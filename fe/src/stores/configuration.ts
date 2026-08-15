@@ -124,11 +124,13 @@ export const useConfigurationStore = defineStore('configuration', () => {
     try {
       const settings = await apiService.getApplicationSettings()
       applicationSettings.value = settings
+      return settings
     } catch (error) {
       errorTracking.captureException(error as Error, {
         component: 'ConfigurationStore',
         operation: 'loadApplicationSettings',
       })
+      return null
     } finally {
       isLoading.value = false
     }
@@ -138,6 +140,7 @@ export const useConfigurationStore = defineStore('configuration', () => {
     try {
       const savedSettings = await apiService.saveApplicationSettings(settings)
       applicationSettings.value = savedSettings
+      return savedSettings
     } catch (error) {
       errorTracking.captureException(error as Error, {
         component: 'ConfigurationStore',

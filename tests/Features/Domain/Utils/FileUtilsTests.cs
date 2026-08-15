@@ -17,6 +17,8 @@
  */
 using System.Security.AccessControl;
 using System.Security.Principal;
+using System.Text.Json;
+using Listenarr.Tests.Common;
 
 namespace Listenarr.Tests.Features.Domain.Utils
 {
@@ -133,15 +135,11 @@ namespace Listenarr.Tests.Features.Domain.Utils
             }
         }
 
-        [Fact]
+        [WindowsFact]
+        [System.Runtime.Versioning.SupportedOSPlatform("windows")]
         [Trait("Category", "Integration")]
         public void GetUniqueDestinationPath_WriteDeniedByAcl_OnWindows()
         {
-            if (!OperatingSystem.IsWindows())
-            {
-                // Not applicable on non-Windows platforms in this test
-                return;
-            }
 
             var dir = Path.Join(Path.GetTempPath(), "fu-acl-" + Guid.NewGuid());
             Directory.CreateDirectory(dir);
@@ -157,10 +155,7 @@ namespace Listenarr.Tests.Features.Domain.Utils
             {
                 // Deny write permission for the current user
                 var currentUser = WindowsIdentity.GetCurrent()?.User;
-                if (currentUser == null)
-                {
-                    return; // can't determine user, skip
-                }
+                Assert.NotNull(currentUser);
 
                 var rule = new FileSystemAccessRule(currentUser, FileSystemRights.CreateFiles | FileSystemRights.Write, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Deny);
                 var security = dirInfo.GetAccessControl();
@@ -221,13 +216,9 @@ namespace Listenarr.Tests.Features.Domain.Utils
             try { Directory.Delete(dir, true); } catch (IOException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); } catch (UnauthorizedAccessException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
         }
 
-        [Fact]
+        [WindowsFact]
         public void NormalizeStoredPath_ExpandsResolvedShortSegments_WhenResolverProvided()
         {
-            if (!OperatingSystem.IsWindows())
-            {
-                return;
-            }
 
             string ResolveLongPath(string candidatePath)
             {
@@ -248,13 +239,9 @@ namespace Listenarr.Tests.Features.Domain.Utils
                 normalized);
         }
 
-        [Fact]
+        [WindowsFact]
         public void NormalizeStoredPath_PreservesUnresolvedTail_WhenResolverProvided()
         {
-            if (!OperatingSystem.IsWindows())
-            {
-                return;
-            }
 
             string ResolveLongPath(string candidatePath)
             {
@@ -274,13 +261,9 @@ namespace Listenarr.Tests.Features.Domain.Utils
                 normalized);
         }
 
-        [Fact]
+        [WindowsFact]
         public void NormalizeStoredPath_DoesNotDropPrefix_WhenMalformedDriveSegmentAppears()
         {
-            if (!OperatingSystem.IsWindows())
-            {
-                return;
-            }
 
             var normalized = FileUtils.NormalizeStoredPath(
                 @"C:\Books\D:\Files\Track 01.mp3",
@@ -299,9 +282,54 @@ namespace Listenarr.Tests.Features.Domain.Utils
         [InlineData("  folder", false)]
         [InlineData(@"C:\Program Files\Listenarr", false)]
         [InlineData(@"C:\media\folder \book.m4b", true)]
-        public void IsPathInvalidForOs_UsesWindowsWhitespaceRules(string path, bool expected)
+        [InlineData(@"C:\Books\NUL", true)]
+        [InlineData(@"C:\Books\COM1.txt", true)]
+        [InlineData(@"C:\Books\COM¹.txt", true)]
+        [InlineData(@"C:\Books\com²", true)]
+        [InlineData(@"C:\Books\LPT³.folder", true)]
+        [InlineData(@"C:\Books\COM⁴.txt", false)]
+        [InlineData(@"C:\Books\Bad|Name", true)]
+        [InlineData(@"C:\Books\..\Other", false)]
+        [InlineData(@"C:\Books\\Author", false)]
+        [InlineData(@"\\server\\share\Books", false)]
+        public void IsPathInvalidForOs_UsesSharedWindowsSegmentRules(string path, bool expected)
         {
             Assert.Equal(expected, FileUtils.IsPathInvalidForOs(path, isWindows: true));
+        }
+
+        [Fact]
+        public void IsPathInvalidForOs_MatchesSharedWindowsReservedDeviceFixture()
+        {
+            using var fixture = JsonDocument.Parse(
+                File.ReadAllText(
+                    Path.Join(
+                        TestUtils.FindRepositoryRoot(),
+                        "test-fixtures",
+                        "windows-reserved-device-names.json")));
+
+            foreach (var name in fixture.RootElement
+                .GetProperty("reserved")
+                .EnumerateArray()
+                .Select(value => value.GetString()!))
+            {
+                Assert.True(
+                    FileUtils.IsPathInvalidForOs(
+                        $@"C:\Books\{name}.folder",
+                        isWindows: true),
+                    name);
+            }
+
+            foreach (var name in fixture.RootElement
+                .GetProperty("nonReserved")
+                .EnumerateArray()
+                .Select(value => value.GetString()!))
+            {
+                Assert.False(
+                    FileUtils.IsPathInvalidForOs(
+                        $@"C:\Books\{name}.folder",
+                        isWindows: true),
+                    name);
+            }
         }
 
         [Theory]
@@ -311,6 +339,7 @@ namespace Listenarr.Tests.Features.Domain.Utils
         [InlineData("folder name", false)]
         [InlineData("  folder", false)]
         [InlineData("/media/folder /book.m4b", false)]
+        [InlineData("/media/NUL", false)]
         public void IsPathInvalidForOs_AllowsLinuxWhitespacePaths(string path, bool expected)
         {
             Assert.Equal(expected, FileUtils.IsPathInvalidForOs(path, isWindows: false));
@@ -354,6 +383,93 @@ namespace Listenarr.Tests.Features.Domain.Utils
         }
 
         [Fact]
+        public void CombineWithOptionalBase_PreservesNestedPathSegmentWhitespace()
+        {
+            var result = FileUtils.CombineWithOptionalBase(
+                FileUtils.GetAbsolutePath("downloads"),
+                " Book Folder / chapter 01.m4b ");
+
+            Assert.Equal(
+                FileUtils.GetAbsolutePath("downloads") + Path.DirectorySeparatorChar + " Book Folder / chapter 01.m4b ",
+                result);
+        }
+
+        [Fact]
+        public void CombineWithOptionalBase_PreservesRootedCandidatePath()
+        {
+            var candidate = Path.DirectorySeparatorChar + " Book Folder /chapter.m4b";
+
+            var result = FileUtils.CombineWithOptionalBase(
+                FileUtils.GetAbsolutePath("downloads"),
+                candidate);
+
+            Assert.Equal(candidate, result);
+        }
+
+        [Fact]
+        public void CombineWithOptionalBase_PreservesCurrentFilesystemRootBase()
+        {
+            var root = Path.GetPathRoot(Path.GetTempPath());
+            Assert.False(string.IsNullOrWhiteSpace(root));
+            var candidate = Path.Join(" Author ", " Title .m4b");
+
+            var result = FileUtils.CombineWithOptionalBase(root!, candidate);
+
+            Assert.Equal(Path.Join(root!, candidate), result);
+            Assert.Contains(" Author ", result);
+            Assert.Contains(" Title .m4b", result);
+        }
+
+        [LinuxFact]
+        public void CombineWithOptionalBase_PreservesUnixFilesystemRootBase()
+        {
+
+            var result = FileUtils.CombineWithOptionalBase("/", "Author/Book.m4b");
+
+            Assert.Equal("/Author/Book.m4b", result);
+        }
+
+        [WindowsFact]
+        public void CombineWithOptionalBase_PreservesWindowsDriveRootBase()
+        {
+
+            var result = FileUtils.CombineWithOptionalBase(@"C:\", @"Books\Title.m4b");
+
+            Assert.Equal(@"C:\Books\Title.m4b", result);
+        }
+
+        [WindowsFact]
+        public void CombineWithOptionalBase_PreservesUncShareRootBase()
+        {
+
+            var result = FileUtils.CombineWithOptionalBase(@"\\server\share", @"Books\Title.m4b");
+
+            Assert.Equal(@"\\server\share\Books\Title.m4b", result);
+        }
+
+        [LinuxFact]
+        public void NormalizeStoredPath_DoesNotTrimPathWhitespace_OnNonWindows()
+        {
+
+            var root = Path.Join(Path.GetTempPath(), "listenarr-path-whitespace-" + Guid.NewGuid().ToString("N"));
+            var whitespaceSegment = " Book Folder ";
+            var directory = Path.Join(root, whitespaceSegment);
+            Directory.CreateDirectory(directory);
+
+            try
+            {
+                var normalized = FileUtils.NormalizeStoredPath(directory);
+
+                Assert.EndsWith(Path.DirectorySeparatorChar + whitespaceSegment, normalized, StringComparison.Ordinal);
+                Assert.True(Directory.Exists(normalized));
+            }
+            finally
+            {
+                try { Directory.Delete(root, true); } catch (IOException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); } catch (UnauthorizedAccessException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
+            }
+        }
+
+        [Fact]
         public void CombineRelativePath_JoinsRelativeSegmentsAndTrimsLeadingSeparators()
         {
             var result = FileUtils.CombineRelativePath(
@@ -373,13 +489,9 @@ namespace Listenarr.Tests.Features.Domain.Utils
             Assert.Throws<ArgumentException>(() => FileUtils.CombineRelativePath("", "config"));
         }
 
-        [Fact]
+        [WindowsFact]
         public void CombineRelativePath_RejectsWindowsRootedSegments()
         {
-            if (!OperatingSystem.IsWindows())
-            {
-                return;
-            }
 
             Assert.Throws<ArgumentException>(() => FileUtils.CombineRelativePath("root", @"C:\escape"));
         }
@@ -407,6 +519,23 @@ namespace Listenarr.Tests.Features.Domain.Utils
             }
         }
 
+        [WindowsFact]
+        public void TryResolveRelativePathWithinBase_BlocksCaseDistinctSiblingTraversalOnWindows()
+        {
+            var parent = Path.Join(
+                Path.GetTempPath(),
+                "fu-case-boundary-" + Guid.NewGuid().ToString("N"));
+            var root = Path.Join(parent, "Library");
+
+            var ok = FileUtils.TryResolveRelativePathWithinBase(
+                root,
+                Path.Join("..", "library", "escape.m4b"),
+                out var resolved);
+
+            Assert.False(ok);
+            Assert.Equal(string.Empty, resolved);
+        }
+
         [Theory]
         [InlineData("../escape.m4b")]
         [InlineData("author/../../escape.m4b")]
@@ -427,6 +556,49 @@ namespace Listenarr.Tests.Features.Domain.Utils
             finally
             {
                 try { Directory.Delete(root, true); } catch (IOException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); } catch (UnauthorizedAccessException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
+            }
+        }
+
+        [Fact]
+        public void MutationBoundary_WindowsCaseDistinctSibling_IsNotContained()
+        {
+            Assert.True(FileSystemSafety.IsSameOrInsideMutationBoundary(
+                @"c:\Library\Author\Book.m4b",
+                @"C:\Library\",
+                FileSystemPathSyntax.Windows));
+            Assert.False(FileSystemSafety.IsSameOrInsideMutationBoundary(
+                @"C:\library\Author\Book.m4b",
+                @"C:\Library",
+                FileSystemPathSyntax.Windows));
+        }
+
+        [WindowsFact]
+        public void TryValidateMutationTarget_AllowsCaseAliasOnlyWhenItIsSamePhysicalRoot()
+        {
+            var parent = Path.Join(
+                Path.GetTempPath(),
+                "fu-mutation-case-alias-" + Guid.NewGuid().ToString("N"));
+            var root = Path.Join(parent, "LibraryRoot");
+            Directory.CreateDirectory(root);
+            var aliasRoot = Path.Join(parent, "libraryroot");
+
+            try
+            {
+                Assert.True(
+                    Directory.Exists(aliasRoot),
+                    "The Windows temp boundary must expose its normal case-insensitive alias for this regression.");
+
+                var target = Path.Join(aliasRoot, "book.m4b");
+                Assert.True(new LocalFileSystem().TryValidateMutationTarget(
+                    target,
+                    [root],
+                    out _,
+                    out var reason),
+                    reason);
+            }
+            finally
+            {
+                try { Directory.Delete(parent, true); } catch (IOException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); } catch (UnauthorizedAccessException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
             }
         }
 
@@ -457,7 +629,35 @@ namespace Listenarr.Tests.Features.Domain.Utils
             }
         }
 
-        [Fact]
+        [WindowsFact]
+        public void TryValidateMutationTarget_ForeignUnixAlias_IsRejectedBeforeWindowsNormalization()
+        {
+            var root = WindowsPathTestFixture
+                .CreateRootRelativeAliasCompatibleDirectory(
+                    "fu-mutation-foreign");
+            var nativeTarget = Path.Join(root, "book.m4b");
+            File.WriteAllText(nativeTarget, "audio");
+            var foreignTarget = WindowsPathTestFixture
+                .GetRootRelativeForeignAlias(nativeTarget);
+
+            try
+            {
+                var fileSystem = new LocalFileSystem();
+                Assert.False(fileSystem.TryValidateMutationTarget(
+                    foreignTarget,
+                    [root],
+                    out _,
+                    out var reason));
+                Assert.Contains("Windows", reason, StringComparison.OrdinalIgnoreCase);
+                Assert.True(File.Exists(nativeTarget));
+            }
+            finally
+            {
+                try { Directory.Delete(root, true); } catch (IOException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); } catch (UnauthorizedAccessException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
+            }
+        }
+
+        [DirectoryLinkFact]
         public void TryValidateMutationTarget_BlocksDirectorySymlinkEscape()
         {
             var root = Path.Join(Path.GetTempPath(), "fu-mutation-" + Guid.NewGuid().ToString("N"));
@@ -474,13 +674,13 @@ namespace Listenarr.Tests.Features.Domain.Utils
                 }
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
                 {
-                    return;
+                    throw new Xunit.Sdk.XunitException(
+                        $"This native filesystem regression requires symbolic-link support: {exception.Message}");
                 }
 
-                if (!Directory.Exists(linkPath))
-                {
-                    return;
-                }
+                Assert.True(
+                    Directory.Exists(linkPath),
+                    "The symbolic-link directory must be visible before mutation validation runs.");
 
                 var target = Path.Join(linkPath, "escape.mp3");
                 var ok = new LocalFileSystem().TryValidateMutationTarget(target, [root], out _, out var reason);
@@ -494,6 +694,553 @@ namespace Listenarr.Tests.Features.Domain.Utils
                 try { Directory.Delete(root, true); } catch (IOException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); } catch (UnauthorizedAccessException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
                 try { Directory.Delete(outside, true); } catch (IOException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); } catch (UnauthorizedAccessException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
             }
+        }
+
+        [Theory]
+        [InlineData(@"C:\Books\Author", true)]
+        [InlineData(@"C:\Books\.\Author", false)]
+        [InlineData(@"C:\", false)]
+        [InlineData(@"\Books\Author", false)]
+        [InlineData("/Books/Author", false)]
+        [InlineData(@"Books\Author", false)]
+        [InlineData(@"C:\Books\Author ", false)]
+        [InlineData(@"C:\Books\Author.", false)]
+        [InlineData(@"C:\Books\NUL", false)]
+        [InlineData(@"C:\Books\COM1.txt", false)]
+        [InlineData(@"C:\Books\COM¹.txt", false)]
+        [InlineData(@"C:\Books\com²", false)]
+        [InlineData(@"C:\Books\LPT³.folder", false)]
+        [InlineData(@"C:\Books\COM⁴.txt", true)]
+        [InlineData(@"C:\Books\Bad|Name", false)]
+        public void TryNormalizeUserProvidedDirectoryPathForOs_UsesWindowsRules(string path, bool expected)
+        {
+            var valid = FileUtils.TryNormalizeUserProvidedDirectoryPathForOs(
+                path,
+                isWindows: true,
+                out var normalizedPath,
+                out var reason);
+
+            Assert.Equal(expected, valid);
+            if (expected)
+            {
+                Assert.False(string.IsNullOrWhiteSpace(normalizedPath));
+                Assert.Equal(string.Empty, reason);
+            }
+            else
+            {
+                Assert.False(string.IsNullOrWhiteSpace(reason));
+            }
+        }
+
+        [Theory]
+        [InlineData(@"\\server\..\Books", "parent")]
+        [InlineData(@"\\.\share\Books", "current")]
+        [InlineData(@"\\server\NUL\Books", "reserved")]
+        [InlineData(@"\\NUL\share\Books", "reserved")]
+        [InlineData(@"\\server\COM¹\Books", "reserved")]
+        [InlineData(@"\\LPT³\share\Books", "reserved")]
+        [InlineData(@"\\server\share.\Books", "space or period")]
+        [InlineData(@"\\server.\share\Books", "space or period")]
+        [InlineData(@"\\server|name\share\Books", "invalid")]
+        [InlineData(@"\\server\\share\Books", "empty")]
+        [InlineData(@"\\server\share\\Books", "empty")]
+        [InlineData(@"\\\server\share\Books", "empty")]
+        [InlineData("//server//share/Books", "empty")]
+        public void TryNormalizeUserProvidedDirectoryPathForOs_RejectsInvalidUncAuthorityOrStructure(
+            string path,
+            string expectedReason)
+        {
+            var valid = FileUtils.TryNormalizeUserProvidedDirectoryPathForOs(
+                path,
+                isWindows: true,
+                out var normalizedPath,
+                out var reason,
+                allowFileSystemRoot: true);
+
+            Assert.False(valid);
+            Assert.Empty(normalizedPath);
+            Assert.Contains(expectedReason, reason, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Theory]
+        [InlineData(@"\\server\share", @"\\server\share")]
+        [InlineData(@"\\server\share\", @"\\server\share")]
+        [InlineData("//server/share", @"\\server\share")]
+        [InlineData(@"\\server\share\Books", @"\\server\share\Books")]
+        [InlineData("//server/share/Books", @"\\server\share\Books")]
+        [InlineData(@"\\server/share\Books", @"\\server\share\Books")]
+        [InlineData("//server\\share/Books", @"\\server\share\Books")]
+        public void TryNormalizeUserProvidedDirectoryPathForOs_CanonicalizesValidUncPaths(
+            string path,
+            string expected)
+        {
+            Assert.True(FileUtils.TryNormalizeUserProvidedDirectoryPathForOs(
+                path,
+                isWindows: true,
+                out var normalizedPath,
+                out var reason,
+                allowFileSystemRoot: true,
+                rejectParentTraversal: true));
+
+            Assert.Equal(string.Empty, reason);
+            Assert.Equal(expected, normalizedPath);
+
+            Assert.True(FileUtils.TryNormalizeUserProvidedDirectoryPathForOs(
+                normalizedPath,
+                isWindows: true,
+                out var normalizedAgain,
+                out var secondReason,
+                allowFileSystemRoot: true,
+                rejectParentTraversal: true));
+            Assert.Equal(string.Empty, secondReason);
+            Assert.Equal(normalizedPath, normalizedAgain);
+        }
+
+        [Theory]
+        [InlineData(@"\\")]
+        [InlineData(@"\\server")]
+        [InlineData(@"\\server\")]
+        [InlineData(@"\\\share")]
+        public void TryNormalizeUserProvidedDirectoryPathForOs_RejectsIncompleteUncPaths(string path)
+        {
+            Assert.False(FileUtils.TryNormalizeUserProvidedDirectoryPathForOs(
+                path,
+                isWindows: true,
+                out var normalizedPath,
+                out var reason,
+                allowFileSystemRoot: true));
+
+            Assert.Empty(normalizedPath);
+            Assert.False(string.IsNullOrWhiteSpace(reason));
+        }
+
+        [Fact]
+        public void TryNormalizeUserProvidedDirectoryPathForOs_RejectsWindowsDriveRelativePathEvenWhenRootsAreAllowed()
+        {
+            Assert.False(FileUtils.TryNormalizeUserProvidedDirectoryPathForOs(
+                "C:",
+                isWindows: true,
+                out var normalizedPath,
+                out var reason,
+                allowFileSystemRoot: true));
+
+            Assert.Empty(normalizedPath);
+            Assert.Contains("absolute", reason, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void TryNormalizeUserProvidedDirectoryPathForOs_CanonicalizesRepeatedDriveRootSeparators()
+        {
+            Assert.True(FileUtils.TryNormalizeUserProvidedDirectoryPathForOs(
+                @"C:\\",
+                isWindows: true,
+                out var normalizedPath,
+                out var reason,
+                allowFileSystemRoot: true));
+
+            Assert.Equal(string.Empty, reason);
+            Assert.Equal(@"C:\", normalizedPath);
+        }
+
+        [Fact]
+        public void TryNormalizeUserProvidedDirectoryPathForOs_AllowsWindowsRootWhenExplicitlyRequested()
+        {
+            var separator = @"\";
+            var driveRoot = "C:" + separator;
+            var uncRoot = separator + separator + "server" + separator + "share";
+            var currentDriveRoot = separator;
+
+            Assert.True(FileUtils.TryNormalizeUserProvidedDirectoryPathForOs(
+                driveRoot,
+                isWindows: true,
+                out var normalizedDriveRoot,
+                out var driveRootReason,
+                allowFileSystemRoot: true));
+            Assert.Equal(string.Empty, driveRootReason);
+            Assert.False(string.IsNullOrWhiteSpace(normalizedDriveRoot));
+
+            Assert.True(FileUtils.TryNormalizeUserProvidedDirectoryPathForOs(
+                uncRoot,
+                isWindows: true,
+                out var normalizedUncRoot,
+                out var uncRootReason,
+                allowFileSystemRoot: true));
+            Assert.Equal(string.Empty, uncRootReason);
+            Assert.Contains("server", normalizedUncRoot, StringComparison.OrdinalIgnoreCase);
+
+            Assert.True(FileUtils.TryNormalizeUserProvidedDirectoryPathForOs(
+                currentDriveRoot,
+                isWindows: true,
+                out var normalizedCurrentDriveRoot,
+                out var currentDriveRootReason,
+                allowFileSystemRoot: true));
+            Assert.Equal(string.Empty, currentDriveRootReason);
+            Assert.False(string.IsNullOrWhiteSpace(normalizedCurrentDriveRoot));
+
+            Assert.True(FileUtils.TryNormalizeUserProvidedDirectoryPathForOs(
+                "/",
+                isWindows: true,
+                out var normalizedForwardSlashRoot,
+                out var forwardSlashRootReason,
+                allowFileSystemRoot: true));
+            Assert.Equal(string.Empty, forwardSlashRootReason);
+            Assert.False(string.IsNullOrWhiteSpace(normalizedForwardSlashRoot));
+        }
+
+        [Fact]
+        public void TryNormalizeUserProvidedDirectoryPathForOs_RejectsWindowsRootByDefault()
+        {
+            var separator = @"\";
+
+            Assert.False(FileUtils.TryNormalizeUserProvidedDirectoryPathForOs(
+                separator,
+                isWindows: true,
+                out _,
+                out var currentDriveRootReason));
+            Assert.Contains("root", currentDriveRootReason, StringComparison.OrdinalIgnoreCase);
+
+            Assert.False(FileUtils.TryNormalizeUserProvidedDirectoryPathForOs(
+                "/",
+                isWindows: true,
+                out _,
+                out var forwardSlashRootReason));
+            Assert.Contains("root", forwardSlashRootReason, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void TryNormalizeUserProvidedDirectoryPathForOs_RejectsParentTraversalForDestinations()
+        {
+            var separator = @"\";
+            var windowsTraversal = "C:" + separator + "Books" + separator + ".." + separator + "Other";
+
+            Assert.False(FileUtils.TryNormalizeUserProvidedDirectoryPathForOs(
+                windowsTraversal,
+                isWindows: true,
+                out _,
+                out var windowsReason,
+                rejectParentTraversal: true));
+            Assert.Contains("parent", windowsReason, StringComparison.OrdinalIgnoreCase);
+
+            Assert.False(FileUtils.TryNormalizeUserProvidedDirectoryPathForOs(
+                "/media/../other",
+                isWindows: false,
+                out _,
+                out var unixReason,
+                rejectParentTraversal: true));
+            Assert.Contains("parent", unixReason, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void TryNormalizeUserProvidedDirectoryPathForOs_RejectsRootFolderParentTraversal()
+        {
+            var separator = @"\";
+            var parentSegment = new string('.', 2);
+            var windowsTraversal = "C:" + separator + "Books" + separator + parentSegment + separator + "Other";
+
+            Assert.False(FileUtils.TryNormalizeUserProvidedDirectoryPathForOs(
+                windowsTraversal,
+                isWindows: true,
+                out _,
+                out var windowsReason,
+                allowFileSystemRoot: true,
+                rejectParentTraversal: true));
+            Assert.Contains("parent", windowsReason, StringComparison.OrdinalIgnoreCase);
+
+            var unixTraversal = string.Join('/', string.Empty, "media", parentSegment, "other");
+            Assert.False(FileUtils.TryNormalizeUserProvidedDirectoryPathForOs(
+                unixTraversal,
+                isWindows: false,
+                out _,
+                out var unixReason,
+                allowFileSystemRoot: true,
+                rejectParentTraversal: true));
+            Assert.Contains("parent", unixReason, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void TryNormalizeUserProvidedDirectoryPathForOs_AllowsRootsWhenExplicitlyRequestedAndTraversalRejected()
+        {
+            var separator = @"\";
+            var driveRoot = "C:" + separator;
+            var uncRoot = separator + separator + "server" + separator + "share";
+
+            Assert.True(FileUtils.TryNormalizeUserProvidedDirectoryPathForOs(
+                driveRoot,
+                isWindows: true,
+                out var normalizedDriveRoot,
+                out var driveRootReason,
+                allowFileSystemRoot: true,
+                rejectParentTraversal: true));
+            Assert.Equal(string.Empty, driveRootReason);
+            Assert.False(string.IsNullOrWhiteSpace(normalizedDriveRoot));
+
+            Assert.True(FileUtils.TryNormalizeUserProvidedDirectoryPathForOs(
+                separator,
+                isWindows: true,
+                out var normalizedCurrentDriveRoot,
+                out var currentDriveRootReason,
+                allowFileSystemRoot: true,
+                rejectParentTraversal: true));
+            Assert.Equal(string.Empty, currentDriveRootReason);
+            Assert.False(string.IsNullOrWhiteSpace(normalizedCurrentDriveRoot));
+
+            Assert.True(FileUtils.TryNormalizeUserProvidedDirectoryPathForOs(
+                uncRoot,
+                isWindows: true,
+                out var normalizedUncRoot,
+                out var uncRootReason,
+                allowFileSystemRoot: true,
+                rejectParentTraversal: true));
+            Assert.Equal(string.Empty, uncRootReason);
+            Assert.False(string.IsNullOrWhiteSpace(normalizedUncRoot));
+
+            Assert.True(FileUtils.TryNormalizeUserProvidedDirectoryPathForOs(
+                "/",
+                isWindows: false,
+                out var normalizedUnixRoot,
+                out var unixRootReason,
+                allowFileSystemRoot: true,
+                rejectParentTraversal: true));
+            Assert.Equal(string.Empty, unixRootReason);
+            Assert.Equal("/", normalizedUnixRoot);
+        }
+
+        [Theory]
+        [InlineData("../escape", true)]
+        [InlineData("Book/../../escape", true)]
+        [InlineData(".../Book", false)]
+        [InlineData("..hidden/Book", false)]
+        [InlineData("Book../Title", false)]
+        public void ContainsParentDirectorySegment_DetectsOnlyLiteralParentSegments(string path, bool expected)
+        {
+            Assert.Equal(expected, FileUtils.ContainsParentDirectorySegment(path, '/', '\\'));
+        }
+
+        [Fact]
+        public void ContainsParentDirectorySegment_WithUnixSeparator_DoesNotTreatBackslashAsSeparator()
+        {
+            Assert.False(FileUtils.ContainsParentDirectorySegment("Book\\..\\Title", '/'));
+        }
+
+        [Theory]
+        [InlineData(" /media/Author", true)]
+        [InlineData("   /media/Author", true)]
+        [InlineData(@" C:\Books\Author", true)]
+        [InlineData(@" \\server\share\Books", true)]
+        [InlineData(@" \\server", true)]
+        [InlineData(@" \\\server\share", true)]
+        [InlineData("  Relative Folder", false)]
+        [InlineData("/media/Author ", false)]
+        [InlineData("/media/ Author", false)]
+        public void HasLeadingWhitespaceBeforeRootedPath_DetectsOnlyAmbiguousRootedInputs(string path, bool expected)
+        {
+            Assert.Equal(expected, FileUtils.HasLeadingWhitespaceBeforeRootedPath(path));
+        }
+
+        [Fact]
+        public void TryNormalizeUserProvidedDirectoryPathForOs_AllowsUnixRootWhenExplicitlyRequested()
+        {
+            Assert.True(FileUtils.TryNormalizeUserProvidedDirectoryPathForOs(
+                "/",
+                isWindows: false,
+                out var normalizedRoot,
+                out var reason,
+                allowFileSystemRoot: true));
+
+            Assert.Equal(string.Empty, reason);
+            Assert.Equal("/", normalizedRoot);
+        }
+
+        [Theory]
+        [InlineData("/media/Author", true)]
+        [InlineData("/media/./Author", false)]
+        [InlineData("/media/Author ", true)]
+        [InlineData("/media/NUL", true)]
+        [InlineData("/media/..", false)]
+        [InlineData("media/Author", false)]
+        [InlineData("/", false)]
+        [InlineData("", false)]
+        public void TryNormalizeUserProvidedDirectoryPathForOs_UsesUnixRules(string path, bool expected)
+        {
+            var valid = FileUtils.TryNormalizeUserProvidedDirectoryPathForOs(
+                path,
+                isWindows: false,
+                out var normalizedPath,
+                out var reason);
+
+            Assert.Equal(expected, valid);
+            if (expected)
+            {
+                Assert.False(string.IsNullOrWhiteSpace(normalizedPath));
+                Assert.Equal(string.Empty, reason);
+            }
+            else
+            {
+                Assert.False(string.IsNullOrWhiteSpace(reason));
+            }
+        }
+
+        [Fact]
+        public void TryNormalizeUserProvidedDirectoryPathForOs_RejectsNullCharacter()
+        {
+            Assert.False(FileUtils.TryNormalizeUserProvidedDirectoryPathForOs(
+                "/media/book\0folder",
+                isWindows: false,
+                out _,
+                out var reason));
+            Assert.Contains("invalid", reason, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void TryNormalizeUserProvidedDirectoryPathForCurrentOs_NormalizesCurrentHostPath()
+        {
+            var path = Path.Join(Path.GetTempPath(), "listenarr-normalize-" + Guid.NewGuid().ToString("N"));
+
+            Assert.True(FileUtils.TryNormalizeUserProvidedDirectoryPathForCurrentOs(path, out var normalizedPath, out var reason));
+            Assert.Equal(Path.GetFullPath(path), normalizedPath);
+            Assert.Equal(string.Empty, reason);
+        }
+
+        [WindowsFact]
+        public void GetValidMutationRootsForCurrentOs_PreservesCaseDistinctWindowsRoots()
+        {
+            var roots = FileUtils.GetValidMutationRootsForCurrentOs([
+                @"C:\Library",
+                @"C:\library"
+            ]);
+
+            Assert.Equal(2, roots.Count);
+            Assert.Contains(@"C:\Library", roots, StringComparer.Ordinal);
+            Assert.Contains(@"C:\library", roots, StringComparer.Ordinal);
+        }
+
+        [WindowsFact]
+        public void GetValidMutationRootsForCurrentOs_DoesNotLaunderPersistedUnixRoot()
+        {
+            var nativeRoot = Path.Join(
+                Path.GetPathRoot(Environment.CurrentDirectory)!,
+                "ListenarrLibrary");
+
+            var roots = FileUtils.GetValidMutationRootsForCurrentOs([
+                "/",
+                nativeRoot
+            ]);
+
+            Assert.Single(roots);
+            Assert.Equal(Path.GetFullPath(nativeRoot), roots[0], StringComparer.OrdinalIgnoreCase);
+        }
+
+        [Theory]
+        [InlineData("/books/title", "/", false, true)]
+        [InlineData("/books/title", "/books", false, true)]
+        [InlineData("/books", "/books/", false, true)]
+        [InlineData("/bookshelf/title", "/books", false, false)]
+        [InlineData("/Books/title", "/books", false, false)]
+        [InlineData(@"C:\Books\Title", @"C:\", true, true)]
+        [InlineData(@"C:\Books\Title", @"C:\Books", true, true)]
+        [InlineData(@"C:\Books", @"C:\Books\", true, true)]
+        [InlineData(@"C:\Bookshelf\Title", @"C:\Books", true, false)]
+        [InlineData(@"\\server\share\Books\Title", @"\\server\share", true, true)]
+        [InlineData(@"\\server\share-other\Books", @"\\server\share", true, false)]
+        public void IsPathSameOrInsideForOs_RespectsFilesystemBoundaries(
+            string candidatePath,
+            string rootPath,
+            bool isWindows,
+            bool expected)
+        {
+            Assert.Equal(expected, FileUtils.IsPathSameOrInsideForOs(candidatePath, rootPath, isWindows));
+        }
+
+        [Theory]
+        [InlineData(@"C:\Books", @"c:\books\", true, true)]
+        [InlineData(@"\\server\share\Books", @"\\SERVER\SHARE\books\", true, true)]
+        [InlineData(@"\\server\\share\Books", @"\\server\share\Books", true, true)]
+        [InlineData("/media/Books", "/media/books", false, false)]
+        [InlineData("/media/Books", "/media/Books/", false, true)]
+        public void AreFilesystemPathsEquivalentForOs_UsesHostStyleCaseRules(
+            string left,
+            string right,
+            bool isWindows,
+            bool expected)
+        {
+            Assert.Equal(expected, FileUtils.AreFilesystemPathsEquivalentForOs(left, right, isWindows));
+        }
+
+        [Fact]
+        public void FilesystemPathComparerForCurrentOs_UsesHostCaseRules()
+        {
+            var root = Path.Join(Path.GetTempPath(), "listenarr-path-case-" + Guid.NewGuid().ToString("N"));
+            var paths = new HashSet<string>(FileUtils.FilesystemPathComparerForCurrentOs)
+            {
+                Path.Join(root, "Track01.m4b"),
+                Path.Join(root, "track01.m4b")
+            };
+
+            Assert.Equal(OperatingSystem.IsWindows() ? 1 : 2, paths.Count);
+        }
+
+        [Fact]
+        public void CombineWithOptionalBase_PreservesPathSegmentWhitespace()
+        {
+            var basePath = Path.Join(Path.GetTempPath(), "listenarr-path-space-" + Guid.NewGuid().ToString("N"));
+            var candidatePath = Path.Join(" Author With Space ", " Title With Space ", " Chapter 01 .m4b");
+
+            var combined = FileUtils.CombineWithOptionalBase(basePath, candidatePath);
+
+            Assert.Equal(Path.Join(basePath, candidatePath), combined);
+        }
+
+        [Fact]
+        public void GetCommonPathForDirectories_UsesHostFilesystemCaseRules()
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                Assert.Equal(@"C:\Books", FileUtils.GetCommonPathForDirectories([
+                    @"C:\Books\AuthorA",
+                    @"c:\Books\AuthorB"
+                ]));
+            }
+            else
+            {
+                Assert.Equal("/", FileUtils.GetCommonPathForDirectories([
+                    "/books/AuthorA",
+                    "/Books/AuthorB"
+                ]));
+            }
+        }
+
+        [Fact]
+        public void GetCommonPathForDirectories_ExplicitWindowsSemantics_AreHostIndependent()
+        {
+            var semantics = new FileSystemPathSemantics(
+                FileSystemPathSyntax.Windows,
+                FileSystemCaseSensitivity.Sensitive);
+
+            Assert.Equal(@"C:\Library", FileUtils.GetCommonPathForDirectories([
+                @"c:\Library\Author\BookA",
+                @"C:\Library\author\BookB"
+            ], semantics));
+        }
+
+        [WindowsFact]
+        public void GetCommonPathForDirectories_PreservesCaseDistinctWindowsSegments()
+        {
+            Assert.Equal(@"C:\Library", FileUtils.GetCommonPathForDirectories([
+                @"C:\Library\Author\BookA",
+                @"C:\Library\author\BookB"
+            ]));
+        }
+
+        [Fact]
+        public void GetCommonPathForDirectories_RespectsPathSegmentBoundaries()
+        {
+            var root = Path.GetTempPath().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var common = FileUtils.GetCommonPathForDirectories([
+                Path.Join(root, "books", "A"),
+                Path.Join(root, "bookshelf", "B")
+            ]);
+
+            Assert.True(FileUtils.AreFilesystemPathsEquivalentForCurrentOs(root, common ?? string.Empty));
         }
 
         [Fact]

@@ -26,7 +26,13 @@ namespace Listenarr.Infrastructure.Persistence
         public DbSet<AudiobookSeriesMembership> AudiobookSeriesMemberships { get; set; } = null!;
         public DbSet<AudiobookExternalIdentifier> AudiobookExternalIdentifiers { get; set; } = null!;
         public DbSet<AudiobookFile> AudiobookFiles { get; set; } = null!;
+        public DbSet<AudiobookDeletionIntent> AudiobookDeletionIntents { get; set; } = null!;
         public DbSet<MoveJob> MoveJobs { get; set; } = null!;
+        public DbSet<MoveJobEntry> MoveJobEntries { get; set; } = null!;
+        public DbSet<MoveJobCreatedDirectory> MoveJobCreatedDirectories { get; set; } = null!;
+        public DbSet<LibraryDirectoryOwnership> LibraryDirectoryOwnerships { get; set; } = null!;
+        public DbSet<LibraryDirectoryOwnershipPathMigration> LibraryDirectoryOwnershipPathMigrations { get; set; } = null!;
+        public DbSet<MoveScanHandoff> MoveScanHandoffs { get; set; } = null!;
         public DbSet<ApplicationSettings> ApplicationSettings { get; set; } = null!;
         public DbSet<History> History { get; set; } = null!;
         public DbSet<Indexer> Indexers { get; set; } = null!;
@@ -35,11 +41,15 @@ namespace Listenarr.Infrastructure.Persistence
         public DbSet<User> Users { get; set; } = null!;
         public DbSet<Download> Downloads { get; set; } = null!;
         public DbSet<DownloadProcessingJob> DownloadProcessingJobs { get; set; } = null!;
+        public DbSet<FileMutationJournal> FileMutationJournals { get; set; } = null!;
         public DbSet<DownloadHistory> DownloadHistories { get; set; } = null!;
         public DbSet<QualityProfile> QualityProfiles { get; set; } = null!;
         public DbSet<RemotePathMapping> RemotePathMappings { get; set; } = null!;
         public DbSet<ProcessExecutionLog> ProcessExecutionLogs { get; set; } = null!;
         public DbSet<RootFolder> RootFolders { get; set; } = null!;
+        public DbSet<RootFolderRelocation> RootFolderRelocations { get; set; } = null!;
+        public DbSet<RootFolderRelocationSkippedItem> RootFolderRelocationSkippedItems { get; set; } = null!;
+        public DbSet<RootFolderRelocationCreatedDirectory> RootFolderRelocationCreatedDirectories { get; set; } = null!;
         public DbSet<MonitoredAuthor> MonitoredAuthors { get; set; } = null!;
         public DbSet<MonitoredSeries> MonitoredSeries { get; set; } = null!;
         public DbSet<AuthorCacheEntry> AuthorCacheEntries { get; set; } = null!;
@@ -57,6 +67,10 @@ namespace Listenarr.Infrastructure.Persistence
             {
                 return base.SaveChanges();
             }
+            catch (DbUpdateConcurrencyException)
+            {
+                throw;
+            }
             catch (DbUpdateException ex)
             {
                 throw TranslatePersistenceException(ex);
@@ -68,6 +82,10 @@ namespace Listenarr.Infrastructure.Persistence
             try
             {
                 return await base.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                throw;
             }
             catch (DbUpdateException ex)
             {
@@ -135,6 +153,9 @@ namespace Listenarr.Infrastructure.Persistence
             modelBuilder.Entity<History>().HasIndex(h => h.DownloadId);
             modelBuilder.Entity<History>().HasIndex(h => h.DownloadClientId);
             modelBuilder.Entity<History>().HasIndex(h => h.CorrelationId);
+            modelBuilder.Entity<History>().HasIndex(h => h.IdempotencyKey)
+                .IsUnique()
+                .HasFilter("\"IdempotencyKey\" IS NOT NULL");
 
             modelBuilder.Entity<MoveJob>().HasIndex(m => new { m.AudiobookId, m.Status });
 

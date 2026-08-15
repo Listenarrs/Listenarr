@@ -4,14 +4,12 @@ namespace Listenarr.Tests.Builders
 {
     public class IndexerBuilder
     {
-        private static int IdCounter = 0;
-
         private readonly Indexer _indexer = new();
         private Dictionary<string, string> _additionalSettings = [];
 
         public IndexerBuilder()
         {
-            _indexer.Id = ++IdCounter;
+            _indexer.Id = TestEntityIdGenerator.Next();
             _indexer.Name = "";
             _indexer.Type = "torrent";
             _indexer.Implementation = "Custom";
@@ -24,7 +22,7 @@ namespace Listenarr.Tests.Builders
 
         public IndexerBuilder WithId(int value)
         {
-            _indexer.Id = value;
+            _indexer.Id = TestEntityIdGenerator.Explicit(value);
             return this;
         }
 

@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Listenarr.Domain.Common;
+using Listenarr.Application.Common;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Audiobooks.Renaming
@@ -28,18 +28,34 @@ namespace Listenarr.Application.Audiobooks.Renaming
         private readonly IFileNamingService _fileNamingService;
         private readonly IFileMover _fileMover;
         private readonly IAudiobookRepository _audiobookRepository;
+        private readonly IAudiobookFileRepository _audiobookFileRepository;
+        private readonly IAudiobookFilePathIdentityResolver _filePathIdentityResolver;
+        private readonly IFilesystemMutationCoordinator _filesystemMutationCoordinator;
         private readonly IFileSystem _fileSystem;
         private readonly ILogger<RenameService> _logger;
         private readonly IRootFolderService? _rootFolderService;
+        private readonly IFileSystemSemanticsResolver _semanticsResolver;
         private readonly IHistoryRepository? _historyRepository;
+        private readonly IAudiobookOperationCoordinator _audiobookOperationCoordinator;
+        private readonly IMoveQueueService _moveQueueService;
+        private readonly ILibraryDirectoryOwnershipStore _directoryOwnershipStore;
+        private readonly IFileRenameCommitStore _fileRenameCommitStore;
 
         public RenameService(
             IConfigurationService configService,
             IFileNamingService fileNamingService,
             IFileMover fileMover,
             IAudiobookRepository audiobookRepository,
+            IAudiobookFileRepository audiobookFileRepository,
+            IAudiobookFilePathIdentityResolver filePathIdentityResolver,
+            IFilesystemMutationCoordinator filesystemMutationCoordinator,
             IFileSystem fileSystem,
             ILogger<RenameService> logger,
+            IFileSystemSemanticsResolver semanticsResolver,
+            IAudiobookOperationCoordinator audiobookOperationCoordinator,
+            IMoveQueueService moveQueueService,
+            ILibraryDirectoryOwnershipStore directoryOwnershipStore,
+            IFileRenameCommitStore fileRenameCommitStore,
             IRootFolderService? rootFolderService = null,
             IHistoryRepository? historyRepository = null)
         {
@@ -47,10 +63,18 @@ namespace Listenarr.Application.Audiobooks.Renaming
             _fileNamingService = fileNamingService;
             _fileMover = fileMover;
             _audiobookRepository = audiobookRepository;
+            _audiobookFileRepository = audiobookFileRepository;
+            _filePathIdentityResolver = filePathIdentityResolver;
+            _filesystemMutationCoordinator = filesystemMutationCoordinator;
             _fileSystem = fileSystem;
             _logger = logger;
+            _semanticsResolver = semanticsResolver;
             _rootFolderService = rootFolderService;
             _historyRepository = historyRepository;
+            _audiobookOperationCoordinator = audiobookOperationCoordinator ?? throw new ArgumentNullException(nameof(audiobookOperationCoordinator));
+            _moveQueueService = moveQueueService ?? throw new ArgumentNullException(nameof(moveQueueService));
+            _directoryOwnershipStore = directoryOwnershipStore ?? throw new ArgumentNullException(nameof(directoryOwnershipStore));
+            _fileRenameCommitStore = fileRenameCommitStore ?? throw new ArgumentNullException(nameof(fileRenameCommitStore));
         }
 
         public async Task<List<RenamePreview>> PreviewRenameAsync(int[] audiobookIds, CancellationToken ct = default)
@@ -63,7 +87,13 @@ namespace Listenarr.Application.Audiobooks.Renaming
 
             var audiobooks = await _audiobookRepository.GetByIdsWithFilesAsync(audiobookIds, ct);
 
-            return audiobooks.Select(a => BuildPreview(a, settings, rootFolders)).ToList();
+            var previews = new List<RenamePreview>();
+            foreach (var audiobook in audiobooks)
+            {
+                previews.Add(await BuildPreviewAsync(audiobook, settings, rootFolders, ct));
+            }
+
+            return previews;
         }
 
         public async Task<List<RenameResult>> ExecuteRenameAsync(List<RenameOperation> operations, CancellationToken ct = default)
@@ -71,30 +101,63 @@ namespace Listenarr.Application.Audiobooks.Renaming
             if (operations == null || operations.Count == 0) return new();
             if (operations.Count > MaxAudiobookIds) throw new ArgumentException($"Cannot execute more than {MaxAudiobookIds} rename operations at once.");
 
-            var settings = await _configService.GetApplicationSettingsAsync();
-            var rootFolders = await LoadRootFoldersAsync();
-            var results = new List<RenameResult>();
-            foreach (var op in operations) results.Add(await ExecuteSingleAsync(op, settings, rootFolders, ct));
-            return results;
+            return await _filesystemMutationCoordinator.ExecuteExclusiveAsync(
+                globalToken => _audiobookOperationCoordinator.ExecuteExclusiveAsync(
+                    operations.Select(operation => operation.AudiobookId),
+                    async keyedToken =>
+                    {
+                        foreach (var audiobookId in operations
+                            .Select(operation => operation.AudiobookId)
+                            .Distinct())
+                        {
+                            await _moveQueueService.EnsureFilesystemMutationAllowedAsync(
+                                audiobookId,
+                                keyedToken);
+                        }
+
+                        var settings = await _configService.GetApplicationSettingsAsync();
+                        var rootFolders = await LoadRootFoldersAsync();
+                        var results = new List<RenameResult>(operations.Count);
+                        foreach (var operation in operations)
+                        {
+                            keyedToken.ThrowIfCancellationRequested();
+                            results.Add(await ExecuteSingleAsync(
+                                operation,
+                                settings,
+                                rootFolders,
+                                keyedToken));
+                        }
+
+                        return results;
+                    },
+                    globalToken),
+                ct);
         }
 
-        private RenamePreview BuildPreview(Audiobook audiobook, ApplicationSettings settings, List<RootFolder> rootFolders)
+        private async Task<RenamePreview> BuildPreviewAsync(Audiobook audiobook, ApplicationSettings settings, List<RootFolder> rootFolders, CancellationToken ct)
         {
+            var currentPathSeed = ComputeCurrentBasePathSeed(audiobook);
+            var pathResolution = await ResolveRenamePathResolutionAsync(
+                currentPathSeed,
+                rootFolders,
+                ct);
+            var semantics = pathResolution.Semantics;
             var preview = new RenamePreview
             {
                 AudiobookId = audiobook.Id,
                 AudiobookTitle = audiobook.Title,
-                CurrentFolderPath = ComputeCurrentBasePath(audiobook)
+                CurrentFolderPath = ComputeCurrentBasePath(audiobook, semantics),
+                CurrentFolderSemantics = ToSnapshot(pathResolution)
             };
 
-            var files = GetFileEntries(audiobook);
+            var files = GetFileEntries(audiobook, semantics);
             if (files.Count == 0)
             {
                 preview.NewFolderPath = preview.CurrentFolderPath;
                 return preview;
             }
 
-            var namingBase = ResolveNamingBasePath(preview.CurrentFolderPath, settings, rootFolders);
+            var namingBase = ResolveNamingBasePath(preview.CurrentFolderPath, settings, rootFolders, semantics);
             var isMultiFile = files.Count > 1;
             var expectedPaths = new List<string>();
 
@@ -109,231 +172,217 @@ namespace Listenarr.Application.Audiobooks.Renaming
                     NewPath = expectedPath,
                     CurrentFilename = Path.GetFileName(file.CurrentPath),
                     NewFilename = Path.GetFileName(expectedPath),
-                    Changed = !PathsEqual(file.CurrentPath, expectedPath)
+                    Changed = !PathsEqual(file.CurrentPath, expectedPath, semantics)
                 });
             }
 
-            preview.NewFolderPath = ComputeCommonBasePath(expectedPaths);
-            preview.FolderChanged = !PathsEqual(preview.CurrentFolderPath, preview.NewFolderPath);
+            preview.NewFolderPath = ComputeCommonBasePath(expectedPaths, semantics);
+            preview.FolderChanged = !PathsEqual(preview.CurrentFolderPath, preview.NewFolderPath, semantics);
             preview.HasChanges = preview.FolderChanged || preview.FileRenames.Any(f => f.Changed);
             return preview;
         }
 
-        private async Task<RenameResult> ExecuteSingleAsync(RenameOperation operation, ApplicationSettings settings, List<RootFolder> rootFolders, CancellationToken ct)
+        private async Task<RenameResult> ExecuteSingleAsync(
+            RenameOperation operation,
+            ApplicationSettings settings,
+            List<RootFolder> rootFolders,
+            CancellationToken ct)
         {
-            var result = new RenameResult { AudiobookId = operation.AudiobookId };
             try
             {
                 var audiobook = await _audiobookRepository.GetByIdAsync(operation.AudiobookId);
                 if (audiobook == null)
                 {
-                    result.Success = false;
-                    result.Error = "Audiobook not found.";
-                    return result;
-                }
-
-                var currentBasePath = ComputeCurrentBasePath(audiobook);
-                var allowedRoots = BuildAllowedRoots(settings, rootFolders, currentBasePath);
-                var anySucceeded = false;
-                var hasFileOperations = operation.FileRenames != null && operation.FileRenames.Count > 0;
-
-                foreach (var fileOp in operation.FileRenames ?? new())
-                {
-                    var fileResult = await ExecuteFileRenameAsync(audiobook, fileOp, allowedRoots);
-                    result.RenamedFiles.Add(fileResult);
-                    anySucceeded |= fileResult.Success;
-                }
-
-                if ((operation.FileRenames == null || operation.FileRenames.Count == 0)
-                    && !string.IsNullOrWhiteSpace(operation.NewFolderPath)
-                    && !PathsEqual(currentBasePath, operation.NewFolderPath))
-                {
-                    var dirMove = await ExecuteDirectoryMoveAsync(audiobook, operation.NewFolderPath!, allowedRoots);
-                    result.Success = dirMove.Success;
-                    result.Error = dirMove.Error;
-                    anySucceeded |= dirMove.Success;
-                }
-
-                if (result.RenamedFiles.Count > 0)
-                {
-                    result.Success = result.RenamedFiles.All(f => f.Success);
-                    if (!result.Success && string.IsNullOrWhiteSpace(result.Error))
+                    return new RenameResult
                     {
-                        result.Error = "One or more file organize operations failed.";
+                        AudiobookId = operation.AudiobookId,
+                        Error = "Audiobook not found."
+                    };
+                }
+
+                var currentPathSeed = ComputeCurrentBasePathSeed(audiobook);
+                var pathResolution = await ResolveRenamePathResolutionAsync(
+                    currentPathSeed,
+                    rootFolders,
+                    ct);
+                var semantics = pathResolution.Semantics;
+                var currentBasePath = ComputeCurrentBasePath(audiobook, semantics);
+                var folderRequested = !string.IsNullOrWhiteSpace(operation.NewFolderPath);
+                var hasFileOperations = operation.FileRenames is { Count: > 0 };
+                if ((folderRequested || hasFileOperations)
+                    && operation.CurrentFolderSemantics == null)
+                {
+                    return StalePreviewResult(
+                        operation.AudiobookId,
+                        "The organize request is missing its expected filesystem semantics.");
+                }
+
+                if (operation.CurrentFolderSemantics != null
+                    && !SemanticsMatch(
+                        operation.CurrentFolderSemantics,
+                        pathResolution))
+                {
+                    return StalePreviewResult(
+                        operation.AudiobookId,
+                        "The filesystem semantics changed after the organize preview was generated.");
+                }
+                if (folderRequested && string.IsNullOrWhiteSpace(operation.CurrentFolderPath))
+                {
+                    return StalePreviewResult(
+                        operation.AudiobookId,
+                        "The organize request is missing its expected current folder path.");
+                }
+
+                if (folderRequested
+                    && !PathsEqual(currentBasePath, operation.CurrentFolderPath, semantics))
+                {
+                    return StalePreviewResult(
+                        operation.AudiobookId,
+                        "The audiobook folder changed after the organize preview was generated.");
+                }
+
+                var allowedRoots = BuildAllowedRoots(
+                    settings,
+                    rootFolders,
+                    currentBasePath,
+                    semantics);
+                if (string.IsNullOrWhiteSpace(currentBasePath)
+                    || !IsPathWithinAllowedRoots(currentBasePath, allowedRoots, semantics))
+                {
+                    return StalePreviewResult(
+                        operation.AudiobookId,
+                        "The audiobook is no longer under a currently configured library root.");
+                }
+
+                var validationFailure = await ValidateOperationPlanAsync(
+                    audiobook,
+                    operation,
+                    allowedRoots,
+                    semantics,
+                    ct);
+                if (validationFailure != null)
+                {
+                    return validationFailure;
+                }
+
+                // Honor cancellation through complete preflight. Once filesystem mutation
+                // can begin, complete or roll back to a stable persisted state.
+                var mutationToken = RequestCancellationBoundary.EnterNonCancelablePhase(ct);
+                var result = new RenameResult { AudiobookId = operation.AudiobookId };
+                var audiobookRollbackState = CaptureAudiobookPathRollbackState(audiobook);
+                foreach (var fileOperation in operation.FileRenames ?? [])
+                {
+                    var fileResult = await ExecuteFileRenameAsync(
+                        audiobook,
+                        fileOperation,
+                        allowedRoots,
+                        semantics,
+                        mutationToken);
+                    result.RenamedFiles.Add(fileResult);
+                    if (!fileResult.Success)
+                    {
+                        _ = await RollBackFileRenamesAsync(
+                            audiobook,
+                            result.RenamedFiles.Where(item => item.Success).ToList(),
+                            audiobookRollbackState,
+                            allowedRoots,
+                            semantics,
+                            mutationToken);
+                        try
+                        {
+                            await CommitRollbackStateAsync(
+                                audiobook,
+                                result.RenamedFiles,
+                                CancellationToken.None);
+                        }
+                        catch (Exception recoveryException) when (recoveryException is not (
+                            OutOfMemoryException or StackOverflowException))
+                        {
+                            _logger.LogCritical(
+                                recoveryException,
+                                "Failed to persist organize rollback journal state for audiobook {AudiobookId}",
+                                audiobook.Id);
+                        }
+                        result.Success = false;
+                        result.Error = fileResult.Error ?? "One or more file organize operations failed.";
+                        return result;
                     }
                 }
-                else if (!result.Success)
-                {
-                    result.Success = anySucceeded;
-                }
 
-                if (anySucceeded)
+                result.Success = true;
+
+                if (hasFileOperations || folderRequested)
                 {
-                    var shouldTrustRequestedBasePath = !string.IsNullOrWhiteSpace(operation.NewFolderPath)
-                        && (!hasFileOperations || result.Success);
-                    UpdateAudiobookPathSummary(audiobook, shouldTrustRequestedBasePath ? operation.NewFolderPath : null);
-                    await _audiobookRepository.SaveChangesAsync(ct);
+                    UpdateAudiobookPathSummary(
+                        audiobook,
+                        folderRequested ? operation.NewFolderPath : null,
+                        semantics);
+                    try
+                    {
+                        await CommitSuccessfulRenameStateAsync(
+                            audiobook,
+                            result.RenamedFiles,
+                            mutationToken);
+                    }
+                    catch (Exception persistenceException) when (persistenceException is not OutOfMemoryException
+                        && persistenceException is not StackOverflowException)
+                    {
+                        var rollbackSucceeded = await RollBackFileRenamesAsync(
+                            audiobook,
+                            result.RenamedFiles,
+                            audiobookRollbackState,
+                            allowedRoots,
+                            semantics,
+                            CancellationToken.None);
+
+                        try
+                        {
+                            await CommitRollbackStateAsync(
+                                audiobook,
+                                result.RenamedFiles,
+                                CancellationToken.None);
+                        }
+                        catch (Exception recoveryException) when (recoveryException is not (
+                            OutOfMemoryException or StackOverflowException))
+                        {
+                            _logger.LogCritical(
+                                recoveryException,
+                                "Failed to persist actual filesystem and rollback journal state after organize persistence failure for audiobook {AudiobookId}",
+                                audiobook.Id);
+                        }
+
+                        if (persistenceException is OperationCanceledException)
+                        {
+                            throw;
+                        }
+
+                        _logger.LogError(
+                            persistenceException,
+                            "Failed to persist organize operation for audiobook {AudiobookId}; rollback succeeded={RollbackSucceeded}",
+                            audiobook.Id,
+                            rollbackSucceeded);
+                        result.Success = false;
+                        result.Error = rollbackSucceeded
+                            ? "The organize operation was rolled back because its database update failed."
+                            : "The organize operation partially completed and its actual filesystem state could not be fully persisted.";
+                        return result;
+                    }
+
                     await AddHistoryAsync(audiobook, result);
                 }
+
+                return result;
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 _logger.LogError(ex, "Failed to execute organize operation for audiobook {AudiobookId}", operation.AudiobookId);
-                result.Success = false;
-                result.Error = ex.Message;
-            }
-
-            return result;
-        }
-
-        private async Task<FileRenameResultItem> ExecuteFileRenameAsync(Audiobook audiobook, FileRenameOperation fileOperation, IReadOnlyCollection<string> allowedRoots)
-        {
-            var source = NormalizePath(fileOperation.CurrentPath);
-            var dest = NormalizePath(fileOperation.NewPath);
-            var item = new FileRenameResultItem { FileId = fileOperation.FileId, PreviousPath = source, NewPath = dest };
-            var trackedSourcePath = string.Empty;
-            AudiobookFile? dbFile = null;
-
-            if (string.IsNullOrWhiteSpace(source) || string.IsNullOrWhiteSpace(dest))
-            {
-                item.Success = false;
-                item.Error = "File organize operation is missing a source or destination path.";
-                return item;
-            }
-
-            if (fileOperation.FileId == 0)
-            {
-                trackedSourcePath = NormalizePath(audiobook.FilePath);
-                if (string.IsNullOrWhiteSpace(trackedSourcePath))
+                return new RenameResult
                 {
-                    item.Success = false;
-                    item.Error = "Legacy file organize operation does not match a tracked audiobook file.";
-                    return item;
-                }
+                    AudiobookId = operation.AudiobookId,
+                    Success = false,
+                    Error = "The organize operation failed. Review the server logs for details."
+                };
             }
-            else
-            {
-                dbFile = audiobook.Files?.FirstOrDefault(f => f.Id == fileOperation.FileId);
-                if (dbFile == null)
-                {
-                    item.Success = false;
-                    item.Error = "File does not belong to this audiobook.";
-                    return item;
-                }
-
-                trackedSourcePath = NormalizePath(dbFile.Path);
-                if (string.IsNullOrWhiteSpace(trackedSourcePath))
-                {
-                    item.Success = false;
-                    item.Error = "Tracked audiobook file path is missing.";
-                    return item;
-                }
-            }
-
-            if (!PathsEqual(source, trackedSourcePath))
-            {
-                item.Success = false;
-                item.Error = "Source path does not match the tracked audiobook file.";
-                return item;
-            }
-
-            if (!IsPathWithinAllowedRoots(source, allowedRoots) || !IsPathWithinAllowedRoots(dest, allowedRoots))
-            {
-                item.Success = false;
-                item.Error = "File path is outside the allowed library roots.";
-                return item;
-            }
-
-            if (!_fileSystem.FileExists(source))
-            {
-                item.Success = false;
-                item.Error = "Source file not found.";
-                return item;
-            }
-
-            if (_fileSystem.FileExists(dest) && !PathsEqual(source, dest))
-            {
-                item.Success = false;
-                item.Error = "Target file already exists.";
-                return item;
-            }
-
-            try
-            {
-                var targetDir = Path.GetDirectoryName(dest);
-                if (!string.IsNullOrWhiteSpace(targetDir)) _fileSystem.CreateDirectory(targetDir);
-
-                if (!PathsEqual(source, dest))
-                {
-                    var moved = await _fileMover.PerformActionOn(FileAction.Move, source, dest);
-                    if (!moved)
-                    {
-                        item.Success = false;
-                        item.Error = "File move operation failed.";
-                        return item;
-                    }
-                }
-
-                if (dbFile != null) dbFile.Path = dest;
-                else if (fileOperation.FileId == 0 && !string.IsNullOrWhiteSpace(audiobook.FilePath)) audiobook.FilePath = dest;
-
-                item.Success = true;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogError(ex, "Failed to organize file {FileId} for audiobook {AudiobookId}", fileOperation.FileId, audiobook.Id);
-                item.Success = false;
-                item.Error = ex.Message;
-            }
-
-            return item;
-        }
-
-        private async Task<(bool Success, string? Error)> ExecuteDirectoryMoveAsync(Audiobook audiobook, string newFolderPath, IReadOnlyCollection<string> allowedRoots)
-        {
-            var currentBase = ComputeCurrentBasePath(audiobook);
-            if (string.IsNullOrWhiteSpace(currentBase))
-            {
-                audiobook.BasePath = NormalizePath(newFolderPath);
-                return (true, null);
-            }
-
-            var normalizedCurrent = NormalizePath(currentBase);
-            var normalizedNew = NormalizePath(newFolderPath);
-            if (!IsPathWithinAllowedRoots(normalizedCurrent, allowedRoots) || !IsPathWithinAllowedRoots(normalizedNew, allowedRoots))
-                return (false, "Destination path is outside the allowed library roots.");
-            if (!_fileSystem.DirectoryExists(normalizedCurrent))
-            {
-                audiobook.BasePath = normalizedNew;
-                return (true, null);
-            }
-            if (_fileSystem.DirectoryExists(normalizedNew) && _fileSystem.EnumerateFileSystemEntries(normalizedNew).Any())
-                return (false, "Target folder already exists and is not empty.");
-
-            var parent = Path.GetDirectoryName(normalizedNew);
-            if (!string.IsNullOrWhiteSpace(parent)) _fileSystem.CreateDirectory(parent);
-
-            var moved = await _fileMover.MoveDirectoryAsync(normalizedCurrent, normalizedNew);
-            if (!moved) return (false, "Folder move operation failed.");
-
-            audiobook.BasePath = normalizedNew;
-            if (audiobook.Files != null)
-            {
-                foreach (var file in audiobook.Files.Where(f => !string.IsNullOrWhiteSpace(f.Path)
-                    && (PathsEqual(f.Path, normalizedCurrent) || FileUtils.IsPathInsideOf(f.Path!, normalizedCurrent))))
-                {
-                    var relative = Path.GetRelativePath(normalizedCurrent, file.Path!);
-                    file.Path = CombineRelativePath(normalizedNew, relative);
-                }
-            }
-            if (!string.IsNullOrWhiteSpace(audiobook.FilePath)
-                && (PathsEqual(audiobook.FilePath, normalizedCurrent) || FileUtils.IsPathInsideOf(audiobook.FilePath, normalizedCurrent)))
-            {
-                var relative = Path.GetRelativePath(normalizedCurrent, audiobook.FilePath);
-                audiobook.FilePath = CombineRelativePath(normalizedNew, relative);
-            }
-
-            return (true, null);
         }
 
     }

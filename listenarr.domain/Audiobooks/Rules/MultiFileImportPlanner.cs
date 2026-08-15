@@ -35,9 +35,11 @@ namespace Listenarr.Domain.Audiobooks.Rules
             @"(?:^|[\s._\-\(\[])\s*0*(\d+)\s*(?:[\)\]]|$)",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-        public static List<PlannedImportFile> BuildPlans(IEnumerable<(string FullPath, string? RelativePath)> inputs)
+        public static List<PlannedImportFile> BuildPlans(
+            IEnumerable<(string FullPath, string? RelativePath)> inputs,
+            StringComparer pathComparer)
         {
-            var distinct = new Dictionary<string, (string FullPath, string? RelativePath)>(StringComparer.OrdinalIgnoreCase);
+            var distinct = new Dictionary<string, (string FullPath, string? RelativePath)>(pathComparer);
             foreach (var input in inputs)
             {
                 if (string.IsNullOrWhiteSpace(input.FullPath))
@@ -53,8 +55,8 @@ namespace Listenarr.Domain.Audiobooks.Rules
 
             var ordered = distinct.Values
                 .OrderBy(i => ToNaturalSortKey(GetComparablePath(i.RelativePath, i.FullPath)), StringComparer.Ordinal)
-                .ThenBy(i => GetComparablePath(i.RelativePath, i.FullPath), StringComparer.OrdinalIgnoreCase)
-                .ThenBy(i => i.FullPath, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(i => GetComparablePath(i.RelativePath, i.FullPath), pathComparer)
+                .ThenBy(i => i.FullPath, StringComparer.Ordinal)
                 .ToList();
 
             var plans = new List<PlannedImportFile>(ordered.Count);
@@ -90,7 +92,8 @@ namespace Listenarr.Domain.Audiobooks.Rules
 
         public static Dictionary<string, int> BuildStableNamingNumbers(
             IEnumerable<PlannedImportFile> plans,
-            Func<PlannedImportFile, int?> selector)
+            Func<PlannedImportFile, int?> selector,
+            StringComparer pathComparer)
         {
             var orderedPlans = plans
                 .OrderBy(p => p.SequenceNumber)
@@ -104,7 +107,7 @@ namespace Listenarr.Domain.Audiobooks.Rules
                 && rawValues.All(v => v.HasValue)
                 && AreStrictlyIncreasing(rawValues.Select(v => v!.Value));
 
-            var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var result = new Dictionary<string, int>(pathComparer);
             for (var i = 0; i < orderedPlans.Count; i++)
             {
                 result[orderedPlans[i].FullPath] = canUseRawValues

@@ -22,6 +22,7 @@ import { signalRService } from '@/services/signalr'
 import type { Audiobook } from '@/types'
 import { errorTracking } from '@/services/errorTracking'
 import { buildApiPath } from '@/services/apiBase'
+import { useLibraryDeleteOperationsStore } from '@/stores/libraryDeleteOperations'
 
 export const useLibraryStore = defineStore('library', () => {
   const audiobooks = ref<Audiobook[]>([])
@@ -29,6 +30,7 @@ export const useLibraryStore = defineStore('library', () => {
   const error = ref<string | null>(null)
   const selectedIds = ref<Set<number>>(new Set())
   let inFlightFetch: Promise<void> | null = null
+  const deleteOperationsStore = useLibraryDeleteOperationsStore()
 
   function normalizeLibraryImageUrl(book: Audiobook): Audiobook {
     const current = (book.imageUrl || '').trim()
@@ -80,15 +82,20 @@ export const useLibraryStore = defineStore('library', () => {
     id: number,
     options?: { deleteFiles?: boolean; deleteFolder?: boolean },
   ) {
+    const title = audiobooks.value.find((book) => book.id === id)?.title || `Audiobook ${id}`
+    const operationId = deleteOperationsStore.beginSingle(id, title)
     try {
       await apiService.removeFromLibrary(id, options)
+      deleteOperationsStore.completeSingle(operationId)
       // Remove from local state
       audiobooks.value = audiobooks.value.filter((book) => book.id !== id)
       // Remove from selection if selected
       selectedIds.value.delete(id)
       return true
     } catch (err) {
-      error.value = err instanceof Error ? err.message : 'Failed to remove audiobook'
+      const message = err instanceof Error ? err.message : 'Failed to remove audiobook'
+      error.value = message
+      deleteOperationsStore.failSingle(operationId, message)
       errorTracking.captureException(err as Error, {
         component: 'LibraryStore',
         operation: 'removeFromLibrary',
@@ -99,32 +106,47 @@ export const useLibraryStore = defineStore('library', () => {
   }
 
   async function bulkRemoveFromLibrary(ids: number[]) {
-    if (ids.length === 0) return { success: false, deletedCount: 0 }
+    const uniqueIds = [...new Set(ids)]
+    if (uniqueIds.length === 0) return { success: false, deletedCount: 0 }
+
+    const titleById = new Map(
+      audiobooks.value.map((book) => [book.id, book.title || `Audiobook ${book.id}`]),
+    )
+    const operationId = deleteOperationsStore.beginBulk(uniqueIds.length)
+    const deletedIds: number[] = []
 
     try {
-      // Backend no longer exposes a single bulk-remove endpoint; perform safe per-id removes
-      let deleted = 0
-      for (const id of ids) {
+      // Perform safe per-id removes while exposing aggregate progress in Notifications.
+      for (const id of uniqueIds) {
+        const title = titleById.get(id) || `Audiobook ${id}`
+        deleteOperationsStore.setBulkCurrentItem(operationId, title)
         try {
           await apiService.removeFromLibrary(id)
-          deleted++
-        } catch {
-          // Continue attempting remaining deletions even if one fails
+          deletedIds.push(id)
+          deleteOperationsStore.updateBulkItem(operationId, title, true)
+        } catch (err) {
+          const message = err instanceof Error ? err.message : `Failed to remove ${title}`
+          deleteOperationsStore.updateBulkItem(operationId, title, false, message)
+          // Continue attempting remaining deletions even if one fails.
         }
       }
-      // Remove from local state
-      audiobooks.value = audiobooks.value.filter((book) => !ids.includes(book.id))
-      // Clear selection
+
+      deleteOperationsStore.finishBulk(operationId)
+      // Remove only successfully deleted rows from local state.
+      const deletedIdSet = new Set(deletedIds)
+      audiobooks.value = audiobooks.value.filter((book) => !deletedIdSet.has(book.id))
       clearSelection()
-      return { success: deleted > 0, deletedCount: deleted }
+      return { success: deletedIds.length > 0, deletedCount: deletedIds.length }
     } catch (err) {
-      error.value = err instanceof Error ? err.message : 'Failed to bulk remove audiobooks'
+      const message = err instanceof Error ? err.message : 'Failed to bulk remove audiobooks'
+      error.value = message
+      deleteOperationsStore.finishBulk(operationId)
       errorTracking.captureException(err as Error, {
         component: 'LibraryStore',
         operation: 'bulkRemoveFromLibrary',
-        metadata: { count: ids.length },
+        metadata: { count: uniqueIds.length },
       })
-      return { success: false, deletedCount: 0 }
+      return { success: false, deletedCount: deletedIds.length }
     }
   }
 

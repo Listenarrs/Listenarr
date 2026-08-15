@@ -89,6 +89,13 @@ describe('ActivityView mobile virtualization', () => {
       }),
     }))
 
+    vi.doMock('@/stores/moveJobs', () => ({
+      useMoveJobsStore: () => ({
+        trackedJobs: [],
+        start: vi.fn(),
+      }),
+    }))
+
     vi.doMock('@/services/errorTracking', () => ({
       errorTracking: {
         captureException: vi.fn(),

@@ -85,6 +85,25 @@ namespace Listenarr.Tests.Features.Infrastructure.DependencyInjection
             Assert.Contains(
                 services,
                 descriptor =>
+                    descriptor.ServiceType == typeof(IFilesystemMutationCoordinator) &&
+                    descriptor.ImplementationType == typeof(FilesystemMutationCoordinator) &&
+                    descriptor.Lifetime == ServiceLifetime.Singleton);
+
+            Assert.Contains(
+                services,
+                descriptor =>
+                    descriptor.ServiceType == typeof(IRootFolderRelocationService) &&
+                    descriptor.Lifetime == ServiceLifetime.Singleton);
+
+            Assert.Contains(
+                services,
+                descriptor =>
+                    descriptor.ServiceType == typeof(IMoveQueueService) &&
+                    descriptor.Lifetime == ServiceLifetime.Singleton);
+
+            Assert.Contains(
+                services,
+                descriptor =>
                     descriptor.ServiceType == typeof(IDownloadProcessingJobService) &&
                     descriptor.ImplementationType == typeof(DownloadProcessingJobService) &&
                     descriptor.Lifetime == ServiceLifetime.Scoped);

@@ -18,6 +18,12 @@ namespace Listenarr.Tests.Builders
             return this;
         }
 
+        public ApplicationSettingsBuilder WithHardlinkFileOnCompleted()
+        {
+            _applicationSettings.CompletedFileAction = FileAction.HardlinkCopy;
+            return this;
+        }
+
         public ApplicationSettingsBuilder WithoutFileAction()
         {
             _applicationSettings.CompletedFileAction = FileAction.None;

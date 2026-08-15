@@ -47,6 +47,7 @@ namespace Listenarr.Tests.Features.Api.Services
             _audiobook.BasePath = _outputRoot;
 
             await InitDataAsync();
+            await AddAuthorizedRootAsync(FileService.GetTempPath());
         }
 
         private async Task InitDataAsync()

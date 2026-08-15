@@ -33,6 +33,7 @@ namespace Listenarr.Application.Downloads.Common
         IRemotePathMappingService remotePathMappingService,
         IDownloadClientAdapterFactory factory,
         IFileSystem fileSystem,
+        IFileSystemSemanticsResolver semanticsResolver,
         ILogger<DownloadClientGateway> logger) : IDownloadClientGateway
     {
         internal IDownloadClientAdapter ResolveAdapter(DownloadClientConfiguration client)
@@ -232,14 +233,16 @@ namespace Listenarr.Application.Downloads.Common
         /// <returns></returns>
         private async Task<QueueItem> TranslateQueueItemPathsAsync(DownloadClientConfiguration client, QueueItem item)
         {
-            if (!string.IsNullOrWhiteSpace(item.RemotePath))
+            if (!string.IsNullOrEmpty(item.RemotePath))
             {
                 item.LocalPath = await remotePathMappingService.TranslatePathAsync(client, item.RemotePath);
+                EnsureNativePath(item.LocalPath, client.Name);
             }
 
-            if (!string.IsNullOrWhiteSpace(item.ContentPath))
+            if (!string.IsNullOrEmpty(item.ContentPath))
             {
                 item.ContentPath = await remotePathMappingService.TranslatePathAsync(client, item.ContentPath);
+                EnsureNativePath(item.ContentPath, client.Name);
             }
 
             // FIXME: https://github.com/Listenarrs/Listenarr/issues/592
@@ -253,11 +256,13 @@ namespace Listenarr.Application.Downloads.Common
                 List<string> sourceFiles = [];
                 foreach (string file in item.SourceFiles)
                 {
-                    sourceFiles.Add(await remotePathMappingService.TranslatePathAsync(client, file));
+                    var sourceFile = await remotePathMappingService.TranslatePathAsync(client, file);
+                    EnsureNativePath(sourceFile, client.Name);
+                    sourceFiles.Add(sourceFile);
                 }
                 item.SourceFiles = sourceFiles;
             }
-            else if (!string.IsNullOrWhiteSpace(item.ContentPath))
+            else if (!string.IsNullOrEmpty(item.ContentPath))
             {
                 // Scan ContentPath only after the adapter has supplied a non-empty path.
                 // Active queue snapshots may not be import-ready, so adapters should leave
@@ -297,10 +302,59 @@ namespace Listenarr.Application.Downloads.Common
                 item.SourceFiles = [];
             }
 
-            // Remove duplicates if any
-            item.SourceFiles = new HashSet<string>(item.SourceFiles, StringComparer.OrdinalIgnoreCase).ToList();
+            // Source files represent local filesystem identities after remote-path mapping.
+            // Use the reported local storage boundary rather than the host OS so Docker mounts
+            // with explicit case behavior dedupe the same way the underlying volume does.
+            var sourceFileComparer = await ResolveSourceFileComparerAsync(item);
+            item.SourceFiles = new HashSet<string>(item.SourceFiles, sourceFileComparer).ToList();
 
             return item;
+        }
+
+        private async Task<IEqualityComparer<string>> ResolveSourceFileComparerAsync(QueueItem item)
+        {
+            var boundary = !string.IsNullOrWhiteSpace(item.ContentPath)
+                ? item.ContentPath
+                : item.SourceFiles?
+                    .Select(Path.GetDirectoryName)
+                    .FirstOrDefault(path => !string.IsNullOrWhiteSpace(path));
+            if (string.IsNullOrWhiteSpace(boundary))
+            {
+                return StringComparer.Ordinal;
+            }
+
+            try
+            {
+                var resolution = await semanticsResolver.ResolveAsync(boundary);
+                return resolution.State == PathIdentityState.Valid
+                    ? resolution.Semantics.Comparer
+                    : StringComparer.Ordinal;
+            }
+            catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
+            {
+                logger.LogDebug(
+                    exception,
+                    "Failed to resolve download source file semantics for {Path}",
+                    LogRedaction.SanitizeFilePath(boundary));
+                return StringComparer.Ordinal;
+            }
+        }
+
+        private static void EnsureNativePath(string? path, string clientName)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                return;
+            }
+
+            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    path,
+                    out _,
+                    out _))
+            {
+                throw new InvalidOperationException(
+                    $"Download client '{clientName}' reported a save path that is not valid on this host; check its remote path mappings.");
+            }
         }
 
         private void LogMissingSourceFiles(

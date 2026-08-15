@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.ComponentModel.DataAnnotations;
+using Listenarr.Domain.Common;
 
 namespace Listenarr.Domain.Audiobooks
 {
@@ -34,8 +35,27 @@ namespace Listenarr.Domain.Audiobooks
 
         public bool IsDefault { get; set; } = false;
 
+        public FileSystemCaseSensitivityMode CaseSensitivityMode { get; set; } = FileSystemCaseSensitivityMode.Auto;
+
+        public FileSystemCaseSensitivity ResolvedCaseSensitivity { get; set; } = FileSystemCaseSensitivity.Unknown;
+
+        [MaxLength(128)]
+        public string? PathIdentityKey { get; set; }
+
+        public PathIdentityState PathIdentityState { get; set; } = PathIdentityState.Unavailable;
+
+        public int? DirectoryObjectIdentityVersion { get; set; }
+
+        [MaxLength(256)]
+        public string? DirectoryObjectIdentity { get; set; }
+
+        [MaxLength(1024)]
+        public string? DirectoryObjectIdentityUnavailableReason { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         public DateTime? UpdatedAt { get; set; }
+
+        public ICollection<RootFolderRelocation> Relocations { get; set; } = new List<RootFolderRelocation>();
     }
 }

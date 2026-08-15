@@ -747,6 +747,7 @@
                 type="checkbox"
                 class="checkbox-input"
                 aria-label="Remove all files in the audiobook folder from disk"
+                :disabled="!filesystemReadinessStore.filesystemReady"
               />
               <div class="checkbox-content">
                 <span class="checkbox-title"
@@ -767,6 +768,7 @@
                 type="checkbox"
                 class="checkbox-input"
                 aria-label="Remove audiobook folder from disk"
+                :disabled="!filesystemReadinessStore.filesystemReady"
               />
               <div class="checkbox-content">
                 <span class="checkbox-title">Also remove the audiobook folder</span>
@@ -815,6 +817,7 @@ import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
 import { useRootFoldersStore } from '@/stores/rootFolders'
 import { useDownloadsStore } from '@/stores/downloads'
+import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import { apiService } from '@/services/api'
 import { buildApiPath } from '@/services/apiBase'
 import { logger } from '@/utils/logger'
@@ -873,6 +876,7 @@ const libraryStore = useLibraryStore()
 const configStore = useConfigurationStore()
 const rootFoldersStore = useRootFoldersStore()
 const downloadsStore = useDownloadsStore()
+const filesystemReadinessStore = useFilesystemReadinessStore()
 const { getProtectedImageSrc } = useProtectedImages()
 
 // Computed list after applying search, filters and sorting

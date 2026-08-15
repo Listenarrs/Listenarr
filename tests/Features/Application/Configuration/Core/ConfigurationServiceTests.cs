@@ -26,6 +26,64 @@ namespace Listenarr.Tests.Features.Application.Configuration.Core
     public class ConfigurationServiceTests : BaseTests
     {
         [Fact]
+        public async Task GetApplicationSettings_RepositoryFailure_PropagatesInsteadOfFabricatingEditableDefaults()
+        {
+            var repository = new Mock<IApplicationSettingsRepository>(MockBehavior.Strict);
+            repository.Setup(candidate => candidate.GetAsync(It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new IOException("simulated settings read failure"));
+            Init(builder => builder.WithScoped<IApplicationSettingsRepository>(_ => repository.Object));
+            var service = _provider.GetRequiredService<IConfigurationService>();
+
+            var exception = await Assert.ThrowsAsync<IOException>(() =>
+                service.GetApplicationSettingsAsync());
+
+            Assert.Equal("simulated settings read failure", exception.Message);
+            repository.Verify(
+                candidate => candidate.GetAsync(It.IsAny<CancellationToken>()),
+                Times.Once);
+            repository.VerifyNoOtherCalls();
+        }
+
+        [WindowsFact]
+        public async Task SaveApplicationSettings_ChangedOutputPath_NormalizesCurrentHostUserInputBeforePersistence()
+        {
+            var svc = _provider.GetRequiredService<IConfigurationService>();
+            var settings = await svc.GetApplicationSettingsAsync();
+            settings.OutputPath = "/";
+
+            await svc.SaveApplicationSettingsAsync(settings);
+
+            var stored = await _applicationSettingsRepository.GetAsync();
+            Assert.NotNull(stored);
+            Assert.Equal(
+                Path.GetPathRoot(Environment.CurrentDirectory),
+                stored!.OutputPath,
+                StringComparer.OrdinalIgnoreCase);
+        }
+
+        [WindowsFact]
+        public async Task SaveApplicationSettings_UnchangedForeignOutputPath_PreservesPersistedSyntax()
+        {
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
+            {
+                Id = 1,
+                OutputPath = "/",
+                ShowCompletedExternalDownloads = false
+            });
+            var svc = _provider.GetRequiredService<IConfigurationService>();
+            var settings = await svc.GetApplicationSettingsAsync();
+            Assert.Equal("/", settings.OutputPath);
+            settings.ShowCompletedExternalDownloads = true;
+
+            await svc.SaveApplicationSettingsAsync(settings);
+
+            var stored = await _applicationSettingsRepository.GetAsync();
+            Assert.NotNull(stored);
+            Assert.Equal("/", stored!.OutputPath);
+            Assert.True(stored.ShowCompletedExternalDownloads);
+        }
+
+        [Fact]
         public async Task SaveApplicationSettings_PersistsChanges()
         {
             var testOutputPath = FileUtils.GetAbsolutePath("test-output");
@@ -64,7 +122,12 @@ namespace Listenarr.Tests.Features.Application.Configuration.Core
             Assert.Single(saved.Webhooks!);
             Assert.Equal("UnitWebhook", saved.Webhooks![0].Name);
 
-            var partial = new ApplicationSettings { Id = 1, OutputPath = partialUpdatePath };
+            var partial = new ApplicationSettings
+            {
+                Id = 1,
+                Version = saved.Version,
+                OutputPath = partialUpdatePath
+            };
             await svc.SaveApplicationSettingsAsync(partial);
 
             var afterPartial = await svc.GetApplicationSettingsAsync();
@@ -140,9 +203,11 @@ namespace Listenarr.Tests.Features.Application.Configuration.Core
                 TagFilter = "audiobooks"
             });
 
+            var current = await svc.GetApplicationSettingsAsync();
             await svc.SaveApplicationSettingsAsync(new ApplicationSettings
             {
                 Id = 1,
+                Version = current.Version,
                 OutputPath = FileUtils.GetAbsolutePath("updated-output")
             });
 

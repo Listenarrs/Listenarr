@@ -20,6 +20,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import LibraryImportFooter from '@/components/domain/audiobook/LibraryImportFooter.vue'
 import { useLibraryImportStore } from '@/stores/libraryImport'
+import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import type { SearchResult, RootFolder } from '@/types'
 
 const success = vi.fn()
@@ -38,6 +39,18 @@ describe('LibraryImportFooter', () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const store = useLibraryImportStore()
+    useFilesystemReadinessStore().readiness = {
+      isReady: true,
+      status: 'ready',
+      databaseConnected: true,
+      migrationsCurrent: true,
+      errorCode: null,
+      filesystemReady: true,
+      filesystemStatus: 'Ready',
+      filesystemPhase: null,
+      filesystemErrorCode: null,
+      filesystemErrorMessage: null,
+    }
 
     let resolveImport: ((value: { imported: number; errors: string[] }) => void) | null = null
 
@@ -100,5 +113,52 @@ describe('LibraryImportFooter', () => {
     await wrapper.vm.$nextTick()
 
     expect(success).toHaveBeenCalledWith('Import complete', '2 books imported')
+  })
+
+  it('disables cached-result imports while filesystem initialization is incomplete', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useLibraryImportStore()
+    useFilesystemReadinessStore().readiness = {
+      isReady: true,
+      status: 'ready',
+      databaseConnected: true,
+      migrationsCurrent: true,
+      errorCode: null,
+      filesystemReady: false,
+      filesystemStatus: 'Running',
+      filesystemPhase: 'AudiobookFileIdentities',
+      filesystemErrorCode: null,
+      filesystemErrorMessage: null,
+    }
+    store.items = {
+      'C:\\incoming\\Book.mp3': {
+        id: 'C:\\incoming\\Book.mp3',
+        fullPath: 'C:\\incoming\\Book.mp3',
+        sourceFiles: ['C:\\incoming\\Book.mp3'],
+        folderPath: 'C:\\incoming',
+        relativePath: 'Book',
+        folderName: 'Book',
+        format: 'MP3',
+        fileCount: 1,
+        selectedMatch: { title: 'Book', authors: [] } as unknown as SearchResult,
+        hasSearched: true,
+        isSearching: false,
+        selected: true,
+      },
+    }
+    const importSelected = vi.spyOn(store, 'importSelected')
+    const wrapper = mount(LibraryImportFooter, {
+      props: {
+        folders: [{ id: 1, path: 'D:\\library' }] as unknown as RootFolder[],
+      },
+      global: { plugins: [pinia] },
+    })
+
+    const importButton = wrapper.get('button.btn.btn-primary')
+    expect(importButton.attributes('disabled')).toBeDefined()
+    expect(importButton.attributes('title')).toContain('filesystem initialization')
+    await importButton.trigger('click')
+    expect(importSelected).not.toHaveBeenCalled()
   })
 })

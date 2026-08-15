@@ -11,9 +11,18 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
 {
     public partial class FfmpegService : IFfmpegService
     {
-        public async Task<AudioMetadata> RunFfprobeAsync(string filePath)
+        public Task<AudioMetadata> RunFfprobeAsync(string filePath)
         {
-            var sanitizedFilePath = LogRedaction.SanitizeFilePath(filePath);
+            return RunFfprobeAsync(new MetadataFileSource(filePath, filePath));
+        }
+
+        public async Task<AudioMetadata> RunFfprobeAsync(
+            MetadataFileSource fileSource)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(fileSource.ReadPath);
+            ArgumentException.ThrowIfNullOrWhiteSpace(fileSource.PublicPath);
+            var sanitizedPublicPath = LogRedaction.SanitizeFilePath(
+                fileSource.PublicPath);
             JsonElement ffprobeData;
             try
             {
@@ -27,18 +36,18 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
                     throw new FfmpegException($"ffprobe binary is unavailable or outside configured root: {LogRedaction.SanitizeText(ffprobeReason)}");
                 }
 
-                if (!File.Exists(filePath))
+                if (!File.Exists(fileSource.ReadPath))
                 {
-                    throw new FfmpegException($"ffprobe target does not exist: {sanitizedFilePath}");
+                    throw new FfmpegException($"ffprobe target does not exist: {sanitizedPublicPath}");
                 }
 
-                if (!FileUtils.IsAudioFile(filePath))
+                if (!FileUtils.IsAudioFile(fileSource.PublicPath))
                 {
-                    throw new FfmpegException($"ffprobe target is not a supported audio file: {sanitizedFilePath}");
+                    throw new FfmpegException($"ffprobe target is not a supported audio file: {sanitizedPublicPath}");
                 }
 
-                var safeFilePath = Path.GetFullPath(filePath);
-                _logger.LogInformation("Running bundled ffprobe at {Path} against file {File}", safeFfprobePath, LogRedaction.SanitizeFilePath(safeFilePath));
+                var safeReadPath = Path.GetFullPath(fileSource.ReadPath);
+                _logger.LogInformation("Running bundled ffprobe at {Path} against file {File}", safeFfprobePath, sanitizedPublicPath);
 
                 var startInfo = new ProcessStartInfo
                 {
@@ -54,19 +63,19 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
                 startInfo.ArgumentList.Add("json");
                 startInfo.ArgumentList.Add("-show_format");
                 startInfo.ArgumentList.Add("-show_streams");
-                startInfo.ArgumentList.Add(safeFilePath);
+                startInfo.ArgumentList.Add(safeReadPath);
 
                 var pr = await _processRunner.RunAsync(startInfo, 10000);
-                _logger.LogInformation("ffprobe exit code {Code} for file {File}; stderr length={Len}", pr.ExitCode, sanitizedFilePath, pr.Stderr?.Length ?? 0);
+                _logger.LogInformation("ffprobe exit code {Code} for file {File}; stderr length={Len}", pr.ExitCode, sanitizedPublicPath, pr.Stderr?.Length ?? 0);
 
-                if (pr.ExitCode > 0)
+                if (pr.TimedOut || pr.ExitCode != 0)
                 {
-                    throw new FfmpegException($"ffprobe cannot read/process {sanitizedFilePath}");
+                    throw new FfmpegException($"ffprobe cannot read/process {sanitizedPublicPath}");
                 }
 
                 if (string.IsNullOrEmpty(pr.Stdout))
                 {
-                    throw new FfmpegException($"Failed to parse ffprobe JSON output for {sanitizedFilePath}: Cannot retrieve output or retrieved empty output");
+                    throw new FfmpegException($"Failed to parse ffprobe JSON output for {sanitizedPublicPath}: Cannot retrieve output or retrieved empty output");
                 }
 
                 try
@@ -75,21 +84,23 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
                 }
                 catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
                 {
-                    throw new FfmpegException($"Failed to parse ffprobe JSON output for {sanitizedFilePath}", ex);
+                    throw new FfmpegException($"Failed to parse ffprobe JSON output for {sanitizedPublicPath}", ex);
                 }
             }
             catch (System.ComponentModel.Win32Exception ex)
             {
-                throw new FfmpegException($"ffprobe execution failed for {sanitizedFilePath}", ex);
+                throw new FfmpegException($"ffprobe execution failed for {sanitizedPublicPath}", ex);
             }
             catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
             {
-                throw new FfmpegException($"Error running ffprobe for {sanitizedFilePath}", ex);
+                throw new FfmpegException($"Error running ffprobe for {sanitizedPublicPath}", ex);
             }
 
-            var metadata = FfprobeMetadataMapper.Map(ffprobeData, filePath);
+            var metadata = FfprobeMetadataMapper.Map(
+                ffprobeData,
+                fileSource.PublicPath);
 
-            _logger.LogInformation("Extracted ffprobe metadata from file: {File}", LogRedaction.SanitizeText(filePath));
+            _logger.LogInformation("Extracted ffprobe metadata from file: {File}", sanitizedPublicPath);
             _logger.LogDebug("Parsed metadata: Duration={Duration} seconds, Format={Format}, Bitrate={Bitrate}, SampleRate={SampleRate}, Channels={Channels}", metadata.Duration.TotalSeconds, metadata.Format, metadata.BitRate, metadata.SampleRate, metadata.Channels);
 
             return metadata;

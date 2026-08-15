@@ -17,6 +17,7 @@
  */
 using System.Runtime.InteropServices;
 using System.Text;
+using Microsoft.EntityFrameworkCore;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Builders;
 
@@ -52,6 +53,7 @@ namespace Listenarr.Tests.Features.Api.Services
             _outputRoot = FileService.GetTempDirectory("import-out");
 
             await InitDataAsync();
+            await AddAuthorizedRootAsync(FileService.GetTempPath());
         }
 
         private async Task InitDataAsync()
@@ -67,6 +69,18 @@ namespace Listenarr.Tests.Features.Api.Services
             _download.DownloadClientId = _client.Id;
             _download.AudiobookId = _audiobook.Id;
             await _downloadRepository.AddAsync(_download);
+        }
+
+        private async Task<ApplicationSettings> SaveCurrentSettingsAsync(
+            ApplicationSettings settings)
+        {
+            var current = await _applicationSettingsRepository.GetAsync();
+            if (current != null)
+            {
+                settings.Version = current.Version;
+            }
+
+            return await _applicationSettingsRepository.SaveAsync(settings);
         }
 
         [Fact]
@@ -143,9 +157,10 @@ namespace Listenarr.Tests.Features.Api.Services
 
             _services.AddSingleton<IMetadataService>(metadataMock.Object);
             Init();
+            await AddAuthorizedRootAsync(FileService.GetTempPath());
             await InitDataAsync();
 
-            var settings = await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+            var settings = await SaveCurrentSettingsAsync(new ApplicationSettingsBuilder()
                 .WithOutputPath(outputRoot)
                 .WithCopyFileOnCompleted()
                 .WithMetadataProcessing()
@@ -176,7 +191,7 @@ namespace Listenarr.Tests.Features.Api.Services
         }
 
         [Fact]
-        public async Task ImportFilesFromDirectory_MoveImportsCompanionFilesAndDeletesSourceFolder()
+        public async Task ImportFilesFromDirectory_MoveImportsCompanionFilesAndPreservesUnownedSourceFolder()
         {
             var outputRoot = FileService.GetTempDirectory("import-out");
             var sourceDir = FileService.GetTempDirectory("import-src");
@@ -191,6 +206,7 @@ namespace Listenarr.Tests.Features.Api.Services
 
             _services.AddSingleton(metadataMock.Object);
             Init();
+            await AddAuthorizedRootAsync(FileService.GetTempPath());
 
             var settings = await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
             {
@@ -218,7 +234,8 @@ namespace Listenarr.Tests.Features.Api.Services
             Assert.Contains(results, r => string.Equals(Path.GetFileName(r.FinalPath), "Companion Book-01.mp3", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(results, r => string.Equals(Path.GetFileName(r.FinalPath), "cover.jpg", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(results, r => string.Equals(Path.GetFileName(r.FinalPath), "notes.txt", StringComparison.OrdinalIgnoreCase));
-            Assert.False(Directory.Exists(sourceDir));
+            Assert.True(Directory.Exists(sourceDir));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(sourceDir));
         }
 
         [Fact]
@@ -237,6 +254,7 @@ namespace Listenarr.Tests.Features.Api.Services
 
             _services.AddSingleton(metadataMock.Object);
             Init();
+            await AddAuthorizedRootAsync(FileService.GetTempPath());
 
             var settings = await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
             {
@@ -298,6 +316,7 @@ namespace Listenarr.Tests.Features.Api.Services
 
             _services.AddSingleton(metadataMock.Object);
             Init();
+            await AddAuthorizedRootAsync(FileService.GetTempPath());
 
             var settings = await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
             {
@@ -335,14 +354,10 @@ namespace Listenarr.Tests.Features.Api.Services
             Assert.DoesNotContain(duplicatedSegment, actualFullPath, StringComparison.OrdinalIgnoreCase);
         }
 
-        [Fact]
+        [WindowsFact]
         [Trait("OSPlatform", "Windows")]
         public async Task ImportSingleFile_WithWindowsShortBasePath_NormalizesFinalPath()
         {
-            if (!OperatingSystem.IsWindows())
-            {
-                return;
-            }
 
             var outputRoot = FileService.GetTempDirectory("import-out");
             var longBasePath = Path.Join(outputRoot, "A Very Long Audiobook Folder Name");
@@ -352,14 +367,18 @@ namespace Listenarr.Tests.Features.Api.Services
             var sourceFile = await FileService.GetFileAsync(sourceDir, "source-track.m4b");
 
             var shortBasePath = TryGetShortPathName(longBasePath);
-            if (string.IsNullOrWhiteSpace(shortBasePath)
-                || string.Equals(shortBasePath, longBasePath, StringComparison.OrdinalIgnoreCase)
-                || !shortBasePath.Contains('~'))
-            {
-                return;
-            }
+            Assert.False(
+                string.IsNullOrWhiteSpace(shortBasePath),
+                "The native Windows runner must expose a short-path spelling for this regression.");
+            Assert.False(
+                string.Equals(
+                    longBasePath,
+                    shortBasePath,
+                    StringComparison.OrdinalIgnoreCase),
+                "The short-path spelling must differ from the long path.");
+            Assert.Contains('~', shortBasePath!);
 
-            var settings = await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
+            var settings = await SaveCurrentSettingsAsync(new ApplicationSettings
             {
                 OutputPath = outputRoot,
                 CompletedFileAction = FileAction.Move,
@@ -407,9 +426,10 @@ namespace Listenarr.Tests.Features.Api.Services
 
             _services.AddSingleton(metadataMock.Object);
             Init();
+            await AddAuthorizedRootAsync(FileService.GetTempPath());
             await InitDataAsync();
 
-            var settings = await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
+            var settings = await SaveCurrentSettingsAsync(new ApplicationSettings
             {
                 OutputPath = outputRoot,
                 CompletedFileAction = FileAction.Copy,
@@ -461,9 +481,10 @@ namespace Listenarr.Tests.Features.Api.Services
 
             _services.AddSingleton(metadataMock.Object);
             Init();
+            await AddAuthorizedRootAsync(FileService.GetTempPath());
             await InitDataAsync();
 
-            var settings = await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
+            var settings = await SaveCurrentSettingsAsync(new ApplicationSettings
             {
                 OutputPath = outputRoot,
                 CompletedFileAction = FileAction.Copy,
@@ -508,9 +529,10 @@ namespace Listenarr.Tests.Features.Api.Services
 
             _services.AddSingleton(metadataMock.Object);
             Init();
+            await AddAuthorizedRootAsync(FileService.GetTempPath());
             await InitDataAsync();
 
-            var settings = await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
+            var settings = await SaveCurrentSettingsAsync(new ApplicationSettings
             {
                 OutputPath = outputRoot,
                 CompletedFileAction = FileAction.Copy,
@@ -548,6 +570,63 @@ namespace Listenarr.Tests.Features.Api.Services
         }
 
         [Fact]
+        public async Task ImportSingleFile_Move_UsesMarkerlessRegistrationJournalWithoutLibraryArtifacts()
+        {
+            var outputRoot = FileService.GetTempDirectory("markerless-import-out");
+            var sourceDir = FileService.GetTempDirectory("markerless-import-src");
+            var sourceFile = await FileService.GetFileAsync(
+                sourceDir,
+                "source.mp3",
+                "markerless audio");
+
+            await SaveCurrentSettingsAsync(new ApplicationSettings
+            {
+                OutputPath = outputRoot,
+                CompletedFileAction = FileAction.Move,
+                EnableMetadataProcessing = false,
+                FolderNamingPattern = "",
+                FileNamingPattern = "{Title}"
+            });
+
+            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+            {
+                Id = 990,
+                Title = "Markerless Book",
+                Authors = ["Markerless Author"],
+                BasePath = outputRoot
+            });
+
+            var downloadImportService =
+                _provider.GetRequiredService<IDownloadImportService>();
+            var result = Assert.Single(
+                await downloadImportService.ImportDownloadFilesAsync(
+                    audiobook,
+                    [sourceFile]));
+
+            Assert.True(result.Success);
+            Assert.NotNull(result.FinalPath);
+            Assert.False(File.Exists(sourceFile));
+            Assert.Equal(
+                "markerless audio",
+                await File.ReadAllTextAsync(result.FinalPath!));
+
+            var factory = _provider.GetRequiredService<
+                IDbContextFactory<ListenArrDbContext>>();
+            await using var db = await factory.CreateDbContextAsync();
+            var journal = await db.FileMutationJournals
+                .AsNoTracking()
+                .SingleAsync();
+            Assert.Equal(FileAction.Move, journal.Action);
+            Assert.Equal(FileMutationJournalState.Completed, journal.State);
+            Assert.Equal(audiobook.Id, journal.AudiobookId);
+            Assert.Equal(Path.GetFullPath(sourceFile), journal.SourcePath);
+            Assert.Equal(Path.GetFullPath(result.FinalPath!), journal.DestinationPath);
+
+            AssertNoListenarrArtifacts(sourceDir);
+            AssertNoListenarrArtifacts(outputRoot);
+        }
+
+        [Fact]
         public async Task ImportSingleFile_WhenDestinationHasSameContent_ReusesDestinationAndRegistersMissingFile()
         {
             var outputRoot = FileService.GetTempDirectory("import-out");
@@ -555,7 +634,7 @@ namespace Listenarr.Tests.Features.Api.Services
             var firstSourceFile = await FileService.GetFileAsync(sourceDir, "first.mp3", "same audio");
             var secondSourceFile = await FileService.GetFileAsync(sourceDir, "second.mp3", "same audio");
 
-            await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
+            await SaveCurrentSettingsAsync(new ApplicationSettings
             {
                 OutputPath = outputRoot,
                 CompletedFileAction = FileAction.Copy,
@@ -590,6 +669,18 @@ namespace Listenarr.Tests.Features.Api.Services
             Assert.Contains(registeredFiles, file => string.Equals(file.Path, first.FinalPath, StringComparison.OrdinalIgnoreCase));
         }
 
+        private static void AssertNoListenarrArtifacts(string root)
+        {
+            Assert.DoesNotContain(
+                Directory.EnumerateFileSystemEntries(
+                    root,
+                    "*",
+                    SearchOption.AllDirectories),
+                path => Path.GetFileName(path).StartsWith(
+                    ".listenarr",
+                    StringComparison.OrdinalIgnoreCase));
+        }
+
         [Fact]
         public async Task ImportSingleFile_WhenDestinationContentDiffers_UsesUniqueDestination()
         {
@@ -598,7 +689,7 @@ namespace Listenarr.Tests.Features.Api.Services
             var firstSourceFile = await FileService.GetFileAsync(sourceDir, "first.mp3", "old audio");
             var secondSourceFile = await FileService.GetFileAsync(sourceDir, "second.mp3", "new audio");
 
-            await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
+            await SaveCurrentSettingsAsync(new ApplicationSettings
             {
                 OutputPath = outputRoot,
                 CompletedFileAction = FileAction.Copy,
@@ -643,9 +734,10 @@ namespace Listenarr.Tests.Features.Api.Services
 
             _services.AddSingleton(metadataMock.Object);
             Init();
+            await AddAuthorizedRootAsync(FileService.GetTempPath());
             await InitDataAsync();
 
-            var settings = await _applicationSettingsRepository.SaveAsync(new ApplicationSettings
+            var settings = await SaveCurrentSettingsAsync(new ApplicationSettings
             {
                 OutputPath = outputRoot,
                 CompletedFileAction = FileAction.Copy,

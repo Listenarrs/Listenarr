@@ -19,6 +19,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Listenarr.Infrastructure.DependencyInjection;
 using Listenarr.Infrastructure.Downloads.DirectDownload;
+using Listenarr.Tests.Common;
 
 namespace Listenarr.Tests.Features.Infrastructure.DependencyInjection
 {
@@ -90,7 +91,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DependencyInjection
 
             // Assert - singletons / supporting services registered
             Assert.Contains(services, d => d.ServiceType == typeof(IScanQueueService) && d.Lifetime == ServiceLifetime.Singleton);
-            Assert.Contains(services, d => d.ServiceType == typeof(IMoveQueueService) && d.Lifetime == ServiceLifetime.Singleton);
+            Assert.DoesNotContain(services, d => d.ServiceType == typeof(IMoveQueueService));
             Assert.Contains(services, d => d.ServiceType == typeof(IWorkerCycleRunner) && d.Lifetime == ServiceLifetime.Singleton);
 
             foreach (var processorType in ExpectedProcessorTypes)
@@ -177,21 +178,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DependencyInjection
             return factoryType?.Name ?? descriptor.ToString();
         }
 
-        private static string FindRepositoryFile(string fileName)
-        {
-            var directory = new DirectoryInfo(AppContext.BaseDirectory);
-            while (directory != null)
-            {
-                var candidate = Path.Join(directory.FullName, fileName);
-                if (File.Exists(candidate))
-                {
-                    return candidate;
-                }
-
-                directory = directory.Parent;
-            }
-
-            throw new FileNotFoundException($"Could not find {fileName} from {AppContext.BaseDirectory}");
-        }
+        private static string FindRepositoryFile(string fileName) =>
+            Path.Join(TestUtils.FindRepositoryRoot(), fileName);
     }
 }

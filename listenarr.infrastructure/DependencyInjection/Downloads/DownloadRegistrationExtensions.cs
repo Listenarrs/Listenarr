@@ -71,7 +71,9 @@ internal static class DownloadRegistrationExtensions
         services.AddScoped<ImportDestinationPlanner>();
         services.AddScoped<ArchiveImportExtractor>();
         services.AddScoped<IDownloadImportService, DownloadImportService>();
-        services.AddScoped<IFileMover, FileMover>();
+        services.AddScoped<FileMover>();
+        services.AddScoped<IFileMover>(provider =>
+            provider.GetRequiredService<FileMover>());
         services.AddScoped<IArchiveExtractor, ArchiveExtractor>();
         services.AddOptions<FileMoverOptions>()
             .Bind(configuration.GetSection("FileMover"))

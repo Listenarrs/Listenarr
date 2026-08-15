@@ -15,486 +15,85 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Listenarr.Application.Mapping;
-using Listenarr.Domain.Common;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-namespace Listenarr.Infrastructure.Library.Moving
+
+namespace Listenarr.Infrastructure.Library.Moving;
+
+internal partial class MoveJobProcessor(
+    IMoveQueueService moveQueueService,
+    IToastService toastService,
+    IScanQueueService scanQueueService,
+    ILogger<MoveJobProcessor> logger,
+    AudiobookContentMoveService contentMoveService,
+    IServiceScopeFactory scopeFactory,
+    IAppMetricsService metrics,
+    IFileSystemSemanticsResolver semanticsResolver,
+    IMoveCleanupBoundaryResolver cleanupBoundaryResolver,
+    IMoveScanHandoffStore moveScanHandoffStore,
+    TimeProvider timeProvider,
+    IFilesystemMutationCoordinator filesystemMutationCoordinator,
+    IAudiobookOperationCoordinator audiobookOperationCoordinator,
+    IAudiobookUpdatePublisher? audiobookUpdatePublisher = null) : IMoveJobProcessor, IMoveJobProcessorPhases
 {
-    public class MoveJobProcessor(
-        IMoveQueueService moveQueueService,
-        IToastService toastService,
-        IScanQueueService scanQueueService,
-        ILogger<MoveJobProcessor> logger,
-        IServiceScopeFactory scopeFactory,
-        IHubContext<DownloadHub> hubContext,
-        IAppMetricsService metrics) : IMoveJobProcessor
+    internal Func<MoveJob, Task>? AfterSourceCleanupBeforeMetadataRewriteForTest { get; set; }
+
+    public async Task ProcessJobAsync(MoveJob job, CancellationToken stoppingToken)
     {
-        public async Task ProcessJobAsync(MoveJob job, CancellationToken stoppingToken)
+        var postCommit = await ProcessDurableJobAsync(job, stoppingToken);
+        if (postCommit != null)
         {
-            using var logScope = logger.BeginScope(new Dictionary<string, object?> { ["JobId"] = job.Id, ["AudiobookId"] = job.AudiobookId });
-            metrics.Increment("worker.move.job.started");
-            stoppingToken.ThrowIfCancellationRequested();
+            await RunPostCompletionEffectsAsync(postCommit, stoppingToken);
+        }
+    }
+
+    public async Task<MovePostCommitContext?> ProcessDurableJobAsync(
+        MoveJob job,
+        CancellationToken stoppingToken)
+    {
+        MovePostCommitContext? postCommit = null;
+        void RegisterPostCommit(MovePostCommitContext context) => postCommit = context;
+
+        if (string.IsNullOrWhiteSpace(job.LeaseOwner))
+        {
+            throw new MoveLeaseLostException(job.Id, job.LeaseGeneration);
+        }
+
+        await moveQueueService.UpdateJobStatusAsync(
+            job.Id,
+            job.LeaseOwner,
+            job.LeaseGeneration,
+            MoveJobStatus.Running,
+            cancellationToken: stoppingToken);
+        job.Status = MoveJobStatus.Running;
+        job.Error = null;
+
+        await filesystemMutationCoordinator.ExecuteExclusiveAsync(
+            globalToken => audiobookOperationCoordinator.ExecuteExclusiveAsync(
+                job.AudiobookId,
+                token => ProcessJobCoreAsync(job, RegisterPostCommit, token),
+                globalToken),
+            stoppingToken);
+
+        if (postCommit == null)
+        {
             try
             {
-                logger.LogInformation("Processing move job {JobId} for audiobook {AudiobookId} to {Path}", job.Id, job.AudiobookId, LogRedaction.SanitizeFilePath(job.RequestedPath));
-                await moveQueueService.UpdateJobStatusAsync(job.Id, "Processing", cancellationToken: stoppingToken);
-
-                using var scope = scopeFactory.CreateScope();
-                var audiobookRepository = scope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
-                var moveJobRepository = scope.ServiceProvider.GetRequiredService<IMoveJobRepository>();
-
-                var audiobook = await audiobookRepository.GetByIdAsync(job.AudiobookId);
-                if (audiobook == null)
-                {
-                    await moveQueueService.UpdateJobStatusAsync(job.Id, "Failed", "Audiobook not found", stoppingToken);
-                    metrics.Increment("worker.move.job.failed");
-                    return;
-                }
-
-                // Prefer an enqueued source path snapshot if provided, otherwise use the audiobook's BasePath
-                var source = job.SourcePath;
-                if (!string.IsNullOrWhiteSpace(source) && !Directory.Exists(source))
-                {
-                    logger.LogWarning("Provided source path {Source} for job {JobId} does not exist; falling back to audiobook.BasePath", LogRedaction.SanitizeFilePath(source), job.Id);
-                    source = null;
-                }
-
-                if (string.IsNullOrWhiteSpace(source))
-                {
-                    source = audiobook.BasePath;
-                }
-
-                if (string.IsNullOrWhiteSpace(source) || !Directory.Exists(source))
-                {
-                    await moveQueueService.UpdateJobStatusAsync(job.Id, "Failed", "Source path invalid or does not exist", stoppingToken);
-                    metrics.Increment("worker.move.job.failed");
-                    return;
-                }
-
-                var requested = job.RequestedPath ?? string.Empty;
-
-                string target = requested;
-
-                if (string.IsNullOrWhiteSpace(target))
-                {
-                    await moveQueueService.UpdateJobStatusAsync(job.Id, "Failed", "Target path not provided", stoppingToken);
-                    metrics.Increment("worker.move.job.failed");
-                    return;
-                }
-
-                // Normalize full paths
-                target = Path.GetFullPath(target);
-                source = Path.GetFullPath(source);
-
-                if (IsFilesystemRoot(source) || IsFilesystemRoot(target))
-                {
-                    await moveQueueService.UpdateJobStatusAsync(job.Id, "Failed", "Refused to move a filesystem root", stoppingToken);
-                    metrics.Increment("worker.move.job.failed");
-                    logger.LogWarning(
-                        "Blocked move job {JobId}: source or target is a filesystem root. Source={Source}, Target={Target}",
-                        job.Id,
-                        LogRedaction.SanitizeFilePath(source),
-                        LogRedaction.SanitizeFilePath(target));
-                    return;
-                }
-
-                // If source == target, nothing to do
-                if (string.Equals(source.TrimEnd(Path.DirectorySeparatorChar), target.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
-                {
-                    await moveQueueService.UpdateJobStatusAsync(job.Id, "Completed", cancellationToken: stoppingToken);
-                    metrics.Increment("worker.move.job.skipped");
-                    return;
-                }
-
-                if (FileUtils.IsPathInsideOf(target, source) || FileUtils.IsPathInsideOf(source, target))
-                {
-                    await moveQueueService.UpdateJobStatusAsync(job.Id, "Failed", "Source and target paths overlap", stoppingToken);
-                    metrics.Increment("worker.move.job.failed");
-                    logger.LogWarning(
-                        "Blocked overlapping move job {JobId}: {Source} -> {Target}",
-                        job.Id,
-                        LogRedaction.SanitizeFilePath(source),
-                        LogRedaction.SanitizeFilePath(target));
-                    return;
-                }
-
-                // Ensure target parent exists
-                var targetParent = Path.GetDirectoryName(target);
-                if (string.IsNullOrEmpty(targetParent))
-                {
-                    await moveQueueService.UpdateJobStatusAsync(job.Id, "Failed", "Invalid target path", stoppingToken);
-                    metrics.Increment("worker.move.job.failed");
-                    return;
-                }
-
-                if (!Directory.Exists(targetParent)) Directory.CreateDirectory(targetParent);
-
-                // Check if target exists and has content - only fail if it has files/folders we'd overwrite
-                if (Directory.Exists(target))
-                {
-                    var targetHasContent = Directory.EnumerateFileSystemEntries(target).Any();
-                    if (targetHasContent)
-                    {
-                        await moveQueueService.UpdateJobStatusAsync(job.Id, "Failed", "Target directory already exists and contains files", stoppingToken);
-                        metrics.Increment("worker.move.job.failed");
-                        return;
-                    }
-                    // Target exists but is empty - safe to proceed (will use it instead of creating new)
-                    logger.LogInformation("Target directory {Target} exists but is empty; proceeding with move", LogRedaction.SanitizeFilePath(target));
-                }
-
-                // Create a temporary directory under the target parent
-                var tempName = Path.Join(targetParent, Path.GetFileName(target) + ".tmp-" + job.Id.ToString("N"));
-                if (!FileSystemSafety.TryValidateMutationTarget(tempName, [targetParent], out tempName, out var tempReason))
-                {
-                    await moveQueueService.UpdateJobStatusAsync(job.Id, "Failed", tempReason, stoppingToken);
-                    metrics.Increment("worker.move.job.failed");
-                    logger.LogWarning("Blocked move temp path for job {JobId}: {Reason}", job.Id, tempReason);
-                    return;
-                }
-
-                // Copy recursively with retries per file
-                try
-                {
-                    // Only create tempName if target doesn't exist; otherwise copy directly into existing empty target
-                    var useTemp = !Directory.Exists(target);
-                    var copyDest = useTemp ? tempName : target;
-
-                    if (useTemp) Directory.CreateDirectory(tempName);
-
-                    var entries = Directory.EnumerateFileSystemEntries(source, "*", SearchOption.AllDirectories);
-                    foreach (var entry in entries)
-                    {
-                        var rel = Path.GetRelativePath(source, entry);
-                        if (!FileUtils.TryResolveRelativePathWithinBase(copyDest, rel, out var destPath))
-                        {
-                            throw new IOException($"Move entry destination escaped target root: {rel}");
-                        }
-
-                        if (Directory.Exists(entry))
-                        {
-                            if (!Directory.Exists(destPath)) Directory.CreateDirectory(destPath);
-                            continue;
-                        }
-
-                        // Ensure dest directory exists
-                        var ddir = Path.GetDirectoryName(destPath);
-                        if (!string.IsNullOrEmpty(ddir) && !Directory.Exists(ddir)) Directory.CreateDirectory(ddir);
-
-                        // Copy file with retry/backoff and preserve timestamps/attributes on success
-                        var succeeded = false;
-                        const int maxAttempts = 5;
-                        for (int attempt = 1; attempt <= maxAttempts; attempt++)
-                        {
-                            try
-                            {
-                                if (File.Exists(destPath) && await FileSystemSafety.FilesHaveSameContentAsync(entry, destPath, stoppingToken))
-                                {
-                                    logger.LogInformation(
-                                        "Skipping copy for move job {JobId}; destination already has identical content: {Dest}",
-                                        job.Id,
-                                        LogRedaction.SanitizeFilePath(destPath));
-                                    succeeded = true;
-                                    break;
-                                }
-
-                                File.Copy(entry, destPath, false);
-
-                                // Preserve file attributes and timestamps
-                                try
-                                {
-                                    var attrs = File.GetAttributes(entry);
-                                    File.SetAttributes(destPath, attrs);
-
-                                    var lastWrite = File.GetLastWriteTimeUtc(entry);
-                                    var creation = File.GetCreationTimeUtc(entry);
-                                    File.SetLastWriteTimeUtc(destPath, lastWrite);
-                                    File.SetCreationTimeUtc(destPath, creation);
-                                }
-                                catch (Exception attrEx) when (attrEx is not OperationCanceledException && attrEx is not OutOfMemoryException && attrEx is not StackOverflowException)
-                                {
-                                    logger.LogDebug(attrEx, "Non-fatal: failed to preserve attributes for {File}", LogRedaction.SanitizeFilePath(entry));
-                                }
-
-                                succeeded = true;
-                                break;
-                            }
-                            catch (IOException ioex)
-                            {
-                                logger.LogWarning(ioex, "IO error copying file {File} attempt {Attempt}", LogRedaction.SanitizeFilePath(entry), attempt);
-
-                                // exponential backoff
-                                var delay = TimeSpan.FromSeconds(Math.Min(8, Math.Pow(2, attempt - 1)));
-                                await Task.Delay(delay, stoppingToken);
-                            }
-                        }
-
-                        if (!succeeded)
-                        {
-                            // Increment attempt count for the DB job to surface retries
-                            try
-                            {
-                                var dbJob = await moveJobRepository.GetByIdAsync(job.Id, stoppingToken);
-                                if (dbJob != null)
-                                {
-                                    dbJob.AttemptCount += 1;
-                                    await moveJobRepository.UpdateAsync(dbJob, stoppingToken);
-                                }
-                            }
-                            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                            {
-                                logger.LogWarning(ex, "Failed to increment AttemptCount for job {JobId}", job.Id);
-                            }
-
-                            throw new Exception($"Failed to copy file after {maxAttempts} attempts: {entry}");
-                        }
-                    }
-
-                    // After successful copy, finalize the move
-                    if (useTemp)
-                    {
-                        // Move temp to final target (atomic on same volume)
-                        Directory.Move(tempName, target);
-                    }
-                    // If we copied directly to target, it's already in place
-
-                    // Delete source directory
-                    if (!Directory.Exists(source) || IsFilesystemRoot(source))
-                    {
-                        throw new IOException("Source path became invalid before cleanup.");
-                    }
-
-                    Directory.Delete(source, true);
-
-                    await MovedAudiobookPathRewriter.RewriteAsync(
-                        audiobook,
-                        source,
-                        target,
-                        audiobookRepository,
-                        logger);
-
-                    // Add history entry and send notifications for the move
-                    try
-                    {
-                        var notificationSent = false;
-                        var historyEntry = new History
-                        {
-                            AudiobookId = audiobook.Id,
-                            AudiobookTitle = audiobook.Title,
-                            EventType = "Moved",
-                            Message = $"Moved audiobook files from {source} to {target}",
-                            Source = "Move",
-                            Timestamp = DateTime.UtcNow,
-                            NotificationSent = false,
-                            Data = System.Text.Json.JsonSerializer.Serialize(new
-                            {
-                                JobId = job.Id,
-                                Source = source,
-                                Target = target
-                            })
-                        };
-
-                        var historyRepository = scope.ServiceProvider.GetRequiredService<IHistoryRepository>();
-
-                        // Send webhook notifications if configured
-                        try
-                        {
-                            var configurationService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
-                            var notificationService = scope.ServiceProvider.GetRequiredService<INotificationService>();
-                            var webhooks = await configurationService.GetWebhookConfigurationsAsync();
-                            foreach (var webhook in webhooks.Where(w => w.IsEnabled && w.Triggers.Contains("Moved")))
-                            {
-
-                                await notificationService.SendNotificationAsync(
-                                    "Moved",
-                                    new
-                                    {
-                                        AudiobookTitle = audiobook.Title,
-                                        Source = source,
-                                        Target = target,
-                                        Timestamp = DateTime.UtcNow
-                                    },
-                                    webhook.Url,
-                                    webhook.Triggers
-                                );
-                            }
-
-                            notificationSent = true;
-                        }
-                        catch (Exception notifyEx) when (notifyEx is not OperationCanceledException && notifyEx is not OutOfMemoryException && notifyEx is not StackOverflowException)
-                        {
-                            logger.LogWarning(notifyEx, "Failed to send move notification for {JobId}", job.Id);
-                        }
-
-                        historyEntry.NotificationSent = notificationSent;
-                        await historyRepository.AddAsync(historyEntry);
-                        logger.LogInformation("Added history entry for move job {JobId}", job.Id);
-
-                        // Send toast notification
-                        try
-                        {
-                            var message = !string.IsNullOrEmpty(audiobook.Title)
-                                ? $"Moved {audiobook.Title} to {target}"
-                                : $"Moved audiobook to {target}";
-
-                            await toastService.PublishToastAsync(
-                                "success",
-                                "Move Complete",
-                                message,
-                                timeoutMs: 5000);
-
-                            logger.LogDebug("Sent toast notification for move job {JobId}", job.Id);
-                        }
-                        catch (Exception toastEx) when (toastEx is not OperationCanceledException && toastEx is not OutOfMemoryException && toastEx is not StackOverflowException)
-                        {
-                            logger.LogDebug(toastEx, "Failed to send toast notification for move job {JobId}", job.Id);
-                        }
-
-                        // Enqueue a scan job and broadcast an immediate AudiobookUpdate so detail views update promptly
-                        try
-                        {
-                            var scanJobId = await scanQueueService.EnqueueScanAsync(audiobook, null);
-                            logger.LogInformation("Enqueued scan job {ScanJobId} for audiobook {AudiobookId} after move", scanJobId, audiobook.Id);
-
-                            // Load latest audiobook state and broadcast a full DTO so clients can update instantly without fetching
-                            try
-                            {
-                                var fresh = await audiobookRepository.GetByIdAsync(audiobook.Id);
-                                if (fresh != null)
-                                {
-                                    var audiobookDtoFull = AudiobookDtoFactory.BuildFromEntity(fresh);
-                                    await hubContext.Clients.All.SendAsync("AudiobookUpdate", audiobookDtoFull);
-                                    logger.LogInformation("Broadcasted full AudiobookUpdate for AudiobookId {AudiobookId} after move job {JobId}", audiobook.Id, job.Id);
-                                }
-                            }
-                            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                            {
-                                logger.LogWarning(ex, "Failed to broadcast full AudiobookUpdate for AudiobookId {AudiobookId} after move job {JobId}", audiobook.Id, job.Id);
-                            }
-                        }
-                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                        {
-                            logger.LogWarning(ex, "Failed to enqueue scan or broadcast AudiobookUpdate after move job {JobId}", job.Id);
-                        }
-                    }
-                    catch (Exception historyEx) when (historyEx is not OperationCanceledException && historyEx is not OutOfMemoryException && historyEx is not StackOverflowException)
-                    {
-                        logger.LogWarning(historyEx, "Failed to add history entry or send notifications for move job {JobId}", job.Id);
-                    }
-
-                    await moveQueueService.UpdateJobStatusAsync(job.Id, "Completed", cancellationToken: stoppingToken);
-                    metrics.Increment("worker.move.job.completed");
-                    logger.LogInformation("Move job {JobId} completed: {Source} -> {Target}", job.Id, LogRedaction.SanitizeFilePath(source), LogRedaction.SanitizeFilePath(target));
-                    // Completed move job — status updated and broadcasted where configured
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    // Cleanup any temp dir
-                    try
-                    {
-                        if (Directory.Exists(tempName)
-                            && FileSystemSafety.TryValidateMutationTarget(tempName, [targetParent], out var safeTempName, out _))
-                        {
-                            Directory.Delete(safeTempName, true);
-                        }
-                    }
-                    catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException)
-                    {
-                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-                    }
-
-                    // Increment attempt count for the job on failure
-                    try
-                    {
-                        var dbJob = await moveJobRepository.GetByIdAsync(job.Id, stoppingToken);
-                        if (dbJob != null)
-                        {
-                            dbJob.AttemptCount += 1;
-                            await moveJobRepository.UpdateAsync(dbJob, stoppingToken);
-                        }
-                    }
-                    catch (Exception attEx) when (attEx is not OperationCanceledException && attEx is not OutOfMemoryException && attEx is not StackOverflowException)
-                    {
-                        logger.LogWarning(attEx, "Failed to increment AttemptCount for job {JobId} after failure", job.Id);
-                    }
-
-                    // Record failure in history and send a toast notification
-                    try
-                    {
-                        var historyEntry = new History
-                        {
-                            AudiobookId = audiobook.Id,
-                            AudiobookTitle = audiobook.Title,
-                            EventType = "MoveFailed",
-                            Message = $"Move failed: {ex.Message}",
-                            Source = "Move",
-                            Timestamp = DateTime.UtcNow,
-                            NotificationSent = false,
-                            Data = System.Text.Json.JsonSerializer.Serialize(new { JobId = job.Id, Error = ex.Message })
-                        };
-
-                        var historyRepository = scope.ServiceProvider.GetRequiredService<IHistoryRepository>();
-                        await historyRepository.AddAsync(historyEntry);
-                        logger.LogInformation("Added history entry for failed move job {JobId}", job.Id);
-
-                        try
-                        {
-                            var message = !string.IsNullOrEmpty(audiobook.Title)
-                                ? $"Failed to move {audiobook.Title}: {ex.Message}"
-                                : $"Move failed: {ex.Message}";
-
-                            await toastService.PublishToastAsync("error", "Move Failed", message, timeoutMs: 15000);
-                            logger.LogDebug("Sent toast notification for failed move job {JobId}", job.Id);
-                        }
-                        catch (Exception toastEx) when (toastEx is not OperationCanceledException && toastEx is not OutOfMemoryException && toastEx is not StackOverflowException)
-                        {
-                            logger.LogDebug(toastEx, "Failed to send toast notification for failed move job {JobId}", job.Id);
-                        }
-                    }
-                    catch (Exception historyEx) when (historyEx is not OperationCanceledException && historyEx is not OutOfMemoryException && historyEx is not StackOverflowException)
-                    {
-                        logger.LogWarning(historyEx, "Failed to add history entry for failed move job {JobId}", job.Id);
-                    }
-
-                    await moveQueueService.UpdateJobStatusAsync(job.Id, "Failed", ex.Message, stoppingToken);
-                    metrics.Increment("worker.move.job.failed");
-                    logger.LogError(ex, "Move job {JobId} failed", job.Id);
-                    // Failure during move job — attempt counts updated and history recorded where configured
-                }
+                await moveQueueService.NotifyPersistedJobStateAsync(
+                    job.Id,
+                    job.Status,
+                    job.Error,
+                    stoppingToken);
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            catch (OperationCanceledException exception)
             {
-                throw;
-            }
-            catch (OperationCanceledException ex)
-            {
-                logger.LogWarning(ex, "Move job {JobId} canceled/timed out", job.Id);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                logger.LogError(ex, "Unexpected error processing move job {JobId}", job.Id);
-                try { await moveQueueService.UpdateJobStatusAsync(job.Id, "Failed", ex.Message, stoppingToken); }
-                catch (Exception caughtEx_2) when (caughtEx_2 is not OperationCanceledException && caughtEx_2 is not OutOfMemoryException && caughtEx_2 is not StackOverflowException)
-                {
-                    System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
-                }
-                metrics.Increment("worker.move.job.failed");
+                logger.LogDebug(
+                    exception,
+                    "Move job {JobId} state was already persisted before terminal notification cancellation",
+                    job.Id);
             }
         }
 
-        private static bool IsFilesystemRoot(string path)
-        {
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return false;
-            }
-
-            var fullPath = Path.GetFullPath(path)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            var root = Path.GetPathRoot(fullPath)?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            return !string.IsNullOrWhiteSpace(root)
-                && string.Equals(fullPath, root, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
-        }
+        return postCommit;
     }
 }

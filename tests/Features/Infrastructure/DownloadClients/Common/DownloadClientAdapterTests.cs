@@ -121,6 +121,33 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Common
                 },
                 resolved.SourceFiles);
         }
+        [Fact]
+        [Trait("Third-Party", "Transmission")]
+        [Trait("Method", "GetImportItemAsync")]
+        public async Task Transmission_LegacyGetImportItemAsync_PreservesWhitespaceBearingFolderPaths()
+        {
+            var item = new QueueItem
+            {
+                Id = TransmissionApiMock.WHITESPACE_FOLDER_TORRENT.ToString(),
+                ContentPath = string.Empty
+            };
+
+            var download = new DownloadBuilder().Build();
+            await _downloadRepository.AddAsync(download);
+
+            var adapter = MockUtils.CreateTransmissionAdapter(_provider);
+            var resolved = await adapter.GetImportItemAsync(_transmissionClient, download, item);
+
+            Assert.Equal(FileUtils.GetAbsolutePath("downloads", " Book Folder "), resolved.ContentPath);
+            Assert.Equal(
+                new[]
+                {
+                    FileUtils.GetAbsolutePath("downloads", " Book Folder ", "chapter1.m4b"),
+                    FileUtils.GetAbsolutePath("downloads", " Book Folder ", "book.txt")
+                },
+                resolved.SourceFiles);
+        }
+
         [Theory]
         [Trait("Third-Party", "Sabnzbd")]
         [Trait("Method", "GetImportItemAsync")]

@@ -16,6 +16,7 @@ namespace Listenarr.Infrastructure.SystemDiagnostics.Diagnostics;
 
 public sealed class SystemReadinessService(
     IDbContextFactory<ListenArrDbContext> dbFactory,
+    ILibraryFilesystemReadiness filesystemReadiness,
     ILogger<SystemReadinessService> logger) : ISystemReadinessService
 {
     public async Task<SystemReadiness> CheckAsync(CancellationToken cancellationToken = default)
@@ -25,14 +26,19 @@ public sealed class SystemReadinessService(
             await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
             if (!await db.Database.CanConnectAsync(cancellationToken))
             {
-                return new SystemReadiness(false, "not_ready", false, false, "database_unavailable");
+                return CreateReadiness(
+                    false,
+                    "not_ready",
+                    false,
+                    false,
+                    "database_unavailable");
             }
 
             var pendingMigrations = await db.Database.GetPendingMigrationsAsync(cancellationToken);
             var migrationsCurrent = !pendingMigrations.Any();
             return migrationsCurrent
-                ? new SystemReadiness(true, "ready", true, true)
-                : new SystemReadiness(false, "not_ready", true, false, "pending_migrations");
+                ? CreateReadiness(true, "ready", true, true)
+                : CreateReadiness(false, "not_ready", true, false, "pending_migrations");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -42,7 +48,28 @@ public sealed class SystemReadinessService(
             exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
         {
             logger.LogError(exception, "Readiness database check failed");
-            return new SystemReadiness(false, "not_ready", false, false, "database_check_failed");
+            return CreateReadiness(false, "not_ready", false, false, "database_check_failed");
         }
+    }
+
+    private SystemReadiness CreateReadiness(
+        bool isReady,
+        string status,
+        bool databaseConnected,
+        bool migrationsCurrent,
+        string? errorCode = null)
+    {
+        var filesystem = filesystemReadiness.Current;
+        return new SystemReadiness(
+            isReady,
+            status,
+            databaseConnected,
+            migrationsCurrent,
+            errorCode,
+            filesystem.IsReady,
+            filesystem.Status.ToString(),
+            filesystem.Phase,
+            filesystem.ErrorCode,
+            filesystem.ErrorMessage);
     }
 }

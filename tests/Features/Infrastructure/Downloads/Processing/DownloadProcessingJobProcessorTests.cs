@@ -15,6 +15,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Processing
         {
             _services.AddSingleton<IDownloadClientGateway>(downloadClientGatewayMock);
             Init();
+            await AddAuthorizedRootAsync(FileService.GetTempPath());
         }
 
         [Fact]

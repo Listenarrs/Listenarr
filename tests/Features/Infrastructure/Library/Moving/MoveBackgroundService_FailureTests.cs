@@ -22,7 +22,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
     public class MoveBackgroundService_FailureTests : BaseTests
     {
         [Fact(Timeout = 20000)]
-        public async Task MoveBackgroundService_Fails_WhenFileLocked_IncrementsAttemptCount()
+        public async Task MoveBackgroundService_TargetOccupiedByFile_RequiresAttentionWithoutRetry()
         {
             var moveQueue = _provider.GetRequiredService<IMoveQueueService>();
             var bg = _provider.GetRequiredService<MoveBackgroundService>();
@@ -39,27 +39,34 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
             // Start background service
             await bg.StartAsync(CancellationToken.None);
 
-            var jobId = await moveQueue.EnqueueMoveAsync(ab.Id, dst, src);
+            var jobId = await moveQueue.EnqueueMoveAsync(
+                await MoveJobTestFactory.CreateCommandAsync(
+                    _provider,
+                    ab.Id,
+                    src,
+                    dst));
 
-            // Wait for job to fail
-            var failed = false;
+            // Wait for the deterministic target conflict to require operator attention.
+            MoveJob? persisted = null;
             for (int i = 0; i < 60; i++)
             {
-                var job = await moveQueue.GetJobAsync(jobId);
-                if (job != null && string.Equals(job.Status, "Failed", StringComparison.OrdinalIgnoreCase))
+                persisted = await moveQueue.GetJobAsync(jobId);
+                if (persisted?.Status == MoveJobStatus.NeedsAttention)
                 {
-                    failed = true; break;
+                    break;
                 }
+
                 await Task.Delay(200, CancellationToken.None);
             }
 
             await bg.StopAsync(CancellationToken.None);
 
-            Assert.True(failed, "Move job did not fail as expected when file was locked");
-
-            // Check attempt count incremented in DB
-            var dbJob = await _moveJobRepository.GetByIdAsync(jobId);
-            Assert.True(dbJob.AttemptCount > 0, "AttemptCount was not incremented on failure");
+            var persistedJob = Assert.IsType<MoveJob>(persisted);
+            Assert.Equal(MoveJobStatus.NeedsAttention, persistedJob.Status);
+            Assert.Equal(0, persistedJob.AttemptCount);
+            Assert.Null(persistedJob.NextAttemptAt);
+            Assert.Null(persistedJob.LeaseOwner);
+            Assert.Null(persistedJob.LeaseExpiresAt);
         }
     }
 }

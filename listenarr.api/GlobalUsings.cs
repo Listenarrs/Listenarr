@@ -12,6 +12,7 @@ global using Listenarr.Application.Audiobooks.Files;
 global using Listenarr.Application.Audiobooks.Identifiers;
 global using Listenarr.Application.Audiobooks.Jobs;
 global using Listenarr.Application.Audiobooks.Matching;
+global using Listenarr.Application.Audiobooks.Moving;
 global using Listenarr.Application.Audiobooks.Renaming;
 global using Listenarr.Application.ActivityHistory.Contracts.Repositories;
 global using Listenarr.Application.Audiobooks.Contracts;

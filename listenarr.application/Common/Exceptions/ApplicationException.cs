@@ -56,6 +56,14 @@ public sealed class ApplicationForbiddenException : ListenarrApplicationExceptio
     }
 }
 
+public sealed class ApplicationUnavailableException : ListenarrApplicationException
+{
+    public ApplicationUnavailableException(string code, string safeDetail, Exception? innerException = null)
+        : base(code, safeDetail, innerException)
+    {
+    }
+}
+
 public sealed class ExternalServiceException : ListenarrApplicationException
 {
     public ExternalServiceException(string code, string safeDetail, Exception? innerException = null)

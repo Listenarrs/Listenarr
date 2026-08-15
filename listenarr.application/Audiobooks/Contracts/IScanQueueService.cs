@@ -15,17 +15,52 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using Listenarr.Domain.Common;
 
 namespace Listenarr.Application.Audiobooks.Contracts
 {
+    public enum ScanAuthorizationMode
+    {
+        ResolveCurrentAudiobookPath,
+        PreauthorizedPath,
+        MoveHandoff
+    }
+
+    public static class ScanJobPublicError
+    {
+        public static string? FromInternal(string? error) =>
+            string.IsNullOrWhiteSpace(error)
+                ? null
+                : "The scan failed. Review the server logs for details.";
+    }
+
+    public sealed record ScanEnqueueCommand(
+        Audiobook Audiobook,
+        string? Path = null,
+        PathIdentitySnapshot? PathIdentity = null,
+        ScanPathPhysicalIdentity? PhysicalIdentity = null,
+        string? CorrelationId = null,
+        string? DownloadId = null,
+        bool IsAuthoritativeScope = true,
+        ScanAuthorizationMode AuthorizationMode = ScanAuthorizationMode.ResolveCurrentAudiobookPath);
+
     public interface IScanQueueService
     {
+        Task<Guid> EnqueueScanAsync(ScanEnqueueCommand command);
         Task<Guid> EnqueueScanAsync(
             Audiobook audiobook,
-            string? path = null,
             string? correlationId = null,
             string? downloadId = null);
+        Task<Guid?> EnqueueMoveHandoffScanAsync(
+            Audiobook audiobook,
+            MoveScanHandoffClaim claim,
+            ScanPathPhysicalIdentity physicalIdentity);
         Task<Guid?> RequeueScanAsync(Guid jobId);
+        Task CommitTerminalJobStatusAsync(
+            Guid jobId,
+            Func<Task<(string Status, string? Error)>> persistTerminalState,
+            CancellationToken cancellationToken = default);
+        System.Threading.Channels.ChannelReader<ScanJob> Reader { get; }
         bool TryGetJob(Guid id, out ScanJob? job);
         void UpdateJobStatus(Guid id, string status, string? error = null, int? found = null, int? created = null);
     }

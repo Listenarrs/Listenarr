@@ -31,6 +31,8 @@ namespace Listenarr.Api.Features.Library
         private readonly IHistoryRepository _historyRepository;
         private readonly INotificationService? _notificationService;
         private readonly ILibraryAddService? _libraryAddService;
+        private readonly ILibraryDestinationMutationGuard _destinationMutationGuard;
+        private readonly IFilesystemMutationCoordinator _mutationCoordinator;
         private readonly ILogger<LibraryAddWorkflow> _logger;
 
         public LibraryAddWorkflow(
@@ -38,6 +40,8 @@ namespace Listenarr.Api.Features.Library
             IImageCacheService imageCacheService,
             IServiceScopeFactory scopeFactory,
             IHistoryRepository historyRepository,
+            ILibraryDestinationMutationGuard destinationMutationGuard,
+            IFilesystemMutationCoordinator mutationCoordinator,
             ILogger<LibraryAddWorkflow> logger,
             INotificationService? notificationService = null,
             ILibraryAddService? libraryAddService = null)
@@ -46,35 +50,58 @@ namespace Listenarr.Api.Features.Library
             _imageCacheService = imageCacheService;
             _scopeFactory = scopeFactory;
             _historyRepository = historyRepository;
+            _destinationMutationGuard = destinationMutationGuard
+                ?? throw new ArgumentNullException(nameof(destinationMutationGuard));
+            _mutationCoordinator = mutationCoordinator ?? throw new ArgumentNullException(nameof(mutationCoordinator));
             _logger = logger;
             _notificationService = notificationService;
             _libraryAddService = libraryAddService;
         }
 
-        public async Task<IActionResult> AddAsync(LibraryController.AddToLibraryRequest request)
+        public Task<IActionResult> AddAsync(
+            LibraryController.AddToLibraryRequest request,
+            CancellationToken cancellationToken = default) =>
+            _libraryAddService != null
+                ? AddWithServiceAsync(request, cancellationToken)
+                : _mutationCoordinator.ExecuteExclusiveAsync(
+                    _ => AddCoreAsync(request),
+                    cancellationToken);
+
+        private async Task<IActionResult> AddWithServiceAsync(
+            LibraryController.AddToLibraryRequest request,
+            CancellationToken cancellationToken)
         {
-            if (_libraryAddService != null)
+            var result = await _libraryAddService!.AddToLibraryAsync(new LibraryAddOperationRequest
             {
-                var result = await _libraryAddService.AddToLibraryAsync(new LibraryAddOperationRequest
-                {
-                    Metadata = request.Metadata,
-                    Monitored = request.Monitored,
-                    QualityProfileId = request.QualityProfileId,
-                    AutoSearch = request.AutoSearch,
-                    DestinationPath = request.DestinationPath,
-                    SearchResult = request.SearchResult,
-                    HistorySource = "AddNew",
-                    HistoryMessage = $"Audiobook '{request.Metadata.Title}' added to library from Add New page"
-                });
+                Metadata = request.Metadata,
+                Monitored = request.Monitored,
+                QualityProfileId = request.QualityProfileId,
+                AutoSearch = request.AutoSearch,
+                DestinationPath = request.DestinationPath,
+                SearchResult = request.SearchResult,
+                HistorySource = "AddNew",
+                HistoryMessage = $"Audiobook '{request.Metadata.Title}' added to library from Add New page"
+            }, cancellationToken);
 
-                if (result.AlreadyExists)
-                {
-                    return new ConflictObjectResult(new { message = result.Message, audiobook = result.Audiobook });
-                }
-
-                return new OkObjectResult(new { message = result.Message, audiobook = result.Audiobook });
+            if (result.ValidationFailed)
+            {
+                return DestinationValidationResult(
+                    result.ValidationCode ?? "destination_path_invalid",
+                    result.ValidationMessage ?? result.Message,
+                    result.ResolvedDestination,
+                    result.ValidationField ?? "destinationPath");
             }
 
+            if (result.AlreadyExists)
+            {
+                return new ConflictObjectResult(new { message = result.Message, audiobook = result.Audiobook });
+            }
+
+            return new OkObjectResult(new { message = result.Message, audiobook = result.Audiobook });
+        }
+
+        private async Task<IActionResult> AddCoreAsync(LibraryController.AddToLibraryRequest request)
+        {
             var metadata = request.Metadata;
 
             _logger.LogInformation("AddToLibrary received metadata: Title={Title}, Asin={Asin}, PublishYear={PublishYear}, Authors={Authors}, Series={Series}",
@@ -103,20 +130,9 @@ namespace Listenarr.Api.Features.Library
                 }
             }
 
-            string? imageUrl;
-            try
-            {
-                imageUrl = await ResolveLibraryImageUrlAsync(request, firstIsbn);
-            }
-            catch (LibraryAddConflictException ex)
-            {
-                return new ConflictObjectResult(new { message = "Audiobook already exists in library", audiobook = ex.Audiobook });
-            }
-
             var audiobook = metadata.ToAudiobook();
 
             audiobook.Monitored = request.Monitored;
-            audiobook.ImageUrl = imageUrl;
 
             AudiobookSeriesMembershipHelper.ApplyToAudiobook(
                 audiobook,
@@ -133,9 +149,78 @@ namespace Listenarr.Api.Features.Library
 
             if (!string.IsNullOrWhiteSpace(request.DestinationPath))
             {
-                audiobook.BasePath = FileUtils.NormalizeStoredPath(request.DestinationPath);
-                _logger.LogInformation("Using custom destination path for audiobook '{Title}': {BasePath}",
+                // Preserve valid Unix path-segment whitespace, but reject values that only become
+                // absolute after trimming accidental leading whitespace.
+                if (FileUtils.HasLeadingWhitespaceBeforeRootedPath(request.DestinationPath))
+                {
+                    return DestinationValidationResult(
+                        "destination_path_invalid",
+                        "DestinationPath is invalid: leading whitespace before an absolute path is not allowed.",
+                        request.DestinationPath);
+                }
+
+                if (!FileUtils.TryNormalizeUserProvidedDirectoryPathForCurrentOs(
+                    request.DestinationPath,
+                    out var normalizedDestinationPath,
+                    out var validationReason,
+                    rejectParentTraversal: true))
+                {
+                    return DestinationValidationResult(
+                        "destination_path_invalid",
+                        $"DestinationPath is invalid: {validationReason}",
+                        request.DestinationPath);
+                }
+
+                using var destinationScope = _scopeFactory.CreateScope();
+                var configurationService = destinationScope.ServiceProvider
+                    .GetRequiredService<IConfigurationService>();
+                var rootFolderService = destinationScope.ServiceProvider
+                    .GetRequiredService<IRootFolderService>();
+                var fileSystem = destinationScope.ServiceProvider.GetRequiredService<IFileSystem>();
+                var settings = await configurationService.GetApplicationSettingsAsync();
+                var rootFolders = await rootFolderService.GetAllAsync();
+                var allowedDestinationRoots = FileUtils.GetValidMutationRootsForCurrentOs(
+                    rootFolders
+                        .Select(root => root.Path)
+                        .Append(settings.OutputPath));
+                if (allowedDestinationRoots.Count == 0
+                    || !fileSystem.TryValidateMutationTarget(
+                        normalizedDestinationPath,
+                        allowedDestinationRoots,
+                        out normalizedDestinationPath,
+                        out _))
+                {
+                    return DestinationValidationResult(
+                        "destination_path_outside_roots",
+                        "DestinationPath must be inside a configured root folder or output path",
+                        normalizedDestinationPath);
+                }
+
+                audiobook.BasePath = normalizedDestinationPath;
+                _logger.LogInformation("Using requested destination path for audiobook '{Title}': {BasePath}",
                     audiobook.Title, audiobook.BasePath);
+            }
+
+            if (!string.IsNullOrWhiteSpace(audiobook.BasePath))
+            {
+                var destinationBlockingReason = await _destinationMutationGuard.GetBlockingReasonAsync(
+                    audiobook.BasePath);
+                if (destinationBlockingReason != null)
+                {
+                    return DestinationValidationResult(
+                        "destination_path_blocked",
+                        destinationBlockingReason,
+                        audiobook.BasePath);
+                }
+            }
+
+            try
+            {
+                audiobook.ImageUrl = await ResolveLibraryImageUrlAsync(request, firstIsbn);
+            }
+            catch (LibraryAddConflictException ex)
+            {
+                return new ConflictObjectResult(new { message = "Audiobook already exists in library", audiobook = ex.Audiobook });
             }
 
             await _repo.AddAsync(audiobook);
@@ -148,6 +233,19 @@ namespace Listenarr.Api.Features.Library
 
             return new OkObjectResult(new { message = "Audiobook added to library successfully", audiobook });
         }
+
+        private static BadRequestObjectResult DestinationValidationResult(
+            string code,
+            string message,
+            string? resolvedDestination = null,
+            string field = "destinationPath") =>
+            new(new
+            {
+                code,
+                field,
+                message,
+                resolvedDestination
+            });
 
         private void TryExtractPublishYear(LibraryController.AddToLibraryRequest request)
         {

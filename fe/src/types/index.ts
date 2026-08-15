@@ -288,9 +288,91 @@ export interface RootFolder {
   id: number
   name: string
   path: string
+  pathSyntax?: 'Windows' | 'Unix' | null
   isDefault: boolean
-  createdAt: string
-  updatedAt?: string
+  createdAt?: string
+  updatedAt?: string | null
+  caseSensitivityMode?: 'Auto' | 'Sensitive' | 'Insensitive'
+  resolvedCaseSensitivity?: 'Unknown' | 'Sensitive' | 'Insensitive'
+  pathIdentityState?: 'Valid' | 'Conflict' | 'Unavailable'
+  storageState?:
+    | 'Healthy'
+    | 'Missing'
+    | 'Changed'
+    | 'Unavailable'
+    | 'Unconfirmed'
+    | 'Initializing'
+    | 'InitializationFailed'
+  storageReason?:
+    | 'None'
+    | 'PathMissing'
+    | 'ForeignPathSyntax'
+    | 'AccessDenied'
+    | 'IdentityUnsupported'
+    | 'IdentityMismatch'
+    | 'IdentityUnstable'
+    | 'FilesystemSemanticsUnavailable'
+    | 'FilesystemSemanticsChanged'
+    | 'NoAuthorizedIdentity'
+    | 'InvalidPath'
+    | 'Initializing'
+    | 'InitializationFailed'
+    | 'Unknown'
+  storageMessage?: string | null
+  canConfirmCurrentFolder?: boolean
+  canChangePath?: boolean
+  canMutateFilesystem?: boolean
+  confirmationToken?: string | null
+  activeRelocation?: RootFolderPathChangeResult | null
+}
+
+export type RootFolderRelocationSkipReasonCode =
+  | 'Unknown'
+  | 'InvalidStoredPath'
+  | 'SourceSemanticsUnavailable'
+  | 'TargetPathInvalid'
+  | 'TargetIdentityCollision'
+  | 'TargetIdentityUnresolvedConflict'
+
+export interface RootFolderRelocationSkippedItem {
+  audiobookId: number
+  reasonCode: RootFolderRelocationSkipReasonCode
+}
+
+export interface RootFolderMetadataRepairCollisionFile {
+  audiobookFileId: number
+  audiobookId: number
+  relativePath: string
+  canRemove: boolean
+}
+
+export interface RootFolderMetadataRepairCollisionGroup {
+  targetRelativePath: string
+  files: RootFolderMetadataRepairCollisionFile[]
+}
+
+export interface RootFolderMetadataRepairDetails {
+  relocationId: string
+  audiobookId: number
+  audiobookTitle: string
+  reasonCode: RootFolderRelocationSkipReasonCode
+  collisionGroups: RootFolderMetadataRepairCollisionGroup[]
+}
+
+export interface RootFolderPathChangeResult {
+  relocationId?: string | null
+  rootFolderId: number | null
+  currentPath: string
+  targetPath: string
+  status: 'Pending' | 'Running' | 'NeedsAttention' | 'Completed' | 'Failed'
+  totalJobs: number
+  completedJobs: number
+  error?: string | null
+  targetIdentityEnrollmentState: 'NotRequired' | 'Authorized' | 'Unavailable'
+  skippedAudiobookIds?: number[] | null
+  mode?: 'Relocate' | 'MetadataOnly'
+  skippedItems?: RootFolderRelocationSkippedItem[] | null
+  canAbandon?: boolean
 }
 
 export interface TranslatePathRequest {
@@ -306,6 +388,7 @@ export interface TranslatePathResponse {
 }
 
 export interface ApplicationSettings {
+  version: number
   outputPath: string
   folderNamingPattern: string
   fileNamingPattern: string
@@ -668,6 +751,38 @@ export interface Audiobook {
   status?: AudiobookStatus
 }
 
+export interface AudiobookUpdateRequest {
+  title?: string
+  subtitle?: string
+  authors?: string[]
+  imageUrl?: string
+  publishYear?: string
+  publishedDate?: string
+  series?: string
+  seriesNumber?: string
+  seriesMemberships?: AudiobookSeriesMembership[]
+  description?: string
+  genres?: string[]
+  tags?: string[]
+  narrators?: string[]
+  isbn?: string[]
+  asin?: string
+  openLibraryId?: string
+  publisher?: string
+  language?: string
+  runtime?: number
+  edition?: string
+  version?: string
+  explicit?: boolean
+  abridged?: boolean
+  monitored?: boolean
+  filePath?: string
+  fileSize?: number
+  basePath?: string
+  quality?: string
+  qualityProfileId?: number
+}
+
 export interface History {
   id: number
   audiobookId?: number
@@ -705,6 +820,19 @@ export interface Indexer {
   lastTestedAt?: string
   lastTestSuccessful?: boolean
   lastTestError?: string
+}
+
+export interface SystemReadiness {
+  isReady: boolean
+  status: string
+  databaseConnected: boolean
+  migrationsCurrent: boolean
+  errorCode?: string | null
+  filesystemReady: boolean
+  filesystemStatus: 'Pending' | 'Running' | 'Ready' | 'Failed'
+  filesystemPhase?: string | null
+  filesystemErrorCode?: string | null
+  filesystemErrorMessage?: string | null
 }
 
 export interface SystemInfo {
@@ -942,11 +1070,12 @@ export interface ManualImportRequest {
 
 export interface ManualImportResult {
   success: boolean
-  filePath?: string
+  sourcePath?: string
   destinationPath?: string
-  audiobookId?: number
-  audiobookTitle?: string
+  audiobook?: Audiobook
   error?: string
+  skipped?: boolean
+  skipReason?: string
 }
 
 // Audible API Types
@@ -1069,10 +1198,18 @@ export interface FileRenamePreview {
   changed: boolean
 }
 
+export interface RenamePathSemanticsSnapshot {
+  syntax: 'Windows' | 'Unix'
+  caseSensitivity: 'Unknown' | 'Sensitive' | 'Insensitive'
+  requestedMode: 'Auto' | 'Sensitive' | 'Insensitive'
+  boundaryPath: string
+}
+
 export interface RenamePreview {
   audiobookId: number
   audiobookTitle?: string
   currentFolderPath?: string
+  currentFolderSemantics?: RenamePathSemanticsSnapshot
   newFolderPath?: string
   folderChanged: boolean
   fileRenames: FileRenamePreview[]
@@ -1087,6 +1224,8 @@ export interface FileRenameOperation {
 
 export interface RenameOperation {
   audiobookId: number
+  currentFolderPath?: string
+  currentFolderSemantics?: RenamePathSemanticsSnapshot
   newFolderPath?: string
   fileRenames: FileRenameOperation[]
 }
@@ -1100,12 +1239,14 @@ export interface FileRenameResultItem {
   previousPath?: string
   newPath?: string
   success: boolean
+  rolledBack: boolean
   error?: string
 }
 
 export interface RenameResult {
   audiobookId: number
   success: boolean
+  conflict: boolean
   error?: string
   renamedFiles: FileRenameResultItem[]
 }

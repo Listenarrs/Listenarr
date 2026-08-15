@@ -105,5 +105,61 @@ namespace Listenarr.Tests.Common
                 .WithBasePath(FileService.GetTempPath())
                 .Build());
         }
+
+        protected async Task<RootFolder> AddAuthorizedRootAsync(
+            string path,
+            string name = "Test Library Root",
+            FileSystemCaseSensitivityMode caseSensitivityMode =
+                FileSystemCaseSensitivityMode.Auto)
+        {
+            Directory.CreateDirectory(path);
+            var semanticsResolution = await _provider
+                .GetRequiredService<IFileSystemSemanticsResolver>()
+                .ResolveAsync(path, caseSensitivityMode);
+            Assert.Equal(PathIdentityState.Valid, semanticsResolution.State);
+            var identity = await _provider
+                .GetRequiredService<IDirectoryObjectIdentityResolver>()
+                .ResolveAsync(path);
+            Assert.True(
+                identity.IsAvailable,
+                identity.UnavailableReason
+                    ?? "The test library root has no physical directory identity.");
+
+            var semantics = semanticsResolution.Semantics;
+            var canonicalPath = FileSystemPathIdentity.Canonicalize(
+                path,
+                semantics.Syntax);
+            var root = (await _rootFolderRepository.GetAllAsync())
+                .SingleOrDefault(candidate => FileSystemPathIdentity.AreEquivalent(
+                    candidate.Path,
+                    canonicalPath,
+                    semantics));
+            var isNew = root == null;
+            root ??= new RootFolderBuilder()
+                .WithName(name)
+                .WithPath(canonicalPath)
+                .WithCaseSensitivityMode(caseSensitivityMode)
+                .Build();
+            root.CaseSensitivityMode = caseSensitivityMode;
+            root.ResolvedCaseSensitivity = semantics.CaseSensitivity;
+            root.PathIdentityState = PathIdentityState.Valid;
+            root.PathIdentityKey = FileSystemPathIdentity.CreateKey(
+                "root",
+                canonicalPath,
+                semantics);
+            root.DirectoryObjectIdentityVersion = identity.Version;
+            root.DirectoryObjectIdentity = identity.Value;
+            root.DirectoryObjectIdentityUnavailableReason = identity.UnavailableReason;
+            if (isNew)
+            {
+                await _rootFolderRepository.AddAsync(root);
+            }
+            else
+            {
+                await _rootFolderRepository.UpdateAsync(root);
+            }
+
+            return root;
+        }
     }
 }

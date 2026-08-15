@@ -16,17 +16,56 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Application.Common;
+using Listenarr.Application.Common.Exceptions;
 using Listenarr.Domain.Common;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Features.Library
 {
-    public sealed class LibraryMoveWorkflow
+    internal sealed record MoveEnqueuedResponse(
+        string Message,
+        Guid JobId,
+        string Target);
+
+    internal sealed record MoveJobStatusResponse(
+        Guid Id,
+        int AudiobookId,
+        MoveJobStatus Status,
+        MoveJobPhase Phase,
+        double Progress,
+        string? RequestedPath,
+        string? Error,
+        int AttemptCount,
+        DateTime EnqueuedAt,
+        DateTime? UpdatedAt,
+        DateTime? NextAttemptAt,
+        string RecoveryDisposition,
+        bool CanRetry);
+
+    internal sealed record MoveRecoveryStateResponse(
+        bool HasUnresolvedMove,
+        string Disposition,
+        Guid? JobId,
+        MoveJobStatus? Status,
+        MoveJobPhase? Phase,
+        string? RequestedPath,
+        string? Error,
+        bool CanRetry,
+        IReadOnlyList<Guid> BlockingJobIds);
+
+    public sealed partial class LibraryMoveWorkflow
     {
         private readonly IAudiobookRepository _repo;
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IMoveQueueService? _moveQueueService;
         private readonly IFileSystem _fileSystem;
+        private readonly IFileSystemSemanticsResolver _semanticsResolver;
+        private readonly IMoveCleanupBoundaryResolver _cleanupBoundaryResolver;
+        private readonly IAudiobookDestinationRewriteService _destinationRewriteService;
+        private readonly IFilesystemMutationCoordinator _mutationCoordinator;
+        private readonly IAudiobookOperationCoordinator _audiobookOperationCoordinator;
+        private readonly ILibraryFilesystemMutationGate _filesystemMutationGate;
         private readonly ILogger<LibraryMoveWorkflow> _logger;
 
         public LibraryMoveWorkflow(
@@ -34,20 +73,34 @@ namespace Listenarr.Api.Features.Library
             IServiceScopeFactory scopeFactory,
             IFileSystem fileSystem,
             ILogger<LibraryMoveWorkflow> logger,
+            IFileSystemSemanticsResolver semanticsResolver,
+            IMoveCleanupBoundaryResolver cleanupBoundaryResolver,
+            IAudiobookDestinationRewriteService destinationRewriteService,
+            IFilesystemMutationCoordinator mutationCoordinator,
+            IAudiobookOperationCoordinator audiobookOperationCoordinator,
+            ILibraryFilesystemMutationGate filesystemMutationGate,
             IMoveQueueService? moveQueueService = null)
         {
             _repo = repo;
             _scopeFactory = scopeFactory;
             _fileSystem = fileSystem;
             _logger = logger;
+            _semanticsResolver = semanticsResolver;
+            _cleanupBoundaryResolver = cleanupBoundaryResolver;
+            _destinationRewriteService = destinationRewriteService;
+            _mutationCoordinator = mutationCoordinator ?? throw new ArgumentNullException(nameof(mutationCoordinator));
+            _audiobookOperationCoordinator = audiobookOperationCoordinator ?? throw new ArgumentNullException(nameof(audiobookOperationCoordinator));
+            _filesystemMutationGate = filesystemMutationGate
+                ?? throw new ArgumentNullException(nameof(filesystemMutationGate));
             _moveQueueService = moveQueueService;
         }
 
-        public async Task<IActionResult> EnqueueAsync(int id, LibraryController.MoveRequest request)
+        public async Task<IActionResult> EnqueueAsync(
+            int id,
+            LibraryController.MoveRequest request,
+            CancellationToken cancellationToken = default)
         {
             if (_moveQueueService == null) return new NotFoundObjectResult(new { message = "Move queue not available" });
-            var audiobook = await _repo.GetByIdAsync(id);
-            if (audiobook == null) return new NotFoundObjectResult(new { message = "Audiobook not found" });
             if (request == null) return new BadRequestObjectResult(new { message = "Request body is required" });
 
             if (string.IsNullOrEmpty(request.DestinationPath))
@@ -55,117 +108,79 @@ namespace Listenarr.Api.Features.Library
                 return new BadRequestObjectResult(new { message = "DestinationPath is required" });
             }
 
-            if (FileUtils.IsPathInvalidForCurrentOs(request.DestinationPath))
+            // Preserve valid Unix path-segment whitespace, but reject values that only become
+            // absolute after trimming accidental leading whitespace. Otherwise move would treat
+            // " /books/Title" as a relative child folder under the configured destination root.
+            if (FileUtils.HasLeadingWhitespaceBeforeRootedPath(request.DestinationPath))
             {
-                return new BadRequestObjectResult(new { message = "DestinationPath is not valid for this operating system" });
+                return new BadRequestObjectResult(new { message = "DestinationPath is invalid: leading whitespace before an absolute path is not allowed." });
             }
 
-            try
+            if (request.MoveFiles == false)
             {
-                using var scope = _scopeFactory.CreateScope();
-                var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
-                var settings = await configService.GetApplicationSettingsAsync();
-
-                var destinationIsRooted = Path.IsPathRooted(request.DestinationPath!);
-                var final = FileUtils.CombineWithOptionalBase(settings.OutputPath, request.DestinationPath!);
-                final = FileUtils.NormalizeStoredPath(final);
-                if (!destinationIsRooted
-                    && !string.IsNullOrWhiteSpace(settings.OutputPath)
-                    && !_fileSystem.TryValidateMutationTarget(final, [settings.OutputPath], out final, out var finalReason))
-                {
-                    _logger.LogWarning(
-                        "Blocked move destination for audiobook {AudiobookId}: {Destination}. Reason: {Reason}",
-                        id,
-                        final,
-                        finalReason);
-                    return new BadRequestObjectResult(new { message = "DestinationPath must be inside the configured output path" });
-                }
-
-                if (request.MoveFiles == false)
-                {
-                    try
-                    {
-                        audiobook.BasePath = final;
-                        await _repo.UpdateAsync(audiobook);
-                        _logger.LogInformation("Updated BasePath for audiobook {AudiobookId} without moving files: {BasePath}", id, final);
-                        return new OkObjectResult(new { message = "Destination updated" });
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        _logger.LogError(ex, "Failed to update BasePath for audiobook {AudiobookId}", id);
-                        return new ObjectResult(new { message = "Failed to update BasePath", error = ex.Message })
-                        {
-                            StatusCode = StatusCodes.Status500InternalServerError
-                        };
-                    }
-                }
-
-                var sourcePath = !string.IsNullOrEmpty(request.SourcePath)
-                    ? request.SourcePath
-                    : audiobook.BasePath;
-
-                if (string.IsNullOrEmpty(sourcePath))
-                {
-                    return new BadRequestObjectResult(new { message = "Source path not provided. Supply current source path in the Move request or ensure audiobook has a valid BasePath." });
-                }
-
-                if (FileUtils.IsPathInvalidForCurrentOs(sourcePath))
-                {
-                    return new BadRequestObjectResult(new { message = "Source path is not valid for this operating system." });
-                }
-
-                if (!_fileSystem.DirectoryExists(sourcePath))
-                {
-                    return new BadRequestObjectResult(new { message = "Source path does not exist. Ensure the audiobook's current BasePath exists or provide a valid SourcePath in the request." });
-                }
-
-                var targetParent = Path.GetDirectoryName(final);
-                if (string.IsNullOrEmpty(targetParent))
-                {
-                    return new BadRequestObjectResult(new { message = "Invalid target path" });
-                }
-
                 try
                 {
-                    if (!_fileSystem.DirectoryExists(targetParent)) _fileSystem.CreateDirectory(targetParent);
+                    await _destinationRewriteService.RewriteDestinationAsync(
+                        id,
+                        request.DestinationPath,
+                        request.SourcePath,
+                        cancellationToken);
+                    return new OkObjectResult(new { message = "Destination updated" });
+                }
+                catch (ListenarrApplicationException ex)
+                {
+                    return ToApplicationExceptionResult(ex);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                 {
-                    _logger.LogWarning(ex, "Failed to access or create target parent {TargetParent}", targetParent);
-                    return new BadRequestObjectResult(new { message = "Target parent path is not writable or unavailable" });
-                }
-
-                try
-                {
-                    var srcFull = Path.GetFullPath(sourcePath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                    var tgtFull = Path.GetFullPath(final).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                    if (string.Equals(srcFull, tgtFull, StringComparison.OrdinalIgnoreCase))
+                    _logger.LogError(ex, "Failed to update BasePath for audiobook {AudiobookId}", id);
+                    return new ObjectResult(new
                     {
-                        return new BadRequestObjectResult(new { message = "Source and target paths are identical; nothing to move." });
-                    }
+                        message = "Failed to update BasePath",
+                        code = "destination_update_failed"
+                    })
+                    {
+                        StatusCode = StatusCodes.Status500InternalServerError
+                    };
                 }
-                catch (Exception normalizeEx) when (
-                    normalizeEx is ArgumentException
-                    || normalizeEx is NotSupportedException
-                    || normalizeEx is PathTooLongException
-                    || normalizeEx is System.Security.SecurityException)
-                {
-                    _logger.LogDebug(normalizeEx, "Unable to normalize move paths for audiobook {AudiobookId}", id);
-                }
-
-                var jobId = await _moveQueueService.EnqueueMoveAsync(id, final, sourcePath);
-                await BroadcastQueuedAsync(jobId, id);
-
-                return new AcceptedResult(string.Empty, new { message = "Move enqueued", jobId });
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+
+            _filesystemMutationGate.EnsureReady();
+
+            try
             {
-                _logger.LogError(ex, "Failed to enqueue move job for audiobook {AudiobookId}", id);
-                return new ObjectResult(new { message = "Failed to enqueue move job", error = ex.Message })
+                var recovery = await _moveQueueService.GetRecoveryStateForAudiobookAsync(
+                    id,
+                    cancellationToken);
+                if (recovery.BlocksFilesystemMutation)
                 {
-                    StatusCode = StatusCodes.Status500InternalServerError
-                };
+                    return MoveRecoveryConflict(recovery);
+                }
             }
+            catch (PersistenceException ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "Move queue persistence failed while checking unresolved move state for audiobook {AudiobookId}",
+                    id);
+                return MoveQueuePersistenceUnavailableResult();
+            }
+
+            return await _mutationCoordinator.ExecuteExclusiveAsync(
+                token => EnqueuePhysicalAsync(id, request, token),
+                cancellationToken);
+        }
+
+        public async Task<IActionResult> GetActiveAsync(
+            CancellationToken cancellationToken = default)
+        {
+            if (_moveQueueService == null)
+            {
+                return new NotFoundObjectResult(new { message = "Move queue not available" });
+            }
+
+            var jobs = await _moveQueueService.GetActiveJobsAsync(cancellationToken);
+            return new OkObjectResult(jobs.Select(ToStatusResponse).ToList());
         }
 
         public async Task<IActionResult> GetStatusAsync(
@@ -177,41 +192,160 @@ namespace Listenarr.Api.Features.Library
             var job = await _moveQueueService.GetJobAsync(gid, cancellationToken);
             if (job != null)
             {
-                _logger.LogInformation("Queried move job {JobId} status: {Status}", gid, job!.Status);
-                return new OkObjectResult(job);
+                _logger.LogInformation("Queried move job {JobId} status: {Status}", gid, job.Status);
+                return new OkObjectResult(ToStatusResponse(job));
             }
 
             return new NotFoundObjectResult(new { message = "Job not found" });
         }
 
-        public async Task<IActionResult> RequeueAsync(string jobId)
+        private static ConflictObjectResult MoveRecoveryConflict(MoveRecoveryState recovery)
+        {
+            var (code, message) = recovery.Disposition switch
+            {
+                MoveRecoveryDisposition.InProgress => (
+                    "move_already_active",
+                    "A move is already in progress for this audiobook. Wait for it to finish before changing the destination again."),
+                MoveRecoveryDisposition.RetryAvailable => (
+                    "move_recovery_required",
+                    "An interrupted move still owns this audiobook's filesystem state. Resume that move before changing the destination again."),
+                MoveRecoveryDisposition.OperatorRepairRequired => (
+                    "move_repair_required",
+                    "A previous move left unresolved filesystem state that requires repair before another move can start."),
+                MoveRecoveryDisposition.Ambiguous => (
+                    "move_recovery_ambiguous",
+                    "Multiple move jobs contain unresolved filesystem state. Operator reconciliation is required before another move can start."),
+                _ => (
+                    "move_recovery_required",
+                    "An unresolved move must be completed before another move can start.")
+            };
+
+            return new ConflictObjectResult(new
+            {
+                message,
+                code,
+                jobId = recovery.JobId,
+                status = recovery.Status,
+                requestedPath = recovery.RequestedPath,
+                recoveryDisposition = recovery.Disposition.ToString(),
+                canRetry = recovery.CanRetry,
+                blockingJobIds = recovery.BlockingJobIds
+            });
+        }
+
+        private sealed class MoveRecoveryConflictException(MoveRecoveryState recovery)
+            : Exception("An unresolved move blocks a new physical move.")
+        {
+            public MoveRecoveryState Recovery { get; } = recovery;
+        }
+
+        private static ObjectResult MoveQueuePersistenceUnavailableResult() =>
+            new(new
+            {
+                message = "Move queue persistence is unavailable. Check database migrations.",
+                code = "move_queue_persistence_unavailable"
+            })
+            {
+                StatusCode = StatusCodes.Status500InternalServerError
+            };
+
+        private static MoveJobStatusResponse ToStatusResponse(MoveJob job)
+        {
+            var disposition = MoveRecoveryPolicy.GetDisposition(job);
+            return new MoveJobStatusResponse(
+                job.Id,
+                job.AudiobookId,
+                job.Status,
+                job.Phase,
+                MoveJobPublicProjection.CalculateProgress(job, job.Status),
+                job.RequestedPath,
+                MoveJobPublicProjection.ToError(job),
+                job.AttemptCount,
+                job.EnqueuedAt,
+                job.UpdatedAt,
+                job.NextAttemptAt,
+                disposition.ToString(),
+                disposition == MoveRecoveryDisposition.RetryAvailable);
+        }
+
+        public async Task<IActionResult> GetRecoveryStateAsync(
+            int audiobookId,
+            CancellationToken cancellationToken = default)
+        {
+            if (_moveQueueService == null)
+            {
+                return new NotFoundObjectResult(new { message = "Move queue not available" });
+            }
+
+            var recovery = await _moveQueueService.GetRecoveryStateForAudiobookAsync(
+                audiobookId,
+                cancellationToken);
+            return new OkObjectResult(new MoveRecoveryStateResponse(
+                recovery.BlocksFilesystemMutation,
+                recovery.Disposition.ToString(),
+                recovery.JobId,
+                recovery.Status,
+                recovery.Phase,
+                recovery.RequestedPath,
+                recovery.Error == null
+                    ? null
+                    : MoveJobPublicProjection.ToError(recovery.Error, MoveFailureKind.Unknown),
+                recovery.CanRetry,
+                recovery.BlockingJobIds));
+        }
+
+        public async Task<IActionResult> RequeueAsync(
+            string jobId,
+            CancellationToken cancellationToken = default)
         {
             if (_moveQueueService == null) return new NotFoundObjectResult(new { message = "Move queue not available" });
             if (!Guid.TryParse(jobId, out var gid)) return new BadRequestObjectResult(new { message = "Invalid jobId" });
 
-            var newJobId = await _moveQueueService.RequeueMoveAsync(gid);
+            _filesystemMutationGate.EnsureReady();
+
+            Guid? newJobId;
+            try
+            {
+                var existing = await _moveQueueService.GetJobAsync(gid, cancellationToken);
+                if (existing == null)
+                {
+                    return new NotFoundObjectResult(new { message = "Move job not found" });
+                }
+
+                var disposition = MoveRecoveryPolicy.GetDisposition(existing);
+                if (existing.Status != MoveJobStatus.Queued
+                    && disposition != MoveRecoveryDisposition.RetryAvailable)
+                {
+                    return new ConflictObjectResult(new
+                    {
+                        message = "This move cannot be retried automatically because its persisted recovery evidence requires operator repair.",
+                        code = "move_repair_required",
+                        jobId = existing.Id,
+                        status = existing.Status,
+                        recoveryDisposition = disposition.ToString(),
+                        canRetry = false
+                    });
+                }
+
+                newJobId = await _moveQueueService.RequeueMoveAsync(
+                    gid,
+                    cancellationToken);
+            }
+            catch (MoveRelocationConflictException)
+            {
+                return new ConflictObjectResult(new
+                {
+                    message = "The move overlaps an active root folder relocation. Retry after the relocation completes.",
+                    code = "move_relocation_conflict"
+                });
+            }
+
             if (newJobId == null)
             {
                 return new BadRequestObjectResult(new { message = "Unable to requeue job (not found or invalid status)" });
             }
 
-            await BroadcastQueuedAsync(newJobId.Value, audiobookId: null);
             return new AcceptedResult(string.Empty, new { message = "Requeued move job", jobId = newJobId });
-        }
-
-        private async Task BroadcastQueuedAsync(Guid jobId, int? audiobookId)
-        {
-            try
-            {
-                using var scope = _scopeFactory.CreateScope();
-                var hub = scope.ServiceProvider.GetRequiredService<IHubBroadcaster>();
-                var job = new { jobId = jobId.ToString(), audiobookId, status = "Queued", enqueuedAt = DateTime.UtcNow };
-                await hub.BroadcastAsync(RealtimeHubTarget.Downloads, "MoveJobUpdate", job);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogWarning(ex, "Failed to broadcast MoveJobUpdate for job {JobId}", jobId);
-            }
         }
     }
 }

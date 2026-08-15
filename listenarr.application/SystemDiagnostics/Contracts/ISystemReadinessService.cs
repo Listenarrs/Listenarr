@@ -20,4 +20,9 @@ public sealed record SystemReadiness(
     string Status,
     bool DatabaseConnected,
     bool MigrationsCurrent,
-    string? ErrorCode = null);
+    string? ErrorCode = null,
+    bool FilesystemReady = false,
+    string FilesystemStatus = "Pending",
+    string? FilesystemPhase = null,
+    string? FilesystemErrorCode = null,
+    string? FilesystemErrorMessage = null);

@@ -44,6 +44,12 @@ namespace Listenarr.Application.SystemDiagnostics.Contracts
         Task<AudioMetadata> RunFfprobeAsync(string filePath);
 
         /// <summary>
+        /// Executes ffprobe through a stable read path while validating and
+        /// mapping the separate public media identity.
+        /// </summary>
+        Task<AudioMetadata> RunFfprobeAsync(MetadataFileSource fileSource);
+
+        /// <summary>
         /// Give license notice content from FFprobe
         /// </summary>
         /// <returns>Content of the license file if any or empty string</returns>

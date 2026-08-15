@@ -16,6 +16,8 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Domain.Common;
+
 namespace Listenarr.Application.Audiobooks.Contracts.Repositories
 {
     public interface IRootFolderRepository
@@ -24,13 +26,36 @@ namespace Listenarr.Application.Audiobooks.Contracts.Repositories
         Task<RootFolder?> GetByIdAsync(int id);
         Task<RootFolder?> GetByPathAsync(string path);
         Task AddAsync(RootFolder root);
+        Task AddAndSetDefaultAsync(
+            RootFolder root,
+            int? expectedCurrentDefaultId,
+            CancellationToken ct = default);
         Task UpdateAsync(RootFolder root);
+        Task UpdateAndSetDefaultAsync(
+            RootFolder root,
+            int? expectedCurrentDefaultId,
+            CancellationToken ct = default);
         Task RemoveAsync(int id);
         Task<RootFolder?> GetDefaultAsync();
         Task ClearDefaultExceptAsync(int? excludeId, CancellationToken ct = default);
-        Task<bool> HasAudiobooksUnderPathAsync(string rootPath, CancellationToken ct = default);
-        Task<List<Audiobook>> GetAudiobooksUnderPathAsync(string rootPath, CancellationToken ct = default);
-        Task<List<(int audiobookId, string original, string target)>> MigrateAudiobookPathsAsync(string oldRootPath, string newRootPath, CancellationToken ct = default);
+        Task<bool> HasAudiobooksUnderPathAsync(
+            string rootPath,
+            FileSystemPathSemantics semantics,
+            CancellationToken ct = default);
+        Task<List<Audiobook>> GetAudiobooksUnderPathAsync(
+            string rootPath,
+            FileSystemPathSemantics semantics,
+            CancellationToken ct = default);
+        Task<List<int>> GetAllAudiobookIdsAsync(CancellationToken ct = default);
+        Task<bool> HasNonRemovedDirectoryOwnershipAsync(
+            int rootFolderId,
+            CancellationToken ct = default);
+        Task ReassignAudiobooksAndRemoveAsync(
+            int sourceRootId,
+            int targetRootId,
+            FileSystemPathSemantics sourceSemantics,
+            FileSystemPathSemantics targetSemantics,
+            CancellationToken ct = default);
         Task SaveChangesAsync(CancellationToken ct = default);
     }
 }

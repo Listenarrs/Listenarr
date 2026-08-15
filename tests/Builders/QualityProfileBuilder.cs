@@ -2,12 +2,11 @@ namespace Listenarr.Tests.Builders
 {
     public class QualityProfileBuilder
     {
-        private static int IdCounter = 0;
         private QualityProfile _qualityProfile = new();
 
         public QualityProfileBuilder()
         {
-            _qualityProfile.Id = ++IdCounter;
+            _qualityProfile.Id = TestEntityIdGenerator.Next();
             _qualityProfile.Qualities = new List<QualityDefinition>();
         }
 

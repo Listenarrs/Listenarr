@@ -49,14 +49,11 @@ namespace Listenarr.Domain.Downloads
         {
             get
             {
-                // FIXME: Previous version did not save normalized paths
-                var normalizedValue = FileUtils.NormalizeStoredPath(field);
-                return FileUtils.EnsureTrailingSeparator(normalizedValue);
+                return NormalizeRemotePath(field);
             }
             set
             {
-                value = FileUtils.NormalizeStoredPath(value);
-                field = FileUtils.EnsureTrailingSeparator(value);
+                field = NormalizeRemotePath(value);
             }
         } = string.Empty;
 
@@ -64,20 +61,7 @@ namespace Listenarr.Domain.Downloads
         /// The path as seen by Listenarr (e.g., "/server/downloads/complete/listenarr/")
         /// </summary>
         [Required]
-        public string LocalPath
-        {
-            get
-            {
-                // FIXME: Previous version did not save normalized paths
-                var normalizedValue = FileUtils.NormalizeStoredPath(field);
-                return FileUtils.EnsureTrailingSeparator(normalizedValue);
-            }
-            set
-            {
-                value = FileUtils.NormalizeStoredPath(value);
-                field = FileUtils.EnsureTrailingSeparator(value);
-            }
-        } = string.Empty;
+        public string LocalPath { get; set; } = string.Empty;
 
         /// <summary>
         /// When this mapping was created
@@ -111,24 +95,48 @@ namespace Listenarr.Domain.Downloads
         /// </summary>
         public void NormalizePaths()
         {
-            RemotePath = NormalizePath(RemotePath);
-            LocalPath = NormalizePath(LocalPath);
+            RemotePath = NormalizeRemotePath(RemotePath);
+            LocalPath = NormalizeLocalPathForHost(LocalPath);
         }
 
-        private static string NormalizePath(string path)
+        private static string NormalizeLocalPathForHost(string path)
         {
             if (string.IsNullOrEmpty(path))
+            {
                 return path;
+            }
 
-            // Replace backslashes with forward slashes
-            path = path.Replace('\\', '/');
+            if (!FileSystemPathIdentity.TryCanonicalizeStoredAbsolutePathForHost(
+                    path,
+                    out var canonicalPath,
+                    out var reason))
+            {
+                throw new ArgumentException(reason, nameof(path));
+            }
 
-            // Ensure trailing slash
-            if (!path.EndsWith('/'))
-                path += '/';
+            return FileUtils.EnsureTrailingSeparator(canonicalPath);
+        }
 
-            return path;
+        private static string NormalizeRemotePath(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                return path;
+            }
+
+            if (path.StartsWith("\\\\", StringComparison.Ordinal))
+            {
+                var uncPath = path.Replace('/', '\\');
+                return uncPath.EndsWith('\\') ? uncPath : uncPath + "\\";
+            }
+
+            if (path.Length >= 2 && char.IsLetter(path[0]) && path[1] == ':')
+            {
+                var drivePath = path.Replace('\\', '/');
+                return drivePath.EndsWith('/') ? drivePath : drivePath + '/';
+            }
+
+            return path.EndsWith('/') ? path : path + '/';
         }
     }
 }
-

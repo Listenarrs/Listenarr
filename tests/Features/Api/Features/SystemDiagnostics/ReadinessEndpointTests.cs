@@ -40,6 +40,41 @@ public sealed class ReadinessEndpointTests(ListenarrWebApplicationFactory factor
     }
 
     [Fact]
+    public async Task Ready_Returns200_WhileFilesystemInitializationIsRunning()
+    {
+        using var initializingFactory = factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureServices(services =>
+            {
+                services.AddScoped<ISystemReadinessService>(_ =>
+                    Mock.Of<ISystemReadinessService>(service =>
+                        service.CheckAsync(It.IsAny<CancellationToken>()) ==
+                        Task.FromResult(new SystemReadiness(
+                            true,
+                            "ready",
+                            true,
+                            true,
+                            null,
+                            false,
+                            "Running",
+                            "AudiobookFileIdentities"))));
+            });
+        });
+        var apiBase = TestUtils.ResolveApiBasePath(initializingFactory.Services);
+        using var client = initializingFactory.CreateClient();
+
+        using var response = await client.GetAsync($"{apiBase}/system/ready");
+        var readiness = await response.Content.ReadFromJsonAsync<SystemReadiness>();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.NotNull(readiness);
+        Assert.True(readiness.IsReady);
+        Assert.False(readiness.FilesystemReady);
+        Assert.Equal("Running", readiness.FilesystemStatus);
+        Assert.Equal("AudiobookFileIdentities", readiness.FilesystemPhase);
+    }
+
+    [Fact]
     public async Task Ready_Returns503_WhenReadinessServiceRejectsHost()
     {
         using var notReadyFactory = factory.WithWebHostBuilder(builder =>

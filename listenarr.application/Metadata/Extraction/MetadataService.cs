@@ -146,8 +146,18 @@ namespace Listenarr.Application.Metadata.Extraction
             }
         }
 
-        public async Task<AudioMetadata?> ExtractFileMetadataAsync(string filePath)
+        public Task<AudioMetadata?> ExtractFileMetadataAsync(string filePath)
         {
+            return ExtractFileMetadataAsync(
+                new MetadataFileSource(filePath, filePath));
+        }
+
+        public async Task<AudioMetadata?> ExtractFileMetadataAsync(
+            MetadataFileSource fileSource)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(fileSource.ReadPath);
+            ArgumentException.ThrowIfNullOrWhiteSpace(fileSource.PublicPath);
+
             var settings = await _configurationService.GetApplicationSettingsAsync();
             if (!settings.EnableMetadataProcessing)
             {
@@ -156,31 +166,30 @@ namespace Listenarr.Application.Metadata.Extraction
 
             try
             {
-                // If the file doesn't exist, skip running ffprobe and return basic metadata from filename
-                if (!_fileSystem.FileExists(filePath))
+                // Stable byte access and public media identity are deliberately
+                // separate. Linux descriptor paths must never become metadata.
+                if (!_fileSystem.FileExists(fileSource.ReadPath))
                 {
-                    _logger.LogWarning("File not found when attempting metadata extraction: {File}", LogRedaction.SanitizeFilePath(filePath));
-                    var fallbackMissingFile = new AudioMetadata
-                    {
-                        Title = Path.GetFileNameWithoutExtension(filePath),
-                        Format = Path.GetExtension(filePath).TrimStart('.').ToUpper()
-                    };
-                    _logger.LogInformation("Extracted basic metadata from (missing) file: {File}", LogRedaction.SanitizeText(filePath));
-                    return fallbackMissingFile;
+                    _logger.LogWarning(
+                        "File not found when attempting metadata extraction: {File}",
+                        LogRedaction.SanitizeFilePath(fileSource.PublicPath));
+                    return CreateFilenameFallback(fileSource.PublicPath);
                 }
 
-                // Ask the ffmpeg installer/service for the bundled ffprobe path
                 var ffprobePathService = await _ffmpegService.GetFfprobePathAsync();
-                if (string.IsNullOrEmpty(ffprobePathService) || !_fileSystem.FileExists(ffprobePathService))
+                if (string.IsNullOrEmpty(ffprobePathService)
+                    || !_fileSystem.FileExists(ffprobePathService))
                 {
-                    _logger.LogInformation("No bundled ffprobe available at configured location; skipping ffprobe for file: {File}", LogRedaction.SanitizeFilePath(filePath));
-                    // Let the outer method fall back to filename-based metadata
+                    _logger.LogInformation(
+                        "No bundled ffprobe available at configured location; skipping ffprobe for file: {File}",
+                        LogRedaction.SanitizeFilePath(fileSource.PublicPath));
                     return null;
                 }
 
                 try
                 {
-                    var ffprobeResult = await _ffmpegService.RunFfprobeAsync(filePath);
+                    var ffprobeResult = await _ffmpegService.RunFfprobeAsync(
+                        fileSource);
                     if (ffprobeResult != null)
                     {
                         return ffprobeResult;
@@ -188,25 +197,35 @@ namespace Listenarr.Application.Metadata.Extraction
                 }
                 catch (FfmpegException ex)
                 {
-                    _logger.LogWarning(ex, "Unable to extract metadata using ffprobe: Using basic filename based metadatas");
+                    _logger.LogWarning(
+                        ex,
+                        "Unable to extract metadata using ffprobe; using public filename metadata");
                 }
 
-                // Fallback: basic filename-based metadata
-                var fallbackName = Path.GetFileNameWithoutExtension(filePath);
-                var fallback = new AudioMetadata
-                {
-                    Title = fallbackName,
-                    Format = Path.GetExtension(filePath).TrimStart('.').ToUpper()
-                };
-
-                _logger.LogInformation("Extracted basic metadata from file: {File}", LogRedaction.SanitizeFilePath(filePath));
-                return fallback;
+                _logger.LogInformation(
+                    "Extracted basic metadata from file: {File}",
+                    LogRedaction.SanitizeFilePath(fileSource.PublicPath));
+                return CreateFilenameFallback(fileSource.PublicPath);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            catch (Exception ex) when (ex is not OperationCanceledException
+                && ex is not OutOfMemoryException
+                && ex is not StackOverflowException)
             {
-                _logger.LogError(ex, "Error extracting metadata from file: {File}", LogRedaction.SanitizeFilePath(filePath));
-                return new AudioMetadata();
+                _logger.LogError(
+                    ex,
+                    "Error extracting metadata from file: {File}",
+                    LogRedaction.SanitizeFilePath(fileSource.PublicPath));
+                return CreateFilenameFallback(fileSource.PublicPath);
             }
+        }
+
+        private static AudioMetadata CreateFilenameFallback(string publicPath)
+        {
+            return new AudioMetadata
+            {
+                Title = Path.GetFileNameWithoutExtension(publicPath),
+                Format = Path.GetExtension(publicPath).TrimStart('.').ToUpperInvariant()
+            };
         }
 
         public async Task ApplyMetadataAsync(string filePath, AudioMetadata metadata)
@@ -226,6 +245,15 @@ namespace Listenarr.Application.Metadata.Extraction
         public Task WriteAsinTagAsync(string filePath, string asin)
         {
             return _audioTagWriter.WriteAsinTagAsync(filePath, asin);
+        }
+
+        public Task WriteAsinTagAsync(
+            IAudiobookFileRegistrationLease registrationLease,
+            string asin)
+        {
+            return _audioTagWriter.WriteAsinTagAsync(
+                registrationLease,
+                asin);
         }
 
         public async Task<byte[]?> DownloadCoverArtAsync(string coverArtUrl)

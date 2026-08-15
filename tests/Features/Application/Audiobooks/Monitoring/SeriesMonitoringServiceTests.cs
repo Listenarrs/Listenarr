@@ -176,7 +176,9 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
             });
 
             // Then
-            Assert.True(result.SyncResult.Succeeded);
+            Assert.True(
+                result.SyncResult.Succeeded,
+                result.SyncResult.ErrorMessage);
             Assert.Equal(1, result.SyncResult.AddedCount);
 
             var storedAudiobook = Assert.Single(await _audiobookRepository.GetAllAsync());

@@ -20,7 +20,9 @@ import { setActivePinia, createPinia } from 'pinia'
 import { describe, it, beforeEach, expect, vi } from 'vitest'
 import { API_BASE_PATH } from '@/services/apiBase'
 import { useLibraryStore } from '@/stores/library'
-import { ensureImageCached } from '@/services/api'
+import { useScanNotificationsStore } from '@/stores/scanNotifications'
+import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
+import { apiService, ensureImageCached } from '@/services/api'
 import AudiobookDetailViewCmp from '@/views/library/AudiobookDetailView.vue'
 const routerPushMock = vi.fn()
 // Mock useRoute to provide params for the detail view
@@ -35,6 +37,7 @@ vi.mock('@/services/api', () => ({
     getImageUrl: vi.fn((url: string) => url || 'https://via.placeholder.com/300x450?text=No+Image'),
     getQualityProfiles: vi.fn(async () => []),
     getLibrary: vi.fn(async () => []),
+    scanAudiobook: vi.fn(),
   },
   ensureImageCached: vi.fn(async () => true),
 }))
@@ -182,5 +185,162 @@ describe('AudiobookDetailView image recache behavior', () => {
     await new Promise((r) => setTimeout(r, 0))
 
     expect(wrapper.find('.edit-audiobook-modal-stub').attributes('data-open')).toBe('true')
+  })
+
+  it('updates the Files tab scan status from the shared scan state', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useLibraryStore()
+    const scanNotificationsStore = useScanNotificationsStore()
+    store.audiobooks = [{ id: 5, title: 'Detail Book', files: [] }] as unknown as ReturnType<
+      typeof useLibraryStore
+    >['audiobooks']
+    store.fetchLibrary = vi.fn(async () => undefined)
+
+    const wrapper = mount(AudiobookDetailViewCmp, { global: { plugins: [pinia] } })
+    await new Promise((r) => setTimeout(r, 10))
+
+    const filesTab = wrapper.findAll('.tab').find((tab) => tab.text().includes('Files'))
+    expect(filesTab).toBeTruthy()
+    await filesTab!.trigger('click')
+
+    scanNotificationsStore.applyUpdate({
+      jobId: 'internal-scan-5',
+      audiobookId: 5,
+      status: 'Processing',
+    })
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.scan-job-status').exists()).toBe(false)
+
+    scanNotificationsStore.registerManualScan('scan-job-5', 5)
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('.scan-job-status').text()).toContain('scan-job-5')
+    expect(wrapper.find('.scan-job-status').text()).toContain('Queued')
+
+    scanNotificationsStore.applyUpdate({
+      jobId: 'scan-job-5',
+      audiobookId: 5,
+      status: 'Completed',
+      found: 2,
+      created: 1,
+    })
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('.scan-job-status').text()).toContain('Completed')
+    expect(wrapper.find('.scan-job-status').text()).not.toContain('Queued / Processing')
+
+    scanNotificationsStore.clearFinished()
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('.scan-job-status').exists()).toBe(false)
+  })
+
+  it('shows the newest visible manual scan for the audiobook', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useLibraryStore()
+    const scanNotificationsStore = useScanNotificationsStore()
+    store.audiobooks = [{ id: 5, title: 'Detail Book', files: [] }] as unknown as ReturnType<
+      typeof useLibraryStore
+    >['audiobooks']
+    store.fetchLibrary = vi.fn(async () => undefined)
+
+    const wrapper = mount(AudiobookDetailViewCmp, { global: { plugins: [pinia] } })
+    await new Promise((r) => setTimeout(r, 10))
+
+    const filesTab = wrapper.findAll('.tab').find((tab) => tab.text().includes('Files'))
+    await filesTab!.trigger('click')
+
+    scanNotificationsStore.registerManualScan('older-scan', 5)
+    scanNotificationsStore.applyUpdate({
+      jobId: 'older-scan',
+      audiobookId: 5,
+      status: 'Completed',
+    })
+    await new Promise((resolve) => setTimeout(resolve, 2))
+    scanNotificationsStore.registerManualScan('newer-scan', 5)
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('.scan-job-status').text()).toContain('newer-scan')
+    expect(wrapper.find('.scan-job-status').text()).toContain('Queued')
+    expect(wrapper.find('.scan-job-status').text()).not.toContain('older-scan')
+  })
+
+  it('registers an accepted Scan Folder job for global notification progress', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useFilesystemReadinessStore().readiness = {
+      isReady: true,
+      status: 'ready',
+      databaseConnected: true,
+      migrationsCurrent: true,
+      errorCode: null,
+      filesystemReady: true,
+      filesystemStatus: 'Ready',
+      filesystemPhase: null,
+      filesystemErrorCode: null,
+      filesystemErrorMessage: null,
+    }
+    const store = useLibraryStore()
+    const scanNotificationsStore = useScanNotificationsStore()
+    store.audiobooks = [{ id: 5, title: 'Detail Book', files: [] }] as unknown as ReturnType<
+      typeof useLibraryStore
+    >['audiobooks']
+    store.fetchLibrary = vi.fn(async () => undefined)
+    vi.mocked(apiService.scanAudiobook).mockResolvedValue({
+      message: 'Scan enqueued',
+      found: 0,
+      created: 0,
+      jobId: 'scan-job-5',
+    })
+
+    const wrapper = mount(AudiobookDetailViewCmp, { global: { plugins: [pinia] } })
+    await new Promise((r) => setTimeout(r, 10))
+
+    const scanButton = wrapper.find('button[aria-label="Scan Folder"]')
+    expect(scanButton.exists()).toBe(true)
+    await scanButton.trigger('click')
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(apiService.scanAudiobook).toHaveBeenCalledWith(5)
+    expect(scanNotificationsStore.jobs).toHaveLength(1)
+    expect(scanNotificationsStore.jobs[0]).toMatchObject({
+      jobId: 'scan-job-5',
+      audiobookId: 5,
+      status: 'Queued',
+      visible: true,
+    })
+  })
+
+  it('disables Scan Folder while library filesystem initialization is incomplete', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useLibraryStore()
+    store.audiobooks = [{ id: 5, title: 'Detail Book', files: [] }] as unknown as ReturnType<
+      typeof useLibraryStore
+    >['audiobooks']
+    store.fetchLibrary = vi.fn(async () => undefined)
+    useFilesystemReadinessStore().readiness = {
+      isReady: true,
+      status: 'ready',
+      databaseConnected: true,
+      migrationsCurrent: true,
+      errorCode: null,
+      filesystemReady: false,
+      filesystemStatus: 'Running',
+      filesystemPhase: 'AudiobookFileIdentities',
+      filesystemErrorCode: null,
+      filesystemErrorMessage: null,
+    }
+
+    const wrapper = mount(AudiobookDetailViewCmp, { global: { plugins: [pinia] } })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    const scanButton = wrapper.get('button[aria-label="Scan Folder"]')
+    expect(scanButton.attributes('disabled')).toBeDefined()
+    expect(scanButton.attributes('title')).toContain('filesystem initialization')
+    await scanButton.trigger('click')
+    expect(apiService.scanAudiobook).not.toHaveBeenCalled()
   })
 })

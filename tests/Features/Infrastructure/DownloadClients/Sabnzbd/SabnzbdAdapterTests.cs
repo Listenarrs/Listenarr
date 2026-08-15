@@ -32,6 +32,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Sabnzbd
         public override async Task InitializeAsync()
         {
             sabnzbdApiMock = _provider.GetRequiredService<SabnzbdApiMock>();
+            await AddAuthorizedRootAsync(FileService.GetTempPath());
 
             _client = await _downloadClientConfigurationRepository.SaveAsync(new DownloadClientConfigurationBuilder()
                 .WithHost("http://192.168.50.111/sab")

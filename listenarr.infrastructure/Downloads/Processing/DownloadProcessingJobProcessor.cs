@@ -24,16 +24,19 @@ namespace Listenarr.Infrastructure.Downloads.Processing
     /// <summary>
     /// Process the download processing jobs queued
     /// </summary>
-    public class DownloadProcessingJobProcessor(
+    public partial class DownloadProcessingJobProcessor(
         IServiceScopeFactory scopeFactory,
         ILogger<DownloadProcessingJobProcessor> logger,
         IAppMetricsService metrics,
-        IScanQueueService scanQueueService) : BackgroundService, IDownloadImportProcessor
+        IScanQueueService scanQueueService,
+        ILibraryFilesystemReadiness filesystemReadiness) : BackgroundService, IDownloadImportProcessor
     {
         private readonly TimeSpan _processingInterval = TimeSpan.FromSeconds(10); // Check every 10 seconds
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
+            logger.LogInformation("Download Processing Background Service waiting for library filesystem initialization");
+            await filesystemReadiness.WaitUntilReadyAsync(stoppingToken);
             logger.LogInformation("Download Processing Background Service started");
 
             // On startup, reset any jobs stuck in Processing status (from previous crash/restart)
@@ -90,6 +93,8 @@ namespace Listenarr.Infrastructure.Downloads.Processing
 
         public async Task ProcessQueueAsync(CancellationToken cancellationToken)
         {
+            await filesystemReadiness.WaitUntilReadyAsync(cancellationToken);
+
             using var scope = scopeFactory.CreateScope();
             var downloadProcessingJobService = scope.ServiceProvider.GetRequiredService<IDownloadProcessingJobService>();
             var downloadRepository = scope.ServiceProvider.GetRequiredService<IDownloadRepository>();
@@ -432,67 +437,5 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                     correlationId, $"Unable to commit import finalization: {exception.Message}", cancellationToken);
             }
         }
-
-        private static async Task ScheduleRetryAsync(
-            DownloadProcessingJob job,
-            IDownloadProcessingJobService jobService,
-            IHistoryRepository historyRepository,
-            Download download,
-            Audiobook audiobook,
-            string correlationId,
-            string reason,
-            CancellationToken ct)
-        {
-            job.ScheduleRetry(reason);
-            await jobService.UpdateJobAsync(job);
-            var exhausted = job.Status == ProcessingJobStatus.Failed;
-            await RecordHistoryAsync(historyRepository, download, audiobook,
-                exhausted ? HistoryEvents.ImportFailed : HistoryEvents.ImportRetry,
-                exhausted ? HistoryOutcome.Failed : HistoryOutcome.Retrying, correlationId, reason,
-                new Dictionary<string, object> { ["JobId"] = job.Id, ["RetryCount"] = job.RetryCount }, ct);
-        }
-
-        private static async Task FailImportAsync(
-            DownloadProcessingJob job,
-            IDownloadProcessingJobService jobService,
-            IHistoryRepository historyRepository,
-            Download download,
-            Audiobook audiobook,
-            string correlationId,
-            string reason,
-            CancellationToken ct)
-        {
-            await jobService.UpdateJobAsync(job.MarkAsFailed(reason));
-            await RecordHistoryAsync(historyRepository, download, audiobook, HistoryEvents.ImportFailed,
-                HistoryOutcome.Failed, correlationId, reason,
-                new Dictionary<string, object> { ["JobId"] = job.Id, ["RetryCount"] = job.RetryCount }, ct);
-        }
-
-        private static Task RecordHistoryAsync(
-            IHistoryRepository historyRepository,
-            Download download,
-            Audiobook audiobook,
-            string eventType,
-            HistoryOutcome outcome,
-            string correlationId,
-            string message,
-            Dictionary<string, object> details,
-            CancellationToken ct) =>
-            historyRepository.AddAsync(new History
-            {
-                AudiobookId = audiobook.Id,
-                AudiobookTitle = audiobook.Title,
-                SourceTitle = download.Title,
-                DownloadId = download.Id.ToUpperInvariant(),
-                DownloadClientId = download.DownloadClientId,
-                EventType = eventType,
-                Outcome = outcome,
-                Source = "DownloadImport",
-                Message = message,
-                Error = outcome == HistoryOutcome.Failed ? message : null,
-                Timestamp = DateTime.UtcNow,
-                CorrelationId = correlationId,
-                Data = JsonSerializer.Serialize(details)
-            }, ct);
     }
 }

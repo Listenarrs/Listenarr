@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Runtime.InteropServices;
+using Listenarr.Tests.Common;
 
 namespace Listenarr.Tests.Features.Api.Services
 {
@@ -46,12 +47,9 @@ namespace Listenarr.Tests.Features.Api.Services
             }
         }
 
-        [Fact]
+        [WindowsFact]
         public void EnsurePathWithinLimits_PathExceeding260Chars_IsTruncated()
         {
-            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                return; // Limit only enforced on Windows
-
             // Build a path well over 260 characters
             var longAuthor = new string('A', 100);
             var longTitle = new string('T', 200);
@@ -65,12 +63,9 @@ namespace Listenarr.Tests.Features.Api.Services
             Assert.EndsWith(".m4b", result);
         }
 
-        [Fact]
+        [WindowsFact]
         public void EnsurePathWithinLimits_PreservesExtension()
         {
-            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                return;
-
             var longTitle = new string('T', 300);
             var path = $@"D:\Audiobooks\Author\{longTitle}.mp3";
 
@@ -80,12 +75,9 @@ namespace Listenarr.Tests.Features.Api.Services
             Assert.EndsWith(".mp3", result);
         }
 
-        [Fact]
+        [WindowsFact]
         public void EnsurePathWithinLimits_ComponentExceeding255Chars_IsTruncated()
         {
-            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                return;
-
             // Single component over 255 chars but total path under 260
             // Not realistic on Windows (260 total means components can't be that long with a root)
             // but test the per-component logic directly
@@ -103,12 +95,9 @@ namespace Listenarr.Tests.Features.Api.Services
             }
         }
 
-        [Fact]
+        [WindowsFact]
         public void EnsurePathWithinLimits_TruncatesLongestComponentFirst()
         {
-            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                return;
-
             // Create a path where the title folder is much longer than the author
             var shortAuthor = "Author";
             var longTitle = new string('T', 200);
@@ -130,12 +119,9 @@ namespace Listenarr.Tests.Features.Api.Services
             Assert.Null(_service.EnsurePathWithinLimits(null!));
         }
 
-        [Fact]
+        [WindowsFact]
         public void EnsurePathWithinLimits_ExactlyAtLimit_ReturnsUnchanged()
         {
-            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                return;
-
             // Build a path that's exactly 259 chars
             var root = @"D:\";
             var remaining = 259 - root.Length - ".m4b".Length - 1; // -1 for separator before filename

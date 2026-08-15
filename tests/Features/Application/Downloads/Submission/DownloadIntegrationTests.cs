@@ -146,6 +146,7 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
             _services.AddSingleton(gatewayMock.Object);
 
             Init();
+            await AddAuthorizedRootAsync(FileService.GetTempPath());
 
             await _audiobookRepository.AddAsync(audiobook);
             await _downloadClientConfigurationRepository.SaveAsync(downloadClient);

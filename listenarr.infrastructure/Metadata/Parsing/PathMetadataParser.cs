@@ -17,6 +17,7 @@
  */
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Listenarr.Domain.Common;
 
 namespace Listenarr.Infrastructure.Metadata.Parsing
 {
@@ -53,20 +54,27 @@ namespace Listenarr.Infrastructure.Metadata.Parsing
         private static readonly string[] AudioExtensions = { ".m4b", ".mp3", ".flac", ".ogg", ".opus", ".m4a", ".aac", ".wav" };
         private static readonly string[] CoverExtensions = { ".jpg", ".jpeg", ".png", ".webp" };
 
-        public static PathParsedMetadata Parse(string filePath, string rootFolderPath)
+        public static PathParsedMetadata Parse(
+            string filePath,
+            string rootFolderPath,
+            FileSystemPathSemantics semantics)
         {
             var result = new PathParsedMetadata();
 
             var normalizedFile = Path.GetFullPath(filePath);
-            var normalizedRoot = Path.GetFullPath(rootFolderPath)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            var normalizedRootWithSep = normalizedRoot + Path.DirectorySeparatorChar;
+            var normalizedRoot = Path.GetFullPath(rootFolderPath);
 
-            if (!normalizedFile.StartsWith(normalizedRootWithSep, StringComparison.OrdinalIgnoreCase))
+            if (!FileSystemPathIdentity.TryGetRelativePathWithinBase(
+                normalizedRoot,
+                normalizedFile,
+                semantics,
+                out var relative))
                 return result;
 
-            var relative = normalizedFile[(normalizedRoot.Length)..].TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            var parts = relative.Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
+            var separators = semantics.Syntax == FileSystemPathSyntax.Windows
+                ? new[] { '\\', '/' }
+                : new[] { '/' };
+            var parts = relative.Split(separators, StringSplitOptions.RemoveEmptyEntries);
 
             // parts[^1] is the filename; everything before is folder levels
             if (parts.Length < 2) return result;
@@ -135,6 +143,7 @@ namespace Listenarr.Infrastructure.Metadata.Parsing
         public static async Task<PathParsedMetadata> ReadEmbeddedTagsAsync(
             string filePath, string ffprobePath, CancellationToken ct = default)
         {
+            ct.ThrowIfCancellationRequested();
             var result = new PathParsedMetadata();
             try
             {
@@ -160,6 +169,10 @@ namespace Listenarr.Infrastructure.Metadata.Parsing
 
                 var doc = JsonSerializer.Deserialize<JsonElement>(stdout);
                 result = ParseEmbeddedTagsFromFfprobeJson(doc);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex) when (ex is not OutOfMemoryException && ex is not StackOverflowException) { /* silently skip - ffprobe unavailable or file unreadable */ }
             return result;
@@ -268,4 +281,3 @@ namespace Listenarr.Infrastructure.Metadata.Parsing
         }
     }
 }
-

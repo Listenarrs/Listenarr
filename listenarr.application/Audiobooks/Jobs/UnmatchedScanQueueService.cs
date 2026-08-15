@@ -17,6 +17,7 @@
  */
 using System.Collections.Concurrent;
 using System.Threading.Channels;
+using Listenarr.Domain.Common;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Audiobooks.Jobs
@@ -39,6 +40,14 @@ namespace Listenarr.Application.Audiobooks.Jobs
         public string? CoverPath { get; set; }
         public string? Asin { get; set; }
         public string Format { get; set; } = string.Empty;
+    }
+
+    public static class UnmatchedScanPublicError
+    {
+        public static string? FromInternal(string? error) =>
+            string.IsNullOrWhiteSpace(error)
+                ? null
+                : "The unmatched scan failed. Review the server logs for details.";
     }
 
     public class UnmatchedScanJob
@@ -66,13 +75,17 @@ namespace Listenarr.Application.Audiobooks.Jobs
         private static readonly TimeSpan JobTtl = TimeSpan.FromHours(1);
 
         private readonly ConcurrentDictionary<Guid, UnmatchedScanJob> _jobs = new();
-        private readonly ConcurrentDictionary<string, Guid> _lastJobByPath = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, Guid> _lastJobByPath = new(StringComparer.Ordinal);
         private readonly Channel<UnmatchedScanJob> _channel = Channel.CreateUnbounded<UnmatchedScanJob>();
         private readonly ILogger<UnmatchedScanQueueService> _logger;
+        private readonly IFileSystemSemanticsResolver _semanticsResolver;
 
-        public UnmatchedScanQueueService(ILogger<UnmatchedScanQueueService> logger)
+        public UnmatchedScanQueueService(
+            ILogger<UnmatchedScanQueueService> logger,
+            IFileSystemSemanticsResolver semanticsResolver)
         {
             _logger = logger;
+            _semanticsResolver = semanticsResolver;
         }
 
         public ChannelReader<UnmatchedScanJob> Reader => _channel.Reader;
@@ -96,8 +109,9 @@ namespace Listenarr.Application.Audiobooks.Jobs
         {
             PurgeExpired();
             // Dedupe: if a queued/processing job exists for the same path, return it
+            var rootSemantics = await ResolvePathSemanticsAsync(rootFolderPath);
             var existing = _jobs.Values.FirstOrDefault(j =>
-                string.Equals(j.RootFolderPath, rootFolderPath, StringComparison.OrdinalIgnoreCase) &&
+                AreEquivalentPaths(j.RootFolderPath, rootFolderPath, rootSemantics) &&
                 (j.Status == "Queued" || j.Status == "Processing"));
 
             if (existing != null)
@@ -134,6 +148,38 @@ namespace Listenarr.Application.Audiobooks.Jobs
             job = null;
             if (!_lastJobByPath.TryGetValue(rootFolderPath, out var jobId)) return false;
             return _jobs.TryGetValue(jobId, out job);
+        }
+
+        private async Task<FileSystemPathSemantics?> ResolvePathSemanticsAsync(string path)
+        {
+            try
+            {
+                if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                        path,
+                        out var canonicalPath,
+                        out _))
+                {
+                    return null;
+                }
+
+                var resolution = await _semanticsResolver.ResolveAsync(canonicalPath);
+                return resolution.State == PathIdentityState.Valid ? resolution.Semantics : null;
+            }
+            catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
+            {
+                _logger.LogDebug(exception, "Failed to resolve unmatched scan path semantics for {Path}", LogRedaction.SanitizeFilePath(path));
+                return null;
+            }
+        }
+
+        private static bool AreEquivalentPaths(
+            string left,
+            string right,
+            FileSystemPathSemantics? semantics)
+        {
+            return semantics != null
+                ? FileSystemPathIdentity.AreEquivalent(left, right, semantics.Value)
+                : string.Equals(left, right, StringComparison.Ordinal);
         }
     }
 }

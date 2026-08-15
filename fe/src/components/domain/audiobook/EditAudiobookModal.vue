@@ -427,7 +427,7 @@
                 <div v-if="!editingDestination" class="destination-readonly">
                   <input
                     type="text"
-                    :value="combinedBasePath() || 'No destination set'"
+                    :value="displayDestinationPath || 'No destination set'"
                     class="form-input readonly-input"
                     readonly
                     disabled
@@ -436,7 +436,17 @@
                     type="button"
                     class="icon-btn btn-primary btn-edit-destination"
                     @click="startEditingDestination"
-                    title="Edit destination"
+                    :disabled="
+                      filesystemReadinessStore.filesystemReady === false ||
+                      Boolean(moveRecoveryState?.hasUnresolvedMove)
+                    "
+                    :title="
+                      filesystemReadinessStore.filesystemReady === false
+                        ? 'Available after library filesystem initialization completes'
+                        : moveRecoveryState?.hasUnresolvedMove
+                          ? 'Resolve the interrupted move before changing the destination'
+                          : 'Edit destination'
+                    "
                     aria-label="Edit destination"
                   >
                     <PhPencil :size="16"></PhPencil>
@@ -448,42 +458,12 @@
                     <div class="root-select">
                       <RootFolderSelect
                         :hideLabel="true"
-                        :hideBrowse="!isUsingCustomPath"
-                        :autoFocusCustom="true"
-                        :externalCustom="true"
                         :inline="true"
                         v-model:rootId="selectedRootId"
-                        v-model:customPath="customRootPath"
-                        @open-browser="openCustomBrowser"
                       />
                     </div>
 
-                    <!-- External inline custom path moved outside of the root-select -->
-                    <div v-if="isUsingCustomPath" class="custom-path inline-mode">
-                      <div class="custom-path-row">
-                        <input
-                          ref="externalCustomInput"
-                          type="text"
-                          class="form-input custom-input"
-                          placeholder="Absolute path (e.g. C:\\Audiobooks)"
-                          v-model="customRootPath"
-                          @input="onExternalCustomInput"
-                          @keydown.enter.prevent="onExternalCustomEnter"
-                        />
-                        <button
-                          type="button"
-                          class="icon-btn btn-secondary btn-inline-browse"
-                          @click="openCustomBrowser"
-                          title="Browse for folder"
-                          aria-label="Browse for folder"
-                        >
-                          <PhFolder></PhFolder>
-                        </button>
-                      </div>
-                    </div>
-
                     <input
-                      v-if="!isUsingCustomPath && selectedRootId !== 0"
                       type="text"
                       v-model="formData.relativePath"
                       class="form-input relative-input"
@@ -504,26 +484,67 @@
                         type="button"
                         class="btn icon-btn btn-primary btn-sm"
                         @click="finishEditingDestination"
+                        :disabled="Boolean(destinationPathValidationError)"
                         aria-label="Save destination"
-                        title="Done"
+                        :title="destinationPathValidationError || 'Done'"
                       >
                         <PhCheck :size="16"></PhCheck>
                       </button>
                     </div>
                   </div>
-
-                  <!-- Custom path status removed for streamlined UI -->
                 </div>
                 <p class="help-text">
-                  <span v-if="!editingDestination"
+                  <span v-if="!editingDestination && !moveRecoveryState?.hasUnresolvedMove"
                     >Click the edit button to change the destination folder.</span
                   >
-                  <span v-else>
-                    <strong>Choose a root folder</strong> from the dropdown, or select
-                    <em>"Custom path"</em> to specify any location. The right field is for
-                    organizing within the selected root.
+                  <span v-else-if="editingDestination">
+                    <strong>Choose a configured root folder</strong> from the dropdown. The right
+                    field is the path relative to that root.
                   </span>
                 </p>
+                <div
+                  v-if="moveRecoveryState?.hasUnresolvedMove"
+                  class="move-recovery-notice"
+                  data-testid="move-recovery-notice"
+                >
+                  <PhWarning :size="18" />
+                  <div class="move-recovery-content">
+                    <strong>
+                      {{
+                        moveRecoveryState.canRetry
+                          ? 'An interrupted move needs to be resumed.'
+                          : 'A previous move needs attention.'
+                      }}
+                    </strong>
+                    <span v-if="moveRecoveryState.requestedPath">
+                      Destination: <code>{{ moveRecoveryState.requestedPath }}</code>
+                    </span>
+                    <span v-if="moveRecoveryState.error">{{ moveRecoveryState.error }}</span>
+                  </div>
+                  <button
+                    v-if="moveRecoveryState.canRetry && moveRecoveryState.jobId"
+                    type="button"
+                    class="btn btn-primary btn-sm"
+                    data-testid="resume-move-button"
+                    :disabled="resumingMove || filesystemReadinessStore.filesystemReady === false"
+                    @click="resumeInterruptedMove"
+                  >
+                    <PhSpinner v-if="resumingMove" class="ph-spin" />
+                    {{ resumingMove ? 'Resuming...' : 'Resume move' }}
+                  </button>
+                </div>
+                <div
+                  v-if="editingDestination && editDestinationPath"
+                  class="destination-preview"
+                  data-testid="effective-destination"
+                >
+                  <span>Effective destination:</span>
+                  <code>{{ editDestinationPath }}</code>
+                </div>
+                <div v-if="destinationPathValidationError" class="path-validation-error">
+                  <PhWarning :size="16" />
+                  <span>{{ destinationPathValidationError }}</span>
+                </div>
                 <!-- Path length warning -->
                 <div v-if="destinationPathWarning" class="path-length-warning">
                   <PhWarning :size="16" />
@@ -723,20 +744,12 @@
       >
         Close
       </button>
-      <div v-if="moveJob" class="move-status">
-        <small>
-          <strong>Move Job</strong>: {{ moveJob.jobId }} — <em>{{ moveJob.status }}</em>
-        </small>
-        <div v-if="moveJob.target">
-          <small>Target: {{ moveJob.target }}</small>
-        </div>
-      </div>
       <button
         type="button"
         class="btn btn-primary"
         @click="handleSave"
-        :disabled="saving || !hasChanges"
-        :title="saving ? 'Saving...' : 'Save'"
+        :disabled="saving || !hasChanges || Boolean(destinationPathValidationError)"
+        :title="saving ? 'Saving...' : destinationPathValidationError || 'Save'"
         :aria-label="saving ? 'Saving' : 'Save'"
       >
         <span v-if="saving"><PhSpinner class="ph-spin"></PhSpinner> Saving...</span>
@@ -744,14 +757,6 @@
       </button>
     </template>
   </Modal>
-
-  <!-- Folder browser for custom path selection -->
-  <FolderBrowserModal
-    v-model:visible="showCustomBrowser"
-    v-model:modelValue="customRootPath"
-    :show-input="true"
-    @close="closeCustomBrowser"
-  />
 
   <MoveAudiobookModal
     :visible="showMoveConfirm"
@@ -764,13 +769,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useToast } from '@/services/toastService'
 import { apiService } from '@/services/api'
-import { signalRService } from '@/services/signalr'
+import { getApiValidationError } from '@/services/apiErrors'
 import { logger } from '@/utils/logger'
 import type {
   Audiobook,
+  AudiobookUpdateRequest,
   AudiobookSeriesMembership,
   QualityProfile,
   AudiobookExternalIdentifier,
@@ -794,14 +800,14 @@ import {
 } from '@phosphor-icons/vue'
 import { useConfigurationStore } from '@/stores/configuration'
 import RootFolderSelect from '@/components/form/RootFolderSelect.vue'
-import FolderBrowser from '@/components/ui/FolderBrowser.vue'
 import Checkbox from '@/components/form/Checkbox.vue'
 import RadioCard from '@/components/settings/RadioCard.vue'
-import FolderBrowserModal from '@/components/feedback/FolderBrowserModal.vue'
 import { Modal, ModalHeader, ModalBody } from '@/components/feedback'
 import MoveAudiobookModal from '@/components/feedback/MoveAudiobookModal.vue'
 // FormRow and CheckboxCard not used in this component script; UI uses local markup
 import { useRootFoldersStore } from '@/stores/rootFolders'
+import { useMoveJobsStore, type MoveRecoveryState } from '@/stores/moveJobs'
+import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import { usePathLengthCheck } from '@/composables/usePathLengthCheck'
 
 // Diagnostic: surface undefined imports that can cause `Invalid vnode type` warnings
@@ -811,7 +817,6 @@ if (typeof window !== 'undefined') {
       ModalExists: typeof Modal !== 'undefined',
       ModalBodyExists: typeof ModalBody !== 'undefined',
       RootFolderSelectExists: typeof RootFolderSelect !== 'undefined',
-      FolderBrowserExists: typeof FolderBrowser !== 'undefined',
     })
   } catch {
     /* noop */
@@ -876,16 +881,13 @@ const emit = defineEmits<{
 const qualityProfiles = ref<QualityProfile[]>([])
 const configStore = useConfigurationStore()
 const rootStore = useRootFoldersStore()
-const selectedRootId = ref<number | null>(null) // null/use default, 0 = custom
-const customRootPath = ref<string | undefined>(undefined)
-
-const isUsingCustomPath = computed(() => {
-  // True when user has selected an explicit custom base path (0) or supplied an absolute path
-  return (
-    selectedRootId.value === 0 || (customRootPath.value != null && customRootPath.value.length > 0)
-  )
-})
+const moveJobsStore = useMoveJobsStore()
+const filesystemReadinessStore = useFilesystemReadinessStore()
+const moveRecoveryState = ref<MoveRecoveryState | null>(null)
+const resumingMove = ref(false)
+const selectedRootId = ref<number | null>(null)
 const rootPath = ref<string | null>(null)
+const unmanagedExistingDestination = ref(false)
 const saving = ref(false)
 const newAuthor = ref('')
 const newNarrator = ref('')
@@ -898,8 +900,6 @@ const isHydratingForm = ref(false)
 const hasLocalEdits = ref(false)
 const resolvedAudiobook = ref<Audiobook | null>(null)
 const baselineAudiobook = computed(() => resolvedAudiobook.value ?? props.audiobook)
-
-// Minimal custom path behaviour: extra helpers removed to keep UI streamlined
 
 const formData = ref<FormData>({
   monitored: true,
@@ -1113,6 +1113,46 @@ watch(
   { deep: true },
 )
 
+async function refreshMoveRecoveryState(audiobookId: number) {
+  try {
+    const recovery = await moveJobsStore.getRecoveryStateForAudiobook(audiobookId)
+    moveRecoveryState.value = recovery.hasUnresolvedMove ? recovery : null
+    if (recovery.hasUnresolvedMove) {
+      editingDestination.value = false
+    }
+  } catch (error) {
+    logger.debug('Failed to load durable move recovery state', error)
+    moveRecoveryState.value = null
+  }
+}
+
+async function resumeInterruptedMove() {
+  const audiobook = baselineAudiobook.value
+  const recovery = moveRecoveryState.value
+  if (!audiobook || !recovery?.jobId || !recovery.canRetry || resumingMove.value) return
+
+  resumingMove.value = true
+  try {
+    const jobId = await moveJobsStore.requeueMoveJob(
+      recovery.jobId,
+      audiobook.id,
+      recovery.requestedPath,
+    )
+    toast.info('Move resumed', `Move job ${jobId} was queued to resume its interrupted work.`)
+    await refreshMoveRecoveryState(audiobook.id)
+  } catch (error) {
+    logger.error('Failed to resume interrupted move', error)
+    const apiError = getApiValidationError(error)
+    toast.error(
+      'Move could not be resumed',
+      apiError?.message || 'The interrupted move could not be requeued safely.',
+    )
+    await refreshMoveRecoveryState(audiobook.id)
+  } finally {
+    resumingMove.value = false
+  }
+}
+
 async function syncFormFromAudiobook(audiobook: Audiobook, loadSupportingData: boolean) {
   isHydratingForm.value = true
 
@@ -1126,6 +1166,7 @@ async function syncFormFromAudiobook(audiobook: Audiobook, loadSupportingData: b
     }
 
     await initializeForm(resolved)
+    await refreshMoveRecoveryState(resolved.id)
     hasLocalEdits.value = false
   } finally {
     await nextTick()
@@ -1148,10 +1189,6 @@ function serializeStringList(values: string[] | null | undefined): string {
   return JSON.stringify(normalizeStringList(values))
 }
 
-// Move job tracking (shows queued/processing/completed/failed state)
-const moveJob = ref<{ jobId: string; status: string; target?: string; error?: string } | null>(null)
-const moveUnsub = ref<(() => void) | null>(null)
-
 // In-component move confirmation modal state
 const showMoveConfirm = ref(false)
 const pendingMove = ref<{ original?: string; combined?: string } | null>(null)
@@ -1160,80 +1197,6 @@ const modalDeleteEmpty = ref(true)
 let moveConfirmResolver:
   | ((r: { proceed: boolean; moveFiles: boolean; deleteEmptySource: boolean }) => void)
   | null = null
-
-// Custom path browser & validation state
-const showCustomBrowser = ref(false)
-
-function openCustomBrowser() {
-  showCustomBrowser.value = true
-}
-function closeCustomBrowser() {
-  showCustomBrowser.value = false
-}
-
-// External custom input ref and helpers (used when we move the custom input outside the select)
-const externalCustomInput = ref<HTMLInputElement | null>(null)
-
-function onExternalCustomInput() {
-  // Ensure parent selection state indicates custom path
-  selectedRootId.value = 0
-}
-
-function onExternalCustomEnter() {
-  selectedRootId.value = 0
-}
-
-// const RECENT_KEY = 'listenarr.recentCustomPaths'
-
-onMounted(() => {
-  // Initialization code if needed
-})
-// When the select switches to 'Custom path' we need to prefill the input
-// using the *previous* chosen root (old) because the new selectedRootId is already
-// set to 0 by the time this runs and combinedBasePath() would return empty.
-watch(
-  () => selectedRootId.value,
-  (v, old) => {
-    if (v === 0 && (customRootPath.value == null || customRootPath.value === '')) {
-      // Determine previous selected root path
-      let prevRoot: string | null = null
-      if (old && old > 0) {
-        const found = rootStore.folders.find((f) => f.id === old)
-        prevRoot = found?.path ?? rootPath.value ?? null
-      } else if (old === null) {
-        prevRoot = rootPath.value || null
-      } else if (old === 0 && customRootPath.value) {
-        prevRoot = customRootPath.value
-      }
-
-      if (prevRoot) {
-        // Prefill the custom input with the precise destination (basePath if available)
-        const base =
-          (formData.value.basePath && formData.value.basePath.trim()) ||
-          baselineAudiobook.value?.basePath ||
-          prevRoot
-        customRootPath.value = base
-
-        // Focus external custom input if it's visible
-        focusExternalInput()
-      }
-    }
-  },
-)
-
-// When the folder browser closes, the path is set
-watch(
-  () => showCustomBrowser.value,
-  (isOpen, wasOpen) => {
-    if (wasOpen && !isOpen && customRootPath.value) {
-      // Path is set from browser. For custom roots, the custom input is the exact
-      // destination — clear the relative so it isn't appended later.
-      formData.value.relativePath = ''
-      // ensure focus behavior is stable when browser closes
-      focusExternalInput()
-    }
-  },
-)
 
 function askMoveConfirmation(original: string, combined: string) {
   modalMoveFiles.value = true
@@ -1293,7 +1256,7 @@ const hasChanges = computed(() => {
     JSON.stringify([...formData.value.tags].sort()) !==
     JSON.stringify([...(audiobook.tags || [])].sort())
 
-  const basePathChanged = (audiobook.basePath || '') !== (combinedBasePath() || '')
+  const basePathChanged = destinationBasePathChanged()
 
   const identifiersChanged =
     serializeIdentifierRows(formData.value.identifiers) !==
@@ -1357,6 +1320,8 @@ watch(
     } else if (!isOpen) {
       hasLocalEdits.value = false
       resolvedAudiobook.value = null
+      moveRecoveryState.value = null
+      resumingMove.value = false
     }
   },
   { immediate: true },
@@ -1393,83 +1358,70 @@ async function loadData() {
 }
 
 async function initializeForm(audiobook: Audiobook) {
-  // Determine which root folder matches the existing basePath
+  unmanagedExistingDestination.value = false
+
+  // Determine which configured root owns the existing base path. Legacy paths
+  // outside every configured root remain visible, but cannot be reused as a
+  // destination authority.
   if (audiobook.basePath && rootStore.folders.length > 0) {
-    // Check if basePath starts with any configured root folder
-    const matchingRoot = rootStore.folders.find((folder) => {
-      const normBase = toForward(audiobook.basePath!)
-      const normRoot = toForward(folder.path)
-      const rootWithSlash = normRoot.endsWith('/') ? normRoot : normRoot + '/'
-      return (
-        normBase.toLowerCase() === normRoot.toLowerCase() ||
-        normBase.toLowerCase().startsWith(rootWithSlash.toLowerCase())
-      )
-    })
+    const matchingRoot = rootStore.folders
+      .filter((folder) => {
+        const pathKind = rootFolderPathKind(folder)
+        const caseSensitivity = folder.resolvedCaseSensitivity ?? 'Unknown'
+        return (
+          pathsEqual(audiobook.basePath, folder.path, pathKind, caseSensitivity) ||
+          pathIsInside(audiobook.basePath, folder.path, pathKind, caseSensitivity)
+        )
+      })
+      .sort(
+        (first, second) =>
+          trimTrailingDirectorySeparators(second.path, rootFolderPathKind(second)).length -
+          trimTrailingDirectorySeparators(first.path, rootFolderPathKind(first)).length,
+      )[0]
 
     if (matchingRoot) {
-      // Found a matching configured root folder
       selectedRootId.value = matchingRoot.id
-      customRootPath.value = undefined
     } else {
-      // No matching configured root folder - use custom path
-      selectedRootId.value = 0
-      customRootPath.value = audiobook.basePath
+      selectedRootId.value =
+        (rootStore.folders.find((folder) => folder.isDefault) ?? rootStore.folders[0])?.id ?? null
+      unmanagedExistingDestination.value = true
     }
   } else if (audiobook.basePath) {
-    // No configured named root folders. If the app has an outputPath and the audiobook's basePath
-    // sits under that outputPath, treat it as relative to the outputPath and show the relative
-    // input. Otherwise treat it as an explicit custom path.
-    const out = rootPath.value ? toForward(rootPath.value) : undefined
-    const base = toForward(audiobook.basePath)
-    if (out && base.toLowerCase().startsWith(out.toLowerCase())) {
-      // Use configured output path as the chosen root and derive relative path later
-      selectedRootId.value = null
-      customRootPath.value = undefined
-    } else {
-      // No match: explicit custom path
-      selectedRootId.value = 0
-      customRootPath.value = audiobook.basePath
-    }
-  } else {
-    // No basePath - use default selection
+    const outputPath = rootPath.value
+    const pathKind = detectPathKind(outputPath)
+    const isInsideOutputPath =
+      Boolean(outputPath) &&
+      (pathsEqual(audiobook.basePath, outputPath, pathKind) ||
+        pathIsInside(audiobook.basePath, outputPath, pathKind))
+
     selectedRootId.value = null
-    customRootPath.value = undefined
+    unmanagedExistingDestination.value = !isInsideOutputPath
+  } else {
+    selectedRootId.value = null
   }
 
-  // helper functions have been moved to module scope above so they are callable from template
-  // previewPath() and deriveRelativeFromBase() now live at module scope
-
-  // If there's an existing basePath that uses the configured root, derive the relative path
   try {
-    // If there's a named root selected, derive relative path from that
-    let chosenRoot = rootPath.value
-    if (selectedRootId.value && selectedRootId.value > 0) {
-      const found = rootStore.folders.find((f) => f.id === selectedRootId.value)
-      if (found) chosenRoot = found.path
-    } else if (selectedRootId.value === 0 && customRootPath.value) {
-      chosenRoot = customRootPath.value
+    const chosenRoot = resolveSelectedRootPath()
+    formData.value.relativePath =
+      formData.value.basePath && chosenRoot && !unmanagedExistingDestination.value
+        ? deriveRelativeFromBase(
+            formData.value.basePath,
+            chosenRoot,
+            selectedDestinationCaseSensitivity(),
+            selectedDestinationPathKind(),
+          )
+        : ''
+
+    // Without a named root, expose the relative destination editor immediately
+    // only when the stored path is already managed. Legacy unmanaged paths stay
+    // read-only until the user explicitly chooses to relocate them.
+    if (rootStore.folders.length === 0 && !unmanagedExistingDestination.value) {
+      editingDestination.value = true
     }
 
-    if (formData.value.basePath && chosenRoot) {
-      formData.value.relativePath = deriveRelativeFromBase(formData.value.basePath, chosenRoot)
-    } else if (formData.value.basePath && !chosenRoot) {
-      // No configured root — show the full base path so user can edit it
-      formData.value.relativePath = formData.value.basePath || null
-    }
-
-    // If there are no named root folders, show the destination edit controls
-    // by default so users can set an explicit path. When named roots exist we
-    // show the readonly display and require the user to click Edit.
-    if (rootStore.folders.length === 0) editingDestination.value = true
-
-    // IMPORTANT: Do not use metadata to fill the destination input for edits.
-    // If the audiobook has a stored basePath we must use that value from the DB
-    // and must not overwrite it with metadata-derived previews. Only when there
-    // is no basePath present could we consider a preview (not applied here).
     await loadIdentifiers()
     return
   } catch (err) {
-    // Non-fatal: unknown error deriving relative path from stored basePath
     logger.debug('Preview path unavailable:', err)
   }
   await loadIdentifiers()
@@ -1477,23 +1429,19 @@ async function initializeForm(audiobook: Audiobook) {
 
 import {
   toForward,
-  trimTrailingSlash,
+  trimTrailingDirectorySeparators,
   normalizeForCompare,
-  isAbsolutePath,
-  stripRootPrefix,
+  isRootedPath,
+  joinPaths,
+  validateLibraryDestinationPath,
+  detectPathKind,
+  pathsEqual,
+  pathIsInside,
+  type PathKind,
+  type PathCaseSensitivity,
 } from '@/utils/path'
 
-function focusExternalInput() {
-  setTimeout(() => externalCustomInput.value?.focus(), 0)
-}
-function isCustomRootSelected() {
-  return selectedRootId.value === 0
-}
-
 function resolveSelectedRootPath(): string | null {
-  if (isCustomRootSelected()) {
-    return customRootPath.value || null
-  }
   if (selectedRootId.value && selectedRootId.value > 0) {
     const r = rootStore.folders.find((f) => f.id === selectedRootId.value)
     return r?.path ?? (rootPath.value || null)
@@ -1501,52 +1449,130 @@ function resolveSelectedRootPath(): string | null {
   return rootPath.value || null
 }
 
-function combinedBasePath(): string | null {
-  const r = resolveSelectedRootPath() || ''
-  const rel = (formData.value.relativePath || '').trim()
-  if (!r && !rel) return null
-  if (!r) return rel
-
-  // If user selected a custom root (external custom path), treat the custom
-  // input as the exact destination where files should be stored. Do NOT
-  // append the relative or naming pattern — return the custom root exactly.
-  if (selectedRootId.value === 0) {
-    let out = toForward(r)
-    out = trimTrailingSlash(out)
-    return out
-  }
-
-  if (!rel) return r
-  const needsSep = !(r.endsWith('/') || r.endsWith('\\'))
-  const sep = r.includes('\\') ? '\\' : '/'
-  return r + (needsSep ? sep : '') + rel
+function rootFolderPathKind(folder: {
+  path: string
+  pathSyntax?: 'Windows' | 'Unix' | null
+}): PathKind {
+  if (folder.pathSyntax === 'Windows') return 'windows'
+  if (folder.pathSyntax === 'Unix') return 'unix'
+  return detectPathKind(folder.path)
 }
 
-// Path-length warning for the destination path
+function selectedDestinationPathKind(): PathKind {
+  if (selectedRootId.value && selectedRootId.value > 0) {
+    const folder = rootStore.folders.find((item) => item.id === selectedRootId.value)
+    if (folder) return rootFolderPathKind(folder)
+  }
+
+  const root =
+    resolveSelectedRootPath() || rootPath.value || baselineAudiobook.value?.basePath || ''
+  return detectPathKind(root)
+}
+
+function selectedDestinationCaseSensitivity() {
+  if (selectedRootId.value && selectedRootId.value > 0) {
+    return (
+      rootStore.folders.find((folder) => folder.id === selectedRootId.value)
+        ?.resolvedCaseSensitivity ?? 'Unknown'
+    )
+  }
+
+  return 'Unknown' as const
+}
+
+function destinationBasePathChanged(): boolean {
+  if (unmanagedExistingDestination.value && !editingDestination.value) return false
+
+  const destination = combinedBasePath() || ''
+  const source = baselineAudiobook.value?.basePath || ''
+  if (!destination && !source) return false
+  if (!destination || !source) return true
+  return !pathsEqual(
+    destination,
+    source,
+    selectedDestinationPathKind(),
+    selectedDestinationCaseSensitivity(),
+  )
+}
+
+function combinedBasePath(): string | null {
+  const r = resolveSelectedRootPath() || ''
+  const rel = formData.value.relativePath || ''
+  if (!r && !rel) return null
+  if (!r) return rel
+  if (!rel) return r
+  return joinPaths(r, rel, selectedDestinationPathKind())
+}
+
+// Path-length warning and validation for the destination path
 const editDestinationPath = computed(() => combinedBasePath() || '')
+const displayDestinationPath = computed(() =>
+  unmanagedExistingDestination.value
+    ? baselineAudiobook.value?.basePath || ''
+    : editDestinationPath.value,
+)
+const serverDestinationValidationError = ref<string | null>(null)
 const { pathLengthWarning: destinationPathWarning } = usePathLengthCheck(editDestinationPath)
+const destinationPathValidationError = computed(() => {
+  if (serverDestinationValidationError.value) return serverDestinationValidationError.value
+  if (unmanagedExistingDestination.value && !editingDestination.value) return null
+  if (unmanagedExistingDestination.value && !(formData.value.relativePath || '').trim()) {
+    return 'Enter a path relative to the selected configured root folder.'
+  }
+
+  const destination = editDestinationPath.value
+  const source = baselineAudiobook.value?.basePath || ''
+  const pathKind = selectedDestinationPathKind()
+  const relativePath = formData.value.relativePath || ''
+  if (relativePath && isRootedPath(relativePath, pathKind)) {
+    return 'Enter a path relative to the selected configured root folder.'
+  }
+
+  const basePathChanged = destinationBasePathChanged()
+
+  return validateLibraryDestinationPath(destination, {
+    pathKind,
+    caseSensitivity: selectedDestinationCaseSensitivity(),
+    sourcePath: basePathChanged ? source : null,
+    allowFileSystemRoot: false,
+  })
+})
+
+watch(editDestinationPath, () => {
+  serverDestinationValidationError.value = null
+})
 
 // Helper: derive relative path from full base and configured root (moved to module scope so it can be reused)
 function deriveRelativeFromBase(
   base: string | null | undefined,
   root: string | null | undefined,
+  caseSensitivity: PathCaseSensitivity = 'Unknown',
+  resolvedPathKind: PathKind = 'unknown',
 ): string {
-  if (!base) return ''
-  if (!root) return base
+  if (!base || !root) return ''
 
-  const normBase = toForward(base)
-  const normRoot = toForward(root)
+  const pathKind = resolvedPathKind === 'unknown' ? detectPathKind(root) : resolvedPathKind
+  const normBase = pathKind === 'windows' ? toForward(base) : base
+  const normRoot = pathKind === 'windows' ? toForward(root) : root
   const rootWithSlash = normRoot.endsWith('/') ? normRoot : normRoot + '/'
 
-  if (normalizeForCompare(normBase) === normalizeForCompare(normRoot)) return ''
-  if (normalizeForCompare(normBase).startsWith(normalizeForCompare(rootWithSlash))) {
+  if (
+    normalizeForCompare(normBase, pathKind, caseSensitivity) ===
+    normalizeForCompare(normRoot, pathKind, caseSensitivity)
+  )
+    return ''
+  if (
+    normalizeForCompare(normBase, pathKind, caseSensitivity).startsWith(
+      normalizeForCompare(rootWithSlash, pathKind, caseSensitivity),
+    )
+  ) {
     const rel = normBase.slice(rootWithSlash.length).replace(/^\/+/, '')
-    const useBackslash = root.includes('\\')
+    const useBackslash = pathKind === 'windows' && root.includes('\\')
     return useBackslash ? rel.replace(/\//g, '\\') : rel
   }
 
-  // Not under root: return full base so users can edit the absolute path
-  return base
+  // Paths outside configured roots are not valid destination authority.
+  return ''
 }
 
 function previewPath() {
@@ -1554,9 +1580,12 @@ function previewPath() {
     const chosenRoot = resolveSelectedRootPath() || rootPath.value
 
     if (formData.value.basePath && chosenRoot) {
-      formData.value.relativePath = deriveRelativeFromBase(formData.value.basePath, chosenRoot)
-    } else if (formData.value.basePath && !chosenRoot) {
-      formData.value.relativePath = formData.value.basePath || ''
+      formData.value.relativePath = deriveRelativeFromBase(
+        formData.value.basePath,
+        chosenRoot,
+        selectedDestinationCaseSensitivity(),
+        selectedDestinationPathKind(),
+      )
     } else {
       formData.value.relativePath = ''
     }
@@ -1584,49 +1613,28 @@ function startEditingDestination() {
 function finishEditingDestination() {
   try {
     const chosenRoot = resolveSelectedRootPath() || rootPath.value
-    const val = (formData.value.relativePath || '').trim()
+    const val = formData.value.relativePath || ''
 
     if (!chosenRoot) {
-      // No root available — nothing to do
-      editingDestination.value = false
-      return
-    }
-
-    // If user is editing a Custom path, the custom input defines the exact destination
-    // so clear the relative and exit early (do not normalize or append anything).
-    if (selectedRootId.value === 0) {
-      formData.value.relativePath = ''
-      editingDestination.value = false
-      return
-    }
-
-    // If the relative contains the root segments, attempt to strip them
-    try {
-      const stripped = stripRootPrefix(chosenRoot, val)
-      if (stripped != null) formData.value.relativePath = stripped
-    } catch (err) {
-      logger.debug('Failed to strip root from relative input:', err)
-    }
-
-    const isAbsolute = isAbsolutePath(formData.value.relativePath || val || '')
-
-    // If user typed an absolute path or included the chosen root prefix, derive a relative path
-    const relOrVal = formData.value.relativePath || val || ''
-    if (
-      isAbsolute ||
-      (relOrVal && normalizeForCompare(relOrVal).startsWith(normalizeForCompare(chosenRoot || '')))
-    ) {
-      formData.value.relativePath = deriveRelativeFromBase(
-        relOrVal || formData.value.basePath || '',
-        chosenRoot,
+      toast.error(
+        'Invalid destination',
+        'Configure a root folder or output path before changing the destination.',
       )
-    } else {
-      // Keep the value as-is (user provided a relative path)
-      formData.value.relativePath = relOrVal
+      return
     }
+
+    // The destination field is strictly relative to the selected configured root.
+    formData.value.relativePath = val
+
+    if (destinationPathValidationError.value) {
+      toast.error('Invalid destination', destinationPathValidationError.value)
+      return
+    }
+
+    unmanagedExistingDestination.value = false
+    editingDestination.value = false
   } catch (err) {
     console.debug('Failed to normalize relative path on Done:', err)
-  } finally {
     editingDestination.value = false
   }
 }
@@ -1634,12 +1642,57 @@ function finishEditingDestination() {
 async function handleSave() {
   const audiobook = baselineAudiobook.value
   if (!audiobook || !hasChanges.value) return
+  if (destinationPathValidationError.value) {
+    toast.error('Invalid destination', destinationPathValidationError.value)
+    return
+  }
+
   // If the base path (destination) changed, prompt the user with rich options
   const combined = combinedBasePath()
   const originalBase = audiobook.basePath || ''
+  const pathKind = selectedDestinationPathKind()
+  const basePathChanged = destinationBasePathChanged()
+  if (basePathChanged) {
+    await refreshMoveRecoveryState(audiobook.id)
+    const recovery = moveRecoveryState.value
+    if (recovery?.hasUnresolvedMove) {
+      toast.info(
+        recovery.canRetry ? 'Resume interrupted move' : 'Move needs attention',
+        recovery.canRetry
+          ? 'Resume the interrupted move before changing the destination.'
+          : 'Resolve the previous move before changing the destination.',
+      )
+      return
+    }
+  }
+
+  const activeMoveJob = basePathChanged
+    ? moveJobsStore.getActiveJobForAudiobook(audiobook.id)
+    : undefined
+  if (activeMoveJob) {
+    toast.info(
+      'Move already in progress',
+      `Move job ${activeMoveJob.jobId} is still ${activeMoveJob.status.toLowerCase()}. Wait for it to finish before changing the destination again.`,
+    )
+    return
+  }
+
+  const destinationValidationMessage = basePathChanged
+    ? validateLibraryDestinationPath(combined, {
+        pathKind,
+        caseSensitivity: selectedDestinationCaseSensitivity(),
+        sourcePath: originalBase,
+        allowFileSystemRoot: false,
+      })
+    : null
+  if (destinationValidationMessage) {
+    toast.error('Invalid destination', destinationValidationMessage)
+    return
+  }
+
   let userWantsMove = true
   let userWantsDeleteEmpty = true
-  if ((combined || '') !== originalBase) {
+  if (basePathChanged) {
     const choice = await askMoveConfirmation(originalBase || '', combined || '')
     if (!choice || !choice.proceed) return
     userWantsMove = Boolean(choice.moveFiles)
@@ -1657,91 +1710,124 @@ async function handleSave() {
       formData.value.seriesMemberships,
     )
     const primarySeries = derivePrimarySeriesMembership(normalizedSeriesMemberships)
+    const normalizedTitle = normalizeOptionalText(formData.value.title)
+    const normalizedSubtitle = normalizeOptionalText(formData.value.subtitle)
+    const normalizedAuthors = normalizeStringList(formData.value.authors)
+    const normalizedNarrators = normalizeStringList(formData.value.narrators)
+    const normalizedDescription = normalizeOptionalText(formData.value.description)
+    const normalizedPublisher = normalizeOptionalText(formData.value.publisher)
+    const normalizedLanguage = normalizeLanguageText(formData.value.language)
+    const normalizedPublishedDate = normalizeOptionalText(formData.value.publishedDate)
+    const normalizedPublishYear = normalizeOptionalText(formData.value.publishYear)
+    const normalizedEdition = normalizeOptionalText(formData.value.edition)
+    const normalizedGenres = normalizeStringList(formData.value.genres)
+    const normalizedImageUrl = normalizeOptionalText(formData.value.imageUrl)
+    const normalizedTags = [...formData.value.tags].sort()
+    const baselineTags = [...(audiobook.tags || [])].sort()
+    const normalizedRuntimeInput = normalizeNumericInput(formData.value.runtime)
+    const baselineRuntimeInput = normalizeNumericInput(audiobook.runtime?.toString())
 
-    // Build update payload with current form values
-    const updates: Partial<Audiobook> = {
-      monitored: formData.value.monitored,
-      title: normalizeOptionalText(formData.value.title),
-      subtitle: normalizeOptionalText(formData.value.subtitle),
-      authors: normalizeStringList(formData.value.authors),
-      narrators: normalizeStringList(formData.value.narrators),
-      description: normalizeOptionalText(formData.value.description),
-      publisher: normalizeOptionalText(formData.value.publisher),
-      language: normalizeLanguageText(formData.value.language),
-      publishedDate: normalizeOptionalText(formData.value.publishedDate),
-      publishYear: normalizeOptionalText(formData.value.publishYear),
-      edition: normalizeOptionalText(formData.value.edition),
-      series: primarySeries.series,
-      seriesNumber: primarySeries.seriesNumber,
-      seriesMemberships: normalizedSeriesMemberships.map((membership, index) => ({
+    const updates: AudiobookUpdateRequest = {}
+    if (formData.value.monitored !== Boolean(audiobook.monitored)) {
+      updates.monitored = formData.value.monitored
+    }
+
+    if (formData.value.qualityProfileId !== (audiobook.qualityProfileId ?? null)) {
+      updates.qualityProfileId =
+        formData.value.qualityProfileId === null ? -1 : formData.value.qualityProfileId
+    }
+
+    if (normalizedTitle !== normalizeOptionalText(audiobook.title)) {
+      updates.title = normalizedTitle
+    }
+
+    if (normalizedSubtitle !== normalizeOptionalText(audiobook.subtitle)) {
+      updates.subtitle = normalizedSubtitle
+    }
+
+    if (serializeStringList(normalizedAuthors) !== serializeStringList(audiobook.authors)) {
+      updates.authors = normalizedAuthors
+    }
+
+    if (serializeStringList(normalizedNarrators) !== serializeStringList(audiobook.narrators)) {
+      updates.narrators = normalizedNarrators
+    }
+
+    if (normalizedDescription !== normalizeOptionalText(audiobook.description)) {
+      updates.description = normalizedDescription
+    }
+
+    if (normalizedPublisher !== normalizeOptionalText(audiobook.publisher)) {
+      updates.publisher = normalizedPublisher
+    }
+
+    if (normalizedLanguage !== normalizeLanguageText(audiobook.language)) {
+      updates.language = normalizedLanguage
+    }
+
+    if (normalizedPublishedDate !== normalizeOptionalText(audiobook.publishedDate)) {
+      updates.publishedDate = normalizedPublishedDate
+    }
+
+    if (normalizedPublishYear !== normalizeOptionalText(audiobook.publishYear)) {
+      updates.publishYear = normalizedPublishYear
+    }
+
+    if (normalizedRuntimeInput !== '' && normalizedRuntimeInput !== baselineRuntimeInput) {
+      if (parsedRuntime !== undefined) {
+        updates.runtime = parsedRuntime
+      }
+    }
+
+    if (normalizedEdition !== normalizeOptionalText(audiobook.edition)) {
+      updates.edition = normalizedEdition
+    }
+
+    if (
+      serializeSeriesMembershipRows(formData.value.seriesMemberships) !==
+      serializeSeriesMembershipRows(
+        audiobook.seriesMemberships,
+        audiobook.series,
+        audiobook.seriesNumber,
+      )
+    ) {
+      updates.series = primarySeries.series
+      updates.seriesNumber = primarySeries.seriesNumber
+      updates.seriesMemberships = normalizedSeriesMemberships.map((membership, index) => ({
         id: membership.id,
         seriesName: membership.seriesName,
         seriesNumber: membership.seriesNumber || undefined,
         seriesAsin: membership.seriesAsin || undefined,
         isPrimary: Boolean(membership.isPrimary),
         sortOrder: index,
-      })),
-      genres: normalizeStringList(formData.value.genres),
-      imageUrl: normalizeOptionalText(formData.value.imageUrl),
-      tags: formData.value.tags,
-      abridged: formData.value.abridged,
-      explicit: formData.value.explicit,
+      }))
     }
 
-    if (parsedRuntime !== undefined) {
-      updates.runtime = parsedRuntime
+    if (serializeStringList(normalizedGenres) !== serializeStringList(audiobook.genres)) {
+      updates.genres = normalizedGenres
     }
 
-    // If user changed destination/base path, include the combined root+relative value in updates
-    if ((combined || '') !== (audiobook.basePath || '')) {
-      ;(updates as Partial<Audiobook>).basePath = combined ?? undefined
+    if (normalizedImageUrl !== normalizeOptionalText(audiobook.imageUrl)) {
+      updates.imageUrl = normalizedImageUrl
     }
 
-    // If qualityProfileId is null, send -1 to signal "use default"
-    // Otherwise send the actual ID
-    if (formData.value.qualityProfileId === null) {
-      ;(updates as { qualityProfileId?: number }).qualityProfileId = -1 // -1 means "use default profile"
-    } else {
-      updates.qualityProfileId = formData.value.qualityProfileId
+    if (JSON.stringify(normalizedTags) !== JSON.stringify(baselineTags)) {
+      updates.tags = formData.value.tags
     }
 
-    const hasNonIdentifierChanges =
-      formData.value.monitored !== Boolean(audiobook.monitored) ||
-      formData.value.qualityProfileId !== (audiobook.qualityProfileId ?? null) ||
-      normalizeOptionalText(formData.value.title) !== normalizeOptionalText(audiobook.title) ||
-      normalizeOptionalText(formData.value.subtitle) !==
-        normalizeOptionalText(audiobook.subtitle) ||
-      serializeStringList(formData.value.authors) !== serializeStringList(audiobook.authors) ||
-      serializeStringList(formData.value.narrators) !== serializeStringList(audiobook.narrators) ||
-      normalizeOptionalText(formData.value.description) !==
-        normalizeOptionalText(audiobook.description) ||
-      normalizeOptionalText(formData.value.publisher) !==
-        normalizeOptionalText(audiobook.publisher) ||
-      normalizeLanguageText(formData.value.language) !==
-        normalizeLanguageText(audiobook.language) ||
-      normalizeOptionalText(formData.value.publishedDate) !==
-        normalizeOptionalText(audiobook.publishedDate) ||
-      normalizeOptionalText(formData.value.publishYear) !==
-        normalizeOptionalText(audiobook.publishYear) ||
-      (normalizeNumericInput(formData.value.runtime) !== '' &&
-        normalizeNumericInput(formData.value.runtime) !==
-          normalizeNumericInput(audiobook.runtime?.toString())) ||
-      normalizeOptionalText(formData.value.edition) !== normalizeOptionalText(audiobook.edition) ||
-      serializeSeriesMembershipRows(formData.value.seriesMemberships) !==
-        serializeSeriesMembershipRows(
-          audiobook.seriesMemberships,
-          audiobook.series,
-          audiobook.seriesNumber,
-        ) ||
-      serializeStringList(formData.value.genres) !== serializeStringList(audiobook.genres) ||
-      normalizeOptionalText(formData.value.imageUrl) !==
-        normalizeOptionalText(audiobook.imageUrl) ||
-      JSON.stringify([...formData.value.tags].sort()) !==
-        JSON.stringify([...(audiobook.tags || [])].sort()) ||
-      formData.value.abridged !== Boolean(audiobook.abridged) ||
-      formData.value.explicit !== Boolean(audiobook.explicit) ||
-      (combined || '') !== (audiobook.basePath || '')
+    if (formData.value.abridged !== Boolean(audiobook.abridged)) {
+      updates.abridged = formData.value.abridged
+    }
 
+    if (formData.value.explicit !== Boolean(audiobook.explicit)) {
+      updates.explicit = formData.value.explicit
+    }
+
+    const hasNonIdentifierChanges = Object.keys(updates).length > 0
+
+    // Persist metadata before enqueueing an asynchronous physical move. The move worker
+    // reloads the current row for its narrow path rewrite, so this ordering prevents the
+    // worker from racing the edits submitted from this same dialog.
     if (hasNonIdentifierChanges) {
       await apiService.updateAudiobook(audiobook.id, updates)
     }
@@ -1754,58 +1840,79 @@ async function handleSave() {
       originalIdentifierRows.value = cloneIdentifierRows(formData.value.identifiers)
     }
 
-    // If base path changed, either update DB without moving or enqueue server-side move and show progress via SignalR
-    if ((combined || '') !== (audiobook.basePath || '')) {
-      if (!userWantsMove) {
-        // User requested a DB-only change
-        toast.info('Destination updated', 'Destination changed without moving files.')
-      } else {
-        try {
-          const res = await apiService.moveAudiobook(audiobook.id, combined ?? '', {
-            sourcePath: originalBase || undefined,
-            moveFiles: true,
-            deleteEmptySource: userWantsDeleteEmpty,
-          })
-          toast.info('Move queued', `Move job queued (${res.jobId}). Moving files in background.`)
+    if (basePathChanged) {
+      try {
+        const res = await apiService.moveAudiobook(audiobook.id, combined ?? '', {
+          sourcePath: originalBase || undefined,
+          moveFiles: userWantsMove,
+          deleteEmptySource: userWantsMove ? userWantsDeleteEmpty : false,
+        })
 
-          // Record initial move job state and subscribe to updates
-          moveJob.value = {
-            jobId: String(res.jobId),
-            status: 'Queued',
-            target: combined || '',
+        if (userWantsMove) {
+          const jobId = typeof res.jobId === 'string' ? res.jobId.trim() : ''
+          const resolvedTarget = typeof res.target === 'string' ? res.target : ''
+          if (!jobId || !resolvedTarget) {
+            throw new Error(
+              'The server did not return a durable move job ID and resolved destination.',
+            )
           }
-          moveUnsub.value = signalRService.onMoveJobUpdate((job) => {
-            if (!job || !job.jobId) return
-            if (String(job.jobId).toLowerCase() !== String(res.jobId).toLowerCase()) return
 
-            // Update local job state
-            moveJob.value = {
-              jobId: job.jobId,
-              status: job.status,
-              target: job.target,
-              error: job.error,
-            }
+          toast.info('Move queued', `Move job queued (${jobId}). Moving files in background.`)
 
-            if (job.status === 'Completed') {
-              toast.success('Move completed', `Files moved to ${job.target || combined}`)
-              try {
-                if (moveUnsub.value) moveUnsub.value()
-              } catch {}
-              moveUnsub.value = null
-            } else if (job.status === 'Failed') {
-              toast.error('Move failed', job.error || 'Move job failed. Check logs for details.')
-              try {
-                if (moveUnsub.value) moveUnsub.value()
-              } catch {}
-              moveUnsub.value = null
-            } else if (job.status === 'Processing') {
-              toast.info('Move in progress', `Moving files to ${job.target || combined}`)
-            }
+          moveJobsStore.trackQueuedJob({
+            jobId,
+            audiobookId: audiobook.id,
+            status: 'Queued',
+            target: resolvedTarget,
           })
-        } catch (moveErr) {
-          console.error('Failed to enqueue move job:', moveErr)
-          toast.error('Move failed', 'Failed to enqueue move job. Please try again.')
+        } else {
+          toast.info('Destination updated', 'Destination changed without moving files.')
         }
+      } catch (moveErr) {
+        console.error('Failed to update destination:', moveErr)
+        const validationError = getApiValidationError(moveErr, 'destinationPath')
+        if (validationError) {
+          serverDestinationValidationError.value = validationError.message
+          editingDestination.value = true
+          toast.error('Invalid destination', validationError.message)
+          return
+        }
+
+        const relatedChangesSaved = hasNonIdentifierChanges || identifiersChanged
+        const moveError = getApiValidationError(moveErr)
+        if (
+          moveError?.code === 'move_recovery_required' ||
+          moveError?.code === 'move_repair_required' ||
+          moveError?.code === 'move_recovery_ambiguous' ||
+          moveError?.code === 'move_already_active'
+        ) {
+          await refreshMoveRecoveryState(audiobook.id)
+          toast.error(
+            moveError.canRetry ? 'Resume interrupted move' : 'Move blocked',
+            relatedChangesSaved
+              ? `Your metadata changes were saved, but the move cannot start: ${moveError.message}`
+              : moveError.message,
+          )
+          return
+        }
+
+        if (moveError) {
+          toast.error(
+            'Move failed',
+            relatedChangesSaved
+              ? `Your metadata changes were saved, but the move was blocked: ${moveError.message}`
+              : moveError.message,
+          )
+          return
+        }
+
+        toast.error(
+          'Move failed',
+          relatedChangesSaved
+            ? 'Your metadata changes were saved, but the destination update could not be confirmed.'
+            : 'The destination update could not be confirmed. No move job was created.',
+        )
+        return
       }
     }
 
@@ -2006,16 +2113,6 @@ function setPrimarySeriesMembership(index: number) {
 }
 
 function close() {
-  // If there's an active move subscription, unsubscribe to avoid leaks
-  try {
-    if (moveUnsub.value) {
-      try {
-        moveUnsub.value()
-      } catch {}
-      moveUnsub.value = null
-    }
-  } catch {}
-  moveJob.value = null
   emit('close')
 }
 </script>
@@ -2023,17 +2120,27 @@ function close() {
 <style scoped>
 /* Modal layout is provided by shared `modals.css` - keep component-specific scrollbars and spacing tweaks */
 
-.path-length-warning {
+.path-length-warning,
+.path-validation-error {
   display: flex;
   align-items: center;
   gap: 6px;
   margin-top: 6px;
   padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+}
+
+.path-length-warning {
   background: rgba(255, 152, 0, 0.12);
   border: 1px solid rgba(255, 152, 0, 0.3);
-  border-radius: 6px;
   color: #ffb74d;
-  font-size: 0.82rem;
+}
+
+.path-validation-error {
+  background: rgba(244, 67, 54, 0.12);
+  border: 1px solid rgba(244, 67, 54, 0.3);
+  color: #ef9a9a;
 }
 
 /* Use global modal body padding variants instead of redefining .modal-body here */
@@ -2813,6 +2920,28 @@ function close() {
   padding: 0.5rem 0;
 }
 
+.move-recovery-notice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid rgba(255, 152, 0, 0.35);
+  border-radius: 6px;
+  background: rgba(255, 152, 0, 0.1);
+}
+
+.move-recovery-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.move-recovery-content code {
+  overflow-wrap: anywhere;
+}
+
 /* Read-only destination display */
 .destination-readonly {
   display: flex;
@@ -3005,115 +3134,5 @@ function close() {
     order: -1;
     width: 100%;
   }
-}
-
-/* Enhanced custom path section */
-.custom-path-section {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  padding: 0.75rem;
-  background-color: #252525;
-  border-radius: 6px;
-  border: 1px solid #404040;
-}
-
-.path-preview {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.preview-label {
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: #ccc;
-}
-
-.preview-path {
-  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-  font-size: 0.875rem;
-  color: #fff;
-  background-color: #1a1a1a;
-  padding: 0.5rem 0.75rem;
-  border-radius: 4px;
-  border: 1px solid #333;
-  word-break: break-all;
-}
-
-.validation-status {
-  display: flex;
-  align-items: center;
-}
-
-.status-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  border-radius: 6px;
-  font-size: 0.875rem;
-  font-weight: 500;
-}
-
-.status-badge.valid {
-  background: rgba(46, 204, 113, 0.15);
-  color: #2ecc71;
-  border: 1px solid rgba(46, 204, 113, 0.3);
-}
-
-.status-badge.invalid {
-  background: rgba(231, 76, 60, 0.15);
-  color: #e74c3c;
-  border: 1px solid rgba(231, 76, 60, 0.3);
-}
-
-.status-text {
-  font-weight: 500;
-}
-
-.path-hint {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  color: #888;
-  font-size: 0.875rem;
-  padding: 0.5rem 0.75rem;
-  background-color: rgba(255, 255, 255, 0.03);
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.path-hint svg {
-  color: var(--brand-500);
-  flex-shrink: 0;
-}
-
-.muted-note {
-  color: #999;
-  font-size: 0.95rem;
-}
-
-.destination-actions {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.custom-path-row {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.custom-path {
-  flex: 1;
-}
-
-.custom-input {
-  min-width: 120px;
-  flex: 1;
-  width: 100%;
-  min-width: 0;
 }
 </style>

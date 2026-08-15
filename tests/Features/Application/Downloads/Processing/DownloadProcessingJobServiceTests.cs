@@ -214,6 +214,7 @@ namespace Listenarr.Tests.Features.Application.Downloads.Processing
             var metadataServiceMock = new MetadataServiceMock();
             _services.AddSingleton<IMetadataService>(metadataServiceMock);
             Init();
+            await AddAuthorizedRootAsync(FileService.GetTempPath());
 
             var outputDirectory = FileService.GetTempDirectory("library");
             var existingFile = await FileService.GetFileAsync(outputDirectory, "oldfile1.mp3");
@@ -289,6 +290,7 @@ namespace Listenarr.Tests.Features.Application.Downloads.Processing
             var downloadClientGatewayMock = new DownloadClientGatewayMock();
             _services.AddSingleton<IDownloadClientGateway>(downloadClientGatewayMock);
             Init();
+            await AddAuthorizedRootAsync(FileService.GetTempPath());
 
             var outputDirectory = FileService.GetTempDirectory("library");
 

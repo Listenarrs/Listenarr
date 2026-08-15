@@ -17,6 +17,7 @@
  */
 
 using Listenarr.Api.Startup;
+using Listenarr.Tests.Common;
 
 namespace Listenarr.Tests.Features.Api.Startup;
 
@@ -94,7 +95,7 @@ public sealed class ListenarrBuilderFactoryTests
             Times.Never);
     }
 
-    [Fact]
+    [DirectoryLinkFact]
     public void EnsureExternalConfiguration_BlocksSymlinkedConfigDirectoryEscape()
     {
         var contentRoot = CreateTemporaryDirectory();
@@ -116,13 +117,13 @@ public sealed class ListenarrBuilderFactoryTests
                 or UnauthorizedAccessException
                 or PlatformNotSupportedException)
             {
-                return;
+                throw new Xunit.Sdk.XunitException(
+                    $"This native filesystem regression requires symbolic-link support: {exception.Message}");
             }
 
-            if (!Directory.Exists(linkedAppSettings))
-            {
-                return;
-            }
+            Assert.True(
+                Directory.Exists(linkedAppSettings),
+                "The symbolic-link directory must be visible before the escape check runs.");
 
             ListenarrBuilderFactory.EnsureExternalConfiguration(contentRoot, new LocalFileSystem());
 

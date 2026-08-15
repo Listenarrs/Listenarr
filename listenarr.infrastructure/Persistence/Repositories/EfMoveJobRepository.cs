@@ -33,7 +33,7 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             return await _db.MoveJobs.FindAsync(new object[] { id }, ct);
         }
 
-        public async Task<List<MoveJob>> GetByStatusAsync(IEnumerable<string> statuses, CancellationToken ct = default)
+        public async Task<List<MoveJob>> GetByStatusAsync(IEnumerable<MoveJobStatus> statuses, CancellationToken ct = default)
         {
             return await _db.MoveJobs
                 .AsNoTracking()

@@ -7,6 +7,7 @@
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  */
+using Listenarr.Domain.Common;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Features.Library;
@@ -14,6 +15,7 @@ namespace Listenarr.Api.Features.Library;
 public sealed class LibraryPreviewPathWorkflow(
     IConfigurationService configurationService,
     IFileNamingService fileNamingService,
+    IFileSystemSemanticsResolver semanticsResolver,
     ILogger<LibraryPreviewPathWorkflow> logger)
 {
     public async Task<IActionResult> PreviewAsync(LibraryController.PreviewPathRequest request)
@@ -21,7 +23,8 @@ public sealed class LibraryPreviewPathWorkflow(
         try
         {
             var settings = await configurationService.GetApplicationSettingsAsync();
-            var root = !string.IsNullOrEmpty(request.DestinationRoot)
+            var explicitRoot = !string.IsNullOrEmpty(request.DestinationRoot);
+            var root = explicitRoot
                 ? request.DestinationRoot
                 : settings.OutputPath;
             var audiobook = request.Metadata.ToAudiobook();
@@ -41,11 +44,31 @@ public sealed class LibraryPreviewPathWorkflow(
                 namingPattern,
                 fileNamingService);
             var relativePath = fullPath;
-            if (!string.IsNullOrEmpty(root) &&
-                fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+            if (!string.IsNullOrEmpty(root))
             {
-                relativePath = fullPath[root.Length..]
-                    .TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                var semanticsRoot = root;
+                if (!explicitRoot
+                    && !FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                        root,
+                        out semanticsRoot,
+                        out _))
+                {
+                    semanticsRoot = null;
+                }
+
+                if (!string.IsNullOrWhiteSpace(semanticsRoot))
+                {
+                    var resolution = await semanticsResolver.ResolveAsync(semanticsRoot);
+                    if (resolution.State == PathIdentityState.Valid
+                        && FileSystemPathIdentity.TryGetRelativePathWithinBase(
+                            semanticsRoot,
+                            fullPath,
+                            resolution.Semantics,
+                            out var resolvedRelativePath))
+                    {
+                        relativePath = resolvedRelativePath;
+                    }
+                }
             }
 
             return new OkObjectResult(new { fullPath, relativePath, root });

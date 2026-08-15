@@ -25,6 +25,23 @@ namespace Listenarr.Api.Dtos.ManualImport
         public string? DestinationPath { get; set; }
         public Audiobook? Audiobook { get; set; }
         public string? Error { get; set; }
+        public bool Skipped { get; set; }
+        public string? SkipReason { get; set; }
+
+        public static ManualImportResultDto SkippedResult(
+            string reason,
+            string? sourcePath,
+            Audiobook? audiobook = null)
+        {
+            return new ManualImportResultDto
+            {
+                Success = false,
+                Skipped = true,
+                SkipReason = reason,
+                SourcePath = sourcePath,
+                Audiobook = audiobook
+            };
+        }
 
         public static ManualImportResultDto FailureResult(string error, string? sourcePath)
         {

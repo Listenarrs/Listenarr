@@ -15,22 +15,75 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using Listenarr.Domain.Common;
 
 namespace Listenarr.Application.Audiobooks.Contracts.Repositories
 {
+    public sealed record AudiobookBasePathMutation(
+        int AudiobookId,
+        string? ExpectedCurrentBasePath,
+        string? ResultingBasePath);
+
+    public sealed record AudiobookFilePathReferenceSnapshot(
+        int AudiobookId,
+        string? Path);
+
     public interface IAudiobookFileRepository
     {
         Task<AudiobookFile?> GetByIdAsync(int id, CancellationToken ct = default);
         Task<List<AudiobookFile>> GetByAudiobookIdAsync(int audiobookId, CancellationToken ct = default);
         Task<List<AudiobookFile>> GetMissingMetadataAsync(int max, CancellationToken ct = default);
-        Task<AudiobookFile> AddAsync(AudiobookFile file, CancellationToken ct = default);
+        Task<AudiobookFileClaimResult> ClaimAsync(AudiobookFile file, CancellationToken ct = default);
+        Task<AudiobookFileClaimResult> ClaimWithBasePathAsync(
+            AudiobookFile file,
+            AudiobookBasePathMutation basePathMutation,
+            CancellationToken ct = default);
+        Task<bool> ApplyBasePathAsync(
+            AudiobookBasePathMutation basePathMutation,
+            CancellationToken ct = default);
+        Task<AudiobookFileOwnershipCheckResult> CheckOwnershipAsync(
+            int audiobookId,
+            int? fileId,
+            AudiobookFilePathIdentity identity,
+            CancellationToken ct = default);
         Task UpdateAsync(AudiobookFile file, CancellationToken ct = default);
+        Task<bool> ReplacePhysicalGenerationAsync(
+            int fileId,
+            int audiobookId,
+            string? expectedPath,
+            string? expectedPhysicalObjectIdentity,
+            AudiobookFile replacement,
+            CancellationToken ct = default);
+        Task<bool> ReplacePhysicalGenerationWithBasePathAsync(
+            int fileId,
+            int audiobookId,
+            string? expectedPath,
+            string? expectedPhysicalObjectIdentity,
+            AudiobookFile replacement,
+            AudiobookBasePathMutation basePathMutation,
+            CancellationToken ct = default);
+        Task<bool> DeletePhysicalGenerationAsync(
+            int fileId,
+            int audiobookId,
+            string? expectedPath,
+            string? expectedPhysicalObjectIdentity,
+            CancellationToken ct = default);
+        Task<bool> DeletePhysicalGenerationWithBasePathAsync(
+            int fileId,
+            int audiobookId,
+            string? expectedPath,
+            string? expectedPhysicalObjectIdentity,
+            AudiobookBasePathMutation basePathMutation,
+            CancellationToken ct = default);
         Task DeleteByAudiobookIdAsync(int audiobookId, CancellationToken ct = default);
         Task DeleteAsync(int id, CancellationToken ct = default);
-        Task<bool> ExistsAtPathAsync(int audiobookId, string path, CancellationToken ct = default);
-        Task<bool> IsPathUsedByOtherAsync(int audiobookId, string path, CancellationToken ct = default);
-        Task<List<string>> GetAllFilePathsAsync(CancellationToken ct = default);
+        Task<List<string>> GetAllFilePathsAsync(
+            FileSystemPathSemantics comparisonSemantics,
+            CancellationToken ct = default);
         Task<List<AudiobookFile>> GetAllAsync(CancellationToken ct = default);
+        Task<List<AudiobookFilePathReferenceSnapshot>> GetOtherPathReferenceSnapshotsAsync(
+            int audiobookId,
+            CancellationToken ct = default);
         Task<List<AudiobookFormatSummary>> GetFormatSummariesAsync(CancellationToken ct = default);
         Task<Dictionary<int, int>> GetCountsByAudiobookIdAsync(CancellationToken ct = default);
     }

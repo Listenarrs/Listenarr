@@ -1,191 +1,470 @@
-/*
- * Listenarr - Audiobook Management System
- * Copyright (C) 2024-2026 Listenarr Contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as published
- * by the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program. If not, see <https://www.gnu.org/licenses/>.
- */
+using Listenarr.Tests.Common;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace Listenarr.Tests.Features.Api.Services
+namespace Listenarr.Tests.Features.Api.Services;
+
+[Trait("Area", "FileSystem")]
+[Trait("Name", "FileMoverHardlinkTests")]
+[Trait("Category", "FileSystem")]
+public sealed class FileMoverHardlinkTests : BaseTests
 {
-    public class FileMoverHardlinkTests : IDisposable
+    [Fact]
+    public async Task PerformActionOn_HardlinkCopy_CreatesHardlinkOnSameVolume()
     {
-        private readonly string _root;
-        private readonly FileMover _mover;
+        var root = FileService.GetTempDirectory("markerless-hardlink");
+        var source = await FileService.GetFileAsync(root, "source.mp3", "audio content");
+        var destination = Path.Join(root, "destination.mp3");
+        var operationId = Guid.NewGuid();
 
-        public FileMoverHardlinkTests()
+        Assert.True(await CreateMover().PerformActionOn(
+            FileAction.HardlinkCopy,
+            source,
+            destination,
+            operationId));
+
+        Assert.True(File.Exists(source));
+        Assert.True(File.Exists(destination));
+        await File.WriteAllTextAsync(destination, "linked mutation");
+        Assert.Equal("linked mutation", await File.ReadAllTextAsync(source));
+        await AssertCompletedJournalAsync(operationId, FileAction.HardlinkCopy);
+        AssertNoLibraryArtifacts(root);
+    }
+
+    [Fact]
+    public async Task PerformActionOn_HardlinkCopy_MissingDestinationDirectoryFailsClosed()
+    {
+        var root = FileService.GetTempDirectory("markerless-hardlink-missing-parent");
+        var source = await FileService.GetFileAsync(root, "source.mp3", "audio content");
+        var destinationDirectory = Path.Join(root, "missing");
+        var destination = Path.Join(destinationDirectory, "destination.mp3");
+
+        Assert.False(await CreateMover().PerformActionOn(
+            FileAction.HardlinkCopy,
+            source,
+            destination,
+            Guid.NewGuid()));
+
+        Assert.False(Directory.Exists(destinationDirectory));
+        Assert.False(File.Exists(destination));
+        Assert.Equal("audio content", await File.ReadAllTextAsync(source));
+        AssertNoLibraryArtifacts(root);
+    }
+
+    [Theory]
+    [InlineData(FileAction.Copy)]
+    [InlineData(FileAction.HardlinkCopy)]
+    public async Task PerformActionOn_DifferentExistingDestinationFailsClosed(
+        FileAction action)
+    {
+        var root = FileService.GetTempDirectory("markerless-existing-destination");
+        var source = await FileService.GetFileAsync(root, "source.mp3", "new content");
+        var destination = await FileService.GetFileAsync(root, "destination.mp3", "old content");
+
+        Assert.False(await CreateMover().PerformActionOn(
+            action,
+            source,
+            destination,
+            Guid.NewGuid()));
+
+        Assert.Equal("new content", await File.ReadAllTextAsync(source));
+        Assert.Equal("old content", await File.ReadAllTextAsync(destination));
+        AssertNoLibraryArtifacts(root);
+    }
+
+    [Fact]
+    public async Task PerformActionOn_HardlinkCopy_FallsBackToByteCopyWhenHardlinkFails()
+    {
+        var root = FileService.GetTempDirectory("markerless-hardlink-fallback");
+        var source = await FileService.GetFileAsync(root, "source.mp3", "content");
+        var destination = Path.Join(root, "destination.mp3");
+        var operationId = Guid.NewGuid();
+        var mover = CreateMover(() =>
+            Task.FromException(new IOException("forced hardlink failure")));
+
+        Assert.True(await mover.PerformActionOn(
+            FileAction.HardlinkCopy,
+            source,
+            destination,
+            operationId));
+
+        Assert.Equal("content", await File.ReadAllTextAsync(destination));
+        await File.WriteAllTextAsync(destination, "destination changed");
+        Assert.Equal("content", await File.ReadAllTextAsync(source));
+        await AssertCompletedJournalAsync(operationId, FileAction.HardlinkCopy);
+        AssertNoLibraryArtifacts(root);
+    }
+
+    [Fact]
+    public async Task PerformActionOn_HardlinkCrashBeforeTargetState_ResumesFromPhysicalAlias()
+    {
+        var root = FileService.GetTempDirectory("markerless-hardlink-prestate-crash");
+        var source = await FileService.GetFileAsync(root, "source.mp3", "content");
+        var destination = Path.Join(root, "destination.mp3");
+        var operationId = Guid.NewGuid();
+        var interrupted = CreateMover(
+            afterTargetCreatedBeforeState: () =>
+                Task.FromException(new IOException("crash before target state")));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            interrupted.PerformActionOn(
+                FileAction.HardlinkCopy,
+                source,
+                destination,
+                operationId));
+        Assert.True(File.Exists(destination));
+        await AssertJournalStateAsync(
+            operationId,
+            FileMutationJournalState.Planned);
+
+        Assert.True(await CreateMover().PerformActionOn(
+            FileAction.HardlinkCopy,
+            source,
+            destination,
+            operationId));
+        await AssertCompletedJournalAsync(operationId, FileAction.HardlinkCopy);
+        AssertNoLibraryArtifacts(root);
+    }
+
+    [Fact]
+    public async Task PerformActionOn_CopyCrashBeforeTargetState_FailsClosedOnRetry()
+    {
+        var root = FileService.GetTempDirectory("markerless-copy-prestate-crash");
+        var source = await FileService.GetFileAsync(root, "source.mp3", "content");
+        var destination = Path.Join(root, "destination.mp3");
+        var operationId = Guid.NewGuid();
+        var interrupted = CreateMover(
+            afterTargetCreatedBeforeState: () =>
+                Task.FromException(new IOException("crash before target state")));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            interrupted.PerformActionOn(
+                FileAction.Copy,
+                source,
+                destination,
+                operationId));
+        Assert.True(File.Exists(destination));
+        Assert.Equal(0, new FileInfo(destination).Length);
+        await AssertJournalStateAsync(
+            operationId,
+            FileMutationJournalState.Planned);
+
+        Assert.False(await CreateMover().PerformActionOn(
+            FileAction.Copy,
+            source,
+            destination,
+            operationId));
+        await AssertJournalStateAsync(
+            operationId,
+            FileMutationJournalState.NeedsAttention);
+        Assert.Equal("content", await File.ReadAllTextAsync(source));
+        Assert.Equal(0, new FileInfo(destination).Length);
+        AssertNoLibraryArtifacts(root);
+    }
+
+    [Fact]
+    public async Task PerformActionOn_CopyCrashAfterTargetState_ResumesAndCompletes()
+    {
+        var root = FileService.GetTempDirectory("markerless-copy-target-state-crash");
+        var source = await FileService.GetFileAsync(root, "source.mp3", "content");
+        var destination = Path.Join(root, "destination.mp3");
+        var operationId = Guid.NewGuid();
+        var interrupted = CreateMover(
+            afterTargetState: () =>
+                Task.FromException(new IOException("crash after target state")));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            interrupted.PerformActionOn(
+                FileAction.Copy,
+                source,
+                destination,
+                operationId));
+        await AssertJournalStateAsync(
+            operationId,
+            FileMutationJournalState.TargetIdentityPersisted);
+
+        Assert.True(await CreateMover().PerformActionOn(
+            FileAction.Copy,
+            source,
+            destination,
+            operationId));
+        Assert.Equal("content", await File.ReadAllTextAsync(destination));
+        await AssertCompletedJournalAsync(operationId, FileAction.Copy);
+        AssertNoLibraryArtifacts(root);
+    }
+
+    [Fact]
+    public async Task PerformActionOn_CopyCrashAfterBytesBeforeVerifiedState_ResumesAndCompletes()
+    {
+        var root = FileService.GetTempDirectory("markerless-copy-written-crash");
+        var source = await FileService.GetFileAsync(root, "source.mp3", "content");
+        var destination = Path.Join(root, "destination.mp3");
+        var operationId = Guid.NewGuid();
+        var interrupted = CreateMover(
+            afterTargetWrittenBeforeVerified: () =>
+                Task.FromException(new IOException("crash after target write")));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            interrupted.PerformActionOn(
+                FileAction.Copy,
+                source,
+                destination,
+                operationId));
+        Assert.Equal("content", await File.ReadAllTextAsync(destination));
+        await AssertJournalStateAsync(
+            operationId,
+            FileMutationJournalState.TargetIdentityPersisted);
+
+        Assert.True(await CreateMover().PerformActionOn(
+            FileAction.Copy,
+            source,
+            destination,
+            operationId));
+        await AssertCompletedJournalAsync(operationId, FileAction.Copy);
+        AssertNoLibraryArtifacts(root);
+    }
+
+    [Theory]
+    [InlineData(FileAction.Copy)]
+    [InlineData(FileAction.HardlinkCopy)]
+    public async Task PerformActionOn_MissingSourceFailsClosed(FileAction action)
+    {
+        var root = FileService.GetTempDirectory("markerless-missing-source");
+        var source = Path.Join(root, "missing.mp3");
+        var destination = Path.Join(root, "destination.mp3");
+
+        Assert.False(await CreateMover().PerformActionOn(
+            action,
+            source,
+            destination,
+            Guid.NewGuid()));
+
+        Assert.False(File.Exists(destination));
+        AssertNoLibraryArtifacts(root);
+    }
+
+    [Fact]
+    public async Task PerformActionOn_CopyCreatesIndependentCopy()
+    {
+        var root = FileService.GetTempDirectory("markerless-copy");
+        var source = await FileService.GetFileAsync(root, "source.mp3", "original content");
+        var destination = Path.Join(root, "destination.mp3");
+        var operationId = Guid.NewGuid();
+
+        Assert.True(await CreateMover().PerformActionOn(
+            FileAction.Copy,
+            source,
+            destination,
+            operationId));
+
+        await File.WriteAllTextAsync(destination, "modified content");
+        Assert.Equal("original content", await File.ReadAllTextAsync(source));
+        await AssertCompletedJournalAsync(operationId, FileAction.Copy);
+        AssertNoLibraryArtifacts(root);
+    }
+
+    [Fact]
+    public async Task PerformActionOn_CompletedCopyWithRecreatedSourceFailsClosed()
+    {
+        var root = FileService.GetTempDirectory("markerless-copy-recreated-source");
+        var source = await FileService.GetFileAsync(root, "source.mp3", "original content");
+        var destination = Path.Join(root, "destination.mp3");
+        var operationId = Guid.NewGuid();
+
+        Assert.True(await CreateMover().PerformActionOn(
+            FileAction.Copy,
+            source,
+            destination,
+            operationId));
+        File.Delete(source);
+        await File.WriteAllTextAsync(source, "replacement content");
+
+        Assert.False(await CreateMover().PerformActionOn(
+            FileAction.Copy,
+            source,
+            destination,
+            operationId));
+
+        Assert.Equal("replacement content", await File.ReadAllTextAsync(source));
+        Assert.Equal("original content", await File.ReadAllTextAsync(destination));
+        await AssertJournalStateAsync(
+            operationId,
+            FileMutationJournalState.NeedsAttention);
+        AssertNoLibraryArtifacts(root);
+    }
+
+    [Fact]
+    public async Task PerformActionOn_CompletedHardlinkWithRecreatedSourceFailsClosed()
+    {
+        var root = FileService.GetTempDirectory("markerless-hardlink-recreated-source");
+        var source = await FileService.GetFileAsync(root, "source.mp3", "original content");
+        var destination = Path.Join(root, "destination.mp3");
+        var operationId = Guid.NewGuid();
+
+        Assert.True(await CreateMover().PerformActionOn(
+            FileAction.HardlinkCopy,
+            source,
+            destination,
+            operationId));
+        File.Delete(source);
+        await File.WriteAllTextAsync(source, "replacement content");
+
+        Assert.False(await CreateMover().PerformActionOn(
+            FileAction.HardlinkCopy,
+            source,
+            destination,
+            operationId));
+
+        Assert.Equal("replacement content", await File.ReadAllTextAsync(source));
+        Assert.Equal("original content", await File.ReadAllTextAsync(destination));
+        await AssertJournalStateAsync(
+            operationId,
+            FileMutationJournalState.NeedsAttention);
+        AssertNoLibraryArtifacts(root);
+    }
+
+    [Fact]
+    public async Task PerformActionOn_CompletedCopyWithChangedSourceBytesFailsClosed()
+    {
+        var root = FileService.GetTempDirectory("markerless-copy-changed-source");
+        var source = await FileService.GetFileAsync(root, "source.mp3", "original content");
+        var destination = Path.Join(root, "destination.mp3");
+        var operationId = Guid.NewGuid();
+
+        Assert.True(await CreateMover().PerformActionOn(
+            FileAction.Copy,
+            source,
+            destination,
+            operationId));
+        await File.WriteAllTextAsync(source, "changed source bytes");
+
+        Assert.False(await CreateMover().PerformActionOn(
+            FileAction.Copy,
+            source,
+            destination,
+            operationId));
+
+        Assert.Equal("changed source bytes", await File.ReadAllTextAsync(source));
+        Assert.Equal("original content", await File.ReadAllTextAsync(destination));
+        await AssertJournalStateAsync(
+            operationId,
+            FileMutationJournalState.NeedsAttention);
+        AssertNoLibraryArtifacts(root);
+    }
+
+    [Theory]
+    [InlineData(FileAction.Copy)]
+    [InlineData(FileAction.HardlinkCopy)]
+    public async Task PerformActionOn_CompletedPublicationWithReplacedTargetFailsClosed(
+        FileAction action)
+    {
+        var root = FileService.GetTempDirectory("markerless-replaced-target");
+        var source = await FileService.GetFileAsync(root, "source.mp3", "original content");
+        var destination = Path.Join(root, "destination.mp3");
+        var operationId = Guid.NewGuid();
+
+        Assert.True(await CreateMover().PerformActionOn(
+            action,
+            source,
+            destination,
+            operationId));
+        File.Delete(destination);
+        await File.WriteAllTextAsync(destination, "replacement target");
+
+        Assert.False(await CreateMover().PerformActionOn(
+            action,
+            source,
+            destination,
+            operationId));
+
+        Assert.Equal("original content", await File.ReadAllTextAsync(source));
+        Assert.Equal("replacement target", await File.ReadAllTextAsync(destination));
+        await AssertJournalStateAsync(
+            operationId,
+            FileMutationJournalState.NeedsAttention);
+        AssertNoLibraryArtifacts(root);
+    }
+
+    [Theory]
+    [InlineData(FileAction.Copy)]
+    [InlineData(FileAction.HardlinkCopy)]
+    public async Task PerformActionOn_SameContentDestinationIsIdempotent(
+        FileAction action)
+    {
+        var root = FileService.GetTempDirectory("markerless-idempotent-copy");
+        var source = await FileService.GetFileAsync(root, "source.mp3", "same content");
+        var destination = await FileService.GetFileAsync(root, "destination.mp3", "same content");
+        var operationId = Guid.NewGuid();
+
+        Assert.True(await CreateMover().PerformActionOn(
+            action,
+            source,
+            destination,
+            operationId));
+
+        Assert.Equal("same content", await File.ReadAllTextAsync(source));
+        Assert.Equal("same content", await File.ReadAllTextAsync(destination));
+        await AssertCompletedJournalAsync(operationId, action);
+        AssertNoLibraryArtifacts(root);
+    }
+
+    private FileMover CreateMover(
+        Func<Task>? beforeHardlinkCreation = null,
+        Func<Task>? afterTargetCreatedBeforeState = null,
+        Func<Task>? afterTargetState = null,
+        Func<Task>? afterTargetWrittenBeforeVerified = null)
+    {
+        var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+        return new FileMover(
+            new NullLogger<FileMover>(),
+            dbContextFactory: factory,
+            timeProvider: TimeProvider.System)
         {
-            _root = Path.Join(Path.GetTempPath(), "listenarr_hardlink_test_" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(_root);
-            _mover = new FileMover(new NullLogger<FileMover>());
-        }
+            FileMoveLockDirectoryForTest = FileService.GetTempDirectory(
+                "markerless-copy-locks"),
+            BeforePinnedHardlinkCreationForTestAsync = beforeHardlinkCreation,
+            AfterMarkerlessRegistrationTargetCreatedBeforeStateForTestAsync =
+                afterTargetCreatedBeforeState,
+            AfterMarkerlessRegistrationTargetStateForTestAsync = afterTargetState,
+            AfterMarkerlessRegistrationTargetWrittenBeforeVerifiedStateForTestAsync =
+                afterTargetWrittenBeforeVerified
+        };
+    }
 
-        public void Dispose()
-        {
-            try { Directory.Delete(_root, true); } catch (IOException ex) { _ = ex; } catch (UnauthorizedAccessException ex) { _ = ex; }
-        }
+    private async Task AssertCompletedJournalAsync(
+        Guid operationId,
+        FileAction action)
+    {
+        var journal = await GetJournalAsync(operationId);
+        Assert.Equal(FileMutationProtocol.MarkerlessDatabaseState, journal.ProtocolVersion);
+        Assert.Equal(action, journal.Action);
+        Assert.Equal(FileMutationJournalState.Completed, journal.State);
+        Assert.Null(journal.AudiobookId);
+    }
 
-        [Fact]
-        public async Task HardlinkFileAsync_CreatesHardlink_WhenBothFilesOnSameVolume()
-        {
-            // Arrange
-            var sourceFile = Path.Join(_root, "source.mp3");
-            var destFile = Path.Join(_root, "dest.mp3");
-            await File.WriteAllTextAsync(sourceFile, "audio content");
+    private async Task AssertJournalStateAsync(
+        Guid operationId,
+        FileMutationJournalState expectedState)
+    {
+        var journal = await GetJournalAsync(operationId);
+        Assert.Equal(expectedState, journal.State);
+    }
 
-            // Act
-            var result = await _mover.HardlinkFileAsync(sourceFile, destFile);
+    private async Task<FileMutationJournal> GetJournalAsync(Guid operationId)
+    {
+        var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        return await db.FileMutationJournals
+            .AsNoTracking()
+            .SingleAsync(candidate => candidate.OperationId == operationId);
+    }
 
-            // Assert
-            Assert.True(result, "HardlinkFileAsync should succeed");
-            Assert.True(File.Exists(sourceFile), "Source file should still exist");
-            Assert.True(File.Exists(destFile), "Destination file should exist");
-
-            // Both files should have same content
-            var sourceContent = await File.ReadAllTextAsync(sourceFile);
-            var destContent = await File.ReadAllTextAsync(destFile);
-            Assert.Equal(sourceContent, destContent);
-        }
-
-        [Fact]
-        public async Task HardlinkFileAsync_CreatesDestinationDirectory_WhenMissing()
-        {
-            // Arrange
-            var sourceFile = Path.Join(_root, "source.mp3");
-            var destDir = Path.Join(_root, "subdir");
-            var destFile = Path.Join(destDir, "dest.mp3");
-            await File.WriteAllTextAsync(sourceFile, "audio content");
-
-            Assert.False(Directory.Exists(destDir), "Destination directory should not exist initially");
-
-            // Act
-            var result = await _mover.HardlinkFileAsync(sourceFile, destFile);
-
-            // Assert
-            Assert.True(result, "HardlinkFileAsync should succeed");
-            Assert.True(Directory.Exists(destDir), "Destination directory should be created");
-            Assert.True(File.Exists(destFile), "Destination file should exist");
-        }
-
-        [Fact]
-        public async Task HardlinkFileAsync_OverwritesDestination_WhenDestinationExists()
-        {
-            // Arrange
-            var sourceFile = Path.Join(_root, "source.mp3");
-            var destFile = Path.Join(_root, "dest.mp3");
-            await File.WriteAllTextAsync(sourceFile, "new content");
-            await File.WriteAllTextAsync(destFile, "old content");
-
-            // Act
-            var result = await _mover.HardlinkFileAsync(sourceFile, destFile);
-
-            // Assert
-            Assert.True(result, "HardlinkFileAsync should succeed");
-            var destContent = await File.ReadAllTextAsync(destFile);
-            Assert.Equal("new content", destContent);
-        }
-
-        [Fact]
-        public async Task HardlinkFileAsync_FallbacksToCopy_WhenHardlinkFails()
-        {
-            // Arrange
-            var sourceFile = Path.Join(_root, "source.mp3");
-            await File.WriteAllTextAsync(sourceFile, "content");
-
-            // Create a path that would cause hardlink to fail (different volume simulation via invalid path)
-            // On some systems, hardlink may fail for various reasons - we want to test fallback behavior
-            var destFile = Path.Join(_root, "dest.mp3");
-
-            // Act - even if hardlink fails internally, the method should fallback to copy
-            var result = await _mover.HardlinkFileAsync(sourceFile, destFile);
-
-            // Assert - should succeed via fallback
-            Assert.True(result, "HardlinkFileAsync should succeed via copy fallback");
-            Assert.True(File.Exists(destFile), "Destination file should exist");
-        }
-
-        [Fact]
-        public async Task HardlinkFileAsync_ReturnsFalse_WhenSourceDoesNotExist()
-        {
-            // Arrange
-            var sourceFile = Path.Join(_root, "nonexistent.mp3");
-            var destFile = Path.Join(_root, "dest.mp3");
-
-            // Act
-            var result = await _mover.HardlinkFileAsync(sourceFile, destFile);
-
-            // Assert
-            // Method gracefully returns false when source doesn't exist (exception is caught internally)
-            Assert.False(result, "HardlinkFileAsync should return false when source doesn't exist");
-            Assert.False(File.Exists(destFile), "Destination file should not be created");
-        }
-
-        [Fact]
-        public async Task CopyFileAsync_CreatesIndependentCopy()
-        {
-            // Arrange
-            var sourceFile = Path.Join(_root, "source.mp3");
-            var destFile = Path.Join(_root, "dest.mp3");
-            await File.WriteAllTextAsync(sourceFile, "original content");
-
-            // Act
-            var result = await _mover.CopyFileAsync(sourceFile, destFile);
-
-            // Assert
-            Assert.True(result, "CopyFileAsync should succeed");
-            Assert.True(File.Exists(sourceFile), "Source should still exist");
-            Assert.True(File.Exists(destFile), "Destination should exist");
-
-            // Modify destination to verify independence
-            await File.WriteAllTextAsync(destFile, "modified content");
-            var sourceContent = await File.ReadAllTextAsync(sourceFile);
-            Assert.Equal("original content", sourceContent);
-        }
-
-        [Fact]
-        public async Task MoveFileAsync_RemovesSource_AfterMove()
-        {
-            // Arrange
-            var sourceFile = Path.Join(_root, "source.mp3");
-            var destFile = Path.Join(_root, "dest.mp3");
-            await File.WriteAllTextAsync(sourceFile, "content");
-
-            // Act
-            var result = await _mover.MoveFileAsync(sourceFile, destFile);
-
-            // Assert
-            Assert.True(result, "MoveFileAsync should succeed");
-            Assert.False(File.Exists(sourceFile), "Source should be removed");
-            Assert.True(File.Exists(destFile), "Destination should exist");
-        }
-
-        [Fact]
-        public async Task HardlinkFileAsync_PreservesFileSize()
-        {
-            // Arrange
-            var sourceFile = Path.Join(_root, "source.mp3");
-            var largeContent = new string('x', 10000);
-            await File.WriteAllTextAsync(sourceFile, largeContent);
-            var sourceInfo = new FileInfo(sourceFile);
-
-            // Act
-            var destFile = Path.Join(_root, "dest.mp3");
-            await _mover.HardlinkFileAsync(sourceFile, destFile);
-
-            // Assert
-            var destInfo = new FileInfo(destFile);
-            Assert.Equal(sourceInfo.Length, destInfo.Length);
-        }
+    private static void AssertNoLibraryArtifacts(string root)
+    {
+        Assert.DoesNotContain(
+            Directory.EnumerateFileSystemEntries(root, "*", SearchOption.AllDirectories),
+            path => Path.GetFileName(path).Contains(
+                ".listenarr-",
+                StringComparison.Ordinal));
     }
 }

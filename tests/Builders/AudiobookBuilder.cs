@@ -2,13 +2,11 @@ namespace Listenarr.Tests.Builders
 {
     public class AudiobookBuilder
     {
-        private static int IdCounter = 0;
-
         private readonly Audiobook _audiobook = new();
 
         public AudiobookBuilder()
         {
-            _audiobook.Id = ++IdCounter;
+            _audiobook.Id = TestEntityIdGenerator.Next();
             _audiobook.Authors = [];
             _audiobook.Genres = [];
             _audiobook.AuthorAsins = [];
@@ -16,7 +14,7 @@ namespace Listenarr.Tests.Builders
 
         public AudiobookBuilder WithId(int value)
         {
-            _audiobook.Id = value;
+            _audiobook.Id = TestEntityIdGenerator.Explicit(value);
             return this;
         }
 

@@ -15,6 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using Listenarr.Domain.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -28,10 +29,32 @@ namespace Listenarr.Infrastructure.Persistence.Configurations
 
             builder.HasIndex(r => r.Path).IsUnique();
             builder.HasIndex(r => r.Name);
+            builder.HasIndex(r => r.IsDefault)
+                .IsUnique()
+                .HasDatabaseName("IX_RootFolders_SingleDefault")
+                .HasFilter("\"IsDefault\" = 1");
 
             builder.Property(r => r.Name).HasMaxLength(200).IsRequired();
             builder.Property(r => r.Path).HasMaxLength(1000).IsRequired();
             builder.Property(r => r.IsDefault).HasDefaultValue(false);
+            builder.Property(r => r.CaseSensitivityMode)
+                .HasConversion<string>()
+                .HasMaxLength(16)
+                .HasDefaultValue(FileSystemCaseSensitivityMode.Auto);
+            builder.Property(r => r.ResolvedCaseSensitivity)
+                .HasConversion<string>()
+                .HasMaxLength(16)
+                .HasDefaultValue(FileSystemCaseSensitivity.Unknown);
+            builder.Property(r => r.PathIdentityState)
+                .HasConversion<string>()
+                .HasMaxLength(16)
+                .HasDefaultValue(PathIdentityState.Unavailable)
+                .HasSentinel(PathIdentityState.Unavailable);
+            builder.Property(r => r.DirectoryObjectIdentity).HasMaxLength(256);
+            builder.Property(r => r.DirectoryObjectIdentityUnavailableReason).HasMaxLength(1024);
+            builder.HasIndex(r => r.PathIdentityKey)
+                .IsUnique()
+                .HasFilter("\"PathIdentityKey\" IS NOT NULL");
 
             builder.Property(r => r.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
         }

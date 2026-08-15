@@ -172,7 +172,17 @@
             v-if="!finished"
             type="button"
             class="btn btn-primary"
-            :disabled="loading || executing || selectedCount === 0"
+            :disabled="
+              loading ||
+              executing ||
+              selectedCount === 0 ||
+              !filesystemReadinessStore.filesystemReady
+            "
+            :title="
+              !filesystemReadinessStore.filesystemReady
+                ? 'Available after library filesystem initialization completes'
+                : undefined
+            "
             @click="confirm"
           >
             <PhSpinner v-if="executing" class="ph-spin" :size="16" />
@@ -203,6 +213,7 @@ import {
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '@/components/feedback'
 import RenamePathDiff from './RenamePathDiff.vue'
 import { apiService } from '@/services/api'
+import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import type { RenameOperation, RenamePreview, RenameResult } from '@/types'
 
 const props = withDefaults(
@@ -221,6 +232,7 @@ const emit = defineEmits<{
   done: []
 }>()
 
+const filesystemReadinessStore = useFilesystemReadinessStore()
 const loading = ref(false)
 const loaded = ref(false)
 const executing = ref(false)
@@ -271,6 +283,8 @@ async function confirm() {
     .filter((preview) => selected.value.has(preview.audiobookId))
     .map((preview) => ({
       audiobookId: preview.audiobookId,
+      currentFolderPath: preview.currentFolderPath,
+      currentFolderSemantics: preview.currentFolderSemantics,
       newFolderPath: preview.folderChanged ? preview.newFolderPath : undefined,
       fileRenames: preview.fileRenames
         .filter((entry) => entry.changed)

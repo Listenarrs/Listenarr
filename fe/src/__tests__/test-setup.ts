@@ -164,8 +164,15 @@ vi.mock('@/services/api', () => {
     executeRename: vi.fn(async () => []),
     getQualityProfiles: vi.fn(async () => []),
     getApiConfigurations: vi.fn(async () => []),
-    // add getRootFolders to apiService so tests that spy on apiService.getRootFolders work
+    // Root-folder mutation methods used by store/component integration tests.
     getRootFolders: vi.fn(async () => []),
+    updateRootFolder: vi.fn(async (_id: number, payload: unknown) => payload),
+    changeRootFolderPath: vi.fn(async () => ({})),
+    confirmRootFolder: vi.fn(async () => ({})),
+    getRootFolderMetadataRepairDetails: vi.fn(async () => ({})),
+    removeRootFolderMetadataRepairFile: vi.fn(async () => ({})),
+    abandonUnpublishedRootFolderRelocation: vi.fn(async () => ({})),
+    retryRootFolderRelocation: vi.fn(async () => ({})),
 
     // add checkVolume to apiService so components that call `apiService.checkVolume` in
     // unit tests have a sensible default value that matches the real API signature.
@@ -233,6 +240,14 @@ vi.mock('@/services/signalr', () => ({
       return () => {}
     },
     onQueueUpdate: (cb?: (...args: unknown[]) => void) => {
+      void cb
+      return () => {}
+    },
+    onConnected: (cb?: (...args: unknown[]) => void) => {
+      void cb
+      return () => {}
+    },
+    onRootFolderRelocationUpdate: (cb?: (...args: unknown[]) => void) => {
       void cb
       return () => {}
     },

@@ -9,12 +9,269 @@
  */
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using Listenarr.Tests.Common;
 
 namespace Listenarr.Tests.Features.Architecture;
 
-public sealed class BackendArchitectureTests
+[Trait("Name", "BackendArchitectureTests")]
+[Trait("Category", "Architecture")]
+public sealed class BackendArchitectureTests : BaseTests
 {
     private static readonly string RepositoryRoot = FindRepositoryRoot();
+
+    // Pre-existing convention debt is grandfathered by full type identity.
+    // No test type added by this branch may appear in this set.
+    private static readonly IReadOnlySet<string> LegacyTestConventionExemptions =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            "Listenarr.Tests.Features.Api.Common.ListenarrExceptionHandlerTests",
+            "Listenarr.Tests.Features.Api.Common.ServerErrorProblemDetailsFilterTests",
+            "Listenarr.Tests.Features.Api.Extensions.SwaggerSecurityRequirementDocumentFilterTests",
+            "Listenarr.Tests.Features.Api.Features.Configuration.ConfigurationControllerDownloadClientTests",
+            "Listenarr.Tests.Features.Api.Features.Configuration.ConfigurationControllerSettingsTests",
+            "Listenarr.Tests.Features.Api.Features.Downloads.ManualImport_MultiFileCollisionTests",
+            "Listenarr.Tests.Features.Api.Features.Images.ImagesController_AlternateAsinCachedImageAliasTests",
+            "Listenarr.Tests.Features.Api.Features.Images.ImagesController_AudnexusAuthorByAsinTests",
+            "Listenarr.Tests.Features.Api.Features.Images.ImagesController_AuthorFallbackTests",
+            "Listenarr.Tests.Features.Api.Features.Images.ImagesController_AuthorStoredAsinTests",
+            "Listenarr.Tests.Features.Api.Features.Images.ImagesController_ContentRootResolutionTests",
+            "Listenarr.Tests.Features.Api.Features.Images.ImagesController_LocalIsbnOpenLibraryFallbackTests",
+            "Listenarr.Tests.Features.Api.Features.Images.ImagesController_LocalTitleAuthorOpenLibraryFallbackTests",
+            "Listenarr.Tests.Features.Api.Features.Images.ImagesController_MetadataDescriptionDoesNotBlockFallbackTests",
+            "Listenarr.Tests.Features.Api.Features.Images.ImagesController_MetadataDownloadFallbackTests",
+            "Listenarr.Tests.Features.Api.Features.Images.ImagesController_MetadataDownloadTests",
+            "Listenarr.Tests.Features.Api.Features.Images.ImagesController_PlaceholderFallbackTests",
+            "Listenarr.Tests.Features.Api.Features.Images.ImagesController_TempToLibraryForAudiobookTests",
+            "Listenarr.Tests.Features.Api.Features.Metadata.MetadataController_AuthorCatalogTests",
+            "Listenarr.Tests.Features.Api.Features.Metadata.MetadataController_AuthorLookupTests",
+            "Listenarr.Tests.Features.Api.Features.Metadata.MetadataController_SeriesTests",
+            "Listenarr.Tests.Features.Api.Features.Prowlarr.ProwlarrCompatControllerTests",
+            "Listenarr.Tests.Features.Api.Features.Search.IntelligentSearchIntegrationTests",
+            "Listenarr.Tests.Features.Api.Features.Search.SearchControllerAdvancedNormalizationTests",
+            "Listenarr.Tests.Features.Api.Features.Search.SearchControllerTests",
+            "Listenarr.Tests.Features.Api.Features.SystemDiagnostics.ReadinessEndpointTests",
+            "Listenarr.Tests.Features.Api.ForwardedHeadersTrustModelTests",
+            "Listenarr.Tests.Features.Api.LibraryController_GetAllResilienceTests",
+            "Listenarr.Tests.Features.Api.LibraryController_IdentifierDeduplicationTests",
+            "Listenarr.Tests.Features.Api.LibraryController_MetadataRescanTests",
+            "Listenarr.Tests.Features.Api.Middleware.AuthenticationMiddlewareTests",
+            "Listenarr.Tests.Features.Api.Models.AudiobookDtoFactoryTests",
+            "Listenarr.Tests.Features.Api.ProwlarrEndpointsTests",
+            "Listenarr.Tests.Features.Api.SecurityPipelineEndToEndTests",
+            "Listenarr.Tests.Features.Api.Services.DownloadNaming_AudiobookMetadataTests",
+            "Listenarr.Tests.Features.Api.Services.DownloadNaming_PatternCollapseTests",
+            "Listenarr.Tests.Features.Api.Services.FileNamingService_PathLengthTests",
+            "Listenarr.Tests.Features.Api.Services.FileNamingService_PatternSelectionTests",
+            "Listenarr.Tests.Features.Api.Services.Import_PatternIntegrationTests",
+            "Listenarr.Tests.Features.Api.Services.LegacyOutputPathMigratorTests",
+            "Listenarr.Tests.Features.Api.Services.MyAnonamouseTorrentAnnounceExtractionTests",
+            "Listenarr.Tests.Features.Api.Services.Search.Providers.IndexersAuthTests",
+            "Listenarr.Tests.Features.Api.Services.Search.Providers.IndexersControllerProwlarrImportTests",
+            "Listenarr.Tests.Features.Api.Services.Search.Providers.IndexersControllerTests",
+            "Listenarr.Tests.Features.Api.Services.Search.Providers.IndexersNewznabAuthTests",
+            "Listenarr.Tests.Features.Api.Services.Search.Providers.IndexersNewznabParsingTests",
+            "Listenarr.Tests.Features.Api.Services.Search.Providers.IndexersPersistedAuthTests",
+            "Listenarr.Tests.Features.Api.Services.Search.Providers.MyAnonamouseRedirectSecurityIntegrationTests",
+            "Listenarr.Tests.Features.Api.Services.Search.Providers.MyAnonamouseTorrentAnnounceRewriteTests",
+            "Listenarr.Tests.Features.Api.Services.Search.Providers.MyAnonamouseTorrentRewriteTests",
+            "Listenarr.Tests.Features.Api.Services.UnmatchedScanBackgroundServiceTests",
+            "Listenarr.Tests.Features.Api.Services.WorkerCycleRunnerTests",
+            "Listenarr.Tests.Features.Api.Services.downloadImportServiceHardlinkTests",
+            "Listenarr.Tests.Features.Api.Services.downloadImportServiceTests",
+            "Listenarr.Tests.Features.Api.SessionCookieAuthTests",
+            "Listenarr.Tests.Features.Api.Startup.ListenarrBuilderFactoryTests",
+            "Listenarr.Tests.Features.Api.Utils.FinalizePathHelperTests",
+            "Listenarr.Tests.Features.Application.Audiobooks.Catalog.AuthorCatalogServiceTests",
+            "Listenarr.Tests.Features.Application.Audiobooks.Catalog.SeriesCatalogServiceTests",
+            "Listenarr.Tests.Features.Application.Audiobooks.Files.AudioFileServiceTests",
+            "Listenarr.Tests.Features.Application.Audiobooks.Files.AudioFileService_UpdateAudiobookFieldsTests",
+            "Listenarr.Tests.Features.Application.Audiobooks.Identifiers.AudiobookIdentifierMapperTests",
+            "Listenarr.Tests.Features.Application.Audiobooks.Jobs.MoveQueueServiceTests",
+            "Listenarr.Tests.Features.Application.Audiobooks.Matching.AudiobookStatusEvaluatorTests",
+            "Listenarr.Tests.Features.Application.Audiobooks.Monitoring.AuthorMonitoringServiceTests",
+            "Listenarr.Tests.Features.Application.Audiobooks.Quality.QualityProfileScoringTests",
+            "Listenarr.Tests.Features.Application.Audiobooks.Quality.QualityScoringTests",
+            "Listenarr.Tests.Features.Application.Audiobooks.Renaming.RenameServiceTests",
+            "Listenarr.Tests.Features.Application.Audiobooks.RootFolders.RootFolderServiceTests",
+            "Listenarr.Tests.Features.Application.Configuration.Core.StartupConfigServiceTests",
+            "Listenarr.Tests.Features.Application.Downloads.Common.DownloadClientUriBuilderTests",
+            "Listenarr.Tests.Features.Application.Downloads.Import.DownloadImportServiceTests",
+            "Listenarr.Tests.Features.Application.Downloads.Import.DownloadValidationPipelineTests",
+            "Listenarr.Tests.Features.Application.Downloads.Processing.DownloadHashRetrievalServiceTests",
+            "Listenarr.Tests.Features.Application.Downloads.Processing.DownloadStateMachineTests",
+            "Listenarr.Tests.Features.Application.Downloads.Queue.DownloadClientCategoryFilterTests",
+            "Listenarr.Tests.Features.Application.Downloads.Queue.DownloadQueueServiceReconciliationTests",
+            "Listenarr.Tests.Features.Application.Downloads.Submission.DirectDownloadWorkflowTests",
+            "Listenarr.Tests.Features.Application.Downloads.Submission.DownloadIntegrationTests",
+            "Listenarr.Tests.Features.Application.Downloads.Submission.DownloadServiceTests",
+            "Listenarr.Tests.Features.Application.Downloads.Submission.TrustedDownloadCandidateFactoryTests",
+            "Listenarr.Tests.Features.Application.Metadata.Audible.AudibleServiceTests",
+            "Listenarr.Tests.Features.Application.Metadata.Core.AudiobookMetadataServiceTests",
+            "Listenarr.Tests.Features.Application.Notifications.NotificationsTests",
+            "Listenarr.Tests.Features.Application.Notifications.Payloads.NotificationPayloadBuilderAdapterTests",
+            "Listenarr.Tests.Features.Application.Search.Core.SearchServiceFixesTests",
+            "Listenarr.Tests.Features.Application.Search.Core.SearchWorkflowHelperTests",
+            "Listenarr.Tests.Features.Application.Search.Parsing.ParseLanguageTests",
+            "Listenarr.Tests.Features.Application.Search.ProwlarrIndexerPayloadParserTests",
+            "Listenarr.Tests.Features.Application.Search.Scoring.SearchServiceScoringTests",
+            "Listenarr.Tests.Features.Application.Search.Scoring.SearchServiceSortingTests",
+            "Listenarr.Tests.Features.Application.Security.Redaction.LogRedactionTests",
+            "Listenarr.Tests.Features.Application.Security.Redaction.SecurityRedactionTests",
+            "Listenarr.Tests.Features.Domain.Audiobooks.Rules.AudiobookSeriesMembershipHelperTests",
+            "Listenarr.Tests.Features.Domain.Downloads.DownloadClientItemTests",
+            "Listenarr.Tests.Features.Domain.Downloads.DownloadProcessingJob",
+            "Listenarr.Tests.Features.Domain.Utils.FileUtilsTests",
+            "Listenarr.Tests.Features.Domain.Utils.QualityMatcherTests",
+            "Listenarr.Tests.Features.Domain.Utils.TitleMatchingServiceTests",
+            "Listenarr.Tests.Features.Infrastructure.ActivityHistory.Migrations.UnifiedActionHistoryMigrationTests",
+            "Listenarr.Tests.Features.Infrastructure.ActivityHistory.Persistence.DownloadHistoryRepositoryTests",
+            "Listenarr.Tests.Features.Infrastructure.ActivityHistory.Persistence.HistoryQueryRepositoryTests",
+            "Listenarr.Tests.Features.Infrastructure.ActivityHistory.Services.DownloadHistoryServiceTests",
+            "Listenarr.Tests.Features.Infrastructure.Configuration.OperationalOptionsValidatorTests",
+            "Listenarr.Tests.Features.Infrastructure.Configuration.Paths.ApplicationPathServiceTests",
+            "Listenarr.Tests.Features.Infrastructure.Converters.JsonValueConvertersTests",
+            "Listenarr.Tests.Features.Infrastructure.DependencyInjection.HostedServicesRegistrationTests",
+            "Listenarr.Tests.Features.Infrastructure.DependencyInjection.InfrastructureServiceRegistrationExtensionsTests",
+            "Listenarr.Tests.Features.Infrastructure.DownloadClients.Common.UsenetAdapterFilteringTests",
+            "Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget.NzbgetAdapterTests",
+            "Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget.NzbgetRemovalWorkflowTests",
+            "Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent.QbittorrentAdapterTests",
+            "Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent.QbittorrentCategoryFilteringTests",
+            "Listenarr.Tests.Features.Infrastructure.DownloadClients.Sabnzbd.SabnzbdAdapterTests",
+            "Listenarr.Tests.Features.Infrastructure.Downloads.Cleanup.MovedDownloadCleanupProcessorTests",
+            "Listenarr.Tests.Features.Infrastructure.Downloads.Import.ImportFinalizationServiceTests",
+            "Listenarr.Tests.Features.Infrastructure.Downloads.Monitoring.DownloadMonitorPersistenceTests",
+            "Listenarr.Tests.Features.Infrastructure.Downloads.Processing.DownloadProcessingJobCleanupProcessorTests",
+            "Listenarr.Tests.Features.Infrastructure.FileSystem.ArchiveExtractorSafetyTests",
+            "Listenarr.Tests.Features.Infrastructure.FileSystem.FileStorageSafetyTests",
+            "Listenarr.Tests.Features.Infrastructure.Library.Moving.MoveBackgroundService_BroadcastTests",
+            "Listenarr.Tests.Features.Infrastructure.Library.Moving.MoveBackgroundService_FailureTests",
+            "Listenarr.Tests.Features.Infrastructure.Library.Moving.MoveBackgroundService_FilePathPreservationTests",
+            "Listenarr.Tests.Features.Infrastructure.Metadata.Parsing.PathMetadataParserTests",
+            "Listenarr.Tests.Features.Infrastructure.Migrations.MigrationMetadataTests",
+            "Listenarr.Tests.Features.Infrastructure.Migrations.ReleasedSchemaUpgradeTests",
+            "Listenarr.Tests.Features.Infrastructure.Notifications.Delivery.NotificationServiceTests",
+            "Listenarr.Tests.Features.Infrastructure.Notifications.Discord.DiscordBotServiceTests",
+            "Listenarr.Tests.Features.Infrastructure.Persistence.ApplicationSettingsConcurrencyTests",
+            "Listenarr.Tests.Features.Infrastructure.Persistence.EfDownloadDeduplicationTests",
+            "Listenarr.Tests.Features.Infrastructure.Persistence.EfDownloadProcessingJobDeduplicationTests",
+            "Listenarr.Tests.Features.Infrastructure.Persistence.EfMoveQueuePersistenceTests",
+            "Listenarr.Tests.Features.Infrastructure.Persistence.EfUnitOfWorkTests",
+            "Listenarr.Tests.Features.Infrastructure.Persistence.TestDatabaseIsolationTests",
+            "Listenarr.Tests.Features.Infrastructure.Repositories.AudiobookRepositoryTests",
+            "Listenarr.Tests.Features.Infrastructure.Repositories.AudiobookRepository_CatalogCacheReadTests",
+            "Listenarr.Tests.Features.Infrastructure.Repositories.DownloadProcessingJobRepositoryTests",
+            "Listenarr.Tests.Features.Infrastructure.Security.Identity.LoginRateLimiterTests",
+            "Listenarr.Tests.Features.Infrastructure.SystemDiagnostics.Diagnostics.MeterAppMetricsServiceTests",
+            "Listenarr.Tests.Features.Infrastructure.SystemDiagnostics.Diagnostics.SystemReadinessServiceTests",
+            "Listenarr.Tests.Features.Infrastructure.SystemDiagnostics.Diagnostics.SystemServiceVersionTests",
+            "Listenarr.Tests.Features.Infrastructure.SystemDiagnostics.Processes.SystemProcessRunnerTests",
+            "Listenarr.Tests.Features.Infrastructure.SystemDiagnostics.Version.ApplicationVersionServiceTests",
+            "Listenarr.Tests.Features.Infrastructure.Torrents.TorrentFileDownloaderTests",
+        };
+
+    [Fact]
+    public void TestClasses_FollowRepositoryConventions()
+    {
+        var violations = typeof(BackendArchitectureTests).Assembly
+            .GetTypes()
+            .Where(type => type is { IsAbstract: false, IsClass: true })
+            .Where(type => type.GetMethods().Any(method =>
+                method.CustomAttributes.Any(attribute =>
+                    typeof(FactAttribute).IsAssignableFrom(attribute.AttributeType))))
+            .Select(type => new
+            {
+                TypeName = type.FullName ?? type.Name,
+                Problem = DescribeTestConventionViolation(type)
+            })
+            .Where(violation => violation.Problem != null)
+            .OrderBy(violation => violation.TypeName, StringComparer.Ordinal)
+            .ToArray();
+        var unexpected = violations
+            .Where(violation => !LegacyTestConventionExemptions.Contains(violation.TypeName))
+            .Select(violation => $"{violation.TypeName}: {violation.Problem}")
+            .ToArray();
+        var currentViolationNames = violations
+            .Select(violation => violation.TypeName)
+            .ToHashSet(StringComparer.Ordinal);
+        var staleExemptions = LegacyTestConventionExemptions
+            .Where(exemption => !currentViolationNames.Contains(exemption))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.True(
+            unexpected.Length == 0,
+            $"New test convention violations:{Environment.NewLine}{string.Join(Environment.NewLine, unexpected)}");
+        Assert.True(
+            staleExemptions.Length == 0,
+            $"Remove repaired legacy exemptions:{Environment.NewLine}{string.Join(Environment.NewLine, staleExemptions)}");
+    }
+
+    [Fact]
+    public void PlatformAndCapabilitySpecificTests_DoNotSilentlyPass()
+    {
+        var testsRoot = Path.Join(RepositoryRoot, "tests");
+        var violations = Directory
+            .EnumerateFiles(testsRoot, "*.cs", SearchOption.AllDirectories)
+            .SelectMany(file => TestEvidenceSourceAnalyzer
+                .Analyze(File.ReadAllText(file))
+                .Select(violation =>
+                    $"{Path.GetRelativePath(RepositoryRoot, file)}:{violation.Line} "
+                    + $"{violation.MethodName}: {violation.Reason}"))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.True(
+            violations.Length == 0,
+            "Tests may not silently return before proving their assertions. "
+            + "Use a platform fact/theory for OS selection and fail explicitly when a required native capability is unavailable:"
+            + Environment.NewLine
+            + string.Join(Environment.NewLine, violations));
+    }
+
+    [Fact]
+    public void RootFolderController_DoesNotUseGenericEnumParsingForPublicRequestValues()
+    {
+        var controllerPath = Path.Join(
+            RepositoryRoot,
+            "listenarr.api",
+            "Features",
+            "Library",
+            "RootFoldersController.cs");
+
+        Assert.DoesNotContain(
+            "Enum.TryParse<",
+            File.ReadAllText(controllerPath),
+            StringComparison.Ordinal);
+    }
+
+    private static string? DescribeTestConventionViolation(Type testType)
+    {
+        var problems = new List<string>();
+        if (!typeof(BaseTests).IsAssignableFrom(testType))
+        {
+            problems.Add($"does not inherit {nameof(BaseTests)}");
+        }
+
+        var traits = testType.CustomAttributes
+            .Where(attribute => attribute.AttributeType == typeof(TraitAttribute))
+            .Select(attribute => (
+                Name: attribute.ConstructorArguments[0].Value as string,
+                Value: attribute.ConstructorArguments[1].Value as string))
+            .ToArray();
+        if (!traits.Any(trait => trait.Name == "Name" && trait.Value == testType.Name))
+        {
+            problems.Add("is missing its exact Name trait");
+        }
+        if (!traits.Any(trait => trait.Name == "Category" && !string.IsNullOrWhiteSpace(trait.Value)))
+        {
+            problems.Add("is missing a non-empty Category trait");
+        }
+
+        return problems.Count == 0
+            ? null
+            : $"{testType.FullName}: {string.Join(", ", problems)}";
+    }
 
     [Fact]
     public void DomainAndApplication_DoNotReferenceImplementationProjects()
@@ -25,6 +282,94 @@ public sealed class BackendArchitectureTests
         AssertProjectReferences(
             "listenarr.application/Listenarr.Application.csproj",
             ["../listenarr.domain/Listenarr.Domain.csproj"]);
+    }
+
+    [Fact]
+    public void PathMutatingServices_RequireAudiobookOperationCoordinator()
+    {
+        Type[] serviceTypes =
+        [
+            typeof(AudiobookFileService),
+            typeof(AudiobookDestinationRewriteService),
+            typeof(RenameService),
+            typeof(DownloadImportService),
+            typeof(ManualImportController),
+            typeof(LibraryBulkEditWorkflow),
+            typeof(LibraryDeleteWorkflow),
+            typeof(LibraryManualScanWorkflow),
+            typeof(LibraryMetadataRescanWorkflow),
+            typeof(LibraryMoveWorkflow),
+            typeof(LibraryUpdateWorkflow),
+            typeof(MetadataRescanProcessor),
+            typeof(MoveJobProcessor),
+            typeof(RootFolderService),
+            typeof(RootFolderRelocationService),
+            typeof(ScanJobProcessor)
+        ];
+
+        AssertRequiredConstructorParameter<IAudiobookOperationCoordinator>(serviceTypes);
+    }
+
+    [Fact]
+    public void LibraryDestinationCreatingServices_RequireDestinationMutationGuard()
+    {
+        AssertRequiredConstructorParameter<ILibraryDestinationMutationGuard>(
+        [
+            typeof(LibraryAddService),
+            typeof(LibraryAddWorkflow)
+        ]);
+    }
+
+    [Fact]
+    public void GlobalFilesystemMutationServices_RequireFilesystemMutationCoordinator()
+    {
+        Type[] serviceTypes =
+        [
+            typeof(AudiobookFileService),
+            typeof(AudiobookDestinationRewriteService),
+            typeof(DownloadImportService),
+            typeof(LibraryAddService),
+            typeof(LibraryAddWorkflow),
+            typeof(LibraryManualScanWorkflow),
+            typeof(LibraryMoveWorkflow),
+            typeof(ManualImportController),
+            typeof(MoveJobProcessor),
+            typeof(MoveQueueService),
+            typeof(RenameService),
+            typeof(RootFolderService),
+            typeof(RootFolderRelocationService),
+            typeof(ScanJobProcessor)
+        ];
+
+        AssertRequiredConstructorParameter<IFilesystemMutationCoordinator>(serviceTypes);
+    }
+
+    [Fact]
+    public void AudiobookFileOwnership_CannotBypassIdentityClaimContract()
+    {
+        var pathProperty = typeof(AudiobookFile).GetProperty(nameof(AudiobookFile.Path));
+        Assert.NotNull(pathProperty);
+        Assert.NotNull(pathProperty!.SetMethod);
+        Assert.False(pathProperty.SetMethod!.IsPublic);
+
+        var repositoryMethods = typeof(IAudiobookFileRepository)
+            .GetMethods()
+            .Select(method => method.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        Assert.DoesNotContain("AddAsync", repositoryMethods);
+        Assert.DoesNotContain("ExistsAtPathAsync", repositoryMethods);
+        Assert.DoesNotContain("IsPathUsedByOtherAsync", repositoryMethods);
+        Assert.Contains(nameof(IAudiobookFileRepository.ClaimAsync), repositoryMethods);
+        Assert.Contains(nameof(IAudiobookFileRepository.CheckOwnershipAsync), repositoryMethods);
+    }
+
+    [Fact]
+    public void RenameService_RequiresOwnershipAndGlobalMutationContracts()
+    {
+        AssertRequiredConstructorParameter<IAudiobookFileRepository>([typeof(RenameService)]);
+        AssertRequiredConstructorParameter<IAudiobookFilePathIdentityResolver>([typeof(RenameService)]);
+        AssertRequiredConstructorParameter<IFilesystemMutationCoordinator>([typeof(RenameService)]);
+        AssertRequiredConstructorParameter<IAudiobookOperationCoordinator>([typeof(RenameService)]);
     }
 
     [Fact]
@@ -349,6 +694,77 @@ public sealed class BackendArchitectureTests
     }
 
     [Fact]
+    public void FileMover_DoesNotOwnManagedHierarchyCreation()
+    {
+        var fileMoverRoot = Path.Join(
+            RepositoryRoot,
+            "listenarr.infrastructure",
+            "FileSystem");
+        var createMissingPattern = new Regex(
+            @"createMissing\s*:\s*true",
+            RegexOptions.Compiled);
+        var matches = Directory
+            .EnumerateFiles(fileMoverRoot, "FileMover*.cs", SearchOption.TopDirectoryOnly)
+            .SelectMany(file => createMissingPattern
+                .Matches(File.ReadAllText(file))
+                .Select(_ => Normalize(Path.GetRelativePath(RepositoryRoot, file))))
+            .ToList();
+
+        Assert.Equal(
+            "listenarr.infrastructure/FileSystem/FileMover.FileMoveLocks.cs",
+            Assert.Single(matches));
+        var lockSource = File.ReadAllText(Path.Join(
+            fileMoverRoot,
+            "FileMover.FileMoveLocks.cs"));
+        Assert.Contains(
+            "OpenFileMoveLockDirectory()",
+            lockSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "directory,\n            createMissing: true",
+            lockSource.Replace("\r\n", "\n", StringComparison.Ordinal),
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "createDestinationParent",
+            string.Join(Environment.NewLine, Directory
+                .EnumerateFiles(fileMoverRoot, "FileMover*.cs", SearchOption.TopDirectoryOnly)
+                .Select(File.ReadAllText)),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AudiobookDatabaseDeletion_UsesSharedCommitBoundary()
+    {
+        const string commitOwner =
+            "listenarr.application/Audiobooks/Deletion/AudiobookDeletionCommitService.cs";
+        var directDeletePattern = new Regex(
+            @"\.\s*DeleteByIdAsync\s*\(",
+            RegexOptions.Compiled);
+        var productionRoots = new[]
+        {
+            "listenarr.application",
+            "listenarr.infrastructure",
+            "listenarr.api"
+        };
+
+        var violations = productionRoots
+            .SelectMany(root => Directory.EnumerateFiles(
+                Path.Join(RepositoryRoot, root),
+                "*.cs",
+                SearchOption.AllDirectories))
+            .Where(file => !IsBuildArtifact(file))
+            .Where(file => directDeletePattern.IsMatch(File.ReadAllText(file)))
+            .Select(file => Normalize(Path.GetRelativePath(RepositoryRoot, file)))
+            .Where(file => !string.Equals(
+                file,
+                commitOwner,
+                StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        Assert.Empty(violations);
+    }
+
+    [Fact]
     public void Controllers_DoNotResolveServicesOrImplementPersistence()
     {
         var controllerFiles = Directory
@@ -401,6 +817,549 @@ public sealed class BackendArchitectureTests
             .ToList();
 
         Assert.Empty(violations);
+    }
+
+    [Fact]
+    public void LegacyDirectoryMover_IsNotConnectedToProductionWorkflows()
+    {
+        var projectRoots = new[]
+        {
+            "listenarr.domain",
+            "listenarr.application",
+            "listenarr.infrastructure",
+            "listenarr.api"
+        };
+        var invocationPattern = new Regex(
+            @"\.(?:MoveDirectoryAsync|CopyDirectoryAsync)\s*\(",
+            RegexOptions.Compiled);
+        var violations = projectRoots
+            .SelectMany(root => Directory.EnumerateFiles(
+                Path.Join(RepositoryRoot, root),
+                "*.cs",
+                SearchOption.AllDirectories))
+            .Where(file => !IsBuildArtifact(file))
+            .Where(file => !file.Contains(
+                $"{Path.DirectorySeparatorChar}Persistence{Path.DirectorySeparatorChar}Migrations{Path.DirectorySeparatorChar}",
+                StringComparison.OrdinalIgnoreCase))
+            .Where(file => invocationPattern.IsMatch(File.ReadAllText(file)))
+            .Select(file => Normalize(Path.GetRelativePath(RepositoryRoot, file)))
+            .ToList();
+
+        Assert.Empty(violations);
+    }
+
+    [Fact]
+    public void MoveSourceAncestorCleanup_RequiresDurableOwnership()
+    {
+        var requestSource = File.ReadAllText(Path.Join(
+            RepositoryRoot,
+            "listenarr.infrastructure",
+            "Library",
+            "Moving",
+            "AudiobookContentMoveService.cs"));
+        var cleanupSource = File.ReadAllText(Path.Join(
+            RepositoryRoot,
+            "listenarr.infrastructure",
+            "Library",
+            "Moving",
+            "AudiobookContentMoveService.SourceAncestorCleanup.cs"));
+
+        Assert.DoesNotContain(
+            "AllowUnownedSourceAncestorCleanup",
+            requestSource,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "TryDeleteEmptyDirectory",
+            cleanupSource,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DurableMoveArchitectureDocumentation_MatchesCurrentMarkerlessContracts()
+    {
+        var architecture = File.ReadAllText(Path.Join(
+            RepositoryRoot,
+            "BACKEND_ARCHITECTURE.md"));
+
+        Assert.Contains(
+            $"Identity-key version {MoveManifestIdentity.Version}",
+            architecture,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            $"Move manifest identity version {MoveManifestIdentity.Version}",
+            architecture,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "Generic `FileMover.MoveDirectoryAsync` fallback",
+            architecture,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "Named publication, move, and empty-source `.state` directories",
+            architecture,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "tombstoned scaffold cleanup",
+            architecture,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "Each owned directory has two matching structured proofs",
+            architecture,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StartupFilesystemReconciliation_IsBackgroundAndCannotReenterBlockingStartupTasks()
+    {
+        var startupTasks = File.ReadAllText(Path.Join(
+            RepositoryRoot,
+            "listenarr.api",
+            "Startup",
+            "ListenarrStartupTasks.cs"));
+        var program = File.ReadAllText(Path.Join(
+            RepositoryRoot,
+            "listenarr.api",
+            "Program.cs"));
+        var reconciler = File.ReadAllText(Path.Join(
+            RepositoryRoot,
+            "listenarr.infrastructure",
+            "Persistence",
+            "LibraryFilesystemStartupReconciliationService.cs"));
+
+        Assert.Contains("ApplyListenarrDatabaseMigrations", program, StringComparison.Ordinal);
+        Assert.Contains("RunListenarrStartupTasksAsync", program, StringComparison.Ordinal);
+        Assert.DoesNotContain("IRootFolderObjectIdentityReconciler", startupTasks, StringComparison.Ordinal);
+        Assert.DoesNotContain("IRootFolderRelocationService", startupTasks, StringComparison.Ordinal);
+        Assert.DoesNotContain("ILibraryDirectoryOwnershipReconciler", startupTasks, StringComparison.Ordinal);
+        Assert.DoesNotContain("IAudiobookFileIdentityReconciler", startupTasks, StringComparison.Ordinal);
+        Assert.Contains(": BackgroundService", reconciler, StringComparison.Ordinal);
+        Assert.Contains("await Task.Yield()", reconciler, StringComparison.Ordinal);
+        Assert.Contains("IRootFolderObjectIdentityReconciler", reconciler, StringComparison.Ordinal);
+        Assert.Contains("IRootFolderRelocationService", reconciler, StringComparison.Ordinal);
+        Assert.Contains("ILibraryDirectoryOwnershipReconciler", reconciler, StringComparison.Ordinal);
+        Assert.Contains("IAudiobookFileIdentityReconciler", reconciler, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FilesystemDependentWorkers_WaitOnSharedStartupReadinessGate()
+    {
+        var workerFiles = new[]
+        {
+            "listenarr.infrastructure/Library/Moving/MoveBackgroundService.cs",
+            "listenarr.infrastructure/Library/Scanning/ScanBackgroundService.cs",
+            "listenarr.infrastructure/Library/Scanning/UnmatchedScanBackgroundService.cs",
+            "listenarr.infrastructure/Downloads/Processing/DownloadProcessingJobProcessor.cs",
+            "listenarr.infrastructure/Metadata/Jobs/MetadataRescanService.cs"
+        };
+
+        foreach (var relativePath in workerFiles)
+        {
+            var source = File.ReadAllText(Path.Join(
+                RepositoryRoot,
+                relativePath.Replace('/', Path.DirectorySeparatorChar)));
+            Assert.Contains("ILibraryFilesystemReadiness", source, StringComparison.Ordinal);
+            Assert.Contains("WaitUntilReadyAsync", source, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void FilesystemReadiness_HasOneSingletonStateOwnerAndBackgroundOrchestrator()
+    {
+        var persistenceRegistration = File.ReadAllText(Path.Join(
+            RepositoryRoot,
+            "listenarr.infrastructure",
+            "DependencyInjection",
+            "Persistence",
+            "PersistenceRegistrationExtensions.cs"));
+        var startupComposition = File.ReadAllText(Path.Join(
+            RepositoryRoot,
+            "listenarr.infrastructure",
+            "DependencyInjection",
+            "InfrastructureStartupCompositionExtensions.cs"));
+        var allDependencyInjectionSource = string.Join(
+            Environment.NewLine,
+            Directory.EnumerateFiles(
+                    Path.Join(RepositoryRoot, "listenarr.infrastructure", "DependencyInjection"),
+                    "*.cs",
+                    SearchOption.AllDirectories)
+                .Where(file => !IsBuildArtifact(file))
+                .Select(File.ReadAllText));
+
+        Assert.Single(Regex.Matches(
+            allDependencyInjectionSource,
+            @"AddSingleton<LibraryFilesystemReadiness>\s*\("));
+        Assert.Contains(
+            "AddSingleton<ILibraryFilesystemReadiness>",
+            persistenceRegistration,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "AddSingleton<ILibraryFilesystemMutationGate>",
+            persistenceRegistration,
+            StringComparison.Ordinal);
+        Assert.Single(Regex.Matches(
+            startupComposition,
+            @"AddHostedService<LibraryFilesystemStartupReconciliationService>\s*\("));
+        Assert.True(
+            startupComposition.IndexOf(
+                "AddHostedService<LibraryFilesystemStartupReconciliationService>",
+                StringComparison.Ordinal)
+            < startupComposition.IndexOf("AddListenarrHostedServices", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void FilesystemStartupArchitectureDocumentation_MatchesReadinessContract()
+    {
+        var architecture = File.ReadAllText(Path.Join(
+            RepositoryRoot,
+            "BACKEND_ARCHITECTURE.md"));
+
+        Assert.Contains(
+            "Filesystem startup reconciliation is deliberately **not** part of `IsReady`",
+            architecture,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "`503 filesystem_initializing`",
+            architecture,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "`503 filesystem_initialization_failed`",
+            architecture,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "root-folder physical identities, active root relocations, directory ownership, durable audiobook-deletion intents, owner-bound file-rename journals, then audiobook-file identities",
+            architecture,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RootDirectoryIdentity_HasNoIntermediateFilesystemEnrollmentCompatibility()
+    {
+        Assert.False(File.Exists(Path.Join(
+            RepositoryRoot,
+            "listenarr.infrastructure",
+            "FileSystem",
+            "ManagedDirectoryEnrollment.cs")));
+
+        var productionRoots = new[]
+        {
+            Path.Join(RepositoryRoot, "listenarr.application"),
+            Path.Join(RepositoryRoot, "listenarr.domain"),
+            Path.Join(RepositoryRoot, "listenarr.infrastructure"),
+            Path.Join(RepositoryRoot, "listenarr.api")
+        };
+        var violations = productionRoots
+            .SelectMany(root => Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories))
+            .Where(file =>
+            {
+                var source = File.ReadAllText(file);
+                return source.Contains("ManagedDirectoryEnrollment", StringComparison.Ordinal)
+                    || source.Contains(".listenarr-root-enrollment.json", StringComparison.Ordinal)
+                    || source.Contains("UpgradeLegacyAsync", StringComparison.Ordinal);
+            })
+            .Select(file => Normalize(Path.GetRelativePath(RepositoryRoot, file)))
+            .ToList();
+
+        Assert.Empty(violations);
+    }
+
+    [Fact]
+    public void LibraryFilesystem_HasNoListenarrScratchNamespaceProtocol()
+    {
+        var productionRoots = new[]
+        {
+            Path.Join(RepositoryRoot, "listenarr.application"),
+            Path.Join(RepositoryRoot, "listenarr.domain"),
+            Path.Join(RepositoryRoot, "listenarr.infrastructure"),
+            Path.Join(RepositoryRoot, "listenarr.api")
+        };
+        var forbidden = new[]
+        {
+            ".listenarr-",
+            "entry.claim"
+        };
+
+        var violations = productionRoots
+            .SelectMany(root => Directory.EnumerateFiles(
+                root,
+                "*.cs",
+                SearchOption.AllDirectories))
+            .Where(file => !IsBuildArtifact(file))
+            .Select(file => new
+            {
+                File = Normalize(Path.GetRelativePath(RepositoryRoot, file)),
+                Source = File.ReadAllText(file)
+            })
+            .SelectMany(candidate => forbidden
+                .Where(token => candidate.Source.Contains(token, StringComparison.Ordinal))
+                .Select(token => $"{candidate.File}: {token}"))
+            .ToList();
+
+        Assert.Empty(violations);
+    }
+
+    [Fact]
+    public void LibraryDirectoryOwnership_ProductionDoesNotAdoptExistingDirectories()
+    {
+        var excludedFiles = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "listenarr.application/Audiobooks/Contracts/ILibraryDirectoryOwnershipStore.cs",
+            "listenarr.infrastructure/Library/Moving/EfLibraryDirectoryOwnershipStore.cs"
+        };
+        var forbidden = new[]
+        {
+            ".RecordCreatedAsync(",
+            ".ClaimRetainedAsync("
+        };
+        var productionRoots = new[]
+        {
+            Path.Join(RepositoryRoot, "listenarr.application"),
+            Path.Join(RepositoryRoot, "listenarr.domain"),
+            Path.Join(RepositoryRoot, "listenarr.infrastructure"),
+            Path.Join(RepositoryRoot, "listenarr.api")
+        };
+
+        var violations = productionRoots
+            .SelectMany(root => Directory.EnumerateFiles(
+                root,
+                "*.cs",
+                SearchOption.AllDirectories))
+            .Where(file => !IsBuildArtifact(file))
+            .Select(file => new
+            {
+                File = Normalize(Path.GetRelativePath(RepositoryRoot, file)),
+                Source = File.ReadAllText(file)
+            })
+            .Where(candidate => !excludedFiles.Contains(candidate.File))
+            .SelectMany(candidate => forbidden
+                .Where(token => candidate.Source.Contains(token, StringComparison.Ordinal))
+                .Select(token => $"{candidate.File}: {token}"))
+            .ToList();
+
+        Assert.Empty(violations);
+    }
+
+    [Fact]
+    public void DurableMoveBoundary_RequiresExplicitFilesystemSemantics()
+    {
+        var files = new[]
+        {
+            "listenarr.application/Audiobooks/Jobs/MoveQueueService.cs",
+            "listenarr.application/Audiobooks/RootFolders/RootFolderService.cs",
+            "listenarr.infrastructure/Library/Moving/AudiobookContentMoveService.cs",
+            "listenarr.infrastructure/Library/Moving/AudiobookContentMoveService.Copy.cs",
+            "listenarr.infrastructure/Library/Moving/AudiobookContentMoveService.Manifest.cs",
+            "listenarr.infrastructure/Library/Moving/MoveJobProcessor.cs",
+            "listenarr.infrastructure/Library/Moving/RootFolderRelocationService.cs",
+            "listenarr.infrastructure/Library/Moving/RootFolderRelocationService.Reconciliation.cs"
+        };
+        var forbidden = new[]
+        {
+            "FilesystemPathComparerForCurrentOs",
+            "AreFilesystemPathsEquivalentForCurrentOs",
+            "FileUtils.IsPathSameOrInside",
+            ".Replace('\\\\', '/')"
+        };
+
+        var violations = files
+            .SelectMany(file => forbidden
+                .Where(token => File.ReadAllText(Path.Join(RepositoryRoot, file)).Contains(token, StringComparison.Ordinal))
+                .Select(token => $"{file}: {token}"))
+            .ToList();
+
+        Assert.Empty(violations);
+    }
+
+    [Fact]
+    public void RootFolderRelocation_UsesSharedRootFolderPathValidation()
+    {
+        var serviceFile = Path.Join(
+            RepositoryRoot,
+            "listenarr.infrastructure",
+            "Library",
+            "Moving",
+            "RootFolderRelocationService.cs");
+        var source = File.ReadAllText(serviceFile);
+
+        Assert.Contains(
+            "FileUtils.NormalizeRootFolderPathForStorage(command.TargetPath)",
+            source,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "ResolveNativeAbsolutePath(command.TargetPath)",
+            source,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ImportDestinationBoundaries_RequireExplicitFilesystemSemantics()
+    {
+        var files = new[]
+        {
+            "listenarr.application/Downloads/Import/DownloadImportService.cs",
+            "listenarr.application/Downloads/Import/ImportDestinationPlanner.cs",
+            "listenarr.api/Features/Downloads/ManualImportController.cs",
+            "listenarr.api/Features/Downloads/ManualImportCompanionImporter.cs",
+            "listenarr.api/Features/Downloads/ManualImportDestinationTracker.cs",
+            "listenarr.api/Features/Downloads/ManualImportPathPlanner.cs",
+            "listenarr.domain/Audiobooks/Rules/MultiFileImportPlanner.cs"
+        };
+        var forbidden = new[]
+        {
+            "FilesystemPathComparerForCurrentOs",
+            "AreFilesystemPathsEquivalentForCurrentOs",
+            "FileUtils.IsPathSameOrInside",
+            "FileSystemPathSemantics.CurrentHostDefault",
+            ".Replace('\\\\', '/')"
+        };
+
+        var violations = files
+            .SelectMany(file => forbidden
+                .Where(token => File.ReadAllText(Path.Join(RepositoryRoot, file))
+                    .Contains(token, StringComparison.Ordinal))
+                .Select(token => $"{file}: {token}"))
+            .ToList();
+
+        Assert.Empty(violations);
+    }
+
+    [Fact]
+    public void ScannerAndMetadataBoundaries_RequireExplicitFilesystemSemantics()
+    {
+        var files = new[]
+        {
+            "listenarr.infrastructure/Library/Scanning/ScanFileDiscovery.cs",
+            "listenarr.infrastructure/Library/Scanning/ScanJobProcessor.cs",
+            "listenarr.infrastructure/Library/Scanning/ScanPathPlanner.cs",
+            "listenarr.infrastructure/Library/Scanning/UnmatchedScanBackgroundService.cs",
+            "listenarr.infrastructure/Library/Scanning/UnmatchedScanProcessor.Grouping.cs",
+            "listenarr.infrastructure/Metadata/Parsing/PathMetadataParser.cs"
+        };
+        var forbidden = new[]
+        {
+            "FilesystemPathComparerForCurrentOs",
+            "AreFilesystemPathsEquivalentForCurrentOs",
+            "FileUtils.IsPathSameOrInside",
+            "FileSystemPathSemantics.CurrentHostDefault",
+            ".Replace('\\\\', '/')"
+        };
+
+        var violations = files
+            .SelectMany(file => forbidden
+                .Where(token => File.ReadAllText(Path.Join(RepositoryRoot, file))
+                    .Contains(token, StringComparison.Ordinal))
+                .Select(token => $"{file}: {token}"))
+            .ToList();
+
+        Assert.Empty(violations);
+    }
+
+    [Fact]
+    public void LegacyHostPathIdentity_StaysOnExplicitAllowList()
+    {
+        var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            // Domain compatibility helpers intentionally expose host-default utilities for
+            // callers that operate on local process paths rather than library-volume identity.
+            "listenarr.domain/Common/FileSystemPathIdentity.cs",
+            "listenarr.domain/Common/FileUtils.cs",
+            "listenarr.domain/Common/FileUtils.PathCombining.cs",
+            "listenarr.domain/Common/FileUtils.AudioMatching.cs",
+
+            // Internal application/runtime paths, not user library volume identity.
+            "listenarr.application/Configuration/Core/StartupConfigService.cs",
+            "listenarr.infrastructure/DependencyInjection/InfrastructureStartupCompositionExtensions.cs",
+            "listenarr.infrastructure/Ffmpeg/Installation/FfmpegService.cs",
+            "listenarr.infrastructure/FileSystem/FileSystemSafety.cs",
+            // Remote path mapping translates client-reported paths to local native paths and
+            // uses host-native semantics only to keep relative joins inside the mapped local base.
+            "listenarr.infrastructure/Configuration/Paths/RemotePathMappingService.cs",
+
+            // Temporary migration allow-list. Each user-library entry must be removed as its
+            // subsystem is moved to explicit FileSystemPathSemantics.
+        };
+        var forbidden = new[]
+        {
+            "FilesystemPathComparerForCurrentOs",
+            "AreFilesystemPathsEquivalentForCurrentOs",
+            "FileUtils.IsPathInsideOf",
+            "FileUtils.IsPathSameOrInside",
+            "FileSystemPathSemantics.CurrentHostDefault"
+        };
+        var roots = new[]
+        {
+            "listenarr.api",
+            "listenarr.application",
+            "listenarr.domain",
+            "listenarr.infrastructure"
+        };
+
+        var violations = roots
+            .SelectMany(root => Directory.EnumerateFiles(
+                Path.Join(RepositoryRoot, root),
+                "*.cs",
+                SearchOption.AllDirectories))
+            .Where(file => !IsBuildArtifact(file))
+            .Where(file => !file.Contains(
+                $"{Path.DirectorySeparatorChar}Persistence{Path.DirectorySeparatorChar}Migrations{Path.DirectorySeparatorChar}",
+                StringComparison.OrdinalIgnoreCase))
+            .Select(file => Normalize(Path.GetRelativePath(RepositoryRoot, file)))
+            .SelectMany(file => forbidden
+                .Where(token => File.ReadAllText(Path.Join(RepositoryRoot, file)).Contains(token, StringComparison.Ordinal))
+                .Select(token => $"{file}: {token}"))
+            .Where(violation => !allowed.Contains(violation.Split(':', 2)[0]))
+            .ToList();
+
+        Assert.Empty(violations);
+    }
+
+    [Fact]
+    public void NamedNonCancelablePhaseTokens_UseSharedRequestCancellationBoundary()
+    {
+        var roots = new[]
+        {
+            "listenarr.api",
+            "listenarr.application",
+            "listenarr.infrastructure"
+        };
+        var rawPhaseToken = new Regex(
+            @"\b(?:mutationToken|commitToken|completionToken)\s*=\s*CancellationToken\.None\b",
+            RegexOptions.CultureInvariant);
+        var violations = roots
+            .SelectMany(root => Directory.EnumerateFiles(
+                Path.Join(RepositoryRoot, root),
+                "*.cs",
+                SearchOption.AllDirectories))
+            .Where(file => !IsBuildArtifact(file))
+            .Where(file => !file.Contains(
+                $"{Path.DirectorySeparatorChar}Persistence{Path.DirectorySeparatorChar}Migrations{Path.DirectorySeparatorChar}",
+                StringComparison.OrdinalIgnoreCase))
+            .Where(file => rawPhaseToken.IsMatch(File.ReadAllText(file)))
+            .Select(file => Normalize(Path.GetRelativePath(RepositoryRoot, file)))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            violations.Count == 0,
+            "Named request-to-noncancelable phase tokens must be entered through "
+            + "RequestCancellationBoundary.EnterNonCancelablePhase:" + Environment.NewLine
+            + string.Join(Environment.NewLine, violations));
+    }
+
+    private static void AssertRequiredConstructorParameter<TParameter>(IEnumerable<Type> serviceTypes)
+    {
+        foreach (var serviceType in serviceTypes)
+        {
+            var coordinatorParameters = serviceType
+                .GetConstructors(System.Reflection.BindingFlags.Instance
+                    | System.Reflection.BindingFlags.Public
+                    | System.Reflection.BindingFlags.NonPublic)
+                .SelectMany(constructor => constructor.GetParameters())
+                .Where(parameter => parameter.ParameterType == typeof(TParameter))
+                .ToList();
+
+            var coordinatorParameter = Assert.Single(coordinatorParameters);
+            Assert.False(coordinatorParameter.IsOptional);
+            Assert.False(coordinatorParameter.HasDefaultValue);
+        }
     }
 
     private static void AssertProjectReferences(string relativeProject, IReadOnlyCollection<string> expected)
@@ -459,6 +1418,7 @@ public sealed class BackendArchitectureTests
     private static bool IsBuildArtifact(string file) =>
         file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) ||
         file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) ||
+        file.Contains($"{Path.DirectorySeparatorChar}artifacts{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) ||
         file.Contains($"{Path.DirectorySeparatorChar}wwwroot{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase);
 
     private static string ToNamespace(string relativePath) =>
@@ -468,19 +1428,5 @@ public sealed class BackendArchitectureTests
 
     private static string Normalize(string path) => path.Replace('\\', '/');
 
-    private static string FindRepositoryRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory != null)
-        {
-            if (File.Exists(Path.Join(directory.FullName, "listenarr.slnx")))
-            {
-                return directory.FullName;
-            }
-
-            directory = directory.Parent;
-        }
-
-        throw new DirectoryNotFoundException($"Unable to locate repository root from {AppContext.BaseDirectory}");
-    }
+    private static string FindRepositoryRoot() => TestUtils.FindRepositoryRoot();
 }

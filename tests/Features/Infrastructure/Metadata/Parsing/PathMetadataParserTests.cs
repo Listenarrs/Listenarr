@@ -22,6 +22,41 @@ namespace Listenarr.Tests.Features.Infrastructure.Metadata.Parsing
     public class PathMetadataParserTests
     {
         [Fact]
+        public void Parse_UsesResolvedCaseSensitivityForContainment()
+        {
+            var root = Path.Join(Path.GetTempPath(), $"MetadataRoot-{Guid.NewGuid():N}");
+            var differentlyCasedRoot = root.ToUpperInvariant();
+            var file = Path.Join(root, "Author", "2020 - Title", "book.m4b");
+            var syntax = FileSystemPathSemantics.CurrentHostDefault.Syntax;
+
+            var sensitive = PathMetadataParser.Parse(
+                file,
+                differentlyCasedRoot,
+                new FileSystemPathSemantics(syntax, FileSystemCaseSensitivity.Sensitive));
+            var insensitive = PathMetadataParser.Parse(
+                file,
+                differentlyCasedRoot,
+                new FileSystemPathSemantics(syntax, FileSystemCaseSensitivity.Insensitive));
+
+            Assert.Null(sensitive.Title);
+            Assert.Equal("Title", insensitive.Title);
+            Assert.Equal("Author", insensitive.Author);
+        }
+
+        [Fact]
+        public async Task ReadEmbeddedTagsAsync_CanceledToken_PropagatesCancellation()
+        {
+            using var cancellation = new CancellationTokenSource();
+            await cancellation.CancelAsync();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                PathMetadataParser.ReadEmbeddedTagsAsync(
+                    "book.m4b",
+                    "ffprobe-does-not-need-to-exist-for-canceled-work",
+                    cancellation.Token));
+        }
+
+        [Fact]
         public void ParseEmbeddedTagsFromFfprobeJson_ParsesStandardAsinTag()
         {
             var doc = JsonDocument.Parse("""

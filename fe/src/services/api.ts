@@ -23,6 +23,7 @@ import type {
   ApplicationSettings,
   ProwlarrImportConnectionSettings,
   Audiobook,
+  AudiobookUpdateRequest,
   History,
   Indexer,
   QueueItem,
@@ -31,6 +32,7 @@ import type {
   // ...existing code...
   TranslatePathRequest,
   TranslatePathResponse,
+  SystemReadiness,
   SystemInfo,
   StorageInfo,
   ServiceHealth,
@@ -887,22 +889,96 @@ class ApiService {
     name: string
     path: string
     isDefault?: boolean
+    caseSensitivityMode?: 'Auto' | 'Sensitive' | 'Insensitive'
   }): Promise<RootFolder> {
     return this.request<RootFolder>('/rootfolders', { method: 'POST', body: JSON.stringify(root) })
   }
 
   async updateRootFolder(
     id: number,
-    root: { id: number; name: string; path: string; isDefault?: boolean },
-    opts?: { moveFiles?: boolean; deleteEmptySource?: boolean },
+    root: {
+      id: number
+      name: string
+      path: string
+      isDefault?: boolean
+      caseSensitivityMode?: 'Auto' | 'Sensitive' | 'Insensitive'
+    },
   ): Promise<RootFolder> {
-    const qs = opts
-      ? `?moveFiles=${opts.moveFiles === true}&deleteEmptySource=${opts.deleteEmptySource !== false}`
-      : ''
-    return this.request<RootFolder>(`/rootfolders/${id}${qs}`, {
-      method: 'PUT',
-      body: JSON.stringify(root),
+    return this.request<RootFolder>(`/rootfolders/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        name: root.name,
+        isDefault: root.isDefault === true,
+        caseSensitivityMode: root.caseSensitivityMode ?? 'Auto',
+      }),
     })
+  }
+
+  async changeRootFolderPath(
+    id: number,
+    request: {
+      targetPath: string
+      mode: 'relocate' | 'metadataOnly'
+      deleteEmptySource: boolean
+      desiredName: string
+      desiredIsDefault: boolean
+      targetCaseSensitivityMode: 'Auto' | 'Sensitive' | 'Insensitive'
+      expectedCurrentPath: string
+    },
+  ): Promise<import('@/types').RootFolderPathChangeResult> {
+    return this.request<import('@/types').RootFolderPathChangeResult>(
+      `/rootfolders/${id}/path-changes`,
+      { method: 'POST', body: JSON.stringify(request) },
+    )
+  }
+
+  async confirmRootFolder(
+    id: number,
+    expectedCurrentPath: string,
+    confirmationToken: string,
+  ): Promise<RootFolder> {
+    return this.request<RootFolder>(`/rootfolders/${id}/confirm-current-folder`, {
+      method: 'POST',
+      body: JSON.stringify({ expectedCurrentPath, confirmationToken }),
+    })
+  }
+
+  async getRootFolderMetadataRepairDetails(
+    relocationId: string,
+    audiobookId: number,
+  ): Promise<import('@/types').RootFolderMetadataRepairDetails> {
+    return this.request<import('@/types').RootFolderMetadataRepairDetails>(
+      `/rootfolder-relocations/${relocationId}/skipped/${audiobookId}`,
+    )
+  }
+
+  async removeRootFolderMetadataRepairFile(
+    relocationId: string,
+    audiobookId: number,
+    audiobookFileId: number,
+  ): Promise<import('@/types').RootFolderMetadataRepairDetails> {
+    return this.request<import('@/types').RootFolderMetadataRepairDetails>(
+      `/rootfolder-relocations/${relocationId}/skipped/${audiobookId}/files/${audiobookFileId}`,
+      { method: 'DELETE' },
+    )
+  }
+
+  async abandonUnpublishedRootFolderRelocation(
+    relocationId: string,
+  ): Promise<import('@/types').RootFolderPathChangeResult> {
+    return this.request<import('@/types').RootFolderPathChangeResult>(
+      `/rootfolder-relocations/${relocationId}/abandon-unpublished`,
+      { method: 'POST' },
+    )
+  }
+
+  async retryRootFolderRelocation(
+    relocationId: string,
+  ): Promise<import('@/types').RootFolderPathChangeResult> {
+    return this.request<import('@/types').RootFolderPathChangeResult>(
+      `/rootfolder-relocations/${relocationId}/retry`,
+      { method: 'POST' },
+    )
   }
 
   async deleteRootFolder(id: number, reassignTo?: number): Promise<{ message?: string }> {
@@ -1211,9 +1287,20 @@ class ApiService {
     })
   }
 
+  async getScanJobStatus(jobId: string): Promise<{
+    id: string
+    audiobookId: number
+    status: string
+    error?: string
+    enqueuedAt: string
+    canRequeue: boolean
+  }> {
+    return this.request(`/library/scan/${encodeURIComponent(jobId)}`)
+  }
+
   async updateAudiobook(
     id: number,
-    audiobook: Partial<Audiobook>,
+    audiobook: AudiobookUpdateRequest,
   ): Promise<{ message: string; audiobook: Audiobook }> {
     return this.request<{ message: string; audiobook: Audiobook }>(`/library/${id}`, {
       method: 'PUT',
@@ -1225,16 +1312,119 @@ class ApiService {
     id: number,
     destinationPath: string,
     options?: { sourcePath?: string; moveFiles?: boolean; deleteEmptySource?: boolean },
-  ): Promise<{ message: string; jobId?: string }> {
+  ): Promise<{ message: string; jobId?: string; target?: string }> {
     const body: Record<string, unknown> = { destinationPath }
     if (options?.sourcePath) (body as Record<string, unknown>).sourcePath = options.sourcePath
     if (options?.moveFiles !== undefined)
       (body as Record<string, unknown>).moveFiles = options.moveFiles
     if (options?.deleteEmptySource !== undefined)
       (body as Record<string, unknown>).deleteEmptySource = options.deleteEmptySource
-    return this.request<{ message: string; jobId?: string }>(`/library/${id}/move`, {
+    return this.request<{ message: string; jobId?: string; target?: string }>(
+      `/library/${id}/move`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+    )
+  }
+
+  async getActiveMoveJobs(): Promise<
+    Array<{
+      jobId: string
+      audiobookId?: number
+      status: string
+      progress?: number
+      phase?: string
+      target?: string
+      error?: string
+      recoveryDisposition?: string
+      canRetry?: boolean
+    }>
+  > {
+    const jobs = await this.request<
+      Array<{
+        id: string
+        audiobookId?: number
+        status: string
+        phase?: string
+        progress?: number
+        requestedPath?: string
+        error?: string
+        recoveryDisposition?: string
+        canRetry?: boolean
+      }>
+    >('/library/move')
+
+    return jobs.map((job) => ({
+      jobId: job.id,
+      audiobookId: job.audiobookId,
+      status: job.status,
+      progress: job.progress,
+      phase: job.phase,
+      target: job.requestedPath,
+      error: job.error,
+      recoveryDisposition: job.recoveryDisposition,
+      canRetry: job.canRetry,
+    }))
+  }
+
+  async getMoveJobStatus(jobId: string): Promise<{
+    jobId: string
+    audiobookId?: number
+    status: string
+    progress?: number
+    phase?: string
+    target?: string
+    error?: string
+    recoveryDisposition?: string
+    canRetry?: boolean
+  }> {
+    const job = await this.request<{
+      id: string
+      audiobookId?: number
+      status: string
+      phase?: string
+      progress?: number
+      requestedPath?: string
+      error?: string
+      attemptCount?: number
+      enqueuedAt?: string
+      updatedAt?: string
+      nextAttemptAt?: string
+      recoveryDisposition?: string
+      canRetry?: boolean
+    }>('/library/move/' + encodeURIComponent(jobId))
+
+    return {
+      jobId: job.id,
+      audiobookId: job.audiobookId,
+      status: job.status,
+      progress: job.progress,
+      phase: job.phase,
+      target: job.requestedPath,
+      error: job.error,
+      recoveryDisposition: job.recoveryDisposition,
+      canRetry: job.canRetry,
+    }
+  }
+
+  async getMoveRecoveryState(audiobookId: number): Promise<{
+    hasUnresolvedMove: boolean
+    disposition: string
+    jobId?: string | null
+    status?: string | null
+    phase?: string | null
+    requestedPath?: string | null
+    error?: string | null
+    canRetry: boolean
+    blockingJobIds: string[]
+  }> {
+    return this.request(`/library/${audiobookId}/move/recovery`)
+  }
+
+  async requeueMoveJob(jobId: string): Promise<{ message: string; jobId: string }> {
+    return this.request(`/library/move/requeue/${encodeURIComponent(jobId)}`, {
       method: 'POST',
-      body: JSON.stringify(body),
     })
   }
 
@@ -1265,16 +1455,37 @@ class ApiService {
   async bulkUpdateAudiobooks(
     ids: number[],
     updates: Record<string, boolean | number | string>,
+    pathChange?: {
+      mode: 'None' | 'MetadataOnly' | 'Physical'
+      destinationRootOrPath?: string | null
+      deleteEmptySource: boolean
+    },
   ): Promise<{
     message: string
-    results: Array<{ id: number; success: boolean; errors: string[] }>
+    results: Array<{
+      id: number
+      success: boolean
+      metadataUpdated?: boolean
+      pathChangeOutcome?: string
+      moveJobId?: string | null
+      resolvedDestination?: string | null
+      errors: string[]
+    }>
   }> {
     return this.request<{
       message: string
-      results: Array<{ id: number; success: boolean; errors: string[] }>
+      results: Array<{
+        id: number
+        success: boolean
+        metadataUpdated?: boolean
+        pathChangeOutcome?: string
+        moveJobId?: string | null
+        resolvedDestination?: string | null
+        errors: string[]
+      }>
     }>('/library/bulk-update', {
       method: 'POST',
-      body: JSON.stringify({ ids, updates }),
+      body: JSON.stringify({ ids, updates, pathChange }),
     })
   }
 
@@ -1350,12 +1561,16 @@ class ApiService {
     return this.request<ManualImportPreviewResponse>(`/library/manual-import/preview${params}`)
   }
 
-  async startManualImport(
-    request: ManualImportRequest,
-  ): Promise<{ importedCount: number; totalCount?: number; results?: ManualImportResult[] }> {
+  async startManualImport(request: ManualImportRequest): Promise<{
+    importedCount: number
+    totalCount?: number
+    stoppedByCancellation?: boolean
+    results?: ManualImportResult[]
+  }> {
     return this.request<{
       importedCount: number
       totalCount?: number
+      stoppedByCancellation?: boolean
       results?: ManualImportResult[]
     }>(`/library/manual-import`, {
       method: 'POST',
@@ -1686,6 +1901,10 @@ class ApiService {
   }
 
   // System endpoints
+  async getSystemReadiness(): Promise<SystemReadiness> {
+    return this.request<SystemReadiness>('/system/ready')
+  }
+
   async getSystemInfo(): Promise<SystemInfo> {
     return this.request<SystemInfo>('/system/info')
   }

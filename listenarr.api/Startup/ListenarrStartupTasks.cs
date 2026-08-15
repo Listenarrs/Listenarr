@@ -24,7 +24,16 @@ public static class ListenarrStartupTasks
 {
     public static async Task RunListenarrStartupTasksAsync(this WebApplication app)
     {
+        await app.MigrateLegacyOutputPathAsync();
         await app.WarnIfAuthenticationDisabledAsync();
+    }
+
+
+    private static async Task MigrateLegacyOutputPathAsync(this WebApplication app)
+    {
+        using var scope = app.Services.CreateScope();
+        var migrator = scope.ServiceProvider.GetRequiredService<ILegacyOutputPathMigrator>();
+        await migrator.MigrateAsync();
     }
 
     private static async Task WarnIfAuthenticationDisabledAsync(this WebApplication app)

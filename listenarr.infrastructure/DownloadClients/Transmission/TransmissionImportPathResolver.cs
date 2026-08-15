@@ -29,14 +29,14 @@ namespace Listenarr.Infrastructure.DownloadClients.Transmission
 
         public static string? BuildContentPath(string? downloadDir, string? name, string? fallbackPath = null)
         {
-            return !string.IsNullOrWhiteSpace(downloadDir) && !string.IsNullOrWhiteSpace(name)
+            return !string.IsNullOrEmpty(downloadDir) && !string.IsNullOrEmpty(name)
                 ? FileUtils.CombineWithOptionalBase(downloadDir, name)
                 : fallbackPath;
         }
 
         public static List<string> BuildSourceFiles(string? downloadDir, JsonElement filesElement)
         {
-            return [.. TorrentClientPathMapper.BuildTransmissionSourceFiles(downloadDir, filesElement).Where(path => !string.IsNullOrWhiteSpace(path))];
+            return [.. TorrentClientPathMapper.BuildTransmissionSourceFiles(downloadDir, filesElement).Where(path => !string.IsNullOrEmpty(path))];
         }
     }
 }

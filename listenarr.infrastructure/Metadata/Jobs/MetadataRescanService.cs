@@ -26,12 +26,15 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
     public class MetadataRescanService(
         ILogger<MetadataRescanService> logger,
         IMetadataRescanProcessor processor,
-        IWorkerCycleRunner cycleRunner) : BackgroundService
+        IWorkerCycleRunner cycleRunner,
+        ILibraryFilesystemReadiness filesystemReadiness) : BackgroundService
     {
         private static readonly TimeSpan Interval = TimeSpan.FromMinutes(5);
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
+            logger.LogInformation("MetadataRescanService waiting for library filesystem initialization");
+            await filesystemReadiness.WaitUntilReadyAsync(stoppingToken);
             logger.LogInformation("MetadataRescanService starting");
             await cycleRunner.RunPeriodicAsync(
                 nameof(MetadataRescanService),
@@ -45,6 +48,8 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
 
     public class MetadataRescanProcessor(
         IServiceScopeFactory scopeFactory,
+        IAudiobookOperationCoordinator audiobookOperationCoordinator,
+        IMoveQueueService moveQueueService,
         ILogger<MetadataRescanProcessor> logger) : IMetadataRescanProcessor
     {
         private readonly AsyncNonKeyedLocker _sem = new(2); // bound concurrent extractions
@@ -61,7 +66,7 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
             }
 
             var tasks = new List<Task>();
-            foreach (var candidate in candidates.Select(f => new { f.Id, f.Path }))
+            foreach (var candidate in candidates.Select(f => new { f.Id, f.AudiobookId, f.Path }))
             {
                 tasks.Add(Task.Run(async () =>
                 {
@@ -70,8 +75,19 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
                     {
                         using var taskScope = scopeFactory.CreateScope();
                         var taskFileRepository = taskScope.ServiceProvider.GetRequiredService<IAudiobookFileRepository>();
-                        var taskAudiobookRepository = taskScope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
-                        var taskMetadataService = taskScope.ServiceProvider.GetRequiredService<IMetadataService>();
+
+                        var recovery = await moveQueueService.GetRecoveryStateForAudiobookAsync(
+                            candidate.AudiobookId,
+                            cancellationToken);
+                        if (recovery.BlocksFilesystemMutation)
+                        {
+                            logger.LogDebug(
+                                "Skipping metadata rescan for file id={Id}; audiobook {AudiobookId} has unresolved move state {Disposition}",
+                                candidate.Id,
+                                candidate.AudiobookId,
+                                recovery.Disposition);
+                            return;
+                        }
 
                         var file = await taskFileRepository.GetByIdAsync(candidate.Id, cancellationToken);
                         if (file == null)
@@ -80,42 +96,74 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
                             return;
                         }
 
-                        if (!FileUtils.IsAudioFile(file.Path ?? string.Empty))
+                        var observedPath = file.Path ?? string.Empty;
+                        if (!FileUtils.IsAudioFile(observedPath))
                         {
-                            var audiobook = await taskAudiobookRepository.GetByIdAsync(file.AudiobookId);
-                            if (audiobook != null && string.Equals(audiobook.FilePath, file.Path, StringComparison.OrdinalIgnoreCase))
-                            {
-                                audiobook.FilePath = null;
-                                audiobook.FileSize = null;
-                                await taskAudiobookRepository.UpdateAsync(audiobook);
-                            }
-
-                            await taskFileRepository.DeleteAsync(file.Id, cancellationToken);
-                            logger.LogInformation("Removed non-audio AudiobookFile entry id={Id} path={Path}", file.Id, LogRedaction.SanitizeFilePath(file.Path));
+                            await RemoveNonAudioFileAsync(
+                                file.Id,
+                                file.AudiobookId,
+                                cancellationToken);
                             return;
                         }
 
-                        logger.LogInformation("Re-extracting metadata for file id={Id} path={Path}", file.Id, LogRedaction.SanitizeFilePath(file.Path));
-
-                        if (cancellationToken.IsCancellationRequested)
+                        var taskAudiobookRepository = taskScope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
+                        var filePathIdentityResolver = taskScope.ServiceProvider.GetRequiredService<IAudiobookFilePathIdentityResolver>();
+                        var audiobook = await taskAudiobookRepository.GetForScanSnapshotAsync(
+                            file.AudiobookId,
+                            cancellationToken);
+                        if (audiobook == null)
                         {
-                            logger.LogDebug("Cancellation requested before extracting metadata for file id={Id}", file.Id);
+                            logger.LogDebug(
+                                "Skipping metadata rescan for file id={Id}; audiobook {AudiobookId} no longer exists",
+                                file.Id,
+                                file.AudiobookId);
                             return;
                         }
 
-                        var meta = await taskMetadataService.ExtractFileMetadataAsync(file.Path ?? string.Empty);
-                        if (meta != null)
+                        var resolvedIdentity = await filePathIdentityResolver.ResolveAsync(
+                            audiobook,
+                            observedPath,
+                            cancellationToken);
+                        if (resolvedIdentity.State != PathIdentityState.Valid)
                         {
-                            var fi = new System.IO.FileInfo(file.Path ?? string.Empty);
-                            file.Size = fi.Exists ? fi.Length : file.Size;
-                            file.DurationSeconds = Math.Abs(meta.Duration.TotalSeconds) > double.Epsilon ? meta.Duration.TotalSeconds : file.DurationSeconds;
-                            file.Format = !string.IsNullOrEmpty(meta.Format) ? meta.Format : file.Format;
-                            file.Bitrate = meta.BitRate != 0 ? meta.BitRate : file.Bitrate;
-                            file.SampleRate = meta.SampleRate != 0 ? meta.SampleRate : file.SampleRate;
-                            file.Channels = meta.Channels != 0 ? meta.Channels : file.Channels;
+                            logger.LogDebug(
+                                "Skipping metadata rescan for file id={Id}; the stored path is unavailable on this host: {Reason}",
+                                file.Id,
+                                LogRedaction.SanitizeText(resolvedIdentity.Reason));
+                            return;
+                        }
 
-                            await taskFileRepository.UpdateAsync(file, cancellationToken);
-                            logger.LogInformation("Updated metadata for file id={Id}", file.Id);
+                        logger.LogInformation(
+                            "Re-extracting metadata for file id={Id} path={Path}",
+                            file.Id,
+                            LogRedaction.SanitizeFilePath(resolvedIdentity.CanonicalPath));
+
+                        var taskFileService = taskScope.ServiceProvider
+                            .GetRequiredService<IAudiobookFileService>();
+                        cancellationToken.ThrowIfCancellationRequested();
+                        using var registrationLease =
+                            PinnedAudiobookFileRegistrationLease.Open(
+                                resolvedIdentity.CanonicalPath,
+                                file.PhysicalObjectIdentity);
+                        if (!registrationLease.MatchesCurrentPublication())
+                        {
+                            logger.LogDebug(
+                                "Skipped metadata rescan for file id={Id}; the stored pathname no longer identifies the pinned generation",
+                                file.Id);
+                            return;
+                        }
+
+                        if (await taskFileService.RefreshPhysicalGenerationAsync(
+                                new Audiobook { Id = file.AudiobookId },
+                                file.Id,
+                                file.PhysicalObjectIdentity,
+                                registrationLease,
+                                "MetadataRescan",
+                                cancellationToken))
+                        {
+                            logger.LogInformation(
+                                "Updated metadata for file id={Id}",
+                                file.Id);
                         }
                     }
                     catch (OperationCanceledException)
@@ -130,6 +178,155 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
             }
 
             await Task.WhenAll(tasks);
+        }
+
+        private async Task RemoveNonAudioFileAsync(
+            int fileId,
+            int audiobookId,
+            CancellationToken cancellationToken)
+        {
+            await audiobookOperationCoordinator.ExecuteExclusiveAsync(
+                audiobookId,
+                async token =>
+                {
+                    await moveQueueService.EnsureFilesystemMutationAllowedAsync(
+                        audiobookId,
+                        token);
+                    using var applyScope = scopeFactory.CreateScope();
+                    var fileRepository = applyScope.ServiceProvider.GetRequiredService<IAudiobookFileRepository>();
+                    var audiobookRepository = applyScope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
+                    var currentFile = await fileRepository.GetByIdAsync(fileId, token);
+                    if (currentFile == null
+                        || currentFile.AudiobookId != audiobookId
+                        || FileUtils.IsAudioFile(currentFile.Path ?? string.Empty))
+                    {
+                        return;
+                    }
+
+                    var audiobook = await audiobookRepository.GetByIdAsync(
+                        currentFile.AudiobookId);
+                    var clearLegacyPath = audiobook != null
+                        && await AreSameLibraryPathAsync(
+                            audiobook,
+                            currentFile.Path,
+                            applyScope.ServiceProvider
+                                .GetRequiredService<IFileSystemSemanticsResolver>(),
+                            applyScope.ServiceProvider
+                                .GetRequiredService<IRootFolderService>(),
+                            token);
+                    if (!await fileRepository.DeletePhysicalGenerationAsync(
+                            currentFile.Id,
+                            currentFile.AudiobookId,
+                            currentFile.Path,
+                            currentFile.PhysicalObjectIdentity,
+                            token))
+                    {
+                        logger.LogInformation(
+                            "Preserved non-audio AudiobookFile entry id={Id} because its row changed before removal",
+                            currentFile.Id);
+                        return;
+                    }
+
+                    if (clearLegacyPath)
+                    {
+                        audiobook!.FilePath = null;
+                        audiobook.FileSize = null;
+                        if (!await audiobookRepository.UpdateAsync(audiobook))
+                        {
+                            logger.LogWarning(
+                                "Removed non-audio AudiobookFile entry id={Id}, but its audiobook disappeared before legacy path cleanup",
+                                currentFile.Id);
+                        }
+                    }
+
+                    logger.LogInformation(
+                        "Removed non-audio AudiobookFile entry id={Id} path={Path}",
+                        currentFile.Id,
+                        LogRedaction.SanitizeFilePath(currentFile.Path));
+                },
+                cancellationToken);
+        }
+
+        private static async Task<bool> AreSameLibraryPathAsync(
+            Audiobook audiobook,
+            string? filePath,
+            IFileSystemSemanticsResolver semanticsResolver,
+            IRootFolderService rootFolderService,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(audiobook.FilePath) || string.IsNullOrWhiteSpace(filePath))
+            {
+                return false;
+            }
+
+            var semantics = await ResolveLibrarySemanticsAsync(
+                audiobook.FilePath,
+                semanticsResolver,
+                rootFolderService,
+                cancellationToken);
+            return semantics != null
+                && FileSystemPathIdentity.AreEquivalent(
+                    audiobook.FilePath,
+                    filePath,
+                    semantics.Value);
+        }
+
+        private static async Task<FileSystemPathSemantics?> ResolveLibrarySemanticsAsync(
+            string path,
+            IFileSystemSemanticsResolver semanticsResolver,
+            IRootFolderService rootFolderService,
+            CancellationToken cancellationToken)
+        {
+            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    path,
+                    out var canonicalPath,
+                    out _))
+            {
+                return null;
+            }
+
+            FileSystemPathSemantics? bestSemantics = null;
+            var bestRootLength = -1;
+            foreach (var root in await rootFolderService.GetAllAsync())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                        root.Path,
+                        out var canonicalRoot,
+                        out _))
+                {
+                    continue;
+                }
+
+                var rootResolution = await semanticsResolver.ResolveAsync(
+                    canonicalRoot,
+                    root.CaseSensitivityMode,
+                    cancellationToken);
+                if (rootResolution.State != PathIdentityState.Valid
+                    || !FileSystemPathIdentity.IsSameOrInside(
+                        canonicalPath,
+                        canonicalRoot,
+                        rootResolution.Semantics))
+                {
+                    continue;
+                }
+
+                if (canonicalRoot.Length > bestRootLength)
+                {
+                    bestSemantics = rootResolution.Semantics;
+                    bestRootLength = canonicalRoot.Length;
+                }
+            }
+
+            if (bestSemantics.HasValue)
+            {
+                return bestSemantics.Value;
+            }
+
+            var resolution = await semanticsResolver.ResolveAsync(
+                canonicalPath,
+                cancellationToken: cancellationToken);
+            return resolution.State == PathIdentityState.Valid ? resolution.Semantics : null;
         }
     }
 }

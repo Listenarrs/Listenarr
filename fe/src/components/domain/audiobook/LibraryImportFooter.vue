@@ -88,7 +88,17 @@
       </span>
       <button
         class="btn btn-primary"
-        :disabled="store.selectedCount === 0 || store.isProcessing || isImporting"
+        :disabled="
+          store.selectedCount === 0 ||
+          store.isProcessing ||
+          isImporting ||
+          !filesystemReadinessStore.filesystemReady
+        "
+        :title="
+          filesystemReadinessStore.filesystemReady
+            ? undefined
+            : 'Available after library filesystem initialization completes'
+        "
         @click="handleImport"
       >
         <PhSpinner v-if="isImporting" class="ph-spin" :size="14" />
@@ -104,11 +114,13 @@ import { computed, ref } from 'vue'
 import { PhWarning, PhPlay, PhStop, PhSpinner, PhDownload } from '@phosphor-icons/vue'
 import { useLibraryImportStore } from '@/stores/libraryImport'
 import { useToast } from '@/services/toastService'
+import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import type { RootFolder } from '@/types'
 
 const props = defineProps<{ folders: RootFolder[] }>()
 
 const store = useLibraryImportStore()
+const filesystemReadinessStore = useFilesystemReadinessStore()
 const toast = useToast()
 
 const destinationFolderId = ref<number | null>(props.folders[0]?.id ?? null)
@@ -135,7 +147,9 @@ const importButtonLabel = computed(() => {
 })
 
 async function handleImport() {
-  if (isImporting.value || store.selectedCount === 0) return
+  if (isImporting.value || store.selectedCount === 0 || !filesystemReadinessStore.filesystemReady) {
+    return
+  }
 
   importingCount.value = store.selectedCount
   isImporting.value = true

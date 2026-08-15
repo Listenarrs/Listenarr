@@ -19,6 +19,10 @@
 
 namespace Listenarr.Application.Metadata.Contracts
 {
+    public readonly record struct MetadataFileSource(
+        string ReadPath,
+        string PublicPath);
+
     /// <summary>
     /// Provides metadata retrieval and file tagging for audiobook files
     /// </summary>
@@ -55,6 +59,13 @@ namespace Listenarr.Application.Metadata.Contracts
         Task<AudioMetadata?> ExtractFileMetadataAsync(string filePath);
 
         /// <summary>
+        /// Extracts metadata through a stable read path while deriving fallback
+        /// identity from the separate public path.
+        /// </summary>
+        Task<AudioMetadata?> ExtractFileMetadataAsync(
+            MetadataFileSource fileSource);
+
+        /// <summary>
         /// Applies metadata tags to an audio file
         /// </summary>
         /// <param name="filePath">Path to the audio file</param>
@@ -65,6 +76,18 @@ namespace Listenarr.Application.Metadata.Contracts
         /// Writes the ASIN to the audio file's embedded tags. No-op if filePath or asin is null/empty.
         /// </summary>
         Task WriteAsinTagAsync(string filePath, string asin);
+
+        /// <summary>
+        /// Writes the ASIN through a generation-bound registration lease so a
+        /// replacement pathname cannot receive metadata intended for the
+        /// published audiobook file.
+        /// </summary>
+        Task WriteAsinTagAsync(
+            IAudiobookFileRegistrationLease registrationLease,
+            string asin) =>
+            Task.FromException(
+                new NotSupportedException(
+                    "Generation-bound ASIN tagging is unavailable."));
 
         /// <summary>
         /// Downloads cover art image from URL

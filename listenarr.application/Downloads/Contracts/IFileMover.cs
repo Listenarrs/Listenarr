@@ -19,13 +19,26 @@
 namespace Listenarr.Application.Downloads.Contracts
 {
     /// <summary>
-    /// This class responsability is to handle all file manipulation operations
+    /// Handles file manipulation within a destination hierarchy that has already
+    /// been established by the caller. Implementations must not create missing
+    /// managed destination parents; library hierarchy creation and enrollment
+    /// belong to <see cref="ILibraryDirectoryOwnershipStore"/>.
     /// </summary>
     public interface IFileMover
     {
-        Task<bool> MoveDirectoryAsync(string source, string destination);
+        Task<bool> MoveFilePreservingPhysicalIdentityAsync(
+            string source,
+            string destination,
+            string expectedSourcePhysicalObjectIdentity,
+            Guid operationId);
 
-        Task<bool> CopyDirectoryAsync(string source, string destination);
+        Task<bool> MoveFilePreservingPhysicalIdentityAsync(
+            string source,
+            string destination,
+            string expectedSourcePhysicalObjectIdentity,
+            Guid operationId,
+            int audiobookId,
+            int audiobookFileId);
 
         /// <summary>
         /// Perform the given action on the given file
@@ -33,7 +46,52 @@ namespace Listenarr.Application.Downloads.Contracts
         /// <param name="action">What we want to do with the file</param>
         /// <param name="source">File</param>
         /// <param name="destination">Optional destination of the action</param>
+        /// <param name="operationId">Stable identifier for a retryable filesystem operation</param>
         /// <returns>True in case of success, false otherwise</returns>
-        Task<bool> PerformActionOn(FileAction action, string source, string? destination = null);
+        Task<bool> PerformActionOn(
+            FileAction action,
+            string source,
+            string? destination,
+            Guid operationId);
+
+        Task<bool> PerformActionOn(
+            FileAction action,
+            string source,
+            string? destination,
+            Guid operationId,
+            int audiobookId,
+            int audiobookFileId);
+
+        /// <summary>
+        /// Publishes the requested copy or hardlink destination and returns a lease
+        /// bound to the exact published file generation. Move requests are staged as
+        /// a copy; callers must retire the source only after durable registration.
+        /// </summary>
+        Task<IAudiobookFileRegistrationLease?> PrepareActionForRegistrationAsync(
+            FileAction action,
+            string source,
+            string destination,
+            Guid operationId);
+
+        /// <summary>
+        /// Resumes a registration publication when durable audiobook-file
+        /// ownership already proves the expected destination generation.
+        /// </summary>
+        Task<IAudiobookFileRegistrationLease?> PrepareActionForRegistrationAsync(
+            FileAction action,
+            string source,
+            string destination,
+            Guid operationId,
+            string expectedRegisteredPhysicalObjectIdentity);
+
+        /// <summary>
+        /// Completes a staged move by retiring only the verified source generation
+        /// while preserving the destination generation held by the registration lease.
+        /// </summary>
+        Task<bool> CompletePreparedMoveAsync(
+            string source,
+            string destination,
+            IAudiobookFileRegistrationLease registrationLease,
+            Guid operationId);
     }
 }

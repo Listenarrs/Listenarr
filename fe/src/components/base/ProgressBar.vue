@@ -55,6 +55,7 @@ interface Props {
   showSize?: boolean // Show size info
   label?: string // Optional label above bar
   animating?: boolean // For activity-style animation
+  indeterminate?: boolean // Show activity without implying measurable completion
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -66,6 +67,7 @@ const props = withDefaults(defineProps<Props>(), {
   showSize: false,
   label: undefined,
   animating: false,
+  indeterminate: false,
 })
 
 // Format bytes to human readable size
@@ -98,12 +100,18 @@ const displaySize = computed(() => {
     <div class="progress-container" :class="`height-${height}`" :data-variant="variant">
       <div
         class="progress-fill"
-        :class="[`fill-${variant}`, { animating: animating && variant === 'activity' }]"
-        :style="{ width: `${Math.max(0, Math.min(100, value))}%` }"
+        :class="[
+          `fill-${variant}`,
+          {
+            animating: animating && variant === 'activity' && !indeterminate,
+            indeterminate: indeterminate && variant === 'activity',
+          },
+        ]"
+        :style="{ width: indeterminate ? '35%' : `${Math.max(0, Math.min(100, value))}%` }"
       ></div>
     </div>
-    <div v-if="showPercentage || showSize" class="progress-info">
-      <div v-if="showPercentage" class="info-item">
+    <div v-if="(showPercentage && !indeterminate) || showSize" class="progress-info">
+      <div v-if="showPercentage && !indeterminate" class="info-item">
         <span class="percentage">{{ Math.round(value) }}%</span>
       </div>
       <div v-if="showSize && displaySize" class="info-item">
@@ -202,6 +210,20 @@ const displaySize = computed(() => {
 
 .progress-fill.fill-activity.animating {
   animation: progress-shimmer 2s infinite;
+}
+
+.progress-fill.fill-activity.indeterminate {
+  animation: progress-indeterminate 1.4s ease-in-out infinite;
+  transition: none;
+}
+
+@keyframes progress-indeterminate {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
 }
 
 @keyframes progress-shimmer {

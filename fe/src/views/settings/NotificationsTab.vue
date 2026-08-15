@@ -411,6 +411,9 @@ import { apiService } from '@/services/api'
 const props = defineProps<{
   settings: ApplicationSettings | null
 }>()
+const emit = defineEmits<{
+  'update:settings': [value: ApplicationSettings]
+}>()
 
 const toast = useToast()
 const configStore = useConfigurationStore()
@@ -987,16 +990,20 @@ const testWebhookConfig = async () => {
 // Persist webhooks to backend settings (do not mutate incoming props)
 const persistWebhooks = async () => {
   // Create a shallow copy of settings and assign updated webhooks
-  const current = props.settings
-    ? { ...(props.settings as unknown as Record<string, unknown>) }
-    : {}
+  const current = configStore.applicationSettings ?? props.settings
+  if (!current) {
+    throw new Error('Application settings are unavailable')
+  }
   try {
     const payload: ApplicationSettings = {
-      ...(current as unknown as ApplicationSettings),
+      ...current,
       webhooks: webhooks.value,
     }
-    // Save to backend using the configuration store
-    await configStore.saveApplicationSettings(payload)
+    // Save from the latest committed snapshot so repeated webhook edits carry
+    // the current optimistic-concurrency version. Propagate the returned snapshot
+    // to the parent because the backend increments that version on every save.
+    const savedSettings = await configStore.saveApplicationSettings(payload)
+    emit('update:settings', savedSettings)
   } catch (error) {
     errorTracking.captureException(error as Error, {
       component: 'NotificationsTab',

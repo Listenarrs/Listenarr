@@ -4,7 +4,6 @@
  */
 using System.Text.RegularExpressions;
 using Listenarr.Domain.Common;
-using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Library.Scanning
 {
@@ -13,11 +12,12 @@ namespace Listenarr.Infrastructure.Library.Scanning
         internal static List<List<string>> BuildGroupedFilesForFolder(
             IEnumerable<string> files,
             string folderPath,
+            FileSystemPathSemantics semantics,
             IReadOnlyDictionary<string, PathParsedMetadata>? embeddedTagsByFile = null)
         {
             var allFiles = files
                 .Where(f => !string.IsNullOrWhiteSpace(f))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Distinct(semantics.Comparer)
                 .ToList();
 
             if (allFiles.Count <= 1)
@@ -27,7 +27,11 @@ namespace Listenarr.Infrastructure.Library.Scanning
 
             if (embeddedTagsByFile != null)
             {
-                var metadataAwareGroups = BuildMetadataAwareGroups(allFiles, folderPath, embeddedTagsByFile);
+                var metadataAwareGroups = BuildMetadataAwareGroups(
+                    allFiles,
+                    folderPath,
+                    semantics,
+                    embeddedTagsByFile);
                 if (metadataAwareGroups.Count > 0)
                 {
                     return metadataAwareGroups;
@@ -40,6 +44,7 @@ namespace Listenarr.Infrastructure.Library.Scanning
         private static List<List<string>> BuildMetadataAwareGroups(
             IReadOnlyCollection<string> files,
             string folderPath,
+            FileSystemPathSemantics semantics,
             IReadOnlyDictionary<string, PathParsedMetadata> embeddedTagsByFile)
         {
             var folderKey = NormalizeGroupKey(Path.GetFileName(folderPath));
@@ -73,7 +78,7 @@ namespace Listenarr.Infrastructure.Library.Scanning
 
             var attachedFiles = new HashSet<string>(
                 metadataGroups.SelectMany(group => group).Select(candidate => candidate.FilePath),
-                StringComparer.OrdinalIgnoreCase);
+                semantics.Comparer);
 
             foreach (var candidate in candidates.Where(candidate => !attachedFiles.Contains(candidate.FilePath)))
             {
@@ -97,7 +102,7 @@ namespace Listenarr.Infrastructure.Library.Scanning
                 .ToList();
 
             var grouped = metadataGroups
-                .Select(group => group.Select(candidate => candidate.FilePath).Distinct(StringComparer.OrdinalIgnoreCase).ToList())
+                .Select(group => group.Select(candidate => candidate.FilePath).Distinct(semantics.Comparer).ToList())
                 .ToList();
 
             if (leftovers.Count > 0)
@@ -173,9 +178,10 @@ namespace Listenarr.Infrastructure.Library.Scanning
         private static async Task<IReadOnlyDictionary<string, PathParsedMetadata>> ReadEmbeddedTagsForFilesAsync(
             IEnumerable<string> files,
             string ffprobePath,
+            FileSystemPathSemantics semantics,
             CancellationToken ct)
         {
-            var result = new Dictionary<string, PathParsedMetadata>(StringComparer.OrdinalIgnoreCase);
+            var result = new Dictionary<string, PathParsedMetadata>(semantics.Comparer);
             foreach (var file in files)
             {
                 result[file] = await PathMetadataParser.ReadEmbeddedTagsAsync(file, ffprobePath, ct);
@@ -194,60 +200,6 @@ namespace Listenarr.Infrastructure.Library.Scanning
             if (!string.IsNullOrEmpty(tags.Year)) target.Year = tags.Year;
             if (!string.IsNullOrEmpty(tags.Description)) target.Description = tags.Description;
             if (!string.IsNullOrEmpty(tags.Asin)) target.Asin = tags.Asin;
-        }
-
-        private List<string> CollectAudioFiles(string rootFolderPath)
-        {
-            var candidates = new List<string>();
-            var normalizedRoot = Path.GetFullPath(rootFolderPath);
-            var dirs = new Stack<string>();
-            dirs.Push(normalizedRoot);
-
-            while (dirs.Count > 0)
-            {
-                var dir = dirs.Pop();
-                try
-                {
-                    var normalizedDir = Path.GetFullPath(dir);
-                    foreach (var file in Directory.EnumerateFiles(normalizedDir))
-                    {
-                        try
-                        {
-                            if (AudioExtensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase))
-                                candidates.Add(file);
-                        }
-                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                        {
-                            _logger.LogDebug(ex, "Skipped file {File} during unmatched scan", file);
-                        }
-                    }
-                    foreach (var sub in Directory.EnumerateDirectories(normalizedDir))
-                    {
-                        // Skip reparse points (symlinks, junctions) because they can point outside the root.
-                        if (new DirectoryInfo(sub).Attributes.HasFlag(FileAttributes.ReparsePoint))
-                        {
-                            _logger.LogDebug("Skipping reparse point {Dir}", sub);
-                            continue;
-                        }
-                        var resolvedSub = Path.GetFullPath(sub);
-                        var rootWithSep = normalizedRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-                        if (!resolvedSub.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase))
-                        {
-                            _logger.LogWarning("Skipping {Dir}: resolves outside configured root {Root}", sub, normalizedRoot);
-                            continue;
-                        }
-                        dirs.Push(resolvedSub);
-                    }
-                }
-                catch (IOException ioEx) { _logger.LogWarning(ioEx, "IO error scanning {Dir}", dir); }
-                catch (UnauthorizedAccessException uaEx) { _logger.LogWarning(uaEx, "Access denied scanning {Dir}", dir); }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    _logger.LogWarning(ex, "Unexpected error scanning {Dir}", dir);
-                }
-            }
-
-            return candidates;
         }
 
         /// <summary>
@@ -314,7 +266,7 @@ namespace Listenarr.Infrastructure.Library.Scanning
         private static string NormalizeGroupKey(string value) =>
             Regex.Replace(value ?? string.Empty, @"\s+", " ").Trim().ToLowerInvariant();
 
-        private static string NormalizePath(string path) =>
-            Path.GetFullPath(path).Replace('\\', '/').TrimEnd('/');
+        private static string NormalizePath(string path, FileSystemPathSyntax syntax) =>
+            FileSystemPathIdentity.Canonicalize(Path.GetFullPath(path), syntax);
     }
 }

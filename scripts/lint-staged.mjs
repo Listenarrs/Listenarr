@@ -20,6 +20,8 @@ const run = (command, args, options = {}) => {
   }
 }
 
+run('node', ['scripts/validate-repository-paths.mjs'])
+
 const stagedResult = spawnSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACMR'], {
   encoding: 'utf8',
   shell: false,

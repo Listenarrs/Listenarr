@@ -8,6 +8,7 @@ namespace Listenarr.Tests.Mocks.Api
         public static readonly int SINGLE_FILE_TORRENT = 1;
         public static readonly int ANOTHER_SINGLE_FILE_TORRENT = 306;
         public static readonly int MULTI_FILE_TORRENT = 2;
+        public static readonly int WHITESPACE_FOLDER_TORRENT = 528;
 
         public TransmissionApiMock()
         {
@@ -41,6 +42,10 @@ namespace Listenarr.Tests.Mocks.Api
                         else if (id == ANOTHER_SINGLE_FILE_TORRENT)
                         {
                             return AnotherSingleFileTorrentGet();
+                        }
+                        else if (id == WHITESPACE_FOLDER_TORRENT)
+                        {
+                            return WhitespaceFolderTorrentGet();
                         }
                     }
 
@@ -193,6 +198,37 @@ namespace Listenarr.Tests.Mocks.Api
             response = MockUtils.PutPathInResponse(response, "{{DIR}}", FileUtils.GetAbsolutePath("downloads"));
             response = MockUtils.PutPathInResponse(response, "{{FILE1}}", Path.Join("Book Folder", "chapter1.m4b"));
             response = MockUtils.PutPathInResponse(response, "{{FILE2}}", Path.Join("Book Folder", "book.txt"));
+            return MockUtils.GetCannedResponse(response);
+        }
+
+        private static HttpResponseMessage WhitespaceFolderTorrentGet()
+        {
+            var response = """
+            {
+                "arguments": {
+                    "torrents": [
+                        {
+                            "id": 528,
+                            "name": " Book Folder ",
+                            "downloadDir": "{{DIR}}",
+                            "files": [
+                                {
+                                    "name": "{{FILE1}}"
+                                },
+                                {
+                                    "name": "{{FILE2}}"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                "result": "success",
+                "tag": 3
+            }
+            """;
+            response = MockUtils.PutPathInResponse(response, "{{DIR}}", FileUtils.GetAbsolutePath("downloads"));
+            response = MockUtils.PutPathInResponse(response, "{{FILE1}}", Path.Join(" Book Folder ", "chapter1.m4b"));
+            response = MockUtils.PutPathInResponse(response, "{{FILE2}}", Path.Join(" Book Folder ", "book.txt"));
             return MockUtils.GetCannedResponse(response);
         }
     }

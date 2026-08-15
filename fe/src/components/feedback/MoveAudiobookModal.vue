@@ -24,27 +24,45 @@
     <template #default>
       <ModalBody>
         <div class="confirm-description">
-          <p>
+          <p v-if="rootFolderRepair">
+            Listenarr needs to reconfirm the storage rules for<span v-if="rootFolderName">
+              <strong>{{ rootFolderName }}</strong></span
+            >
+            before using this folder for filesystem operations.
+          </p>
+          <p v-else-if="rootFolderChange">
+            You're changing the library folder<span v-if="rootFolderName">
+              for <strong>{{ rootFolderName }}</strong></span
+            >. Confirm that the new path is the storage location you want Listenarr to use.
+          </p>
+          <p v-else>
             You're updating the audiobook destination. You can update the path only, or choose to
             move files immediately by selecting "Move files now."
           </p>
         </div>
 
         <div class="path-comparison" v-if="pendingMove || pendingRootPath">
-          <div class="path-section" v-if="pendingMove && pendingMove.original">
+          <div
+            class="path-section"
+            v-if="
+              !rootFolderRepair &&
+              ((pendingMove && pendingMove.original) || (rootFolderChange && currentRootPath))
+            "
+          >
             <div class="path-label">
               <PhArrowRight />
               <span>From:</span>
             </div>
             <div class="path-display">
-              <code>{{ pendingMove?.original }}</code>
+              <code>{{ pendingMove?.original || currentRootPath }}</code>
             </div>
           </div>
 
           <div class="path-section">
             <div class="path-label">
               <PhArrowDown />
-              <span v-if="pendingMove">To:</span>
+              <span v-if="rootFolderRepair">Library Folder:</span>
+              <span v-else-if="pendingMove || rootFolderChange">To:</span>
               <span v-else>New Root Folder:</span>
             </div>
             <div class="path-display">
@@ -76,23 +94,34 @@
         </div>
 
         <div class="confirm-options">
-          <div class="checkbox-row">
+          <div class="checkbox-row" v-if="showMoveOption">
             <label class="checkbox-wrapper checkbox-label">
               <input
                 type="checkbox"
                 class="checkbox-input"
-                :checked="moveFiles"
+                :checked="moveFiles && effectiveAllowMoveFiles"
+                :disabled="!effectiveAllowMoveFiles"
                 @change="onToggleMoveFiles($event)"
                 aria-label="Move files now"
               />
               <div class="checkbox-content">
                 <span class="checkbox-title">Move files now</span>
-                <small>Copy all audiobook files to the new location (recommended)</small>
+                <small v-if="effectiveAllowMoveFiles"
+                  >Copy all audiobook files to the new location (recommended)</small
+                >
+                <small v-else-if="!filesystemReadinessStore.filesystemReady">
+                  Files can be moved after library filesystem initialization completes. The path can
+                  still be updated without moving files.
+                </small>
+                <small v-else>
+                  Files cannot be moved from the current root on this system. The configured path
+                  can still be updated.
+                </small>
               </div>
             </label>
           </div>
 
-          <div class="checkbox-row" v-if="moveFiles">
+          <div class="checkbox-row" v-if="moveFiles && effectiveAllowMoveFiles">
             <label class="checkbox-wrapper checkbox-label">
               <input
                 type="checkbox"
@@ -108,7 +137,11 @@
             </label>
           </div>
 
-          <p class="confirm-note">
+          <p class="confirm-note" v-if="rootFolderChange">
+            Confirming the new folder updates the configured root. When the destination exists,
+            Listenarr verifies that exact folder before using it for filesystem operations.
+          </p>
+          <p class="confirm-note" v-else>
             The primary button will <strong>{{ buttonLabel }}</strong> based on the checkbox. Use
             <strong>Move files now</strong> to perform the move immediately, or leave it unchecked
             to only update the path.
@@ -138,6 +171,7 @@ import type { Component } from 'vue'
 import { computed, watch, ref } from 'vue'
 import { apiService } from '@/services/api'
 import { usePathLengthCheck } from '@/composables/usePathLengthCheck'
+import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 
 const props = withDefaults(
   defineProps<{
@@ -145,6 +179,12 @@ const props = withDefaults(
     title?: string
     pendingMove?: { original?: string; combined?: string } | null
     pendingRootPath?: string | null
+    rootFolderChange?: boolean
+    rootFolderRepair?: boolean
+    currentRootPath?: string | null
+    rootFolderName?: string | null
+    showMoveOption?: boolean
+    allowMoveFiles?: boolean
     moveFiles?: boolean
     deleteEmpty?: boolean
     icon?: Component | undefined
@@ -154,6 +194,12 @@ const props = withDefaults(
     title: 'Move Audiobook Files',
     pendingMove: null,
     pendingRootPath: null,
+    rootFolderChange: false,
+    rootFolderRepair: false,
+    currentRootPath: null,
+    rootFolderName: null,
+    showMoveOption: true,
+    allowMoveFiles: true,
     moveFiles: true,
     deleteEmpty: true,
     icon: undefined,
@@ -161,6 +207,10 @@ const props = withDefaults(
 )
 
 const emit = defineEmits(['cancel', 'confirm', 'update:moveFiles', 'update:deleteEmpty'])
+const filesystemReadinessStore = useFilesystemReadinessStore()
+const effectiveAllowMoveFiles = computed(
+  () => props.allowMoveFiles && filesystemReadinessStore.filesystemReady,
+)
 
 const volumeCheckResult = ref<{
   sameVolume: boolean
@@ -179,15 +229,22 @@ const { pathLengthWarning: movePathWarning } = usePathLengthCheck(moveDestinatio
 
 // Check volumes when paths change
 watch(
-  () => [props.pendingMove?.original, props.pendingMove?.combined, props.visible],
+  () => [
+    props.pendingMove?.original,
+    props.pendingMove?.combined,
+    props.currentRootPath,
+    props.pendingRootPath,
+    props.visible,
+    effectiveAllowMoveFiles.value,
+  ],
   async () => {
-    if (!props.visible || !props.moveFiles) {
+    if (!props.visible || !props.moveFiles || !effectiveAllowMoveFiles.value) {
       showHardlinkWarning.value = false
       return
     }
 
-    const source = props.pendingMove?.original
-    const dest = props.pendingMove?.combined
+    const source = props.pendingMove?.original || props.currentRootPath
+    const dest = props.pendingMove?.combined || props.pendingRootPath
 
     if (source && dest) {
       try {
@@ -205,17 +262,28 @@ watch(
 
 function onToggleMoveFiles(e: Event) {
   const t = e.target as HTMLInputElement | null
-  emit('update:moveFiles', Boolean(t && t.checked))
+  emit('update:moveFiles', Boolean(effectiveAllowMoveFiles.value && t && t.checked))
 }
 function onToggleDeleteEmpty(e: Event) {
   const t = e.target as HTMLInputElement | null
   emit('update:deleteEmpty', Boolean(t && t.checked))
 }
 
-const buttonLabel = computed(() => (props.moveFiles ? 'Move Files' : 'Update Path'))
+const buttonLabel = computed(() => {
+  if (props.rootFolderRepair) return 'Confirm Folder'
+  if (props.rootFolderChange) {
+    return props.moveFiles && effectiveAllowMoveFiles.value
+      ? 'Confirm & Move Files'
+      : 'Confirm New Folder'
+  }
+  return props.moveFiles && effectiveAllowMoveFiles.value ? 'Move Files' : 'Update Path'
+})
 
 function onSubmit() {
-  emit('confirm', { moveFiles: Boolean(props.moveFiles), deleteEmpty: Boolean(props.deleteEmpty) })
+  emit('confirm', {
+    moveFiles: Boolean(props.moveFiles && effectiveAllowMoveFiles.value),
+    deleteEmpty: Boolean(props.deleteEmpty),
+  })
 }
 </script>
 

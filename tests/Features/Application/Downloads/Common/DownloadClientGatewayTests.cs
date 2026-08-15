@@ -179,6 +179,27 @@ namespace Listenarr.Tests.Features.Application.Downloads.Common
             Assert.Equal(["1"], downloadClientAdapterMock.LastRequestedQueueIds);
         }
 
+        [LinuxFact]
+        public async Task GetQueueItemAsync_AmbiguousDoubleSlashPath_IsRejectedAsForeignSyntax()
+        {
+            var ambiguousPath = "//server/share/audiobooks/Book";
+            var adapter = (DownloadCLientAdapterMock)((DownloadClientGateway)downloadClientGateway)
+                .ResolveAdapter(client);
+            adapter.QueueItemMock = new QueueItemBuilder()
+                .WithRemotePath(ambiguousPath)
+                .WithContentPath(ambiguousPath)
+                .WithStatus("completed")
+                .Build();
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                downloadClientGateway.GetQueueItemAsync(
+                    client,
+                    new DownloadBuilder().Build(),
+                    new QueueItem()));
+
+            Assert.Contains("remote path mappings", exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
         [Fact]
         [Trait("Method", "GetQueueItemAsync")]
         [Trait("Scenario", "Check SourceFiles is empty when adapter gives null for both source files and content path")]
@@ -292,6 +313,138 @@ namespace Listenarr.Tests.Features.Application.Downloads.Common
             Assert.NotNull(item);
             Assert.NotNull(item.SourceFiles);
             Assert.Empty(item.SourceFiles);
+        }
+
+        [Fact]
+        [Trait("Method", "GetQueueItemAsync")]
+        [Trait("Scenario", "Remote path mapping preserves whitespace-bearing path segments")]
+        public async Task GetQueueItemAsync_PreservesWhitespaceAfterRemotePathMapping()
+        {
+            var remoteFile = FileUtils.GetAbsolutePath("downloads", " Book Folder ", "chapter1.m4b");
+            var expectedLocalFile = Path.Join(localMapping, " Book Folder ", "chapter1.m4b");
+            var downloadClientAdapterMock = (DownloadCLientAdapterMock)((DownloadClientGateway)downloadClientGateway).ResolveAdapter(client);
+            downloadClientAdapterMock.QueueItemMock = new QueueItemBuilder()
+                .WithRemotePath(remoteFile)
+                .WithContentPath(remoteFile)
+                .WithSourceFile(remoteFile)
+                .WithStatus("completed")
+                .Build();
+
+            var item = await downloadClientGateway.GetQueueItemAsync(client, new DownloadBuilder().Build(), new QueueItem());
+
+            Assert.Equal(expectedLocalFile, item.LocalPath);
+            Assert.Equal(expectedLocalFile, item.ContentPath);
+            Assert.Equal([expectedLocalFile], item.SourceFiles);
+        }
+
+        [Fact]
+        [Trait("Method", "GetQueueItemAsync")]
+        [Trait("Scenario", "Exact duplicate source files are deduped")]
+        public async Task GetQueueItemAsync_DedupesExactDuplicateSourceFiles()
+        {
+            var sourceFile = Path.Join(localPath, "chapter1.m4b");
+            var downloadClientAdapterMock = (DownloadCLientAdapterMock)((DownloadClientGateway)downloadClientGateway).ResolveAdapter(client);
+            downloadClientAdapterMock.QueueItemMock = new QueueItemBuilder()
+                .WithSourceFile(sourceFile)
+                .WithSourceFile(sourceFile)
+                .WithStatus("completed")
+                .Build();
+
+            var item = await downloadClientGateway.GetQueueItemAsync(client, new DownloadBuilder().Build(), new QueueItem());
+
+            var actual = Assert.Single(item.SourceFiles);
+            Assert.Equal(sourceFile, actual);
+        }
+
+        [Theory]
+        [InlineData(FileSystemCaseSensitivity.Sensitive, 2)]
+        [InlineData(FileSystemCaseSensitivity.Insensitive, 1)]
+        [Trait("Method", "GetQueueItemAsync")]
+        [Trait("Scenario", "Case-only source file dedupe follows resolved storage semantics")]
+        public async Task GetQueueItemAsync_DedupesCaseOnlySourceFilesUsingResolvedSemantics(
+            FileSystemCaseSensitivity caseSensitivity,
+            int expectedCount)
+        {
+            var sourceRoot = Path.Join(Path.GetTempPath(), "listenarr-gateway-semantics");
+            var firstSourceFile = Path.Join(sourceRoot, "chapter1.m4b");
+            var secondSourceFile = Path.Join(sourceRoot, "Chapter1.m4b");
+            var item = new QueueItemBuilder()
+                .WithContentPath(sourceRoot)
+                .WithSourceFile(firstSourceFile)
+                .WithSourceFile(secondSourceFile)
+                .WithStatus("completed")
+                .Build();
+            var adapter = new Mock<IDownloadClientAdapter>();
+            adapter.Setup(service => service.GetImportItemAsync(
+                    It.IsAny<DownloadClientConfiguration>(),
+                    It.IsAny<Download>(),
+                    It.IsAny<QueueItem>(),
+                    It.IsAny<QueueItem?>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(item);
+            var factory = new Mock<IDownloadClientAdapterFactory>();
+            factory.Setup(service => service.GetByType("mock"))
+                .Returns(adapter.Object);
+            var mapping = new Mock<IRemotePathMappingService>();
+            mapping.Setup(service => service.TranslatePathAsync(
+                    It.IsAny<DownloadClientConfiguration>(),
+                    It.IsAny<string>()))
+                .ReturnsAsync((DownloadClientConfiguration _, string path) => path);
+            var resolver = new Mock<IFileSystemSemanticsResolver>();
+            resolver.Setup(service => service.ResolveAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<FileSystemCaseSensitivityMode>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns<string, FileSystemCaseSensitivityMode, CancellationToken>((path, _, _) =>
+                    ValueTask.FromResult(new FileSystemSemanticsResolution(
+                        new FileSystemPathSemantics(FileSystemPathSemantics.CurrentHostDefault.Syntax, caseSensitivity),
+                        PathIdentityState.Valid,
+                        path)));
+            var gateway = new DownloadClientGateway(
+                mapping.Object,
+                factory.Object,
+                _provider.GetRequiredService<IFileSystem>(),
+                resolver.Object,
+                _provider.GetRequiredService<ILogger<DownloadClientGateway>>());
+
+            var result = await gateway.GetQueueItemAsync(
+                new DownloadClientConfiguration { Type = "mock", Name = "mock" },
+                new DownloadBuilder().Build(),
+                new QueueItem());
+
+            Assert.Equal(expectedCount, result.SourceFiles.Count);
+        }
+
+        [LinuxFact]
+        [Trait("Method", "GetQueueItemAsync")]
+        [Trait("Scenario", "Directory expansion preserves whitespace-bearing filesystem paths")]
+        public async Task GetQueueItemAsync_ExpandsWhitespaceBearingDirectoryIntoExactSourceFiles()
+        {
+
+            var root = Path.Join(Path.GetTempPath(), "listenarr-gateway-whitespace-" + Guid.NewGuid().ToString("N"));
+            var sourceDirectory = Path.Join(root, " Book Folder ");
+            Directory.CreateDirectory(sourceDirectory);
+            var sourceFile = Path.Join(sourceDirectory, "chapter1.m4b");
+            await File.WriteAllTextAsync(sourceFile, "audio");
+
+            try
+            {
+                var downloadClientAdapterMock = (DownloadCLientAdapterMock)((DownloadClientGateway)downloadClientGateway).ResolveAdapter(client);
+                downloadClientAdapterMock.QueueItemMock = new QueueItemBuilder()
+                    .WithContentPath(sourceDirectory)
+                    .WithStatus("completed")
+                    .Build();
+
+                var item = await downloadClientGateway.GetQueueItemAsync(client, new DownloadBuilder().Build(), new QueueItem());
+                var actual = Assert.Single(item.SourceFiles);
+
+                Assert.Equal(FileUtils.NormalizeStoredPath(sourceFile), actual);
+                Assert.True(File.Exists(actual));
+            }
+            finally
+            {
+                try { Directory.Delete(root, true); } catch (IOException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); } catch (UnauthorizedAccessException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
+            }
         }
     }
 }

@@ -6,6 +6,11 @@
  * it under the terms of the GNU Affero General Public License as published
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU Affero General Public License for more details.
  */
 
 using Listenarr.Api.Dtos.ManualImport;
@@ -18,26 +23,43 @@ public sealed class ManualImportCompanionImporter
     private readonly IMetadataService _metadataService;
     private readonly IFileMover _fileMover;
     private readonly IFileSystem _fileSystem;
+    private readonly IFileSystemSemanticsResolver _semanticsResolver;
+    private readonly ILibraryDirectoryOwnershipStore _directoryOwnershipStore;
     private readonly ILogger<ManualImportCompanionImporter> _logger;
+    private readonly IAudiobookFileService? _audiobookFileService;
 
     public ManualImportCompanionImporter(
         IMetadataService metadataService,
         IFileMover fileMover,
         IFileSystem fileSystem,
-        ILogger<ManualImportCompanionImporter> logger)
+        IFileSystemSemanticsResolver semanticsResolver,
+        ILibraryDirectoryOwnershipStore directoryOwnershipStore,
+        ILogger<ManualImportCompanionImporter> logger,
+        IAudiobookFileService? audiobookFileService = null)
     {
         _metadataService = metadataService;
         _fileMover = fileMover;
         _fileSystem = fileSystem;
+        _semanticsResolver = semanticsResolver;
+        _directoryOwnershipStore = directoryOwnershipStore;
         _logger = logger;
+        _audiobookFileService = audiobookFileService;
     }
 
-    public async Task<IReadOnlyCollection<FileUtils.AudioMatchProfile>> BuildAudioMatchProfilesAsync(IEnumerable<string> filePaths)
+    public async Task<IReadOnlyCollection<FileUtils.AudioMatchProfile>> BuildAudioMatchProfilesAsync(
+        IEnumerable<string> filePaths,
+        StringComparer sourcePathComparer,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         return (await Task.WhenAll(filePaths
                 .Where(path => !string.IsNullOrWhiteSpace(path))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Select(BuildAudioMatchProfileAsync)))
+                .Distinct(sourcePathComparer)
+                .Select(async path =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    return await BuildAudioMatchProfileAsync(path);
+                })))
             .Where(profile => profile != null)
             .Cast<FileUtils.AudioMatchProfile>()
             .ToList();
@@ -49,9 +71,12 @@ public sealed class ManualImportCompanionImporter
         IReadOnlyCollection<ManualImportResultDto> results,
         string sourceRootPath,
         IReadOnlyCollection<FileUtils.AudioMatchProfile> selectedAudioProfiles,
-        HashSet<string> unavailableFilenames,
-        IEnumerable<string> importBlacklist)
+        ManualImportDestinationTracker destinationTracker,
+        FileSystemPathSemantics sourceSemantics,
+        IEnumerable<string> importBlacklist,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var audiobookIds = orderedItems
             .Select(item => item.MatchedAudiobookId)
             .Distinct()
@@ -63,6 +88,10 @@ public sealed class ManualImportCompanionImporter
             return 0;
         }
 
+        var targetAudiobook = results
+            .Where(result => result.Success && result.Audiobook?.Id == audiobookIds[0])
+            .Select(result => result.Audiobook)
+            .FirstOrDefault();
         var destinationRoot = ManualImportPathPlanner.DetermineScanPath(results
             .Where(r => r.Success && !string.IsNullOrWhiteSpace(r.DestinationPath))
             .Select(r => r.DestinationPath!)
@@ -78,12 +107,12 @@ public sealed class ManualImportCompanionImporter
             orderedItems
                 .Where(item => !string.IsNullOrWhiteSpace(item.FullPath))
                 .Select(item => Path.GetFullPath(item.FullPath!)),
-            StringComparer.OrdinalIgnoreCase);
+            sourceSemantics.Comparer);
 
         var selectedDirectories = selectedSourceFiles
             .Select(Path.GetDirectoryName)
             .Where(d => !string.IsNullOrWhiteSpace(d))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Distinct(sourceSemantics.Comparer)
             .ToList();
 
         var companionFiles = selectedDirectories
@@ -92,15 +121,29 @@ public sealed class ManualImportCompanionImporter
             .Where(file => !FileUtils.IsBlacklistedFile(file, importBlacklist))
             .Select(Path.GetFullPath)
             .Where(file => !selectedSourceFiles.Contains(file))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Distinct(sourceSemantics.Comparer)
             .ToList();
+
+        var destinationResolution = await _semanticsResolver.ResolveAsync(
+            destinationRoot,
+            cancellationToken: cancellationToken);
+        if (destinationResolution.State != PathIdentityState.Valid)
+        {
+            _logger.LogWarning(
+                "Skipping companion-file import because destination filesystem identity is unavailable for {DestinationRoot}: {Reason}",
+                destinationRoot,
+                destinationResolution.Reason);
+            return 0;
+        }
 
         var importedCount = 0;
         foreach (var companionFile in companionFiles)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                if (FileUtils.IsAudioFile(companionFile))
+                var isAudioCompanion = FileUtils.IsAudioFile(companionFile);
+                if (isAudioCompanion)
                 {
                     var profile = await BuildAudioMatchProfileAsync(companionFile);
                     if (profile == null || !FileUtils.LikelyMatchesAnyReference(profile, selectedAudioProfiles))
@@ -112,21 +155,94 @@ public sealed class ManualImportCompanionImporter
                     }
                 }
 
-                var relativePath = Path.GetRelativePath(sourceRootPath, companionFile);
-                if (relativePath.StartsWith("..", StringComparison.Ordinal))
+                if (!TryResolveCompanionDestination(
+                        sourceRootPath,
+                        destinationRoot,
+                        companionFile,
+                        results,
+                        sourceSemantics,
+                        destinationResolution.Semantics,
+                        out var destinationPath))
                 {
+                    _logger.LogWarning(
+                        "Skipping companion file {FilePath} because no contained destination could be resolved",
+                        companionFile);
                     continue;
                 }
 
-                var destinationPath = ManualImportPathPlanner.CombineWithOptionalBase(destinationRoot, relativePath);
+                var destinationReservation = await destinationTracker.PlanUniqueAsync(
+                    destinationPath,
+                    cancellationToken);
+                destinationPath = destinationReservation.Path;
+                var operationId = FileMoveOperationIdentity.CreateForPaths(
+                    "manual-import-companion",
+                    audiobookIds[0],
+                    action,
+                    companionFile,
+                    sourceSemantics,
+                    destinationPath,
+                    destinationResolution.Semantics);
 
-                var success = await _fileMover.PerformActionOn(action, companionFile, destinationPath);
-                if (success)
+                var destinationDirectory = Path.GetDirectoryName(destinationPath)
+                    ?? throw new InvalidOperationException(
+                        "The companion import destination has no parent directory.");
+                AudiobookFileOwnershipCheckResult? ownership = null;
+                if (_audiobookFileService != null && targetAudiobook != null)
                 {
-                    unavailableFilenames.Add(destinationPath);
+                    ownership = await _audiobookFileService.CheckAudiobookFileOwnershipAsync(
+                        targetAudiobook,
+                        destinationPath,
+                        destinationDirectory,
+                        cancellationToken);
+                    if (ownership.Outcome is not (
+                            AudiobookFileOwnershipCheckOutcome.Available or
+                            AudiobookFileOwnershipCheckOutcome.AlreadyOwnedByAudiobook))
+                    {
+                        _logger.LogWarning(
+                            "Skipping companion file {FilePath} because destination {DestinationPath} is not available: {Outcome}. {Reason}",
+                            companionFile,
+                            destinationPath,
+                            ownership.Outcome,
+                            ownership.Reason);
+                        continue;
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Skipping companion file {FilePath} because destination ownership cannot be verified",
+                        companionFile);
+                    continue;
                 }
 
-                importedCount++;
+                await _directoryOwnershipStore.EnsureCreatedHierarchyAsync(
+                    destinationDirectory,
+                    destinationRoot,
+                    destinationResolution.Semantics,
+                    "manual-import-companion",
+                    operationId,
+                    audiobookIds[0],
+                    cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                var success = isAudioCompanion
+                    ? await PublishAndRegisterAudioCompanionAsync(
+                        action,
+                        companionFile,
+                        destinationPath,
+                        operationId,
+                        targetAudiobook!,
+                        ownership!,
+                        cancellationToken)
+                    : await _fileMover.PerformActionOn(
+                        action,
+                        companionFile,
+                        destinationPath,
+                        operationId);
+                if (success)
+                {
+                    destinationTracker.Commit(destinationReservation);
+                    importedCount++;
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
@@ -135,6 +251,134 @@ public sealed class ManualImportCompanionImporter
         }
 
         return importedCount;
+    }
+
+    private async Task<bool> PublishAndRegisterAudioCompanionAsync(
+        FileAction action,
+        string sourcePath,
+        string destinationPath,
+        Guid operationId,
+        Audiobook audiobook,
+        AudiobookFileOwnershipCheckResult ownership,
+        CancellationToken cancellationToken)
+    {
+        var expectedIdentity = action == FileAction.HardlinkCopy
+            ? ownership.ExistingFile?.PhysicalObjectIdentity
+            : null;
+        using var registrationLease = !string.IsNullOrWhiteSpace(expectedIdentity)
+            ? await _fileMover.PrepareActionForRegistrationAsync(
+                action,
+                sourcePath,
+                destinationPath,
+                operationId,
+                expectedIdentity)
+            : await _fileMover.PrepareActionForRegistrationAsync(
+                action,
+                sourcePath,
+                destinationPath,
+                operationId);
+        if (registrationLease == null
+            || _audiobookFileService == null
+            || !await _audiobookFileService.RegisterPublishedGenerationAsync(
+                audiobook,
+                ownership,
+                registrationLease,
+                "manual-import-companion",
+                cancellationToken))
+        {
+            return false;
+        }
+
+        if (action == FileAction.Move
+            && !await _fileMover.CompletePreparedMoveAsync(
+                sourcePath,
+                destinationPath,
+                registrationLease,
+                operationId))
+        {
+            await _audiobookFileService.RollbackPublishedGenerationIfStaleAsync(
+                audiobook,
+                registrationLease);
+            return false;
+        }
+
+        var completion = registrationLease.CompletePublication();
+        if (completion
+            == RegistrationPublicationCompletion.CommittedCleanupPending)
+        {
+            _logger.LogWarning(
+                "Manual import companion committed for audiobook {AudiobookId}, but registration-publication cleanup remains pending for {Path}",
+                audiobook.Id,
+                LogRedaction.SanitizeFilePath(destinationPath));
+        }
+
+        return true;
+    }
+
+    private static bool TryResolveCompanionDestination(
+        string sourceRootPath,
+        string destinationRoot,
+        string companionFile,
+        IReadOnlyCollection<ManualImportResultDto> results,
+        FileSystemPathSemantics sourceSemantics,
+        FileSystemPathSemantics destinationSemantics,
+        out string destinationPath)
+    {
+        var sourceRoot = FileSystemPathIdentity.ResolveNativeAbsolutePath(sourceRootPath);
+        var companion = FileSystemPathIdentity.ResolveNativeAbsolutePath(companionFile);
+        var destination = FileSystemPathIdentity.ResolveNativeAbsolutePath(destinationRoot);
+        if (FileSystemPathIdentity.TryGetRelativePathWithinBase(
+                sourceRoot,
+                companion,
+                sourceSemantics,
+                out var relativePath)
+            && FileSystemPathIdentity.TryResolveRelativePathWithinBase(
+                destination,
+                relativePath,
+                destinationSemantics,
+                out destinationPath))
+        {
+            return true;
+        }
+
+        var companionDirectory = Path.GetDirectoryName(companion);
+        if (string.IsNullOrWhiteSpace(companionDirectory))
+        {
+            destinationPath = string.Empty;
+            return false;
+        }
+
+        var matchingImport = results.FirstOrDefault(result =>
+        {
+            if (!result.Success
+                || string.IsNullOrWhiteSpace(result.SourcePath)
+                || string.IsNullOrWhiteSpace(result.DestinationPath))
+            {
+                return false;
+            }
+
+            var importedSourceDirectory = Path.GetDirectoryName(
+                FileSystemPathIdentity.ResolveNativeAbsolutePath(result.SourcePath));
+            return importedSourceDirectory != null
+                && sourceSemantics.Comparer.Equals(importedSourceDirectory, companionDirectory);
+        });
+        var importedDestinationDirectory = matchingImport?.DestinationPath == null
+            ? null
+            : Path.GetDirectoryName(
+                FileSystemPathIdentity.ResolveNativeAbsolutePath(
+                    matchingImport.DestinationPath));
+        if (string.IsNullOrWhiteSpace(importedDestinationDirectory)
+            || !FileSystemPathIdentity.TryResolveRelativePathWithinBase(
+                importedDestinationDirectory,
+                Path.GetFileName(companion),
+                destinationSemantics,
+                out destinationPath))
+        {
+            destinationPath = string.Empty;
+            return false;
+        }
+
+        return true;
     }
 
     private async Task<FileUtils.AudioMatchProfile?> BuildAudioMatchProfileAsync(string filePath)

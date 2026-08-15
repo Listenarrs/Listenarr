@@ -87,57 +87,6 @@ namespace Listenarr.Api.Features.Library
             return ResolvePathWithOptionalBase(rootPath, relative);
         }
 
-        public static string CalculateBasePath(List<string> filePaths, IFileSystem fileSystem, ILogger logger)
-        {
-            if (!filePaths.Any())
-                return string.Empty;
-
-            var directories = filePaths
-                .Select(p => FileUtils.NormalizeStoredPath(Path.GetDirectoryName(p) ?? p))
-                .Where(p => !string.IsNullOrWhiteSpace(p))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            if (directories.Count == 1)
-            {
-                return directories[0];
-            }
-
-            var commonPath = GetCommonPath(directories, fileSystem);
-            var currentPath = commonPath;
-            while (!string.IsNullOrEmpty(currentPath))
-            {
-                try
-                {
-                    var parent = fileSystem.GetParentDirectory(currentPath);
-                    if (string.IsNullOrEmpty(parent))
-                        break;
-
-                    var subDirs = fileSystem.EnumerateDirectories(parent).Count();
-                    var files = fileSystem.EnumerateFiles(parent).Count();
-
-                    if (subDirs + files > 1)
-                    {
-                        return currentPath;
-                    }
-
-                    currentPath = parent;
-                }
-                catch (Exception traversalEx) when (
-                    traversalEx is IOException
-                    || traversalEx is UnauthorizedAccessException
-                    || traversalEx is System.Security.SecurityException
-                    || traversalEx is ArgumentException
-                    || traversalEx is NotSupportedException)
-                {
-                    logger.LogDebug(traversalEx, "Stopping common-base-path ascent at {Path} due to traversal error", currentPath);
-                    break;
-                }
-            }
-
-            return commonPath;
-        }
-
         internal static string SanitizeDirectoryName(string name)
         {
             var invalidChars = Path.GetInvalidFileNameChars();
@@ -148,47 +97,6 @@ namespace Listenarr.Api.Features.Library
 
             name = name.Replace(":", "_").Replace("*", "_").Replace("?", "_").Replace("\"", "_").Replace("<", "_").Replace(">", "_").Replace("|", "_");
             return name.Trim();
-        }
-
-        private static string GetCommonPath(List<string> paths, IFileSystem fileSystem)
-        {
-            if (!paths.Any())
-                return string.Empty;
-
-            var firstPath = FileUtils.NormalizeStoredPath(paths[0]);
-            var commonPath = firstPath;
-
-            foreach (var path in paths.Skip(1).Select(rawPath => FileUtils.NormalizeStoredPath(rawPath)))
-            {
-                var minLength = Math.Min(commonPath.Length, path.Length);
-                var commonLength = 0;
-
-                for (int i = 0; i < minLength; i++)
-                {
-                    if (commonPath[i] == path[i])
-                        commonLength++;
-                    else
-                        break;
-                }
-
-                if (commonLength < commonPath.Length)
-                    commonLength = commonPath.LastIndexOf(Path.DirectorySeparatorChar, commonLength - 1) is var lastSep && lastSep >= 0
-                        ? lastSep + 1
-                        : 0;
-
-                commonPath = commonPath.Substring(0, commonLength);
-
-                if (string.IsNullOrEmpty(commonPath))
-                    break;
-            }
-
-            if (!string.IsNullOrEmpty(commonPath) && !fileSystem.DirectoryExists(commonPath))
-            {
-                var parent = fileSystem.GetParentDirectory(commonPath);
-                return parent ?? commonPath;
-            }
-
-            return commonPath;
         }
 
         private static string CleanDirectoryPattern(string pattern)

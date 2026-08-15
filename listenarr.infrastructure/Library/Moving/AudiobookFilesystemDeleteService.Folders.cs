@@ -13,186 +13,217 @@ namespace Listenarr.Infrastructure.Library.Moving
         private async Task<DeleteFolderTarget?> ResolveDeleteFolderTargetAsync(
             Audiobook audiobook,
             IReadOnlyList<string> trackedFilePaths,
-            AudiobookFilesystemDeleteResult result)
+            FileSystemPathSemantics semantics,
+            AudiobookFilesystemDeleteResult result,
+            CancellationToken cancellationToken)
         {
-            var protectedRoots = await GetProtectedRootPathsAsync();
-            var folderPath = ResolveAudiobookFolderPath(audiobook, trackedFilePaths);
+            cancellationToken.ThrowIfCancellationRequested();
+            var protectedRoots = await GetProtectedRootPathsAsync(cancellationToken);
+            var folderPath = ResolveAudiobookFolderPath(audiobook, trackedFilePaths, semantics);
             if (string.IsNullOrWhiteSpace(folderPath))
             {
                 result.Warnings.Add("Audiobook folder could not be determined, so only tracked audiobook files were deleted.");
                 return null;
             }
 
-            if (protectedRoots.Any(root => PathsEqual(root, folderPath)))
+            if (protectedRoots.Any(root => PathsEqual(root, folderPath, semantics)))
             {
-                var fallbackFolderPath = ResolveTrackedFolderPath(trackedFilePaths);
+                var fallbackFolderPath = ResolveTrackedFolderPath(trackedFilePaths, semantics);
                 if (!string.IsNullOrWhiteSpace(fallbackFolderPath)
-                    && !protectedRoots.Any(root => PathsEqual(root, fallbackFolderPath))
-                    && IsSamePathOrWithin(fallbackFolderPath, folderPath))
+                    && !protectedRoots.Any(root => PathsEqual(root, fallbackFolderPath, semantics))
+                    && IsSamePathOrWithin(fallbackFolderPath, folderPath, semantics))
                 {
                     folderPath = fallbackFolderPath;
                 }
             }
 
-            if (IsFilesystemRoot(folderPath))
+            if (IsFilesystemRoot(folderPath, semantics))
             {
                 result.Warnings.Add("Refused to delete all files in a filesystem root folder.");
                 return null;
             }
 
-            if (protectedRoots.Any(root => PathsEqual(root, folderPath)))
+            if (protectedRoots.Any(root => PathsEqual(root, folderPath, semantics)))
             {
                 result.Warnings.Add("Refused to delete all files in a configured library root folder.");
                 return null;
             }
 
-            if (!Directory.Exists(folderPath))
+            var ownedDirectories = await ResolveOwnedDirectoriesForDeleteAsync(
+                folderPath,
+                semantics,
+                result,
+                cancellationToken);
+            if (ownedDirectories == null)
+            {
+                return null;
+            }
+            if (!Directory.Exists(folderPath)
+                && !ownedDirectories.Any(ownership =>
+                    FileSystemPathIdentity.AreEquivalent(
+                        ownership.CanonicalPath,
+                        folderPath,
+                        semantics)
+                    && ownership.State == LibraryDirectoryOwnershipState.Removing))
             {
                 return null;
             }
 
-            var allFiles = await _audioFileRepository.GetAllAsync();
-            var otherFilePaths = allFiles
-                .Where(f => f.AudiobookId != audiobook.Id && f.Path != null)
-                .Select(f => f.Path!)
-                .ToList();
-
-            if (otherFilePaths
-                .Select(NormalizePath)
-                .Any(p => !string.IsNullOrWhiteSpace(p) && IsSamePathOrWithin(p!, folderPath)))
-            {
-                result.Warnings.Add("Refused to delete all files in the audiobook folder because other audiobook files are inside it.");
-                return null;
-            }
-
+            cancellationToken.ThrowIfCancellationRequested();
             var allAudiobooks = await _audiobookRepository.GetAllAsync();
-            var otherAudiobookPaths = allAudiobooks
-                .Where(a => a.Id != audiobook.Id)
-                .Select(a => new { a.Id, a.BasePath, a.FilePath })
-                .ToList();
-
-            foreach (var otherPath in otherAudiobookPaths)
+            var otherAudiobooks = allAudiobooks
+                .Where(candidate => candidate.Id != audiobook.Id)
+                .ToDictionary(candidate => candidate.Id);
+            var allFiles = await _audioFileRepository.GetAllAsync();
+            foreach (var file in allFiles.Where(file =>
+                file.AudiobookId != audiobook.Id
+                && !string.IsNullOrWhiteSpace(file.Path)))
             {
-                var otherBasePath = NormalizePath(otherPath.BasePath);
-                if (!string.IsNullOrWhiteSpace(otherBasePath)
-                    && (IsSamePathOrWithin(otherBasePath, folderPath) || IsSamePathOrWithin(folderPath, otherBasePath)))
+                if (!otherAudiobooks.TryGetValue(file.AudiobookId, out var owner)
+                    || !TryResolveStoredFilePath(
+                        owner,
+                        file.Path!,
+                        semantics,
+                        out var otherFilePath))
                 {
-                    result.Warnings.Add("Refused to delete all files in the audiobook folder because another audiobook references that location.");
+                    result.Warnings.Add(
+                        "Refused to delete all files in the audiobook folder because another audiobook has an unresolved tracked path.");
                     return null;
                 }
 
-                var otherFilePath = NormalizePath(otherPath.FilePath);
-                if (!string.IsNullOrWhiteSpace(otherFilePath) && IsSamePathOrWithin(otherFilePath, folderPath))
+                if (IsSamePathOrWithin(otherFilePath, folderPath, semantics))
                 {
-                    result.Warnings.Add("Refused to delete all files in the audiobook folder because another audiobook file is inside it.");
+                    result.Warnings.Add("Refused to delete all files in the audiobook folder because other audiobook files are inside it.");
                     return null;
                 }
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            foreach (var otherAudiobook in otherAudiobooks.Values)
+            {
+                if (!string.IsNullOrWhiteSpace(otherAudiobook.BasePath))
+                {
+                    if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                            otherAudiobook.BasePath,
+                            out var otherBasePath,
+                            out _))
+                    {
+                        result.Warnings.Add(
+                            "Refused to delete all files in the audiobook folder because another audiobook has an unresolved base path.");
+                        return null;
+                    }
+
+                    if (IsSamePathOrWithin(otherBasePath, folderPath, semantics)
+                        || IsSamePathOrWithin(folderPath, otherBasePath, semantics))
+                    {
+                        result.Warnings.Add("Refused to delete all files in the audiobook folder because another audiobook references that location.");
+                        return null;
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(otherAudiobook.FilePath))
+                {
+                    if (!TryResolveStoredFilePath(
+                            otherAudiobook,
+                            otherAudiobook.FilePath,
+                            semantics,
+                            out var otherFilePath))
+                    {
+                        result.Warnings.Add(
+                            "Refused to delete all files in the audiobook folder because another audiobook has an unresolved legacy file path.");
+                        return null;
+                    }
+
+                    if (IsSamePathOrWithin(otherFilePath, folderPath, semantics))
+                    {
+                        result.Warnings.Add("Refused to delete all files in the audiobook folder because another audiobook file is inside it.");
+                        return null;
+                    }
+                }
+            }
+
+            var allowedMutationRoots = protectedRoots
+                .Where(root => IsSamePathOrWithin(folderPath, root, semantics))
+                .ToList();
+            if (allowedMutationRoots.Count == 0)
+            {
+                allowedMutationRoots.Add(folderPath);
             }
 
             return new DeleteFolderTarget
             {
                 FolderPath = folderPath,
-                ProtectedRoots = protectedRoots
+                ProtectedRoots = protectedRoots,
+                AllowedMutationRoots = allowedMutationRoots,
+                Semantics = semantics,
+                OwnedDirectories = ownedDirectories
             };
         }
 
-        private async Task TryDeleteAudiobookFolderAsync(Audiobook audiobook, DeleteFolderTarget deleteTarget, AudiobookFilesystemDeleteResult result)
+        private async Task TryDeleteAudiobookFolderAsync(
+            Audiobook audiobook,
+            DeleteFolderTarget deleteTarget,
+            AudiobookFilesystemDeleteResult result,
+            CancellationToken cancellationToken)
         {
-            if (!Directory.Exists(deleteTarget.FolderPath))
+            cancellationToken.ThrowIfCancellationRequested();
+            if (deleteTarget.OwnedDirectories.Count > 0
+                && !await RetireOwnedHierarchyAsync(
+                    deleteTarget.OwnedDirectories,
+                    cancellationToken))
             {
+                result.Warnings.Add(
+                    "The audiobook folder gained content while its owned directory hierarchy was being deleted.");
                 return;
             }
 
-            try
-            {
-                Directory.Delete(deleteTarget.FolderPath, recursive: true);
-                result.DeletedFolder = true;
-                _logger.LogInformation("Deleted audiobook folder {FolderPath}", LogRedaction.SanitizeFilePath(deleteTarget.FolderPath));
-                await TryDeleteEmptyAuthorFolderAsync(audiobook, deleteTarget.FolderPath, deleteTarget.ProtectedRoots, result);
-            }
-            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            cancellationToken.ThrowIfCancellationRequested();
+            // Unowned exact audiobook folders may still be removed because the user
+            // explicitly requested folder deletion. Implicit parent deletion remains
+            // ownership-gated below.
+            if (!FileSystemSafety.TryDeleteEmptyDirectory(
+                    deleteTarget.FolderPath,
+                    deleteTarget.AllowedMutationRoots,
+                    out var reason))
             {
                 result.Warnings.Add("Failed to delete the audiobook folder.");
-                _logger.LogWarning(ex, "Failed to delete audiobook folder {FolderPath}", LogRedaction.SanitizeFilePath(deleteTarget.FolderPath));
-            }
-        }
-
-        private async Task TryDeleteEmptyAuthorFolderAsync(
-            Audiobook audiobook,
-            string deletedFolderPath,
-            IReadOnlyCollection<string> protectedRoots,
-            AudiobookFilesystemDeleteResult result)
-        {
-            var parentFolder = NormalizePath(Path.GetDirectoryName(deletedFolderPath));
-            if (string.IsNullOrWhiteSpace(parentFolder)
-                || IsFilesystemRoot(parentFolder)
-                || protectedRoots.Any(root => PathsEqual(root, parentFolder))
-                || !Directory.Exists(parentFolder)
-                || !IsAuthorFolder(parentFolder, audiobook.Authors?.FirstOrDefault()))
-            {
+                _logger.LogWarning(
+                    "Failed to safely delete audiobook folder {FolderPath}: {Reason}",
+                    LogRedaction.SanitizeFilePath(deleteTarget.FolderPath),
+                    LogRedaction.SanitizeText(reason));
                 return;
             }
 
-            try
-            {
-                if (Directory.EnumerateFileSystemEntries(parentFolder).Any())
-                {
-                    return;
-                }
-            }
-            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
-            {
-                _logger.LogDebug(ex, "Unable to inspect parent folder {FolderPath} after audiobook delete", LogRedaction.SanitizeFilePath(parentFolder));
-                return;
-            }
-
-            var allAudiobooks = await _audiobookRepository.GetAllAsync();
-            var otherAudiobookPaths = allAudiobooks
-                .Where(a => a.Id != audiobook.Id)
-                .Select(a => new { a.Id, a.BasePath, a.FilePath })
-                .ToList();
-
-            foreach (var otherPath in otherAudiobookPaths)
-            {
-                var otherBasePath = NormalizePath(otherPath.BasePath);
-                if (!string.IsNullOrWhiteSpace(otherBasePath)
-                    && (IsSamePathOrWithin(otherBasePath, parentFolder) || IsSamePathOrWithin(parentFolder, otherBasePath)))
-                {
-                    return;
-                }
-
-                var otherFilePath = NormalizePath(otherPath.FilePath);
-                if (!string.IsNullOrWhiteSpace(otherFilePath) && IsSamePathOrWithin(otherFilePath, parentFolder))
-                {
-                    return;
-                }
-            }
-
-            try
-            {
-                Directory.Delete(parentFolder, recursive: false);
-                result.DeletedParentFolder = true;
-                _logger.LogInformation("Deleted empty parent author folder {FolderPath}", LogRedaction.SanitizeFilePath(parentFolder));
-            }
-            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
-            {
-                result.Warnings.Add("Failed to delete the empty author folder.");
-                _logger.LogWarning(ex, "Failed to delete empty parent author folder {FolderPath}", LogRedaction.SanitizeFilePath(parentFolder));
-            }
+            result.DeletedFolder = !Directory.Exists(deleteTarget.FolderPath)
+                && !File.Exists(deleteTarget.FolderPath);
+            _logger.LogInformation("Deleted audiobook folder {FolderPath}", LogRedaction.SanitizeFilePath(deleteTarget.FolderPath));
+            await TryDeleteEmptyAuthorFolderAsync(
+                audiobook,
+                deleteTarget.FolderPath,
+                deleteTarget.ProtectedRoots,
+                deleteTarget.Semantics,
+                result,
+                cancellationToken);
         }
 
-        private async Task<HashSet<string>> GetProtectedRootPathsAsync()
+        private async Task<HashSet<string>> GetProtectedRootPathsAsync(
+            CancellationToken cancellationToken = default)
         {
-            var protectedRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            cancellationToken.ThrowIfCancellationRequested();
+            var protectedRoots = new HashSet<string>(StringComparer.Ordinal);
 
             try
             {
                 var roots = await _rootFolderService.GetAllAsync();
-                foreach (var normalizedRoot in roots
-                    .Select(root => NormalizePath(root.Path))
-                    .Where(normalizedRoot => !string.IsNullOrWhiteSpace(normalizedRoot)))
+                foreach (var root in roots)
                 {
-                    protectedRoots.Add(normalizedRoot!);
+                    if (FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                            root.Path,
+                            out var normalizedRoot,
+                            out _))
+                    {
+                        protectedRoots.Add(normalizedRoot);
+                    }
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
@@ -203,8 +234,10 @@ namespace Listenarr.Infrastructure.Library.Moving
             try
             {
                 var settings = await _configurationService.GetApplicationSettingsAsync();
-                var outputPath = NormalizePath(settings?.OutputPath);
-                if (!string.IsNullOrWhiteSpace(outputPath))
+                if (FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                        settings?.OutputPath ?? string.Empty,
+                        out var outputPath,
+                        out _))
                 {
                     protectedRoots.Add(outputPath);
                 }
@@ -217,24 +250,43 @@ namespace Listenarr.Infrastructure.Library.Moving
             return protectedRoots;
         }
 
-        private static string? ResolveAudiobookFolderPath(Audiobook audiobook, IReadOnlyList<string> trackedFilePaths)
+        private static string? ResolveAudiobookFolderPath(
+            Audiobook audiobook,
+            IReadOnlyList<string> trackedFilePaths,
+            FileSystemPathSemantics semantics)
         {
-            var basePath = NormalizePath(audiobook.BasePath);
-            if (!string.IsNullOrWhiteSpace(basePath))
+            if (!string.IsNullOrWhiteSpace(audiobook.BasePath))
             {
-                return basePath;
+                return FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    audiobook.BasePath,
+                    out var basePath,
+                    out _)
+                    ? basePath
+                    : null;
             }
 
-            var legacyFilePath = NormalizePath(audiobook.FilePath);
-            if (!string.IsNullOrWhiteSpace(legacyFilePath))
+            if (!string.IsNullOrWhiteSpace(audiobook.FilePath)
+                && FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                    audiobook.FilePath,
+                    out _))
             {
+                if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                        audiobook.FilePath,
+                        out var legacyFilePath,
+                        out _))
+                {
+                    return null;
+                }
+
                 return NormalizePath(Path.GetDirectoryName(legacyFilePath));
             }
 
-            return GetCommonDirectoryPath(trackedFilePaths);
+            return GetCommonDirectoryPath(trackedFilePaths, semantics);
         }
 
-        private static string? ResolveTrackedFolderPath(IReadOnlyList<string> trackedFilePaths)
+        private static string? ResolveTrackedFolderPath(
+            IReadOnlyList<string> trackedFilePaths,
+            FileSystemPathSemantics semantics)
         {
             if (trackedFilePaths.Count == 0)
             {
@@ -262,7 +314,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                 return directFolder;
             }
 
-            return GetCommonDirectoryPath(trackedFilePaths);
+            return GetCommonDirectoryPath(trackedFilePaths, semantics);
         }
 
         private static bool IsLikelySegmentFolder(string? folderName)
@@ -278,7 +330,9 @@ namespace Listenarr.Infrastructure.Library.Moving
                 RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         }
 
-        private static string? GetCommonDirectoryPath(IReadOnlyList<string> filePaths)
+        private static string? GetCommonDirectoryPath(
+            IReadOnlyList<string> filePaths,
+            FileSystemPathSemantics semantics)
         {
             if (filePaths.Count == 0)
             {
@@ -289,7 +343,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                 .Select(p => NormalizePath(Path.GetDirectoryName(p)))
                 .Where(p => !string.IsNullOrWhiteSpace(p))
                 .Cast<string>()
-                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Distinct(semantics.Comparer)
                 .ToList();
 
             if (directories.Count == 0)
@@ -300,10 +354,10 @@ namespace Listenarr.Infrastructure.Library.Moving
             var commonPath = directories[0];
             for (var i = 1; i < directories.Count; i++)
             {
-                while (!IsSamePathOrWithin(directories[i], commonPath))
+                while (!IsSamePathOrWithin(directories[i], commonPath, semantics))
                 {
                     var parent = NormalizePath(Path.GetDirectoryName(commonPath));
-                    if (string.IsNullOrWhiteSpace(parent) || PathsEqual(parent, commonPath))
+                    if (string.IsNullOrWhiteSpace(parent) || PathsEqual(parent, commonPath, semantics))
                     {
                         return null;
                     }
@@ -312,7 +366,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                 }
             }
 
-            return IsFilesystemRoot(commonPath) ? null : commonPath;
+            return IsFilesystemRoot(commonPath, semantics) ? null : commonPath;
         }
 
         private static string? NormalizePath(string? path)
@@ -333,56 +387,22 @@ namespace Listenarr.Infrastructure.Library.Moving
             }
         }
 
-        private static bool PathsEqual(string? left, string? right)
+        private static bool PathsEqual(
+            string? left,
+            string? right,
+            FileSystemPathSemantics semantics)
         {
-            if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
-            {
-                return false;
-            }
-
-            return string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
+            return !string.IsNullOrWhiteSpace(left)
+                && !string.IsNullOrWhiteSpace(right)
+                && FileSystemPathIdentity.AreEquivalent(left, right, semantics);
         }
 
-        private static bool IsSamePathOrWithin(string path, string rootPath)
-            => FileUtils.IsPathSameOrInside(path, rootPath);
+        private static bool IsSamePathOrWithin(
+            string path,
+            string rootPath,
+            FileSystemPathSemantics semantics) =>
+            FileSystemPathIdentity.IsSameOrInside(path, rootPath, semantics);
 
-        private static bool IsFilesystemRoot(string? path)
-        {
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return false;
-            }
 
-            var root = NormalizePath(Path.GetPathRoot(path));
-            return !string.IsNullOrWhiteSpace(root) && PathsEqual(root, path);
-        }
-
-        private static bool IsAuthorFolder(string folderPath, string? authorName)
-        {
-            if (string.IsNullOrWhiteSpace(folderPath) || string.IsNullOrWhiteSpace(authorName))
-            {
-                return false;
-            }
-
-            var folderName = Path.GetFileName(folderPath);
-            return NormalizeName(folderName) == NormalizeName(authorName);
-        }
-
-        private static string NormalizeName(string? value)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                return string.Empty;
-            }
-
-            var cleaned = new string(value
-                .Where(c => char.IsLetterOrDigit(c) || char.IsWhiteSpace(c))
-                .ToArray());
-
-            return string.Join(
-                ' ',
-                cleaned.Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
-                .ToLowerInvariant();
-        }
     }
 }

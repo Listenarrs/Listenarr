@@ -21,5 +21,9 @@ namespace Listenarr.Application.Audiobooks.Contracts
     public interface IAudioTagWriter
     {
         Task WriteAsinTagAsync(string filePath, string asin);
+
+        Task WriteAsinTagAsync(
+            IAudiobookFileRegistrationLease registrationLease,
+            string asin);
     }
 }

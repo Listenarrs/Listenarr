@@ -25,7 +25,7 @@ public sealed class EfUnitOfWorkTests
         {
             AudiobookId = 42,
             RequestedPath = "library/book",
-            Status = "Queued"
+            Status = MoveJobStatus.Queued
         };
         db.MoveJobs.Add(job);
         var unitOfWork = new EfUnitOfWork(db);

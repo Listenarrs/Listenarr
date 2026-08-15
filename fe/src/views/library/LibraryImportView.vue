@@ -37,7 +37,12 @@
 
       <button
         class="btn btn-secondary btn-sm"
-        :disabled="store.scanStatus === 'scanning'"
+        :disabled="store.scanStatus === 'scanning' || !filesystemReadinessStore.filesystemReady"
+        :title="
+          !filesystemReadinessStore.filesystemReady
+            ? 'Available after library filesystem initialization completes'
+            : undefined
+        "
         @click="openAddRootFolder"
       >
         <PhFolderPlus :size="15" />
@@ -46,7 +51,16 @@
 
       <button
         class="btn btn-primary btn-sm"
-        :disabled="!selectedFolderId || store.scanStatus === 'scanning'"
+        :disabled="
+          !selectedFolderId ||
+          store.scanStatus === 'scanning' ||
+          !filesystemReadinessStore.filesystemReady
+        "
+        :title="
+          !filesystemReadinessStore.filesystemReady
+            ? 'Available after library filesystem initialization completes'
+            : undefined
+        "
         @click="startScan"
       >
         <PhSpinner v-if="store.scanStatus === 'scanning'" class="ph-spin" :size="15" />
@@ -225,6 +239,7 @@ import {
 import { useLibraryImportStore } from '@/stores/libraryImport'
 import { useRootFoldersStore } from '@/stores/rootFolders'
 import { useConfigurationStore } from '@/stores/configuration'
+import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import LibraryImportRow from '@/components/domain/audiobook/LibraryImportRow.vue'
 import LibraryImportFooter from '@/components/domain/audiobook/LibraryImportFooter.vue'
 import {
@@ -246,6 +261,7 @@ const MOBILE_TABLE_BREAKPOINT = 720
 const store = useLibraryImportStore()
 const rootFoldersStore = useRootFoldersStore()
 const configStore = useConfigurationStore()
+const filesystemReadinessStore = useFilesystemReadinessStore()
 
 const selectedFolderId = ref<number | null>(null)
 const sortKey = ref<LibraryImportSortKey>('folder')

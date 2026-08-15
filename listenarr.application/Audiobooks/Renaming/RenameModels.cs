@@ -15,6 +15,8 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using Listenarr.Domain.Common;
+
 namespace Listenarr.Application.Audiobooks.Renaming
 {
     public class BulkRenameRequest
@@ -25,8 +27,18 @@ namespace Listenarr.Application.Audiobooks.Renaming
     public class RenameOperation
     {
         public int AudiobookId { get; set; }
+        public string? CurrentFolderPath { get; set; }
+        public RenamePathSemanticsSnapshot? CurrentFolderSemantics { get; set; }
         public string? NewFolderPath { get; set; }
         public List<FileRenameOperation> FileRenames { get; set; } = new();
+    }
+
+    public class RenamePathSemanticsSnapshot
+    {
+        public FileSystemPathSyntax Syntax { get; set; }
+        public FileSystemCaseSensitivity CaseSensitivity { get; set; }
+        public FileSystemCaseSensitivityMode RequestedMode { get; set; }
+        public string BoundaryPath { get; set; } = string.Empty;
     }
 
     public class FileRenameOperation
@@ -46,6 +58,7 @@ namespace Listenarr.Application.Audiobooks.Renaming
         public int AudiobookId { get; set; }
         public string? AudiobookTitle { get; set; }
         public string? CurrentFolderPath { get; set; }
+        public RenamePathSemanticsSnapshot? CurrentFolderSemantics { get; set; }
         public string? NewFolderPath { get; set; }
         public bool FolderChanged { get; set; }
         public List<FileRenamePreview> FileRenames { get; set; } = new();
@@ -66,6 +79,7 @@ namespace Listenarr.Application.Audiobooks.Renaming
     {
         public int AudiobookId { get; set; }
         public bool Success { get; set; }
+        public bool Conflict { get; set; }
         public string? Error { get; set; }
         public List<FileRenameResultItem> RenamedFiles { get; set; } = new();
     }
@@ -76,6 +90,9 @@ namespace Listenarr.Application.Audiobooks.Renaming
         public string? PreviousPath { get; set; }
         public string? NewPath { get; set; }
         public bool Success { get; set; }
+        internal Guid? OperationId { get; set; }
+        internal Guid? RollbackOperationId { get; set; }
+        public bool RolledBack { get; set; }
         public string? Error { get; set; }
     }
 }

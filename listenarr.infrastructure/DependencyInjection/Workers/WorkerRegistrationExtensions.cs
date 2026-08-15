@@ -10,7 +10,6 @@
 using Listenarr.Infrastructure.HostedServices;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Listenarr.Infrastructure.DependencyInjection.Workers;
 
@@ -20,14 +19,14 @@ internal static class WorkerRegistrationExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IWorkerCycleRunner, WorkerCycleRunner>();
 
         services.AddSingleton<IScanQueueService, ScanQueueService>();
+        services.AddSingleton<MoveScanHandoffRecoveryService>();
         AddProcessor<ScanJobProcessor, IScanJobProcessor>(services);
         services.AddHostedService<ScanBackgroundService>();
 
-        services.AddSingleton<IMoveQueueService, MoveQueueService>();
+        services.AddSingleton<AudiobookContentMoveService>();
         AddProcessor<MoveJobProcessor, IMoveJobProcessor>(services);
         services.AddHostedService<MoveBackgroundService>();
 
@@ -44,7 +43,6 @@ internal static class WorkerRegistrationExtensions
         AddHostedProcessor<SeriesMonitoringProcessor, ISeriesMonitoringProcessor, SeriesMonitoringBackgroundService>(services);
         AddHostedProcessor<FfmpegInstallProcessor, IFfmpegInstallProcessor, FfmpegInstallBackgroundService>(services);
         AddHostedProcessor<MetadataRescanProcessor, IMetadataRescanProcessor, MetadataRescanService>(services);
-
         services.AddSingleton<DownloadProcessingJobProcessor>();
         services.AddSingleton<IDownloadImportProcessor>(provider =>
             provider.GetRequiredService<DownloadProcessingJobProcessor>());

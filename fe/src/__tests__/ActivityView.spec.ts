@@ -80,6 +80,18 @@ const mockLibraryStore = (audiobooks: Array<{ id: number; title: string }> = [])
   }))
 }
 
+let currentMoveJobsStore: Record<string, unknown>
+
+const mockMoveJobsStore = (overrides: Record<string, unknown> = {}) => {
+  currentMoveJobsStore = {
+    trackedJobs: [],
+    start: vi.fn(),
+    ...overrides,
+  }
+
+  return currentMoveJobsStore
+}
+
 const mockDownloadsStore = (overrides: Record<string, unknown> = {}) => {
   const store = {
     activeDownloads: [],
@@ -116,6 +128,10 @@ describe('ActivityView', () => {
   beforeEach(() => {
     vi.resetModules()
     vi.clearAllMocks()
+    mockMoveJobsStore()
+    vi.doMock('@/stores/moveJobs', () => ({
+      useMoveJobsStore: () => currentMoveJobsStore,
+    }))
     vi.spyOn(globalThis, 'setInterval').mockReturnValue(
       1 as unknown as ReturnType<typeof setInterval>,
     )
@@ -124,6 +140,34 @@ describe('ActivityView', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  it('shows active library move progress in the unified activity list', async () => {
+    mockSignalR()
+    mockApi()
+    mockConfigurationStore(false)
+    mockLibraryStore([{ id: 42, title: 'Book' }])
+    mockDownloadsStore()
+    mockMoveJobsStore({
+      trackedJobs: [
+        {
+          jobId: 'job-1',
+          audiobookId: 42,
+          status: 'Running',
+          progress: 37.5,
+          phase: 'Copying',
+          target: '/library/book',
+        },
+      ],
+    })
+
+    const wrapper = await mountActivityView()
+    const vm = wrapper.vm as unknown as ActivityViewVm
+    const move = vm.allActivityItems.find((item) => item.id === 'move:job-1')
+
+    expect(move).toMatchObject({ status: 'moving', progress: 37.5 })
+    expect(wrapper.text()).toContain('38%')
+    expect(wrapper.text()).toContain('Moving')
   })
 
   it('includes completed external downloads from the downloads store in the unified list', async () => {

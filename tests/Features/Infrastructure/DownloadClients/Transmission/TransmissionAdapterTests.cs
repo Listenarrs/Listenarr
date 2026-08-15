@@ -220,15 +220,10 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Transmission
             Assert.Equal(expected, result);
         }
 
-        [Fact]
+        [LinuxFact]
         [Trait("Method", "AddAsync")]
         public async Task GetImportItemAsync_WithSpaceInRemoteDirectory()
         {
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            {
-                return;
-            }
-
             var download = new Download
             {
                 DownloadClientId = CLIENT_CONFIG_ID,

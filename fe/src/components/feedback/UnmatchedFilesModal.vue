@@ -104,7 +104,12 @@
                       <button
                         class="btn btn-primary btn-sm"
                         @click="startAdd(item)"
-                        title="Add to library"
+                        :disabled="!filesystemReadinessStore.filesystemReady"
+                        :title="
+                          filesystemReadinessStore.filesystemReady
+                            ? 'Add to library'
+                            : 'Available after library filesystem initialization completes'
+                        "
                       >
                         Add
                       </button>
@@ -146,7 +151,7 @@
         <button
           v-if="phase === 'results' && asinCount > 0"
           class="btn btn-primary"
-          :disabled="bulkAdding"
+          :disabled="bulkAdding || !filesystemReadinessStore.filesystemReady"
           @click="addAllWithAsin"
           title="Search Audible metadata for every item with an ASIN and add matches automatically"
         >
@@ -155,9 +160,15 @@
         </button>
         <button
           class="btn btn-secondary"
-          :disabled="phase === 'scanning' || bulkAdding"
+          :disabled="
+            phase === 'scanning' || bulkAdding || !filesystemReadinessStore.filesystemReady
+          "
           @click="startScan"
-          title="Scan for unmatched files"
+          :title="
+            filesystemReadinessStore.filesystemReady
+              ? 'Scan for unmatched files'
+              : 'Available after library filesystem initialization completes'
+          "
         >
           <PhArrowsClockwise />
           Scan
@@ -198,6 +209,7 @@ import { signalRService } from '@/services/signalr'
 import { useToast } from '@/services/toastService'
 import { useRootFoldersStore } from '@/stores/rootFolders'
 import { useConfigurationStore } from '@/stores/configuration'
+import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import type { UnmatchedFileItem, AudibleBookMetadata, Audiobook, RootFolder } from '@/types'
 
 interface Props {
@@ -230,6 +242,7 @@ const rootFolderName = computed(() => props.rootFolder?.name || props.rootFolder
 
 const rootFoldersStore = useRootFoldersStore()
 const configStore = useConfigurationStore()
+const filesystemReadinessStore = useFilesystemReadinessStore()
 
 const destinationFolderId = ref<number | null>(null)
 
@@ -293,7 +306,7 @@ watch(
 
 // Explicit scan button handler
 async function startScan() {
-  if (!props.rootFolder?.id) return
+  if (!props.rootFolder?.id || !filesystemReadinessStore.filesystemReady) return
 
   phase.value = 'scanning'
   items.value = []
@@ -379,6 +392,7 @@ const addingBook = computed<AudibleBookMetadata>(() => {
 })
 
 function startAdd(item: UnmatchedFileItem) {
+  if (!filesystemReadinessStore.filesystemReady) return
   addingItem.value = item
 }
 
@@ -454,6 +468,7 @@ function mapToAudible(meta: AudiblePayload, fallback: UnmatchedFileItem): Audibl
 }
 
 async function addAllWithAsin() {
+  if (!filesystemReadinessStore.filesystemReady) return
   const candidates = items.value.filter((i) => i.asin)
   if (!candidates.length) return
 

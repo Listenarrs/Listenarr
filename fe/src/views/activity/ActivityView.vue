@@ -29,7 +29,7 @@
             v-model="filterText"
             type="text"
             class="filter-input"
-            placeholder="Filter downloads..."
+            placeholder="Filter activity..."
           />
           <button v-if="filterText" class="filter-clear" @click="filterText = ''">
             <PhX />
@@ -77,7 +77,14 @@
           <div
             v-for="item in visibleQueueItems"
             :key="item.id"
-            v-memo="[item.id, item.status, item.progress, item.eta, item.downloadSpeed]"
+            v-memo="[
+              item.id,
+              item.status,
+              item.progress,
+              item.eta,
+              item.downloadSpeed,
+              item.downloadClient,
+            ]"
             class="queue-row"
           >
             <div class="col-title">
@@ -107,10 +114,10 @@
                   :value="item.progress"
                   :downloaded="item.downloaded"
                   :total="item.size"
-                  :showPercentage="false"
+                  :showPercentage="item.downloadClientType === 'move'"
                   variant="activity"
                   height="small"
-                  :animating="item.status === 'downloading'"
+                  :animating="item.status === 'downloading' || item.status === 'moving'"
                 />
               </div>
             </div>
@@ -248,6 +255,7 @@ import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import { useDownloadsStore } from '@/stores/downloads'
 import { useLibraryStore } from '@/stores/library'
+import { useMoveJobsStore, type TrackedMoveJob } from '@/stores/moveJobs'
 import { EmptyState, LoadingState, ProgressBar } from '@/components/base'
 import { useConfigurationStore } from '@/stores/configuration'
 import type { QueueClientStatus, QueueItem, QueueUpdatePayload, Download } from '@/types'
@@ -255,6 +263,7 @@ import { normalizeQueueSnapshot } from '@/utils/queueSnapshot'
 
 const downloadsStore = useDownloadsStore()
 const libraryStore = useLibraryStore()
+const moveJobsStore = useMoveJobsStore()
 const configStore = useConfigurationStore()
 
 const filterText = ref('')
@@ -480,6 +489,26 @@ const convertDownloadToQueueItem = (download: Download): QueueItem => {
   }
 }
 
+const convertMoveJobToQueueItem = (job: TrackedMoveJob): QueueItem => ({
+  id: `move:${job.jobId}`,
+  title: 'Library move',
+  audiobookId: job.audiobookId,
+  status: job.status === 'Queued' || job.status === 'RetryScheduled' ? 'queued' : 'moving',
+  progress: job.progress,
+  size: 0,
+  downloaded: 0,
+  downloadSpeed: 0,
+  eta: undefined,
+  quality: '',
+  downloadClient: job.phase ? `Library move · ${job.phase}` : 'Library move',
+  downloadClientId: 'LISTENARR_MOVE',
+  downloadClientType: 'move',
+  addedAt: '',
+  errorMessage: job.error,
+  canPause: false,
+  canRemove: false,
+})
+
 // Read user preference from configuration store
 const showCompletedExternalDownloads = computed(
   () => configStore.applicationSettings?.showCompletedExternalDownloads ?? false,
@@ -549,6 +578,17 @@ const allActivityItems = computed(() => {
   const failedFromDownloads = (downloadsStore.failedDownloads || []).map(convertDownloadToQueueItem)
 
   const finalMap = new Map<string, QueueItem>()
+  for (const job of moveJobsStore.trackedJobs) {
+    if (
+      job.status !== 'Completed' &&
+      job.status !== 'Failed' &&
+      job.status !== 'NeedsAttention' &&
+      job.status !== 'Superseded'
+    ) {
+      const item = convertMoveJobToQueueItem(job)
+      finalMap.set(item.id, item)
+    }
+  }
   for (const it of combined) finalMap.set(it.id, it)
   for (const it of completedExternal) if (!finalMap.has(it.id)) finalMap.set(it.id, it)
   for (const it of failedFromDownloads) if (!finalMap.has(it.id)) finalMap.set(it.id, it)
@@ -669,6 +709,7 @@ const formatStatus = (status: string): string => {
     completed: 'Completed',
     failed: 'Failed',
     processing: 'Processing',
+    moving: 'Moving',
     importpending: 'Importing',
     importblocked: 'Import Blocked',
     imported: 'Imported',
@@ -685,6 +726,7 @@ const formatEta = (seconds: number): string => {
 
 // Subscribe to SignalR for real-time updates
 onMounted(async () => {
+  moveJobsStore.start()
   updateActivityLayoutMode()
   if (typeof window !== 'undefined') {
     window.addEventListener('resize', handleViewportResize, { passive: true })
@@ -1077,7 +1119,8 @@ onUnmounted(() => {
   color: #868e96;
 }
 
-.status-badge.processing {
+.status-badge.processing,
+.status-badge.moving {
   background-color: rgba(190, 75, 219, 0.15);
   color: #be4bdb;
 }

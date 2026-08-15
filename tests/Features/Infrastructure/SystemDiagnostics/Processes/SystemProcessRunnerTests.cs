@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Listenarr.Tests.Features.Infrastructure.SystemDiagnostics.Processes
@@ -56,28 +55,29 @@ namespace Listenarr.Tests.Features.Infrastructure.SystemDiagnostics.Processes
 
         private static ProcessStartInfo CreateEchoProcessStartInfo(string text)
         {
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            var startInfo = new ProcessStartInfo
             {
-                return new ProcessStartInfo
-                {
-                    FileName = "cmd.exe",
-                    Arguments = $"/c echo {text}",
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true
-                };
-            }
-
-            return new ProcessStartInfo
-            {
-                FileName = "bash",
-                Arguments = $"-c \"echo {text}\"",
+                FileName = OperatingSystem.IsWindows() ? "cmd.exe" : "/bin/sh",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true
             };
+
+            if (OperatingSystem.IsWindows())
+            {
+                startInfo.ArgumentList.Add("/d");
+                startInfo.ArgumentList.Add("/s");
+                startInfo.ArgumentList.Add("/c");
+                startInfo.ArgumentList.Add($"echo {text}");
+                return startInfo;
+            }
+
+            startInfo.ArgumentList.Add("-c");
+            startInfo.ArgumentList.Add("printf '%s\\n' \"$1\"");
+            startInfo.ArgumentList.Add("sh");
+            startInfo.ArgumentList.Add(text);
+            return startInfo;
         }
     }
 }

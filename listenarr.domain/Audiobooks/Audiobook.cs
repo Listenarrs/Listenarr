@@ -17,7 +17,6 @@
  */
 
 using System.ComponentModel.DataAnnotations;
-using Listenarr.Domain.Common;
 
 namespace Listenarr.Domain.Audiobooks
 {
@@ -60,16 +59,10 @@ namespace Listenarr.Domain.Audiobooks
         public string? FilePath { get; set; }
         public long? FileSize { get; set; }
 
-        // Base path for multi-file audiobooks (common root directory)
-        public string? BasePath
-        {
-            get
-            {
-                // TODO: Should be put on the set operation with appropriate DB migration to normalize existing data
-                return FileUtils.NormalizeStoredPath(field);
-            }
-            set;
-        }
+        // Base path for multi-file audiobooks (common root directory).
+        // Preserve the persisted filesystem syntax; mutation workflows normalize explicitly
+        // using the authoritative path semantics for that root.
+        public string? BasePath { get; set; }
 
         // Multi-file support: store zero or more file records for this audiobook
         public List<AudiobookFile>? Files { get; set; }
@@ -114,4 +107,3 @@ namespace Listenarr.Domain.Audiobooks
         }
     }
 }
-

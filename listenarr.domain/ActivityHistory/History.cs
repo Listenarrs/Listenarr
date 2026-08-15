@@ -105,6 +105,11 @@ namespace Listenarr.Domain.ActivityHistory
         public string CorrelationId { get; set; } = Guid.NewGuid().ToString("N");
 
         /// <summary>
+        /// Optional database-unique key for operationally idempotent events.
+        /// </summary>
+        public string? IdempotencyKey { get; set; }
+
+        /// <summary>
         /// Optional parent event for attempt/detail relationships.
         /// </summary>
         public int? ParentEventId { get; set; }

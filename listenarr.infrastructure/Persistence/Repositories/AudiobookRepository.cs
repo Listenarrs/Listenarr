@@ -19,7 +19,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Listenarr.Infrastructure.Persistence.Repositories
 {
-    public class AudiobookRepository : IAudiobookRepository
+    public partial class AudiobookRepository : IAudiobookRepository
     {
         private readonly ListenArrDbContext _db;
         public AudiobookRepository(ListenArrDbContext db)
@@ -35,6 +35,30 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                 .OrderBy(a => a.Title)
                 .ToListAsync();
         }
+
+        public Task<AudiobookPathReferenceSnapshot?> GetPathReferenceSnapshotAsync(
+            int audiobookId,
+            CancellationToken ct = default) =>
+            _db.Audiobooks
+                .AsNoTracking()
+                .Where(audiobook => audiobook.Id == audiobookId)
+                .Select(audiobook => new AudiobookPathReferenceSnapshot(
+                    audiobook.Id,
+                    audiobook.BasePath,
+                    audiobook.FilePath))
+                .SingleOrDefaultAsync(ct);
+
+        public Task<List<AudiobookPathReferenceSnapshot>> GetOtherPathReferenceSnapshotsAsync(
+            int audiobookId,
+            CancellationToken ct = default) =>
+            _db.Audiobooks
+                .AsNoTracking()
+                .Where(audiobook => audiobook.Id != audiobookId)
+                .Select(audiobook => new AudiobookPathReferenceSnapshot(
+                    audiobook.Id,
+                    audiobook.BasePath,
+                    audiobook.FilePath))
+                .ToListAsync(ct);
 
         public async Task<List<Audiobook>> GetLibraryAsync()
         {
@@ -94,6 +118,7 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
         {
             // Include QualityProfile and Files for callers that need full audiobook details
             return await _db.Audiobooks
+                .AsSplitQuery()
                 .Include(a => a.QualityProfile)
                 .Include(a => a.Files)
                 .Include(a => a.ExternalIdentifiers)
@@ -101,10 +126,37 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                 .FirstOrDefaultAsync(a => a.Id == id);
         }
 
+        public async Task<Audiobook?> GetByIdSnapshotAsync(
+            int id,
+            CancellationToken ct = default)
+        {
+            return await _db.Audiobooks
+                .AsNoTracking()
+                .AsSplitQuery()
+                .Include(a => a.QualityProfile)
+                .Include(a => a.Files)
+                .Include(a => a.ExternalIdentifiers)
+                .Include(a => a.SeriesMemberships)
+                .FirstOrDefaultAsync(a => a.Id == id, ct);
+        }
+
+        public Task<Audiobook?> GetForScanAsync(
+            int id,
+            CancellationToken ct = default) =>
+            _db.Audiobooks.FirstOrDefaultAsync(a => a.Id == id, ct);
+
+        public Task<Audiobook?> GetForScanSnapshotAsync(
+            int id,
+            CancellationToken ct = default) =>
+            _db.Audiobooks
+                .AsNoTracking()
+                .FirstOrDefaultAsync(a => a.Id == id, ct);
+
         public async Task<List<Audiobook>> GetByIdsWithFilesAsync(IEnumerable<int> ids, System.Threading.CancellationToken ct = default)
         {
             var idSet = ids.ToHashSet();
             return await _db.Audiobooks
+                .AsNoTracking()
                 .Include(a => a.Files)
                 .Where(a => idSet.Contains(a.Id))
                 .ToListAsync(ct);
@@ -117,70 +169,20 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             return audiobook;
         }
 
-        public async Task<bool> UpdateAsync(Audiobook audiobook)
+        public async Task<bool> DeleteByIdAsync(int id)
         {
-            // Defensive: preserve existing BasePath if the incoming audiobook doesn't provide one
-            try
+            var audiobook = await _db.Audiobooks
+                .FirstOrDefaultAsync(candidate => candidate.Id == id);
+            if (audiobook == null)
             {
-                var existing = await _db.Audiobooks.AsNoTracking().FirstOrDefaultAsync(a => a.Id == audiobook.Id);
-                if (existing != null && string.IsNullOrEmpty(audiobook.BasePath) && !string.IsNullOrEmpty(existing.BasePath))
-                {
-                    audiobook.BasePath = existing.BasePath;
-                }
-            }
-            catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException)
-            {
-                // If anything goes wrong reading existing record, fall back to update behavior
-                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                return false;
             }
 
-            _db.Audiobooks.Update(audiobook);
-            await _db.SaveChangesAsync();
-            return true;
-        }
-
-        public async Task<bool> DeleteAsync(Audiobook audiobook)
-        {
+            // Delete the aggregate root without materializing its navigation graph.
+            // Relational foreign keys own cascade cleanup for file/identifier/series rows.
             _db.Audiobooks.Remove(audiobook);
             await _db.SaveChangesAsync();
             return true;
-        }
-
-        public async Task<bool> DeleteByIdAsync(int id)
-        {
-            var audiobook = await GetByIdAsync(id);
-            if (audiobook == null)
-                return false;
-
-            return await DeleteAsync(audiobook);
-        }
-
-        public async Task<bool> UpdateWithIdentifierReplaceAsync(Audiobook audiobook, List<AudiobookExternalIdentifier> newIdentifiers, CancellationToken ct = default)
-        {
-            var existing = await _db.AudiobookExternalIdentifiers
-                .Where(i => i.AudiobookId == audiobook.Id)
-                .ToListAsync(ct);
-            if (existing.Count > 0)
-                _db.AudiobookExternalIdentifiers.RemoveRange(existing);
-
-            audiobook.ExternalIdentifiers = newIdentifiers;
-            _db.Audiobooks.Update(audiobook);
-            await _db.SaveChangesAsync(ct);
-            return true;
-        }
-
-        public async Task<int> DeleteBulkAsync(List<int> ids)
-        {
-            var audiobooks = await _db.Audiobooks
-                .Where(a => ids.Contains(a.Id))
-                .ToListAsync();
-
-            if (!audiobooks.Any())
-                return 0;
-
-            _db.Audiobooks.RemoveRange(audiobooks);
-            await _db.SaveChangesAsync();
-            return audiobooks.Count;
         }
 
         public async Task<string?> GetAuthorAsinByNameAsync(string name)

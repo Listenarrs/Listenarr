@@ -16,11 +16,12 @@ concurrency:
 
 jobs:
   unit-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: "1"
       DOTNET_NOLOGO: "1"
       API_PROJECT: listenarr.api/Listenarr.Api.csproj
+      LISTENARR_REQUIRED_NATIVE_TEST_CAPABILITIES: 'DirectorySymbolicLinks,FileSymbolicLinks'
 
     steps:
       - uses: actions/checkout@v4
@@ -80,6 +81,12 @@ jobs:
         working-directory: fe
         run: npm run build --if-present
 
+      - name: Repository path safety
+        run: npm run --silent validate:repository-paths
+
+      - name: Repository path-safety tests
+        run: npm run --silent test:repository-paths
+
       - name: Frontend lint
         run: npm run --silent lint:frontend
 
@@ -96,12 +103,11 @@ jobs:
       - name: Build solution
         run: dotnet build listenarr.slnx --no-restore --configuration Release
 
-      - name: Run unit tests (with Test environment / disable Playwright)
+      - name: Run native backend tests
         env:
           ASPNETCORE_ENVIRONMENT: Test
           Playwright__Enabled: 'false'
-        run: |
-          dotnet test listenarr.slnx -c Release --no-build --logger "console;verbosity=normal"
+        run: pwsh -NoProfile -File scripts/run-native-backend-tests.ps1
 
       - name: Run frontend tests
         working-directory: fe
@@ -117,10 +123,11 @@ jobs:
         run: dotnet publish ${{ env.API_PROJECT }} -c Release -r linux-x64 --no-restore --self-contained true /p:PublishSingleFile=true -o listenarr.api/publish/linux-x64
 
   backend-tests-windows:
-    runs-on: windows-latest
+    runs-on: windows-2025
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: "1"
       DOTNET_NOLOGO: "1"
+      LISTENARR_REQUIRED_NATIVE_TEST_CAPABILITIES: 'DirectorySymbolicLinks,FileSymbolicLinks'
 
     steps:
       - uses: actions/checkout@v4
@@ -136,8 +143,8 @@ jobs:
       - name: Build backend
         run: dotnet build listenarr.slnx --no-restore --configuration Release
 
-      - name: Run backend tests
+      - name: Run native backend tests
         env:
           ASPNETCORE_ENVIRONMENT: Test
           Playwright__Enabled: 'false'
-        run: dotnet test listenarr.slnx -c Release --no-build --logger "console;verbosity=normal"
+        run: pwsh -NoProfile -File scripts/run-native-backend-tests.ps1

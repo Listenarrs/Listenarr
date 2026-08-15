@@ -389,16 +389,16 @@
         <div class="files-header">
           <h3>Files</h3>
           <div class="files-actions">
-            <!-- Scan job status (updated via SignalR) -->
-            <div v-if="scanJobId" class="scan-job-status">
+            <div v-if="displayedScanJobId" class="scan-job-status">
               <div class="job-row">
                 <PhClock />
                 <strong>Scan job:</strong>
-                <span class="job-id">{{ scanJobId }}</span>
+                <span class="job-id">{{ displayedScanJobId }}</span>
               </div>
               <div class="job-status">
-                <span v-if="scanQueued" class="status queued">Queued / Processing</span>
-                <span v-else class="status completed">No active scan</span>
+                <span :class="['status', scanQueued ? 'queued' : 'completed']">
+                  {{ displayedScanStatus }}
+                </span>
               </div>
             </div>
           </div>
@@ -568,6 +568,7 @@
                 type="checkbox"
                 class="checkbox-input"
                 aria-label="Remove all files in the audiobook folder from disk"
+                :disabled="!filesystemReadinessStore.filesystemReady"
               />
               <div class="checkbox-content">
                 <span class="checkbox-title"
@@ -588,6 +589,7 @@
                 type="checkbox"
                 class="checkbox-input"
                 aria-label="Remove audiobook folder from disk"
+                :disabled="!filesystemReadinessStore.filesystemReady"
               />
               <div class="checkbox-content">
                 <span class="checkbox-title">Also remove the audiobook folder</span>
@@ -652,11 +654,13 @@ import { useRoute, useRouter } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
 import { useRootFoldersStore } from '@/stores/rootFolders'
+import { useScanNotificationsStore } from '@/stores/scanNotifications'
+import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import { apiService, ensureImageCached } from '@/services/api'
 import { isApiImagesUrl } from '@/services/apiBase'
 import { handleImageError } from '@/utils/imageFallback'
 import { getPlaceholderUrl } from '@/utils/placeholder'
-import { joinPaths, isAbsolutePath } from '@/utils/path'
+import { detectPathKind, joinPaths, isAbsolutePath } from '@/utils/path'
 import { signalRService } from '@/services/signalr'
 import type {
   Audiobook,
@@ -717,6 +721,8 @@ const router = useRouter()
 const libraryStore = useLibraryStore()
 const configStore = useConfigurationStore()
 const rootFoldersStore = useRootFoldersStore()
+const scanNotificationsStore = useScanNotificationsStore()
+const filesystemReadinessStore = useFilesystemReadinessStore()
 const { getProtectedImageSrc } = useProtectedImages()
 
 type DetailTab = 'details' | 'files' | 'history'
@@ -733,8 +739,28 @@ const deleteFolderOnDisk = ref(false)
 const showFullDescription = ref(false)
 const scanning = ref(false)
 const rescanningMetadata = ref(false)
-const scanQueued = ref(false)
-const scanJobId = ref<string | null>(null)
+const trackedScanJob = computed(() => {
+  const currentBookId = audiobook.value?.id
+  if (!currentBookId) return undefined
+
+  return scanNotificationsStore.jobs
+    .filter((job) => job.visible && job.audiobookId === currentBookId)
+    .sort((left, right) => right.timestamp.localeCompare(left.timestamp))[0]
+})
+const displayedScanJobId = computed(() => trackedScanJob.value?.jobId)
+const scanQueued = computed(() => {
+  const status = trackedScanJob.value?.status.toLowerCase()
+  return status === 'queued' || status === 'processing'
+})
+const displayedScanStatus = computed(() => {
+  const status = trackedScanJob.value?.status.toLowerCase()
+  if (status === 'queued') return 'Queued'
+  if (status === 'processing') return 'Processing'
+  if (status === 'completed') return 'Completed'
+  if (status === 'failed') return 'Failed'
+  if (status === 'superseded') return 'Stopped'
+  return 'No active scan'
+})
 const showEditModal = ref(false)
 const showOrganizeModal = ref(false)
 const showMoreActions = ref(false)
@@ -777,11 +803,17 @@ const topActions = computed<DetailTopAction[]>(() => [
   {
     key: 'scan',
     label: scanning.value ? 'Scanning...' : scanQueued.value ? 'Scan queued' : 'Scan Folder',
-    title: scanning.value ? 'Scanning...' : scanQueued.value ? 'Scan queued' : 'Scan Folder',
+    title: !filesystemReadinessStore.filesystemReady
+      ? 'Available after library filesystem initialization completes'
+      : scanning.value
+        ? 'Scanning...'
+        : scanQueued.value
+          ? 'Scan queued'
+          : 'Scan Folder',
     ariaLabel: 'Scan Folder',
     icon: scanning.value ? PhSpinner : scanQueued.value ? PhClock : PhFolderOpen,
     iconClass: scanning.value ? 'ph-spin' : undefined,
-    disabled: scanning.value || scanQueued.value,
+    disabled: scanning.value || scanQueued.value || !filesystemReadinessStore.filesystemReady,
     desktopGroup: 'primary',
     onClick: () => {
       void scanFiles()
@@ -1181,6 +1213,7 @@ watch(activeTab, async (newTab) => {
 // }
 
 let audiobookUpdateUnsub: (() => void) | null = null
+let scanJobUpdateUnsub: (() => void) | null = null
 
 onMounted(async () => {
   syncActiveTabFromRoute()
@@ -1188,20 +1221,12 @@ onMounted(async () => {
 
   await loadAudiobook()
 
-  // subscribe to scan job updates
-  signalRService.onScanJobUpdate((job) => {
+  // Keep the shared scan notification store current when this detail view is mounted.
+  // App.vue also subscribes globally; duplicate updates are monotonic/idempotent in the store.
+  scanJobUpdateUnsub = signalRService.onScanJobUpdate((job) => {
     if (!audiobook.value) return
     if (String(job.audiobookId) !== String(audiobook.value.id)) return
-    // update local job state
-    scanJobId.value = job.jobId
-    scanQueued.value = job.status === 'Queued' || job.status === 'Processing'
-    // if completed or failed, clear queued flag when appropriate
-    if (job.status === 'Completed' || job.status === 'Failed') {
-      // small delay to allow AudiobookUpdate to arrive and merge files
-      setTimeout(() => {
-        scanQueued.value = false
-      }, 500)
-    }
+    scanNotificationsStore.applyUpdate(job)
   })
 
   // subscribe to AudiobookUpdate messages and merge detail when this audiobook is updated (e.g., after a move)
@@ -1252,6 +1277,9 @@ onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
   try {
     if (audiobookUpdateUnsub) audiobookUpdateUnsub()
+  } catch {}
+  try {
+    if (scanJobUpdateUnsub) scanJobUpdateUnsub()
   } catch {}
 })
 
@@ -1456,8 +1484,6 @@ function handleDownloaded(result: SearchResult) {
 async function scanFiles() {
   if (!audiobook.value) return
   scanning.value = true
-  scanQueued.value = false
-  scanJobId.value = null
   try {
     const res = (await apiService.scanAudiobook(audiobook.value.id)) as {
       message: string
@@ -1470,8 +1496,7 @@ async function scanFiles() {
     logger.debug('Scan result:', res)
     // If backend enqueued the job it will return 202 Accepted with { jobId }
     if (res?.jobId) {
-      scanQueued.value = true
-      scanJobId.value = res.jobId
+      scanNotificationsStore.registerManualScan(res.jobId, audiobook.value.id)
       // keep scanning spinner off - queued state shows separately
     }
 
@@ -1505,11 +1530,6 @@ watch(
     if (updated) {
       // Merge fields to preserve reactivity where possible
       audiobook.value = { ...audiobook.value, ...updated }
-      // If files were added, clear queued indicators
-      if (scanQueued.value && updated.files && updated.files.length > 0) {
-        scanQueued.value = false
-        scanJobId.value = null
-      }
     }
   },
   { deep: true },
@@ -1750,10 +1770,12 @@ function toggleFileAccordion(fileId: number): void {
 function getFullPath(relativePath?: string): string {
   if (!relativePath) return 'Unknown'
 
-  const isAbsolute = isAbsolutePath(relativePath)
+  const basePath = audiobook.value?.basePath
+  const pathKind = detectPathKind(basePath)
+  const isAbsolute = isAbsolutePath(relativePath, pathKind)
   if (isAbsolute) return relativePath
-  if (!audiobook.value?.basePath) return relativePath
-  return joinPaths(audiobook.value.basePath, relativePath)
+  if (!basePath) return relativePath
+  return joinPaths(basePath, relativePath, pathKind)
 }
 
 function formatDate(dateString?: string): string {
