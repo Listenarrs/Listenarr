@@ -325,7 +325,9 @@ namespace Listenarr.Application.Downloads.Common
 
             try
             {
-                var resolution = await semanticsResolver.ResolveAsync(boundary);
+                var resolution = await semanticsResolver.ResolveAsync(
+                    boundary,
+                    FileSystemCaseSensitivityMode.Auto);
                 return resolution.State == PathIdentityState.Valid
                     ? resolution.Semantics.Comparer
                     : StringComparer.Ordinal;

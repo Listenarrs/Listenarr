@@ -36,6 +36,7 @@ public partial class ManualImportController : ControllerBase
     private readonly IScanPathAuthorizationService _scanPathAuthorizationService;
     private readonly IRootFolderService _rootFolderService;
     private readonly IFileMover _fileMover;
+    private readonly IFilePublicationSourceCapability _filePublicationSourceCapability;
     private readonly IAudiobookFileService _audiobookFileService;
     private readonly IFileSystem _fileSystem;
     private readonly IFileSystemSemanticsResolver _semanticsResolver;
@@ -57,6 +58,7 @@ public partial class ManualImportController : ControllerBase
         IScanPathAuthorizationService scanPathAuthorizationService,
         IRootFolderService rootFolderService,
         IFileMover fileMover,
+        IFilePublicationSourceCapability filePublicationSourceCapability,
         IAudiobookFileService audiobookFileService,
         IFileSystem fileSystem,
         IFileSystemSemanticsResolver semanticsResolver,
@@ -78,6 +80,8 @@ public partial class ManualImportController : ControllerBase
             ?? throw new ArgumentNullException(nameof(scanPathAuthorizationService));
         _rootFolderService = rootFolderService;
         _fileMover = fileMover;
+        _filePublicationSourceCapability = filePublicationSourceCapability
+            ?? throw new ArgumentNullException(nameof(filePublicationSourceCapability));
         _audiobookFileService = audiobookFileService;
         _fileSystem = fileSystem;
         _semanticsResolver = semanticsResolver;

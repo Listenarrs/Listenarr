@@ -164,6 +164,7 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             Mock<IAudiobookRepository> repoMock = null,
             Mock<IScanQueueService> scanMock = null,
             IFileMover fileMover = null,
+            IFilePublicationSourceCapability filePublicationSourceCapability = null,
             IAudiobookFileService audiobookFileService = null,
             IReadOnlyList<RootFolder> rootFolders = null,
             IFileSystemSemanticsResolver semanticsResolver = null,
@@ -176,6 +177,22 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             repoMock ??= GetRepoMock(book);
             scanMock ??= GetScanMock();
             fileMover ??= CreateMarkerlessFileMover();
+            if (filePublicationSourceCapability == null)
+            {
+                if (fileMover is IFilePublicationSourceCapability concreteCapability)
+                {
+                    filePublicationSourceCapability = concreteCapability;
+                }
+                else
+                {
+                    var capabilityMock = new Mock<IFilePublicationSourceCapability>();
+                    capabilityMock.Setup(capability => capability.CheckAsync(
+                            It.IsAny<string>(),
+                            It.IsAny<CancellationToken>()))
+                        .ReturnsAsync(FilePublicationSourceCapabilityResult.Supported);
+                    filePublicationSourceCapability = capabilityMock.Object;
+                }
+            }
             if (audiobookFileService == null)
             {
                 var audiobookFileServiceMock = new Mock<IAudiobookFileService>();
@@ -355,6 +372,7 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                 scanAuthorizationMock.Object,
                 rootFolderMock.Object,
                 fileMover,
+                filePublicationSourceCapability,
                 audiobookFileService,
                 new LocalFileSystem(),
                 semanticsResolver,
@@ -1560,6 +1578,73 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
         }
 
         [Fact]
+        public async Task InteractiveManualImport_UnsupportedSourceCapability_DoesNotCreateDestinationHierarchy()
+        {
+            var destinationRoot = CreateTempDirectory("listenarr-manual-capability-destination");
+            var destination = Path.Join(destinationRoot, "Capability Book");
+            var sourceDir = CreateTempDirectory("listenarr-manual-capability-source");
+            var source = Path.Join(sourceDir, "book.mp3");
+            await File.WriteAllTextAsync(source, "audio");
+            var book = new Audiobook
+            {
+                Id = 499,
+                Title = "Capability Book",
+                BasePath = destination
+            };
+            var capability = new Mock<IFilePublicationSourceCapability>(MockBehavior.Strict);
+            capability.Setup(service => service.CheckAsync(
+                    source,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(FilePublicationSourceCapabilityResult.Unsupported(
+                    "Source storage does not expose durable identity."));
+            var fileMover = new Mock<IFileMover>(MockBehavior.Strict);
+            var ownershipStore = new Mock<ILibraryDirectoryOwnershipStore>(MockBehavior.Strict);
+            var controller = GetController(
+                book,
+                new ApplicationSettings
+                {
+                    OutputPath = destinationRoot,
+                    FolderNamingPattern = "",
+                    FileNamingPattern = "{Title}"
+                },
+                fileMover: fileMover.Object,
+                filePublicationSourceCapability: capability.Object,
+                directoryOwnershipStore: ownershipStore.Object);
+            var request = new ManualImportRequestDto
+            {
+                Path = sourceDir,
+                Mode = "interactive",
+                Action = FileAction.Copy,
+                Items =
+                [
+                    new ManualImportItemDto
+                    {
+                        FullPath = source,
+                        MatchedAudiobookId = book.Id
+                    }
+                ]
+            };
+
+            var action = await controller.Start(request);
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(action.Result);
+            var results = Assert.IsAssignableFrom<System.Collections.IEnumerable>(
+                ok.Value!.GetType().GetProperty("results")!.GetValue(ok.Value));
+            var result = Assert.Single(results.Cast<object>());
+            Assert.False((bool)result.GetType().GetProperty("Success")!.GetValue(result)!);
+            Assert.False(Directory.Exists(destination));
+            ownershipStore.Verify(store => store.EnsureCreatedHierarchyAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<FileSystemPathSemantics>(),
+                It.IsAny<string>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<int?>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+            fileMover.VerifyNoOtherCalls();
+        }
+
+        [Fact]
         public async Task InteractiveManualImport_RequestCancelledAfterCommittedMutationReturnsCommittedResultAndQueuesFocusedScan()
         {
             var basePath = CreateTempDirectory("listenarr-manual-post-mutation-cancel-dst");
@@ -2224,7 +2309,7 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                 repository,
                 scanQueue,
                 fileMover.Object,
-                fileService.Object,
+                audiobookFileService: fileService.Object,
                 directoryOwnershipStore: ownershipStore.Object,
                 metadataMock: metadata);
             var request = new ManualImportRequestDto

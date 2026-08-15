@@ -273,7 +273,8 @@ namespace Listenarr.Infrastructure.Library.Moving
 
             var resolution = await _semanticsResolver.ResolveAsync(
                 canonicalBoundaryPath,
-                cancellationToken: cancellationToken);
+                FileSystemCaseSensitivityMode.Auto,
+                cancellationToken);
             if (resolution.State == PathIdentityState.Valid)
             {
                 return resolution.Semantics;

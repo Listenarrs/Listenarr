@@ -84,7 +84,8 @@ internal sealed partial class EfFileMutationJournalStore
     {
         var resolution = await _semanticsResolver.ResolveAsync(
             requestedPath,
-            cancellationToken: cancellationToken);
+            FileSystemCaseSensitivityMode.Auto,
+            cancellationToken);
         return resolution.State == PathIdentityState.Valid
             && FileSystemPathIdentity.AreEquivalent(
                 persistedPath,

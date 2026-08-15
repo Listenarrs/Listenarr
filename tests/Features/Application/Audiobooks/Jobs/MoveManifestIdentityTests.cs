@@ -7,9 +7,9 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs;
 public sealed class MoveManifestIdentityTests : BaseTests
 {
     [Fact]
-    public void Version_IsOne()
+    public void Version_IsTwo()
     {
-        Assert.Equal(1, MoveManifestIdentity.Version);
+        Assert.Equal(2, MoveManifestIdentity.Version);
     }
 
     [Fact]

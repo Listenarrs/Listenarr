@@ -1581,6 +1581,76 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
     }
 
     [Fact]
+    public async Task MetadataOnlyRetry_FailedCompletionWithoutOwnershipJournal_ActiveDeletionBlocksRediscoveredAudiobookMutation()
+    {
+        var source = Path.Join(
+            Path.GetTempPath(),
+            $"metadata-retry-owner-source-{Guid.NewGuid():N}");
+        var target = Path.Join(
+            Path.GetTempPath(),
+            $"metadata-retry-owner-target-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(target);
+        Guid relocationId;
+        int audiobookId;
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var root = new RootFolder
+            {
+                Name = "Library",
+                Path = target,
+                CaseSensitivityMode = FileSystemCaseSensitivityMode.Sensitive,
+                ResolvedCaseSensitivity = FileSystemCaseSensitivity.Sensitive
+            };
+            var audiobook = new Audiobook
+            {
+                Title = "Owned During Recovery",
+                BasePath = Path.Join(source, "Author", "Book")
+            };
+            db.RootFolders.Add(root);
+            db.Audiobooks.Add(audiobook);
+            await db.SaveChangesAsync();
+            audiobookId = audiobook.Id;
+
+            var relocation = new RootFolderRelocation
+            {
+                RootFolderId = root.Id,
+                ActiveRootFolderId = root.Id,
+                SourcePath = source,
+                SourceCaseSensitivityMode = FileSystemCaseSensitivityMode.Sensitive,
+                TargetPath = target,
+                TargetCaseSensitivityMode = FileSystemCaseSensitivityMode.Sensitive,
+                Mode = RootFolderRelocationMode.MetadataOnly,
+                Status = RootFolderRelocationStatus.Failed,
+                DesiredName = root.Name,
+                TotalJobs = 1,
+                CompletedJobs = 0,
+                Error = "Injected metadata completion failure."
+            };
+            db.RootFolderRelocations.Add(relocation);
+            db.AudiobookDeletionIntents.Add(new AudiobookDeletionIntent
+            {
+                AudiobookId = audiobook.Id,
+                DeleteFolder = false,
+                State = AudiobookDeletionIntentState.Planned
+            });
+            await db.SaveChangesAsync();
+            relocationId = relocation.Id;
+        }
+
+        var exception = await Assert.ThrowsAsync<ApplicationConflictException>(() =>
+            CreateService().RetryAsync(relocationId));
+
+        Assert.Equal("delete_recovery_pending", exception.Code);
+        await using var verification = await _factory.CreateDbContextAsync();
+        Assert.Equal(
+            Path.Join(source, "Author", "Book"),
+            (await verification.Audiobooks.SingleAsync(candidate => candidate.Id == audiobookId)).BasePath);
+        var persisted = await verification.RootFolderRelocations.SingleAsync();
+        Assert.Equal(RootFolderRelocationStatus.Failed, persisted.Status);
+        Assert.Empty(await verification.LibraryDirectoryOwnershipPathMigrations.ToListAsync());
+    }
+
+    [Fact]
     public async Task MetadataOnlyPathChange_RepairsInvalidStoredRootPath()
     {
         var target = Path.Join(Path.GetTempPath(), $"repair-root-{Guid.NewGuid():N}");
@@ -2754,6 +2824,30 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
     }
 
     [Fact]
+    public async Task RelocationStart_ActiveDeletionRecovery_BlocksBeforeChildMovePublication()
+    {
+        var (rootId, audiobookId, _, target) = await SeedRelocationScenarioAsync();
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            db.AudiobookDeletionIntents.Add(new AudiobookDeletionIntent
+            {
+                AudiobookId = audiobookId,
+                DeleteFolder = true,
+                State = AudiobookDeletionIntentState.NeedsAttention
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var exception = await Assert.ThrowsAsync<RootFolderPathChangeRejectedException>(() =>
+            CreateService().StartAsync(rootId, BuildRelocationCommand(target)));
+
+        Assert.Equal("delete_recovery_pending", exception.Code);
+        await using var verification = await _factory.CreateDbContextAsync();
+        Assert.Empty(await verification.RootFolderRelocations.ToListAsync());
+        Assert.Empty(await verification.MoveJobs.ToListAsync());
+    }
+
+    [Fact]
     public async Task ConcurrentRelocationFirst_BlocksWaitingMoveAfterRelocationIsPersisted()
     {
         var (rootId, audiobookId, source, target) = await SeedRelocationScenarioAsync();
@@ -2791,6 +2885,58 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         coordinator.ReleaseFirst();
         await relocationTask;
         await Assert.ThrowsAsync<MoveRelocationConflictException>(() => moveTask);
+    }
+
+    [Fact]
+    public async Task RetryAsync_ActiveRenameRecovery_BlocksBeforeReactivatingChildMove()
+    {
+        var (_, audiobookId, _, target) = await SeedRelocationScenarioAsync();
+        int rootId;
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            rootId = await db.RootFolders.Select(root => root.Id).SingleAsync();
+        }
+        var service = CreateService();
+        var started = await service.StartAsync(rootId, BuildRelocationCommand(target));
+        Assert.NotNull(started.RelocationId);
+
+        Guid jobId;
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var relocation = await db.RootFolderRelocations.SingleAsync();
+            relocation.Status = RootFolderRelocationStatus.NeedsAttention;
+            relocation.Error = "Retry required.";
+            var job = await db.MoveJobs.SingleAsync();
+            job.Status = MoveJobStatus.NeedsAttention;
+            job.ActiveDeduplicationKey = null;
+            job.Error = "Interrupted move.";
+            jobId = job.Id;
+            var audiobookFileId = await db.AudiobookFiles
+                .Where(file => file.AudiobookId == audiobookId)
+                .Select(file => file.Id)
+                .SingleAsync();
+            db.FileMutationJournals.Add(new FileMutationJournal
+            {
+                Action = FileAction.Move,
+                SourcePath = Path.Join(relocation.SourcePath, "Author", "Title", "book.m4b"),
+                DestinationPath = Path.Join(relocation.TargetPath, "Author", "Title", "book.m4b"),
+                SourcePhysicalObjectIdentity = "test-source-generation",
+                SourceLength = 5,
+                State = FileMutationJournalState.Planned,
+                AudiobookId = audiobookId,
+                AudiobookFileId = audiobookFileId
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var exception = await Assert.ThrowsAsync<ApplicationConflictException>(() =>
+            service.RetryAsync(started.RelocationId.Value));
+
+        Assert.Equal("rename_recovery_pending", exception.Code);
+        await using var verification = await _factory.CreateDbContextAsync();
+        var unchangedJob = await verification.MoveJobs.SingleAsync(job => job.Id == jobId);
+        Assert.Equal(MoveJobStatus.NeedsAttention, unchangedJob.Status);
+        Assert.Null(unchangedJob.ActiveDeduplicationKey);
     }
 
     [Fact]
@@ -3179,6 +3325,168 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         Assert.Equal(RootFolderRelocationStatus.Completed, relocationAfter.Status);
         Assert.Null(relocationAfter.ActiveRootFolderId);
         Assert.Equal(1, relocationAfter.CompletedJobs);
+    }
+
+    [Fact]
+    public async Task MetadataOnly_CrashAfterJournalCommit_StartupDeletionOwnerBlocksBeforeAudiobookRewrite()
+    {
+        var source = Path.Join(
+            Path.GetTempPath(),
+            $"metadata-crash-deletion-owner-source-{Guid.NewGuid():N}");
+        var target = Path.Join(
+            Path.GetTempPath(),
+            $"metadata-crash-deletion-owner-target-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(source);
+        Directory.CreateDirectory(target);
+        int rootId;
+        int audiobookId;
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var root = new RootFolder { Name = "Library", Path = source };
+            var audiobook = new Audiobook
+            {
+                Title = "Title",
+                BasePath = Path.Join(source, "Title")
+            };
+            db.RootFolders.Add(root);
+            db.Audiobooks.Add(audiobook);
+            await db.SaveChangesAsync();
+            rootId = root.Id;
+            audiobookId = audiobook.Id;
+        }
+
+        var interrupted = CreateService();
+        interrupted.AfterMetadataOnlyJournalCommitForTest = () =>
+            throw new IOException("Injected process loss after metadata journal commit.");
+        await Assert.ThrowsAsync<IOException>(() =>
+            interrupted.StartAsync(
+                rootId,
+                new RootFolderPathChangeCommand(
+                    target,
+                    RootFolderRelocationMode.MetadataOnly,
+                    false,
+                    "Recovered Library",
+                    false,
+                    FileSystemCaseSensitivityMode.Auto)));
+
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            db.AudiobookDeletionIntents.Add(new AudiobookDeletionIntent
+            {
+                AudiobookId = audiobookId,
+                DeleteFolder = false,
+                State = AudiobookDeletionIntentState.Planned
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            CreateService().ReconcileActiveAsync());
+        Assert.Contains("remains failed", exception.Message, StringComparison.OrdinalIgnoreCase);
+
+        await using var verification = await _factory.CreateDbContextAsync();
+        Assert.Equal(source, (await verification.RootFolders.SingleAsync()).Path);
+        Assert.Equal(
+            Path.Join(source, "Title"),
+            (await verification.Audiobooks.SingleAsync()).BasePath);
+        var relocation = await verification.RootFolderRelocations.SingleAsync();
+        Assert.Equal(RootFolderRelocationStatus.Failed, relocation.Status);
+        Assert.Contains("deletion", relocation.Error!, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            AudiobookDeletionIntentState.Planned,
+            (await verification.AudiobookDeletionIntents.SingleAsync()).State);
+    }
+
+    [Fact]
+    public async Task MetadataOnly_OwnershipMigrationStartup_RenameOwnerBlocksBeforeMetadataRewrite()
+    {
+        var scenario = await SeedPublishedOwnershipMigrationAsync();
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var audiobook = await db.Audiobooks.SingleAsync();
+            await AddTrackedFileAsync(
+                db,
+                audiobook,
+                Path.Join(scenario.OwnedPath, "book.m4b"),
+                scenario.RootPath);
+            var file = await db.AudiobookFiles.SingleAsync();
+            db.FileMutationJournals.Add(new FileMutationJournal
+            {
+                Action = FileAction.Move,
+                SourcePath = file.Path!,
+                DestinationPath = Path.Join(scenario.OwnedPath, "renamed.m4b"),
+                SourcePhysicalObjectIdentity = "test-source-generation",
+                SourceLength = 5,
+                State = FileMutationJournalState.Planned,
+                AudiobookId = audiobook.Id,
+                AudiobookFileId = file.Id
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            CreateService().ReconcileActiveAsync());
+        Assert.Contains("remains failed", exception.Message, StringComparison.OrdinalIgnoreCase);
+
+        await using var verification = await _factory.CreateDbContextAsync();
+        var ownership = await verification.LibraryDirectoryOwnerships.SingleAsync();
+        Assert.Equal(scenario.OwnedPath, ownership.CanonicalPath);
+        Assert.Equal(scenario.SourceOwnershipKey, ownership.PathOwnershipKey);
+        Assert.Equal(
+            scenario.OwnedPath,
+            (await verification.Audiobooks.SingleAsync()).BasePath);
+        var relocation = await verification.RootFolderRelocations.SingleAsync();
+        Assert.Equal(RootFolderRelocationStatus.Failed, relocation.Status);
+        Assert.Contains("organize", relocation.Error!, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            FileMutationJournalState.Planned,
+            (await verification.FileMutationJournals.SingleAsync()).State);
+    }
+
+    [Fact]
+    public async Task MetadataOnly_OwnershipMigrationRetry_RenameOwnerReturnsConflictBeforeMetadataRewrite()
+    {
+        var scenario = await SeedPublishedOwnershipMigrationAsync();
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var audiobook = await db.Audiobooks.SingleAsync();
+            await AddTrackedFileAsync(
+                db,
+                audiobook,
+                Path.Join(scenario.OwnedPath, "book.m4b"),
+                scenario.RootPath);
+            var file = await db.AudiobookFiles.SingleAsync();
+            db.FileMutationJournals.Add(new FileMutationJournal
+            {
+                Action = FileAction.Move,
+                SourcePath = file.Path!,
+                DestinationPath = Path.Join(scenario.OwnedPath, "renamed.m4b"),
+                SourcePhysicalObjectIdentity = "test-source-generation",
+                SourceLength = 5,
+                State = FileMutationJournalState.Planned,
+                AudiobookId = audiobook.Id,
+                AudiobookFileId = file.Id
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var exception = await Assert.ThrowsAsync<ApplicationConflictException>(() =>
+            CreateService().RetryAsync(scenario.RelocationId));
+
+        Assert.Equal("rename_recovery_pending", exception.Code);
+        await using var verification = await _factory.CreateDbContextAsync();
+        var ownership = await verification.LibraryDirectoryOwnerships.SingleAsync();
+        Assert.Equal(scenario.OwnedPath, ownership.CanonicalPath);
+        Assert.Equal(scenario.SourceOwnershipKey, ownership.PathOwnershipKey);
+        Assert.Equal(
+            scenario.OwnedPath,
+            (await verification.Audiobooks.SingleAsync()).BasePath);
+        var relocation = await verification.RootFolderRelocations.SingleAsync();
+        Assert.Equal(RootFolderRelocationStatus.NeedsAttention, relocation.Status);
+        Assert.True(await verification.LibraryDirectoryOwnershipPathMigrations.AnyAsync());
+        Assert.Equal(
+            FileMutationJournalState.Planned,
+            (await verification.FileMutationJournals.SingleAsync()).State);
     }
 
     [Fact]

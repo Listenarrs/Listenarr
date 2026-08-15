@@ -38,6 +38,11 @@ public partial class MoveQueueService
                 return null;
             }
 
+            await EnsureNonRelocationRecoveryAllowsMutationAsync(
+                job.AudiobookId,
+                allowActiveDeletionIntent: false,
+                cancellationToken);
+
             if (string.IsNullOrWhiteSpace(job.SourcePath)
                 || string.IsNullOrWhiteSpace(job.RequestedPath))
             {
@@ -230,8 +235,23 @@ public partial class MoveQueueService
                         job.AudiobookId);
                     return requeue.Job?.Id;
                 case MoveRequeueOutcome.ConflictingActiveJob:
+                    if (requeue.Job == null
+                        || !ActiveExecutionOptionsMatch(
+                            requeue.Job,
+                            sourceIdentity,
+                            targetIdentity,
+                            job.DeleteEmptySource,
+                            job.RelocationId,
+                            job.SourceCleanupBoundary))
+                    {
+                        _logger.LogWarning(
+                            "Move job {JobId} cannot be requeued because the conflicting active job uses different execution options",
+                            job.Id);
+                        return null;
+                    }
+
                     jobToSchedule = requeue.Job;
-                    return requeue.Job?.Id;
+                    return requeue.Job.Id;
                 case MoveRequeueOutcome.StaleState:
                     _logger.LogInformation(
                         "Move job {JobId} changed state while it was being requeued",

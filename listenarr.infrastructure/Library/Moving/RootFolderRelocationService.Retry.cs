@@ -69,6 +69,45 @@ public sealed partial class RootFolderRelocationService
                 state.Mode == RootFolderRelocationMode.MetadataOnly
                 && !hasOwnershipMigration
                 && state.Status == RootFolderRelocationStatus.Failed;
+
+            var retryAudiobookIds = (await preflight.MoveJobs
+                    .AsNoTracking()
+                    .Where(job => job.RelocationId == relocationId
+                        && (job.Status == MoveJobStatus.NeedsAttention
+                            || job.Status == MoveJobStatus.Failed))
+                    .Select(job => job.AudiobookId)
+                    .ToListAsync(cancellationToken))
+                .Concat(await preflight.RootFolderRelocationSkippedItems
+                    .AsNoTracking()
+                    .Where(item => item.RelocationId == relocationId)
+                    .Select(item => item.AudiobookId)
+                    .ToListAsync(cancellationToken))
+                .Concat(await preflight.LibraryDirectoryOwnershipPathMigrations
+                    .AsNoTracking()
+                    .Where(item => item.RelocationId == relocationId
+                        && item.Ownership.AudiobookId != null)
+                    .Select(item => item.Ownership.AudiobookId!.Value)
+                    .ToListAsync(cancellationToken))
+                .ToHashSet();
+            if (state.Mode == RootFolderRelocationMode.MetadataOnly)
+            {
+                retryAudiobookIds.UnionWith(
+                    await FindMetadataRecoveryAudiobookIdsAsync(
+                        preflight,
+                        relocationId,
+                        cancellationToken));
+            }
+
+            var externalRecoveryConflict = await FindExternalRecoveryConflictAsync(
+                preflight,
+                retryAudiobookIds,
+                cancellationToken);
+            if (externalRecoveryConflict != null)
+            {
+                throw new ApplicationConflictException(
+                    externalRecoveryConflict.Code,
+                    externalRecoveryConflict.PublicMessage);
+            }
         }
 
         if (requiresMetadataCompletionRecovery)

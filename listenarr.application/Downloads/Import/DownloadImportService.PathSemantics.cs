@@ -132,7 +132,8 @@ public partial class DownloadImportService
     {
         var resolution = await semanticsResolver.ResolveAsync(
             path,
-            cancellationToken: cancellationToken);
+            FileSystemCaseSensitivityMode.Auto,
+            cancellationToken);
         return resolution.State == PathIdentityState.Valid
             ? resolution.Semantics
             : throw new InvalidOperationException(resolution.Reason ?? defaultReason);

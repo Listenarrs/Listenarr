@@ -285,7 +285,9 @@ public partial class FileMover
         string path)
     {
         var resolver = _semanticsResolver ?? new FileSystemSemanticsResolver();
-        var resolution = await resolver.ResolveAsync(path);
+        var resolution = await resolver.ResolveAsync(
+            path,
+            FileSystemCaseSensitivityMode.Auto);
         if (resolution.State != PathIdentityState.Valid
             || resolution.Semantics.CaseSensitivity
                 == FileSystemCaseSensitivity.Unknown)

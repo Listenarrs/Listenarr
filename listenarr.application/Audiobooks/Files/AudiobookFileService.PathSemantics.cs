@@ -83,7 +83,8 @@ public partial class AudiobookFileService
         {
             var resolution = await semanticsResolver.ResolveAsync(
                 path,
-                cancellationToken: cancellationToken);
+                FileSystemCaseSensitivityMode.Auto,
+                cancellationToken);
             return resolution.State == PathIdentityState.Valid
                 ? new LibraryPathSemanticsResolution(resolution.Semantics, null)
                 : null;

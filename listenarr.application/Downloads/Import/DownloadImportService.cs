@@ -24,6 +24,7 @@ namespace Listenarr.Application.Downloads.Import
         IFileNamingService fileNamingService,
         IMetadataService metadataService,
         IFileMover fileMover,
+        IFilePublicationSourceCapability filePublicationSourceCapability,
         IAudiobookFileService audiobookFileService,
         IArchiveExtractor archiveExtractor,
         IConfigurationService configurationService,

@@ -1884,7 +1884,8 @@ async function handleSave() {
           moveError?.code === 'move_recovery_required' ||
           moveError?.code === 'move_repair_required' ||
           moveError?.code === 'move_recovery_ambiguous' ||
-          moveError?.code === 'move_already_active'
+          moveError?.code === 'move_already_active' ||
+          moveError?.code === 'move_active_options_conflict'
         ) {
           await refreshMoveRecoveryState(audiobook.id)
           toast.error(

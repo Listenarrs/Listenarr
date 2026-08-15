@@ -294,6 +294,72 @@ describe('EditAudiobookModal move options', () => {
     )
   })
 
+  it('refreshes active move state when execution options conflict with an already active move', async () => {
+    const { apiService } = await import('@/services/api')
+    const noRecovery = {
+      hasUnresolvedMove: false,
+      disposition: 'None',
+      jobId: null,
+      status: null,
+      phase: null,
+      requestedPath: null,
+      error: null,
+      canRetry: false,
+      blockingJobIds: [] as string[],
+    }
+    const active = {
+      hasUnresolvedMove: true,
+      disposition: 'RetryAvailable',
+      jobId: 'active-options-job',
+      status: 'Failed',
+      phase: 'Published',
+      requestedPath: 'C:\\root\\New Author\\New Book',
+      error: 'An active move uses different execution options.',
+      canRetry: true,
+      blockingJobIds: ['active-options-job'],
+    }
+    vi.mocked(apiService.getMoveRecoveryState).mockImplementation(async () =>
+      vi.mocked(apiService.moveAudiobook).mock.calls.length > 0 ? active : noRecovery,
+    )
+    vi.mocked(apiService.moveAudiobook).mockRejectedValueOnce(
+      Object.assign(new Error('API error'), {
+        status: 409,
+        body: JSON.stringify({
+          code: 'move_active_options_conflict',
+          message: 'An active move for this audiobook uses different execution options.',
+        }),
+      }),
+    )
+
+    const wrapper = mount(EditAudiobookModal, {
+      props: { isOpen: true, audiobook },
+      attachTo: document.body,
+      global: { plugins: [(await import('pinia')).createPinia()] },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
+    await wrapper.vm.$nextTick()
+
+    const savePromise = (wrapper.vm as unknown).handleSave()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const resolver = (wrapper.vm as unknown).moveConfirmResolver
+    if (resolver) resolver({ proceed: true, moveFiles: true, deleteEmptySource: false })
+    await savePromise
+    await wrapper.vm.$nextTick()
+
+    expect(apiService.moveAudiobook).toHaveBeenCalledTimes(1)
+    expect(apiService.getMoveRecoveryState).toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="move-recovery-notice"]').text()).toContain(
+      'An interrupted move needs to be resumed.',
+    )
+    expect(wrapper.get('[data-testid="resume-move-button"]').exists()).toBe(true)
+    expect(toastMocks.error).toHaveBeenCalledWith(
+      'Move blocked',
+      'An active move for this audiobook uses different execution options.',
+    )
+    wrapper.unmount()
+  })
+
   it('Change without moving should persist metadata and identifiers before the destination update', async () => {
     const wrapper = mount(EditAudiobookModal, {
       props: { isOpen: true, audiobook },

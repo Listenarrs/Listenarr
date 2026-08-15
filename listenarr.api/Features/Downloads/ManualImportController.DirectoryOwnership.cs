@@ -30,6 +30,18 @@ public partial class ManualImportController
                 "The manual import destination has no managed ownership boundary.");
         }
 
+        var sourceCapability = await _filePublicationSourceCapability.CheckAsync(
+            source,
+            cancellationToken);
+        if (!sourceCapability.IsSupported)
+        {
+            _logger.LogWarning(
+                "Blocked manual import before destination creation because source publication capability is unavailable for {Source}: {Reason}",
+                LogRedaction.SanitizeFilePath(source),
+                LogRedaction.SanitizeText(sourceCapability.Reason));
+            return null;
+        }
+
         await _directoryOwnershipStore.EnsureCreatedHierarchyAsync(
             destinationDirectory,
             boundary,

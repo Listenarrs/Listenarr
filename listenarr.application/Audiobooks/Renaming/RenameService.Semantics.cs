@@ -73,7 +73,8 @@ public partial class RenameService
 
         var resolution = await _semanticsResolver.ResolveAsync(
             boundaryPath,
-            cancellationToken: cancellationToken);
+            FileSystemCaseSensitivityMode.Auto,
+            cancellationToken);
         if (resolution.State != PathIdentityState.Valid
             || resolution.Semantics.CaseSensitivity == FileSystemCaseSensitivity.Unknown)
         {

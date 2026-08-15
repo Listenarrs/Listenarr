@@ -162,7 +162,9 @@ namespace Listenarr.Application.Audiobooks.Jobs
                     return null;
                 }
 
-                var resolution = await _semanticsResolver.ResolveAsync(canonicalPath);
+                var resolution = await _semanticsResolver.ResolveAsync(
+                    canonicalPath,
+                    FileSystemCaseSensitivityMode.Auto);
                 return resolution.State == PathIdentityState.Valid ? resolution.Semantics : null;
             }
             catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))

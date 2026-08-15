@@ -1527,6 +1527,55 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
         [Fact]
         [Trait("Method", "EnqueueMove")]
+        [Trait("Scenario", "NarrowTrackedIdentityBoundaryWithoutCleanupKeepsManagedRootAuthority")]
+        public async Task MoveAudiobook_NarrowTrackedIdentityBoundary_DeleteEmptySourceFalse_PersistsManagedRootAuthorizationBoundary()
+        {
+            var moveQueue = CreateMoveQueueMock();
+            moveQueue.Setup(service => service.EnqueueMoveAsync(
+                    It.IsAny<MoveEnqueueCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
+            Init(services => services.WithSingleton(moveQueue.Object));
+            var rootPath = FileService.GetTempDirectory(
+                "listenarr-move-managed-source-root-no-cleanup");
+            await AddAuthorizedRootAsync(rootPath, "Managed Source Root");
+
+            var sourcePath = Path.Join(rootPath, "Author", "BookMoved");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Moved source without cleanup")
+                .WithBasePath(sourcePath)
+                .Build());
+            await AddTrackedFileAsync(
+                audiobook,
+                sourcePath,
+                identityBoundary: sourcePath);
+            var targetPath = Path.Join(rootPath, "Author", "BookReturned");
+
+            var result = await _provider.GetRequiredService<LibraryController>().EnqueueMove(
+                audiobook.Id,
+                new LibraryController.MoveRequest
+                {
+                    DestinationPath = targetPath,
+                    SourcePath = sourcePath,
+                    MoveFiles = true,
+                    DeleteEmptySource = false
+                });
+
+            Assert.IsType<AcceptedResult>(result);
+            moveQueue.Verify(service => service.EnqueueMoveAsync(
+                It.Is<MoveEnqueueCommand>(command =>
+                    command.SourcePath == sourcePath
+                    && command.SourceIdentity.BoundaryPath == sourcePath
+                    && !command.DeleteEmptySource
+                    && command.SourceCleanupBoundary == rootPath
+                    && command.SourceBoundaryDirectoryObjectIdentityVersion > 0
+                    && !string.IsNullOrWhiteSpace(
+                        command.SourceBoundaryDirectoryObjectIdentity)),
+                It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [Fact]
+        [Trait("Method", "EnqueueMove")]
         [Trait("Scenario", "TrackedIdentityBoundaryOutsideManagedRootIsRejected")]
         public async Task MoveAudiobook_TrackedIdentityBoundaryOutsideManagedRoot_IsRejected()
         {

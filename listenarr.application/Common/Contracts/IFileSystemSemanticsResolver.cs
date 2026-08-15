@@ -13,6 +13,6 @@ public interface IFileSystemSemanticsResolver
 {
     ValueTask<FileSystemSemanticsResolution> ResolveAsync(
         string path,
-        FileSystemCaseSensitivityMode mode = FileSystemCaseSensitivityMode.Auto,
+        FileSystemCaseSensitivityMode mode,
         CancellationToken cancellationToken = default);
 }

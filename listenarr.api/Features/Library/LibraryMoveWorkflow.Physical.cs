@@ -324,6 +324,13 @@ public sealed partial class LibraryMoveWorkflow
                             "Source root physical identity is unavailable or changed.");
                     }
 
+                    // MoveJob.SourceCleanupBoundary also persists the path paired with the
+                    // source boundary-generation authorization. Keep the managed root path
+                    // even when ancestor cleanup is disabled; DeleteEmptySource remains the
+                    // independent switch that authorizes directory retirement.
+                    var persistedSourceBoundary = sourceCleanupBoundary
+                        ?? sourceManagedBoundary?.Path;
+
                     return await _moveQueueService!.EnqueueMoveAsync(
                         new MoveEnqueueCommand(
                             id,
@@ -337,7 +344,7 @@ public sealed partial class LibraryMoveWorkflow
                             targetBoundary.DirectoryIdentity.Version!.Value,
                             targetBoundary.DirectoryIdentity.Value!,
                             deleteEmptySource,
-                            sourceCleanupBoundary),
+                            persistedSourceBoundary),
                         lockedToken);
                 },
                 cancellationToken);

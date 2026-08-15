@@ -15,7 +15,8 @@ public partial class DownloadImportService
         int audiobookId,
         CancellationToken cancellationToken)
     {
-        if (!await EnsureOwnedImportDestinationAsync(
+        if (!await CanPublishFromSourceAsync(source, cancellationToken)
+            || !await EnsureOwnedImportDestinationAsync(
                 source,
                 destination,
                 managedBoundary,
@@ -46,7 +47,8 @@ public partial class DownloadImportService
         int audiobookId,
         CancellationToken cancellationToken)
     {
-        if (!await EnsureOwnedImportDestinationAsync(
+        if (!await CanPublishFromSourceAsync(source, cancellationToken)
+            || !await EnsureOwnedImportDestinationAsync(
                 source,
                 destination,
                 managedBoundary,
@@ -76,6 +78,25 @@ public partial class DownloadImportService
             source,
             destination,
             operationId);
+    }
+
+    private async Task<bool> CanPublishFromSourceAsync(
+        string source,
+        CancellationToken cancellationToken)
+    {
+        var capability = await filePublicationSourceCapability.CheckAsync(
+            source,
+            cancellationToken);
+        if (capability.IsSupported)
+        {
+            return true;
+        }
+
+        logger.LogWarning(
+            "Blocked download import before destination creation because source publication capability is unavailable for {Source}: {Reason}",
+            LogRedaction.SanitizeFilePath(source),
+            LogRedaction.SanitizeText(capability.Reason));
+        return false;
     }
 
     private async Task<bool> EnsureOwnedImportDestinationAsync(

@@ -43,7 +43,7 @@ public sealed class FileSystemSemanticsResolver : IFileSystemSemanticsResolver
 
     public ValueTask<FileSystemSemanticsResolution> ResolveAsync(
         string path,
-        FileSystemCaseSensitivityMode mode = FileSystemCaseSensitivityMode.Auto,
+        FileSystemCaseSensitivityMode mode,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();

@@ -123,6 +123,9 @@ namespace Listenarr.Application.Audiobooks.Jobs
                     "A physical move requires durable source- and target-boundary generation authorization.");
             }
 
+            var persistedSourceBoundary = command.SourceCleanupBoundary == null
+                ? null
+                : sourceAuthorizationBoundary;
             var persistedEntries = manifest.Entries.ToList();
             persistedEntries.Add(
                 MoveManifestIdentity.CreateSourceBoundaryAuthorization(
@@ -143,6 +146,10 @@ namespace Listenarr.Application.Audiobooks.Jobs
             MoveJob? jobToSchedule = null;
             var jobId = await _mutationCoordinator.ExecuteExclusiveAsync(async token =>
             {
+                await EnsureNonRelocationRecoveryAllowsMutationAsync(
+                    command.AudiobookId,
+                    allowActiveDeletionIntent: false,
+                    token);
                 await ThrowIfRelocationBoundaryProtectedAsync(
                     source,
                     command.SourceIdentity,
@@ -154,6 +161,10 @@ namespace Listenarr.Application.Audiobooks.Jobs
                     token);
                 if (existingDb != null)
                 {
+                    EnsureMatchingActiveExecutionOptions(
+                        existingDb,
+                        command,
+                        persistedSourceBoundary);
                     jobToSchedule = existingDb;
                     _logger.LogInformation(
                         "Found active move job {JobId} for audiobook {AudiobookId} to {Path}; deduping and returning existing job id",
@@ -173,9 +184,7 @@ namespace Listenarr.Application.Audiobooks.Jobs
                     EnqueuedAt = _timeProvider.GetUtcNow().UtcDateTime,
                     Status = MoveJobStatus.Queued,
                     SourcePath = source,
-                    SourceCleanupBoundary = command.SourceCleanupBoundary == null
-                        ? null
-                        : sourceAuthorizationBoundary,
+                    SourceCleanupBoundary = persistedSourceBoundary,
                     DeleteEmptySource = command.DeleteEmptySource,
                     RelocationId = command.RelocationId,
                     Entries = persistedEntries
@@ -195,6 +204,10 @@ namespace Listenarr.Application.Audiobooks.Jobs
                         commitToken);
                     if (existingDb != null)
                     {
+                        EnsureMatchingActiveExecutionOptions(
+                            existingDb,
+                            command,
+                            persistedSourceBoundary);
                         jobToSchedule = existingDb;
                         return existingDb.Id;
                     }

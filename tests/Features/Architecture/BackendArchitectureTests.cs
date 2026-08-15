@@ -230,6 +230,27 @@ public sealed class BackendArchitectureTests : BaseTests
     }
 
     [Fact]
+    public void FileSystemSemanticsResolverContract_RequiresExplicitCaseSensitivityMode()
+    {
+        foreach (var contractType in new[]
+        {
+            typeof(IFileSystemSemanticsResolver),
+            typeof(FileSystemSemanticsResolver)
+        })
+        {
+            var methods = contractType.GetMethods()
+                .Where(method => method.Name == nameof(IFileSystemSemanticsResolver.ResolveAsync))
+                .ToArray();
+            var method = Assert.Single(methods);
+            var parameters = method.GetParameters();
+            Assert.Equal(3, parameters.Length);
+            Assert.Equal(typeof(FileSystemCaseSensitivityMode), parameters[1].ParameterType);
+            Assert.False(parameters[1].IsOptional);
+            Assert.False(parameters[1].HasDefaultValue);
+        }
+    }
+
+    [Fact]
     public void RootFolderController_DoesNotUseGenericEnumParsingForPublicRequestValues()
     {
         var controllerPath = Path.Join(

@@ -325,7 +325,8 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
 
             var resolution = await semanticsResolver.ResolveAsync(
                 canonicalPath,
-                cancellationToken: cancellationToken);
+                FileSystemCaseSensitivityMode.Auto,
+                cancellationToken);
             return resolution.State == PathIdentityState.Valid ? resolution.Semantics : null;
         }
     }

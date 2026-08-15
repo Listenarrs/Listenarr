@@ -100,6 +100,17 @@ public partial class MoveQueueService
                 "An active root-folder path repair still owns this audiobook's path state. Resolve or retry that repair before changing the audiobook's files.");
         }
 
+        await EnsureNonRelocationRecoveryAllowsMutationAsync(
+            audiobookId,
+            allowActiveDeletionIntent,
+            cancellationToken);
+    }
+
+    private async Task EnsureNonRelocationRecoveryAllowsMutationAsync(
+        int audiobookId,
+        bool allowActiveDeletionIntent,
+        CancellationToken cancellationToken)
+    {
         if (_fileRenameRecoveryProbe != null
             && await _fileRenameRecoveryProbe.HasBlockingAsync(
                 audiobookId,

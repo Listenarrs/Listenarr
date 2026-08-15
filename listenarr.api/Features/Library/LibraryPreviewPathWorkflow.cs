@@ -15,7 +15,6 @@ namespace Listenarr.Api.Features.Library;
 public sealed class LibraryPreviewPathWorkflow(
     IConfigurationService configurationService,
     IFileNamingService fileNamingService,
-    IFileSystemSemanticsResolver semanticsResolver,
     ILogger<LibraryPreviewPathWorkflow> logger)
 {
     public async Task<IActionResult> PreviewAsync(LibraryController.PreviewPathRequest request)
@@ -38,38 +37,17 @@ public sealed class LibraryPreviewPathWorkflow(
             var namingPattern = !string.IsNullOrWhiteSpace(settings.FolderNamingPattern)
                 ? settings.FolderNamingPattern
                 : settings.FileNamingPattern;
-            var fullPath = LibraryPathPlanner.ComputeAudiobookBaseDirectoryFromPattern(
+            // Preview owns the naming calculation, so preserve the generated relative
+            // directory directly instead of re-deriving it from the full path through
+            // live filesystem semantics. Read-only preview must not depend on CIFS/NFS/
+            // FUSE case-sensitivity probes merely to recover a string it just produced.
+            var relativePath = LibraryPathPlanner.ComputeAudiobookRelativeDirectoryFromPattern(
                 audiobook,
-                root ?? string.Empty,
                 namingPattern,
                 fileNamingService);
-            var relativePath = fullPath;
-            if (!string.IsNullOrEmpty(root))
-            {
-                var semanticsRoot = root;
-                if (!explicitRoot
-                    && !FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
-                        root,
-                        out semanticsRoot,
-                        out _))
-                {
-                    semanticsRoot = null;
-                }
-
-                if (!string.IsNullOrWhiteSpace(semanticsRoot))
-                {
-                    var resolution = await semanticsResolver.ResolveAsync(semanticsRoot);
-                    if (resolution.State == PathIdentityState.Valid
-                        && FileSystemPathIdentity.TryGetRelativePathWithinBase(
-                            semanticsRoot,
-                            fullPath,
-                            resolution.Semantics,
-                            out var resolvedRelativePath))
-                    {
-                        relativePath = resolvedRelativePath;
-                    }
-                }
-            }
+            var fullPath = FileUtils.CombineWithOptionalBase(
+                root ?? string.Empty,
+                relativePath);
 
             return new OkObjectResult(new { fullPath, relativePath, root });
         }

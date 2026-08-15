@@ -178,7 +178,10 @@ public sealed partial class RootFolderRelocationService(
                 "One or more audiobook base paths are invalid; use metadata-only path change to repair stored metadata before relocating files.");
         }
 
-        var affectedAudiobookIds = affected.Select(candidate => candidate.Audiobook.Id).ToHashSet();
+        var affectedAudiobookIds = affected
+            .Concat(invalidStoredBasePaths)
+            .Select(candidate => candidate.Audiobook.Id)
+            .ToHashSet();
         await EnsureNoUnresolvedMoveConflictsAsync(
             db,
             affectedAudiobookIds,
@@ -187,6 +190,17 @@ public sealed partial class RootFolderRelocationService(
             targetPath,
             targetResolution.Semantics,
             cancellationToken);
+        var externalRecoveryConflict = await FindExternalRecoveryConflictAsync(
+            db,
+            affectedAudiobookIds,
+            cancellationToken);
+        if (externalRecoveryConflict != null)
+        {
+            throw new RootFolderPathChangeRejectedException(
+                externalRecoveryConflict.Code,
+                externalRecoveryConflict.PublicMessage,
+                externalRecoveryConflict.Detail);
+        }
 
         var movePlans = new List<RelocationMovePlan>();
         if (sourceResolution != null

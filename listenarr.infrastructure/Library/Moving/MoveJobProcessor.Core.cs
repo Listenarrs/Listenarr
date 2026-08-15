@@ -18,6 +18,11 @@ internal partial class MoveJobProcessor
         {
             logger.LogInformation("Processing move job {JobId} for audiobook {AudiobookId} to {Path}", job.Id, job.AudiobookId, LogRedaction.SanitizeFilePath(job.RequestedPath));
 
+            if (!await EnsureNoExternalRecoveryOwnerAsync(job, stoppingToken))
+            {
+                return;
+            }
+
             using var scope = scopeFactory.CreateScope();
             var audiobookRepository = scope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
             var audiobook = await audiobookRepository.GetByIdAsync(job.AudiobookId);

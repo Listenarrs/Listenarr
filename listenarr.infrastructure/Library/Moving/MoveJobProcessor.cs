@@ -33,6 +33,8 @@ internal partial class MoveJobProcessor(
     TimeProvider timeProvider,
     IFilesystemMutationCoordinator filesystemMutationCoordinator,
     IAudiobookOperationCoordinator audiobookOperationCoordinator,
+    IAudiobookDeletionIntentProbe? deletionIntentProbe = null,
+    IFileRenameRecoveryProbe? fileRenameRecoveryProbe = null,
     IAudiobookUpdatePublisher? audiobookUpdatePublisher = null) : IMoveJobProcessor, IMoveJobProcessorPhases
 {
     internal Func<MoveJob, Task>? AfterSourceCleanupBeforeMetadataRewriteForTest { get; set; }

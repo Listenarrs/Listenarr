@@ -325,7 +325,8 @@ public sealed class FileRenameRecoveryReconciler(
         }
         var resolution = await semanticsResolver.ResolveAsync(
             journal.SourcePath,
-            cancellationToken: cancellationToken);
+            FileSystemCaseSensitivityMode.Auto,
+            cancellationToken);
         if (resolution.State != PathIdentityState.Valid)
         {
             return false;

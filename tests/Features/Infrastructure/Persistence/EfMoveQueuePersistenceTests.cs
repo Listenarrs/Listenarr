@@ -187,7 +187,7 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
         Assert.True(
             jobs[1].Status == MoveJobStatus.Running,
             jobs[1].Error ?? $"Unexpected status: {jobs[1].Status}");
-        Assert.StartsWith("v1:move-source:42:", jobs[1].ActiveDeduplicationKey);
+        Assert.StartsWith("v2:move-source:42:", jobs[1].ActiveDeduplicationKey);
     }
 
     [Theory]
@@ -466,7 +466,7 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
                 """
                 CREATE TRIGGER fail_current_identity_key
                 BEFORE UPDATE OF ActiveDeduplicationKey ON MoveJobs
-                WHEN NEW.ActiveDeduplicationKey LIKE 'v1:%'
+                WHEN NEW.ActiveDeduplicationKey LIKE 'v2:%'
                 BEGIN
                     SELECT RAISE(ABORT, 'simulated current identity-key write failure');
                 END;
@@ -610,6 +610,67 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
                 job.Error,
                 StringComparison.OrdinalIgnoreCase);
             Assert.Null(job.ActiveDeduplicationKey);
+        });
+    }
+
+    [Fact]
+    public async Task ReconcileIdentityKeysAsync_SamePhysicalIdentityWithDifferentExecutionAuthority_RequiresAttention()
+    {
+        var source = Path.Join(
+            Path.GetTempPath(),
+            "listenarr-tests",
+            $"move-reconcile-options-source-{Guid.NewGuid():N}");
+        var target = Path.Join(
+            Path.GetTempPath(),
+            "listenarr-tests",
+            $"move-reconcile-options-target-{Guid.NewGuid():N}");
+        var cleanupBoundary = Path.GetDirectoryName(source)
+            ?? throw new InvalidOperationException("Test source parent is unavailable.");
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            db.MoveJobs.AddRange(
+                new MoveJob
+                {
+                    AudiobookId = 42,
+                    SourcePath = source,
+                    RequestedPath = target,
+                    Status = MoveJobStatus.Queued,
+                    Phase = MoveJobPhase.Planned,
+                    IdentityKeyVersion = 1,
+                    DeleteEmptySource = false,
+                    ActiveDeduplicationKey = "legacy:options-first",
+                    Entries = CreateAuthorizedManifestEntries()
+                },
+                new MoveJob
+                {
+                    AudiobookId = 42,
+                    SourcePath = source,
+                    RequestedPath = target,
+                    Status = MoveJobStatus.RetryScheduled,
+                    Phase = MoveJobPhase.Planned,
+                    IdentityKeyVersion = 1,
+                    DeleteEmptySource = true,
+                    SourceCleanupBoundary = cleanupBoundary,
+                    ActiveDeduplicationKey = "legacy:options-second",
+                    Entries = CreateAuthorizedManifestEntries()
+                });
+            await db.SaveChangesAsync();
+        }
+
+        await CreatePersistence().ReconcileIdentityKeysAsync();
+
+        await using var verification = await _factory.CreateDbContextAsync();
+        var jobs = await verification.MoveJobs.AsNoTracking().ToListAsync();
+        Assert.Equal(2, jobs.Count);
+        Assert.All(jobs, job =>
+        {
+            Assert.Equal(MoveJobStatus.NeedsAttention, job.Status);
+            Assert.Contains(
+                "disagree on execution authority",
+                job.Error,
+                StringComparison.OrdinalIgnoreCase);
+            Assert.Null(job.ActiveDeduplicationKey);
+            Assert.Equal(MoveManifestIdentity.Version, job.IdentityKeyVersion);
         });
     }
 
@@ -782,7 +843,7 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
         Assert.Contains("Move path identity could not be reconciled", bad.Error, StringComparison.Ordinal);
         Assert.Null(bad.ActiveDeduplicationKey);
         Assert.Equal(MoveJobStatus.Queued, good.Status);
-        Assert.StartsWith("v1:move-source:43:", good.ActiveDeduplicationKey);
+        Assert.StartsWith("v2:move-source:43:", good.ActiveDeduplicationKey);
     }
 
     [Fact]

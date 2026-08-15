@@ -10,6 +10,31 @@ namespace Listenarr.Tests.Features.Infrastructure.FileSystem;
 public sealed class FileMoverMarkerlessRegistrationTests : BaseTests
 {
     [Fact]
+    public async Task CheckPublicationSource_ExistingStableFile_ReturnsSupported()
+    {
+        var scenario = await CreateScenarioAsync("registration-source-capability");
+        var capability = Assert.IsAssignableFrom<IFilePublicationSourceCapability>(CreateMover());
+
+        var result = await capability.CheckAsync(scenario.Source);
+
+        Assert.True(result.IsSupported, result.Reason);
+    }
+
+    [Fact]
+    public async Task CheckPublicationSource_MissingFile_ReturnsUnsupported()
+    {
+        var scenario = await CreateScenarioAsync("registration-source-capability-missing");
+        File.Delete(scenario.Source);
+        var capability = Assert.IsAssignableFrom<IFilePublicationSourceCapability>(CreateMover());
+
+        var result = await capability.CheckAsync(scenario.Source);
+
+        Assert.False(result.IsSupported);
+        Assert.NotNull(result.Reason);
+        Assert.False(File.Exists(scenario.Destination));
+    }
+
+    [Fact]
     public async Task PrepareMove_EmptyOperationId_FailsClosedWithoutPublication()
     {
         var scenario = await CreateScenarioAsync("registration-empty-operation-id");

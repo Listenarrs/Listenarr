@@ -29,6 +29,18 @@ namespace Listenarr.Api.Features.Library
             string fileNamingPattern,
             IFileNamingService fileNamingService)
         {
+            var relative = ComputeAudiobookRelativeDirectoryFromPattern(
+                audiobook,
+                fileNamingPattern,
+                fileNamingService);
+            return ResolvePathWithOptionalBase(rootPath, relative);
+        }
+
+        internal static string ComputeAudiobookRelativeDirectoryFromPattern(
+            Audiobook audiobook,
+            string fileNamingPattern,
+            IFileNamingService fileNamingService)
+        {
             string directoryPattern;
             if (!string.IsNullOrWhiteSpace(fileNamingPattern))
             {
@@ -83,8 +95,7 @@ namespace Listenarr.Api.Features.Library
                 { "ChapterNumber", string.Empty }
             };
 
-            var relative = fileNamingService.ApplyNamingPattern(directoryPattern, variables, false);
-            return ResolvePathWithOptionalBase(rootPath, relative);
+            return fileNamingService.ApplyNamingPattern(directoryPattern, variables, false);
         }
 
         internal static string SanitizeDirectoryName(string name)

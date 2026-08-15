@@ -170,6 +170,20 @@ public sealed partial class EfMoveQueuePersistence
             foreach (var group in resolvedJobs.GroupBy(item => item.Key, StringComparer.Ordinal))
             {
                 var candidates = group.ToList();
+                var executionOwner = candidates[0].Job;
+                if (candidates.Skip(1).Any(candidate =>
+                        !MoveExecutionContract.Matches(executionOwner, candidate.Job)))
+                {
+                    var conflictingIds = string.Join(", ", candidates.Select(item => item.Job.Id));
+                    foreach (var candidate in candidates)
+                    {
+                        MarkIdentityConflict(
+                            candidate.Job,
+                            $"Multiple active move jobs share one physical move identity but disagree on execution authority: {conflictingIds}.");
+                    }
+                    continue;
+                }
+
                 var evidenceBearing = candidates
                     .Where(candidate => HasDurableExecutionEvidence(
                         candidate.Job,

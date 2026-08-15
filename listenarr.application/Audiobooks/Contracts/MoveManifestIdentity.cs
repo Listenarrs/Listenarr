@@ -7,7 +7,7 @@ namespace Listenarr.Application.Audiobooks.Contracts;
 
 public static partial class MoveManifestIdentity
 {
-    public const int Version = 1;
+    public const int Version = MoveIdentityProtocol.Current;
     private const string SourceBoundaryAuthorizationDomain =
         "LISTENARR-MOVE-SOURCE-BOUNDARY";
     private const string TargetBoundaryAuthorizationDomain =
