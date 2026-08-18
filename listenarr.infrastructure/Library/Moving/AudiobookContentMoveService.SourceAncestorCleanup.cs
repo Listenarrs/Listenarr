@@ -210,6 +210,11 @@ internal sealed partial class AudiobookContentMoveService
                 throw new MoveNeedsAttentionException(
                     resolution.Reason
                         ?? "Conflicting durable directory ownership claims prevent cleanup."),
+            LibraryDirectoryOwnershipResolutionState.Unavailable
+                when resolution.IsTransient =>
+                throw new IOException(
+                    resolution.Reason
+                        ?? "Durable directory ownership proof is temporarily unavailable for cleanup."),
             LibraryDirectoryOwnershipResolutionState.Unavailable =>
                 throw new MoveNeedsAttentionException(
                     resolution.Reason

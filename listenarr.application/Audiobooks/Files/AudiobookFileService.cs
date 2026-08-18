@@ -375,7 +375,8 @@ namespace Listenarr.Application.Audiobooks.Files
                         }
 
                         if (registrationLease != null
-                            && !registrationLease.MatchesCurrentPublication())
+                            && ProbeCurrentPublication(registrationLease)
+                                == RegistrationPublicationMatchOutcome.Mismatch)
                         {
                             await DeleteCreatedPhysicalGenerationAsync(
                                 fileRecord,

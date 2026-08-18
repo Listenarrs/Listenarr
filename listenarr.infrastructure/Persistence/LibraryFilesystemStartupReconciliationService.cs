@@ -28,6 +28,12 @@ internal sealed class LibraryFilesystemStartupReconciliationService(
         AudiobookFileIdentityReconciliationResult? fileIdentityResult = null;
         try
         {
+            phase = "FileRegistrationOwnerAdoption";
+            readiness.MarkRunning(phase);
+            await RunScopedAsync<IFileRegistrationRecoveryService>(
+                static (service, token) => service.AdoptCommittedAnonymousAsync(token),
+                stoppingToken);
+
             phase = "RootFolderObjectIdentities";
             readiness.MarkRunning(phase);
             await RunScopedAsync<IRootFolderObjectIdentityReconciler>(
@@ -49,6 +55,12 @@ internal sealed class LibraryFilesystemStartupReconciliationService(
             phase = "AudiobookDeletionRecovery";
             readiness.MarkRunning(phase);
             await RunScopedAsync<IAudiobookDeletionIntentReconciler>(
+                static (service, token) => service.ReconcileAsync(token),
+                stoppingToken);
+
+            phase = "FileRegistrationRecovery";
+            readiness.MarkRunning(phase);
+            await RunScopedAsync<IFileRegistrationRecoveryService>(
                 static (service, token) => service.ReconcileAsync(token),
                 stoppingToken);
 

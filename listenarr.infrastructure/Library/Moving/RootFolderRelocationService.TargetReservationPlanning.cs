@@ -4,6 +4,12 @@ namespace Listenarr.Infrastructure.Library.Moving;
 
 public sealed partial class RootFolderRelocationService
 {
+    internal Action<string>? BeforeTargetReservationPlanForTest
+    {
+        get;
+        set;
+    }
+
     private async Task<DirectoryObjectIdentityResolution>
         ReserveRelocationTargetAsync(
             Guid relocationId,
@@ -33,6 +39,7 @@ public sealed partial class RootFolderRelocationService
             }
         }
 
+        BeforeTargetReservationPlanForTest?.Invoke(targetPath);
         var plan = DiscoverTargetReservationPlan(targetPath);
         if (plan.Segments.Count == 0)
         {
@@ -57,25 +64,41 @@ public sealed partial class RootFolderRelocationService
         var canonicalTarget = Path.GetFullPath(targetPath);
         var missing = new Stack<string>();
         var current = canonicalTarget;
-        while (!Directory.Exists(current))
+        while (true)
         {
-            if (File.Exists(current))
+            try
             {
-                throw new InvalidOperationException(
-                    "A relocation target segment is occupied by a file.");
-            }
+                var attributes = File.GetAttributes(current);
+                if ((attributes & FileAttributes.Directory) == 0
+                    || (attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    throw new InvalidOperationException(
+                        "A relocation target segment is occupied by a file or linked directory.");
+                }
 
-            missing.Push(current);
-            current = Path.GetDirectoryName(current)
-                ?? throw new InvalidOperationException(
-                    "The relocation target has no existing directory ancestor.");
+                break;
+            }
+            catch (Exception exception) when (
+                FileSystemSafety.IsProvenMissingPathException(exception))
+            {
+                missing.Push(current);
+                current = Path.GetDirectoryName(current)
+                    ?? throw new InvalidOperationException(
+                        "The relocation target has no existing directory ancestor.");
+            }
         }
 
         using var ancestor =
             PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
                 current,
                 createMissing: false);
-        if (!ancestor.VisiblePathMatches())
+        var ancestorVisibility = ancestor.ProbeVisiblePathMatch();
+        if (ancestorVisibility == RegistrationPublicationMatchOutcome.Unavailable)
+        {
+            throw new IOException(
+                "The relocation target ancestor is temporarily unavailable during planning.");
+        }
+        if (ancestorVisibility != RegistrationPublicationMatchOutcome.Match)
         {
             throw new InvalidOperationException(
                 "The relocation target ancestor changed during planning.");

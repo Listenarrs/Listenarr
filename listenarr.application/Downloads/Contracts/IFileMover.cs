@@ -59,8 +59,24 @@ namespace Listenarr.Application.Downloads.Contracts
             string source,
             string? destination,
             Guid operationId,
+            FilePublicationSourceProof expectedSourceProof);
+
+        Task<bool> PerformActionOn(
+            FileAction action,
+            string source,
+            string? destination,
+            Guid operationId,
             int audiobookId,
             int audiobookFileId);
+
+        Task<bool> PerformActionOn(
+            FileAction action,
+            string source,
+            string? destination,
+            Guid operationId,
+            int audiobookId,
+            int audiobookFileId,
+            FilePublicationSourceProof expectedSourceProof);
 
         /// <summary>
         /// Publishes the requested copy or hardlink destination and returns a lease
@@ -83,6 +99,18 @@ namespace Listenarr.Application.Downloads.Contracts
             string destination,
             Guid operationId,
             string expectedRegisteredPhysicalObjectIdentity);
+
+        /// <summary>
+        /// Publishes a registration candidate only when the source still matches
+        /// the exact generation and content proof used to derive the durable operation ID.
+        /// </summary>
+        Task<IAudiobookFileRegistrationLease?> PrepareActionForRegistrationAsync(
+            FileAction action,
+            string source,
+            string destination,
+            Guid operationId,
+            string? expectedRegisteredPhysicalObjectIdentity,
+            FilePublicationSourceProof expectedSourceProof);
 
         /// <summary>
         /// Completes a staged move by retiring only the verified source generation

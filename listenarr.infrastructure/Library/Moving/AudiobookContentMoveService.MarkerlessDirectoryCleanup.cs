@@ -16,17 +16,22 @@ internal sealed partial class AudiobookContentMoveService
             entry,
             request.SourceSemantics,
             "source");
-        if (File.Exists(sourcePath))
+        var sourceExists = TryGetMarkerlessPathAttributes(
+            sourcePath,
+            out var sourceAttributes);
+        if (sourceExists
+            && ((sourceAttributes & FileAttributes.Directory) == 0
+                || (sourceAttributes & FileAttributes.ReparsePoint) != 0))
         {
             throw new MoveNeedsAttentionException(
-                $"A source directory changed into a file: {entry.RelativePath}");
+                $"A source directory changed type or became a link: {entry.RelativePath}");
         }
 
         var ownership = await ResolveMarkerlessSourceDirectoryOwnershipAsync(
             sourcePath,
             request.SourceSemantics,
             cancellationToken);
-        if (!Directory.Exists(sourcePath))
+        if (!sourceExists)
         {
             if (entry.CleanupState is
                 MoveJobEntryCleanupState.DeleteAuthorized
@@ -203,7 +208,17 @@ internal sealed partial class AudiobookContentMoveService
             return;
         }
 
-        if (!Directory.Exists(source))
+        var sourceExists = TryGetMarkerlessPathAttributes(
+            source,
+            out var sourceAttributes);
+        if (sourceExists
+            && ((sourceAttributes & FileAttributes.Directory) == 0
+                || (sourceAttributes & FileAttributes.ReparsePoint) != 0))
+        {
+            throw new MoveNeedsAttentionException(
+                "The markerless source root changed type or became a link before deletion.");
+        }
+        if (!sourceExists)
         {
             if (endpoints.SourceDirectoryCleanupState is
                 MoveJobEntryCleanupState.DeleteAuthorized
@@ -275,7 +290,9 @@ internal sealed partial class AudiobookContentMoveService
             if (string.IsNullOrWhiteSpace(endpoints.SourceDirectoryObjectIdentity)
                 || !directory.MatchesDirectoryObjectIdentity(
                     endpoints.SourceDirectoryObjectIdentity)
-                || !directory.VisiblePathMatches())
+                || !PinnedDirectoryVisibleOrThrowUnavailable(
+                    directory,
+                    "The markerless source root is temporarily unavailable before deletion."))
             {
                 throw new MoveNeedsAttentionException(
                     "The markerless source root changed physical generation before deletion.");
@@ -297,8 +314,18 @@ internal sealed partial class AudiobookContentMoveService
                     source,
                     target,
                     cancellationToken);
-                if (Directory.EnumerateFileSystemEntries(source).Any()
-                    || !directory.VisiblePathMatches())
+                if (Directory.EnumerateFileSystemEntries(source).Any())
+                {
+                    await UpdateSourceDirectoryCleanupStateAsync(
+                        request.JobId,
+                        request.LeaseToken,
+                        MoveJobEntryCleanupState.Retained,
+                        cancellationToken);
+                    return;
+                }
+                if (!PinnedDirectoryVisibleOrThrowUnavailable(
+                        directory,
+                        "The markerless source root is temporarily unavailable immediately before deletion."))
                 {
                     await UpdateSourceDirectoryCleanupStateAsync(
                         request.JobId,

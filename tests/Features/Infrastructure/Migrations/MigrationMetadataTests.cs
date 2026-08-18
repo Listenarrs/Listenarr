@@ -132,9 +132,51 @@ public class MigrationMetadataTests
     }
 
     [Fact]
+    public void AddFileMutationParentGenerationProofs_IsDiscoverableAndIsolated()
+    {
+        AssertMigrationId<AddFileMutationParentGenerationProofs>(
+            "20260818132300_AddFileMutationParentGenerationProofs");
+
+        var migration = new AddFileMutationParentGenerationProofs();
+        var upBuilder = BuildOperations(migration, "Up");
+        var downBuilder = BuildOperations(migration, "Down");
+
+        var additions = upBuilder.Operations
+            .OfType<AddColumnOperation>()
+            .ToDictionary(operation => operation.Name, StringComparer.Ordinal);
+        Assert.Equal(2, additions.Count);
+        Assert.Contains("SourceParentDirectoryObjectIdentity", additions.Keys);
+        Assert.Contains("DestinationParentDirectoryObjectIdentity", additions.Keys);
+        Assert.All(additions.Values, operation =>
+        {
+            Assert.Equal("FileMutationJournals", operation.Table);
+            Assert.False(operation.IsNullable);
+            Assert.Equal(512, operation.MaxLength);
+            Assert.Equal(string.Empty, operation.DefaultValue);
+        });
+
+        Assert.Equal(2, upBuilder.Operations.Count);
+        Assert.Empty(upBuilder.Operations.OfType<AlterColumnOperation>());
+
+        var removals = downBuilder.Operations
+            .OfType<DropColumnOperation>()
+            .Select(operation => operation.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        Assert.Equal(
+            new HashSet<string>(StringComparer.Ordinal)
+            {
+                "SourceParentDirectoryObjectIdentity",
+                "DestinationParentDirectoryObjectIdentity"
+            },
+            removals);
+        Assert.Equal(2, downBuilder.Operations.Count);
+        Assert.Empty(downBuilder.Operations.OfType<AlterColumnOperation>());
+    }
+
+    [Fact]
     public void FinalMoveMigration_TargetModelMatchesFinalContracts()
     {
-        var model = new AddMoveJobRelocationForeignKey().TargetModel;
+        var model = new AddFileMutationParentGenerationProofs().TargetModel;
 
         var moveJob = AssertEntity(model, "Listenarr.Domain.Audiobooks.MoveJob");
         Assert.Equal(0, moveJob.FindProperty("ExecutionProtocolVersion")?.GetDefaultValue());
@@ -155,6 +197,13 @@ public class MigrationMetadataTests
             model,
             "Listenarr.Domain.Downloads.FileMutationJournal");
         Assert.NotNull(fileMutationJournal.FindProperty("AudiobookFileId"));
+        Assert.NotNull(fileMutationJournal.FindProperty(
+            "SourceParentDirectoryObjectIdentity"));
+        Assert.NotNull(fileMutationJournal.FindProperty(
+            "DestinationParentDirectoryObjectIdentity"));
+        Assert.Equal(
+            FileMutationProtocol.MarkerlessDatabaseState,
+            fileMutationJournal.FindProperty("ProtocolVersion")?.GetDefaultValue());
         Assert.NotNull(model.FindEntityType(
             "Listenarr.Domain.Audiobooks.AudiobookDeletionIntent"));
 

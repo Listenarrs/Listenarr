@@ -1,3 +1,4 @@
+using Listenarr.Application.Common.Exceptions;
 using Listenarr.Tests.Common;
 using Microsoft.EntityFrameworkCore;
 
@@ -116,6 +117,326 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
             Assert.Contains("file organize operation owns", blocked.Error, StringComparison.OrdinalIgnoreCase);
             Assert.True(File.Exists(sourceFile));
             Assert.False(File.Exists(Path.Join(target, "book.m4b")));
+        }
+
+        [Fact]
+        public async Task ProcessJobAsync_ActiveRegistrationRecovery_StopsBeforeFilesystemMutation()
+        {
+            var source = FileService.GetTempDirectory("move-processor-registration-owner-source");
+            var sourceFile = await FileService.GetFileAsync(source, "book.m4b", "audio");
+            var target = Path.Join(
+                FileService.GetTempPath(),
+                $"move-processor-registration-owner-target-{Guid.NewGuid():N}");
+            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+            {
+                Title = "Registration Recovery Owner",
+                BasePath = source
+            });
+            var (queue, job) = await CreateQueuedMoveJobAsync(audiobook, target, source);
+
+            var dbFactory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+            await using (var db = await dbFactory.CreateDbContextAsync())
+            {
+                db.FileMutationJournals.Add(new FileMutationJournal
+                {
+                    OperationId = Guid.NewGuid(),
+                    Action = FileAction.Move,
+                    SourcePath = Path.Join(source, "original-download.m4b"),
+                    DestinationPath = sourceFile,
+                    SourcePhysicalObjectIdentity = "test-download-generation",
+                    TargetPhysicalObjectIdentity = "test-registered-generation",
+                    SourceLength = new FileInfo(sourceFile).Length,
+                    State = FileMutationJournalState.SourceDeletionAuthorized,
+                    AudiobookId = audiobook.Id,
+                    AudiobookFileId = null
+                });
+                await db.SaveChangesAsync();
+            }
+
+            await _provider.GetRequiredService<IMoveJobProcessor>()
+                .ProcessJobAsync(job, CancellationToken.None);
+
+            var blocked = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
+            Assert.Equal(MoveJobStatus.NeedsAttention, blocked.Status);
+            Assert.Contains("committed file import", blocked.Error, StringComparison.OrdinalIgnoreCase);
+            Assert.True(File.Exists(sourceFile));
+            Assert.False(File.Exists(Path.Join(target, "book.m4b")));
+        }
+
+        [Fact]
+        public async Task ProcessJobAsync_AnonymousRegistrationPublicationTouchesSource_StopsBeforeFilesystemMutation()
+        {
+            var source = FileService.GetTempDirectory("move-processor-anonymous-registration-source");
+            var sourceFile = await FileService.GetFileAsync(source, "book.m4b", "audio");
+            var target = Path.Join(
+                FileService.GetTempPath(),
+                $"move-processor-anonymous-registration-target-{Guid.NewGuid():N}");
+            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+            {
+                Title = "Anonymous Registration Recovery Owner",
+                BasePath = source
+            });
+            var (queue, job) = await CreateQueuedMoveJobAsync(audiobook, target, source);
+            var anonymousPublishedFile = await FileService.GetFileAsync(
+                source,
+                "unregistered.m4b",
+                "anonymous-audio");
+
+            var dbFactory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+            await using (var db = await dbFactory.CreateDbContextAsync())
+            {
+                db.FileMutationJournals.Add(new FileMutationJournal
+                {
+                    OperationId = Guid.NewGuid(),
+                    ProtocolVersion = FileMutationProtocol.Current,
+                    Action = FileAction.Copy,
+                    SourcePath = Path.Join(
+                        FileService.GetTempPath(),
+                        $"anonymous-download-{Guid.NewGuid():N}.m4b"),
+                    DestinationPath = anonymousPublishedFile,
+                    SourceParentDirectoryObjectIdentity = "source-parent",
+                    DestinationParentDirectoryObjectIdentity = "destination-parent",
+                    SourcePhysicalObjectIdentity = "anonymous-source-generation",
+                    TargetPhysicalObjectIdentity = "anonymous-target-generation",
+                    SourceLength = new FileInfo(anonymousPublishedFile).Length,
+                    State = FileMutationJournalState.TargetVerified,
+                    AudiobookId = null,
+                    AudiobookFileId = null
+                });
+                await db.SaveChangesAsync();
+            }
+
+            await _provider.GetRequiredService<IMoveJobProcessor>()
+                .ProcessJobAsync(job, CancellationToken.None);
+
+            var blocked = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
+            Assert.Equal(MoveJobStatus.NeedsAttention, blocked.Status);
+            Assert.Contains("unresolved file publication", blocked.Error, StringComparison.OrdinalIgnoreCase);
+            Assert.True(File.Exists(sourceFile));
+            Assert.True(File.Exists(anonymousPublishedFile));
+            Assert.False(File.Exists(Path.Join(target, "book.m4b")));
+        }
+
+        [Fact]
+        public async Task ProcessJobAsync_PersistedRelocation_AnonymousPublicationInSourceRootSibling_BlocksMove()
+        {
+            var relocationRoot = FileService.GetTempDirectory(
+                "move-processor-relocation-anonymous-root");
+            var source = Path.Join(relocationRoot, "Author", "Book");
+            Directory.CreateDirectory(source);
+            var sourceFile = await FileService.GetFileAsync(source, "book.m4b", "audio");
+            var target = Path.Join(
+                FileService.GetTempPath(),
+                $"move-processor-relocation-anonymous-target-{Guid.NewGuid():N}",
+                "Author",
+                "Book");
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+            {
+                Title = "Persisted Relocation Recovery Owner",
+                BasePath = source
+            });
+
+            var dbFactory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+            await using (var db = await dbFactory.CreateDbContextAsync())
+            {
+                db.RootFolders.Add(new RootFolder
+                {
+                    Name = "Relocation Root",
+                    Path = relocationRoot,
+                    CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto
+                });
+                await db.SaveChangesAsync();
+            }
+
+            var (queue, job) = await CreateQueuedMoveJobAsync(audiobook, target, source);
+            job.RelocationId = Guid.NewGuid();
+            job.SourceCleanupBoundary = relocationRoot;
+
+            var anonymousDirectory = Path.Join(relocationRoot, "Untracked");
+            Directory.CreateDirectory(anonymousDirectory);
+            var anonymousPublishedFile = await FileService.GetFileAsync(
+                anonymousDirectory,
+                "unregistered.m4b",
+                "anonymous-audio");
+            await using (var db = await dbFactory.CreateDbContextAsync())
+            {
+                db.FileMutationJournals.Add(new FileMutationJournal
+                {
+                    OperationId = Guid.NewGuid(),
+                    ProtocolVersion = FileMutationProtocol.Current,
+                    Action = FileAction.Copy,
+                    SourcePath = Path.Join(
+                        FileService.GetTempPath(),
+                        $"relocation-anonymous-download-{Guid.NewGuid():N}.m4b"),
+                    DestinationPath = anonymousPublishedFile,
+                    SourceParentDirectoryObjectIdentity = "source-parent",
+                    DestinationParentDirectoryObjectIdentity = "destination-parent",
+                    SourcePhysicalObjectIdentity = "anonymous-source-generation",
+                    TargetPhysicalObjectIdentity = "anonymous-target-generation",
+                    SourceLength = new FileInfo(anonymousPublishedFile).Length,
+                    State = FileMutationJournalState.TargetVerified,
+                    AudiobookId = null,
+                    AudiobookFileId = null
+                });
+                await db.SaveChangesAsync();
+            }
+
+            await _provider.GetRequiredService<IMoveJobProcessor>()
+                .ProcessJobAsync(job, CancellationToken.None);
+
+            var blocked = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
+            Assert.Equal(MoveJobStatus.NeedsAttention, blocked.Status);
+            Assert.Contains("unresolved file publication", blocked.Error, StringComparison.OrdinalIgnoreCase);
+            Assert.True(File.Exists(sourceFile));
+            Assert.True(File.Exists(anonymousPublishedFile));
+            Assert.False(File.Exists(Path.Join(target, "book.m4b")));
+        }
+
+        [Fact]
+        public async Task ProcessJobAsync_TransientTrackedManifestInspectionFailure_SchedulesRetryWithoutMutation()
+        {
+            var sourcePlan = new Mock<IMoveSourcePlanService>(MockBehavior.Strict);
+            sourcePlan
+                .Setup(service => service.BuildPlanAsync(
+                    It.IsAny<AudiobookPathReferenceSnapshot>(),
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new ApplicationUnavailableException(
+                    "move_source_temporarily_unavailable",
+                    "Injected transient source storage outage."));
+            Init(builder => builder.WithSingleton(sourcePlan.Object));
+
+            var source = FileService.GetTempDirectory("move-processor-transient-manifest-source");
+            var sourceFile = await FileService.GetFileAsync(source, "book.m4b", "audio");
+            var target = Path.Join(
+                FileService.GetTempPath(),
+                $"move-processor-transient-manifest-target-{Guid.NewGuid():N}");
+            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+            {
+                Title = "Transient Manifest Inspection",
+                BasePath = source
+            });
+            var (queue, job) = await CreateQueuedMoveJobAsync(audiobook, target, source);
+
+            await _provider.GetRequiredService<IMoveJobProcessor>()
+                .ProcessJobAsync(job, CancellationToken.None);
+
+            var updated = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
+            Assert.Equal(MoveJobStatus.RetryScheduled, updated.Status);
+            Assert.Contains("will be retried", updated.Error, StringComparison.OrdinalIgnoreCase);
+            Assert.True(File.Exists(sourceFile));
+            Assert.False(Directory.Exists(target));
+            sourcePlan.VerifyAll();
+        }
+
+        [Fact]
+        public async Task ProcessJobAsync_AutoSemanticsTemporarilyUnavailable_SchedulesRetryWithoutMutation()
+        {
+            var semanticsResolver = new ToggleUnavailableSemanticsResolver();
+            Init(builder => builder.WithSingleton<IFileSystemSemanticsResolver>(
+                semanticsResolver));
+
+            var source = FileService.GetTempDirectory(
+                "move-processor-transient-semantics-source");
+            var sourceFile = await FileService.GetFileAsync(
+                source,
+                "book.m4b",
+                "audio");
+            var target = Path.Join(
+                FileService.GetTempPath(),
+                $"move-processor-transient-semantics-target-{Guid.NewGuid():N}");
+            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+            {
+                Title = "Transient Filesystem Semantics",
+                BasePath = source
+            });
+            var (queue, job) = await CreateQueuedMoveJobAsync(
+                audiobook,
+                target,
+                source);
+
+            semanticsResolver.ReturnUnavailable = true;
+            await _provider.GetRequiredService<IMoveJobProcessor>()
+                .ProcessJobAsync(job, CancellationToken.None);
+
+            var updated = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
+            Assert.Equal(MoveJobStatus.RetryScheduled, updated.Status);
+            Assert.Contains(
+                "identity verification will be retried",
+                updated.Error,
+                StringComparison.OrdinalIgnoreCase);
+            Assert.True(File.Exists(sourceFile));
+            Assert.False(Directory.Exists(target));
+        }
+
+        [LinuxFact]
+        [System.Runtime.Versioning.SupportedOSPlatform("linux")]
+        public async Task ProcessJobAsync_ReadOnlyRemountDuringTargetScaffolding_SchedulesRetryWithoutMutation()
+        {
+            var source = FileService.GetTempDirectory("move-processor-erofs-source");
+            var sourceFile = await FileService.GetFileAsync(source, "book.m4b", "audio");
+            var targetParent = FileService.GetTempDirectory("move-processor-erofs-target-parent");
+            var target = Path.Join(targetParent, "Book");
+            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+            {
+                Title = "Transient Read Only Remount",
+                BasePath = source
+            });
+            var (queue, job) = await CreateQueuedMoveJobAsync(audiobook, target, source);
+            var hookRan = false;
+            using var hook = ExclusiveDirectoryCreator.PushBeforeCreateHook(path =>
+            {
+                if (hookRan || !string.Equals(path, target, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                hookRan = true;
+                throw new System.ComponentModel.Win32Exception(
+                    30,
+                    "Injected read-only filesystem remount.");
+            });
+
+            await _provider.GetRequiredService<IMoveJobProcessor>()
+                .ProcessJobAsync(job, CancellationToken.None);
+
+            Assert.True(hookRan);
+            var updated = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
+            Assert.Equal(MoveJobStatus.RetryScheduled, updated.Status);
+            Assert.Contains("retried", updated.Error, StringComparison.OrdinalIgnoreCase);
+            Assert.True(File.Exists(sourceFile));
+            Assert.False(Directory.Exists(target));
+        }
+
+        [WindowsFact]
+        public async Task ProcessJobAsync_SourceDeleteSharingViolation_SchedulesRetryWithoutRetiringSource()
+        {
+            var source = FileService.GetTempDirectory("move-processor-sharing-source");
+            var sourceFile = await FileService.GetFileAsync(source, "book.m4b", "audio");
+            var target = Path.Join(
+                FileService.GetTempPath(),
+                $"move-processor-sharing-target-{Guid.NewGuid():N}");
+            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+            {
+                Title = "Windows Sharing Retry",
+                BasePath = source
+            });
+            var (queue, job) = await CreateQueuedMoveJobAsync(audiobook, target, source);
+
+            await using (var sourceLock = new FileStream(
+                sourceFile,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read))
+            {
+                await _provider.GetRequiredService<IMoveJobProcessor>()
+                    .ProcessJobAsync(job, CancellationToken.None);
+
+                var updated = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
+                Assert.Equal(MoveJobStatus.RetryScheduled, updated.Status);
+                Assert.True(File.Exists(sourceFile));
+                Assert.False(File.Exists(Path.Join(target, "book.m4b")));
+            }
         }
 
         [Fact]
@@ -316,6 +637,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
             var handoffStore = new Mock<IMoveScanHandoffStore>();
             handoffStore.Setup(store => store.CommitMoveCompletionAsync(
                     It.IsAny<MoveCompletionCommit>(),
+                    It.IsAny<Func<CancellationToken, Task<RegistrationPublicationMatchOutcome>>>(),
                     It.IsAny<CancellationToken>()))
                 .ThrowsAsync(new PersistenceException(
                     "Completion transaction failed.",
@@ -1355,6 +1677,36 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
             }
 
             public void Dispose() => _inner.Dispose();
+        }
+
+        private sealed class ToggleUnavailableSemanticsResolver : IFileSystemSemanticsResolver
+        {
+            private readonly FileSystemSemanticsResolver _inner = new();
+
+            public bool ReturnUnavailable { get; set; }
+
+            public async ValueTask<FileSystemSemanticsResolution> ResolveAsync(
+                string path,
+                FileSystemCaseSensitivityMode mode,
+                CancellationToken cancellationToken = default)
+            {
+                if (!ReturnUnavailable)
+                {
+                    return await _inner.ResolveAsync(path, mode, cancellationToken);
+                }
+
+                var syntax = OperatingSystem.IsWindows()
+                    ? FileSystemPathSyntax.Windows
+                    : FileSystemPathSyntax.Unix;
+                return new FileSystemSemanticsResolution(
+                    new FileSystemPathSemantics(
+                        syntax,
+                        FileSystemCaseSensitivity.Unknown),
+                    PathIdentityState.Unavailable,
+                    Path.GetFullPath(path),
+                    "Injected transient filesystem semantics outage.",
+                    Path.GetFullPath(path));
+            }
         }
 
         private static async Task PrepareJobForProcessingAsync(IMoveQueueService queue, MoveJob job)

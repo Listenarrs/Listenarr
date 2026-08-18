@@ -638,6 +638,122 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Files
                 .GetByAudiobookIdAsync(_audiobook.Id));
         }
 
+        [LinuxFact]
+        public async Task RegisterPublishedGenerationAsync_PublicParentReplacedBeforeClaim_DoesNotPersistOwnership()
+        {
+            var parent = FileService.GetTempDirectory(
+                "physical-generation-parent-replacement");
+            var displacedParent = parent + "-displaced";
+            var publicPath = await FileService.GetFileAsync(
+                parent,
+                "book.m4b",
+                "original generation");
+            _audiobook.BasePath = parent;
+            await _audiobookRepository.UpdateAsync(_audiobook);
+            var service = _provider.GetRequiredService<IAudiobookFileService>();
+            var ownership = await service.CheckAudiobookFileOwnershipAsync(
+                _audiobook,
+                publicPath,
+                parent);
+            Assert.Equal(
+                AudiobookFileOwnershipCheckOutcome.Available,
+                ownership.Outcome);
+            using var lease = PinnedAudiobookFileRegistrationLease.Open(publicPath);
+
+            Directory.Move(parent, displacedParent);
+            Directory.CreateDirectory(parent);
+            await File.WriteAllTextAsync(
+                Path.Join(parent, "book.m4b"),
+                "replacement generation");
+
+            var registered = await service.RegisterPublishedGenerationAsync(
+                _audiobook,
+                ownership,
+                lease,
+                "parent-replacement");
+
+            Assert.False(registered);
+            Assert.Empty(await _audiobookFileRepository
+                .GetByAudiobookIdAsync(_audiobook.Id));
+            Assert.Equal(
+                "original generation",
+                await File.ReadAllTextAsync(Path.Join(displacedParent, "book.m4b")));
+            Assert.Equal(
+                "replacement generation",
+                await File.ReadAllTextAsync(Path.Join(parent, "book.m4b")));
+        }
+
+        [Fact]
+        public async Task RegisterPublishedGenerationAsync_PublicationChangesDuringCompletion_RollsBackCommittedClaim()
+        {
+            var testFile = await FileService.GetTempFileAsync(
+                $"physical-generation-completion-race-{Guid.NewGuid():N}.m4b");
+            _audiobook.BasePath = Path.GetDirectoryName(testFile);
+            await _audiobookRepository.UpdateAsync(_audiobook);
+            var service = _provider.GetRequiredService<IAudiobookFileService>();
+            var ownership = await service.CheckAudiobookFileOwnershipAsync(
+                _audiobook,
+                testFile,
+                _audiobook.BasePath);
+            Assert.Equal(
+                AudiobookFileOwnershipCheckOutcome.Available,
+                ownership.Outcome);
+            using var lease = new SequencedRegistrationLease(
+                testFile,
+                "completion-race-generation",
+                [true, true, true, true, true, false, false]);
+
+            var registered = await service.RegisterPublishedGenerationAsync(
+                _audiobook,
+                ownership,
+                lease,
+                "completion-race");
+
+            Assert.False(registered);
+            Assert.Empty(await _audiobookFileRepository
+                .GetByAudiobookIdAsync(_audiobook.Id));
+        }
+
+        [Fact]
+        public async Task RegisterPublishedGenerationAsync_PublicationUnavailableDuringCompletion_PreservesCommittedClaim()
+        {
+            var testFile = await FileService.GetTempFileAsync(
+                $"physical-generation-completion-unavailable-{Guid.NewGuid():N}.m4b");
+            _audiobook.BasePath = Path.GetDirectoryName(testFile);
+            await _audiobookRepository.UpdateAsync(_audiobook);
+            var service = _provider.GetRequiredService<IAudiobookFileService>();
+            var ownership = await service.CheckAudiobookFileOwnershipAsync(
+                _audiobook,
+                testFile,
+                _audiobook.BasePath);
+            Assert.Equal(
+                AudiobookFileOwnershipCheckOutcome.Available,
+                ownership.Outcome);
+            using var lease = new SequencedRegistrationLease(
+                testFile,
+                "completion-unavailable-generation",
+                [true, true, true, true, true, true, true, true],
+                publicationProbeOutcomes:
+                [
+                    RegistrationPublicationMatchOutcome.Match,
+                    RegistrationPublicationMatchOutcome.Unavailable,
+                    RegistrationPublicationMatchOutcome.Unavailable
+                ]);
+
+            var registered = await service.RegisterPublishedGenerationAsync(
+                _audiobook,
+                ownership,
+                lease,
+                "completion-unavailable");
+
+            Assert.True(registered);
+            var persisted = Assert.Single(await _audiobookFileRepository
+                .GetByAudiobookIdAsync(_audiobook.Id));
+            Assert.Equal(
+                "completion-unavailable-generation",
+                persisted.PhysicalObjectIdentity);
+        }
+
         [Fact]
         public async Task RegisterPublishedGenerationAsync_CompatiblePhysicalToken_DoesNotRefreshPersistedGeneration()
         {
@@ -718,6 +834,42 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Files
         }
 
         [Fact]
+        public async Task RollbackPublishedGenerationIfStaleAsync_PublicationUnavailable_PreservesCommittedClaim()
+        {
+            var testFile = await FileService.GetTempFileAsync(
+                $"physical-generation-unavailable-rollback-{Guid.NewGuid():N}.m4b");
+            _audiobook.BasePath = Path.GetDirectoryName(testFile);
+            await _audiobookRepository.UpdateAsync(_audiobook);
+            var service = _provider.GetRequiredService<IAudiobookFileService>();
+            const string persistedIdentity = "persisted-unavailable-generation";
+            using (var initialLease = new SequencedRegistrationLease(
+                testFile,
+                persistedIdentity,
+                [true, true, true, true]))
+            {
+                Assert.True(await service.EnsureAudiobookFileAsync(
+                    _audiobook,
+                    initialLease,
+                    "initial"));
+            }
+
+            using var unavailableLease = new SequencedRegistrationLease(
+                testFile,
+                persistedIdentity,
+                [false],
+                publicationProbeOutcomes:
+                    [RegistrationPublicationMatchOutcome.Unavailable]);
+
+            await service.RollbackPublishedGenerationIfStaleAsync(
+                _audiobook,
+                unavailableLease);
+
+            var persisted = Assert.Single(await _audiobookFileRepository
+                .GetByAudiobookIdAsync(_audiobook.Id));
+            Assert.Equal(persistedIdentity, persisted.PhysicalObjectIdentity);
+        }
+
+        [Fact]
         public async Task RefreshPhysicalGenerationAsync_PublicationChangesAfterDatabaseUpdate_RestoresPredecessor()
         {
             var testFile = await FileService.GetTempFileAsync(
@@ -763,6 +915,80 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Files
         }
 
         [Fact]
+        public async Task RefreshPhysicalGenerationAsync_PublicationUnavailableAfterDatabaseUpdate_PreservesReplacement()
+        {
+            var testFile = await FileService.GetTempFileAsync(
+                $"physical-generation-unavailable-refresh-{Guid.NewGuid():N}.m4b");
+            _audiobook.BasePath = Path.GetDirectoryName(testFile);
+            await _audiobookRepository.UpdateAsync(_audiobook);
+            var service = _provider.GetRequiredService<IAudiobookFileService>();
+            using (var initialLease =
+                PinnedAudiobookFileRegistrationLease.Open(testFile))
+            {
+                Assert.True(await service.EnsureAudiobookFileAsync(
+                    _audiobook,
+                    initialLease,
+                    "initial"));
+            }
+
+            var predecessor = Assert.Single(
+                await _audiobookFileRepository.GetByAudiobookIdAsync(
+                    _audiobook.Id));
+            var predecessorIdentity = Assert.IsType<string>(
+                predecessor.PhysicalObjectIdentity);
+            using var replacementLease = new SequencedRegistrationLease(
+                testFile,
+                "replacement-unavailable-physical-identity",
+                [true, true, true],
+                publicationProbeOutcomes:
+                    [RegistrationPublicationMatchOutcome.Unavailable]);
+
+            var refreshed = await service.RefreshPhysicalGenerationAsync(
+                _audiobook,
+                predecessor.Id,
+                predecessorIdentity,
+                replacementLease,
+                "replacement-unavailable");
+
+            Assert.True(refreshed);
+            var persisted = Assert.Single(
+                await _audiobookFileRepository.GetByAudiobookIdAsync(
+                    _audiobook.Id));
+            Assert.Equal(predecessor.Id, persisted.Id);
+            Assert.Equal(
+                "replacement-unavailable-physical-identity",
+                persisted.PhysicalObjectIdentity);
+            Assert.Equal("replacement-unavailable", persisted.Source);
+        }
+
+        [Fact]
+        public async Task EnsureAudiobookFileAsync_PublicationUnavailableAfterClaim_PreservesCommittedClaim()
+        {
+            var testFile = await FileService.GetTempFileAsync(
+                $"physical-generation-unavailable-claim-{Guid.NewGuid():N}.m4b");
+            _audiobook.BasePath = Path.GetDirectoryName(testFile);
+            await _audiobookRepository.UpdateAsync(_audiobook);
+            var service = _provider.GetRequiredService<IAudiobookFileService>();
+            using var lease = new SequencedRegistrationLease(
+                testFile,
+                "claim-unavailable-generation",
+                [true, true],
+                publicationProbeOutcomes:
+                    [RegistrationPublicationMatchOutcome.Unavailable]);
+
+            var created = await service.EnsureAudiobookFileAsync(
+                _audiobook,
+                lease,
+                "claim-unavailable");
+
+            Assert.True(created);
+            var persisted = Assert.Single(await _audiobookFileRepository
+                .GetByAudiobookIdAsync(_audiobook.Id));
+            Assert.Equal("claim-unavailable-generation", persisted.PhysicalObjectIdentity);
+            Assert.Equal("claim-unavailable", persisted.Source);
+        }
+
+        [Fact]
         public async Task EnsureAudiobookFileAsync_PersistsMetadataFromMetadataService()
         {
             var testFile = await FileService.GetTempFileAsync($"meta-int-{Guid.NewGuid()}.m4b");
@@ -783,14 +1009,20 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Files
             IEnumerable<bool> publicationMatches,
             Action<int>? onPublicationCheck = null,
             IEnumerable<string>? compatiblePhysicalObjectIdentities = null,
-            bool hasDurablePhysicalObjectIdentity = true) :
+            bool hasDurablePhysicalObjectIdentity = true,
+            IEnumerable<RegistrationPublicationMatchOutcome>? publicationProbeOutcomes = null) :
             IAudiobookFileRegistrationLease,
-            IAudiobookFileRegistrationIdentityVerifier
+            IAudiobookFileRegistrationIdentityVerifier,
+            IAudiobookFileRegistrationPublicationProbe
         {
             private readonly Queue<bool> _publicationMatches =
                 new(publicationMatches);
             private readonly HashSet<string> _compatiblePhysicalObjectIdentities =
                 new(compatiblePhysicalObjectIdentities ?? [], StringComparer.Ordinal);
+            private readonly Queue<RegistrationPublicationMatchOutcome>? _publicationProbeOutcomes =
+                publicationProbeOutcomes == null
+                    ? null
+                    : new Queue<RegistrationPublicationMatchOutcome>(publicationProbeOutcomes);
             private int _publicationChecks;
 
             public string PublicPath { get; } = path;
@@ -809,6 +1041,23 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Files
                 return _publicationMatches.Count == 0
                     ? false
                     : _publicationMatches.Dequeue();
+            }
+
+            public RegistrationPublicationMatchOutcome ProbeCurrentPublication()
+            {
+                if (_publicationProbeOutcomes == null)
+                {
+                    return MatchesCurrentPublication()
+                        ? RegistrationPublicationMatchOutcome.Match
+                        : RegistrationPublicationMatchOutcome.Mismatch;
+                }
+
+                var publicationCheck = Interlocked.Increment(
+                    ref _publicationChecks);
+                onPublicationCheck?.Invoke(publicationCheck);
+                return _publicationProbeOutcomes.Count == 0
+                    ? RegistrationPublicationMatchOutcome.Mismatch
+                    : _publicationProbeOutcomes.Dequeue();
             }
 
             public bool MatchesPhysicalObjectIdentity(

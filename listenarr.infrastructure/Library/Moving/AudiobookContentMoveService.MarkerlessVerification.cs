@@ -27,6 +27,17 @@ internal sealed partial class AudiobookContentMoveService
             throw new MoveNeedsAttentionException(
                 "Markerless target verification requires a persisted target endpoint generation.");
         }
+        if (targetVerificationLease != null)
+        {
+            targetVerificationLease.SetTargetRoot(
+                OpenPinnedMoveDescendant(
+                    request,
+                    target,
+                    target,
+                    request.TargetSemantics,
+                    endpoints.TargetDirectoryObjectIdentity,
+                    sourceEndpoint: false));
+        }
         ValidateExistingDestinationContents(
             request,
             request.Source,
@@ -80,10 +91,56 @@ internal sealed partial class AudiobookContentMoveService
                 && targetVerificationLease.TryGet(
                     entry.RelativePath,
                     out leasedTargetEntry);
+            if (string.IsNullOrWhiteSpace(entry.Sha256))
+            {
+                if (!IsVerifiedMarkerlessNativeRenameEntry(entry)
+                    || string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity))
+                {
+                    throw new MoveNeedsAttentionException(
+                        $"A verified markerless target lacks durable content proof: {entry.RelativePath}");
+                }
+
+                entry.Sha256 = await ComputePinnedFileSha256Async(
+                    file,
+                    cancellationToken);
+                await UpdateSourceEntryProofAsync(
+                    request.JobId,
+                    request.LeaseToken,
+                    entry.RelativePath,
+                    entry.SourcePhysicalObjectIdentity,
+                    entry.Sha256,
+                    cancellationToken);
+            }
+
+            Func<long, Task>? reportFileProgress = null;
+            if (progressStart.HasValue && progressSpan > 0)
+            {
+                reportFileProgress = bytesRead => ReportProgressAsync(
+                    request,
+                    CalculateWeightedProgress(
+                        progressStart.Value,
+                        progressSpan,
+                        completedUnits + Math.Min(bytesRead, GetProgressUnits(entry)),
+                        totalUnits),
+                    progressPhase ?? "Verifying target",
+                    cancellationToken);
+            }
+            if (!await PinnedFileMatchesManifestAsync(
+                    file,
+                    entry,
+                    cancellationToken,
+                    reportFileProgress))
+            {
+                throw new MoveNeedsAttentionException(
+                    $"A markerless target file failed final content verification: {entry.RelativePath}");
+            }
+
             if (hasProtectedContentProof)
             {
                 if (leasedTargetEntry == null
-                    || !leasedTargetEntry.VisiblePathMatches()
+                    || !PinnedFileVisibleOrThrowUnavailable(
+                        leasedTargetEntry,
+                        $"A protected markerless target generation is temporarily unavailable: {entry.RelativePath}")
                     || !leasedTargetEntry.IdentifiesSameEntry(file)
                     || !leasedTargetEntry.MatchesObjectIdentity(
                         entry.TargetPhysicalObjectIdentity)
@@ -94,40 +151,34 @@ internal sealed partial class AudiobookContentMoveService
                     throw new MoveNeedsAttentionException(
                         $"A protected markerless target generation changed after native publication: {entry.RelativePath}");
                 }
+
+                targetVerificationLease!.SetContentEvidence(
+                    entry.RelativePath,
+                    entry.Length,
+                    entry.Sha256);
             }
-            else if (IsVerifiedMarkerlessNativeRenameEntry(entry))
+
+            if (!PinnedFileVisibleOrThrowUnavailable(
+                    file,
+                    $"A markerless target file is temporarily unavailable after verification: {entry.RelativePath}")
+                || !PinnedDirectoryVisibleOrThrowUnavailable(
+                    parent,
+                    $"A markerless target file parent is temporarily unavailable after verification: {entry.RelativePath}")
+                || !file.MatchesObjectIdentity(entry.TargetPhysicalObjectIdentity))
             {
-                if (!file.MatchesMetadata(entry.Length, entry.LastWriteTimeUtc))
-                {
-                    throw new MoveNeedsAttentionException(
-                        $"A markerless native-rename target changed metadata after publication: {entry.RelativePath}");
-                }
+                throw new MoveNeedsAttentionException(
+                    $"A markerless target file changed physical generation after verification: {entry.RelativePath}");
             }
-            else
+
+            if (targetVerificationLease != null && !hasProtectedContentProof)
             {
-                Func<long, Task>? reportFileProgress = null;
-                if (progressStart.HasValue && progressSpan > 0)
-                {
-                    reportFileProgress = bytesRead => ReportProgressAsync(
-                        request,
-                        CalculateWeightedProgress(
-                            progressStart.Value,
-                            progressSpan,
-                            completedUnits + Math.Min(bytesRead, GetProgressUnits(entry)),
-                            totalUnits),
-                        progressPhase ?? "Verifying target",
-                        cancellationToken);
-                }
-                if (!await PinnedFileMatchesManifestAsync(
-                        file,
-                        entry,
-                        cancellationToken,
-                        reportFileProgress))
-                {
-                    throw new MoveNeedsAttentionException(
-                        $"A markerless target file failed final verification: {entry.RelativePath}");
-                }
+                targetVerificationLease.Add(
+                    entry.RelativePath,
+                    file.OpenStableRegistrationCopy(),
+                    entry.Length,
+                    entry.Sha256!);
             }
+
             completedUnits += GetProgressUnits(entry);
             if (progressStart.HasValue && progressSpan > 0)
             {
@@ -153,7 +204,9 @@ internal sealed partial class AudiobookContentMoveService
         if (string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
             || !sourceEntry.MatchesObjectIdentity(
                 entry.SourcePhysicalObjectIdentity)
-            || !sourceEntry.VisiblePathMatches())
+            || !PinnedFileVisibleOrThrowUnavailable(
+                sourceEntry,
+                $"A markerless source file is temporarily unavailable: {entry.RelativePath}"))
         {
             throw new MoveNeedsAttentionException(
                 $"A markerless source file changed physical generation: {entry.RelativePath}");
@@ -167,7 +220,9 @@ internal sealed partial class AudiobookContentMoveService
         if (string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity)
             || !targetEntry.MatchesObjectIdentity(
                 entry.TargetPhysicalObjectIdentity)
-            || !targetEntry.VisiblePathMatches())
+            || !PinnedFileVisibleOrThrowUnavailable(
+                targetEntry,
+                $"A markerless target file is temporarily unavailable: {entry.RelativePath}"))
         {
             throw new MoveNeedsAttentionException(
                 $"A markerless target file changed physical generation: {entry.RelativePath}");
@@ -187,6 +242,17 @@ internal sealed partial class AudiobookContentMoveService
             bufferSize: 128 * 1024,
             asynchronous: false);
         return stream.Length == manifestEntry.Length;
+    }
+
+    private static async Task<string> ComputePinnedFileSha256Async(
+        PinnedDirectoryCreation.PinnedFileEntry file,
+        CancellationToken cancellationToken)
+    {
+        await using var stream = file.OpenReadStream(
+            bufferSize: 1024 * 1024,
+            asynchronous: false);
+        return Convert.ToHexString(
+            await SHA256.HashDataAsync(stream, cancellationToken));
     }
 
     private static async Task<bool> PinnedFileMatchesManifestAsync(

@@ -20,12 +20,22 @@ internal sealed partial class AudiobookContentMoveService
         CancellationToken cancellationToken,
         IReadOnlyCollection<string>? structuralSpinePaths = null)
     {
-        if (!Directory.Exists(source))
+        FileAttributes sourceAttributes;
+        try
+        {
+            sourceAttributes = File.GetAttributes(source);
+        }
+        catch (Exception exception) when (exception is
+            FileNotFoundException or DirectoryNotFoundException)
         {
             throw new MoveNeedsAttentionException("The move source directory does not exist.");
         }
 
-        if ((File.GetAttributes(source) & FileAttributes.ReparsePoint) != 0)
+        if ((sourceAttributes & FileAttributes.Directory) == 0)
+        {
+            throw new MoveNeedsAttentionException("The move source path is not a directory.");
+        }
+        if ((sourceAttributes & FileAttributes.ReparsePoint) != 0)
         {
             throw new MoveNeedsAttentionException("Move sources cannot be symlinks or reparse points.");
         }
@@ -48,10 +58,16 @@ internal sealed partial class AudiobookContentMoveService
                     FileSystemPathIdentity.AreEquivalent(path, entry, sourceSemantics)) == true;
                 if (isStructuralSpine)
                 {
-                    if (!Directory.Exists(entry))
+                    var structuralAttributes = File.GetAttributes(entry);
+                    if ((structuralAttributes & FileAttributes.Directory) == 0)
                     {
                         throw new MoveNeedsAttentionException(
                             "A target structural directory became a file.");
+                    }
+                    if ((structuralAttributes & FileAttributes.ReparsePoint) != 0)
+                    {
+                        throw new MoveNeedsAttentionException(
+                            "A target structural directory became a link or reparse point.");
                     }
 
                     continue;
@@ -139,7 +155,9 @@ internal sealed partial class AudiobookContentMoveService
         try
         {
             if (!current.MatchesDirectoryObjectIdentity(expectedEndpointIdentity)
-                || !current.VisiblePathMatches())
+                || !PinnedDirectoryVisibleOrThrowUnavailable(
+                    current,
+                    "The move endpoint is temporarily unavailable while its physical generation is being verified."))
             {
                 throw new MoveNeedsAttentionException(
                     "A move endpoint changed physical generation.");
@@ -212,7 +230,9 @@ internal sealed partial class AudiobookContentMoveService
             if (!current.MatchesManagedDirectoryIdentity(
                     boundaryIdentityVersion,
                     boundaryIdentity)
-                || !current.VisiblePathMatches())
+                || !PinnedDirectoryVisibleOrThrowUnavailable(
+                    current,
+                    $"The move {boundaryDescription} is temporarily unavailable while its physical generation is being verified."))
             {
                 throw new MoveNeedsAttentionException(
                     $"The move {boundaryDescription} changed physical generation.");

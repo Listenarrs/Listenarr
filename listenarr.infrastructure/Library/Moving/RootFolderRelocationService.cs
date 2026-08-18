@@ -14,7 +14,8 @@ public sealed partial class RootFolderRelocationService(
     IAudiobookOperationCoordinator audiobookOperationCoordinator,
     IServiceScopeFactory manifestScopeFactory,
     ILibraryFilesystemReadiness filesystemReadiness,
-    IDirectoryObjectIdentityResolver? directoryObjectIdentityResolver = null) : IRootFolderRelocationService
+    IDirectoryObjectIdentityResolver? directoryObjectIdentityResolver = null,
+    IFileRegistrationRecoveryProbe? fileRegistrationRecoveryProbe = null) : IRootFolderRelocationService
 {
     private readonly SemaphoreSlim _rootIdentityGate = new(1, 1);
     private readonly IFilesystemMutationCoordinator _mutationCoordinator =
@@ -25,6 +26,8 @@ public sealed partial class RootFolderRelocationService(
         manifestScopeFactory ?? throw new ArgumentNullException(nameof(manifestScopeFactory));
     private readonly IDirectoryObjectIdentityResolver? _directoryObjectIdentityResolver =
         directoryObjectIdentityResolver;
+    private readonly IFileRegistrationRecoveryProbe? _fileRegistrationRecoveryProbe =
+        fileRegistrationRecoveryProbe;
     private bool _rootIdentitiesReconciled;
     private async Task<StartOutcome> StartCoreAsync(
         int rootFolderId,
@@ -125,6 +128,15 @@ public sealed partial class RootFolderRelocationService(
                 nameof(command));
         }
 
+        var targetIdentityKey = await ValidateStartRecoveryBoundariesAsync(
+            db,
+            rootFolderId,
+            root,
+            sourcePathSemantics,
+            targetPath,
+            targetResolution,
+            cancellationToken);
+
         var sourceObjectIdentity =
             await ResolveRelocationSourceObjectIdentityAsync(
                 root,
@@ -137,38 +149,12 @@ public sealed partial class RootFolderRelocationService(
             sourcePathSemantics.AllowContextualAmbiguousMetadataSyntax;
         var sourceCaseSensitivityMode = sourcePathSemantics.SourceCaseSensitivityMode;
 
-        var targetIdentityKey = FileSystemPathIdentity.CreateKey(
-            "root",
-            targetPath,
-            targetResolution.Semantics);
-        await EnsureNoTargetBoundaryConflictAsync(
+        var (affected, invalidStoredBasePaths) = await LoadAffectedAudiobooksAsync(
             db,
-            rootFolderId,
-            targetPath,
-            targetIdentityKey,
-            targetResolution.Semantics,
+            root.Path,
+            metadataSourcePathSemantics,
+            allowContextualAmbiguousMetadataSyntax,
             cancellationToken);
-
-        var audiobookRows = await db.Audiobooks
-            .Where(audiobook => audiobook.BasePath != null)
-            .Select(audiobook => new
-            {
-                Audiobook = audiobook,
-                StoredBasePath = EF.Property<string>(audiobook, nameof(Audiobook.BasePath))!
-            })
-            .ToListAsync(cancellationToken);
-        await db.AudiobookFiles.LoadAsync(cancellationToken);
-        var audiobooks = audiobookRows
-            .Select(row => new AudiobookPathCandidate(row.Audiobook, row.StoredBasePath))
-            .ToList();
-        var (affected, invalidStoredBasePaths) = metadataSourcePathSemantics == null
-            ? (new List<AudiobookPathCandidate>(), new List<AudiobookPathCandidate>())
-            : DiscoverAffectedAudiobooks(
-                audiobooks,
-                root.Path,
-                metadataSourcePathSemantics.Value.Semantics,
-                metadataSourcePathSemantics.Value.DetectAmbiguousCaseMatches,
-                allowContextualAmbiguousMetadataSyntax);
 
         if (command.Mode != RootFolderRelocationMode.MetadataOnly && invalidStoredBasePaths.Count > 0)
         {
@@ -272,9 +258,22 @@ public sealed partial class RootFolderRelocationService(
                 targetPath,
                 cancellationToken);
 
+        if (command.Mode == RootFolderRelocationMode.Relocate
+            && !targetObjectIdentity.IsAvailable
+            && targetObjectIdentity.FailureKind
+                != DirectoryObjectIdentityFailureKind.Missing)
+        {
+            throw new RootFolderPathChangeRejectedException(
+                "root_folder_target_unavailable",
+                "Listenarr cannot verify the new root folder's physical directory identity. Make sure the destination is mounted and accessible, then try again.",
+                targetObjectIdentity.UnavailableReason
+                    ?? "Target physical directory identity is unavailable.");
+        }
+
         RootFolderRelocation? relocation = null;
         var relocationWasPrecommitted = false;
         var precommittedContinuationCommitted = false;
+        PinnedDirectoryCreation.PinnedDirectoryAnchor? relocationCommitTargetLease = null;
         try
         {
             if (command.Mode == RootFolderRelocationMode.Relocate
@@ -443,29 +442,29 @@ public sealed partial class RootFolderRelocationService(
             await db.SaveChangesAsync(cancellationToken);
             if (affected.Count == 0)
             {
-                await RequireTargetDirectoryGenerationAsync(
-                    targetPath,
-                    targetObjectIdentity,
-                    cancellationToken);
-                ApplyRootMetadata(root, command, targetPath, targetResolution, targetIdentityKey);
-                ApplyRootDirectoryObjectIdentity(root, targetObjectIdentity);
-                if (command.DesiredIsDefault)
-                {
-                    await ClearOtherDefaultsAsync(db, rootFolderId, cancellationToken);
-                }
-
-                relocation.Status = RootFolderRelocationStatus.Completed;
-                relocation.ActiveRootFolderId = null;
-                relocation.CompletedAt = nowUtc;
-                relocation.TargetIdentityEnrollmentState =
-                    TargetIdentityEnrollmentState.NotRequired;
-                await FinalizeRelocationTargetReservationsAsync(
+                relocationCommitTargetLease = await CompleteEmptyRelocationAsync(
                     db,
-                    relocation.Id,
+                    root,
+                    relocation,
+                    command,
+                    targetPath,
+                    targetResolution,
+                    targetObjectIdentity,
+                    targetIdentityKey,
+                    rootFolderId,
+                    nowUtc,
                     cancellationToken);
-                await db.SaveChangesAsync(cancellationToken);
             }
 
+            if (relocationCommitTargetLease != null)
+            {
+                RevalidatePinnedTargetDirectoryGeneration(
+                    relocationCommitTargetLease,
+                    targetObjectIdentity.Version,
+                    targetObjectIdentity.Value,
+                    targetObjectIdentity.UnavailableReason,
+                    CancellationToken.None);
+            }
             cancellationToken.ThrowIfCancellationRequested();
             if (continuationTransaction != null)
             {
@@ -492,6 +491,10 @@ public sealed partial class RootFolderRelocationService(
                 exception,
                 CancellationToken.None);
             throw;
+        }
+        finally
+        {
+            relocationCommitTargetLease?.Dispose();
         }
     }
 }

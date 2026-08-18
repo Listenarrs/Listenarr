@@ -31,7 +31,9 @@ internal sealed partial class AudiobookContentMoveService
                 throw new MoveNeedsAttentionException(
                     "The markerless move source root changed physical generation.");
             }
-            if (!root.VisiblePathMatches())
+            if (!PinnedDirectoryVisibleOrThrowUnavailable(
+                    root,
+                    "The markerless move source root is temporarily unavailable while pinned."))
             {
                 throw new MoveNeedsAttentionException(
                     "The markerless move source root changed while it was pinned.");
@@ -57,7 +59,7 @@ internal sealed partial class AudiobookContentMoveService
                 request.SourceSemantics,
                 "source");
             if (entry.EntryType == MoveJobEntryType.File
-                && !File.Exists(fullPath)
+                && !TryGetMarkerlessPathAttributes(fullPath, out _)
                 && IsVerifiedMarkerlessNativeRenameEntry(entry))
             {
                 continue;
@@ -79,7 +81,9 @@ internal sealed partial class AudiobookContentMoveService
                 using var directory = parent.OpenExistingChild(
                     Path.GetFileName(fullPath));
                 identity = directory.GetDirectoryObjectIdentity();
-                if (!directory.VisiblePathMatches()
+                if (!PinnedDirectoryVisibleOrThrowUnavailable(
+                        directory,
+                        $"Source directory is temporarily unavailable while pinned: {entry.RelativePath}")
                     || (!string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
                         && !directory.MatchesDirectoryObjectIdentity(
                             entry.SourcePhysicalObjectIdentity)))
@@ -126,6 +130,7 @@ internal sealed partial class AudiobookContentMoveService
         AudiobookContentMoveRequest request,
         MoveJobEntry entry,
         string fullPath,
+        PinnedDirectoryCreation.PinnedDirectoryAnchor parent,
         PinnedDirectoryCreation.PinnedFileEntry file,
         long completedWorkUnits,
         long totalWorkUnits,
@@ -179,7 +184,12 @@ internal sealed partial class AudiobookContentMoveService
             }
 
             if (hashed != entry.Length
-                || !file.VisiblePathMatches()
+                || !PinnedFileVisibleOrThrowUnavailable(
+                    file,
+                    $"Source file is temporarily unavailable during content proof capture: {entry.RelativePath}")
+                || !PinnedDirectoryVisibleOrThrowUnavailable(
+                    parent,
+                    $"Source file parent is temporarily unavailable during content proof capture: {entry.RelativePath}")
                 || file.GetLastWriteTimeUtc() != initialLastWriteTimeUtc)
             {
                 throw new MoveNeedsAttentionException(

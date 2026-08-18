@@ -28,7 +28,7 @@
       <label class="footer-label">
         On import:
         <select v-model="store.action" class="mode-select" :disabled="isImporting">
-          <option value="none">Do nothing</option>
+          <option value="none">Leave files in place</option>
           <option value="move">Move</option>
           <option value="hardlink/copy">Hardlink / Copy</option>
         </select>
@@ -46,7 +46,7 @@
             </select>
           </label>
         </div>
-        <span v-else>Imported files will be left where they are</span>
+        <span v-else>Files will be added to the library without being moved or copied</span>
       </label>
 
       <div v-if="store.metadataFetchCount > 100" class="rate-limit-warning">

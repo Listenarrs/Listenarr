@@ -4,7 +4,7 @@ namespace Listenarr.Infrastructure.FileSystem;
 
 public partial class FileMover : IFilePublicationSourceCapability
 {
-    public Task<FilePublicationSourceCapabilityResult> CheckAsync(
+    public async Task<FilePublicationSourceCapabilityResult> CheckAsync(
         string sourcePath,
         CancellationToken cancellationToken = default)
     {
@@ -19,46 +19,79 @@ public partial class FileMover : IFilePublicationSourceCapability
             if (string.IsNullOrWhiteSpace(parent)
                 || string.IsNullOrWhiteSpace(fileName))
             {
-                return Task.FromResult(
-                    FilePublicationSourceCapabilityResult.Unsupported(
-                        "The source path does not identify a file beneath a directory."));
+                return FilePublicationSourceCapabilityResult.Unsupported(
+                    "The source path does not identify a file beneath a directory.");
             }
 
-            using var anchor = PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(parent);
-            using var entry = anchor.TryOpenExistingFile(
+            using var anchor = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                parent,
+                createMissing: false);
+            var openOutcome = anchor.TryOpenExistingFileWithOutcome(
                 fileName,
-                requireDeleteAccess: false);
-            if (entry == null || !entry.VisiblePathMatches())
+                requireDeleteAccess: false,
+                out var openedEntry);
+            using var entry = openedEntry;
+            if (openOutcome == PinnedFileOpenOutcome.NotFound)
             {
-                return Task.FromResult(
-                    FilePublicationSourceCapabilityResult.Unsupported(
-                        "The source file is unavailable or changed while its identity is being verified."));
+                return FilePublicationSourceCapabilityResult.Unsupported(
+                    "The source file does not exist.",
+                    FilePublicationSourceCapabilityFailureKind.Missing);
+            }
+            if (openOutcome == PinnedFileOpenOutcome.Unavailable)
+            {
+                return FilePublicationSourceCapabilityResult.Unsupported(
+                    "The source file is temporarily unavailable.",
+                    FilePublicationSourceCapabilityFailureKind.Unavailable);
+            }
+            if (entry == null || !entry.IsRegularFile())
+            {
+                return FilePublicationSourceCapabilityResult.Unsupported(
+                    "The source path is not a regular file that can be published safely.");
+            }
+            if (!entry.VisiblePathMatches())
+            {
+                return FilePublicationSourceCapabilityResult.Unsupported(
+                    "The source file changed while its publication capability was being verified.",
+                    FilePublicationSourceCapabilityFailureKind.Unavailable);
             }
 
-            _ = entry.GetObjectIdentity();
+            var proof = await CaptureMarkerlessSourceProofAsync(
+                entry,
+                cancellationToken,
+                includeSha256: true);
             if (!anchor.VisiblePathMatches()
                 || !entry.VisiblePathMatches())
             {
-                return Task.FromResult(
-                    FilePublicationSourceCapabilityResult.Unsupported(
-                        "The source file changed while its durable identity was being verified."));
+                return FilePublicationSourceCapabilityResult.Unsupported(
+                    "The source file changed while its durable identity was being verified.",
+                    FilePublicationSourceCapabilityFailureKind.Unavailable);
             }
 
-            return Task.FromResult(FilePublicationSourceCapabilityResult.Supported);
+            return FilePublicationSourceCapabilityResult.SupportedForProof(
+                new FilePublicationSourceProof(
+                    proof.PhysicalObjectIdentity,
+                    proof.Length,
+                    proof.Sha256!));
+        }
+        catch (Exception exception) when (
+            FileSystemSafety.IsProvenMissingPathException(exception))
+        {
+            return FilePublicationSourceCapabilityResult.Unsupported(
+                "The source file does not exist.",
+                FilePublicationSourceCapabilityFailureKind.Missing);
         }
         catch (PlatformNotSupportedException exception)
         {
-            return Task.FromResult(
-                FilePublicationSourceCapabilityResult.Unsupported(exception.Message));
+            return FilePublicationSourceCapabilityResult.Unsupported(exception.Message);
         }
         catch (Exception exception) when (exception is
             IOException or UnauthorizedAccessException or Win32Exception
                 or InvalidOperationException or NotSupportedException
                 or PathTooLongException or System.Security.SecurityException)
         {
-            return Task.FromResult(
-                FilePublicationSourceCapabilityResult.Unsupported(
-                    "The source file cannot be pinned to a durable physical generation."));
+            return FilePublicationSourceCapabilityResult.Unsupported(
+                "The source file cannot be pinned to a durable physical generation and content proof.",
+                FilePublicationSourceCapabilityFailureKind.Unavailable);
         }
     }
 }

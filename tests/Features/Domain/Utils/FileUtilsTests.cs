@@ -680,6 +680,8 @@ namespace Listenarr.Tests.Features.Domain.Utils
 
         [Theory]
         [InlineData(@"C:\Books\Author", true)]
+        [InlineData(@"\\?\C:\Books\Author", false)]
+        [InlineData(@"\\.\C:\Books\Author", false)]
         [InlineData(@"C:\Books\.\Author", false)]
         [InlineData(@"C:\", false)]
         [InlineData(@"\Books\Author", false)]

@@ -71,6 +71,46 @@ public sealed class FileSystemSemanticsResolverTests : BaseTests
     }
 
     [Fact]
+    public async Task Auto_InaccessibleExistingBoundary_DoesNotFallBackToParentSemantics()
+    {
+        var parent = Path.Join(
+            Path.GetTempPath(),
+            "filesystem-semantics-unavailable-" + Guid.NewGuid().ToString("N"));
+        var boundary = Path.Join(parent, "Book");
+        Directory.CreateDirectory(boundary);
+        try
+        {
+            var resolver = new FileSystemSemanticsResolver(
+                _ => new FileSystemSemanticsResolver.LinuxFilesystemFlagsProbe(
+                    Success: false,
+                    Flags: 0,
+                    ErrorCode: 25),
+                path => string.Equals(path, boundary, StringComparison.Ordinal)
+                    ? throw new UnauthorizedAccessException(
+                        "Injected boundary access failure.")
+                    : File.GetAttributes(path));
+
+            var resolution = await resolver.ResolveAsync(
+                boundary,
+                FileSystemCaseSensitivityMode.Auto);
+
+            Assert.Equal(PathIdentityState.Unavailable, resolution.State);
+            Assert.Equal(
+                FileSystemCaseSensitivity.Unknown,
+                resolution.Semantics.CaseSensitivity);
+            Assert.Equal(Path.GetFullPath(boundary), resolution.CanonicalPath);
+            Assert.Contains(
+                "Injected boundary access failure",
+                resolution.Reason ?? string.Empty,
+                StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(parent, true);
+        }
+    }
+
+    [Fact]
     public async Task Auto_ExistingBoundary_DoesNotCreateOrModifyEntries()
     {
         var boundary = Path.Join(

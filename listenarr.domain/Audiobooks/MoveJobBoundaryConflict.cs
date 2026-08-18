@@ -43,28 +43,10 @@ public static class MoveJobBoundaryConflict
             return false;
         }
 
-        try
-        {
-            var endpointSemantics = endpointIdentity?.Semantics ?? boundarySemantics;
-            if (endpointIdentity.HasValue)
-            {
-                endpointIdentity.Value.ValidateForPath(endpointPath);
-            }
-
-            return FileSystemPathIdentity.EvaluateBoundaryConflict(
-                    endpointPath,
-                    endpointSemantics,
-                    boundaryPath,
-                    boundarySemantics)
-                != FileSystemPathBoundaryConflict.None;
-        }
-        catch (Exception exception) when (exception is
-            ArgumentException or InvalidOperationException or NotSupportedException
-                or PathTooLongException)
-        {
-            // A caller that selected this job as relevant must fail closed when its
-            // endpoint identity is malformed or incomplete.
-            return true;
-        }
+        return FileSystemPathIdentity.StoredPathMayTouchBoundary(
+            endpointPath,
+            boundaryPath,
+            boundarySemantics,
+            endpointIdentity);
     }
 }

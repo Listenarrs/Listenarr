@@ -14,6 +14,7 @@ namespace Listenarr.Api.Features.Library;
 
 public sealed class LibraryPreviewPathWorkflow(
     IConfigurationService configurationService,
+    IRootFolderService rootFolderService,
     IFileNamingService fileNamingService,
     ILogger<LibraryPreviewPathWorkflow> logger)
 {
@@ -23,9 +24,12 @@ public sealed class LibraryPreviewPathWorkflow(
         {
             var settings = await configurationService.GetApplicationSettingsAsync();
             var explicitRoot = !string.IsNullOrEmpty(request.DestinationRoot);
+            var defaultRoot = explicitRoot
+                ? null
+                : await rootFolderService.GetDefaultAsync();
             var root = explicitRoot
                 ? request.DestinationRoot
-                : settings.OutputPath;
+                : defaultRoot?.Path ?? settings.OutputPath;
             var audiobook = request.Metadata.ToAudiobook();
 
             AudiobookSeriesMembershipHelper.ApplyToAudiobook(

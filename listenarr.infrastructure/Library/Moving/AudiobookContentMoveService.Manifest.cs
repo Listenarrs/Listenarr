@@ -100,12 +100,6 @@ internal sealed partial class AudiobookContentMoveService
                 continue;
             }
 
-            if (!File.Exists(destinationPath))
-            {
-                throw new MoveNeedsAttentionException(
-                    $"Published file verification failed: {entry.RelativePath}");
-            }
-
             var parentPath = Path.GetDirectoryName(destinationPath)
                 ?? throw new MoveNeedsAttentionException(
                     "A published manifest file has no parent directory.");
@@ -117,7 +111,9 @@ internal sealed partial class AudiobookContentMoveService
             using var file = parent.OpenExistingFile(
                 Path.GetFileName(destinationPath),
                 requireDeleteAccess: false);
-            if (!file.VisiblePathMatches()
+            if (!PinnedFileVisibleOrThrowUnavailable(
+                    file,
+                    $"Published file is temporarily unavailable: {entry.RelativePath}")
                 || (!string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity)
                     && !file.MatchesObjectIdentity(
                         entry.TargetPhysicalObjectIdentity)))
@@ -164,7 +160,9 @@ internal sealed partial class AudiobookContentMoveService
         try
         {
             if (!current.MatchesDirectoryObjectIdentity(boundaryObjectIdentity)
-                || !current.VisiblePathMatches())
+                || !PinnedDirectoryVisibleOrThrowUnavailable(
+                    current,
+                    "The published manifest scan boundary is temporarily unavailable."))
             {
                 throw new MoveNeedsAttentionException(
                     "The published manifest scan boundary changed physical generation.");
@@ -177,7 +175,9 @@ internal sealed partial class AudiobookContentMoveService
                 current = next;
             }
 
-            if (!current.VisiblePathMatches())
+            if (!PinnedDirectoryVisibleOrThrowUnavailable(
+                    current,
+                    "The published manifest directory is temporarily unavailable while being pinned."))
             {
                 throw new MoveNeedsAttentionException(
                     "A published manifest directory changed while it was being pinned.");

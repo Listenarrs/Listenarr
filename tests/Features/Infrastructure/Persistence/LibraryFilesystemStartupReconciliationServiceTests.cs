@@ -16,6 +16,19 @@ public sealed class LibraryFilesystemStartupReconciliationServiceTests : BaseTes
             TaskCreationOptions.RunContinuationsAsynchronously);
         var order = new List<string>();
 
+        var registration = new Mock<IFileRegistrationRecoveryService>(MockBehavior.Strict);
+        registration.Setup(service => service.AdoptCommittedAnonymousAsync(It.IsAny<CancellationToken>()))
+            .Returns((CancellationToken _) =>
+            {
+                order.Add("registration-adopt");
+                return Task.CompletedTask;
+            });
+        registration.Setup(service => service.ReconcileAsync(It.IsAny<CancellationToken>()))
+            .Returns((CancellationToken _) =>
+            {
+                order.Add("registration-recover");
+                return Task.CompletedTask;
+            });
         var root = new Mock<IRootFolderObjectIdentityReconciler>(MockBehavior.Strict);
         root.Setup(service => service.ReconcileAsync(It.IsAny<CancellationToken>()))
             .Returns(async (CancellationToken cancellationToken) =>
@@ -66,6 +79,7 @@ public sealed class LibraryFilesystemStartupReconciliationServiceTests : BaseTes
             ownership.Object,
             files.Object,
             deletion.Object,
+            registration.Object,
             rename.Object);
         var readiness = new LibraryFilesystemReadiness();
         var service = new LibraryFilesystemStartupReconciliationService(
@@ -79,14 +93,23 @@ public sealed class LibraryFilesystemStartupReconciliationServiceTests : BaseTes
         Assert.Equal(LibraryFilesystemInitializationStatus.Running, readiness.Current.Status);
         Assert.Equal("RootFolderObjectIdentities", readiness.Current.Phase);
         Assert.False(readiness.Current.IsReady);
-        Assert.Equal(["root"], order);
+        Assert.Equal(["registration-adopt", "root"], order);
 
         releaseRoot.TrySetResult();
         await readiness.WaitUntilReadyAsync().WaitAsync(TimeSpan.FromSeconds(5));
         await service.StopAsync(CancellationToken.None);
 
         Assert.Equal(
-            ["root", "relocation", "ownership", "deletion", "rename", "files"],
+            [
+                "registration-adopt",
+                "root",
+                "relocation",
+                "ownership",
+                "deletion",
+                "registration-recover",
+                "rename",
+                "files"
+            ],
             order);
         Assert.True(readiness.Current.IsReady);
     }
@@ -190,6 +213,7 @@ public sealed class LibraryFilesystemStartupReconciliationServiceTests : BaseTes
         ILibraryDirectoryOwnershipReconciler ownership,
         IAudiobookFileIdentityReconciler files,
         IAudiobookDeletionIntentReconciler? deletion = null,
+        IFileRegistrationRecoveryService? registration = null,
         IFileRenameRecoveryReconciler? rename = null) =>
         new ServiceCollection()
             .AddScoped(_ => root)
@@ -197,6 +221,9 @@ public sealed class LibraryFilesystemStartupReconciliationServiceTests : BaseTes
             .AddScoped(_ => ownership)
             .AddScoped(_ => deletion ?? Mock.Of<IAudiobookDeletionIntentReconciler>(service =>
                 service.ReconcileAsync(It.IsAny<CancellationToken>()) == Task.CompletedTask))
+            .AddScoped(_ => registration ?? Mock.Of<IFileRegistrationRecoveryService>(service =>
+                service.AdoptCommittedAnonymousAsync(It.IsAny<CancellationToken>()) == Task.CompletedTask
+                && service.ReconcileAsync(It.IsAny<CancellationToken>()) == Task.CompletedTask))
             .AddScoped(_ => rename ?? Mock.Of<IFileRenameRecoveryReconciler>(service =>
                 service.ReconcileAsync(It.IsAny<CancellationToken>()) == Task.CompletedTask))
             .AddScoped(_ => files)

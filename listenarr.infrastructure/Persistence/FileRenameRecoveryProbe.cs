@@ -21,7 +21,9 @@ public sealed class FileRenameRecoveryProbe(
             .AnyAsync(journal =>
                 journal.AudiobookId == audiobookId
                 && journal.AudiobookFileId != null
-                && journal.State != FileMutationJournalState.OwnerMetadataReconciled,
+                && (journal.AudiobookFileId == FileMutationOwner.CompanionFile
+                    ? journal.State != FileMutationJournalState.Completed
+                    : journal.State != FileMutationJournalState.OwnerMetadataReconciled),
                 cancellationToken);
     }
 }

@@ -147,6 +147,132 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         Assert.Null(persisted.DirectoryObjectIdentity);
     }
 
+    [WindowsFact]
+    public async Task ConfirmCurrentFolderAsync_ActiveMoveWithDeviceAliasSourceUnderRoot_BlocksBeforeAuthorization()
+    {
+        var fixture = await CreateFixtureAsync(
+            "confirm-active-move-device-alias",
+            blockingJobsFactory: rootPath =>
+            [
+                new MoveJob
+                {
+                    Id = Guid.NewGuid(),
+                    SourcePath = @"\\?\" + Path.Join(rootPath, "Author", "Title"),
+                    RequestedPath = Path.Join(Path.GetDirectoryName(rootPath)!, "elsewhere"),
+                    Status = MoveJobStatus.Running
+                }
+            ]);
+        await using var cleanup = fixture;
+        var root = await fixture.LoadRootAsync();
+        var observation = await fixture.HealthResolver.ResolveAsync(root);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Service.ConfirmCurrentFolderAsync(
+                root.Id,
+                root.Path,
+                observation.ConfirmationToken!));
+
+        var persisted = await fixture.LoadRootAsync();
+        Assert.Null(persisted.DirectoryObjectIdentity);
+    }
+
+    [Fact]
+    public async Task ConfirmCurrentFolderAsync_ActiveRegistrationRecoveryUnderRoot_BlocksBeforeAuthorization()
+    {
+        var fixture = await CreateFixtureAsync("confirm-registration-recovery");
+        await using var cleanup = fixture;
+        await fixture.AddRegistrationRecoveryAsync();
+        var root = await fixture.LoadRootAsync();
+        var observation = await fixture.HealthResolver.ResolveAsync(root);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Service.ConfirmCurrentFolderAsync(
+                root.Id,
+                root.Path,
+                observation.ConfirmationToken!));
+
+        Assert.Contains("file import", exception.Message, StringComparison.OrdinalIgnoreCase);
+        var persisted = await fixture.LoadRootAsync();
+        Assert.Null(persisted.DirectoryObjectIdentity);
+    }
+
+    [Fact]
+    public async Task ConfirmCurrentFolderAsync_AnonymousRegistrationPublicationUnderRoot_BlocksBeforeAuthorization()
+    {
+        var fixture = await CreateFixtureAsync("confirm-anonymous-registration-recovery");
+        await using var cleanup = fixture;
+        await fixture.AddAnonymousRegistrationPublicationAsync();
+        var root = await fixture.LoadRootAsync();
+        var observation = await fixture.HealthResolver.ResolveAsync(root);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Service.ConfirmCurrentFolderAsync(
+                root.Id,
+                root.Path,
+                observation.ConfirmationToken!));
+
+        Assert.Contains("file import", exception.Message, StringComparison.OrdinalIgnoreCase);
+        var persisted = await fixture.LoadRootAsync();
+        Assert.Null(persisted.DirectoryObjectIdentity);
+    }
+
+    [WindowsFact]
+    public async Task ConfirmCurrentFolderAsync_ActiveRegistrationRecoveryWithDeviceAliasSourceUnderRoot_BlocksBeforeAuthorization()
+    {
+        var fixture = await CreateFixtureAsync("confirm-registration-recovery-device-alias");
+        await using var cleanup = fixture;
+        await fixture.AddRegistrationRecoveryViaDeviceAliasSourceAsync();
+        var root = await fixture.LoadRootAsync();
+        var observation = await fixture.HealthResolver.ResolveAsync(root);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Service.ConfirmCurrentFolderAsync(
+                root.Id,
+                root.Path,
+                observation.ConfirmationToken!));
+
+        Assert.Contains("file import", exception.Message, StringComparison.OrdinalIgnoreCase);
+        var persisted = await fixture.LoadRootAsync();
+        Assert.Null(persisted.DirectoryObjectIdentity);
+    }
+
+    [WindowsFact]
+    public async Task ConfirmCurrentFolderAsync_ActiveRegistrationRecoveryWithForeignUnixPaths_DoesNotBlockUnrelatedRoot()
+    {
+        var fixture = await CreateFixtureAsync("confirm-registration-recovery-foreign-unix");
+        await using var cleanup = fixture;
+        await fixture.AddForeignRegistrationRecoveryAsync();
+        var root = await fixture.LoadRootAsync();
+        var observation = await fixture.HealthResolver.ResolveAsync(root);
+
+        var confirmed = await fixture.Service.ConfirmCurrentFolderAsync(
+            root.Id,
+            root.Path,
+            observation.ConfirmationToken!);
+
+        Assert.False(string.IsNullOrWhiteSpace(confirmed.DirectoryObjectIdentity));
+    }
+
+    [Fact]
+    public async Task ConfirmCurrentFolderAsync_ActiveDeletionRecoveryWithLegacyFilePathUnderRoot_BlocksBeforeAuthorization()
+    {
+        var fixture = await CreateFixtureAsync("confirm-delete-recovery-legacy-path");
+        await using var cleanup = fixture;
+        await fixture.AddDeletionRecoveryViaLegacyFilePathAsync();
+        var root = await fixture.LoadRootAsync();
+        var observation = await fixture.HealthResolver.ResolveAsync(root);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Service.ConfirmCurrentFolderAsync(
+                root.Id,
+                root.Path,
+                observation.ConfirmationToken!));
+
+        Assert.Contains("deletion recovery", exception.Message, StringComparison.OrdinalIgnoreCase);
+        var persisted = await fixture.LoadRootAsync();
+        Assert.Null(persisted.DirectoryObjectIdentity);
+    }
+
     [Fact]
     public async Task ConfirmCurrentFolderAsync_ReplacementBeforeCommit_RollsBackAuthorization()
     {
@@ -638,6 +764,130 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
 
         public EfLibraryDirectoryOwnershipStore CreateOwnershipStore() =>
             new(dbFactory, TimeProvider.System);
+
+        public async Task AddRegistrationRecoveryAsync()
+        {
+            await using var db = await dbFactory.CreateDbContextAsync();
+            db.Audiobooks.Add(new Audiobook
+            {
+                Id = 42,
+                Title = "Pending Registration Recovery",
+                BasePath = Path.Join(rootPath, "Author", "Book")
+            });
+            db.FileMutationJournals.Add(new FileMutationJournal
+            {
+                OperationId = Guid.NewGuid(),
+                Action = FileAction.Move,
+                SourcePath = Path.Join(rootPath, "incoming", "book.m4b"),
+                DestinationPath = Path.Join(rootPath, "Author", "Book", "book.m4b"),
+                SourcePhysicalObjectIdentity = "source-generation",
+                TargetPhysicalObjectIdentity = "target-generation",
+                SourceLength = 1,
+                State = FileMutationJournalState.SourceDeletionAuthorized,
+                AudiobookId = 42,
+                AudiobookFileId = null
+            });
+            await db.SaveChangesAsync();
+        }
+
+        public async Task AddAnonymousRegistrationPublicationAsync()
+        {
+            await using var db = await dbFactory.CreateDbContextAsync();
+            db.FileMutationJournals.Add(new FileMutationJournal
+            {
+                OperationId = Guid.NewGuid(),
+                ProtocolVersion = FileMutationProtocol.Current,
+                Action = FileAction.Copy,
+                SourcePath = Path.Join(parentPath, "incoming-anonymous", "book.m4b"),
+                DestinationPath = Path.Join(rootPath, "Author", "Book", "book.m4b"),
+                SourceParentDirectoryObjectIdentity = "source-parent",
+                DestinationParentDirectoryObjectIdentity = "destination-parent",
+                SourcePhysicalObjectIdentity = "source-generation",
+                TargetPhysicalObjectIdentity = "target-generation",
+                SourceLength = 5,
+                State = FileMutationJournalState.TargetVerified,
+                AudiobookId = null,
+                AudiobookFileId = null
+            });
+            await db.SaveChangesAsync();
+        }
+
+        public async Task AddRegistrationRecoveryViaDeviceAliasSourceAsync()
+        {
+            var sourceDirectory = Path.Join(rootPath, "incoming-device-alias");
+            Directory.CreateDirectory(sourceDirectory);
+            var sourcePath = Path.Join(sourceDirectory, "book.m4b");
+            await File.WriteAllTextAsync(sourcePath, "audio");
+            var outsideBasePath = Path.Join(parentPath, "outside", "Book");
+            Directory.CreateDirectory(outsideBasePath);
+
+            await using var db = await dbFactory.CreateDbContextAsync();
+            db.Audiobooks.Add(new Audiobook
+            {
+                Id = 44,
+                Title = "Pending Device Alias Registration Recovery",
+                BasePath = outsideBasePath
+            });
+            db.FileMutationJournals.Add(new FileMutationJournal
+            {
+                OperationId = Guid.NewGuid(),
+                Action = FileAction.Move,
+                SourcePath = @"\\?\" + sourcePath,
+                DestinationPath = Path.Join(outsideBasePath, "book.m4b"),
+                SourcePhysicalObjectIdentity = "source-generation",
+                TargetPhysicalObjectIdentity = "target-generation",
+                SourceLength = 5,
+                State = FileMutationJournalState.SourceDeletionAuthorized,
+                AudiobookId = 44,
+                AudiobookFileId = null
+            });
+            await db.SaveChangesAsync();
+        }
+
+        public async Task AddForeignRegistrationRecoveryAsync()
+        {
+            await using var db = await dbFactory.CreateDbContextAsync();
+            db.Audiobooks.Add(new Audiobook
+            {
+                Id = 45,
+                Title = "Pending Foreign Registration Recovery",
+                BasePath = "/foreign/library/Book"
+            });
+            db.FileMutationJournals.Add(new FileMutationJournal
+            {
+                OperationId = Guid.NewGuid(),
+                Action = FileAction.Move,
+                SourcePath = "/foreign/downloads/book.m4b",
+                DestinationPath = "/foreign/library/Book/book.m4b",
+                SourcePhysicalObjectIdentity = "foreign-source-generation",
+                TargetPhysicalObjectIdentity = "foreign-target-generation",
+                SourceLength = 5,
+                State = FileMutationJournalState.SourceDeletionAuthorized,
+                AudiobookId = 45,
+                AudiobookFileId = null
+            });
+            await db.SaveChangesAsync();
+        }
+
+        public async Task AddDeletionRecoveryViaLegacyFilePathAsync()
+        {
+            await using var db = await dbFactory.CreateDbContextAsync();
+            db.Audiobooks.Add(new Audiobook
+            {
+                Id = 43,
+                Title = "Pending Legacy Deletion Recovery",
+                BasePath = null,
+                FilePath = Path.Join(rootPath, "Legacy", "book.m4b")
+            });
+            db.AudiobookDeletionIntents.Add(new AudiobookDeletionIntent
+            {
+                Id = Guid.NewGuid(),
+                AudiobookId = 43,
+                DeleteFolder = true,
+                State = AudiobookDeletionIntentState.Planned
+            });
+            await db.SaveChangesAsync();
+        }
 
         public async Task<LibraryDirectoryOwnership> CreateOwnedDirectoryAsync(
             string path)

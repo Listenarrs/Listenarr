@@ -443,6 +443,87 @@ describe('AddLibraryModal relative path derivation', () => {
     })
   })
 
+  it('does not allow the modal to close while an add commit is in flight', async () => {
+    const { apiService } = await import('@/services/api')
+    const pendingAdd = deferred<{ audiobook: { id: number; title: string } }>()
+    vi.mocked(apiService.addToLibrary).mockImplementationOnce(() => pendingAdd.promise)
+    const identifierlessBook = { ...fakeBook, asin: '', isbn: [], title: 'Identifierless Add' }
+    const wrapper = mount(AddLibraryModal, {
+      props: { visible: false, book: identifierlessBook },
+      attachTo: document.body,
+      global: { plugins: [(await import('pinia')).createPinia()] },
+    })
+
+    await wrapper.setProps({ visible: true })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const vm = wrapper.vm as unknown as {
+      addToLibrary: () => Promise<void>
+      closeModal: () => void
+      isAdding: boolean
+    }
+    const request = vm.addToLibrary()
+    await vi.waitFor(() => expect(vm.isAdding).toBe(true))
+
+    vm.closeModal()
+    await wrapper.vm.$nextTick()
+
+    expect(vm.isAdding).toBe(true)
+    expect(wrapper.emitted('close')).toBeUndefined()
+    const cancelButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('Cancel'))
+    expect(cancelButton?.attributes('disabled')).toBeDefined()
+
+    pendingAdd.resolve({ audiobook: { id: 9, title: identifierlessBook.title } })
+    await request
+
+    expect(vm.isAdding).toBe(false)
+    expect(wrapper.emitted('added')).toHaveLength(1)
+    expect(wrapper.emitted('close')).toHaveLength(1)
+    wrapper.unmount()
+    vi.mocked(apiService.addToLibrary).mockResolvedValue({ audiobook: { id: 1 } })
+  })
+
+  it('reconciles an already-existing destination conflict as an idempotent add success', async () => {
+    const { apiService } = await import('@/services/api')
+    const existing = { id: 42, title: 'Identifierless Existing Book' }
+    vi.mocked(apiService.addToLibrary).mockRejectedValueOnce(
+      Object.assign(new Error('API error: 409'), {
+        status: 409,
+        body: JSON.stringify({
+          message: 'Audiobook already exists in library',
+          audiobook: existing,
+        }),
+      }),
+    )
+    const identifierlessBook = {
+      ...fakeBook,
+      asin: '',
+      isbn: [],
+      title: 'Identifierless Existing Book',
+    }
+    const wrapper = mount(AddLibraryModal, {
+      props: { visible: false, book: identifierlessBook },
+      attachTo: document.body,
+      global: { plugins: [(await import('pinia')).createPinia()] },
+    })
+
+    await wrapper.setProps({ visible: true })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const vm = wrapper.vm as unknown as {
+      addToLibrary: () => Promise<void>
+      isAdding: boolean
+    }
+
+    await vm.addToLibrary()
+
+    expect(wrapper.emitted('added')).toEqual([[existing]])
+    expect(wrapper.emitted('close')).toHaveLength(1)
+    expect(vm.isAdding).toBe(false)
+    wrapper.unmount()
+    vi.mocked(apiService.addToLibrary).mockResolvedValue({ audiobook: { id: 1 } })
+  })
+
   it('does not let a stale add request close or unlock a newer modal session', async () => {
     const { apiService } = await import('@/services/api')
     const oldAdd = deferred<{ audiobook: { id: number; title: string; asin: string } }>()

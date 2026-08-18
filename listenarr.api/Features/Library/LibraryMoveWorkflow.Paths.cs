@@ -28,7 +28,7 @@ public sealed partial class LibraryMoveWorkflow
         return null;
     }
 
-    private async Task AddAllowedMoveRootAsync(
+    private async Task<bool> AddAllowedMoveRootAsync(
         List<MoveRootBoundary> allowedRoots,
         string? normalizedRoot,
         FileSystemCaseSensitivityMode caseSensitivityMode,
@@ -42,7 +42,7 @@ public sealed partial class LibraryMoveWorkflow
     {
         if (string.IsNullOrEmpty(normalizedRoot))
         {
-            return;
+            return false;
         }
 
         var resolution = await _semanticsResolver.ResolveAsync(
@@ -62,7 +62,7 @@ public sealed partial class LibraryMoveWorkflow
                 _logger.LogWarning(
                     "Skipping managed move boundary {Root}: live filesystem semantics do not match its persisted root semantics.",
                     LogRedaction.SanitizeFilePath(normalizedRoot));
-                return;
+                return false;
             }
 
             semantics = resolution.Semantics;
@@ -78,7 +78,7 @@ public sealed partial class LibraryMoveWorkflow
                     "Skipping move boundary {Root}: {Reason}",
                     LogRedaction.SanitizeFilePath(normalizedRoot),
                     resolution.Reason ?? "filesystem identity unavailable");
-                return;
+                return false;
             }
         }
 
@@ -139,7 +139,7 @@ public sealed partial class LibraryMoveWorkflow
                     isManagedRoot);
             }
 
-            return;
+            return true;
         }
 
         allowedRoots.Add(new MoveRootBoundary(
@@ -148,6 +148,7 @@ public sealed partial class LibraryMoveWorkflow
             caseSensitivityMode,
             directoryIdentity,
             isManagedRoot));
+        return true;
     }
 
     private string? TryFindNearestExistingDirectory(string path)
@@ -171,6 +172,65 @@ public sealed partial class LibraryMoveWorkflow
         }
 
         return null;
+    }
+
+    private static bool UnavailableManagedRootOutranksTargetBoundary(
+        string path,
+        MoveRootBoundary targetBoundary,
+        IReadOnlyCollection<UnavailableManagedMoveRoot> unavailableRoots)
+    {
+        if (!FileSystemPathIdentity.TryDetectAbsoluteSyntaxForHost(
+                path,
+                out var pathSyntax))
+        {
+            return unavailableRoots.Count > 0;
+        }
+
+        var targetLength = FileSystemPathIdentity.Canonicalize(
+            targetBoundary.Path,
+            targetBoundary.Semantics.Syntax).Length;
+        return UnavailableManagedRootOutranksBoundary(
+            path,
+            pathSyntax,
+            targetLength,
+            unavailableRoots);
+    }
+
+    private static bool UnavailableManagedRootOutranksSourceBoundary(
+        string path,
+        PathIdentitySnapshot sourceIdentity,
+        string? configuredManagedSourceRoot,
+        IReadOnlyCollection<UnavailableManagedMoveRoot> unavailableRoots) =>
+        UnavailableManagedRootOutranksBoundary(
+            path,
+            sourceIdentity.Syntax,
+            configuredManagedSourceRoot?.Length ?? -1,
+            unavailableRoots);
+
+    private static bool UnavailableManagedRootOutranksBoundary(
+        string path,
+        FileSystemPathSyntax pathSyntax,
+        int validBoundaryLength,
+        IReadOnlyCollection<UnavailableManagedMoveRoot> unavailableRoots)
+    {
+        foreach (var unavailable in unavailableRoots)
+        {
+            var boundary = unavailable.CanonicalPath ?? unavailable.Root.Path;
+            if (boundary.Length < validBoundaryLength)
+            {
+                continue;
+            }
+            if (FileSystemPathIdentity.StoredBoundaryMayContainPath(
+                    boundary,
+                    path,
+                    pathSyntax,
+                    unavailable.Root.CaseSensitivityMode))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static MoveRootBoundary? FindAllowedMoveRoot(
@@ -300,6 +360,10 @@ public sealed partial class LibraryMoveWorkflow
             sourceIdentity,
             target,
             targetIdentity);
+
+    private sealed record UnavailableManagedMoveRoot(
+        RootFolder Root,
+        string? CanonicalPath);
 
     private sealed record MoveRootBoundary(
         string Path,

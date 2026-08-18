@@ -14,6 +14,12 @@ public partial class DownloadImportService
                 audiobook.Id,
                 async token =>
                 {
+                    var recoveryReceipts = await fileRegistrationRecoveryService
+                        .ReconcileAudiobookWithReceiptsAsync(
+                            audiobook.Id,
+                            files,
+                            token)
+                        ?? [];
                     await moveQueueService.EnsureFilesystemMutationAllowedAsync(
                         audiobook.Id,
                         token);
@@ -26,7 +32,8 @@ public partial class DownloadImportService
                         currentAudiobook,
                         files,
                         token,
-                        options);
+                        options,
+                        recoveryReceipts);
                 },
                 globalToken),
             ct);

@@ -8,9 +8,32 @@ namespace Listenarr.Infrastructure.Persistence.Repositories;
 public sealed partial class EfMoveScanHandoffStore(
     IDbContextFactory<ListenArrDbContext> dbFactory) : IMoveScanHandoffStore
 {
-    public async Task<MoveCompletionCommitResult> CommitMoveCompletionAsync(
+    public Task<MoveCompletionCommitResult> CommitMoveCompletionAsync(
         MoveCompletionCommit command,
+        CancellationToken cancellationToken = default) =>
+        CommitMoveCompletionCoreAsync(
+            command,
+            commitValidation: null,
+            cancellationToken);
+
+    public Task<MoveCompletionCommitResult> CommitMoveCompletionAsync(
+        MoveCompletionCommit command,
+        Func<CancellationToken, Task<RegistrationPublicationMatchOutcome>>
+            commitValidation,
         CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(commitValidation);
+        return CommitMoveCompletionCoreAsync(
+            command,
+            commitValidation,
+            cancellationToken);
+    }
+
+    private async Task<MoveCompletionCommitResult> CommitMoveCompletionCoreAsync(
+        MoveCompletionCommit command,
+        Func<CancellationToken, Task<RegistrationPublicationMatchOutcome>>?
+            commitValidation,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -151,7 +174,44 @@ public sealed partial class EfMoveScanHandoffStore(
             job.LeaseExpiresAt = null;
             job.UpdatedAt = now;
 
+            if (commitValidation != null && transaction == null)
+            {
+                var validation = await commitValidation(CancellationToken.None);
+                if (validation == RegistrationPublicationMatchOutcome.Unavailable)
+                {
+                    throw new IOException(
+                        "The finalized move target is temporarily unavailable while durable completion is being committed.");
+                }
+                if (validation != RegistrationPublicationMatchOutcome.Match)
+                {
+                    throw new MoveNeedsAttentionException(
+                        "The finalized move target changed before durable completion could be committed.");
+                }
+            }
+
             await db.SaveChangesAsync(cancellationToken);
+            if (commitValidation != null && transaction != null)
+            {
+                var validation = await commitValidation(CancellationToken.None);
+                if (validation == RegistrationPublicationMatchOutcome.Unavailable)
+                {
+                    if (transaction != null)
+                    {
+                        await transaction.RollbackAsync(CancellationToken.None);
+                    }
+                    throw new IOException(
+                        "The finalized move target is temporarily unavailable while durable completion is being committed.");
+                }
+                if (validation != RegistrationPublicationMatchOutcome.Match)
+                {
+                    if (transaction != null)
+                    {
+                        await transaction.RollbackAsync(CancellationToken.None);
+                    }
+                    throw new MoveNeedsAttentionException(
+                        "The finalized move target changed before durable completion could be committed.");
+                }
+            }
             if (transaction != null)
             {
                 cancellationToken.ThrowIfCancellationRequested();

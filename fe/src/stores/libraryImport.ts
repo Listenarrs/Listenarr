@@ -505,7 +505,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
           }
           const { audiobook } = await apiService.addToLibrary(metadata, {
             monitored: monitor.value != 'none',
-            destinationPath: rootFolderPath,
+            destinationPath: action.value === 'none' ? item.folderPath : rootFolderPath,
             searchResult: sanitizedMatch,
           })
           audiobookId = audiobook.id
@@ -516,9 +516,10 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
             const body = typeof err.body === 'string' ? JSON.parse(err.body) : err.body
             if (body?.audiobook?.id) {
               audiobookId = body.audiobook.id
-              // Update BasePath to the selected destination so the file moves to the right place.
-              // Existing audiobooks may have BasePath = null or pointing to the wrong location.
-              if (rootFolderPath) {
+              // Mutation imports may compatibility-route an existing audiobook to the
+              // selected destination. In-place registration must never rewrite BasePath:
+              // the existing file has to belong to the audiobook's current managed folder.
+              if (action.value !== 'none' && rootFolderPath) {
                 try {
                   await apiService.updateAudiobook(audiobookId, { basePath: rootFolderPath })
                 } catch {
@@ -532,7 +533,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
             throw e
           }
         }
-        await apiService.startManualImport({
+        const importResult = await apiService.startManualImport({
           path: item.folderPath,
           mode: 'interactive',
           action: action.value,
@@ -543,7 +544,17 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
             matchedAudiobookId: audiobookId,
           })),
         })
-        // Remove imported item from store
+        const failedResult = importResult.results?.find((result) => !result.success)
+        if (failedResult || importResult.importedCount !== item.sourceFiles.length) {
+          const reason = failedResult?.error ?? failedResult?.skipReason
+          throw new Error(
+            reason ??
+              `Only ${importResult.importedCount} of ${item.sourceFiles.length} file(s) were imported`,
+          )
+        }
+
+        // Remove imported item from store only after the backend confirms every
+        // source file represented by this book row was registered successfully.
         const updated = { ...items.value }
         delete updated[item.id]
         items.value = updated

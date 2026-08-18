@@ -121,6 +121,220 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
+        public async Task AddToLibrary_ConcurrentIdentifierlessSameDestination_CommitsExactlyOnce()
+        {
+            var destination = Path.Join(tempRoot, "Identifierless", "Book");
+            LibraryController.AddToLibraryRequest CreateRequest() => new()
+            {
+                Metadata = new AudibleBookMetadata
+                {
+                    Title = "Identifierless Duplicate Probe"
+                },
+                DestinationPath = destination,
+                Monitored = true
+            };
+            var controller = _provider.GetRequiredService<LibraryController>();
+
+            var results = await Task.WhenAll(
+                controller.AddToLibrary(CreateRequest()),
+                controller.AddToLibrary(CreateRequest()));
+
+            Assert.Single(results, result => result is OkObjectResult);
+            Assert.Single(results, result => result is ConflictObjectResult);
+            var persisted = await _audiobookRepository.GetAllAsync();
+            var audiobook = Assert.Single(persisted);
+            Assert.Equal("Identifierless Duplicate Probe", audiobook.Title);
+            Assert.Equal(Path.GetFullPath(destination), Path.GetFullPath(audiobook.BasePath!));
+        }
+
+        [Fact]
+        public async Task AddToLibrary_IdentifierlessSameDestination_WithProductionGuardReturnsExistingConflict()
+        {
+            await ReinitializeAsync(builder => builder
+                .WithScoped<ILibraryDestinationMutationGuard>(provider =>
+                    new LibraryDestinationMutationGuard(
+                        provider.GetRequiredService<IRootFolderService>(),
+                        provider.GetRequiredService<IRootFolderRelocationService>(),
+                        provider.GetRequiredService<IFileSystemSemanticsResolver>(),
+                        provider.GetRequiredService<IAudiobookRepository>())));
+            var root = Assert.Single(await _rootFolderRepository.GetAllAsync());
+            var rootResolution = await _provider
+                .GetRequiredService<IFileSystemSemanticsResolver>()
+                .ResolveAsync(root.Path, FileSystemCaseSensitivityMode.Auto);
+            Assert.Equal(PathIdentityState.Valid, rootResolution.State);
+            root.ResolvedCaseSensitivity = rootResolution.Semantics.CaseSensitivity;
+            root.PathIdentityState = PathIdentityState.Valid;
+            root.PathIdentityKey = FileSystemPathIdentity.CreateKey(
+                "root",
+                root.Path,
+                rootResolution.Semantics);
+            await _rootFolderRepository.UpdateAsync(root);
+
+            var destination = Path.Join(tempRoot, "Identifierless", "Production Guard");
+            LibraryController.AddToLibraryRequest CreateRequest() => new()
+            {
+                Metadata = new AudibleBookMetadata
+                {
+                    Title = "Identifierless Production Guard"
+                },
+                DestinationPath = destination,
+                Monitored = true
+            };
+            var controller = _provider.GetRequiredService<LibraryController>();
+
+            var first = await controller.AddToLibrary(CreateRequest());
+            var second = await controller.AddToLibrary(CreateRequest());
+
+            Assert.IsType<OkObjectResult>(first);
+            var conflict = Assert.IsType<ConflictObjectResult>(second);
+            var persisted = Assert.Single(await _audiobookRepository.GetAllAsync());
+            var payload = System.Text.Json.JsonSerializer.Serialize(
+                conflict.Value,
+                new System.Text.Json.JsonSerializerOptions(
+                    System.Text.Json.JsonSerializerDefaults.Web));
+            using var document = System.Text.Json.JsonDocument.Parse(payload);
+            Assert.Equal(
+                "Audiobook already exists in library",
+                document.RootElement.GetProperty("message").GetString());
+            Assert.Equal(
+                persisted.Id,
+                document.RootElement.GetProperty("audiobook").GetProperty("id").GetInt32());
+        }
+
+        [Fact]
+        public async Task AddToLibrary_DifferentBookSameDestination_ReturnsDestinationConflict()
+        {
+            await ReinitializeAsync(builder => builder
+                .WithScoped<ILibraryDestinationMutationGuard>(provider =>
+                    new LibraryDestinationMutationGuard(
+                        provider.GetRequiredService<IRootFolderService>(),
+                        provider.GetRequiredService<IRootFolderRelocationService>(),
+                        provider.GetRequiredService<IFileSystemSemanticsResolver>(),
+                        provider.GetRequiredService<IAudiobookRepository>())));
+            var root = Assert.Single(await _rootFolderRepository.GetAllAsync());
+            var rootResolution = await _provider
+                .GetRequiredService<IFileSystemSemanticsResolver>()
+                .ResolveAsync(root.Path, FileSystemCaseSensitivityMode.Auto);
+            Assert.Equal(PathIdentityState.Valid, rootResolution.State);
+            root.ResolvedCaseSensitivity = rootResolution.Semantics.CaseSensitivity;
+            root.PathIdentityState = PathIdentityState.Valid;
+            root.PathIdentityKey = FileSystemPathIdentity.CreateKey(
+                "root",
+                root.Path,
+                rootResolution.Semantics);
+            await _rootFolderRepository.UpdateAsync(root);
+
+            var destination = Path.Join(tempRoot, "Shared Destination");
+            var existingAudiobook = new AudiobookBuilder()
+                .WithTitle("Existing Book")
+                .WithBasePath(destination)
+                .Build();
+            existingAudiobook.Asin = "EXISTING-ASIN";
+            var existing = await _audiobookRepository.AddAsync(existingAudiobook);
+
+            var result = await _provider.GetRequiredService<LibraryController>().AddToLibrary(
+                new LibraryController.AddToLibraryRequest
+                {
+                    Metadata = new AudibleBookMetadata
+                    {
+                        Title = "Different Book",
+                        Asin = "DIFFERENT-ASIN",
+                        Author = "Different Author"
+                    },
+                    DestinationPath = destination,
+                    Monitored = true
+                });
+
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            var payload = System.Text.Json.JsonSerializer.Serialize(
+                badRequest.Value,
+                new System.Text.Json.JsonSerializerOptions(
+                    System.Text.Json.JsonSerializerDefaults.Web));
+            using var document = System.Text.Json.JsonDocument.Parse(payload);
+            Assert.Equal(
+                "destination_path_blocked",
+                document.RootElement.GetProperty("code").GetString());
+            Assert.Contains(
+                "already assigned",
+                document.RootElement.GetProperty("message").GetString(),
+                StringComparison.OrdinalIgnoreCase);
+            var persisted = await _audiobookRepository.GetAllAsync();
+            Assert.Single(persisted);
+            Assert.Equal(existing.Id, persisted[0].Id);
+        }
+
+        [LinuxFact]
+        public async Task AddToLibrary_StalePersistedInsensitiveRoot_DoesNotTurnCaseDistinctDestinationIntoExistingConflict()
+        {
+            await ReinitializeAsync(builder => builder
+                .WithScoped<ILibraryDestinationMutationGuard>(provider =>
+                    new LibraryDestinationMutationGuard(
+                        provider.GetRequiredService<IRootFolderService>(),
+                        provider.GetRequiredService<IRootFolderRelocationService>(),
+                        provider.GetRequiredService<IFileSystemSemanticsResolver>(),
+                        provider.GetRequiredService<IAudiobookRepository>())));
+            var persistedSemantics = new FileSystemPathSemantics(
+                FileSystemPathSyntax.Unix,
+                FileSystemCaseSensitivity.Insensitive);
+            var root = Assert.Single(await _rootFolderRepository.GetAllAsync());
+            root.CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto;
+            root.ResolvedCaseSensitivity = FileSystemCaseSensitivity.Insensitive;
+            root.PathIdentityState = PathIdentityState.Valid;
+            root.PathIdentityKey = FileSystemPathIdentity.CreateKey(
+                "root",
+                root.Path,
+                persistedSemantics);
+            await _rootFolderRepository.UpdateAsync(root);
+
+            var existingPath = Path.Join(tempRoot, "CaseBook");
+            var requestedPath = Path.Join(tempRoot, "casebook");
+            await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Existing Case Book")
+                .WithBasePath(existingPath)
+                .Build());
+
+            var result = await _provider.GetRequiredService<LibraryController>().AddToLibrary(
+                new LibraryController.AddToLibraryRequest
+                {
+                    Metadata = new AudibleBookMetadata
+                    {
+                        Title = "Distinct Case Book"
+                    },
+                    DestinationPath = requestedPath,
+                    Monitored = true
+                });
+
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            Assert.Contains(
+                "filesystem identity is unavailable",
+                badRequest.Value?.ToString() ?? string.Empty,
+                StringComparison.OrdinalIgnoreCase);
+            Assert.Single(await _audiobookRepository.GetAllAsync());
+        }
+
+        [Fact]
+        public async Task AddToLibrary_IdentifierlessDifferentDestination_RemainsAllowed()
+        {
+            var controller = _provider.GetRequiredService<LibraryController>();
+            LibraryController.AddToLibraryRequest CreateRequest(string destination) => new()
+            {
+                Metadata = new AudibleBookMetadata
+                {
+                    Title = "Identifierless Distinct Destination"
+                },
+                DestinationPath = destination,
+                Monitored = true
+            };
+
+            Assert.IsType<OkObjectResult>(await controller.AddToLibrary(
+                CreateRequest(Path.Join(tempRoot, "Edition A"))));
+            Assert.IsType<OkObjectResult>(await controller.AddToLibrary(
+                CreateRequest(Path.Join(tempRoot, "Edition B"))));
+
+            Assert.Equal(2, (await _audiobookRepository.GetAllAsync()).Count);
+        }
+
+        [Fact]
         public async Task AddToLibrary_BlockedAuthorLookupDoesNotBlockUnrelatedFilesystemMutation()
         {
             using var httpClient = new HttpClient();
@@ -697,6 +911,35 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
+        public async Task AddToLibrary_ConfiguredRootsExist_LegacyOutputPathDoesNotGrantIndependentDestinationAuthority()
+        {
+            var legacyOutputPath = FileService.GetTempDirectory(
+                "listenarr-stale-output");
+            var settings = await _applicationSettingsRepository.GetAsync()
+                ?? await _applicationSettingsRepository.InitializeIfMissingAsync(
+                    new ApplicationSettingsBuilder().Build());
+            settings.OutputPath = legacyOutputPath;
+            await _applicationSettingsRepository.SaveAsync(settings);
+            var destination = Path.Join(legacyOutputPath, "Legacy Author", "Legacy Book");
+
+            var result = await _provider.GetRequiredService<LibraryController>().AddToLibrary(
+                new LibraryController.AddToLibraryRequest
+                {
+                    Metadata = new AudibleBookMetadata
+                    {
+                        Title = "Legacy Output Authority",
+                        Author = "Legacy Author"
+                    },
+                    DestinationPath = destination,
+                    Monitored = true
+                });
+
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            Assert.Equal(StatusCodes.Status400BadRequest, badRequest.StatusCode);
+            Assert.Empty(await _audiobookRepository.GetAllAsync());
+        }
+
+        [Fact]
         public async Task AddToLibrary_WithCustomPath_StoresCustomPathAsBasePath()
         {
             var controller = _provider.GetRequiredService<LibraryController>();
@@ -754,6 +997,140 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 Path.Join("Valid Author", "Valid Title"),
                 audiobook.BasePath,
                 StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public async Task ExplicitManagedDestination_DoesNotRequireLegacySettingsRead_InServiceOrFallbackWorkflow()
+        {
+            var configurationService = new Mock<IConfigurationService>(MockBehavior.Strict);
+            configurationService.Setup(service => service.GetApplicationSettingsAsync())
+                .ThrowsAsync(new InvalidOperationException("Injected legacy settings outage."));
+            await ReinitializeAsync(builder => builder
+                .WithSingleton<IConfigurationService>(configurationService.Object));
+
+            var serviceDestination = Path.Join(
+                tempRoot,
+                "Settings Independent",
+                "Service Book");
+            var serviceResult = await _provider
+                .GetRequiredService<LibraryController>()
+                .AddToLibrary(new LibraryController.AddToLibraryRequest
+                {
+                    Metadata = new AudibleBookMetadata
+                    {
+                        Title = "Settings Independent Service Book",
+                        Author = "Settings Independent"
+                    },
+                    DestinationPath = serviceDestination,
+                    Monitored = true
+                });
+            Assert.IsType<OkObjectResult>(serviceResult);
+
+            var workflow = new LibraryAddWorkflow(
+                _provider.GetRequiredService<IAudiobookRepository>(),
+                _provider.GetRequiredService<IImageCacheService>(),
+                _provider.GetRequiredService<IServiceScopeFactory>(),
+                _provider.GetRequiredService<IHistoryRepository>(),
+                _provider.GetRequiredService<ILibraryDestinationMutationGuard>(),
+                _provider.GetRequiredService<IFilesystemMutationCoordinator>(),
+                _provider.GetRequiredService<ILogger<LibraryAddWorkflow>>());
+            var fallbackDestination = Path.Join(
+                tempRoot,
+                "Settings Independent",
+                "Fallback Book");
+            var fallbackResult = await workflow.AddAsync(
+                new LibraryController.AddToLibraryRequest
+                {
+                    Metadata = new AudibleBookMetadata
+                    {
+                        Title = "Settings Independent Fallback Book",
+                        Author = "Settings Independent"
+                    },
+                    DestinationPath = fallbackDestination,
+                    Monitored = true
+                });
+            Assert.IsType<OkObjectResult>(fallbackResult);
+            Assert.Equal(2, (await _audiobookRepository.GetAllAsync()).Count);
+        }
+
+        [Fact]
+        public async Task AddWorkflowFallback_PostCommitNotificationSettingsFailure_ReturnsSuccessAndWritesHistory()
+        {
+            var configurationService = new Mock<IConfigurationService>(MockBehavior.Strict);
+            configurationService.Setup(service => service.GetApplicationSettingsAsync())
+                .ThrowsAsync(new InvalidOperationException("Injected notification settings outage."));
+            await ReinitializeAsync(builder => builder
+                .WithSingleton<IConfigurationService>(configurationService.Object));
+            var notificationService = new Mock<INotificationService>(MockBehavior.Strict);
+            var workflow = new LibraryAddWorkflow(
+                _provider.GetRequiredService<IAudiobookRepository>(),
+                _provider.GetRequiredService<IImageCacheService>(),
+                _provider.GetRequiredService<IServiceScopeFactory>(),
+                _provider.GetRequiredService<IHistoryRepository>(),
+                _provider.GetRequiredService<ILibraryDestinationMutationGuard>(),
+                _provider.GetRequiredService<IFilesystemMutationCoordinator>(),
+                _provider.GetRequiredService<ILogger<LibraryAddWorkflow>>(),
+                notificationService.Object,
+                libraryAddService: null);
+            var destination = Path.Join(
+                tempRoot,
+                "Post Commit",
+                "Notification Failure");
+
+            var result = await workflow.AddAsync(
+                new LibraryController.AddToLibraryRequest
+                {
+                    Metadata = new AudibleBookMetadata
+                    {
+                        Title = "Post Commit Notification Failure",
+                        Author = "Post Commit"
+                    },
+                    DestinationPath = destination,
+                    Monitored = true
+                });
+
+            Assert.IsType<OkObjectResult>(result);
+            var audiobook = Assert.Single(await _audiobookRepository.GetAllAsync());
+            Assert.Single(await _historyRepository.GetByAudiobookIdAsync(audiobook.Id));
+            notificationService.VerifyNoOtherCalls();
+        }
+
+        [Fact]
+        public async Task AddWorkflowFallback_PostCommitHistoryFailure_ReturnsSuccess()
+        {
+            var historyRepository = new Mock<IHistoryRepository>(MockBehavior.Strict);
+            historyRepository.Setup(repository => repository.AddAsync(It.IsAny<History>()))
+                .ThrowsAsync(new IOException("Injected history outage."));
+            var workflow = new LibraryAddWorkflow(
+                _provider.GetRequiredService<IAudiobookRepository>(),
+                _provider.GetRequiredService<IImageCacheService>(),
+                _provider.GetRequiredService<IServiceScopeFactory>(),
+                historyRepository.Object,
+                _provider.GetRequiredService<ILibraryDestinationMutationGuard>(),
+                _provider.GetRequiredService<IFilesystemMutationCoordinator>(),
+                _provider.GetRequiredService<ILogger<LibraryAddWorkflow>>(),
+                notificationService: null,
+                libraryAddService: null);
+            var destination = Path.Join(
+                tempRoot,
+                "Post Commit",
+                "History Failure");
+
+            var result = await workflow.AddAsync(
+                new LibraryController.AddToLibraryRequest
+                {
+                    Metadata = new AudibleBookMetadata
+                    {
+                        Title = "Post Commit History Failure",
+                        Author = "Post Commit"
+                    },
+                    DestinationPath = destination,
+                    Monitored = true
+                });
+
+            Assert.IsType<OkObjectResult>(result);
+            Assert.Single(await _audiobookRepository.GetAllAsync());
+            historyRepository.VerifyAll();
         }
 
         [Fact]

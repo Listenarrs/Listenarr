@@ -223,8 +223,24 @@ internal sealed partial class MoveCleanupBoundaryResolver(
             if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
                     root.Path,
                     out var canonicalRoot,
-                    out _)
-                || !FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                    out _))
+            {
+                if (FileSystemPathIdentity.AmbiguousStoredBoundaryMayContainPath(
+                        root.Path,
+                        source,
+                        sourceSyntax,
+                        root.CaseSensitivityMode))
+                {
+                    candidates.Add(new ConfiguredRootCandidate(
+                        root.Path.Length,
+                        null,
+                        null,
+                        $"Configured source root '{root.Path}' may contain the source, but its persisted filesystem identity is ambiguous."));
+                }
+
+                continue;
+            }
+            if (!FileSystemPathIdentity.TryDetectAbsoluteSyntax(
                     canonicalRoot,
                     out var rootSyntax)
                 || rootSyntax != sourceSyntax)

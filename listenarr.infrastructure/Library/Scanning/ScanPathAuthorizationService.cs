@@ -21,10 +21,10 @@ internal sealed partial class ScanPathAuthorizationService(
                 "The scan path is invalid.");
         }
 
-        IReadOnlyList<AuthorizedRoot> roots;
+        AuthorizedRootSet rootSet;
         try
         {
-            roots = await LoadAuthorizedRootsAsync(cancellationToken);
+            rootSet = await LoadAuthorizedRootsAsync(cancellationToken);
         }
         catch (Exception exception) when (WorkerExceptionClassifier.IsNonFatal(exception))
         {
@@ -37,22 +37,48 @@ internal sealed partial class ScanPathAuthorizationService(
                 "Configured scan roots could not be loaded safely.");
         }
 
-        if (roots.Count == 0)
+        if (!FileSystemPathIdentity.TryDetectAbsoluteSyntaxForHost(
+                fullPath,
+                out var pathSyntax))
         {
             return ScanPathAuthorizationResult.Rejected(
-                ScanPathAuthorizationFailure.NoConfiguredRoots,
-                "No configured scan roots are available.");
+                ScanPathAuthorizationFailure.InvalidPath,
+                "The scan path does not have a valid host filesystem identity.");
         }
 
-        var boundary = roots
+        var boundary = rootSet.Roots
             .Where(root => FileSystemPathIdentity.IsSameOrInside(
                 fullPath,
                 root.Path,
                 root.Semantics))
             .OrderByDescending(root => root.Path.Length)
             .FirstOrDefault();
+        var unavailableRootLength = rootSet.UnavailableRoots
+            .Where(root => FileSystemPathIdentity.StoredBoundaryMayContainPath(
+                root.Path,
+                fullPath,
+                pathSyntax,
+                root.RequestedMode))
+            .Select(root => root.Path.Length)
+            .DefaultIfEmpty(-1)
+            .Max();
+        var boundaryLength = boundary?.Path.Length ?? -1;
+        if (unavailableRootLength >= boundaryLength
+            && unavailableRootLength >= 0)
+        {
+            return ScanPathAuthorizationResult.Rejected(
+                ScanPathAuthorizationFailure.ConfigurationUnavailable,
+                "A configured root that may contain the scan path has unavailable or ambiguous filesystem identity.");
+        }
         if (boundary == null)
         {
+            if (rootSet.Roots.Count == 0)
+            {
+                return ScanPathAuthorizationResult.Rejected(
+                    ScanPathAuthorizationFailure.NoConfiguredRoots,
+                    "No configured scan roots are available.");
+            }
+
             return ScanPathAuthorizationResult.Rejected(
                 ScanPathAuthorizationFailure.OutsideConfiguredRoots,
                 "The scan path is not within a configured root folder.");
@@ -97,6 +123,33 @@ internal sealed partial class ScanPathAuthorizationService(
             return await AuthorizeAsync(storedPreferredPath, cancellationToken);
         }
 
+        RootFolder? defaultRoot;
+        try
+        {
+            defaultRoot = await rootFolderService.GetDefaultAsync();
+        }
+        catch (Exception exception) when (WorkerExceptionClassifier.IsNonFatal(exception))
+        {
+            logger.LogWarning(
+                exception,
+                "Unable to load the configured default root for a default scan");
+            return ScanPathAuthorizationResult.Rejected(
+                ScanPathAuthorizationFailure.ConfigurationUnavailable,
+                "The configured default scan root could not be loaded safely.");
+        }
+
+        if (defaultRoot != null)
+        {
+            if (!TryGetStoredFullPath(defaultRoot.Path, out var storedDefaultRoot))
+            {
+                return ScanPathAuthorizationResult.Rejected(
+                    ScanPathAuthorizationFailure.InvalidPath,
+                    "The configured default root is unavailable on this host.");
+            }
+
+            return await AuthorizeAsync(storedDefaultRoot, cancellationToken);
+        }
+
         ApplicationSettings? settings;
         try
         {
@@ -106,10 +159,10 @@ internal sealed partial class ScanPathAuthorizationService(
         {
             logger.LogWarning(
                 exception,
-                "Unable to load the configured output path for a default scan");
+                "Unable to load the legacy configured output path for a default scan");
             return ScanPathAuthorizationResult.Rejected(
                 ScanPathAuthorizationFailure.ConfigurationUnavailable,
-                "The configured output path could not be loaded safely.");
+                "The legacy configured output path could not be loaded safely.");
         }
 
         if (string.IsNullOrWhiteSpace(settings?.OutputPath))
@@ -127,117 +180,6 @@ internal sealed partial class ScanPathAuthorizationService(
         }
 
         return await AuthorizeAsync(storedOutputPath, cancellationToken);
-    }
-
-    private async Task<IReadOnlyList<AuthorizedRoot>> LoadAuthorizedRootsAsync(
-        CancellationToken cancellationToken)
-    {
-        var configuredRoots = await rootFolderService.GetAllAsync();
-        var settings = await configurationService.GetApplicationSettingsAsync();
-        var candidates = configuredRoots
-            .Select(root => new RootCandidate(
-                root.Path,
-                root.CaseSensitivityMode,
-                RequiresEnrollment: true,
-                RootFolderPathSemantics.ResolvePersisted(root),
-                root.DirectoryObjectIdentityVersion,
-                root.DirectoryObjectIdentity,
-                root.DirectoryObjectIdentityUnavailableReason))
-            .ToList();
-        if (!string.IsNullOrWhiteSpace(settings?.OutputPath))
-        {
-            candidates.Add(new RootCandidate(
-                settings.OutputPath,
-                FileSystemCaseSensitivityMode.Auto,
-                RequiresEnrollment: false,
-                PersistedSemantics: null,
-                DirectoryObjectIdentityVersion: null,
-                DirectoryObjectIdentity: null,
-                DirectoryObjectIdentityUnavailableReason: null));
-        }
-
-        var roots = new List<AuthorizedRoot>();
-        foreach (var candidate in candidates)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (!TryGetStoredFullPath(candidate.Path, out var fullPath))
-            {
-                LogUnavailableCandidate(
-                    candidate,
-                    "Ignoring invalid configured scan root {Path}");
-                continue;
-            }
-
-            var resolution = await semanticsResolver.ResolveAsync(
-                fullPath,
-                candidate.RequestedMode,
-                cancellationToken);
-            if (resolution.State != PathIdentityState.Valid)
-            {
-                LogUnavailableCandidate(
-                    candidate,
-                    "Ignoring configured scan root {Path}: {Reason}",
-                    resolution.Reason);
-                continue;
-            }
-            if (candidate.RequiresEnrollment
-                && (!candidate.PersistedSemantics.HasValue
-                    || candidate.PersistedSemantics.Value.DetectAmbiguousCaseMatches
-                    || candidate.PersistedSemantics.Value.Semantics.Syntax
-                        != resolution.Semantics.Syntax
-                    || candidate.PersistedSemantics.Value.Semantics.CaseSensitivity
-                        != resolution.Semantics.CaseSensitivity))
-            {
-                LogUnavailableCandidate(
-                    candidate,
-                    "Ignoring configured scan root {Path}: live filesystem semantics do not match its persisted root semantics.");
-                continue;
-            }
-
-            var canonical = FileSystemPathIdentity.Canonicalize(
-                fullPath,
-                resolution.Semantics.Syntax);
-            if (IsFilesystemRoot(canonical, resolution.Semantics))
-            {
-                LogUnavailableCandidate(
-                    candidate,
-                    "Ignoring unsafe filesystem-root scan boundary {Path}");
-                continue;
-            }
-
-            var duplicate = roots.FirstOrDefault(existing =>
-                existing.Semantics.Syntax == resolution.Semantics.Syntax
-                && FileSystemPathIdentity.AreEquivalent(
-                    existing.Path,
-                    canonical,
-                    existing.Semantics)
-                && FileSystemPathIdentity.AreEquivalent(
-                    existing.Path,
-                    canonical,
-                    resolution.Semantics));
-            if (duplicate != null)
-            {
-                if (duplicate.Semantics.CaseSensitivity
-                    != resolution.Semantics.CaseSensitivity)
-                {
-                    throw new InvalidOperationException(
-                        $"Configured scan root '{fullPath}' has conflicting filesystem semantics.");
-                }
-
-                continue;
-            }
-
-            roots.Add(new AuthorizedRoot(
-                canonical,
-                resolution.Semantics,
-                candidate.RequestedMode,
-                candidate.RequiresEnrollment,
-                candidate.DirectoryObjectIdentityVersion,
-                candidate.DirectoryObjectIdentity,
-                candidate.DirectoryObjectIdentityUnavailableReason));
-        }
-
-        return roots;
     }
 
     private async Task<PhysicalIdentityCapture> TryCapturePhysicalIdentityAsync(
@@ -448,6 +390,14 @@ internal sealed partial class ScanPathAuthorizationService(
         int? DirectoryObjectIdentityVersion,
         string? DirectoryObjectIdentity,
         string? DirectoryObjectIdentityUnavailableReason);
+
+    private sealed record AuthorizedRootSet(
+        IReadOnlyList<AuthorizedRoot> Roots,
+        IReadOnlyList<UnavailableAuthorizedRoot> UnavailableRoots);
+
+    private sealed record UnavailableAuthorizedRoot(
+        string Path,
+        FileSystemCaseSensitivityMode RequestedMode);
 
     private sealed record AuthorizedRoot(
         string Path,

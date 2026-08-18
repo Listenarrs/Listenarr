@@ -15,7 +15,8 @@ public partial class FileMover
             string source,
             string destination,
             Guid operationId,
-            string? expectedRegisteredPhysicalObjectIdentity)
+            string? expectedRegisteredPhysicalObjectIdentity,
+            FilePublicationSourceProof? expectedSourceProof)
     {
         if (_fileMutationJournalStore == null)
         {
@@ -53,6 +54,12 @@ public partial class FileMover
             {
                 return new MarkerlessRegistrationPreparation(true, null);
             }
+            if (expectedSourceProof.HasValue
+                && !initialSource.MatchesObjectIdentity(
+                    expectedSourceProof.Value.PhysicalObjectIdentity))
+            {
+                return new MarkerlessRegistrationPreparation(true, null);
+            }
 
             if (action == FileAction.Move
                 && !OperatingSystem.IsWindows()
@@ -71,7 +78,15 @@ public partial class FileMover
             var proof = await CaptureMarkerlessSourceProofAsync(
                 initialSource,
                 cancellationToken,
-                includeSha256: action != FileAction.HardlinkCopy);
+                includeSha256: expectedSourceProof.HasValue
+                    || action != FileAction.HardlinkCopy);
+            if (expectedSourceProof.HasValue
+                && !MatchesExpectedSourceProof(
+                    proof,
+                    expectedSourceProof.Value))
+            {
+                return new MarkerlessRegistrationPreparation(true, null);
+            }
             if (initialDestination != null)
             {
                 if (string.IsNullOrWhiteSpace(proof.Sha256)
@@ -101,6 +116,8 @@ public partial class FileMover
                     action,
                     gate.SourcePath,
                     gate.DestinationPath,
+                    gate.SourceParent.GetDirectoryObjectIdentity(),
+                    gate.DestinationParent.GetDirectoryObjectIdentity(),
                     proof.PhysicalObjectIdentity,
                     proof.Length,
                     proof.Sha256),
@@ -119,6 +136,22 @@ public partial class FileMover
         else
         {
             await ValidateMarkerlessRegistrationJournalAsync(journal, action, gate);
+            if (!JournalParentGenerationsMatchGate(journal, gate))
+            {
+                await MarkMarkerlessRegistrationNeedsAttentionAsync(
+                    journal,
+                    "A markerless registration parent directory changed physical generation while the operation was interrupted.",
+                    cancellationToken);
+                return new MarkerlessRegistrationPreparation(true, null);
+            }
+            if (expectedSourceProof.HasValue
+                && !JournalMatchesExpectedSourceProof(
+                    journal,
+                    expectedSourceProof.Value))
+            {
+                throw new InvalidOperationException(
+                    "The durable registration operation is bound to another source generation or content proof.");
+            }
         }
 
         if (journal.State == FileMutationJournalState.NeedsAttention)
@@ -233,7 +266,7 @@ public partial class FileMover
         var journal = _fileMutationJournalStore!.Get(operationId)
             ?? throw new InvalidOperationException(
                 "The markerless registration journal no longer exists.");
-        if (journal.ProtocolVersion != FileMutationProtocol.MarkerlessDatabaseState
+        if (journal.ProtocolVersion != FileMutationProtocol.Current
             || journal.Action != action
             || !string.Equals(
                 journal.TargetPhysicalObjectIdentity,
@@ -248,29 +281,82 @@ public partial class FileMover
             throw new InvalidOperationException(
                 "A markerless registration requiring attention cannot be committed.");
         }
+        var publicationMatch = ProbeMarkerlessJournalTarget(
+            journal,
+            targetPhysicalObjectIdentity);
+        if (publicationMatch == RegistrationPublicationMatchOutcome.Mismatch)
+        {
+            _ = _fileMutationJournalStore.Advance(
+                operationId,
+                FileMutationJournalState.NeedsAttention,
+                targetPhysicalObjectIdentity,
+                audiobookId,
+                "The registration destination changed before its journal commit.");
+            return false;
+        }
         if (journal.State < FileMutationJournalState.TargetVerified)
         {
             throw new InvalidOperationException(
                 "The markerless registration destination is not verified.");
         }
 
+        RegistrationPublicationMatchOutcome ValidateCommitPublication()
+        {
+            var validation = ProbeMarkerlessJournalTarget(
+                journal,
+                targetPhysicalObjectIdentity);
+            return validation == RegistrationPublicationMatchOutcome.Unavailable
+                ? RegistrationPublicationMatchOutcome.Match
+                : validation;
+        }
+
         if (journal.State < FileMutationJournalState.RegistrationCommitted)
         {
-            journal = _fileMutationJournalStore.Advance(
-                operationId,
-                FileMutationJournalState.RegistrationCommitted,
-                targetPhysicalObjectIdentity,
-                audiobookId,
-                error: null);
+            var commitValidation =
+                _fileMutationJournalStore.AdvanceWithCommitValidation(
+                    operationId,
+                    FileMutationJournalState.RegistrationCommitted,
+                    targetPhysicalObjectIdentity,
+                    audiobookId,
+                    error: null,
+                    ValidateCommitPublication);
+            if (commitValidation == RegistrationPublicationMatchOutcome.Mismatch)
+            {
+                _ = _fileMutationJournalStore.Advance(
+                    operationId,
+                    FileMutationJournalState.NeedsAttention,
+                    targetPhysicalObjectIdentity,
+                    audiobookId,
+                    "The registration destination changed while its durable owner commit was being recorded.");
+                return false;
+            }
+            journal = _fileMutationJournalStore.Get(operationId)
+                ?? throw new InvalidOperationException(
+                    "The markerless registration journal disappeared after owner commit.");
         }
         else if (!journal.AudiobookId.HasValue)
         {
-            journal = _fileMutationJournalStore.Advance(
-                operationId,
-                journal.State,
-                targetPhysicalObjectIdentity,
-                audiobookId,
-                error: null);
+            var ownerBindingValidation =
+                _fileMutationJournalStore.AdvanceWithCommitValidation(
+                    operationId,
+                    journal.State,
+                    targetPhysicalObjectIdentity,
+                    audiobookId,
+                    error: null,
+                    ValidateCommitPublication);
+            if (ownerBindingValidation == RegistrationPublicationMatchOutcome.Mismatch)
+            {
+                _ = _fileMutationJournalStore.Advance(
+                    operationId,
+                    FileMutationJournalState.NeedsAttention,
+                    targetPhysicalObjectIdentity,
+                    audiobookId,
+                    "The registration destination changed while its durable owner binding was being recorded.");
+                return false;
+            }
+            journal = _fileMutationJournalStore.Get(operationId)
+                ?? throw new InvalidOperationException(
+                    "The markerless registration journal disappeared after owner binding.");
         }
         else if (journal.AudiobookId.Value != audiobookId)
         {
@@ -281,12 +367,27 @@ public partial class FileMover
         if (action != FileAction.Move
             && journal.State < FileMutationJournalState.Completed)
         {
-            journal = _fileMutationJournalStore.Advance(
-                operationId,
-                FileMutationJournalState.Completed,
-                targetPhysicalObjectIdentity,
-                audiobookId,
-                error: null);
+            var completionValidation =
+                _fileMutationJournalStore.AdvanceWithCommitValidation(
+                    operationId,
+                    FileMutationJournalState.Completed,
+                    targetPhysicalObjectIdentity,
+                    audiobookId,
+                    error: null,
+                    ValidateCommitPublication);
+            if (completionValidation == RegistrationPublicationMatchOutcome.Mismatch)
+            {
+                _ = _fileMutationJournalStore.Advance(
+                    operationId,
+                    FileMutationJournalState.NeedsAttention,
+                    targetPhysicalObjectIdentity,
+                    audiobookId,
+                    "The registration destination changed before publication completion could be committed.");
+                return false;
+            }
+            journal = _fileMutationJournalStore.Get(operationId)
+                ?? throw new InvalidOperationException(
+                    "The markerless registration journal disappeared after publication completion.");
         }
 
         return journal.State != FileMutationJournalState.NeedsAttention
@@ -295,19 +396,6 @@ public partial class FileMover
                 : journal.State >= FileMutationJournalState.Completed);
     }
 
-    private async Task ValidateMarkerlessRegistrationJournalAsync(
-        FileMutationJournal journal,
-        FileAction action,
-        FileMoveGateLease gate)
-    {
-        if (journal.ProtocolVersion != FileMutationProtocol.MarkerlessDatabaseState
-            || journal.Action != action
-            || !await JournalPathsMatchGateAsync(journal, gate))
-        {
-            throw new InvalidOperationException(
-                "The durable registration identity does not match the requested operation.");
-        }
-    }
 
     private async Task MarkMarkerlessRegistrationNeedsAttentionAsync(
         FileMutationJournal journal,

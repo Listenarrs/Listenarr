@@ -226,6 +226,101 @@ public sealed class FileMutationJournalStoreTests : BaseTests
     }
 
     [Fact]
+    public async Task AdvanceWithCommitValidationAsync_MismatchRollsBackPersistedState()
+    {
+        var databasePath = Path.Join(
+            FileService.GetTempPath(),
+            $"file-mutation-validated-async-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+            .UseSqlite($"Data Source={databasePath};Pooling=False")
+            .Options;
+        var factory = new TestDbContextFactory(options);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            await db.Database.EnsureCreatedAsync();
+        }
+
+        var operationId = Guid.NewGuid();
+        var store = CreateStore(factory);
+        await store.GetOrCreateAsync(CreateClaim(operationId), CancellationToken.None);
+        await store.AdvanceAsync(
+            operationId,
+            FileMutationJournalState.SourceDeleted,
+            "target-generation",
+            audiobookId: null,
+            error: null,
+            CancellationToken.None);
+
+        var validationRan = false;
+        var outcome = await store.AdvanceWithCommitValidationAsync(
+            operationId,
+            FileMutationJournalState.Completed,
+            "target-generation",
+            audiobookId: null,
+            error: null,
+            _ =>
+            {
+                validationRan = true;
+                return Task.FromResult(
+                    RegistrationPublicationMatchOutcome.Mismatch);
+            },
+            CancellationToken.None);
+
+        Assert.True(validationRan);
+        Assert.Equal(RegistrationPublicationMatchOutcome.Mismatch, outcome);
+        var persisted = await store.GetAsync(operationId, CancellationToken.None);
+        Assert.NotNull(persisted);
+        Assert.Equal(FileMutationJournalState.SourceDeleted, persisted.State);
+    }
+
+    [Fact]
+    public async Task AdvanceWithCommitValidation_MismatchRollsBackPersistedState()
+    {
+        var databasePath = Path.Join(
+            FileService.GetTempPath(),
+            $"file-mutation-validated-sync-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+            .UseSqlite($"Data Source={databasePath};Pooling=False")
+            .Options;
+        var factory = new TestDbContextFactory(options);
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            await db.Database.EnsureCreatedAsync();
+        }
+
+        var operationId = Guid.NewGuid();
+        var store = CreateStore(factory);
+        await store.GetOrCreateAsync(CreateClaim(operationId), CancellationToken.None);
+        await store.AdvanceAsync(
+            operationId,
+            FileMutationJournalState.TargetVerified,
+            "target-generation",
+            audiobookId: null,
+            error: null,
+            CancellationToken.None);
+
+        var validationRan = false;
+        var outcome = store.AdvanceWithCommitValidation(
+            operationId,
+            FileMutationJournalState.RegistrationCommitted,
+            "target-generation",
+            audiobookId: 42,
+            error: null,
+            () =>
+            {
+                validationRan = true;
+                return RegistrationPublicationMatchOutcome.Mismatch;
+            });
+
+        Assert.True(validationRan);
+        Assert.Equal(RegistrationPublicationMatchOutcome.Mismatch, outcome);
+        var persisted = await store.GetAsync(operationId, CancellationToken.None);
+        Assert.NotNull(persisted);
+        Assert.Equal(FileMutationJournalState.TargetVerified, persisted.State);
+        Assert.Null(persisted.AudiobookId);
+    }
+
+    [Fact]
     public async Task AdvanceAsync_OwnerMetadataReconciledCannotBeWrittenOrReopenedByFilesystemStore()
     {
         var operationId = Guid.NewGuid();
@@ -322,6 +417,8 @@ public sealed class FileMutationJournalStoreTests : BaseTests
             FileAction.Move,
             Path.Join(FileService.GetTempPath(), "source.m4b"),
             Path.Join(FileService.GetTempPath(), "destination.m4b"),
+            "source-parent-generation",
+            "destination-parent-generation",
             "source-generation",
             SourceLength: 123,
             SourceSha256: new string('A', 64));

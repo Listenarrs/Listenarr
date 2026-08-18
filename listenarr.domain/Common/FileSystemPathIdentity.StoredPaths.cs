@@ -59,6 +59,12 @@ public static partial class FileSystemPathIdentity
             reason = $"The persisted path uses {detectedSyntax} filesystem syntax, but this host uses {effectiveHostSyntax} syntax.";
             return false;
         }
+        if (detectedSyntax == FileSystemPathSyntax.Windows
+            && IsWindowsNamespacePath(path))
+        {
+            reason = "The persisted Windows namespace path cannot be canonicalized as an ordinary filesystem path without changing its identity.";
+            return false;
+        }
 
         return TryCanonicalizeStoredAbsolutePathForHost(
             path,
@@ -152,6 +158,325 @@ public static partial class FileSystemPathIdentity
         }
 
         syntax = FileSystemPathSyntax.Unix;
+        return true;
+    }
+
+    /// <summary>
+    /// Conservatively determines whether a persisted boundary may contain a known
+    /// host path under the boundary's requested case-sensitivity mode. This is a
+    /// safety predicate only: contextual interpretation must never be used to
+    /// authorize, normalize, or persist an ambiguous or otherwise invalid boundary.
+    /// </summary>
+    public static bool StoredBoundaryMayContainPath(
+        string storedBoundary,
+        string candidatePath,
+        FileSystemPathSyntax candidateSyntax,
+        FileSystemCaseSensitivityMode boundaryCaseSensitivityMode)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(storedBoundary);
+        ArgumentException.ThrowIfNullOrWhiteSpace(candidatePath);
+
+        if (candidateSyntax == FileSystemPathSyntax.Windows
+            && IsWindowsNamespacePath(storedBoundary))
+        {
+            if (!TryNormalizeWindowsNamespacePathForSafety(
+                    storedBoundary,
+                    out var namespaceBoundary))
+            {
+                return true;
+            }
+
+            storedBoundary = namespaceBoundary;
+        }
+
+        FileSystemPathSyntax boundarySyntax;
+        if (TryDetectAbsoluteSyntax(storedBoundary, out var unambiguousSyntax))
+        {
+            if (unambiguousSyntax != candidateSyntax)
+            {
+                return false;
+            }
+            boundarySyntax = unambiguousSyntax;
+            if (ContainsNavigationSegments(storedBoundary, boundarySyntax))
+            {
+                return true;
+            }
+        }
+        else
+        {
+            if (!TryDetectAbsoluteSyntax(
+                    storedBoundary,
+                    candidateSyntax,
+                    out var contextualSyntax)
+                || contextualSyntax != candidateSyntax)
+            {
+                return false;
+            }
+            boundarySyntax = contextualSyntax;
+            if (ContainsNavigationSegments(storedBoundary, boundarySyntax))
+            {
+                return true;
+            }
+        }
+
+        try
+        {
+            var contextualBoundary = Canonicalize(
+                storedBoundary,
+                boundarySyntax);
+            var sensitivity = boundaryCaseSensitivityMode
+                == FileSystemCaseSensitivityMode.Sensitive
+                    ? FileSystemCaseSensitivity.Sensitive
+                    : FileSystemCaseSensitivity.Insensitive;
+            return IsSameOrInside(
+                candidatePath,
+                contextualBoundary,
+                new FileSystemPathSemantics(
+                    candidateSyntax,
+                    sensitivity));
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or InvalidOperationException
+                or NotSupportedException or PathTooLongException
+                or System.Security.SecurityException)
+        {
+            // Failure to compare a syntax-compatible boundary must not become
+            // permission to borrow unrelated live semantics.
+            return true;
+        }
+    }
+
+    public static bool AmbiguousStoredBoundaryMayContainPath(
+        string storedBoundary,
+        string candidatePath,
+        FileSystemPathSyntax candidateSyntax,
+        FileSystemCaseSensitivityMode boundaryCaseSensitivityMode) =>
+        StoredBoundaryMayContainPath(
+            storedBoundary,
+            candidatePath,
+            candidateSyntax,
+            boundaryCaseSensitivityMode);
+
+    /// <summary>
+    /// Conservatively determines whether a persisted endpoint may overlap a known
+    /// boundary. This is a safety predicate only: a same-host or ambiguous spelling
+    /// that cannot be proven outside the boundary must be treated as overlapping.
+    /// </summary>
+    public static bool StoredPathMayTouchBoundary(
+        string storedPath,
+        string boundaryPath,
+        FileSystemPathSemantics boundarySemantics,
+        PathIdentitySnapshot? storedIdentity = null,
+        FileSystemPathSemantics? storedSemantics = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(storedPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(boundaryPath);
+
+        if (boundarySemantics.CaseSensitivity == FileSystemCaseSensitivity.Unknown)
+        {
+            throw new InvalidOperationException(
+                "Boundary case sensitivity must be resolved before evaluating overlap.");
+        }
+
+        if (boundarySemantics.Syntax == FileSystemPathSyntax.Windows
+            && IsWindowsNamespacePath(storedPath))
+        {
+            if (storedIdentity.HasValue)
+            {
+                try
+                {
+                    storedIdentity.Value.ValidateForPath(storedPath);
+                }
+                catch (Exception exception) when (exception is
+                    ArgumentException or InvalidOperationException
+                        or NotSupportedException or PathTooLongException)
+                {
+                    return true;
+                }
+            }
+
+            if ((storedIdentity.HasValue
+                    && storedIdentity.Value.Syntax != FileSystemPathSyntax.Windows)
+                || (storedSemantics.HasValue
+                    && storedSemantics.Value.Syntax != FileSystemPathSyntax.Windows))
+            {
+                return true;
+            }
+            if (!TryNormalizeWindowsNamespacePathForSafety(
+                    storedPath,
+                    out var namespacePath)
+                || !TryCanonicalizeStoredAbsolutePathForHost(
+                    namespacePath,
+                    out var canonicalNamespacePath,
+                    out _,
+                    FileSystemPathSyntax.Windows))
+            {
+                return true;
+            }
+
+            var namespaceSemantics = storedIdentity?.Semantics
+                ?? storedSemantics
+                ?? boundarySemantics;
+            try
+            {
+                return EvaluateBoundaryConflict(
+                        canonicalNamespacePath,
+                        namespaceSemantics,
+                        boundaryPath,
+                        boundarySemantics)
+                    != FileSystemPathBoundaryConflict.None;
+            }
+            catch (Exception exception) when (exception is
+                ArgumentException or InvalidOperationException
+                    or NotSupportedException or PathTooLongException
+                    or System.Security.SecurityException)
+            {
+                return true;
+            }
+        }
+
+        string canonicalStoredPath;
+        FileSystemPathSemantics resolvedStoredSemantics;
+        if (storedIdentity.HasValue)
+        {
+            if (storedIdentity.Value.Syntax != boundarySemantics.Syntax)
+            {
+                return false;
+            }
+
+            try
+            {
+                storedIdentity.Value.ValidateForPath(storedPath);
+            }
+            catch (Exception exception) when (exception is
+                ArgumentException or InvalidOperationException
+                    or NotSupportedException or PathTooLongException)
+            {
+                return true;
+            }
+
+            if (!TryCanonicalizeStoredPathWithIdentityForHost(
+                    storedPath,
+                    storedIdentity.Value,
+                    out canonicalStoredPath,
+                    out _,
+                    boundarySemantics.Syntax))
+            {
+                return true;
+            }
+
+            resolvedStoredSemantics = storedIdentity.Value.Semantics;
+        }
+        else
+        {
+            var hasContextualSyntax = false;
+            if (!TryDetectAbsoluteSyntax(storedPath, out var detectedSyntax))
+            {
+                if (!storedSemantics.HasValue
+                    || !TryDetectAbsoluteSyntax(
+                        storedPath,
+                        storedSemantics.Value.Syntax,
+                        out detectedSyntax))
+                {
+                    // Ambiguous same-host syntax and invalid/relative persisted paths
+                    // cannot prove that an active filesystem owner is unrelated.
+                    return true;
+                }
+
+                hasContextualSyntax = true;
+            }
+            if (detectedSyntax != boundarySemantics.Syntax)
+            {
+                return false;
+            }
+
+            if (hasContextualSyntax)
+            {
+                try
+                {
+                    canonicalStoredPath = Canonicalize(storedPath, detectedSyntax);
+                }
+                catch (Exception exception) when (exception is
+                    ArgumentException or InvalidOperationException
+                        or NotSupportedException or PathTooLongException
+                        or System.Security.SecurityException)
+                {
+                    return true;
+                }
+            }
+            else if (!TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    storedPath,
+                    out canonicalStoredPath,
+                    out _,
+                    boundarySemantics.Syntax))
+            {
+                return true;
+            }
+
+            if (storedSemantics.HasValue
+                && storedSemantics.Value.Syntax != detectedSyntax)
+            {
+                return true;
+            }
+
+            resolvedStoredSemantics = storedSemantics ?? boundarySemantics;
+        }
+
+        try
+        {
+            return EvaluateBoundaryConflict(
+                    canonicalStoredPath,
+                    resolvedStoredSemantics,
+                    boundaryPath,
+                    boundarySemantics)
+                != FileSystemPathBoundaryConflict.None;
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or InvalidOperationException
+                or NotSupportedException or PathTooLongException
+                or System.Security.SecurityException)
+        {
+            return true;
+        }
+    }
+
+    private static bool IsWindowsNamespacePath(string path)
+    {
+        var normalized = path.Replace('/', '\\');
+        return normalized.StartsWith("\\\\?\\", StringComparison.Ordinal)
+            || normalized.StartsWith("\\\\.\\", StringComparison.Ordinal);
+    }
+
+    private static bool TryNormalizeWindowsNamespacePathForSafety(
+        string path,
+        out string normalizedPath)
+    {
+        normalizedPath = string.Empty;
+        var normalized = path.Replace('/', '\\');
+        if (!IsWindowsNamespacePath(normalized) || normalized.Length <= 4)
+        {
+            return false;
+        }
+
+        var remainder = normalized[4..];
+        if (remainder.StartsWith("UNC\\", StringComparison.OrdinalIgnoreCase))
+        {
+            var uncRemainder = remainder[4..];
+            if (string.IsNullOrWhiteSpace(uncRemainder))
+            {
+                return false;
+            }
+
+            normalizedPath = "\\\\" + uncRemainder;
+            return true;
+        }
+
+        if (!WindowsDrivePattern.IsMatch(remainder))
+        {
+            return false;
+        }
+
+        normalizedPath = remainder;
         return true;
     }
 

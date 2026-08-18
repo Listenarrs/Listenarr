@@ -196,6 +196,13 @@ public sealed partial class AudiobookFilesystemDeleteService
         {
             return;
         }
+        if (resolution.State == LibraryDirectoryOwnershipResolutionState.Unavailable
+            && resolution.IsTransient)
+        {
+            throw new IOException(
+                resolution.Reason
+                    ?? $"The missing {directoryKind} directory ownership proof is temporarily unavailable.");
+        }
         if (resolution.State != LibraryDirectoryOwnershipResolutionState.Owned
             || resolution.Ownership == null)
         {

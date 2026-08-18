@@ -122,6 +122,13 @@ internal sealed class RootFolderStorageConfirmationService(
                 "The root folder path changed before the folder could be confirmed.");
         }
 
+        await EnsureNoExternalRecoveryOwnerTouchesRootAsync(
+            db,
+            rootFolderId,
+            canonicalRootPath,
+            semantics.Semantics,
+            cancellationToken);
+
         var blockingJobs = await moveQueueService.GetFilesystemBlockingJobsAsync(
             cancellationToken);
         if (blockingJobs.Any(job =>
@@ -237,6 +244,82 @@ internal sealed class RootFolderStorageConfirmationService(
 
             throw;
         }
+    }
+
+    private static async Task EnsureNoExternalRecoveryOwnerTouchesRootAsync(
+        ListenArrDbContext db,
+        int rootFolderId,
+        string canonicalRootPath,
+        FileSystemPathSemantics semantics,
+        CancellationToken cancellationToken)
+    {
+        var audiobooks = await db.Audiobooks
+            .AsNoTracking()
+            .AsSplitQuery()
+            .Include(audiobook => audiobook.Files)
+            .ToListAsync(cancellationToken);
+        var audiobookIds = audiobooks
+            .Where(audiobook =>
+                PathTouchesConfirmedRoot(audiobook.BasePath, canonicalRootPath, semantics)
+                || PathTouchesConfirmedRoot(audiobook.FilePath, canonicalRootPath, semantics)
+                || (audiobook.Files?.Any(file =>
+                    PathTouchesConfirmedRoot(file.Path, canonicalRootPath, semantics)) ?? false))
+            .Select(audiobook => audiobook.Id)
+            .ToHashSet();
+        audiobookIds.UnionWith(await db.LibraryDirectoryOwnerships
+            .AsNoTracking()
+            .Where(ownership => ownership.ManagedRootFolderId == rootFolderId
+                && ownership.AudiobookId != null
+                && ownership.State != LibraryDirectoryOwnershipState.Removed)
+            .Select(ownership => ownership.AudiobookId!.Value)
+            .ToListAsync(cancellationToken));
+        var activeMutationJournals = await db.FileMutationJournals
+            .AsNoTracking()
+            .Where(journal =>
+                (journal.AudiobookFileId == null
+                    && journal.State != FileMutationJournalState.Completed)
+                || (journal.AudiobookId != null
+                    && journal.AudiobookFileId != null
+                    && (journal.AudiobookFileId == FileMutationOwner.CompanionFile
+                        ? journal.State != FileMutationJournalState.Completed
+                        : journal.State != FileMutationJournalState.OwnerMetadataReconciled)))
+            .ToListAsync(cancellationToken);
+        if (activeMutationJournals.Any(journal =>
+                (journal.AudiobookId.HasValue
+                    && audiobookIds.Contains(journal.AudiobookId.Value))
+                || PathTouchesConfirmedRoot(journal.SourcePath, canonicalRootPath, semantics)
+                || PathTouchesConfirmedRoot(journal.DestinationPath, canonicalRootPath, semantics)))
+        {
+            throw new InvalidOperationException(
+                "Resolve active file import or organize recovery under this root before confirming its storage folder.");
+        }
+
+        if (audiobookIds.Count > 0
+            && await db.AudiobookDeletionIntents
+                .AsNoTracking()
+                .AnyAsync(intent => audiobookIds.Contains(intent.AudiobookId)
+                    && intent.State != AudiobookDeletionIntentState.Completed,
+                    cancellationToken))
+        {
+            throw new InvalidOperationException(
+                "Resolve active audiobook deletion recovery under this root before confirming its storage folder.");
+        }
+    }
+
+    private static bool PathTouchesConfirmedRoot(
+        string? path,
+        string canonicalRootPath,
+        FileSystemPathSemantics semantics)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        return FileSystemPathIdentity.StoredPathMayTouchBoundary(
+            path,
+            canonicalRootPath,
+            semantics);
     }
 
     private static DirectoryObjectIdentityResolution CreateObservedIdentity(

@@ -1274,6 +1274,47 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
         }
 
         [Fact]
+        public async Task RequeueMoveAsync_ActiveRegistrationRecovery_BlocksBeforeDurableRequeue()
+        {
+            var jobs = new List<MoveJob>();
+            var persistence = CreateInMemoryPersistence(jobs);
+            var registrationProbe = new Mock<IFileRegistrationRecoveryProbe>(MockBehavior.Strict);
+            registrationProbe.SetupSequence(probe => probe.HasBlockingAsync(
+                    9,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(false)
+                .ReturnsAsync(false)
+                .ReturnsAsync(true);
+            var service = new MoveQueueService(
+                NullLogger<MoveQueueService>.Instance,
+                persistence.Object,
+                new NoopHubBroadcaster(),
+                TimeProvider.System,
+                BuildSemanticsResolver(),
+                fileRegistrationRecoveryProbe: registrationProbe.Object);
+            var jobId = await service.EnqueueMoveAsync(
+                9,
+                "/library/Title",
+                "/downloads/Title");
+            Assert.True(service.Reader.TryRead(out _));
+            await service.UpdateJobStatusAsync(
+                jobId,
+                LeaseOwner,
+                0,
+                MoveJobStatus.Failed,
+                "copy interrupted");
+
+            var conflict = await Assert.ThrowsAsync<ApplicationConflictException>(() =>
+                service.RequeueMoveAsync(jobId));
+
+            Assert.Equal("registration_recovery_pending", conflict.Code);
+            persistence.Verify(store => store.RequeueAsync(
+                It.IsAny<RequeueMoveCommand>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+            Assert.False(service.Reader.TryRead(out _));
+        }
+
+        [Fact]
         public async Task RequeueMoveAsync_ActiveRenameRecovery_BlocksBeforeDurableRequeue()
         {
             var jobs = new List<MoveJob>();
@@ -2378,6 +2419,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
             IRootFolderRelocationService? relocationService = null,
             IFilesystemMutationCoordinator? mutationCoordinator = null,
             IAudiobookDeletionIntentProbe? deletionIntentProbe = null,
+            IFileRegistrationRecoveryProbe? fileRegistrationRecoveryProbe = null,
             IFileRenameRecoveryProbe? fileRenameRecoveryProbe = null)
             : base(
                 NullLogger<AppMoveQueueService>.Instance,
@@ -2388,6 +2430,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
                 relocationService ?? Mock.Of<IRootFolderRelocationService>(),
                 mutationCoordinator ?? new FilesystemMutationCoordinator(),
                 deletionIntentProbe,
+                fileRegistrationRecoveryProbe,
                 fileRenameRecoveryProbe)
         {
             _semanticsResolver = semanticsResolver;

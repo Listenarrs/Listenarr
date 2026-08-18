@@ -293,6 +293,14 @@ public sealed partial class EfMoveQueuePersistence
                     persistedIdentity.BoundaryPath,
                     FileSystemCaseSensitivityMode.Auto,
                     cancellationToken);
+                if (current.State == PathIdentityState.Unavailable)
+                {
+                    // Identity-key reconciliation does not authorize filesystem mutation.
+                    // Preserve the persisted v2 semantics while the live probe is
+                    // temporarily unavailable; the worker revalidates Auto semantics
+                    // immediately before execution and schedules a retry until it can.
+                    return persistedIdentity;
+                }
                 if (current.State != PathIdentityState.Valid
                     || current.Semantics.Syntax != persistedIdentity.Syntax
                     || current.Semantics.CaseSensitivity != persistedIdentity.CaseSensitivity)

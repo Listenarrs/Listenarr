@@ -118,16 +118,62 @@ internal sealed partial class AudiobookContentMoveService
                 continue;
             }
 
+            PinnedDirectoryCreation.PinnedFileEntry? stableRenameEntry = null;
             if (existingTarget == null
                 && entry.CopyState == MoveJobEntryCopyState.Pending
                 && string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity))
             {
-                var stableRenameEntry = TryOpenMarkerlessStableNativeRenameSource(
+                stableRenameEntry = TryOpenMarkerlessStableNativeRenameSource(
                     entry,
                     sourceParent,
                     sourceEntry,
                     targetParent);
-                try
+            }
+
+            try
+            {
+                var observedHash = await ComputeMarkerlessSourceProofHashAsync(
+                    request,
+                    entry,
+                    sourcePath,
+                    sourceParent,
+                    sourceEntry,
+                    completedWorkUnits,
+                    totalWorkUnits,
+                    cancellationToken);
+                if (!string.IsNullOrWhiteSpace(entry.Sha256)
+                    && !string.Equals(
+                        entry.Sha256,
+                        observedHash,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new MoveNeedsAttentionException(
+                        $"Source file changed before markerless publication: {entry.RelativePath}");
+                }
+                if (string.IsNullOrWhiteSpace(entry.Sha256))
+                {
+                    await UpdateSourceEntryProofAsync(
+                        request.JobId,
+                        request.LeaseToken,
+                        entry.RelativePath,
+                        entry.SourcePhysicalObjectIdentity
+                            ?? sourceEntry.GetObjectIdentity(),
+                        observedHash,
+                        cancellationToken);
+                    entry.Sha256 = observedHash;
+                }
+                completedWorkUnits += GetProgressUnits(entry);
+                await ReportProgressAsync(
+                    request,
+                    CalculateWeightedProgress(
+                        5,
+                        65,
+                        completedWorkUnits,
+                        totalWorkUnits),
+                    "Verifying source",
+                    cancellationToken);
+
+                if (stableRenameEntry != null)
                 {
                     var nativeRename = await TryPublishMarkerlessNativeRenameAsync(
                         request,
@@ -147,7 +193,7 @@ internal sealed partial class AudiobookContentMoveService
                                 entry.RelativePath,
                                 nativeRename.VerificationLease);
                         }
-                        completedWorkUnits += checked(GetProgressUnits(entry) * 2);
+                        completedWorkUnits += GetProgressUnits(entry);
                         await ReportProgressAsync(
                             request,
                             CalculateWeightedProgress(
@@ -160,50 +206,11 @@ internal sealed partial class AudiobookContentMoveService
                         continue;
                     }
                 }
-                finally
-                {
-                    stableRenameEntry?.Dispose();
-                }
             }
-
-            var observedHash = await ComputeMarkerlessSourceProofHashAsync(
-                request,
-                entry,
-                sourcePath,
-                sourceEntry,
-                completedWorkUnits,
-                totalWorkUnits,
-                cancellationToken);
-            if (!string.IsNullOrWhiteSpace(entry.Sha256)
-                && !string.Equals(
-                    entry.Sha256,
-                    observedHash,
-                    StringComparison.OrdinalIgnoreCase))
+            finally
             {
-                throw new MoveNeedsAttentionException(
-                    $"Source file changed before markerless publication: {entry.RelativePath}");
+                stableRenameEntry?.Dispose();
             }
-            if (string.IsNullOrWhiteSpace(entry.Sha256))
-            {
-                await UpdateSourceEntryProofAsync(
-                    request.JobId,
-                    request.LeaseToken,
-                    entry.RelativePath,
-                    sourceEntry.GetObjectIdentity(),
-                    observedHash,
-                    cancellationToken);
-                entry.Sha256 = observedHash;
-            }
-            completedWorkUnits += GetProgressUnits(entry);
-            await ReportProgressAsync(
-                request,
-                CalculateWeightedProgress(
-                    5,
-                    65,
-                    completedWorkUnits,
-                    totalWorkUnits),
-                "Verifying source",
-                cancellationToken);
 
             if (existingTarget != null)
             {

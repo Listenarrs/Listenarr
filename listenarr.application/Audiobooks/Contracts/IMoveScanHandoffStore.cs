@@ -65,6 +65,12 @@ public interface IMoveScanHandoffStore
         MoveCompletionCommit command,
         CancellationToken cancellationToken = default);
 
+    Task<MoveCompletionCommitResult> CommitMoveCompletionAsync(
+        MoveCompletionCommit command,
+        Func<CancellationToken, Task<RegistrationPublicationMatchOutcome>>
+            commitValidation,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<Guid>> GetClaimableIdsAsync(
         DateTimeOffset now,
         int limit,

@@ -38,6 +38,7 @@ namespace Listenarr.Application.Audiobooks.Jobs
         private readonly IFileSystemSemanticsResolver _semanticsResolver;
         private readonly IFilesystemMutationCoordinator _mutationCoordinator;
         private readonly IAudiobookDeletionIntentProbe? _deletionIntentProbe;
+        private readonly IFileRegistrationRecoveryProbe? _fileRegistrationRecoveryProbe;
         private readonly IFileRenameRecoveryProbe? _fileRenameRecoveryProbe;
 
         public MoveQueueService(
@@ -49,6 +50,7 @@ namespace Listenarr.Application.Audiobooks.Jobs
             IRootFolderRelocationService relocationService,
             IFilesystemMutationCoordinator mutationCoordinator,
             IAudiobookDeletionIntentProbe? deletionIntentProbe = null,
+            IFileRegistrationRecoveryProbe? fileRegistrationRecoveryProbe = null,
             IFileRenameRecoveryProbe? fileRenameRecoveryProbe = null)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -59,6 +61,7 @@ namespace Listenarr.Application.Audiobooks.Jobs
             _mutationCoordinator = mutationCoordinator ?? throw new ArgumentNullException(nameof(mutationCoordinator));
             _relocationService = relocationService ?? throw new ArgumentNullException(nameof(relocationService));
             _deletionIntentProbe = deletionIntentProbe;
+            _fileRegistrationRecoveryProbe = fileRegistrationRecoveryProbe;
             _fileRenameRecoveryProbe = fileRenameRecoveryProbe;
         }
 

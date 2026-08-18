@@ -327,6 +327,34 @@ public partial class FileMover
             journal.DestinationPath,
             gate.DestinationIdentity);
 
+    private static bool JournalParentGenerationsMatchGate(
+        FileMutationJournal journal,
+        FileMoveGateLease gate)
+    {
+        if (string.IsNullOrWhiteSpace(
+                journal.SourceParentDirectoryObjectIdentity)
+            || string.IsNullOrWhiteSpace(
+                journal.DestinationParentDirectoryObjectIdentity))
+        {
+            return false;
+        }
+
+        try
+        {
+            return gate.SourceParent.MatchesDirectoryObjectIdentity(
+                    journal.SourceParentDirectoryObjectIdentity)
+                && gate.DestinationParent.MatchesDirectoryObjectIdentity(
+                    journal.DestinationParentDirectoryObjectIdentity);
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or InvalidOperationException
+                or NotSupportedException or PlatformNotSupportedException
+                or System.ComponentModel.Win32Exception)
+        {
+            return false;
+        }
+    }
+
     private async Task<bool> PersistedPathMatchesEndpointAsync(
         string persistedPath,
         string endpointIdentity)

@@ -63,10 +63,19 @@ internal sealed partial class AudiobookContentMoveService
         internal void EnsureVisibleHierarchy()
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_anchors.Any(anchor => !anchor.VisiblePathMatches()))
+            foreach (var anchor in _anchors)
             {
-                throw new MoveNeedsAttentionException(
-                    "A pinned move directory hierarchy changed during mutation.");
+                var visibility = anchor.ProbeVisiblePathMatch();
+                if (visibility == RegistrationPublicationMatchOutcome.Unavailable)
+                {
+                    throw new IOException(
+                        "A pinned move directory hierarchy is temporarily unavailable during mutation.");
+                }
+                if (visibility != RegistrationPublicationMatchOutcome.Match)
+                {
+                    throw new MoveNeedsAttentionException(
+                        "A pinned move directory hierarchy changed during mutation.");
+                }
             }
         }
 

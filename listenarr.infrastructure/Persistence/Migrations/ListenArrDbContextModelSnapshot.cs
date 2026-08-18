@@ -178,7 +178,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("Timestamp");
 
-                    b.ToTable("History");
+                    b.ToTable("History", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.ActivityHistory.ProcessExecutionLog", b =>
@@ -216,7 +216,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ProcessExecutionLogs");
+                    b.ToTable("ProcessExecutionLogs", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Audiobooks.Audiobook", b =>
@@ -323,7 +323,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("QualityProfileId");
 
-                    b.ToTable("Audiobooks");
+                    b.ToTable("Audiobooks", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Audiobooks.AudiobookDeletionIntent", b =>
@@ -535,7 +535,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasFilter("\"PathOwnershipKey\" IS NOT NULL");
 
-                    b.ToTable("AudiobookFiles");
+                    b.ToTable("AudiobookFiles", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Audiobooks.AudiobookSeriesMembership", b =>
@@ -630,7 +630,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.HasIndex("AuthorNameNormalized", "Region")
                         .IsUnique();
 
-                    b.ToTable("AuthorCacheEntries");
+                    b.ToTable("AuthorCacheEntries", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Audiobooks.LibraryDirectoryOwnership", b =>
@@ -895,7 +895,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.HasIndex("AuthorNameNormalized", "Region", "Language")
                         .IsUnique();
 
-                    b.ToTable("MonitoredAuthors");
+                    b.ToTable("MonitoredAuthors", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Audiobooks.MonitoredSeries", b =>
@@ -951,7 +951,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.HasIndex("SeriesNameNormalized", "Region", "Language")
                         .IsUnique();
 
-                    b.ToTable("MonitoredSeries");
+                    b.ToTable("MonitoredSeries", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Audiobooks.MoveJob", b =>
@@ -1096,7 +1096,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("Status", "NextAttemptAt", "LeaseExpiresAt");
 
-                    b.ToTable("MoveJobs");
+                    b.ToTable("MoveJobs", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Audiobooks.MoveJobCreatedDirectory", b =>
@@ -1330,7 +1330,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("QualityProfiles");
+                    b.ToTable("QualityProfiles", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Audiobooks.RootFolder", b =>
@@ -1647,7 +1647,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.HasIndex("SeriesNameNormalized", "Region")
                         .IsUnique();
 
-                    b.ToTable("SeriesCacheEntries");
+                    b.ToTable("SeriesCacheEntries", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Configuration.ApiConfiguration", b =>
@@ -1698,7 +1698,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ApiConfigurations");
+                    b.ToTable("ApiConfigurations", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Configuration.ApplicationSettings", b =>
@@ -1853,7 +1853,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ApplicationSettings");
+                    b.ToTable("ApplicationSettings", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Downloads.Download", b =>
@@ -1972,7 +1972,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("Status");
 
-                    b.ToTable("Downloads");
+                    b.ToTable("Downloads", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Downloads.DownloadClientConfiguration", b =>
@@ -2027,7 +2027,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("DownloadClientConfigurations");
+                    b.ToTable("DownloadClientConfigurations", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Downloads.DownloadProcessingJob", b =>
@@ -2101,7 +2101,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("DownloadId", "Status");
 
-                    b.ToTable("DownloadProcessingJobs");
+                    b.ToTable("DownloadProcessingJobs", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Downloads.FileMutationJournal", b =>
@@ -2124,6 +2124,11 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("DestinationParentDirectoryObjectIdentity")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("DestinationPath")
                         .IsRequired()
                         .HasMaxLength(4096)
@@ -2140,6 +2145,11 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
 
                     b.Property<long>("SourceLength")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("SourceParentDirectoryObjectIdentity")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("SourcePath")
                         .IsRequired()
@@ -2205,7 +2215,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("RemotePathMappings");
+                    b.ToTable("RemotePathMappings", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Identity.User", b =>
@@ -2233,7 +2243,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Users");
+                    b.ToTable("Users", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Identity.UserSession", b =>
@@ -2276,7 +2286,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("Username");
 
-                    b.ToTable("UserSessions");
+                    b.ToTable("UserSessions", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Search.Indexer", b =>
@@ -2360,7 +2370,7 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Indexers");
+                    b.ToTable("Indexers", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Audiobooks.Audiobook", b =>

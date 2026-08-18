@@ -94,24 +94,44 @@ internal sealed partial class PinnedDirectoryCreation : IDisposable
             : TryCreateUnix(parentPath, childName);
     }
 
-    public bool VisiblePathMatches()
+    public bool VisiblePathMatches() =>
+        ProbeVisiblePathMatch() == RegistrationPublicationMatchOutcome.Match;
+
+    internal RegistrationPublicationMatchOutcome ProbeVisiblePathMatch()
     {
         ThrowIfDisposed();
         if (!Created || _directoryHandle == null || _directoryHandle.IsInvalid)
         {
-            return false;
+            return RegistrationPublicationMatchOutcome.Mismatch;
         }
 
         try
         {
             using var visible = OpenVisibleDirectory(FullPath);
-            return HandlesIdentifySameDirectory(_directoryHandle, visible);
+            return HandlesIdentifySameDirectory(_directoryHandle, visible)
+                ? RegistrationPublicationMatchOutcome.Match
+                : RegistrationPublicationMatchOutcome.Mismatch;
+        }
+        catch (FileNotFoundException)
+        {
+            return RegistrationPublicationMatchOutcome.Mismatch;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return RegistrationPublicationMatchOutcome.Mismatch;
+        }
+        catch (Win32Exception exception) when (
+            OperatingSystem.IsWindows()
+                ? exception.NativeErrorCode is 2 or 3
+                : exception.NativeErrorCode == 2)
+        {
+            return RegistrationPublicationMatchOutcome.Mismatch;
         }
         catch (Exception exception) when (exception is
             IOException or UnauthorizedAccessException or Win32Exception
                 or PlatformNotSupportedException)
         {
-            return false;
+            return RegistrationPublicationMatchOutcome.Unavailable;
         }
     }
 
@@ -212,7 +232,14 @@ internal sealed partial class PinnedDirectoryCreation : IDisposable
                 created: true,
                 parentFollowsVisibleFinalLink: false);
             directoryHandle = null;
-            if (!created.VisiblePathMatches())
+            var visibility = created.ProbeVisiblePathMatch();
+            if (visibility == RegistrationPublicationMatchOutcome.Unavailable)
+            {
+                created.Dispose();
+                throw new IOException(
+                    "The newly created directory is temporarily unavailable before it can be pinned.");
+            }
+            if (visibility != RegistrationPublicationMatchOutcome.Match)
             {
                 created.Dispose();
                 throw new InvalidOperationException(

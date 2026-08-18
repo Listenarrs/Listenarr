@@ -22,7 +22,7 @@ internal sealed partial class AudiobookContentMoveService
                 entry,
                 request.SourceSemantics,
                 "source");
-            if (File.Exists(sourcePath))
+            if (TryGetMarkerlessPathAttributes(sourcePath, out _))
             {
                 continue;
             }
@@ -33,10 +33,21 @@ internal sealed partial class AudiobookContentMoveService
                 request.TargetSemantics,
                 "target");
             var targetParentPath = Path.GetDirectoryName(targetPath);
-            if (string.IsNullOrWhiteSpace(targetParentPath)
-                || !Directory.Exists(targetParentPath))
+            if (string.IsNullOrWhiteSpace(targetParentPath))
             {
                 continue;
+            }
+            if (!TryGetMarkerlessPathAttributes(
+                    targetParentPath,
+                    out var targetParentAttributes))
+            {
+                continue;
+            }
+            if ((targetParentAttributes & FileAttributes.Directory) == 0
+                || (targetParentAttributes & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new MoveNeedsAttentionException(
+                    "Interrupted native-rename recovery target parent changed type or became linked.");
             }
 
             if (string.IsNullOrWhiteSpace(endpoints.TargetDirectoryObjectIdentity))
@@ -71,29 +82,64 @@ internal sealed partial class AudiobookContentMoveService
         PinnedDirectoryCreation.PinnedFileEntry sourceEntry,
         PinnedDirectoryCreation.PinnedDirectoryAnchor targetParent)
     {
-        if (!OperatingSystem.IsWindows()
-            || (faultInjector != null && !faultInjector.AllowMarkerlessFileRename)
-            || !sourceEntry.IsOnSameVolume(targetParent)
-            || sourceParent.TryOpenExistingFileForStableDeleteWithOutcome(
+        if (!(OperatingSystem.IsWindows()
+                || OperatingSystem.IsLinux()
+                || OperatingSystem.IsMacOS())
+            || (faultInjector != null && !faultInjector.AllowMarkerlessFileRename))
+        {
+            return null;
+        }
+
+        var stableOpenOutcome =
+            sourceParent.TryOpenExistingFileForStableDeleteWithOutcome(
                 Path.GetFileName(sourceEntry.FullPath),
-                out var stableEntry) != PinnedFileOpenOutcome.Opened
+                out var stableEntry);
+        if (stableOpenOutcome == PinnedFileOpenOutcome.Unavailable)
+        {
+            throw new IOException(
+                $"The markerless source is temporarily unavailable for stable retirement before publication: {entry.RelativePath}");
+        }
+        if (stableOpenOutcome != PinnedFileOpenOutcome.Opened
             || stableEntry == null)
         {
-            return null;
+            throw new MoveNeedsAttentionException(
+                $"The markerless source changed before stable retirement could be authorized: {entry.RelativePath}");
         }
 
-        if (!stableEntry.IdentifiesSameEntry(sourceEntry)
-            || !stableEntry.VisiblePathMatches()
-            || !stableEntry.MatchesMetadata(entry.Length, entry.LastWriteTimeUtc)
-            || string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
-            || !stableEntry.MatchesObjectIdentity(
-                entry.SourcePhysicalObjectIdentity))
+        try
+        {
+            if (!stableEntry.IdentifiesSameEntry(sourceEntry)
+                || !PinnedFileVisibleOrThrowUnavailable(
+                    stableEntry,
+                    $"The markerless native-rename source is temporarily unavailable: {entry.RelativePath}")
+                || !PinnedDirectoryVisibleOrThrowUnavailable(
+                    sourceParent,
+                    $"The markerless native-rename source parent is temporarily unavailable: {entry.RelativePath}")
+                || !PinnedDirectoryVisibleOrThrowUnavailable(
+                    targetParent,
+                    $"The markerless native-rename target parent is temporarily unavailable: {entry.RelativePath}")
+                || !stableEntry.MatchesMetadata(entry.Length, entry.LastWriteTimeUtc)
+                || string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
+                || !stableEntry.MatchesObjectIdentity(
+                    entry.SourcePhysicalObjectIdentity))
+            {
+                throw new MoveNeedsAttentionException(
+                    $"The markerless source changed before stable native-rename publication: {entry.RelativePath}");
+            }
+
+            if (!sourceEntry.IsOnSameVolume(targetParent))
+            {
+                stableEntry.Dispose();
+                return null;
+            }
+
+            return stableEntry;
+        }
+        catch
         {
             stableEntry.Dispose();
-            return null;
+            throw;
         }
-
-        return stableEntry;
     }
 
     private async Task<(bool Published, PinnedDirectoryCreation.PinnedFileEntry? VerificationLease)>
@@ -105,7 +151,7 @@ internal sealed partial class AudiobookContentMoveService
             PinnedDirectoryCreation.PinnedDirectoryAnchor sourceParent,
             PinnedDirectoryCreation.PinnedFileEntry sourceEntry,
             PinnedDirectoryCreation.PinnedDirectoryAnchor targetParent,
-            PinnedDirectoryCreation.PinnedFileEntry? stableRenameEntry,
+            PinnedDirectoryCreation.PinnedFileEntry stableRenameEntry,
             CancellationToken cancellationToken)
     {
         if ((faultInjector != null && !faultInjector.AllowMarkerlessFileRename)
@@ -114,22 +160,21 @@ internal sealed partial class AudiobookContentMoveService
             return (false, null);
         }
 
-        PinnedDirectoryCreation.PinnedFileEntry? ownedRenameEntry = null;
         PinnedDirectoryCreation.PinnedFileEntry? verificationLease = null;
         var renameEntry = stableRenameEntry;
-        if (renameEntry == null)
-        {
-            ownedRenameEntry = sourceParent.TryOpenExistingFile(
-                Path.GetFileName(sourceEntry.FullPath),
-                requireDeleteAccess: true);
-            renameEntry = ownedRenameEntry;
-        }
 
         try
         {
-            if (renameEntry == null
-                || !renameEntry.IdentifiesSameEntry(sourceEntry)
-                || !renameEntry.VisiblePathMatches()
+            if (!renameEntry.IdentifiesSameEntry(sourceEntry)
+                || !PinnedFileVisibleOrThrowUnavailable(
+                    renameEntry,
+                    $"The markerless native-rename source is temporarily unavailable before publication: {entry.RelativePath}")
+                || !PinnedDirectoryVisibleOrThrowUnavailable(
+                    sourceParent,
+                    $"The markerless native-rename source parent is temporarily unavailable before publication: {entry.RelativePath}")
+                || !PinnedDirectoryVisibleOrThrowUnavailable(
+                    targetParent,
+                    $"The markerless native-rename target parent is temporarily unavailable before publication: {entry.RelativePath}")
                 || string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
                 || !renameEntry.MatchesObjectIdentity(
                     entry.SourcePhysicalObjectIdentity))
@@ -142,6 +187,9 @@ internal sealed partial class AudiobookContentMoveService
                 source,
                 target,
                 cancellationToken);
+            faultInjector?.OnCopyMutation(
+                request.JobId,
+                CopyMutationFaultPoint.BeforeMarkerlessNativeRenameMutation);
             renameEntry.MoveTo(
                 targetParent,
                 Path.GetFileName(ResolveManifestPath(
@@ -161,7 +209,15 @@ internal sealed partial class AudiobookContentMoveService
             faultInjector?.OnCopyMutation(
                 request.JobId,
                 CopyMutationFaultPoint.AfterMarkerlessNativeRenameBeforeStateUpdate);
-            if (!renameEntry.VisiblePathMatches()
+            if (!PinnedFileVisibleOrThrowUnavailable(
+                    renameEntry,
+                    $"The markerless native-rename target is temporarily unavailable after publication: {entry.RelativePath}")
+                || !PinnedDirectoryVisibleOrThrowUnavailable(
+                    sourceParent,
+                    $"The markerless native-rename source parent is temporarily unavailable after publication: {entry.RelativePath}")
+                || !PinnedDirectoryVisibleOrThrowUnavailable(
+                    targetParent,
+                    $"The markerless native-rename target parent is temporarily unavailable after publication: {entry.RelativePath}")
                 || !renameEntry.MatchesObjectIdentity(
                     entry.SourcePhysicalObjectIdentity!))
             {
@@ -169,16 +225,15 @@ internal sealed partial class AudiobookContentMoveService
                     $"The markerless native rename target changed physical generation: {entry.RelativePath}");
             }
 
-            if (stableRenameEntry != null)
+            verificationLease = targetParent.OpenExistingFileForVerificationLease(
+                Path.GetFileName(renameEntry.FullPath));
+            if (!verificationLease.IdentifiesSameEntry(renameEntry)
+                || !PinnedFileVisibleOrThrowUnavailable(
+                    verificationLease,
+                    $"The markerless native-rename verification lease is temporarily unavailable: {entry.RelativePath}"))
             {
-                verificationLease = targetParent.OpenExistingFileForVerificationLease(
-                    Path.GetFileName(renameEntry.FullPath));
-                if (!verificationLease.IdentifiesSameEntry(renameEntry)
-                    || !verificationLease.VisiblePathMatches())
-                {
-                    throw new MoveNeedsAttentionException(
-                        $"The markerless native rename verification lease did not capture the published generation: {entry.RelativePath}");
-                }
+                throw new MoveNeedsAttentionException(
+                    $"The markerless native rename verification lease did not capture the published generation: {entry.RelativePath}");
             }
 
             var durableTargetIdentity = entry.SourcePhysicalObjectIdentity!;
@@ -198,7 +253,6 @@ internal sealed partial class AudiobookContentMoveService
         finally
         {
             verificationLease?.Dispose();
-            ownedRenameEntry?.Dispose();
         }
     }
 
@@ -209,7 +263,9 @@ internal sealed partial class AudiobookContentMoveService
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
-            || !targetEntry.VisiblePathMatches()
+            || !PinnedFileVisibleOrThrowUnavailable(
+                targetEntry,
+                $"The interrupted markerless native-rename target is temporarily unavailable: {entry.RelativePath}")
             || !targetEntry.MatchesObjectIdentity(
                 entry.SourcePhysicalObjectIdentity)
             || entry.CopyState is not (
@@ -307,7 +363,9 @@ internal sealed partial class AudiobookContentMoveService
     private static bool TargetMatchesMarkerlessRenameEntry(
         MoveJobEntry entry,
         PinnedDirectoryCreation.PinnedFileEntry targetEntry) =>
-        targetEntry.VisiblePathMatches()
+        PinnedFileVisibleOrThrowUnavailable(
+            targetEntry,
+            $"The markerless native-rename target is temporarily unavailable during cleanup: {entry.RelativePath}")
         && !string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
         && !string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity)
         && targetEntry.MatchesObjectIdentity(entry.SourcePhysicalObjectIdentity)

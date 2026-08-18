@@ -8,9 +8,24 @@ internal sealed partial class AudiobookContentMoveService
         AudiobookContentMoveRequest request,
         CancellationToken cancellationToken)
     {
-        if (request.TargetDirectoryOwnership != null || !Directory.Exists(request.Target))
+        if (request.TargetDirectoryOwnership != null)
+        {
+            RevalidateTargetDirectoryOwnership(
+                request,
+                request.TargetDirectoryOwnership);
+            return request;
+        }
+        if (!TryGetMarkerlessPathAttributes(
+                request.Target,
+                out var targetAttributes))
         {
             return request;
+        }
+        if ((targetAttributes & FileAttributes.Directory) == 0
+            || (targetAttributes & FileAttributes.ReparsePoint) != 0)
+        {
+            throw new MoveNeedsAttentionException(
+                "The move target changed type or became a link before durable ownership could be loaded.");
         }
 
         await TryRetireReplacedMarkerlessTargetOwnershipAsync(
@@ -29,9 +44,15 @@ internal sealed partial class AudiobookContentMoveService
         string target,
         CancellationToken cancellationToken)
     {
-        if (!Directory.Exists(target))
+        if (!TryGetMarkerlessPathAttributes(target, out var targetAttributes))
         {
             return;
+        }
+        if ((targetAttributes & FileAttributes.Directory) == 0
+            || (targetAttributes & FileAttributes.ReparsePoint) != 0)
+        {
+            throw new MoveNeedsAttentionException(
+                "The markerless target changed type or became a link while ownership replacement was being reconciled.");
         }
 
         var endpoints = await GetEndpointObjectIdentitiesAsync(
@@ -52,10 +73,21 @@ internal sealed partial class AudiobookContentMoveService
                     endpoints.TargetDirectoryObjectIdentity,
                     cancellationToken);
         }
+        catch (Exception exception) when (
+            FileSystemSafety.IsProvenMissingPathException(exception))
+        {
+            throw new MoveNeedsAttentionException(
+                $"The markerless target ownership replacement disappeared while it was being reconciled: {exception.Message}");
+        }
         catch (Exception exception) when (exception is
-            ArgumentException or IOException or UnauthorizedAccessException
-                or InvalidOperationException or NotSupportedException
-                or PathTooLongException or System.ComponentModel.Win32Exception)
+            IOException or UnauthorizedAccessException
+                or System.ComponentModel.Win32Exception)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or InvalidOperationException
+                or NotSupportedException or PathTooLongException)
         {
             throw new MoveNeedsAttentionException(
                 $"The markerless target ownership replacement could not be reconciled safely: {exception.Message}");
@@ -73,6 +105,13 @@ internal sealed partial class AudiobookContentMoveService
         if (resolution.State == LibraryDirectoryOwnershipResolutionState.Unowned)
         {
             return null;
+        }
+        if (resolution.State == LibraryDirectoryOwnershipResolutionState.Unavailable
+            && resolution.IsTransient)
+        {
+            throw new IOException(
+                resolution.Reason
+                    ?? "Durable target-directory ownership proof is temporarily unavailable.");
         }
         if (resolution.State != LibraryDirectoryOwnershipResolutionState.Owned
             || resolution.Ownership == null)
@@ -122,17 +161,32 @@ internal sealed partial class AudiobookContentMoveService
                     ownership.DirectoryObjectIdentityVersion,
                     ownership.DirectoryObjectIdentity,
                     ownership.OwnershipToken)
-                || !directory.VisiblePathMatches()
-                || !parent.VisiblePathMatches())
+                || !PinnedDirectoryVisibleOrThrowUnavailable(
+                    directory,
+                    "The target directory is temporarily unavailable while its ownership generation is being verified.")
+                || !PinnedDirectoryVisibleOrThrowUnavailable(
+                    parent,
+                    "The target directory parent is temporarily unavailable while ownership is being verified."))
             {
                 throw new InvalidOperationException(
                     "The target directory no longer matches its persisted physical ownership generation.");
             }
         }
+        catch (Exception exception) when (
+            FileSystemSafety.IsProvenMissingPathException(exception))
+        {
+            throw new MoveNeedsAttentionException(
+                $"The target-directory ownership disappeared: {exception.Message}");
+        }
         catch (Exception exception) when (exception is
-            ArgumentException or IOException or UnauthorizedAccessException
-                or InvalidOperationException or NotSupportedException
-                or PathTooLongException or System.ComponentModel.Win32Exception)
+            IOException or UnauthorizedAccessException
+                or System.ComponentModel.Win32Exception)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or InvalidOperationException
+                or NotSupportedException or PathTooLongException)
         {
             throw new MoveNeedsAttentionException(
                 $"The target-directory ownership changed: {exception.Message}");
@@ -165,11 +219,6 @@ internal sealed partial class AudiobookContentMoveService
                 throw new MoveNeedsAttentionException(
                     "A source directory has an interrupted ownership cleanup and cannot be moved.");
             }
-            if (!Directory.Exists(ownership.CanonicalPath))
-            {
-                throw new MoveNeedsAttentionException(
-                    "A durably owned source directory is missing.");
-            }
         }
 
         return ownerships;
@@ -188,6 +237,13 @@ internal sealed partial class AudiobookContentMoveService
         if (resolution.State == LibraryDirectoryOwnershipResolutionState.Unowned)
         {
             return null;
+        }
+        if (resolution.State == LibraryDirectoryOwnershipResolutionState.Unavailable
+            && resolution.IsTransient)
+        {
+            throw new IOException(
+                resolution.Reason
+                    ?? "Durable source-directory ownership proof is temporarily unavailable.");
         }
         if (resolution.State != LibraryDirectoryOwnershipResolutionState.Owned
             || resolution.Ownership == null)

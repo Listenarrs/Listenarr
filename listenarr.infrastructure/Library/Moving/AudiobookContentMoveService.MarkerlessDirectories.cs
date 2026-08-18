@@ -15,7 +15,7 @@ internal sealed partial class AudiobookContentMoveService
             manifest,
             request.TargetSemantics);
         var missing = desired
-            .Where(path => !Directory.Exists(path) && !File.Exists(path))
+            .Where(path => !TryGetMarkerlessPathAttributes(path, out _))
             .ToArray();
         await PersistCreatedDirectoriesAsync(
             request.JobId,
@@ -42,15 +42,20 @@ internal sealed partial class AudiobookContentMoveService
         foreach (var path in pathsToProcess.OrderBy(GetPathDepth))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (File.Exists(path))
+            var pathExists = TryGetMarkerlessPathAttributes(
+                path,
+                out var pathAttributes);
+            if (pathExists
+                && ((pathAttributes & FileAttributes.Directory) == 0
+                    || (pathAttributes & FileAttributes.ReparsePoint) != 0))
             {
                 throw new MoveNeedsAttentionException(
-                    $"A markerless target directory path is occupied by a file: {path}");
+                    $"A markerless target directory path is occupied by a file or link: {path}");
             }
 
             if (!ledger.TryGetValue(path, out var planned))
             {
-                if (!Directory.Exists(path))
+                if (!pathExists)
                 {
                     throw new MoveNeedsAttentionException(
                         "A required target directory was not durably planned before creation.");
@@ -59,7 +64,7 @@ internal sealed partial class AudiobookContentMoveService
                 continue;
             }
 
-            if (Directory.Exists(path))
+            if (pathExists)
             {
                 if (planned.State == MoveCreatedDirectoryState.Planned
                     && string.IsNullOrWhiteSpace(planned.DirectoryObjectIdentity))
@@ -113,7 +118,9 @@ internal sealed partial class AudiobookContentMoveService
 
             using var directory = creation.OpenCreatedDirectoryAnchor();
             var identity = directory.GetDirectoryObjectIdentity();
-            if (!directory.VisiblePathMatches())
+            if (!PinnedDirectoryVisibleOrThrowUnavailable(
+                    directory,
+                    $"A newly created target directory is temporarily unavailable before persistence: {path}"))
             {
                 throw new MoveNeedsAttentionException(
                     $"A newly created target directory changed before persistence: {path}");
@@ -174,8 +181,12 @@ internal sealed partial class AudiobookContentMoveService
             request.TargetSemantics,
             sourceBoundary: false);
         using var directory = parent.OpenExistingChild(Path.GetFileName(planned.Path));
-        if (!directory.VisiblePathMatches()
-            || !parent.VisiblePathMatches()
+        if (!PinnedDirectoryVisibleOrThrowUnavailable(
+                directory,
+                $"An unproven markerless target directory is temporarily unavailable during recovery: {planned.Path}")
+            || !PinnedDirectoryVisibleOrThrowUnavailable(
+                parent,
+                $"The parent of an unproven markerless target directory is temporarily unavailable during recovery: {planned.Path}")
             || Directory.EnumerateFileSystemEntries(planned.Path).Any())
         {
             throw new MoveNeedsAttentionException(
@@ -299,9 +310,8 @@ internal sealed partial class AudiobookContentMoveService
             return parent.TryCreateChildForPublication(Path.GetFileName(path));
         }
         catch (Exception exception) when (exception is
-            IOException or UnauthorizedAccessException or InvalidOperationException
-                or NotSupportedException or PathTooLongException
-                or System.ComponentModel.Win32Exception)
+            ArgumentException or InvalidOperationException
+                or NotSupportedException or PathTooLongException)
         {
             throw new MoveNeedsAttentionException(
                 $"The markerless target directory parent changed before creation: {path}. {exception.Message}");
@@ -324,8 +334,12 @@ internal sealed partial class AudiobookContentMoveService
         if (string.IsNullOrWhiteSpace(planned.DirectoryObjectIdentity)
             || !directory.MatchesDirectoryObjectIdentity(
                 planned.DirectoryObjectIdentity)
-            || !directory.VisiblePathMatches()
-            || !parent.VisiblePathMatches())
+            || !PinnedDirectoryVisibleOrThrowUnavailable(
+                directory,
+                $"A move-created target directory is temporarily unavailable: {planned.Path}")
+            || !PinnedDirectoryVisibleOrThrowUnavailable(
+                parent,
+                $"The parent of a move-created target directory is temporarily unavailable: {planned.Path}"))
         {
             throw new MoveNeedsAttentionException(
                 $"A move-created target directory changed physical generation: {planned.Path}");
@@ -373,7 +387,9 @@ internal sealed partial class AudiobookContentMoveService
             throw new MoveNeedsAttentionException(
                 "The markerless move target root changed physical generation.");
         }
-        if (!root.VisiblePathMatches())
+        if (!PinnedDirectoryVisibleOrThrowUnavailable(
+                root,
+                "The markerless target root is temporarily unavailable while pinned."))
         {
             throw new MoveNeedsAttentionException(
                 "The markerless target root changed while pinned.");

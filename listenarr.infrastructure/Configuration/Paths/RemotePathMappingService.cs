@@ -126,19 +126,6 @@ namespace Listenarr.Infrastructure.Configuration.Paths
             var mappings = await GetPathMappingByClientAsync(client);
             foreach (var mapping in mappings)
             {
-                if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
-                        mapping.LocalPath,
-                        out var localRoot,
-                        out var localReason))
-                {
-                    logger.LogWarning(
-                        "Remote path mapping {MappingId} has a local root that is unavailable on this host and was ignored for client {ClientId}: {Reason}",
-                        mapping.Id,
-                        client.Id,
-                        localReason);
-                    continue;
-                }
-
                 if (!TryGetRemoteSemantics(
                         mapping.RemotePath,
                         out var remoteSemantics))
@@ -157,6 +144,23 @@ namespace Listenarr.Infrastructure.Configuration.Paths
                     out var relativePath))
                 {
                     continue;
+                }
+
+                // Mappings are ordered from most-specific remote root to broadest.
+                // Once a mapping owns this remote path, an unusable local side must
+                // not silently delegate the same path to a broader mapping.
+                if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                        mapping.LocalPath,
+                        out var localRoot,
+                        out var localReason))
+                {
+                    logger.LogWarning(
+                        "Remote path mapping {MappingId} owns the reported path but its local root is unavailable on this host for client {ClientId}: {Reason}",
+                        mapping.Id,
+                        client.Id,
+                        localReason);
+                    throw new InvalidOperationException(
+                        $"The matching remote path mapping {mapping.Id} is unavailable on this host.");
                 }
 
                 if (string.IsNullOrEmpty(relativePath))
@@ -180,9 +184,11 @@ namespace Listenarr.Infrastructure.Configuration.Paths
                 }
 
                 logger.LogWarning(
-                    "Remote path mapping {MappingId} produced an unsafe mapped path for client {ClientId}",
+                    "Remote path mapping {MappingId} owns the reported path but produced an unsafe mapped path for client {ClientId}",
                     mapping.Id,
                     client.Id);
+                throw new InvalidOperationException(
+                    $"The matching remote path mapping {mapping.Id} produced an unsafe local path.");
             }
 
             return remotePath;

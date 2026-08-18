@@ -337,6 +337,102 @@ public sealed class EfMoveExecutionStoreTests : BaseTests
     }
 
     [Fact]
+    public async Task EnsureMutationAuthorizedAsync_TargetFilesystemSemanticsTemporarilyUnavailable_IsRetryable()
+    {
+        var databasePath = Path.Join(
+            FileService.GetTempPath(),
+            $"move-execution-semantics-unavailable-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+            .UseSqlite($"Data Source={databasePath};Foreign Keys=False")
+            .Options;
+        var factory = new TestDbContextFactory(options);
+        var jobId = Guid.NewGuid();
+        var lease = new MoveLeaseToken("worker", 1);
+        var source = FileService.GetTempDirectory("move-execution-unavailable-source");
+        var target = FileService.GetTempDirectory("move-execution-unavailable-target");
+        var semantics = FileSystemPathSemantics.CurrentHostDefault;
+        string targetBoundaryIdentity;
+        using (var boundary = PinnedDirectoryCreation.OpenPinnedBoundary(target))
+        {
+            targetBoundaryIdentity = ManagedDirectoryIdentity.CreateMarkerless(
+                boundary.GetDirectoryObjectIdentity());
+        }
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            await db.Database.EnsureCreatedAsync();
+            db.MoveJobs.Add(new MoveJob
+            {
+                Id = jobId,
+                AudiobookId = 1,
+                RequestedPath = target,
+                SourcePath = source,
+                SourcePathSyntax = semantics.Syntax,
+                SourceCaseSensitivity = semantics.CaseSensitivity,
+                SourceCaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
+                SourceIdentityBoundary = source,
+                TargetPathSyntax = semantics.Syntax,
+                TargetCaseSensitivity = semantics.CaseSensitivity,
+                TargetCaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
+                TargetIdentityBoundary = target,
+                Status = MoveJobStatus.Running,
+                LeaseOwner = lease.Owner,
+                LeaseGeneration = lease.Generation,
+                LeaseExpiresAt = DateTime.UtcNow.AddMinutes(5),
+                ActiveDeduplicationKey = $"test:{jobId:N}",
+                Entries =
+                [
+                    MoveManifestIdentity.CreateTargetBoundaryAuthorization(
+                        ManagedDirectoryIdentity.CurrentVersion,
+                        targetBoundaryIdentity)
+                ]
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var semanticsResolver = new Mock<IFileSystemSemanticsResolver>(MockBehavior.Strict);
+        semanticsResolver
+            .Setup(resolver => resolver.ResolveAsync(
+                source,
+                FileSystemCaseSensitivityMode.Auto,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileSystemSemanticsResolution(
+                semantics,
+                PathIdentityState.Valid,
+                source));
+        semanticsResolver
+            .Setup(resolver => resolver.ResolveAsync(
+                target,
+                FileSystemCaseSensitivityMode.Auto,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileSystemSemanticsResolution(
+                new FileSystemPathSemantics(
+                    semantics.Syntax,
+                    FileSystemCaseSensitivity.Unknown),
+                PathIdentityState.Unavailable,
+                target,
+                "Injected transient target semantics outage.",
+                target));
+        var store = new EfMoveExecutionStore(
+            factory,
+            TimeProvider.System,
+            semanticsResolver.Object);
+
+        var exception = await Assert.ThrowsAsync<IOException>(() =>
+            store.EnsureMutationAuthorizedAsync(
+                jobId,
+                lease,
+                source,
+                target,
+                semantics,
+                semantics,
+                CancellationToken.None));
+
+        Assert.Contains("transient", exception.Message, StringComparison.OrdinalIgnoreCase);
+        semanticsResolver.VerifyAll();
+    }
+
+    [Fact]
     public async Task EnsureMutationAuthorizedAsync_RowLimitedBoundaryProofQuery_IsDeterministicallyOrdered()
     {
         var databasePath = Path.Join(

@@ -78,10 +78,14 @@ internal sealed partial class AudiobookContentMoveService
                 fullPath,
                 entry.EntryType,
                 sourceSemantics);
+            var entryExists = TryGetMarkerlessPathAttributes(
+                fullPath,
+                out var entryAttributes);
             if (entry.EntryType == MoveJobEntryType.Directory)
             {
-                if (!Directory.Exists(fullPath)
-                    || (File.GetAttributes(fullPath) & FileAttributes.ReparsePoint) != 0)
+                if (!entryExists
+                    || (entryAttributes & FileAttributes.Directory) == 0
+                    || (entryAttributes & FileAttributes.ReparsePoint) != 0)
                 {
                     throw new MoveNeedsAttentionException(
                         $"Manifest directory changed type, disappeared, or became linked: {entry.RelativePath}");
@@ -90,7 +94,7 @@ internal sealed partial class AudiobookContentMoveService
                 continue;
             }
 
-            if (!File.Exists(fullPath)
+            if (!entryExists
                 && allowVerifiedNativeRenameMissingSources
                 && IsVerifiedMarkerlessNativeRenameEntry(entry))
             {
@@ -98,8 +102,9 @@ internal sealed partial class AudiobookContentMoveService
             }
 
             if (entry.EntryType != MoveJobEntryType.File
-                || !File.Exists(fullPath)
-                || (File.GetAttributes(fullPath) & FileAttributes.ReparsePoint) != 0
+                || !entryExists
+                || (entryAttributes & FileAttributes.Directory) != 0
+                || (entryAttributes & FileAttributes.ReparsePoint) != 0
                 || !FileMetadataMatchesManifest(fullPath, entry)
                 || (verifyFileContents
                     && !await FileMatchesManifestAsync(
@@ -159,13 +164,12 @@ internal sealed partial class AudiobookContentMoveService
                     "A manifest ancestor escaped the authorized source root.");
             }
 
-            if (!Directory.Exists(current))
+            if (!TryGetMarkerlessPathAttributes(current, out var attributes))
             {
                 throw new MoveNeedsAttentionException(
                     "A manifest ancestor directory disappeared.");
             }
 
-            var attributes = File.GetAttributes(current);
             if ((attributes & FileAttributes.ReparsePoint) != 0
                 || (attributes & FileAttributes.Directory) == 0)
             {

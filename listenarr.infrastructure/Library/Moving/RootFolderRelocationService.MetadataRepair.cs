@@ -1,4 +1,5 @@
 using Listenarr.Application.Common.Exceptions;
+using Listenarr.Domain.Audiobooks.Enumerations;
 using Listenarr.Domain.Common;
 using Listenarr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -151,8 +152,24 @@ public sealed partial class RootFolderRelocationService
             .AsNoTracking()
             .AnyAsync(
                 journal => journal.AudiobookId == audiobookId
+                    && journal.AudiobookFileId == null
+                    && journal.Action == FileAction.Move
+                    && journal.State != FileMutationJournalState.Completed,
+                cancellationToken))
+        {
+            throw new ApplicationConflictException(
+                "registration_recovery_pending",
+                "A committed file import still owns source-cleanup state for this audiobook. Complete that recovery before repairing tracked file records.");
+        }
+
+        if (await db.FileMutationJournals
+            .AsNoTracking()
+            .AnyAsync(
+                journal => journal.AudiobookId == audiobookId
                     && journal.AudiobookFileId != null
-                    && journal.State != FileMutationJournalState.OwnerMetadataReconciled,
+                    && (journal.AudiobookFileId == FileMutationOwner.CompanionFile
+                        ? journal.State != FileMutationJournalState.Completed
+                        : journal.State != FileMutationJournalState.OwnerMetadataReconciled),
                 cancellationToken))
         {
             throw new ApplicationConflictException(

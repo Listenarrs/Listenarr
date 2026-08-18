@@ -24,23 +24,28 @@ public sealed partial class LibraryMoveWorkflow
         try
         {
             using var scope = _scopeFactory.CreateScope();
-            var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
             var rootFolderService = scope.ServiceProvider.GetRequiredService<IRootFolderService>();
-            var settings = await configService.GetApplicationSettingsAsync();
             var rootFolders = await rootFolderService.GetAllAsync();
+            ApplicationSettings? settings = null;
+            if (rootFolders.Count == 0)
+            {
+                var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+                settings = await configService.GetApplicationSettingsAsync();
+            }
             var directoryIdentityResolver = scope.ServiceProvider
                 .GetRequiredService<IDirectoryObjectIdentityResolver>();
             cancellationToken.ThrowIfCancellationRequested();
 
             var allowedMoveRoots = new List<MoveRootBoundary>();
+            var unavailableManagedRoots = new List<UnavailableManagedMoveRoot>();
             // RootFolders are the authoritative managed-storage boundaries. OutputPath is
             // retained only as a legacy fallback for databases that have not configured
             // any root folders yet; otherwise stale cross-host OutputPath values must not
             // grant independent filesystem mutation authority.
             var normalizedOutputPath = rootFolders.Count == 0
-                ? TryNormalizeMoveRoot(settings.OutputPath, "legacy configured output path")
+                ? TryNormalizeMoveRoot(settings?.OutputPath, "legacy configured output path")
                 : null;
-            await AddAllowedMoveRootAsync(
+            _ = await AddAllowedMoveRootAsync(
                 allowedMoveRoots,
                 normalizedOutputPath,
                 FileSystemCaseSensitivityMode.Auto,
@@ -55,10 +60,13 @@ public sealed partial class LibraryMoveWorkflow
                     $"root folder {rootFolder.Id}");
                 if (normalizedRootPath == null)
                 {
+                    unavailableManagedRoots.Add(new UnavailableManagedMoveRoot(
+                        rootFolder,
+                        CanonicalPath: null));
                     continue;
                 }
 
-                await AddAllowedMoveRootAsync(
+                var rootAvailable = await AddAllowedMoveRootAsync(
                     allowedMoveRoots,
                     normalizedRootPath,
                     rootFolder.CaseSensitivityMode,
@@ -69,6 +77,13 @@ public sealed partial class LibraryMoveWorkflow
                     rootFolder.DirectoryObjectIdentityUnavailableReason,
                     RootFolderPathSemantics.ResolvePersisted(rootFolder),
                     isManagedRoot: true);
+                if (!rootAvailable)
+                {
+                    unavailableManagedRoots.Add(new UnavailableManagedMoveRoot(
+                        rootFolder,
+                        normalizedRootPath));
+                    continue;
+                }
                 if (rootFolder.IsDefault && defaultRootPath == null)
                 {
                     defaultRootPath = normalizedRootPath;
@@ -127,7 +142,11 @@ public sealed partial class LibraryMoveWorkflow
 
             var targetBoundary = FindAllowedMoveRoot(final, allowedMoveRoots);
 
-            if (targetBoundary == null)
+            if (targetBoundary == null
+                || UnavailableManagedRootOutranksTargetBoundary(
+                    final,
+                    targetBoundary,
+                    unavailableManagedRoots))
             {
                 return DestinationValidationResult(
                     "destination_filesystem_identity_unavailable",
@@ -206,6 +225,17 @@ public sealed partial class LibraryMoveWorkflow
                         manifest.SourceRoot,
                         manifest.SourceIdentity,
                         rootFolders);
+                    if (UnavailableManagedRootOutranksSourceBoundary(
+                            manifest.SourceRoot,
+                            manifest.SourceIdentity,
+                            configuredManagedSourceRoot,
+                            unavailableManagedRoots))
+                    {
+                        throw new ApplicationValidationException(
+                            "source_physical_identity_unavailable",
+                            "Source root physical identity is unavailable or changed.");
+                    }
+
                     var sourceManagedBoundary = configuredManagedSourceRoot == null
                         ? null
                         : FindExactManagedMoveRoot(

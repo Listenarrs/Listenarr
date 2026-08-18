@@ -76,11 +76,36 @@ public sealed partial class RootFolderRelocationService
         }
 
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var basePath = await db.Audiobooks
+        var audiobook = await db.Audiobooks
             .AsNoTracking()
-            .Where(audiobook => audiobook.Id == audiobookId)
-            .Select(audiobook => audiobook.BasePath)
-            .SingleOrDefaultAsync(cancellationToken);
+            .Include(candidate => candidate.Files)
+            .SingleOrDefaultAsync(
+                candidate => candidate.Id == audiobookId,
+                cancellationToken);
+        if (audiobook == null)
+        {
+            return false;
+        }
+
+        var pathEvidence = new List<string>();
+        if (!string.IsNullOrWhiteSpace(audiobook.BasePath))
+        {
+            pathEvidence.Add(audiobook.BasePath);
+        }
+        if (audiobook.Files != null)
+        {
+            pathEvidence.AddRange(audiobook.Files
+                .Select(file => file.PathIdentityState == PathIdentityState.Valid
+                    && !string.IsNullOrWhiteSpace(file.CanonicalPath)
+                        ? file.CanonicalPath
+                        : file.Path)
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Cast<string>());
+        }
+        if (!string.IsNullOrWhiteSpace(audiobook.FilePath))
+        {
+            pathEvidence.Add(audiobook.FilePath);
+        }
         var relocations = await db.RootFolderRelocations
             .AsNoTracking()
             .Include(relocation => relocation.SkippedItems)
@@ -92,7 +117,7 @@ public sealed partial class RootFolderRelocationService
             {
                 return true;
             }
-            if (string.IsNullOrWhiteSpace(basePath)
+            if (pathEvidence.Count == 0
                 || !TryResolvePersistedRelocationSourceSemantics(
                     relocation,
                     out var sourceSemantics,
@@ -101,33 +126,13 @@ public sealed partial class RootFolderRelocationService
                 continue;
             }
 
-            FileSystemPathSyntax baseSyntax;
-            if (!FileSystemPathIdentity.TryDetectAbsoluteSyntax(basePath, out baseSyntax)
-                && !FileSystemPathIdentity.TryDetectAbsoluteSyntax(
-                    basePath,
-                    sourceSemantics.Syntax,
-                    out baseSyntax))
-            {
-                continue;
-            }
-            if (baseSyntax != sourceSemantics.Syntax)
-            {
-                continue;
-            }
-
-            try
-            {
-                if (FileSystemPathIdentity.IsSameOrInside(
-                        basePath,
+            if (pathEvidence.Any(path =>
+                    FileSystemPathIdentity.StoredPathMayTouchBoundary(
+                        path,
                         relocation.SourcePath,
-                        sourceSemantics))
-                {
-                    return true;
-                }
-            }
-            catch (ArgumentException)
+                        sourceSemantics)))
             {
-                // An unparseable path cannot be proven to belong to this relocation.
+                return true;
             }
         }
 

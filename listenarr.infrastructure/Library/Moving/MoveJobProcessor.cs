@@ -34,6 +34,7 @@ internal partial class MoveJobProcessor(
     IFilesystemMutationCoordinator filesystemMutationCoordinator,
     IAudiobookOperationCoordinator audiobookOperationCoordinator,
     IAudiobookDeletionIntentProbe? deletionIntentProbe = null,
+    IFileRegistrationRecoveryProbe? fileRegistrationRecoveryProbe = null,
     IFileRenameRecoveryProbe? fileRenameRecoveryProbe = null,
     IAudiobookUpdatePublisher? audiobookUpdatePublisher = null) : IMoveJobProcessor, IMoveJobProcessorPhases
 {

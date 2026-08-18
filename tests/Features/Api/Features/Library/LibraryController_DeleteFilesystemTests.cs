@@ -672,6 +672,52 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                     StringComparison.Ordinal));
         }
 
+        [LinuxFact]
+        public async Task DeleteAudiobook_AmbiguousConfiguredRoot_DoesNotBorrowSensitiveAutoSemanticsForTrackedFallback()
+        {
+            var tempRoot = FileService.GetTempDirectory("listenarr-delete-ambiguous-root-semantics");
+            var bookFolder = Path.Join(tempRoot, "Book");
+            var audioPath = Path.Join(bookFolder, "track.m4b");
+            Directory.CreateDirectory(bookFolder);
+            await File.WriteAllTextAsync(audioPath, "audio");
+            await AddAuthorizedRootAsync(new RootFolderBuilder()
+                .WithId(510)
+                .WithPath(tempRoot)
+                .Build());
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithId(510)
+                .WithTitle("Ambiguous Root Semantics")
+                .WithBasePath(bookFolder)
+                .WithFilePath(audioPath)
+                .Build());
+            await AddTrackedGenerationAsync(audiobook, audioPath);
+            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
+                .WithAudiobook(audiobook)
+                .WithPath(@"C:\foreign\unresolved.m4b")
+                .Build());
+
+            var ambiguousRoot = "/" + tempRoot;
+            Assert.False(FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                ambiguousRoot,
+                out _));
+            await _rootFolderRepository.AddAsync(new RootFolderBuilder()
+                .WithId(511)
+                .WithPath(ambiguousRoot)
+                .Build());
+            var persistedAmbiguousRoot = await _rootFolderRepository.GetByIdAsync(511);
+            Assert.NotNull(persistedAmbiguousRoot);
+            persistedAmbiguousRoot!.CaseSensitivityMode = FileSystemCaseSensitivityMode.Insensitive;
+            await _rootFolderRepository.UpdateAsync(persistedAmbiguousRoot);
+
+            _ = await _provider.GetRequiredService<LibraryController>()
+                .DeleteAudiobook(
+                    audiobook.Id,
+                    deleteFiles: true,
+                    deleteFolder: false);
+
+            Assert.True(File.Exists(audioPath));
+        }
+
         [WindowsFact]
         public async Task DeleteAudiobook_ForeignConfiguredOutputPath_DoesNotProtectWindowsAliasFolder()
         {
@@ -2052,6 +2098,85 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 .SingleAsync(candidate => candidate.Id == authorOwnership.Id);
             Assert.Equal(LibraryDirectoryOwnershipState.Removed, recoveredAuthor.State);
             Assert.Null(recoveredAuthor.PathOwnershipKey);
+        }
+
+        [Fact]
+        public async Task FilesystemDelete_MissingOwnedParentWithTransientOwnershipProof_PropagatesTransientFailure()
+        {
+            var tempRoot = FileService.GetTempDirectory("listenarr-delete-transient-owned-parent");
+            var authorFolder = Path.Join(tempRoot, "Author");
+            var bookFolder = Path.Join(authorFolder, "Book");
+            var audioPath = Path.Join(bookFolder, "book.mp3");
+            Directory.CreateDirectory(bookFolder);
+            await File.WriteAllTextAsync(audioPath, "audio");
+            await AddAuthorizedRootAsync(new RootFolder
+            {
+                Name = "Library",
+                Path = tempRoot,
+                IsDefault = true
+            });
+            var ownershipStore = _provider.GetRequiredService<ILibraryDirectoryOwnershipStore>();
+            var authorOwnership = await ownershipStore.RecordCreatedAsync(
+                new LibraryDirectoryOwnershipClaim(
+                    authorFolder,
+                    FileSystemPathSemantics.CurrentHostDefault,
+                    "test-fixture"));
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithId(909)
+                .WithTitle("Transient Parent Ownership")
+                .WithAuthor("Author")
+                .WithBasePath(bookFolder)
+                .WithFilePath(audioPath)
+                .Build());
+            await AddTrackedGenerationAsync(audiobook, audioPath);
+            await ownershipStore.BeginRemovalAsync(
+                authorOwnership.Id,
+                authorOwnership.PathOwnershipKey!);
+            Directory.Delete(authorFolder, recursive: true);
+
+            var transientStore = new Mock<ILibraryDirectoryOwnershipStore>(MockBehavior.Strict);
+            transientStore.Setup(store => store.GetOwnedWithinAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<FileSystemPathSemantics>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns((string path, FileSystemPathSemantics semantics, CancellationToken token) =>
+                    ownershipStore.GetOwnedWithinAsync(path, semantics, token));
+            transientStore.Setup(store => store.ResolveOwnedAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<FileSystemPathSemantics>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns((string path, FileSystemPathSemantics semantics, CancellationToken token) =>
+                    string.Equals(
+                        Path.GetFullPath(path),
+                        Path.GetFullPath(authorFolder),
+                        StringComparison.Ordinal)
+                        ? Task.FromResult(new LibraryDirectoryOwnershipResolution(
+                            LibraryDirectoryOwnershipResolutionState.Unavailable,
+                            Reason: "Injected transient ownership outage.",
+                            IsTransient: true))
+                        : ownershipStore.ResolveOwnedAsync(path, semantics, token));
+
+            var service = new AudiobookFilesystemDeleteService(
+                _provider.GetRequiredService<IAudiobookRepository>(),
+                _provider.GetRequiredService<IAudiobookFileRepository>(),
+                _provider.GetRequiredService<IRootFolderService>(),
+                _provider.GetRequiredService<IConfigurationService>(),
+                _provider.GetRequiredService<IFileSystemSemanticsResolver>(),
+                transientStore.Object,
+                _provider.GetRequiredService<ILogger<AudiobookFilesystemDeleteService>>(),
+                _provider.GetRequiredService<LibraryDirectoryOwnershipBoundaryAuthorizer>());
+
+            var exception = await Assert.ThrowsAsync<IOException>(() =>
+                service.DeleteAsync(audiobook, deleteFolder: true));
+
+            Assert.Contains("Injected transient ownership outage", exception.Message, StringComparison.Ordinal);
+            var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+            await using var db = await factory.CreateDbContextAsync();
+            var persistedAuthor = await db.LibraryDirectoryOwnerships.AsNoTracking()
+                .SingleAsync(candidate => candidate.Id == authorOwnership.Id);
+            Assert.Equal(LibraryDirectoryOwnershipState.Removing, persistedAuthor.State);
+            Assert.NotNull(persistedAuthor.PathOwnershipKey);
+            transientStore.VerifyAll();
         }
 
         [Fact]

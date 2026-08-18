@@ -1,4 +1,5 @@
 using Listenarr.Application.Common.Exceptions;
+using Listenarr.Domain.Audiobooks.Enumerations;
 using Listenarr.Domain.Common;
 using Listenarr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -98,6 +99,18 @@ public sealed partial class RootFolderRelocationService
             db,
             audiobookIds,
             cancellationToken);
+        if (conflict == null)
+        {
+            var relocation = await db.RootFolderRelocations
+                .AsNoTracking()
+                .SingleAsync(candidate => candidate.Id == relocationId, cancellationToken);
+            conflict = await FindRegistrationBoundaryRecoveryConflictAsync(
+                relocation.SourcePath,
+                relocation.SourceCaseSensitivityMode,
+                relocation.TargetPath,
+                relocation.TargetCaseSensitivityMode,
+                cancellationToken);
+        }
         if (conflict != null)
         {
             throw new ApplicationConflictException(
@@ -105,6 +118,169 @@ public sealed partial class RootFolderRelocationService
                 conflict.PublicMessage);
         }
     }
+
+    private async Task<ExternalRecoveryConflict?>
+        FindRegistrationBoundaryRecoveryConflictAsync(
+            ListenArrDbContext db,
+            Guid relocationId,
+            CancellationToken cancellationToken)
+    {
+        var boundary = await db.RootFolderRelocations
+            .AsNoTracking()
+            .Where(relocation => relocation.Id == relocationId)
+            .Select(relocation => new
+            {
+                relocation.SourcePath,
+                relocation.SourceCaseSensitivityMode,
+                relocation.TargetPath,
+                relocation.TargetCaseSensitivityMode
+            })
+            .SingleAsync(cancellationToken);
+        return await FindRegistrationBoundaryRecoveryConflictAsync(
+            boundary.SourcePath,
+            boundary.SourceCaseSensitivityMode,
+            boundary.TargetPath,
+            boundary.TargetCaseSensitivityMode,
+            cancellationToken);
+    }
+
+    private async Task<ExternalRecoveryConflict?>
+        FindRegistrationBoundaryRecoveryConflictAsync(
+            string sourcePath,
+            FileSystemCaseSensitivityMode sourceMode,
+            string targetPath,
+            FileSystemCaseSensitivityMode targetMode,
+            CancellationToken cancellationToken)
+    {
+        if (_fileRegistrationRecoveryProbe == null)
+        {
+            return null;
+        }
+
+        var sourceSemantics = await ResolveRecoveryBoundarySemanticsAsync(
+            sourcePath,
+            sourceMode,
+            cancellationToken);
+        if (sourceSemantics.HasValue
+            && await _fileRegistrationRecoveryProbe.HasBlockingBoundaryAsync(
+                sourcePath,
+                sourceSemantics.Value,
+                cancellationToken))
+        {
+            return RegistrationBoundaryConflict(sourcePath);
+        }
+
+        var targetSemantics = await ResolveRecoveryBoundarySemanticsAsync(
+            targetPath,
+            targetMode,
+            cancellationToken);
+        if (targetSemantics.HasValue
+            && await _fileRegistrationRecoveryProbe.HasBlockingBoundaryAsync(
+                targetPath,
+                targetSemantics.Value,
+                cancellationToken))
+        {
+            return RegistrationBoundaryConflict(targetPath);
+        }
+
+        return null;
+    }
+
+    private async Task<FileSystemPathSemantics?> ResolveRecoveryBoundarySemanticsAsync(
+        string path,
+        FileSystemCaseSensitivityMode mode,
+        CancellationToken cancellationToken)
+    {
+        if (FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                path,
+                out var canonicalPath,
+                out _))
+        {
+            try
+            {
+                var resolution = await semanticsResolver.ResolveAsync(
+                    canonicalPath,
+                    mode,
+                    cancellationToken);
+                if (resolution.State == PathIdentityState.Valid)
+                {
+                    return resolution.Semantics;
+                }
+            }
+            catch (Exception exception) when (exception is
+                IOException or UnauthorizedAccessException or ArgumentException
+                    or InvalidOperationException or NotSupportedException
+                    or PathTooLongException or System.Security.SecurityException)
+            {
+                // Fall back to persisted path geometry below. This check grants no
+                // filesystem authority; an insensitive comparison is deliberately
+                // conservative when live Auto semantics are unavailable.
+            }
+        }
+
+        if (!FileSystemPathIdentity.TryDetectAbsoluteSyntax(path, out var syntax))
+        {
+            return null;
+        }
+
+        var sensitivity = mode switch
+        {
+            FileSystemCaseSensitivityMode.Sensitive => FileSystemCaseSensitivity.Sensitive,
+            FileSystemCaseSensitivityMode.Insensitive => FileSystemCaseSensitivity.Insensitive,
+            _ => FileSystemCaseSensitivity.Insensitive
+        };
+        return new FileSystemPathSemantics(syntax, sensitivity);
+    }
+
+    private async Task<string> ValidateStartRecoveryBoundariesAsync(
+        ListenArrDbContext db,
+        int rootFolderId,
+        RootFolder root,
+        StartSourcePathSemantics sourcePathSemantics,
+        string targetPath,
+        FileSystemSemanticsResolution targetResolution,
+        CancellationToken cancellationToken)
+    {
+        var sourceSemantics =
+            sourcePathSemantics.MetadataSourcePathSemantics?.Semantics
+            ?? sourcePathSemantics.SourceOperationSemantics;
+        if (_fileRegistrationRecoveryProbe != null
+            && ((sourceSemantics.HasValue
+                    && await _fileRegistrationRecoveryProbe.HasBlockingBoundaryAsync(
+                        root.Path,
+                        sourceSemantics.Value,
+                        cancellationToken))
+                || await _fileRegistrationRecoveryProbe.HasBlockingBoundaryAsync(
+                    targetPath,
+                    targetResolution.Semantics,
+                    cancellationToken)))
+        {
+            var conflict = RegistrationBoundaryConflict(root.Path);
+            throw new RootFolderPathChangeRejectedException(
+                conflict.Code,
+                conflict.PublicMessage,
+                conflict.Detail);
+        }
+
+        var targetIdentityKey = FileSystemPathIdentity.CreateKey(
+            "root",
+            targetPath,
+            targetResolution.Semantics);
+        await EnsureNoTargetBoundaryConflictAsync(
+            db,
+            rootFolderId,
+            targetPath,
+            targetIdentityKey,
+            targetResolution.Semantics,
+            cancellationToken);
+        return targetIdentityKey;
+    }
+
+    private static ExternalRecoveryConflict RegistrationBoundaryConflict(string path) =>
+        new(
+            "registration_recovery_pending",
+            "An unresolved file publication still owns a path under this root. Complete file-registration recovery before changing the root folder path.",
+            $"File-registration recovery touches relocation boundary {LogRedaction.SanitizeFilePath(path)}.");
 
     private static async Task<ExternalRecoveryConflict?>
         FindExternalRecoveryConflictAsync(
@@ -117,12 +293,31 @@ public sealed partial class RootFolderRelocationService
             return null;
         }
 
+        var registrationOwnerId = await db.FileMutationJournals
+            .AsNoTracking()
+            .Where(journal => journal.AudiobookId != null
+                && audiobookIds.Contains(journal.AudiobookId.Value)
+                && journal.AudiobookFileId == null
+                && journal.Action == FileAction.Move
+                && journal.State != FileMutationJournalState.Completed)
+            .Select(journal => journal.AudiobookId)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (registrationOwnerId.HasValue)
+        {
+            return new ExternalRecoveryConflict(
+                "registration_recovery_pending",
+                "A committed file import still owns source-cleanup state for an audiobook under this root. Complete that recovery before changing the root folder path.",
+                $"File-registration recovery owns audiobook {registrationOwnerId.Value} while this root-folder relocation is being prepared or retried.");
+        }
+
         var renameOwnerId = await db.FileMutationJournals
             .AsNoTracking()
             .Where(journal => journal.AudiobookId != null
                 && audiobookIds.Contains(journal.AudiobookId.Value)
                 && journal.AudiobookFileId != null
-                && journal.State != FileMutationJournalState.OwnerMetadataReconciled)
+                && (journal.AudiobookFileId == FileMutationOwner.CompanionFile
+                    ? journal.State != FileMutationJournalState.Completed
+                    : journal.State != FileMutationJournalState.OwnerMetadataReconciled))
             .Select(journal => journal.AudiobookId)
             .FirstOrDefaultAsync(cancellationToken);
         if (renameOwnerId.HasValue)

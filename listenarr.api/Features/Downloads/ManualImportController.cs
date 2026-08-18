@@ -33,6 +33,7 @@ public partial class ManualImportController : ControllerBase
     private readonly IFileNamingService _fileNamingService;
     private readonly IConfigurationService _configService;
     private readonly IScanQueueService _scanQueueService;
+    private readonly IAudiobookScanService _audiobookScanService;
     private readonly IScanPathAuthorizationService _scanPathAuthorizationService;
     private readonly IRootFolderService _rootFolderService;
     private readonly IFileMover _fileMover;
@@ -42,6 +43,7 @@ public partial class ManualImportController : ControllerBase
     private readonly IFileSystemSemanticsResolver _semanticsResolver;
     private readonly IFilesystemMutationCoordinator _filesystemMutationCoordinator;
     private readonly IAudiobookOperationCoordinator _audiobookOperationCoordinator;
+    private readonly IFileRegistrationRecoveryService _fileRegistrationRecoveryService;
     private readonly IMoveQueueService _moveQueueService;
     private readonly ILibraryFilesystemMutationGate _filesystemMutationGate;
     private readonly ManualImportPathPlanner _pathPlanner;
@@ -55,6 +57,7 @@ public partial class ManualImportController : ControllerBase
         IFileNamingService fileNamingService,
         IConfigurationService configService,
         IScanQueueService scanQueueService,
+        IAudiobookScanService audiobookScanService,
         IScanPathAuthorizationService scanPathAuthorizationService,
         IRootFolderService rootFolderService,
         IFileMover fileMover,
@@ -64,6 +67,7 @@ public partial class ManualImportController : ControllerBase
         IFileSystemSemanticsResolver semanticsResolver,
         IFilesystemMutationCoordinator filesystemMutationCoordinator,
         IAudiobookOperationCoordinator audiobookOperationCoordinator,
+        IFileRegistrationRecoveryService fileRegistrationRecoveryService,
         IMoveQueueService moveQueueService,
         ILibraryDirectoryOwnershipStore directoryOwnershipStore,
         ILibraryFilesystemMutationGate filesystemMutationGate,
@@ -76,6 +80,8 @@ public partial class ManualImportController : ControllerBase
         _fileNamingService = fileNamingService;
         _configService = configService;
         _scanQueueService = scanQueueService;
+        _audiobookScanService = audiobookScanService
+            ?? throw new ArgumentNullException(nameof(audiobookScanService));
         _scanPathAuthorizationService = scanPathAuthorizationService
             ?? throw new ArgumentNullException(nameof(scanPathAuthorizationService));
         _rootFolderService = rootFolderService;
@@ -87,6 +93,8 @@ public partial class ManualImportController : ControllerBase
         _semanticsResolver = semanticsResolver;
         _filesystemMutationCoordinator = filesystemMutationCoordinator ?? throw new ArgumentNullException(nameof(filesystemMutationCoordinator));
         _audiobookOperationCoordinator = audiobookOperationCoordinator ?? throw new ArgumentNullException(nameof(audiobookOperationCoordinator));
+        _fileRegistrationRecoveryService = fileRegistrationRecoveryService
+            ?? throw new ArgumentNullException(nameof(fileRegistrationRecoveryService));
         _moveQueueService = moveQueueService ?? throw new ArgumentNullException(nameof(moveQueueService));
         _directoryOwnershipStore = directoryOwnershipStore ?? throw new ArgumentNullException(nameof(directoryOwnershipStore));
         _filesystemMutationGate = filesystemMutationGate
@@ -95,6 +103,7 @@ public partial class ManualImportController : ControllerBase
         _companionImporter = companionImporter ?? new ManualImportCompanionImporter(
             metadataService,
             fileMover,
+            filePublicationSourceCapability,
             fileSystem,
             directoryOwnershipStore,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<ManualImportCompanionImporter>.Instance,
@@ -188,7 +197,9 @@ public partial class ManualImportController : ControllerBase
         _filesystemMutationGate.EnsureReady();
 
         var results = new List<ManualImportResultDto>();
-        var destinationTracker = new ManualImportDestinationTracker(_fileSystem);
+        var destinationTracker = new ManualImportDestinationTracker(
+            _fileSystem,
+            _filePublicationSourceCapability);
 
         try
         {
@@ -219,9 +230,14 @@ public partial class ManualImportController : ControllerBase
 
             await ExecuteWithAudiobookLocksAsync(
                 orderedItems.Select(item => item.MatchedAudiobookId),
-                async operationToken =>
+                orderedItems
+                    .Where(item => !string.IsNullOrWhiteSpace(item.FullPath))
+                    .Select(item => item.FullPath!)
+                    .ToArray(),
+                async (recoveryReceipts, operationToken) =>
                 {
                     var planningBasePaths = new Dictionary<int, string>();
+                    var consumedRecoveryOperationIds = new HashSet<Guid>();
                     var planningDestinationResolutions =
                         new Dictionary<int, FileSystemSemanticsResolution>();
                     try
@@ -237,6 +253,26 @@ public partial class ManualImportController : ControllerBase
                                 item.FullPath,
                                 item.MatchedAudiobookId,
                                 fileCount);
+                            var recoveredResult = await TryConsumeRecoveredManualImportAsync(
+                                item,
+                                request.Action,
+                                sourceSemantics,
+                                recoveryReceipts,
+                                consumedRecoveryOperationIds,
+                                destinationTracker,
+                                rootFolders,
+                                operationToken);
+                            if (recoveredResult != null)
+                            {
+                                results.Add(recoveredResult);
+                                _logger.LogInformation(
+                                    "Manual import retry reused recovered Move publication for audiobook {AudiobookId}: {Source} -> {Destination}",
+                                    item.MatchedAudiobookId,
+                                    LogRedaction.SanitizeFilePath(recoveredResult.SourcePath),
+                                    LogRedaction.SanitizeFilePath(recoveredResult.DestinationPath));
+                                continue;
+                            }
+
                             var result = await ImportFileAsync(
                                 item,
                                 request.Action,
@@ -280,7 +316,7 @@ public partial class ManualImportController : ControllerBase
                             && request.CleanupEmptySourceFolders)
                         {
                             operationToken.ThrowIfCancellationRequested();
-                            if (IsPotentiallyInsideAnyConfiguredRoot(
+                            if (PotentiallyOverlapsAnyConfiguredRoot(
                                     sourceDirectory,
                                     rootFolders))
                             {
@@ -300,14 +336,14 @@ public partial class ManualImportController : ControllerBase
                         stoppedByCancellation = true;
                     }
 
-                    var hasSuccessfulMutation = results.Any(result => result.Success);
+                    var hasSuccessfulCommit = results.Any(result => result.Success);
                     await EnqueueFocusedScansAsync(
                         results,
-                        hasSuccessfulMutation
+                        hasSuccessfulCommit
                             ? CancellationToken.None
                             : operationToken);
 
-                    if (hasSuccessfulMutation
+                    if (hasSuccessfulCommit
                         && operationToken.IsCancellationRequested)
                     {
                         stoppedByCancellation = true;

@@ -203,6 +203,153 @@ public sealed class ScanPathAuthorizationServiceTests : BaseTests
         identityResolver.VerifyAll();
     }
 
+    [LinuxFact]
+    public async Task AuthorizeAsync_AmbiguousNestedManagedRoot_DoesNotFallBackToBroaderRootAuthority()
+    {
+        var outerRootPath = FileService.GetTempDirectory(
+            "scan-authorization-ambiguous-outer");
+        var innerRootPath = Path.Join(outerRootPath, "Managed Inner");
+        var scanRoot = Path.Join(innerRootPath, "Book");
+        Directory.CreateDirectory(scanRoot);
+        var outerRoot = await AddAuthorizedRootAsync(
+            outerRootPath,
+            caseSensitivityMode: FileSystemCaseSensitivityMode.Sensitive);
+        var ambiguousInnerPath = "/" + innerRootPath;
+        Assert.False(FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+            ambiguousInnerPath,
+            out _));
+        var innerRoot = new RootFolder
+        {
+            Id = 999,
+            Name = "Ambiguous Nested Root",
+            Path = ambiguousInnerPath,
+            CaseSensitivityMode = FileSystemCaseSensitivityMode.Insensitive
+        };
+        var rootFolderService = new Mock<IRootFolderService>(MockBehavior.Strict);
+        rootFolderService.Setup(service => service.GetAllAsync())
+            .ReturnsAsync([outerRoot, innerRoot]);
+        var configurationService = new Mock<IConfigurationService>(MockBehavior.Strict);
+        configurationService.Setup(service => service.GetApplicationSettingsAsync())
+            .ReturnsAsync(new ApplicationSettings());
+        var service = new ScanPathAuthorizationService(
+            configurationService.Object,
+            rootFolderService.Object,
+            _provider.GetRequiredService<IFileSystemSemanticsResolver>(),
+            _provider.GetRequiredService<IDirectoryObjectIdentityResolver>(),
+            new CapturingScanAuthorizationLogger());
+
+        var result = await service.AuthorizeAsync(scanRoot);
+
+        Assert.False(result.IsAuthorized);
+        Assert.Equal(
+            ScanPathAuthorizationFailure.ConfigurationUnavailable,
+            result.Failure);
+        Assert.Null(result.PhysicalIdentity);
+    }
+
+    [Fact]
+    public async Task AuthorizeAsync_ConfiguredRootsExist_LegacyOutputPathDoesNotGrantIndependentScanAuthority()
+    {
+        var configuredRoot = FileService.GetTempDirectory(
+            "scan-authorization-managed-root");
+        var legacyOutputPath = FileService.GetTempDirectory(
+            "scan-authorization-legacy-output");
+        var scanRoot = Path.Join(legacyOutputPath, "Book");
+        Directory.CreateDirectory(scanRoot);
+        var root = await AddAuthorizedRootAsync(configuredRoot);
+        var rootFolderService = new Mock<IRootFolderService>(MockBehavior.Strict);
+        rootFolderService.Setup(service => service.GetAllAsync())
+            .ReturnsAsync([root]);
+        var configurationService = new Mock<IConfigurationService>(MockBehavior.Strict);
+        configurationService.Setup(service => service.GetApplicationSettingsAsync())
+            .ReturnsAsync(new ApplicationSettings
+            {
+                OutputPath = legacyOutputPath
+            });
+        var service = new ScanPathAuthorizationService(
+            configurationService.Object,
+            rootFolderService.Object,
+            _provider.GetRequiredService<IFileSystemSemanticsResolver>(),
+            _provider.GetRequiredService<IDirectoryObjectIdentityResolver>(),
+            new CapturingScanAuthorizationLogger());
+
+        var result = await service.AuthorizeAsync(scanRoot);
+
+        Assert.False(result.IsAuthorized);
+        Assert.Equal(
+            ScanPathAuthorizationFailure.OutsideConfiguredRoots,
+            result.Failure);
+        Assert.Null(result.PhysicalIdentity);
+    }
+
+    [Fact]
+    public async Task AuthorizeAsync_ConfiguredRoot_DoesNotRequireLegacySettingsRead()
+    {
+        var configuredRoot = FileService.GetTempDirectory(
+            "scan-authorization-settings-independent-root");
+        var scanRoot = Path.Join(configuredRoot, "Book");
+        Directory.CreateDirectory(scanRoot);
+        var root = await AddAuthorizedRootAsync(configuredRoot);
+        var rootFolderService = new Mock<IRootFolderService>(MockBehavior.Strict);
+        rootFolderService.Setup(service => service.GetAllAsync())
+            .ReturnsAsync([root]);
+        var configurationService = new Mock<IConfigurationService>(MockBehavior.Strict);
+        configurationService.Setup(service => service.GetApplicationSettingsAsync())
+            .ThrowsAsync(new InvalidOperationException("Injected legacy settings outage."));
+        var service = new ScanPathAuthorizationService(
+            configurationService.Object,
+            rootFolderService.Object,
+            _provider.GetRequiredService<IFileSystemSemanticsResolver>(),
+            _provider.GetRequiredService<IDirectoryObjectIdentityResolver>(),
+            new CapturingScanAuthorizationLogger());
+
+        var result = await service.AuthorizeAsync(scanRoot);
+
+        Assert.True(result.IsAuthorized, result.Error);
+        Assert.Equal(
+            FileUtils.NormalizeStoredPath(scanRoot),
+            result.Path);
+    }
+
+    [Fact]
+    public async Task ResolveDefaultAsync_ConfiguredDefaultRootTakesPrecedenceOverLegacyOutputPath()
+    {
+        var configuredRoot = FileService.GetTempDirectory(
+            "scan-authorization-default-root");
+        var legacyOutputPath = FileService.GetTempDirectory(
+            "scan-authorization-default-legacy-output");
+        var root = await AddAuthorizedRootAsync(configuredRoot);
+        root.IsDefault = true;
+        var rootFolderService = new Mock<IRootFolderService>(MockBehavior.Strict);
+        rootFolderService.Setup(service => service.GetDefaultAsync())
+            .ReturnsAsync(root);
+        rootFolderService.Setup(service => service.GetAllAsync())
+            .ReturnsAsync([root]);
+        var configurationService = new Mock<IConfigurationService>(MockBehavior.Strict);
+        configurationService.Setup(service => service.GetApplicationSettingsAsync())
+            .ReturnsAsync(new ApplicationSettings
+            {
+                OutputPath = legacyOutputPath
+            });
+        var service = new ScanPathAuthorizationService(
+            configurationService.Object,
+            rootFolderService.Object,
+            _provider.GetRequiredService<IFileSystemSemanticsResolver>(),
+            _provider.GetRequiredService<IDirectoryObjectIdentityResolver>(),
+            new CapturingScanAuthorizationLogger());
+
+        var result = await service.ResolveDefaultAsync(preferredPath: null);
+
+        Assert.True(result.IsAuthorized, result.Error);
+        Assert.Equal(
+            FileUtils.NormalizeStoredPath(configuredRoot),
+            result.Path);
+        Assert.False(FileSystemPathIdentity.AreEquivalent(
+            result.Path!,
+            legacyOutputPath,
+            result.Identity!.Value.Semantics));
+    }
+
     [WindowsFact]
     public async Task AuthorizeAsync_ForeignPersistedRootSyntax_CannotAliasWindowsRoot()
     {
@@ -265,11 +412,7 @@ public sealed class ScanPathAuthorizationServiceTests : BaseTests
 
         Assert.True(result.IsAuthorized, result.Error);
         Assert.DoesNotContain(logger.Entries, log =>
-            log.Level == LogLevel.Warning
-            && log.Message.Contains("Audiobooks", StringComparison.Ordinal));
-        Assert.Contains(logger.Entries, log =>
-            log.Level == LogLevel.Debug
-            && log.Message.Contains("Audiobooks", StringComparison.Ordinal));
+            log.Message.Contains("Audiobooks", StringComparison.Ordinal));
     }
 
     private sealed class CapturingScanAuthorizationLogger

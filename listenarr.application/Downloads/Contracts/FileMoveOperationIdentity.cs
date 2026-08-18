@@ -12,12 +12,14 @@ public static class FileMoveOperationIdentity
         object operationKind,
         string sourcePath,
         FileSystemPathSemantics sourceSemantics,
+        FilePublicationSourceProof sourceProof,
         string destinationPath,
         FileSystemPathSemantics destinationSemantics)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(scope);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
+        sourceProof.Validate();
         ArgumentNullException.ThrowIfNull(operationKind);
 
         var sourceKey = FileSystemPathIdentity.CreateKey(
@@ -36,6 +38,9 @@ public static class FileMoveOperationIdentity
                 operationKind,
                 System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
             sourceKey,
+            sourceProof.PhysicalObjectIdentity,
+            sourceProof.Length.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            sourceProof.Sha256,
             destinationKey);
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(payload));
         return new Guid(hash.AsSpan(0, 16));

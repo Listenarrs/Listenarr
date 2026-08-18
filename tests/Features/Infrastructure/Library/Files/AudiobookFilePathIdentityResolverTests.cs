@@ -23,6 +23,43 @@ public sealed class AudiobookFilePathIdentityResolverTests : BaseTests
         Assert.Equal("C:\\Library", first.BoundaryPath);
     }
 
+    [WindowsFact]
+    public async Task ResolveAsync_DeviceAliasConfiguredRoot_DoesNotMintDirectOwnershipIdentity()
+    {
+        var physicalRoot = FileService.GetTempDirectory(
+            "identity-device-alias-root");
+        var filePath = Path.Join(
+            physicalRoot,
+            "Author",
+            "Book",
+            "book.m4b");
+        Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+        await File.WriteAllTextAsync(filePath, "audio");
+        var root = new RootFolder
+        {
+            Path = @"\\?\" + physicalRoot,
+            CaseSensitivityMode = FileSystemCaseSensitivityMode.Insensitive,
+            ResolvedCaseSensitivity = FileSystemCaseSensitivity.Insensitive,
+            PathIdentityState = PathIdentityState.Unavailable
+        };
+        var roots = new Mock<IRootFolderRepository>(MockBehavior.Strict);
+        roots.Setup(repository => repository.GetAllAsync()).ReturnsAsync([root]);
+        var semantics = new Mock<IFileSystemSemanticsResolver>(MockBehavior.Strict);
+        var resolver = new AudiobookFilePathIdentityResolver(
+            roots.Object,
+            semantics.Object);
+
+        var identity = await resolver.ResolveAsync(
+            new Audiobook { BasePath = Path.GetDirectoryName(filePath) },
+            filePath);
+
+        Assert.Equal(PathIdentityState.Unavailable, identity.State);
+        Assert.Null(identity.OwnershipKey);
+        Assert.NotNull(identity.LookupKey);
+        Assert.Contains("configured root", identity.Reason, StringComparison.OrdinalIgnoreCase);
+        semantics.VerifyNoOtherCalls();
+    }
+
     [LinuxFact]
     public async Task ResolveAsync_UnixSensitiveCaseVariants_CreateDifferentOwnershipIdentities()
     {
@@ -130,6 +167,56 @@ public sealed class AudiobookFilePathIdentityResolverTests : BaseTests
         Assert.Contains("cannot be validated", identity.Reason, StringComparison.OrdinalIgnoreCase);
         roots.Verify(repository => repository.GetAllAsync(), Times.Never);
         semantics.VerifyNoOtherCalls();
+    }
+
+    [LinuxFact]
+    public async Task ResolveAsync_AmbiguousConfiguredInsensitiveRoot_DoesNotBorrowSensitiveAutoSemantics()
+    {
+        var rootPath = Path.Join(
+            FileService.GetTempDirectory("identity-ambiguous-root"),
+            "library");
+        Directory.CreateDirectory(rootPath);
+        var filePath = Path.Join(rootPath, "Author", "Book", "book.m4b");
+        Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+        await File.WriteAllTextAsync(filePath, "audio");
+        var ambiguousRoot = "/" + rootPath;
+        Assert.False(FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+            ambiguousRoot,
+            out _));
+
+        var root = new RootFolder
+        {
+            Path = ambiguousRoot,
+            CaseSensitivityMode = FileSystemCaseSensitivityMode.Insensitive
+        };
+        var roots = new Mock<IRootFolderRepository>(MockBehavior.Strict);
+        roots.Setup(repository => repository.GetAllAsync()).ReturnsAsync([root]);
+        var semantics = new Mock<IFileSystemSemanticsResolver>(MockBehavior.Strict);
+        semantics.Setup(resolver => resolver.ResolveAsync(
+                filePath,
+                FileSystemCaseSensitivityMode.Auto,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileSystemSemanticsResolution(
+                new FileSystemPathSemantics(
+                    FileSystemPathSyntax.Unix,
+                    FileSystemCaseSensitivity.Sensitive),
+                PathIdentityState.Valid,
+                rootPath));
+        var resolver = new AudiobookFilePathIdentityResolver(
+            roots.Object,
+            semantics.Object);
+
+        var identity = await resolver.ResolveAsync(
+            new Audiobook { BasePath = Path.GetDirectoryName(filePath) },
+            filePath);
+
+        Assert.Equal(PathIdentityState.Unavailable, identity.State);
+        Assert.Equal(FileSystemCaseSensitivityMode.Insensitive, identity.RequestedMode);
+        Assert.Contains("ambiguous", identity.Reason, StringComparison.OrdinalIgnoreCase);
+        semantics.Verify(service => service.ResolveAsync(
+            It.IsAny<string>(),
+            It.IsAny<FileSystemCaseSensitivityMode>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [LinuxFact]

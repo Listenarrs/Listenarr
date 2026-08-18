@@ -111,6 +111,16 @@ public partial class MoveQueueService
         bool allowActiveDeletionIntent,
         CancellationToken cancellationToken)
     {
+        if (_fileRegistrationRecoveryProbe != null
+            && await _fileRegistrationRecoveryProbe.HasBlockingAsync(
+                audiobookId,
+                cancellationToken))
+        {
+            throw new ApplicationConflictException(
+                "registration_recovery_pending",
+                "A committed file import still owns source-cleanup state for this audiobook. Complete that recovery before changing its files.");
+        }
+
         if (_fileRenameRecoveryProbe != null
             && await _fileRenameRecoveryProbe.HasBlockingAsync(
                 audiobookId,

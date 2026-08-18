@@ -12,9 +12,18 @@ internal sealed partial class AudiobookContentMoveService
         FileSystemPathSemantics targetSemantics,
         LibraryDirectoryOwnership? targetDirectoryOwnership = null)
     {
-        if (!Directory.Exists(destinationRoot))
+        var destinationExists = TryGetMarkerlessPathAttributes(
+            destinationRoot,
+            out var destinationAttributes);
+        if (!destinationExists)
         {
             return;
+        }
+        if ((destinationAttributes & FileAttributes.Directory) == 0
+            || (destinationAttributes & FileAttributes.ReparsePoint) != 0)
+        {
+            throw new MoveNeedsAttentionException(
+                "The move destination changed type or became linked before content validation.");
         }
 
         RevalidateTargetDirectoryOwnership(request, targetDirectoryOwnership);

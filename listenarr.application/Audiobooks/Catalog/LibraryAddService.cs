@@ -31,6 +31,7 @@ namespace Listenarr.Application.Audiobooks.Catalog
         private readonly IFileNamingService _fileNamingService;
         private readonly IRootFolderService _rootFolderService;
         private readonly ILibraryDestinationMutationGuard _destinationMutationGuard;
+        private readonly IFileSystemSemanticsResolver _semanticsResolver;
         private readonly IFileSystem _fileSystem;
         private readonly IFilesystemMutationCoordinator _mutationCoordinator;
         private readonly INotificationService? _notificationService;
@@ -46,6 +47,7 @@ namespace Listenarr.Application.Audiobooks.Catalog
             IFileNamingService fileNamingService,
             IRootFolderService rootFolderService,
             ILibraryDestinationMutationGuard destinationMutationGuard,
+            IFileSystemSemanticsResolver semanticsResolver,
             IFileSystem fileSystem,
             IFilesystemMutationCoordinator mutationCoordinator,
             INotificationService? notificationService = null)
@@ -61,6 +63,8 @@ namespace Listenarr.Application.Audiobooks.Catalog
             _rootFolderService = rootFolderService;
             _destinationMutationGuard = destinationMutationGuard
                 ?? throw new ArgumentNullException(nameof(destinationMutationGuard));
+            _semanticsResolver = semanticsResolver
+                ?? throw new ArgumentNullException(nameof(semanticsResolver));
             _fileSystem = fileSystem ?? throw new ArgumentNullException(nameof(fileSystem));
             _mutationCoordinator = mutationCoordinator ?? throw new ArgumentNullException(nameof(mutationCoordinator));
             _notificationService = notificationService;

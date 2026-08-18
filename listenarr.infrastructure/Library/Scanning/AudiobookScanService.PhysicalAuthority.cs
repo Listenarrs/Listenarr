@@ -185,6 +185,31 @@ internal sealed partial class AudiobookScanService
                 "The metadata candidate was not part of the pinned file snapshot.");
         }
 
+        return OpenPinnedRegistrationFile(
+            command,
+            authority,
+            canonicalPath,
+            expectedIdentity);
+    }
+
+    private static IAudiobookFileRegistrationLease OpenPinnedRegistrationFile(
+        AudiobookScanCommand command,
+        PinnedScanAuthority authority,
+        string path,
+        string? expectedIdentity = null)
+    {
+        var canonicalPath = FileSystemPathIdentity.Canonicalize(
+            path,
+            command.ScanIdentity.Syntax);
+        if (!FileSystemPathIdentity.IsSameOrInside(
+                canonicalPath,
+                command.ScanRoot,
+                command.ScanIdentity.Semantics))
+        {
+            throw new InvalidOperationException(
+                "The registration candidate is outside the authorized scan root.");
+        }
+
         var relative = Path.GetRelativePath(command.ScanRoot, canonicalPath);
         var segments = relative.Split(
             [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
@@ -192,7 +217,7 @@ internal sealed partial class AudiobookScanService
         if (segments.Length == 0 || segments.Any(segment => segment is "." or ".."))
         {
             throw new InvalidOperationException(
-                "The metadata candidate contains invalid navigation segments.");
+                "The registration candidate contains invalid navigation segments.");
         }
 
         var current = authority.Root.Duplicate();
@@ -210,7 +235,7 @@ internal sealed partial class AudiobookScanService
             {
                 file.Dispose();
                 throw new InvalidOperationException(
-                    "The metadata candidate changed or is no longer a regular file before stable extraction.");
+                    "The registration candidate changed or is no longer a regular file before stable extraction.");
             }
 
             if (!command.ScanPhysicalIdentity.HasDurableGenerationProof)
@@ -220,11 +245,12 @@ internal sealed partial class AudiobookScanService
                     canonicalPath);
             }
 
-            if (!file.MatchesObjectIdentity(expectedIdentity))
+            if (!string.IsNullOrWhiteSpace(expectedIdentity)
+                && !file.MatchesObjectIdentity(expectedIdentity))
             {
                 file.Dispose();
                 throw new InvalidOperationException(
-                    "The metadata candidate changed before stable extraction.");
+                    "The registration candidate changed before stable extraction.");
             }
 
             return PinnedAudiobookFileRegistrationLease.Create(

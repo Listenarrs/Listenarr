@@ -2,7 +2,9 @@ using Listenarr.Domain.Common;
 
 namespace Listenarr.Application.Downloads.Import;
 
-public sealed class ImportDestinationPlanner(IFileSystem fileSystem)
+public sealed class ImportDestinationPlanner(
+    IFileSystem fileSystem,
+    IFilePublicationSourceCapability filePublicationSourceCapability)
 {
     public bool TryResolve(
         string? basePath,
@@ -24,12 +26,13 @@ public sealed class ImportDestinationPlanner(IFileSystem fileSystem)
     }
 
     public async Task<ImportDestinationReservation> PlanIdempotentOrUniqueAsync(
-        string sourcePath,
+        FilePublicationSourceProof sourceProof,
         string destination,
         ISet<string> usedDestinations,
         FileSystemPathSemantics destinationSemantics,
         CancellationToken cancellationToken = default)
     {
+        sourceProof.Validate();
         if (destinationSemantics.CaseSensitivity == FileSystemCaseSensitivity.Unknown)
         {
             throw new InvalidOperationException("Destination filesystem case sensitivity must be resolved before import planning.");
@@ -63,9 +66,9 @@ public sealed class ImportDestinationPlanner(IFileSystem fileSystem)
             {
                 continue;
             }
-            if (await fileSystem.FilesHaveSameContentAsync(
-                    sourcePath,
+            if (await ExistingMatchesSourceProofAsync(
                     existing.Path,
+                    sourceProof,
                     cancellationToken))
             {
                 // Repeated processing of a completed multi-file download must
@@ -132,13 +135,32 @@ public sealed class ImportDestinationPlanner(IFileSystem fileSystem)
         usedDestinations.Add(reservation.Path);
     }
 
-    public Task<bool> IsExistingEquivalentAsync(
-        string sourcePath,
+    private async Task<bool> ExistingMatchesSourceProofAsync(
         string destination,
-        CancellationToken cancellationToken = default) =>
-        fileSystem.FileExists(destination)
-            ? fileSystem.FilesHaveSameContentAsync(sourcePath, destination, cancellationToken)
-            : Task.FromResult(false);
+        FilePublicationSourceProof sourceProof,
+        CancellationToken cancellationToken)
+    {
+        if (!fileSystem.FileExists(destination))
+        {
+            return false;
+        }
+
+        var destinationCapability = await filePublicationSourceCapability.CheckAsync(
+            destination,
+            cancellationToken);
+        if (!destinationCapability.IsSupported
+            || !destinationCapability.SourceProof.HasValue)
+        {
+            return false;
+        }
+
+        var destinationProof = destinationCapability.SourceProof.Value;
+        return destinationProof.Length == sourceProof.Length
+            && string.Equals(
+                destinationProof.Sha256,
+                sourceProof.Sha256,
+                StringComparison.OrdinalIgnoreCase);
+    }
 }
 
 public sealed record ImportDestinationReservation(

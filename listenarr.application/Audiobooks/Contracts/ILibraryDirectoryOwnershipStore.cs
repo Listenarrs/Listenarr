@@ -20,7 +20,8 @@ public sealed record LibraryDirectoryOwnershipClaim(
 public sealed record LibraryDirectoryOwnershipResolution(
     LibraryDirectoryOwnershipResolutionState State,
     LibraryDirectoryOwnership? Ownership = null,
-    string? Reason = null);
+    string? Reason = null,
+    bool IsTransient = false);
 
 public interface ILibraryDirectoryOwnershipStore
 {

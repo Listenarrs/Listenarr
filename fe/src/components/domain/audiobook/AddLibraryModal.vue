@@ -18,7 +18,7 @@
 <template>
   <Modal :visible="visible" size="lg" @close="closeModal">
     <template #header>
-      <ModalHeader :title="'Add to Library'" @close="closeModal" />
+      <ModalHeader :title="'Add to Library'" :show-close="!isAdding" @close="closeModal" />
     </template>
 
     <template #default>
@@ -430,7 +430,7 @@
     </template>
 
     <template #footer>
-      <button class="btn btn-secondary" @click="closeModal">
+      <button class="btn btn-secondary" :disabled="isAdding" @click="closeModal">
         <PhX />
         Cancel
       </button>
@@ -1278,7 +1278,7 @@ function toggleMetadataEditor() {
 
 const modalRef = ref<HTMLElement | null>(null)
 
-const closeModal = () => {
+const finishModalSession = () => {
   ++seedGeneration
   ++previewGeneration
   ++addGeneration
@@ -1289,6 +1289,14 @@ const closeModal = () => {
   metadataLoading.value = false
   destinationPreviewState.value = 'idle'
   emit('close')
+}
+
+const closeModal = () => {
+  // Once the add request has been submitted, closing the modal cannot reliably cancel
+  // a server-side commit. Keep the session visible until the request resolves so the
+  // user cannot unknowingly submit the same identifier-less book a second time.
+  if (isAdding.value) return
+  finishModalSession()
 }
 
 // Focus management for accessibility: trap focus inside modal and restore on close
@@ -1365,6 +1373,21 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeyDown, { capture: true })
 })
 
+const getAlreadyExistingAudiobook = (error: unknown): Audiobook | null => {
+  if (!(error instanceof Error)) return null
+  const candidate = error as Error & { status?: number; body?: string }
+  if (candidate.status !== 409 || !candidate.body) return null
+
+  try {
+    const payload = JSON.parse(candidate.body) as { audiobook?: unknown }
+    if (!payload.audiobook || typeof payload.audiobook !== 'object') return null
+    const audiobook = payload.audiobook as Partial<Audiobook>
+    return typeof audiobook.id === 'number' ? (payload.audiobook as Audiobook) : null
+  } catch {
+    return null
+  }
+}
+
 const addToLibrary = async () => {
   if (!props.book) return
   if (destinationPathValidationError.value) {
@@ -1374,11 +1397,13 @@ const addToLibrary = async () => {
 
   const ownerGeneration = seedGeneration
   const requestGeneration = ++addGeneration
+  let submittedTitle = props.book.title || 'Audiobook'
   isAdding.value = true
   try {
     const estimatedDestination = estimatedFullPath.value
     const destination = estimatedDestination.trim().length > 0 ? estimatedDestination : undefined
     const metadataToSend = buildMetadataPayload()
+    submittedTitle = metadataToSend.title || submittedTitle
     const result = await apiService.addToLibrary(metadataToSend, {
       monitored: options.value.monitored,
       qualityProfileId: options.value.qualityProfileId || undefined,
@@ -1389,9 +1414,17 @@ const addToLibrary = async () => {
 
     toast.success('Added', `"${metadataToSend.title}" has been added to your library!`)
     emit('added', result.audiobook)
-    closeModal()
+    finishModalSession()
   } catch (err: unknown) {
     if (requestGeneration !== addGeneration || !isCurrentSeed(ownerGeneration)) return
+
+    const existingAudiobook = getAlreadyExistingAudiobook(err)
+    if (existingAudiobook) {
+      toast.success('Already added', `"${submittedTitle}" is already in your library.`)
+      emit('added', existingAudiobook)
+      finishModalSession()
+      return
+    }
 
     console.error('Failed to add audiobook:', err)
     const validationError = getApiValidationError(err, 'destinationPath')

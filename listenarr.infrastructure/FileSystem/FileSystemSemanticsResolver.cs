@@ -5,7 +5,7 @@ using Listenarr.Domain.Common;
 
 namespace Listenarr.Infrastructure.FileSystem;
 
-public sealed class FileSystemSemanticsResolver : IFileSystemSemanticsResolver
+public sealed partial class FileSystemSemanticsResolver : IFileSystemSemanticsResolver
 {
     private const int MaxLinuxCaseProbeCandidates = 128;
     private const uint FileReadAttributes = 0x0080;
@@ -26,8 +26,11 @@ public sealed class FileSystemSemanticsResolver : IFileSystemSemanticsResolver
     private const long LinuxExtFamilySuperMagic = 0x0000ef53L;
     private const long LinuxF2fsSuperMagic = 0xf2f52010L;
     private const int LinuxStatFsBufferBytes = 256;
+    // Darwin bsd/sys/unistd.h: _PC_CASE_SENSITIVE.
+    private const int MacPathConfCaseSensitive = 11;
 
     private readonly Func<int, LinuxFilesystemFlagsProbe> _linuxFilesystemFlagsProbe;
+    private readonly Func<string, FileAttributes> _pathAttributesProbe;
 
     public FileSystemSemanticsResolver()
         : this(ProbeLinuxFilesystemFlags)
@@ -35,10 +38,12 @@ public sealed class FileSystemSemanticsResolver : IFileSystemSemanticsResolver
     }
 
     internal FileSystemSemanticsResolver(
-        Func<int, LinuxFilesystemFlagsProbe> linuxFilesystemFlagsProbe)
+        Func<int, LinuxFilesystemFlagsProbe> linuxFilesystemFlagsProbe,
+        Func<string, FileAttributes>? pathAttributesProbe = null)
     {
         _linuxFilesystemFlagsProbe = linuxFilesystemFlagsProbe
             ?? throw new ArgumentNullException(nameof(linuxFilesystemFlagsProbe));
+        _pathAttributesProbe = pathAttributesProbe ?? File.GetAttributes;
     }
 
     public ValueTask<FileSystemSemanticsResolution> ResolveAsync(
@@ -65,14 +70,37 @@ public sealed class FileSystemSemanticsResolver : IFileSystemSemanticsResolver
             var explicitSensitivity = mode == FileSystemCaseSensitivityMode.Sensitive
                 ? FileSystemCaseSensitivity.Sensitive
                 : FileSystemCaseSensitivity.Insensitive;
+            string explicitBoundary;
+            try
+            {
+                explicitBoundary = FindExistingBoundary(fullPath)
+                    ?? Path.GetPathRoot(fullPath)
+                    ?? fullPath;
+            }
+            catch (Exception exception) when (IsBoundaryInspectionUnavailable(exception))
+            {
+                // Explicit semantics do not require probing the live filesystem.
+                explicitBoundary = Path.GetPathRoot(fullPath) ?? fullPath;
+            }
             return ValueTask.FromResult(new FileSystemSemanticsResolution(
                 new FileSystemPathSemantics(syntax, explicitSensitivity),
                 PathIdentityState.Valid,
-                FindExistingBoundary(fullPath) ?? Path.GetPathRoot(fullPath) ?? fullPath,
+                explicitBoundary,
                 CanonicalPath: fullPath));
         }
 
-        var boundary = FindExistingBoundary(fullPath);
+        string? boundary;
+        try
+        {
+            boundary = FindExistingBoundary(fullPath);
+        }
+        catch (Exception exception) when (IsBoundaryInspectionUnavailable(exception))
+        {
+            return ValueTask.FromResult(Unavailable(
+                syntax,
+                fullPath,
+                $"Filesystem boundary could not be inspected safely: {exception.Message}"));
+        }
         if (boundary == null)
         {
             return ValueTask.FromResult(Unavailable(
@@ -97,6 +125,11 @@ public sealed class FileSystemSemanticsResolver : IFileSystemSemanticsResolver
         if (OperatingSystem.IsLinux())
         {
             return ResolveLinux(boundary, syntax);
+        }
+
+        if (OperatingSystem.IsMacOS())
+        {
+            return ResolveMacOS(boundary, syntax);
         }
 
         return Unavailable(
@@ -154,6 +187,38 @@ public sealed class FileSystemSemanticsResolver : IFileSystemSemanticsResolver
             (info.Flags & FileCsFlagCaseSensitiveDir) != 0
                 ? FileSystemCaseSensitivity.Sensitive
                 : FileSystemCaseSensitivity.Insensitive);
+    }
+
+    private static FileSystemSemanticsResolution ResolveMacOS(
+        string boundary,
+        FileSystemPathSyntax syntax)
+    {
+        Marshal.SetLastPInvokeError(0);
+        var caseSensitive = PathConfUnix(
+            boundary,
+            MacPathConfCaseSensitive);
+        if (caseSensitive == 0)
+        {
+            return Valid(
+                syntax,
+                boundary,
+                FileSystemCaseSensitivity.Insensitive);
+        }
+        if (caseSensitive == 1)
+        {
+            return Valid(
+                syntax,
+                boundary,
+                FileSystemCaseSensitivity.Sensitive);
+        }
+
+        var error = Marshal.GetLastPInvokeError();
+        return Unavailable(
+            syntax,
+            boundary,
+            error == 0
+                ? "Filesystem case sensitivity could not be determined with pathconf."
+                : $"Filesystem case sensitivity could not be read: {new Win32Exception(error).Message}");
     }
 
     private FileSystemSemanticsResolution ResolveLinux(
@@ -363,34 +428,23 @@ public sealed class FileSystemSemanticsResolver : IFileSystemSemanticsResolver
         long? fileSystemType) =>
         fileSystemType is LinuxExtFamilySuperMagic or LinuxF2fsSuperMagic;
 
-    private static long? TryGetLinuxFileSystemType(int descriptor)
-    {
-        var buffer = Marshal.AllocHGlobal(LinuxStatFsBufferBytes);
-        try
-        {
-            if (FStatFsUnix(descriptor, buffer) != 0)
-            {
-                return null;
-            }
-
-            return IntPtr.Size == sizeof(long)
-                ? Marshal.ReadInt64(buffer)
-                : Marshal.ReadInt32(buffer);
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(buffer);
-        }
-    }
-
-    private static string? FindExistingBoundary(string path)
+    private string? FindExistingBoundary(string path)
     {
         var current = path;
         while (!string.IsNullOrEmpty(current))
         {
-            if (Directory.Exists(current))
+            try
             {
-                return current;
+                var attributes = _pathAttributesProbe(current);
+                if ((attributes & FileAttributes.Directory) != 0)
+                {
+                    return current;
+                }
+            }
+            catch (Exception exception) when (
+                FileSystemSafety.IsProvenMissingPathException(exception))
+            {
+                // A proven missing segment may safely fall back to its existing parent.
             }
 
             current = Path.GetDirectoryName(current);
@@ -398,6 +452,9 @@ public sealed class FileSystemSemanticsResolver : IFileSystemSemanticsResolver
 
         return null;
     }
+
+    private static bool IsBoundaryInspectionUnavailable(Exception exception) =>
+        exception is IOException or UnauthorizedAccessException or Win32Exception;
 
     private static FileSystemSemanticsResolution Valid(
         FileSystemPathSyntax syntax,
@@ -421,47 +478,4 @@ public sealed class FileSystemSemanticsResolver : IFileSystemSemanticsResolver
             reason,
             boundary);
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct FileCaseSensitiveInformation
-    {
-        public uint Flags;
-    }
-
-    [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern SafeFileHandle CreateFileWindows(
-        string fileName,
-        uint desiredAccess,
-        uint shareMode,
-        IntPtr securityAttributes,
-        uint creationDisposition,
-        uint flagsAndAttributes,
-        IntPtr templateFile);
-
-    [DllImport("kernel32.dll", EntryPoint = "GetFileInformationByHandleEx", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetFileInformationByHandleEx(
-        SafeFileHandle fileHandle,
-        int fileInformationClass,
-        out FileCaseSensitiveInformation fileInformation,
-        uint bufferSize);
-
-    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
-    private static extern int OpenUnix(
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
-        int flags);
-
-    [DllImport("libc", EntryPoint = "ioctl", SetLastError = true)]
-    private static extern int IoctlUnix64(
-        int descriptor,
-        ulong request,
-        out long flags);
-
-    [DllImport("libc", EntryPoint = "ioctl", SetLastError = true)]
-    private static extern int IoctlUnix32(
-        int descriptor,
-        ulong request,
-        out int flags);
-
-    [DllImport("libc", EntryPoint = "fstatfs", SetLastError = true)]
-    private static extern int FStatFsUnix(int descriptor, IntPtr buffer);
 }

@@ -136,6 +136,58 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
             Assert.Equal(expectedChanged, preview.HasChanges);
         }
 
+        [LinuxFact]
+        public async Task PreviewRename_AmbiguousConfiguredRoot_DoesNotBorrowConflictingAutoSemantics()
+        {
+            var bookFolder = Path.Join(_tempRoot, "ambiguous-case-preview");
+            Directory.CreateDirectory(bookFolder);
+            var ambiguousRoot = "/" + bookFolder;
+            Assert.False(FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                ambiguousRoot,
+                out _));
+            var rootFolders = new Mock<IRootFolderService>(MockBehavior.Strict);
+            rootFolders.Setup(service => service.GetAllAsync())
+                .ReturnsAsync([
+                    new RootFolder
+                    {
+                        Id = 1,
+                        Name = "Legacy Ambiguous Root",
+                        Path = ambiguousRoot,
+                        CaseSensitivityMode = FileSystemCaseSensitivityMode.Insensitive
+                    }
+                ]);
+            var settings = new ApplicationSettings
+            {
+                OutputPath = bookFolder,
+                FolderNamingPattern = string.Empty,
+                FileNamingPattern = "{Title}"
+            };
+            var (service, db, _) = BuildService(
+                settings,
+                caseSensitivity: FileSystemCaseSensitivity.Sensitive,
+                rootFolderServiceOverride: rootFolders.Object);
+            db.Audiobooks.Add(new Audiobook
+            {
+                Id = 100,
+                Title = "book",
+                BasePath = bookFolder,
+                Files =
+                [
+                    new AudiobookFile
+                    {
+                        Id = 1001,
+                        AudiobookId = 100,
+                        Path = Path.Join(bookFolder, "BOOK.m4b"),
+                        Format = "m4b"
+                    }
+                ]
+            });
+            await db.SaveChangesAsync();
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.PreviewRenameAsync([100]));
+        }
+
         [Fact]
         public async Task PreviewRename_PreservesCustomBasePath()
         {
@@ -170,6 +222,115 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
             Assert.False(preview.FolderChanged);
             Assert.Equal(NormalizePath(customBase), preview.NewFolderPath);
             Assert.All(preview.FileRenames, file => Assert.StartsWith(NormalizePath(customBase), file.NewPath!, StringComparison.OrdinalIgnoreCase));
+        }
+
+        [Fact]
+        public async Task PreviewRename_ConfiguredRootsExist_StaleOutputPathDoesNotWidenCustomBase()
+        {
+            var managedRoot = Path.Join(_tempRoot, "managed-library");
+            var legacyOutput = Path.Join(_tempRoot, "legacy-library");
+            var customBase = Path.Join(legacyOutput, "Legacy Book");
+            Directory.CreateDirectory(managedRoot);
+            Directory.CreateDirectory(customBase);
+            var rootFolders = new Mock<IRootFolderService>(MockBehavior.Strict);
+            rootFolders.Setup(service => service.GetAllAsync())
+                .ReturnsAsync([
+                    new RootFolder
+                    {
+                        Id = 1,
+                        Name = "Managed Library",
+                        Path = managedRoot,
+                        IsDefault = true,
+                        CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
+                        ResolvedCaseSensitivity =
+                            FileSystemPathSemantics.CurrentHostDefault.CaseSensitivity,
+                        PathIdentityState = PathIdentityState.Valid
+                    }
+                ]);
+            var settings = new ApplicationSettings
+            {
+                OutputPath = legacyOutput,
+                FolderNamingPattern = "{Author}/{Title}",
+                FileNamingPattern = "{Title}"
+            };
+            var (service, db, _) = BuildService(
+                settings,
+                rootFolderServiceOverride: rootFolders.Object);
+            db.Audiobooks.Add(new Audiobook
+            {
+                Id = 3,
+                Title = "Dune",
+                Authors = ["Frank Herbert"],
+                BasePath = customBase,
+                Files =
+                [
+                    new AudiobookFile
+                    {
+                        Id = 31,
+                        AudiobookId = 3,
+                        Path = Path.Join(customBase, "wrong-name.m4b"),
+                        Format = "m4b"
+                    }
+                ]
+            });
+            await db.SaveChangesAsync();
+
+            var preview = Assert.Single(await service.PreviewRenameAsync([3]));
+
+            Assert.False(preview.FolderChanged);
+            Assert.Equal(NormalizePath(customBase), preview.NewFolderPath);
+            Assert.All(preview.FileRenames, file =>
+                Assert.StartsWith(
+                    NormalizePath(customBase),
+                    file.NewPath!,
+                    StringComparison.OrdinalIgnoreCase));
+            rootFolders.VerifyAll();
+        }
+
+        [Fact]
+        public async Task PreviewRename_RootFolderServiceUnavailable_DoesNotFallBackToLegacyOutputPath()
+        {
+            var legacyOutput = Path.Join(_tempRoot, "legacy-organize-root");
+            var currentBase = Path.Join(legacyOutput, "Dune");
+            Directory.CreateDirectory(currentBase);
+            var rootFolders = new Mock<IRootFolderService>(MockBehavior.Strict);
+            rootFolders.Setup(service => service.GetAllAsync())
+                .ThrowsAsync(new InvalidOperationException("Injected root folder outage."));
+            var (service, db, _) = BuildService(
+                new ApplicationSettings
+                {
+                    OutputPath = legacyOutput,
+                    FolderNamingPattern = "{Author}/{Title}",
+                    FileNamingPattern = "{Title}"
+                },
+                rootFolderServiceOverride: rootFolders.Object);
+            db.Audiobooks.Add(new Audiobook
+            {
+                Id = 4,
+                Title = "Dune",
+                Authors = ["Frank Herbert"],
+                BasePath = currentBase,
+                Files =
+                [
+                    new AudiobookFile
+                    {
+                        Id = 41,
+                        AudiobookId = 4,
+                        Path = Path.Join(currentBase, "wrong-name.m4b"),
+                        Format = "m4b"
+                    }
+                ]
+            });
+            await db.SaveChangesAsync();
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.PreviewRenameAsync([4]));
+
+            Assert.Contains(
+                "root folder",
+                exception.Message,
+                StringComparison.OrdinalIgnoreCase);
+            rootFolders.VerifyAll();
         }
 
         [Fact]

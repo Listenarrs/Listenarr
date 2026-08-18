@@ -122,13 +122,46 @@ public sealed class AudiobookDeletionIntentReconcilerTests : BaseTests
             filesystem.Object,
             NullLogger<AudiobookDeletionIntentReconciler>.Instance);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            reconciler.ReconcileAsync());
+        await reconciler.ReconcileAsync();
 
         Assert.NotNull(await _audiobookRepository.GetByIdAsync(audiobook.Id));
         Assert.Equal(
             AudiobookDeletionIntentState.Planned,
             await GetIntentStateAsync(intent.Id));
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_IncompleteTrackedFileCleanup_RemainsPlannedWithoutFailingGlobalRecovery()
+    {
+        var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+            .WithTitle("Delete Recovery Pending File")
+            .WithBasePath(FileService.GetTempDirectory("delete-recovery-pending-file"))
+            .Build());
+        var store = _provider.GetRequiredService<IAudiobookDeletionIntentStore>();
+        var intent = await store.GetOrCreateAsync(audiobook.Id, deleteFolder: true);
+        var filesystem = new Mock<IAudiobookFilesystemDeleteService>(MockBehavior.Strict);
+        filesystem.Setup(service => service.DeleteAsync(
+                It.IsAny<Audiobook>(),
+                true,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AudiobookFilesystemDeleteResult
+            {
+                TrackedFileCleanupComplete = false
+            });
+        var reconciler = new AudiobookDeletionIntentReconciler(
+            store,
+            _audiobookRepository,
+            _provider.GetRequiredService<IAudiobookDeletionCommitService>(),
+            filesystem.Object,
+            NullLogger<AudiobookDeletionIntentReconciler>.Instance);
+
+        await reconciler.ReconcileAsync();
+
+        Assert.NotNull(await _audiobookRepository.GetByIdAsync(audiobook.Id));
+        Assert.Equal(
+            AudiobookDeletionIntentState.Planned,
+            await GetIntentStateAsync(intent.Id));
+        filesystem.VerifyAll();
     }
 
     private async Task<AudiobookDeletionIntentState> GetIntentStateAsync(Guid intentId)

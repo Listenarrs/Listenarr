@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using Listenarr.Tests.Common;
@@ -36,6 +37,116 @@ public sealed partial class PinnedDirectoryCreationTests : BaseTests
         using var entry = await openTask;
         Assert.True(entry.VisiblePathMatches());
         Assert.False(entry.IsRegularFile());
+    }
+
+    [Fact]
+    public async Task FileVisiblePathProbe_ReplacedGeneration_IsMismatch()
+    {
+        var parent = FileService.GetTempDirectory("pinned-file-probe-replaced");
+        var file = await FileService.GetFileAsync(parent, "book.m4b", "owned");
+        var displaced = Path.Join(parent, "book.original.m4b");
+        using var anchor = PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(parent);
+        using var entry = anchor.OpenExistingFile("book.m4b", requireDeleteAccess: false);
+
+        File.Move(file, displaced);
+        await File.WriteAllTextAsync(file, "replacement");
+
+        Assert.Equal(
+            RegistrationPublicationMatchOutcome.Mismatch,
+            entry.ProbeVisiblePathMatch());
+    }
+
+    [Fact]
+    public void DirectoryVisiblePathProbe_ReplacedGeneration_IsMismatch()
+    {
+        var parent = FileService.GetTempDirectory("pinned-directory-probe-parent");
+        var directory = Path.Join(parent, "owned");
+        var displaced = Path.Join(parent, "owned.original");
+        Directory.CreateDirectory(directory);
+        using var anchor = PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(directory);
+
+        Directory.Move(directory, displaced);
+        Directory.CreateDirectory(directory);
+
+        Assert.Equal(
+            RegistrationPublicationMatchOutcome.Mismatch,
+            anchor.ProbeVisiblePathMatch());
+    }
+
+    [LinuxFact]
+    [System.Runtime.Versioning.SupportedOSPlatform("linux")]
+    public async Task FileVisiblePathProbe_AccessDenied_IsUnavailable()
+    {
+        var parent = FileService.GetTempDirectory("pinned-file-probe-unavailable");
+        var file = await FileService.GetFileAsync(parent, "book.m4b", "owned");
+        using var anchor = PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(parent);
+        using var entry = anchor.OpenExistingFile("book.m4b", requireDeleteAccess: false);
+        var originalMode = File.GetUnixFileMode(file);
+        File.SetUnixFileMode(file, UnixFileMode.None);
+        try
+        {
+            if (!File.Exists(file))
+            {
+                Assert.Equal(
+                    RegistrationPublicationMatchOutcome.Unavailable,
+                    entry.ProbeVisiblePathMatch());
+            }
+        }
+        finally
+        {
+            File.SetUnixFileMode(file, originalMode);
+        }
+    }
+
+    [LinuxFact]
+    [System.Runtime.Versioning.SupportedOSPlatform("linux")]
+    public async Task RegistrationLease_PhysicalIdentityMatch_DoesNotDependOnVisiblePathAvailability()
+    {
+        var parent = FileService.GetTempDirectory("registration-identity-probe-unavailable");
+        var file = await FileService.GetFileAsync(parent, "book.m4b", "owned");
+        using var lease = PinnedAudiobookFileRegistrationLease.Open(file);
+        var originalMode = File.GetUnixFileMode(file);
+        File.SetUnixFileMode(file, UnixFileMode.None);
+        try
+        {
+            if (!File.Exists(file))
+            {
+                Assert.Equal(
+                    RegistrationPublicationMatchOutcome.Unavailable,
+                    lease.ProbeCurrentPublication());
+                Assert.True(lease.MatchesPhysicalObjectIdentity(
+                    lease.PhysicalObjectIdentity));
+            }
+        }
+        finally
+        {
+            File.SetUnixFileMode(file, originalMode);
+        }
+    }
+
+    [LinuxFact]
+    [System.Runtime.Versioning.SupportedOSPlatform("linux")]
+    public void DirectoryVisiblePathProbe_AccessDenied_IsUnavailable()
+    {
+        var parent = FileService.GetTempDirectory("pinned-directory-probe-unavailable-parent");
+        var directory = Path.Join(parent, "owned");
+        Directory.CreateDirectory(directory);
+        using var anchor = PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(directory);
+        var originalMode = File.GetUnixFileMode(parent);
+        File.SetUnixFileMode(parent, UnixFileMode.None);
+        try
+        {
+            if (!Directory.Exists(directory))
+            {
+                Assert.Equal(
+                    RegistrationPublicationMatchOutcome.Unavailable,
+                    anchor.ProbeVisiblePathMatch());
+            }
+        }
+        finally
+        {
+            File.SetUnixFileMode(parent, originalMode);
+        }
     }
 
     [WindowsFact]
@@ -318,6 +429,31 @@ public sealed partial class PinnedDirectoryCreationTests : BaseTests
 
         Assert.Equal(PinnedFileOpenOutcome.NotFound, outcome);
         Assert.Null(entry);
+    }
+
+    [WindowsFact]
+    public async Task TryOpenExistingFile_WindowsSharingViolation_DoesNotReportMissing()
+    {
+        var parent = FileService.GetTempDirectory("pinned-file-open-locked-nullable");
+        var marker = await FileService.GetFileAsync(
+            parent,
+            "marker.json",
+            "owned marker");
+        using var anchor = PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(parent);
+        using (File.Open(
+            marker,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read))
+        {
+            var error = Assert.Throws<Win32Exception>(() =>
+                anchor.TryOpenExistingFile(
+                    "marker.json",
+                    requireDeleteAccess: true));
+
+            Assert.Equal(32, error.NativeErrorCode);
+            Assert.True(File.Exists(marker));
+        }
     }
 
     [WindowsFact]

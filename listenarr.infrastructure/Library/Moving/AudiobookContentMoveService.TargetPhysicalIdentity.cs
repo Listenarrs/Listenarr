@@ -92,7 +92,9 @@ internal sealed partial class AudiobookContentMoveService
                 fileName,
                 requireDeleteAccess: false);
             targetPath.EnsureVisibleHierarchy();
-            if (!targetEntry.VisiblePathMatches()
+            if (!PinnedFileVisibleOrThrowUnavailable(
+                    targetEntry,
+                    $"The published target generation is temporarily unavailable before identity capture: {entry.RelativePath}")
                 || !await targetEntry.MatchesAsync(
                     entry.Length,
                     entry.Sha256,
@@ -104,7 +106,9 @@ internal sealed partial class AudiobookContentMoveService
 
             var objectIdentity = targetEntry.GetObjectIdentity();
             targetPath.EnsureVisibleHierarchy();
-            if (!targetEntry.VisiblePathMatches())
+            if (!PinnedFileVisibleOrThrowUnavailable(
+                    targetEntry,
+                    $"The published target path is temporarily unavailable during identity capture: {entry.RelativePath}"))
             {
                 throw new MoveNeedsAttentionException(
                     $"The published target path changed during identity capture: {entry.RelativePath}");

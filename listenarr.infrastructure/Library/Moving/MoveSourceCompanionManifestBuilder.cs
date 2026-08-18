@@ -67,20 +67,23 @@ internal static class MoveSourceCompanionManifestBuilder
             if (!FileSystemPathIdentity.AreEquivalent(
                     authorization.ParentAnchor.FullPath,
                     sourceParent,
-                    sourceIdentity.Semantics)
-                || !authorization.ParentAnchor.VisiblePathMatches())
+                    sourceIdentity.Semantics))
             {
                 throw Conflict(
                     "The audiobook companion source root could not be pinned beneath its managed library root.");
             }
+            EnsureVisible(
+                authorization.ParentAnchor,
+                "The audiobook companion source parent is temporarily unavailable.",
+                "The audiobook companion source parent changed during manifest capture.");
 
             using var source = authorization.ParentAnchor.OpenExistingChild(
                 Path.GetFileName(sourceRoot));
-            if (!source.VisiblePathMatches(sourceRoot))
-            {
-                throw Conflict(
-                    "The audiobook companion source directory changed while its move manifest was being created.");
-            }
+            EnsureVisible(
+                source,
+                sourceRoot,
+                "The audiobook companion source directory is temporarily unavailable.",
+                "The audiobook companion source directory changed while its move manifest was being created.");
 
             var entries = new List<MoveSourceManifestEntry>();
             await CaptureDirectoryAsync(
@@ -91,11 +94,11 @@ internal static class MoveSourceCompanionManifestBuilder
                 entries,
                 includeContentHashes,
                 cancellationToken);
-            if (!source.VisiblePathMatches(sourceRoot))
-            {
-                throw Conflict(
-                    "The audiobook companion source directory changed after its move manifest was created.");
-            }
+            EnsureVisible(
+                source,
+                sourceRoot,
+                "The audiobook companion source directory is temporarily unavailable after manifest capture.",
+                "The audiobook companion source directory changed after its move manifest was created.");
 
             return entries;
         }
@@ -103,11 +106,27 @@ internal static class MoveSourceCompanionManifestBuilder
         {
             throw;
         }
+        catch (ApplicationUnavailableException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (
+            FileSystemSafety.IsProvenMissingPathException(exception))
+        {
+            throw Conflict(
+                "Audiobook companion files changed while the move manifest was being created.");
+        }
         catch (Exception exception) when (exception is
             IOException or UnauthorizedAccessException
-                or ArgumentException or InvalidOperationException
-                or NotSupportedException or PathTooLongException
                 or System.ComponentModel.Win32Exception)
+        {
+            throw Unavailable(
+                "Audiobook companion files are temporarily unavailable while the move manifest is being created.",
+                exception);
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or InvalidOperationException
+                or NotSupportedException or PathTooLongException)
         {
             throw Conflict(
                 $"Audiobook companion files could not be safely included in the move manifest: {exception.Message}");
@@ -335,9 +354,21 @@ internal static class MoveSourceCompanionManifestBuilder
             ? Convert.ToHexString(
                 await SHA256.HashDataAsync(stream, cancellationToken))
             : null;
-        if (!root.VisiblePathMatches()
-            || !parent.VisiblePathMatches()
-            || !file.VisiblePathMatches()
+        EnsureVisible(
+            root,
+            "The audiobook companion root is temporarily unavailable during file capture.",
+            "The audiobook companion root changed during file capture.");
+        EnsureVisible(
+            parent,
+            "The audiobook companion parent is temporarily unavailable during file capture.",
+            "The audiobook companion parent changed during file capture.");
+        var fileVisibility = file.ProbeVisiblePathMatch();
+        if (fileVisibility == RegistrationPublicationMatchOutcome.Unavailable)
+        {
+            throw new IOException(
+                $"Audiobook companion file is temporarily unavailable: {fileName}");
+        }
+        if (fileVisibility != RegistrationPublicationMatchOutcome.Match
             || !file.MatchesObjectIdentity(physicalObjectIdentity)
             || stream.Length != length
             || file.GetLastWriteTimeUtc() != lastWriteTimeUtc)
@@ -364,11 +395,10 @@ internal static class MoveSourceCompanionManifestBuilder
             .Cast<string>()
             .OrderBy(name => name, semantics.Comparer)
             .ToArray();
-        if (!directory.VisiblePathMatches())
-        {
-            throw Conflict(
-                "The audiobook companion directory changed during enumeration.");
-        }
+        EnsureVisible(
+            directory,
+            "The audiobook companion directory is temporarily unavailable during enumeration.",
+            "The audiobook companion directory changed during enumeration.");
 
         return names;
     }
@@ -397,14 +427,54 @@ internal static class MoveSourceCompanionManifestBuilder
         PinnedDirectoryCreation.PinnedDirectoryAnchor root,
         PinnedDirectoryCreation.PinnedDirectoryAnchor current)
     {
-        if (!root.VisiblePathMatches()
-            || !current.VisiblePathMatches())
+        EnsureVisible(
+            root,
+            "The audiobook companion root is temporarily unavailable during manifest capture.",
+            "The audiobook companion root changed during manifest capture.");
+        EnsureVisible(
+            current,
+            "The audiobook companion directory is temporarily unavailable during manifest capture.",
+            "The audiobook companion directory generation changed during manifest capture.");
+    }
+
+    private static void EnsureVisible(
+        PinnedDirectoryCreation.PinnedDirectoryAnchor directory,
+        string unavailableMessage,
+        string mismatchMessage)
+    {
+        var visibility = directory.ProbeVisiblePathMatch();
+        if (visibility == RegistrationPublicationMatchOutcome.Unavailable)
         {
-            throw Conflict(
-                "The audiobook companion directory generation changed during manifest capture.");
+            throw new IOException(unavailableMessage);
+        }
+        if (visibility != RegistrationPublicationMatchOutcome.Match)
+        {
+            throw Conflict(mismatchMessage);
+        }
+    }
+
+    private static void EnsureVisible(
+        PinnedDirectoryCreation.PinnedDirectoryAnchor directory,
+        string visiblePath,
+        string unavailableMessage,
+        string mismatchMessage)
+    {
+        var visibility = directory.ProbeVisiblePathMatch(visiblePath);
+        if (visibility == RegistrationPublicationMatchOutcome.Unavailable)
+        {
+            throw new IOException(unavailableMessage);
+        }
+        if (visibility != RegistrationPublicationMatchOutcome.Match)
+        {
+            throw Conflict(mismatchMessage);
         }
     }
 
     private static ApplicationConflictException Conflict(string message) =>
         new("move_source_unverified", message);
+
+    private static ApplicationUnavailableException Unavailable(
+        string message,
+        Exception? innerException = null) =>
+        new("move_source_temporarily_unavailable", message, innerException);
 }

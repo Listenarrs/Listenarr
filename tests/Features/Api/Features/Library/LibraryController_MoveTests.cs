@@ -1375,6 +1375,57 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
         [Fact]
         [Trait("Method", "EnqueueMove")]
+        [Trait("Scenario", "ConfiguredRootsDoNotRequireLegacySettingsRead")]
+        public async Task MoveAudiobook_ConfiguredRootsExist_DoesNotRequireLegacySettingsRead()
+        {
+            var moveQueue = CreateMoveQueueMock();
+            moveQueue.Setup(service => service.EnqueueMoveAsync(
+                    It.IsAny<MoveEnqueueCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
+            var configuration = new Mock<IConfigurationService>(MockBehavior.Strict);
+            configuration.Setup(service => service.GetApplicationSettingsAsync())
+                .ThrowsAsync(new InvalidOperationException("Injected legacy settings outage."));
+            Init(services => services
+                .WithSingleton(moveQueue.Object)
+                .WithSingleton(configuration.Object));
+
+            var rootPath = FileService.GetTempDirectory(
+                "listenarr-move-settings-independent-root");
+            var root = await AddAuthorizedRootAsync(rootPath, "Managed Root");
+            root.IsDefault = true;
+            await _rootFolderRepository.UpdateAsync(root);
+            var sourcePath = Path.Join(rootPath, "Author", "Source");
+            var targetPath = Path.Join(rootPath, "Author", "Target");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Settings-independent move")
+                .WithBasePath(sourcePath)
+                .Build());
+            await AddTrackedFileAsync(
+                audiobook,
+                sourcePath,
+                identityBoundary: sourcePath);
+
+            var result = await _provider.GetRequiredService<LibraryController>().EnqueueMove(
+                audiobook.Id,
+                new LibraryController.MoveRequest
+                {
+                    DestinationPath = targetPath,
+                    SourcePath = sourcePath,
+                    MoveFiles = true
+                });
+
+            Assert.IsType<AcceptedResult>(result);
+            configuration.Verify(
+                service => service.GetApplicationSettingsAsync(),
+                Times.Never);
+            moveQueue.Verify(service => service.EnqueueMoveAsync(
+                It.IsAny<MoveEnqueueCommand>(),
+                It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [Fact]
+        [Trait("Method", "EnqueueMove")]
         [Trait("Scenario", "ManagedRootChangedFilesystemSemanticsBlocksPhysicalMove")]
         public async Task MoveAudiobook_ManagedRootChangedFilesystemSemantics_BlocksPhysicalMove()
         {
@@ -2241,6 +2292,112 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                     && command.SourceIdentity.CaseSensitivity == FileSystemCaseSensitivity.Sensitive
                     && command.TargetIdentity.CaseSensitivity == FileSystemCaseSensitivity.Sensitive),
                 It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [LinuxFact]
+        public async Task MoveAudiobook_AmbiguousNestedManagedSourceRoot_DoesNotFallBackToBroaderRootAuthority()
+        {
+            var mockMoveQueue = CreateMoveQueueMock();
+            mockMoveQueue.Setup(service => service.EnqueueMoveAsync(
+                    It.IsAny<MoveEnqueueCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
+            Init(services => services.WithSingleton(mockMoveQueue.Object));
+            var outerRoot = FileService.GetTempDirectory("listenarr-move-ambiguous-source-outer");
+            var innerRoot = Path.Join(outerRoot, "Managed Inner");
+            Directory.CreateDirectory(innerRoot);
+            await AddAuthorizedRootAsync(
+                outerRoot,
+                "Outer Managed Root",
+                FileSystemCaseSensitivityMode.Sensitive);
+            var ambiguousInnerRoot = "/" + innerRoot;
+            Assert.False(FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                ambiguousInnerRoot,
+                out _));
+            await _rootFolderRepository.AddAsync(new RootFolderBuilder()
+                .WithName("Ambiguous Nested Source Root")
+                .WithPath(ambiguousInnerRoot)
+                .WithCaseSensitivityMode(FileSystemCaseSensitivityMode.Insensitive)
+                .Build());
+
+            var sourcePath = Path.Join(innerRoot, "Author", "Source Book");
+            var targetPath = Path.Join(outerRoot, "Target Book");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Nested source authority")
+                .WithBasePath(sourcePath)
+                .Build());
+            await AddTrackedFileAsync(
+                audiobook,
+                sourcePath,
+                identityBoundary: innerRoot,
+                caseSensitivityMode: FileSystemCaseSensitivityMode.Sensitive);
+
+            var result = await _provider.GetRequiredService<LibraryController>().EnqueueMove(
+                audiobook.Id,
+                new LibraryController.MoveRequest { DestinationPath = targetPath });
+
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            var payload = System.Text.Json.JsonSerializer.Serialize(badRequest.Value);
+            Assert.Contains(
+                "source_physical_identity_unavailable",
+                payload,
+                StringComparison.Ordinal);
+            mockMoveQueue.Verify(service => service.EnqueueMoveAsync(
+                It.IsAny<MoveEnqueueCommand>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [LinuxFact]
+        public async Task MoveAudiobook_AmbiguousNestedManagedRoot_DoesNotFallBackToBroaderRootAuthority()
+        {
+            var mockMoveQueue = CreateMoveQueueMock();
+            mockMoveQueue.Setup(service => service.EnqueueMoveAsync(
+                    It.IsAny<MoveEnqueueCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
+            Init(services => services.WithSingleton(mockMoveQueue.Object));
+            var outerRoot = FileService.GetTempDirectory("listenarr-move-ambiguous-outer");
+            var innerRoot = Path.Join(outerRoot, "Managed Inner");
+            Directory.CreateDirectory(innerRoot);
+            await AddAuthorizedRootAsync(
+                outerRoot,
+                "Outer Managed Root",
+                FileSystemCaseSensitivityMode.Sensitive);
+            var ambiguousInnerRoot = "/" + innerRoot;
+            Assert.False(FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                ambiguousInnerRoot,
+                out _));
+            await _rootFolderRepository.AddAsync(new RootFolderBuilder()
+                .WithName("Ambiguous Nested Root")
+                .WithPath(ambiguousInnerRoot)
+                .WithCaseSensitivityMode(FileSystemCaseSensitivityMode.Insensitive)
+                .Build());
+
+            var sourcePath = Path.Join(outerRoot, "Source Book");
+            var targetPath = Path.Join(innerRoot, "Author", "Target Book");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Nested root authority")
+                .WithBasePath(sourcePath)
+                .Build());
+            await AddTrackedFileAsync(
+                audiobook,
+                sourcePath,
+                identityBoundary: outerRoot,
+                caseSensitivityMode: FileSystemCaseSensitivityMode.Sensitive);
+
+            var result = await _provider.GetRequiredService<LibraryController>().EnqueueMove(
+                audiobook.Id,
+                new LibraryController.MoveRequest { DestinationPath = targetPath });
+
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            var payload = System.Text.Json.JsonSerializer.Serialize(badRequest.Value);
+            Assert.Contains(
+                "destination_filesystem_identity_unavailable",
+                payload,
+                StringComparison.Ordinal);
+            mockMoveQueue.Verify(service => service.EnqueueMoveAsync(
+                It.IsAny<MoveEnqueueCommand>(),
+                It.IsAny<CancellationToken>()), Times.Never);
         }
 
         [Fact]

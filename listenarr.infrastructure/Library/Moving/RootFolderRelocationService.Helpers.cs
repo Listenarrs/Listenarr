@@ -85,16 +85,32 @@ public sealed partial class RootFolderRelocationService
                     audiobook.StoredBasePath,
                     out var storedSyntax))
             {
-                if (!allowContextualAmbiguousSyntax
-                    || !audiobook.StoredBasePath.StartsWith("//", StringComparison.Ordinal)
-                    || !FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                var hasContextualSyntax =
+                    audiobook.StoredBasePath.StartsWith("//", StringComparison.Ordinal)
+                    && FileSystemPathIdentity.TryDetectAbsoluteSyntax(
                         audiobook.StoredBasePath,
                         sourceSemantics.Syntax,
-                        out storedSyntax))
+                        out storedSyntax);
+                if (!hasContextualSyntax)
                 {
                     // A syntactically unresolvable BasePath cannot be attributed to
                     // this root safely. Do not claim unrelated broken metadata as a
                     // skipped item for this relocation.
+                    continue;
+                }
+
+                if (!allowContextualAmbiguousSyntax)
+                {
+                    if (StoredBasePathMayBelongToRoot(
+                            audiobook.StoredBasePath,
+                            storedSyntax,
+                            sourceRootPath,
+                            sourceSemantics,
+                            detectAmbiguousCaseMatches))
+                    {
+                        invalidStoredBasePaths.Add(audiobook);
+                    }
+
                     continue;
                 }
             }
@@ -104,18 +120,38 @@ public sealed partial class RootFolderRelocationService
                 continue;
             }
 
-            string canonicalStoredBasePath;
-            try
-            {
-                canonicalStoredBasePath = FileSystemPathIdentity.Canonicalize(
+            var canonicalStoredBasePath = string.Empty;
+            if (!allowContextualAmbiguousSyntax
+                && !FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
                     audiobook.StoredBasePath,
-                    storedSyntax);
-            }
-            catch (ArgumentException)
+                    out canonicalStoredBasePath,
+                    out _,
+                    sourceSemantics.Syntax))
             {
-                // Canonicalization failure leaves root ownership unknown. Preserve
-                // the audiobook unchanged without claiming it for this relocation.
+                if (FileSystemPathIdentity.StoredPathMayTouchBoundary(
+                        audiobook.StoredBasePath,
+                        sourceRootPath,
+                        sourceSemantics))
+                {
+                    invalidStoredBasePaths.Add(audiobook);
+                }
+
                 continue;
+            }
+
+            if (allowContextualAmbiguousSyntax)
+            {
+                try
+                {
+                    canonicalStoredBasePath = FileSystemPathIdentity.Canonicalize(
+                        audiobook.StoredBasePath,
+                        storedSyntax);
+                }
+                catch (ArgumentException)
+                {
+                    invalidStoredBasePaths.Add(audiobook);
+                    continue;
+                }
             }
 
             try
@@ -142,41 +178,22 @@ public sealed partial class RootFolderRelocationService
             }
             catch (ArgumentException)
             {
-                // Boundary comparison failure is not evidence that this audiobook
-                // belongs to the relocating root.
+                // This candidate already has same-syntax source context. Comparison
+                // failure cannot prove it is unrelated to the relocating root.
+                invalidStoredBasePaths.Add(audiobook);
             }
         }
 
         return (affected, invalidStoredBasePaths);
     }
 
-    private static bool PathTouchesBoundary(
-        string? path,
-        string boundaryPath,
-        FileSystemPathSemantics semantics)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return false;
-        }
-
-        try
-        {
-            return FileSystemPathIdentity.IsSameOrInside(path, boundaryPath, semantics)
-                || FileSystemPathIdentity.IsSameOrInside(boundaryPath, path, semantics);
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-    }
-
-    private async Task FinalizeCompletedRelocationAsync(
-        ListenArrDbContext db,
-        RootFolderRelocation relocation,
-        RootFolder root,
-        DateTime now,
-        CancellationToken cancellationToken)
+    private async Task<PinnedDirectoryCreation.PinnedDirectoryAnchor?>
+        FinalizeCompletedRelocationAsync(
+            ListenArrDbContext db,
+            RootFolderRelocation relocation,
+            RootFolder root,
+            DateTime now,
+            CancellationToken cancellationToken)
     {
         if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
                 relocation.TargetPath,
@@ -185,7 +202,7 @@ public sealed partial class RootFolderRelocationService
         {
             relocation.Status = RootFolderRelocationStatus.NeedsAttention;
             relocation.Error = "Target filesystem identity became unavailable during finalization.";
-            return;
+            return null;
         }
 
         var resolution = await semanticsResolver.ResolveAsync(
@@ -196,7 +213,7 @@ public sealed partial class RootFolderRelocationService
         {
             relocation.Status = RootFolderRelocationStatus.NeedsAttention;
             relocation.Error = "Target filesystem identity became unavailable during finalization.";
-            return;
+            return null;
         }
 
         var targetSemanticsError = await ValidateRelocationTargetSemanticsAsync(
@@ -208,7 +225,7 @@ public sealed partial class RootFolderRelocationService
         {
             relocation.Status = RootFolderRelocationStatus.NeedsAttention;
             relocation.Error = targetSemanticsError;
-            return;
+            return null;
         }
 
         if (!relocation.TargetDirectoryObjectIdentityVersion.HasValue
@@ -217,7 +234,7 @@ public sealed partial class RootFolderRelocationService
             relocation.Status = RootFolderRelocationStatus.NeedsAttention;
             relocation.Error =
                 "The target directory no longer has persisted physical identity authorization.";
-            return;
+            return null;
         }
 
         var currentObjectIdentity =
@@ -237,41 +254,56 @@ public sealed partial class RootFolderRelocationService
             relocation.Status = RootFolderRelocationStatus.NeedsAttention;
             relocation.Error =
                 "The target directory changed after the path change was authorized.";
-            return;
+            return null;
         }
 
-        var command = new RootFolderPathChangeCommand(
+        var targetGenerationLease = PinTargetDirectoryGeneration(
             canonicalTargetPath,
-            relocation.Mode,
-            relocation.DeleteEmptySource,
-            relocation.DesiredName,
-            relocation.DesiredIsDefault,
-            relocation.TargetCaseSensitivityMode);
-        ApplyRootMetadata(
-            root,
-            command,
-            canonicalTargetPath,
-            resolution,
-            FileSystemPathIdentity.CreateKey("root", canonicalTargetPath, resolution.Semantics));
-        root.DirectoryObjectIdentityVersion = currentObjectIdentity.Version;
-        root.DirectoryObjectIdentity = currentObjectIdentity.Value;
-        root.DirectoryObjectIdentityUnavailableReason =
-            currentObjectIdentity.UnavailableReason;
-        if (relocation.DesiredIsDefault)
-        {
-            await ClearOtherDefaultsAsync(db, root.Id, cancellationToken);
-        }
-
-        await FinalizeRelocationTargetReservationsAsync(
-            db,
-            relocation.Id,
+            currentObjectIdentity.Version,
+            currentObjectIdentity.Value,
+            currentObjectIdentity.UnavailableReason,
             cancellationToken);
-        relocation.TargetIdentityEnrollmentState =
-            TargetIdentityEnrollmentState.NotRequired;
-        relocation.Status = RootFolderRelocationStatus.Completed;
-        relocation.ActiveRootFolderId = null;
-        relocation.CompletedAt = now;
-        relocation.Error = null;
+        try
+        {
+            var command = new RootFolderPathChangeCommand(
+                canonicalTargetPath,
+                relocation.Mode,
+                relocation.DeleteEmptySource,
+                relocation.DesiredName,
+                relocation.DesiredIsDefault,
+                relocation.TargetCaseSensitivityMode);
+            ApplyRootMetadata(
+                root,
+                command,
+                canonicalTargetPath,
+                resolution,
+                FileSystemPathIdentity.CreateKey("root", canonicalTargetPath, resolution.Semantics));
+            root.DirectoryObjectIdentityVersion = currentObjectIdentity.Version;
+            root.DirectoryObjectIdentity = currentObjectIdentity.Value;
+            root.DirectoryObjectIdentityUnavailableReason =
+                currentObjectIdentity.UnavailableReason;
+            if (relocation.DesiredIsDefault)
+            {
+                await ClearOtherDefaultsAsync(db, root.Id, cancellationToken);
+            }
+
+            await FinalizeRelocationTargetReservationsAsync(
+                db,
+                relocation.Id,
+                cancellationToken);
+            relocation.TargetIdentityEnrollmentState =
+                TargetIdentityEnrollmentState.NotRequired;
+            relocation.Status = RootFolderRelocationStatus.Completed;
+            relocation.ActiveRootFolderId = null;
+            relocation.CompletedAt = now;
+            relocation.Error = null;
+            return targetGenerationLease;
+        }
+        catch
+        {
+            targetGenerationLease.Dispose();
+            throw;
+        }
     }
 
     private static void ApplyRootMetadata(
@@ -422,63 +454,5 @@ public sealed partial class RootFolderRelocationService
         relocation.Status == RootFolderRelocationStatus.Completed
             ? relocation.TargetPath
             : relocation.SourcePath;
-
-    private static RootFolderPathChangeResult Map(
-        RootFolderRelocation relocation,
-        string currentPath,
-        bool canAbandon = false) => new(
-        relocation.Id,
-        relocation.RootFolderId,
-        currentPath,
-        relocation.TargetPath,
-        relocation.Status,
-        relocation.TotalJobs,
-        relocation.CompletedJobs,
-        relocation.Error,
-        relocation.TargetIdentityEnrollmentState,
-        relocation.SkippedItems
-            .Select(item => item.AudiobookId)
-            .Distinct()
-            .OrderBy(id => id)
-            .ToArray(),
-        relocation.Mode,
-        relocation.SkippedItems
-            .OrderBy(item => item.AudiobookId)
-            .Select(item => new RootFolderRelocationSkippedItemResult(
-                item.AudiobookId,
-                ClassifyMetadataSkipReason(item.Reason)))
-            .ToArray(),
-        canAbandon);
-
-    private async Task BroadcastAsync(
-        RootFolderPathChangeResult result,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            await hubBroadcaster.BroadcastAsync(
-                "RootFolderRelocationUpdate",
-                RootFolderRelocationPublicProjection.Sanitize(result),
-                cancellationToken);
-        }
-        catch (OperationCanceledException exception)
-        {
-            // The relocation state is already committed. Request or transport
-            // cancellation may suppress this best-effort publication, but it must
-            // not make the durable operation appear to have failed.
-            System.Diagnostics.Trace.TraceWarning(
-                "Canceled broadcasting root relocation {0}: {1}",
-                result.RelocationId,
-                exception.Message);
-        }
-        catch (Exception exception) when (exception is not (
-            OperationCanceledException or OutOfMemoryException or StackOverflowException))
-        {
-            System.Diagnostics.Trace.TraceWarning(
-                "Failed to broadcast root relocation {0}: {1}",
-                result.RelocationId,
-                exception.Message);
-        }
-    }
 
 }

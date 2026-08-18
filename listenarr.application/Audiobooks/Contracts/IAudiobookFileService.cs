@@ -7,6 +7,18 @@ namespace Listenarr.Application.Audiobooks.Contracts
         CommittedCleanupPending
     }
 
+    public enum RegistrationPublicationMatchOutcome
+    {
+        Match,
+        Mismatch,
+        Unavailable
+    }
+
+    public interface IAudiobookFileRegistrationPublicationProbe
+    {
+        RegistrationPublicationMatchOutcome ProbeCurrentPublication();
+    }
+
     public interface IAudiobookFileRegistrationIdentityVerifier
     {
         bool MatchesPhysicalObjectIdentity(string expectedPhysicalObjectIdentity);

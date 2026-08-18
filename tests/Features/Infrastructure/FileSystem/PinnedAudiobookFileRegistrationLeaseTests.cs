@@ -39,6 +39,36 @@ public sealed class PinnedAudiobookFileRegistrationLeaseTests : BaseTests
     }
 
     [LinuxFact]
+    public async Task ProbeCurrentPublication_ParentReplaced_DetectsPublicPathMismatch()
+    {
+        var parent = FileService.GetTempDirectory(
+            "registration-lease-parent-replacement");
+        var displacedParent = parent + "-displaced";
+        var publicPath = await FileService.GetFileAsync(
+            parent,
+            "book.m4b",
+            "original generation");
+        using var lease = PinnedAudiobookFileRegistrationLease.Open(publicPath);
+
+        Directory.Move(parent, displacedParent);
+        Directory.CreateDirectory(parent);
+        await File.WriteAllTextAsync(
+            Path.Join(parent, "book.m4b"),
+            "replacement generation");
+
+        Assert.Equal(
+            RegistrationPublicationMatchOutcome.Mismatch,
+            lease.ProbeCurrentPublication());
+        Assert.False(lease.MatchesCurrentPublication());
+        Assert.Equal(
+            "original generation",
+            await File.ReadAllTextAsync(lease.MetadataPath));
+        Assert.Equal(
+            "replacement generation",
+            await File.ReadAllTextAsync(Path.Join(parent, "book.m4b")));
+    }
+
+    [LinuxFact]
     public async Task OpenMetadataWriteStream_PublicPathReplaced_DoesNotOpenReplacementGeneration()
     {
         var parent = FileService.GetTempDirectory(

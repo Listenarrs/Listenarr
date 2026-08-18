@@ -123,7 +123,8 @@ namespace Listenarr.Infrastructure.FileSystem
             string destFile,
             Guid operationId,
             int? audiobookId = null,
-            int? audiobookFileId = null)
+            int? audiobookFileId = null,
+            FilePublicationSourceProof? expectedSourceProof = null)
         {
             if (operationId == Guid.Empty)
             {
@@ -148,7 +149,8 @@ namespace Listenarr.Infrastructure.FileSystem
                 destFile,
                 operationId,
                 audiobookId,
-                audiobookFileId);
+                audiobookFileId,
+                expectedSourceProof);
             if (markerlessResult.HasValue)
             {
                 return markerlessResult.Value;

@@ -431,6 +431,66 @@ public sealed class MoveCleanupBoundaryResolverTests : BaseTests
         Assert.NotEqual(configuredRoot, result.Boundary);
     }
 
+    [LinuxFact]
+    public async Task ResolveAsync_AmbiguousConfiguredRootThatMayContainSource_FailsClosed()
+    {
+        var root = FileService.GetTempDirectory("move-boundary-ambiguous-root");
+        var ambiguousRoot = "/" + root;
+        Assert.False(FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+            ambiguousRoot,
+            out _));
+        var source = Path.Join(root, "Author", "Book", "test");
+        var target = Path.Join(
+            FileService.GetTempPath(),
+            $"move-boundary-ambiguous-target-{Guid.NewGuid():N}");
+        var resolver = CreateResolver((path, mode) => new FileSystemSemanticsResolution(
+            new FileSystemPathSemantics(
+                FileSystemPathSyntax.Unix,
+                FileSystemCaseSensitivity.Sensitive),
+            PathIdentityState.Valid,
+            Path.GetPathRoot(path) ?? path));
+
+        var result = await resolver.ResolveAsync(
+            source,
+            target,
+            [new RootFolder
+            {
+                Name = "Legacy Ambiguous Root",
+                Path = ambiguousRoot,
+                CaseSensitivityMode = FileSystemCaseSensitivityMode.Insensitive
+            }]);
+
+        Assert.False(result.IsAvailable);
+        Assert.Equal(MoveCleanupBoundaryKind.Unavailable, result.Kind);
+        Assert.Contains("ambiguous", result.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [WindowsFact]
+    public async Task ResolveAsync_DeviceAliasConfiguredRootThatContainsSource_FailsClosed()
+    {
+        var root = FileService.GetTempDirectory("move-boundary-device-root");
+        var source = Path.Join(root, "Author", "Book", "test");
+        var target = Path.Join(
+            FileService.GetTempPath(),
+            $"move-boundary-device-target-{Guid.NewGuid():N}");
+        var deviceAliasRoot = @"\\?\" + root;
+        var resolver = CreateResolver();
+
+        var result = await resolver.ResolveAsync(
+            source,
+            target,
+            [new RootFolder
+            {
+                Name = "Legacy Device Root",
+                Path = deviceAliasRoot,
+                CaseSensitivityMode = FileSystemCaseSensitivityMode.Insensitive
+            }]);
+
+        Assert.False(result.IsAvailable);
+        Assert.Equal(MoveCleanupBoundaryKind.Unavailable, result.Kind);
+        Assert.Contains("configured source root", result.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public async Task ResolveAsync_PotentialConfiguredRootWithUnavailableIdentity_FailsClosed()
     {

@@ -12,7 +12,9 @@ using Listenarr.Domain.Common;
 
 namespace Listenarr.Api.Features.Downloads;
 
-public sealed class ManualImportDestinationTracker(IFileSystem fileSystem)
+public sealed class ManualImportDestinationTracker(
+    IFileSystem fileSystem,
+    IFilePublicationSourceCapability filePublicationSourceCapability)
 {
     private readonly Dictionary<string, HashSet<string>> _usedDestinationsByBoundary = new(StringComparer.Ordinal);
 
@@ -23,21 +25,21 @@ public sealed class ManualImportDestinationTracker(IFileSystem fileSystem)
         FileSystemSemanticsResolution destinationResolution,
         CancellationToken cancellationToken = default) =>
         PlanAsync(
-            sourcePath: null,
+            sourceProof: null,
             desiredDestination,
             destinationResolution,
             allowExistingEquivalent: false,
             cancellationToken);
 
     public Task<ManualImportDestinationReservation> PlanIdempotentOrUniqueAsync(
-        string sourcePath,
+        FilePublicationSourceProof sourceProof,
         string desiredDestination,
         FileSystemSemanticsResolution destinationResolution,
         CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
+        sourceProof.Validate();
         return PlanAsync(
-            sourcePath,
+            sourceProof,
             desiredDestination,
             destinationResolution,
             allowExistingEquivalent: true,
@@ -54,8 +56,42 @@ public sealed class ManualImportDestinationTracker(IFileSystem fileSystem)
         usedDestinations.Add(reservation.Path);
     }
 
+    public void CommitRecovered(
+        string destinationPath,
+        FileSystemSemanticsResolution destinationResolution)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
+        if (destinationResolution.State != PathIdentityState.Valid
+            || string.IsNullOrWhiteSpace(destinationResolution.BoundaryPath))
+        {
+            throw new InvalidOperationException(
+                destinationResolution.Reason
+                    ?? "Recovered destination filesystem identity is unavailable.");
+        }
+        if (!FileSystemPathIdentity.IsSameOrInside(
+                destinationPath,
+                destinationResolution.BoundaryPath,
+                destinationResolution.Semantics))
+        {
+            throw new InvalidOperationException(
+                "Recovered destination escaped its authorized filesystem boundary.");
+        }
+
+        var boundaryKey = FileSystemPathIdentity.CreateKey(
+            "manual-import-boundary",
+            destinationResolution.BoundaryPath,
+            destinationResolution.Semantics);
+        if (!_usedDestinationsByBoundary.TryGetValue(boundaryKey, out var usedDestinations))
+        {
+            usedDestinations = new HashSet<string>(destinationResolution.Semantics.Comparer);
+            _usedDestinationsByBoundary[boundaryKey] = usedDestinations;
+        }
+
+        usedDestinations.Add(destinationPath);
+    }
+
     private async Task<ManualImportDestinationReservation> PlanAsync(
-        string? sourcePath,
+        FilePublicationSourceProof? sourceProof,
         string desiredDestination,
         FileSystemSemanticsResolution destinationResolution,
         bool allowExistingEquivalent,
@@ -93,12 +129,11 @@ public sealed class ManualImportDestinationTracker(IFileSystem fileSystem)
         }
 
         if (allowExistingEquivalent
-            && sourcePath != null
+            && sourceProof.HasValue
             && !usedDestinations.Contains(desiredDestination)
-            && fileSystem.FileExists(desiredDestination)
-            && await fileSystem.FilesHaveSameContentAsync(
-                sourcePath,
+            && await ExistingMatchesSourceProofAsync(
                 desiredDestination,
+                sourceProof.Value,
                 cancellationToken))
         {
             return new ManualImportDestinationReservation(
@@ -114,6 +149,33 @@ public sealed class ManualImportDestinationTracker(IFileSystem fileSystem)
             fileSystem.FileExists,
             usedDestinations);
         return new ManualImportDestinationReservation(uniqueDestination, boundaryKey);
+    }
+
+    private async Task<bool> ExistingMatchesSourceProofAsync(
+        string destination,
+        FilePublicationSourceProof sourceProof,
+        CancellationToken cancellationToken)
+    {
+        if (!fileSystem.FileExists(destination))
+        {
+            return false;
+        }
+
+        var destinationCapability = await filePublicationSourceCapability.CheckAsync(
+            destination,
+            cancellationToken);
+        if (!destinationCapability.IsSupported
+            || !destinationCapability.SourceProof.HasValue)
+        {
+            return false;
+        }
+
+        var destinationProof = destinationCapability.SourceProof.Value;
+        return destinationProof.Length == sourceProof.Length
+            && string.Equals(
+                destinationProof.Sha256,
+                sourceProof.Sha256,
+                StringComparison.OrdinalIgnoreCase);
     }
 }
 

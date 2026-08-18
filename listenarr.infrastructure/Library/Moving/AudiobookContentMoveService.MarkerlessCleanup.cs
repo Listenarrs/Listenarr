@@ -102,7 +102,7 @@ internal sealed partial class AudiobookContentMoveService
             entry,
             request.TargetSemantics,
             "target");
-        if (!File.Exists(sourcePath))
+        if (!TryGetMarkerlessPathAttributes(sourcePath, out var sourceAttributes))
         {
             if (entry.CleanupState == MoveJobEntryCleanupState.DeleteAuthorized)
             {
@@ -129,6 +129,12 @@ internal sealed partial class AudiobookContentMoveService
             }
             throw new MoveNeedsAttentionException(
                 $"A source file disappeared before markerless deletion was authorized: {entry.RelativePath}");
+        }
+        if ((sourceAttributes & FileAttributes.Directory) != 0
+            || (sourceAttributes & FileAttributes.ReparsePoint) != 0)
+        {
+            throw new MoveNeedsAttentionException(
+                $"A source file changed type or became a link before markerless deletion: {entry.RelativePath}");
         }
         if (entry.CleanupState == MoveJobEntryCleanupState.Deleted)
         {
@@ -196,6 +202,9 @@ internal sealed partial class AudiobookContentMoveService
                 MoveJobEntryCleanupState.DeleteAuthorized,
                 cancellationToken);
             entry.CleanupState = MoveJobEntryCleanupState.DeleteAuthorized;
+            faultInjector?.OnSourceCleanupMutation(
+                request.JobId,
+                SourceCleanupFaultPoint.AfterMarkerlessSourceDeleteAuthorizedState);
         }
         await EnsureMutationAuthorizedAsync(
             request,
@@ -204,6 +213,22 @@ internal sealed partial class AudiobookContentMoveService
             cancellationToken);
         ValidateMarkerlessSourceEntry(request, entry, sourceEntry);
         ValidateMarkerlessTargetEntry(entry, targetEntry);
+        if (!await PinnedFileMatchesManifestAsync(
+                sourceEntry,
+                entry,
+                cancellationToken))
+        {
+            throw new MoveNeedsAttentionException(
+                $"The source file content changed after markerless deletion was authorized: {entry.RelativePath}");
+        }
+        if (!await PinnedFileMatchesManifestAsync(
+                targetEntry,
+                entry,
+                cancellationToken))
+        {
+            throw new MoveNeedsAttentionException(
+                $"The target file content changed after markerless deletion was authorized: {entry.RelativePath}");
+        }
         sourceEntry.Delete();
         faultInjector?.OnSourceCleanupMutation(
             request.JobId,
@@ -238,6 +263,31 @@ internal sealed partial class AudiobookContentMoveService
         }
     }
 
+    private static bool TryGetMarkerlessPathAttributes(
+        string path,
+        out FileAttributes attributes)
+    {
+        try
+        {
+            attributes = File.GetAttributes(path);
+            return true;
+        }
+        catch (Exception exception) when (exception is
+            FileNotFoundException or DirectoryNotFoundException)
+        {
+            attributes = default;
+            return false;
+        }
+        catch (System.ComponentModel.Win32Exception exception) when (
+            OperatingSystem.IsWindows()
+                ? exception.NativeErrorCode is 2 or 3
+                : exception.NativeErrorCode == 2)
+        {
+            attributes = default;
+            return false;
+        }
+    }
+
     private static void ValidateMarkerlessSourceDirectory(
         MoveJobEntry entry,
         PinnedDirectoryCreation.PinnedDirectoryAnchor directory)
@@ -245,7 +295,9 @@ internal sealed partial class AudiobookContentMoveService
         if (string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
             || !directory.MatchesDirectoryObjectIdentity(
                 entry.SourcePhysicalObjectIdentity)
-            || !directory.VisiblePathMatches())
+            || !PinnedDirectoryVisibleOrThrowUnavailable(
+                directory,
+                $"A markerless source directory is temporarily unavailable: {entry.RelativePath}"))
         {
             throw new MoveNeedsAttentionException(
                 $"A markerless source directory changed physical generation: {entry.RelativePath}");

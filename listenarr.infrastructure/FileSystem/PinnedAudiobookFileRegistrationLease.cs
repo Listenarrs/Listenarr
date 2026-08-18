@@ -4,7 +4,8 @@ namespace Listenarr.Infrastructure.FileSystem;
 
 internal sealed class PinnedAudiobookFileRegistrationLease :
     IAudiobookFileRegistrationLease,
-    IAudiobookFileRegistrationIdentityVerifier
+    IAudiobookFileRegistrationIdentityVerifier,
+    IAudiobookFileRegistrationPublicationProbe
 {
     private readonly PinnedDirectoryCreation.PinnedFileEntry _file;
     private readonly Microsoft.Win32.SafeHandles.SafeFileHandle? _stableHandle;
@@ -113,7 +114,13 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
         {
             var canonicalPath = Path.GetFullPath(publicPath);
             var physicalObjectIdentity = file.GetObjectIdentity();
-            if (!file.VisiblePathMatches()
+            var visibility = file.ProbeVisiblePathMatch();
+            if (visibility == RegistrationPublicationMatchOutcome.Unavailable)
+            {
+                throw new IOException(
+                    "The audiobook file generation is temporarily unavailable while its physical identity is being verified.");
+            }
+            if (visibility != RegistrationPublicationMatchOutcome.Match
                 || (!string.IsNullOrWhiteSpace(expectedPhysicalObjectIdentity)
                     && !file.MatchesObjectIdentity(
                         expectedPhysicalObjectIdentity)))
@@ -137,15 +144,18 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
                     commitRegistration);
             }
 
-            if (OperatingSystem.IsLinux())
+            if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
             {
                 stableHandle = file.DuplicateHandleForOperation();
-                var metadataPath = FormattableString.Invariant(
-                    $"/proc/{Environment.ProcessId}/fd/{stableHandle.DangerousGetHandle().ToInt32()}");
+                var descriptor = stableHandle.DangerousGetHandle().ToInt32();
+                var metadataPath = OperatingSystem.IsLinux()
+                    ? FormattableString.Invariant(
+                        $"/proc/{Environment.ProcessId}/fd/{descriptor}")
+                    : FormattableString.Invariant($"/dev/fd/{descriptor}");
                 if (!File.Exists(metadataPath))
                 {
                     throw new PlatformNotSupportedException(
-                        "The Linux proc filesystem is unavailable for stable metadata extraction.");
+                        "The platform does not expose a stable metadata path for the pinned file descriptor.");
                 }
 
                 var result = new PinnedAudiobookFileRegistrationLease(
@@ -164,7 +174,7 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
             }
 
             throw new PlatformNotSupportedException(
-                "Stable metadata extraction is supported only on Windows and Linux.");
+                "Stable metadata extraction is supported only on Windows, Linux, and macOS.");
         }
         catch
         {
@@ -190,7 +200,13 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
             }
 
             var canonicalPath = Path.GetFullPath(publicPath);
-            if (!file.VisiblePathMatches())
+            var visibility = file.ProbeVisiblePathMatch();
+            if (visibility == RegistrationPublicationMatchOutcome.Unavailable)
+            {
+                throw new IOException(
+                    "The audiobook file is temporarily unavailable before pinned path-only registration.");
+            }
+            if (visibility != RegistrationPublicationMatchOutcome.Match)
             {
                 throw new InvalidOperationException(
                     "The audiobook file changed before pinned path-only registration.");
@@ -295,33 +311,49 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
 
         try
         {
-            return _file.VisiblePathMatches()
-                && _file.MatchesObjectIdentity(expectedPhysicalObjectIdentity);
+            // Identity compatibility is a property of the pinned generation. Whether
+            // that generation is still published at the visible path is a separate
+            // tri-state observation exposed by ProbeCurrentPublication().
+            return _file.MatchesObjectIdentity(expectedPhysicalObjectIdentity);
         }
         catch (Exception exception) when (exception is
-            IOException or UnauthorizedAccessException
-                or InvalidOperationException
-                or System.ComponentModel.Win32Exception)
+            ArgumentException or InvalidOperationException
+                or NotSupportedException or PathTooLongException)
         {
             return false;
         }
     }
 
-    public bool MatchesCurrentPublication()
+    public bool MatchesCurrentPublication() =>
+        ProbeCurrentPublication() == RegistrationPublicationMatchOutcome.Match;
+
+    public RegistrationPublicationMatchOutcome ProbeCurrentPublication()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         try
         {
-            return _file.VisiblePathMatches()
-                && (!HasDurablePhysicalObjectIdentity
-                    || _file.MatchesObjectIdentity(PhysicalObjectIdentity));
+            var visible = _file.ProbePublicPathMatch();
+            if (visible != RegistrationPublicationMatchOutcome.Match)
+            {
+                return visible;
+            }
+
+            return !HasDurablePhysicalObjectIdentity
+                || _file.MatchesObjectIdentity(PhysicalObjectIdentity)
+                    ? RegistrationPublicationMatchOutcome.Match
+                    : RegistrationPublicationMatchOutcome.Mismatch;
         }
         catch (Exception exception) when (exception is
             IOException or UnauthorizedAccessException
-                or InvalidOperationException
                 or System.ComponentModel.Win32Exception)
         {
-            return false;
+            return RegistrationPublicationMatchOutcome.Unavailable;
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or InvalidOperationException
+                or NotSupportedException or PathTooLongException)
+        {
+            return RegistrationPublicationMatchOutcome.Mismatch;
         }
     }
 

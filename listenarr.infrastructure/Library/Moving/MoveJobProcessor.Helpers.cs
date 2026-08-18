@@ -14,6 +14,11 @@ namespace Listenarr.Infrastructure.Library.Moving
 {
     internal partial class MoveJobProcessor
     {
+        private static bool IsTransientFilesystemException(Exception exception) =>
+            exception is IOException or UnauthorizedAccessException
+            || exception is System.ComponentModel.Win32Exception native
+                && native.NativeErrorCode is 5 or 13 or 16 or 30 or 32 or 33;
+
         private async Task<PathIdentitySnapshot> GetRequiredIdentityAsync(
             MoveJob job,
             string path,
@@ -46,6 +51,12 @@ namespace Listenarr.Infrastructure.Library.Moving
                     identity.BoundaryPath,
                     FileSystemCaseSensitivityMode.Auto,
                     cancellationToken);
+                if (current.State == PathIdentityState.Unavailable)
+                {
+                    throw new IOException(
+                        current.Reason
+                            ?? $"The {(target ? "target" : "source")} filesystem semantics are temporarily unavailable.");
+                }
                 if (current.State != PathIdentityState.Valid
                     || current.Semantics.Syntax != identity.Syntax
                     || current.Semantics.CaseSensitivity != identity.CaseSensitivity)
@@ -164,7 +175,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                     job.Id);
                 return FinalizedMoveRecoveryOutcome.HandledFailure;
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            catch (Exception exception) when (IsTransientFilesystemException(exception))
             {
                 await ScheduleTransientRetryAsync(
                     job,
@@ -266,7 +277,7 @@ namespace Listenarr.Infrastructure.Library.Moving
             {
                 throw;
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            catch (Exception exception) when (IsTransientFilesystemException(exception))
             {
                 await ScheduleTransientRetryAsync(
                     job,
@@ -300,7 +311,7 @@ namespace Listenarr.Infrastructure.Library.Moving
             {
                 throw;
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            catch (Exception exception) when (IsTransientFilesystemException(exception))
             {
                 await ScheduleTransientRetryAsync(
                     job,

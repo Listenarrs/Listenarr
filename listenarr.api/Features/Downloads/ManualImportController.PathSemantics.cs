@@ -15,9 +15,9 @@ public partial class ManualImportController
         managedBasePath = string.Empty;
         reason = string.Empty;
         allowedRoots = FileUtils.GetValidMutationRootsForCurrentOs(
-            rootFolders
-                .Select(root => root.Path)
-                .Append(settings.OutputPath));
+            rootFolders.Count > 0
+                ? rootFolders.Select(root => root.Path)
+                : [settings.OutputPath]);
         if (allowedRoots.Count == 0)
         {
             reason = "No configured destination root is available.";
@@ -26,10 +26,9 @@ public partial class ManualImportController
 
         var requestedBasePath = !string.IsNullOrWhiteSpace(audiobook.BasePath)
             ? audiobook.BasePath
-            : !string.IsNullOrWhiteSpace(settings.OutputPath)
-                ? settings.OutputPath
-                : rootFolders.FirstOrDefault(root => root.IsDefault)?.Path
-                    ?? rootFolders.FirstOrDefault()?.Path;
+            : rootFolders.FirstOrDefault(root => root.IsDefault)?.Path
+                ?? rootFolders.FirstOrDefault()?.Path
+                ?? settings.OutputPath;
         if (string.IsNullOrWhiteSpace(requestedBasePath)
             || !_fileSystem.TryValidateMutationTarget(
                 requestedBasePath,
@@ -60,6 +59,7 @@ public partial class ManualImportController
             basePath,
             rootFolders,
             "Destination filesystem identity is unavailable.",
+            allowUnavailableManagedRootFallback: false,
             cancellationToken);
     }
 
@@ -73,6 +73,7 @@ public partial class ManualImportController
             path,
             rootFolders,
             defaultReason,
+            allowUnavailableManagedRootFallback: true,
             cancellationToken);
         return resolution.Semantics;
     }
@@ -81,13 +82,22 @@ public partial class ManualImportController
         string path,
         IReadOnlyCollection<RootFolder> rootFolders,
         string defaultReason,
+        bool allowUnavailableManagedRootFallback,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentNullException.ThrowIfNull(rootFolders);
 
+        if (!FileSystemPathIdentity.TryDetectAbsoluteSyntaxForHost(
+                path,
+                out var pathSyntax))
+        {
+            throw new InvalidOperationException(defaultReason);
+        }
+
         FileSystemSemanticsResolution? bestRootResolution = null;
         var bestRootLength = -1;
+        var unavailableRootLength = -1;
         foreach (var root in rootFolders)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -96,6 +106,26 @@ public partial class ManualImportController
                     out var canonicalRoot,
                     out _))
             {
+                if (FileSystemPathIdentity.StoredBoundaryMayContainPath(
+                        root.Path,
+                        path,
+                        pathSyntax,
+                        root.CaseSensitivityMode))
+                {
+                    unavailableRootLength = Math.Max(
+                        unavailableRootLength,
+                        root.Path.Length);
+                }
+
+                continue;
+            }
+
+            if (!FileSystemPathIdentity.StoredBoundaryMayContainPath(
+                    canonicalRoot,
+                    path,
+                    pathSyntax,
+                    root.CaseSensitivityMode))
+            {
                 continue;
             }
 
@@ -103,8 +133,14 @@ public partial class ManualImportController
                 root,
                 canonicalRoot,
                 cancellationToken);
-            if (rootResolution.State != PathIdentityState.Valid
-                || !FileSystemPathIdentity.IsSameOrInside(
+            if (rootResolution.State != PathIdentityState.Valid)
+            {
+                unavailableRootLength = Math.Max(
+                    unavailableRootLength,
+                    canonicalRoot.Length);
+                continue;
+            }
+            if (!FileSystemPathIdentity.IsSameOrInside(
                     path,
                     canonicalRoot,
                     rootResolution.Semantics))
@@ -117,6 +153,23 @@ public partial class ManualImportController
                 bestRootResolution = rootResolution;
                 bestRootLength = canonicalRoot.Length;
             }
+        }
+
+        if (unavailableRootLength >= bestRootLength
+            && unavailableRootLength >= 0)
+        {
+            if (!allowUnavailableManagedRootFallback)
+            {
+                throw new InvalidOperationException(
+                    "A configured root that may contain this path has unavailable or ambiguous persisted filesystem identity. Repair or change that root before importing here.");
+            }
+
+            // Source publication is independently generation-pinned. Do not borrow
+            // semantics from a broader configured root when a more specific managed
+            // source boundary is unavailable; resolve the live source path directly.
+            // Generic source-directory cleanup has a separate fail-closed managed-root
+            // fence and therefore remains disabled for this ambiguous source.
+            bestRootResolution = null;
         }
 
         FileSystemSemanticsResolution resolution;
@@ -169,7 +222,7 @@ public partial class ManualImportController
             cancellationToken);
     }
 
-    private static bool IsPotentiallyInsideAnyConfiguredRoot(
+    private static bool PotentiallyOverlapsAnyConfiguredRoot(
         string path,
         IEnumerable<RootFolder> rootFolders)
     {
@@ -189,8 +242,19 @@ public partial class ManualImportController
             if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
                     root.Path,
                     out var canonicalRoot,
-                    out _)
-                || !FileSystemPathIdentity.TryDetectAbsoluteSyntaxForHost(
+                    out _))
+            {
+                if (!FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                        root.Path,
+                        out var storedRootSyntax)
+                    || storedRootSyntax == pathSyntax)
+                {
+                    return true;
+                }
+
+                continue;
+            }
+            if (!FileSystemPathIdentity.TryDetectAbsoluteSyntaxForHost(
                     canonicalRoot,
                     out var rootSyntax)
                 || rootSyntax != pathSyntax)
@@ -211,6 +275,14 @@ public partial class ManualImportController
                 || FileSystemPathIdentity.IsSameOrInside(
                     canonicalPath,
                     canonicalRoot,
+                    insensitive)
+                || FileSystemPathIdentity.IsSameOrInside(
+                    canonicalRoot,
+                    canonicalPath,
+                    sensitive)
+                || FileSystemPathIdentity.IsSameOrInside(
+                    canonicalRoot,
+                    canonicalPath,
                     insensitive))
             {
                 return true;

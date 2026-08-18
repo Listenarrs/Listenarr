@@ -90,10 +90,13 @@ public partial class AudiobookFileService
                         if (registration.Success)
                         {
                             ApplyCommittedBasePath(audiobook, registration.Mutation);
-                            if (registrationLease.MatchesCurrentPublication())
+                            if (ProbeCurrentPublication(registrationLease)
+                                != RegistrationPublicationMatchOutcome.Mismatch)
                             {
-                                return CompleteRegisteredPublication(
-                                    registrationLease);
+                                return await CompleteRegisteredPublicationAsync(
+                                    audiobook,
+                                    registrationLease,
+                                    registration.Mutation);
                             }
 
                             await RollbackPublishedGenerationIfStaleAsync(
@@ -137,10 +140,13 @@ public partial class AudiobookFileService
                             }
 
                             ApplyCommittedBasePath(audiobook, basePathCommit.Mutation);
-                            if (registrationLease.MatchesCurrentPublication())
+                            if (ProbeCurrentPublication(registrationLease)
+                                != RegistrationPublicationMatchOutcome.Mismatch)
                             {
-                                return CompleteRegisteredPublication(
-                                    registrationLease);
+                                return await CompleteRegisteredPublicationAsync(
+                                    audiobook,
+                                    registrationLease,
+                                    basePathCommit.Mutation);
                             }
 
                             await RollbackPublishedGenerationIfStaleAsync(
@@ -174,10 +180,13 @@ public partial class AudiobookFileService
                         }
 
                         ApplyCommittedBasePath(audiobook, refresh.Mutation);
-                        if (registrationLease.MatchesCurrentPublication())
+                        if (ProbeCurrentPublication(registrationLease)
+                            != RegistrationPublicationMatchOutcome.Mismatch)
                         {
-                            return CompleteRegisteredPublication(
-                                registrationLease);
+                            return await CompleteRegisteredPublicationAsync(
+                                audiobook,
+                                registrationLease,
+                                refresh.Mutation);
                         }
 
                         await RollbackPublishedGenerationIfStaleAsync(
@@ -195,11 +204,38 @@ public partial class AudiobookFileService
         return false;
     }
 
-    private static bool CompleteRegisteredPublication(
-        IAudiobookFileRegistrationLease registrationLease) =>
-        registrationLease.CompletePublication() is
-            RegistrationPublicationCompletion.Completed or
-            RegistrationPublicationCompletion.CommittedCleanupPending;
+    private async Task<bool> CompleteRegisteredPublicationAsync(
+        Audiobook audiobook,
+        IAudiobookFileRegistrationLease registrationLease,
+        AudiobookBasePathMutation? basePathMutation)
+    {
+        var completion = registrationLease.CompletePublication();
+        if (completion is not (
+                RegistrationPublicationCompletion.Completed or
+                RegistrationPublicationCompletion.CommittedCleanupPending))
+        {
+            return false;
+        }
+
+        var publicationMatch = ProbeCurrentPublication(registrationLease);
+        if (publicationMatch == RegistrationPublicationMatchOutcome.Match)
+        {
+            return true;
+        }
+        if (publicationMatch == RegistrationPublicationMatchOutcome.Unavailable)
+        {
+            // The ownership row and publication journal are already durably committed.
+            // Temporary storage unavailability is not proof that the namespace changed;
+            // preserve the claim for startup reconciliation instead of rolling it back.
+            return true;
+        }
+
+        await RollbackPublishedGenerationIfStaleAsync(
+            audiobook,
+            registrationLease,
+            basePathMutation);
+        return false;
+    }
 
     public Task RollbackPublishedGenerationIfStaleAsync(
         Audiobook audiobook,
@@ -209,6 +245,14 @@ public partial class AudiobookFileService
             registrationLease,
             basePathMutation: null);
 
+    private static RegistrationPublicationMatchOutcome ProbeCurrentPublication(
+        IAudiobookFileRegistrationLease registrationLease) =>
+        registrationLease is IAudiobookFileRegistrationPublicationProbe probe
+            ? probe.ProbeCurrentPublication()
+            : registrationLease.MatchesCurrentPublication()
+                ? RegistrationPublicationMatchOutcome.Match
+                : RegistrationPublicationMatchOutcome.Mismatch;
+
     private async Task RollbackPublishedGenerationIfStaleAsync(
         Audiobook audiobook,
         IAudiobookFileRegistrationLease registrationLease,
@@ -216,7 +260,8 @@ public partial class AudiobookFileService
     {
         ArgumentNullException.ThrowIfNull(audiobook);
         ArgumentNullException.ThrowIfNull(registrationLease);
-        if (registrationLease.MatchesCurrentPublication())
+        if (ProbeCurrentPublication(registrationLease)
+            != RegistrationPublicationMatchOutcome.Mismatch)
         {
             return;
         }

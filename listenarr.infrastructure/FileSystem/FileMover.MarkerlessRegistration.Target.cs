@@ -19,12 +19,20 @@ public partial class FileMover
             gate.DestinationName,
             requireDeleteAccess: false);
 
+        var requiresGenerationPreservingLink =
+            action == FileAction.HardlinkCopy
+            || (action == FileAction.Move && !OperatingSystem.IsWindows());
+
         if (existingTarget != null)
         {
-            if (action == FileAction.HardlinkCopy
+            if (requiresGenerationPreservingLink
                 && sourceEntry != null
-                && sourceEntry.VisiblePathMatches()
-                && existingTarget.VisiblePathMatches()
+                && VisiblePathMatchesOrThrowUnavailable(
+                    sourceEntry,
+                    "The hardlink registration source is temporarily unavailable while interrupted publication is being verified.")
+                && VisiblePathMatchesOrThrowUnavailable(
+                    existingTarget,
+                    "The hardlink registration destination is temporarily unavailable while interrupted publication is being verified.")
                 && sourceEntry.IdentifiesSameEntry(existingTarget)
                 && await MatchesMarkerlessSourceProofAsync(
                     sourceEntry,
@@ -74,7 +82,7 @@ public partial class FileMover
 
         string targetIdentity;
         PinnedDirectoryCreation.PinnedFileEntry? publishedHardlink = null;
-        if (action == FileAction.HardlinkCopy
+        if (requiresGenerationPreservingLink
             && sourceEntry.IsOnSameVolume(gate.DestinationParent))
         {
             try
@@ -107,6 +115,18 @@ public partial class FileMover
             catch (Exception exception) when (exception is
                 IOException or Win32Exception or PlatformNotSupportedException)
             {
+                if (action == FileAction.Move && !OperatingSystem.IsWindows())
+                {
+                    _logger.LogWarning(
+                        exception,
+                        "Markerless Unix move publication could not preserve the exact source generation with a hardlink: {Source} -> {Destination}",
+                        LogRedaction.SanitizeFilePath(gate.SourcePath),
+                        LogRedaction.SanitizeFilePath(gate.DestinationPath));
+                    throw new IOException(
+                        "The move source generation could not be published safely on this filesystem.",
+                        exception);
+                }
+
                 _logger.LogInformation(
                     exception,
                     "Markerless hardlink publication was unavailable; falling back to a direct final-name copy: {Source} -> {Destination}",

@@ -312,7 +312,9 @@ namespace Listenarr.Infrastructure.Library.Scanning
 
             // Resolve ffprobe path once for the whole scan (null = not available)
             var ffprobePath = hasDurableGenerationProof
-                && (OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
+                && (OperatingSystem.IsWindows()
+                    || OperatingSystem.IsLinux()
+                    || OperatingSystem.IsMacOS())
                     ? await _ffmpegService.GetFfprobePathAsync()
                     : null;
 

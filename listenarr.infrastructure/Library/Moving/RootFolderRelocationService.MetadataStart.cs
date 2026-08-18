@@ -150,10 +150,13 @@ public sealed partial class RootFolderRelocationService
         {
             DisposeOwnershipMigrationTargetLeases(ownershipGenerationLeases);
             targetGenerationLease?.Dispose();
-            metadataRelocation.Status =
-                RootFolderRelocationStatus.Failed;
-            metadataRelocation.Error =
-                $"{MetadataOnlyTargetVerificationAttentionPrefix}{exception.Message}";
+            var transient = IsTransientMetadataOnlyFilesystemException(exception);
+            metadataRelocation.Status = transient
+                ? RootFolderRelocationStatus.Pending
+                : RootFolderRelocationStatus.Failed;
+            metadataRelocation.Error = transient
+                ? $"Metadata-only root repair target verification is temporarily unavailable and will be retried: {exception.Message}"
+                : $"{MetadataOnlyTargetVerificationAttentionPrefix}{exception.Message}";
             metadataRelocation.UpdatedAt =
                 timeProvider.GetUtcNow().UtcDateTime;
             await db.SaveChangesAsync(completionToken);
@@ -284,11 +287,15 @@ public sealed partial class RootFolderRelocationService
                 .SingleAsync(
                     candidate => candidate.Id == metadataRelocation.Id,
                     CancellationToken.None);
-            persistedRelocation.Status = RootFolderRelocationStatus.Failed;
+            var transient = IsTransientMetadataOnlyFilesystemException(exception);
+            persistedRelocation.Status = transient
+                ? RootFolderRelocationStatus.Pending
+                : RootFolderRelocationStatus.Failed;
             persistedRelocation.ActiveRootFolderId = rootFolderId;
             persistedRelocation.CompletedAt = null;
-            persistedRelocation.Error =
-                $"{MetadataOnlyCompletionAttentionPrefix}{exception.Message}";
+            persistedRelocation.Error = transient
+                ? $"Metadata-only root repair completion is temporarily unavailable and will be retried: {exception.Message}"
+                : $"{MetadataOnlyCompletionAttentionPrefix}{exception.Message}";
             persistedRelocation.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
             await db.SaveChangesAsync(CancellationToken.None);
             throw;

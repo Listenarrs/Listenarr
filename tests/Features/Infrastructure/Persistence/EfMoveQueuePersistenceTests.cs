@@ -794,6 +794,78 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ReconcileIdentityKeysAsync_TemporarilyUnavailableAutoSemantics_PreservesActiveV2Job()
+    {
+        var sourcePath = Path.GetFullPath(Path.Join(
+            Path.GetTempPath(),
+            "downloads",
+            $"temporary-semantics-{Guid.NewGuid():N}"));
+        var targetPath = Path.GetFullPath(Path.Join(
+            Path.GetTempPath(),
+            "library",
+            $"temporary-semantics-{Guid.NewGuid():N}"));
+        var semantics = new FileSystemPathSemantics(
+            FileSystemPathSemantics.CurrentHostDefault.Syntax,
+            FileSystemCaseSensitivity.Sensitive);
+        var sourceIdentity = new PathIdentitySnapshot(
+            semantics.Syntax,
+            semantics.CaseSensitivity,
+            FileSystemCaseSensitivityMode.Auto,
+            Path.GetDirectoryName(sourcePath)!);
+        var targetIdentity = new PathIdentitySnapshot(
+            semantics.Syntax,
+            semantics.CaseSensitivity,
+            FileSystemCaseSensitivityMode.Auto,
+            Path.GetDirectoryName(targetPath)!);
+        var job = new MoveJob
+        {
+            AudiobookId = 46,
+            SourcePath = sourcePath,
+            RequestedPath = targetPath,
+            Status = MoveJobStatus.Queued,
+            Phase = MoveJobPhase.None,
+            IdentityKeyVersion = MoveManifestIdentity.Version,
+            ExecutionProtocolVersion = MoveExecutionProtocol.Current,
+            DeleteEmptySource = false,
+            ActiveDeduplicationKey = "v2:previous-active-key",
+            Entries = CreateAuthorizedManifestEntries()
+        };
+        job.SetSourceIdentity(sourceIdentity);
+        job.SetTargetIdentity(targetIdentity);
+        await CreatePersistence().AddAsync(job);
+
+        var resolver = new Mock<IFileSystemSemanticsResolver>(MockBehavior.Strict);
+        resolver.Setup(service => service.ResolveAsync(
+                It.IsAny<string>(),
+                FileSystemCaseSensitivityMode.Auto,
+                It.IsAny<CancellationToken>()))
+            .Returns<string, FileSystemCaseSensitivityMode, CancellationToken>((path, _, _) =>
+                ValueTask.FromResult(new FileSystemSemanticsResolution(
+                    new FileSystemPathSemantics(
+                        semantics.Syntax,
+                        FileSystemCaseSensitivity.Unknown),
+                    PathIdentityState.Unavailable,
+                    path,
+                    "Injected temporary filesystem semantics outage.",
+                    path)));
+
+        await CreatePersistence(resolver.Object).ReconcileIdentityKeysAsync();
+
+        await using var verification = await _factory.CreateDbContextAsync();
+        var persisted = await verification.MoveJobs.AsNoTracking()
+            .SingleAsync(candidate => candidate.Id == job.Id);
+        Assert.Equal(MoveJobStatus.Queued, persisted.Status);
+        Assert.Equal(MoveManifestIdentity.Version, persisted.IdentityKeyVersion);
+        Assert.NotNull(persisted.ActiveDeduplicationKey);
+        Assert.StartsWith(
+            $"v2:move-source:{job.AudiobookId}:",
+            persisted.ActiveDeduplicationKey,
+            StringComparison.Ordinal);
+        Assert.Null(persisted.Error);
+        resolver.VerifyAll();
+    }
+
+    [Fact]
     public async Task ReconcileIdentityKeysAsync_MalformedCurrentJobMarksNeedsAttentionAndContinues()
     {
         var throwingPath = Path.GetFullPath("/library/bad-book");

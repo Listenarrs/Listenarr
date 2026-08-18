@@ -40,10 +40,14 @@ public sealed partial class RootFolderRelocationService
             MoveRecoveryPolicy.BlocksFilesystemMutation(job)
             && (affectedAudiobookIds.Contains(job.AudiobookId)
                 || (sourceSemantics.HasValue
-                    && (PathTouchesBoundary(job.SourcePath, sourceRootPath, sourceSemantics.Value)
-                        || PathTouchesBoundary(job.RequestedPath, sourceRootPath, sourceSemantics.Value)))
-                || PathTouchesBoundary(job.SourcePath, targetPath, targetSemantics)
-                || PathTouchesBoundary(job.RequestedPath, targetPath, targetSemantics)));
+                    && MoveJobBoundaryConflict.TouchesBoundary(
+                        job,
+                        sourceRootPath,
+                        sourceSemantics.Value))
+                || MoveJobBoundaryConflict.TouchesBoundary(
+                    job,
+                    targetPath,
+                    targetSemantics)));
         if (conflictingMoveJob != null)
         {
             throw new RootFolderPathChangeRejectedException(
@@ -62,19 +66,12 @@ public sealed partial class RootFolderRelocationService
         var candidateSemantics = FileSystemPathIdentity.ResolveComparisonSemantics(
             candidate.ResolvedCaseSensitivity,
             targetSemantics);
-        try
-        {
-            return candidate.PathIdentityKey == targetIdentityKey
-                || FileSystemPathIdentity.EvaluateBoundaryConflict(
-                    targetPath,
-                    targetSemantics,
-                    candidate.Path,
-                    candidateSemantics) != FileSystemPathBoundaryConflict.None;
-        }
-        catch (ArgumentException)
-        {
-            return candidate.PathIdentityKey == targetIdentityKey;
-        }
+        return candidate.PathIdentityKey == targetIdentityKey
+            || FileSystemPathIdentity.StoredPathMayTouchBoundary(
+                candidate.Path,
+                targetPath,
+                targetSemantics,
+                storedSemantics: candidateSemantics);
     }
 
     private async Task<bool> ActiveBoundaryConflictsWithTargetAsync(
@@ -106,18 +103,6 @@ public sealed partial class RootFolderRelocationService
             return false;
         }
 
-        string canonicalBoundaryPath;
-        try
-        {
-            canonicalBoundaryPath = FileSystemPathIdentity.Canonicalize(
-                boundaryPath,
-                boundarySyntax);
-        }
-        catch (ArgumentException)
-        {
-            return true;
-        }
-
         var persistedSensitivity = boundaryMode switch
         {
             FileSystemCaseSensitivityMode.Sensitive =>
@@ -128,21 +113,13 @@ public sealed partial class RootFolderRelocationService
         };
         if (persistedSensitivity != FileSystemCaseSensitivity.Unknown)
         {
-            var persistedSemantics = new FileSystemPathSemantics(
-                boundarySyntax,
-                persistedSensitivity);
-            try
-            {
-                return FileSystemPathIdentity.EvaluateBoundaryConflict(
-                    targetPath,
-                    targetSemantics,
-                    canonicalBoundaryPath,
-                    persistedSemantics) != FileSystemPathBoundaryConflict.None;
-            }
-            catch (ArgumentException)
-            {
-                return true;
-            }
+            return FileSystemPathIdentity.StoredPathMayTouchBoundary(
+                boundaryPath,
+                targetPath,
+                targetSemantics,
+                storedSemantics: new FileSystemPathSemantics(
+                    boundarySyntax,
+                    persistedSensitivity));
         }
 
         if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(

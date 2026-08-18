@@ -23,12 +23,9 @@ internal sealed partial class AudiobookContentMoveService
             {
                 continue;
             }
-            if (File.Exists(planned.Path))
-            {
-                throw new MoveNeedsAttentionException(
-                    $"A markerless move-created directory path is occupied by a file: {planned.Path}");
-            }
-            if (!Directory.Exists(planned.Path))
+            if (!TryGetMarkerlessPathAttributes(
+                    planned.Path,
+                    out var plannedAttributes))
             {
                 await UpdateCreatedDirectoryStateAsync(
                     request.JobId,
@@ -38,6 +35,12 @@ internal sealed partial class AudiobookContentMoveService
                     cancellationToken);
                 planned.State = MoveCreatedDirectoryState.Removed;
                 continue;
+            }
+            if ((plannedAttributes & FileAttributes.Directory) == 0
+                || (plannedAttributes & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new MoveNeedsAttentionException(
+                    $"A markerless move-created directory path is occupied by a file or link: {planned.Path}");
             }
 
             var parentPath = Path.GetDirectoryName(planned.Path)
@@ -53,8 +56,12 @@ internal sealed partial class AudiobookContentMoveService
                     sourceBoundary: false);
                 using var directory = parent.OpenExistingChild(
                     Path.GetFileName(planned.Path));
-                if (!directory.VisiblePathMatches()
-                    || !parent.VisiblePathMatches())
+                if (!PinnedDirectoryVisibleOrThrowUnavailable(
+                        directory,
+                        "An unproven markerless target directory is temporarily unavailable while being retained.")
+                    || !PinnedDirectoryVisibleOrThrowUnavailable(
+                        parent,
+                        "The parent of an unproven markerless target directory is temporarily unavailable while being retained."))
                 {
                     throw new MoveNeedsAttentionException(
                         "An unproven markerless target directory changed while it was being retained.");
@@ -88,8 +95,12 @@ internal sealed partial class AudiobookContentMoveService
             using var directoryAnchor = publication.OpenCreatedDirectoryAnchor();
             if (!directoryAnchor.MatchesDirectoryObjectIdentity(
                     planned.DirectoryObjectIdentity)
-                || !directoryAnchor.VisiblePathMatches()
-                || !parentAnchor.VisiblePathMatches())
+                || !PinnedDirectoryVisibleOrThrowUnavailable(
+                    directoryAnchor,
+                    $"A markerless move-created directory is temporarily unavailable before terminal cleanup: {planned.Path}")
+                || !PinnedDirectoryVisibleOrThrowUnavailable(
+                    parentAnchor,
+                    $"The parent of a markerless move-created directory is temporarily unavailable before terminal cleanup: {planned.Path}"))
             {
                 throw new MoveNeedsAttentionException(
                     $"A markerless move-created directory changed physical generation before terminal cleanup: {planned.Path}");
@@ -113,8 +124,12 @@ internal sealed partial class AudiobookContentMoveService
                 cancellationToken);
             if (!directoryAnchor.MatchesDirectoryObjectIdentity(
                     planned.DirectoryObjectIdentity)
-                || !directoryAnchor.VisiblePathMatches()
-                || !parentAnchor.VisiblePathMatches())
+                || !PinnedDirectoryVisibleOrThrowUnavailable(
+                    directoryAnchor,
+                    $"A markerless move-created directory is temporarily unavailable before terminal retirement: {planned.Path}")
+                || !PinnedDirectoryVisibleOrThrowUnavailable(
+                    parentAnchor,
+                    $"The parent of a markerless move-created directory is temporarily unavailable before terminal retirement: {planned.Path}"))
             {
                 throw new MoveNeedsAttentionException(
                     $"A markerless move-created directory changed before terminal retirement: {planned.Path}");

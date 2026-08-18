@@ -44,6 +44,35 @@ public sealed class FileSystemPathIdentityTests : BaseTests
         Assert.Equal(expected, canonicalPath);
     }
 
+    [Theory]
+    [InlineData("//library/books", "/library/books/Author/Title", FileSystemCaseSensitivityMode.Insensitive, true)]
+    [InlineData("//library/books", "/other/books/Author/Title", FileSystemCaseSensitivityMode.Insensitive, false)]
+    [InlineData("C:\\Library\\Books", "/library/books/Author/Title", FileSystemCaseSensitivityMode.Insensitive, false)]
+    public void AmbiguousStoredBoundaryMayContainPath_UsesContextOnlyAsConservativeSafetyFence(
+        string storedBoundary,
+        string candidatePath,
+        FileSystemCaseSensitivityMode mode,
+        bool expected)
+    {
+        var result = FileSystemPathIdentity.AmbiguousStoredBoundaryMayContainPath(
+            storedBoundary,
+            candidatePath,
+            FileSystemPathSyntax.Unix,
+            mode);
+
+        Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public void AmbiguousStoredBoundaryMayContainPath_InvalidSameSyntaxBoundaryFailsClosed()
+    {
+        Assert.True(FileSystemPathIdentity.AmbiguousStoredBoundaryMayContainPath(
+            "/library/../books",
+            "/library/books/Author/Title",
+            FileSystemPathSyntax.Unix,
+            FileSystemCaseSensitivityMode.Sensitive));
+    }
+
     [Fact]
     public void UnixIdentity_PreservesLiteralBackslash()
     {
@@ -535,6 +564,163 @@ public sealed class FileSystemPathIdentityTests : BaseTests
         Assert.False(resolved);
         Assert.Empty(canonicalPath);
         Assert.Contains("identity boundary", reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void StoredBoundaryMayContainPath_WindowsNamespaceAlias_ContainsOrdinaryChild()
+    {
+        Assert.True(FileSystemPathIdentity.StoredBoundaryMayContainPath(
+            @"\\?\C:\Library",
+            @"C:\Library\Author\Book",
+            FileSystemPathSyntax.Windows,
+            FileSystemCaseSensitivityMode.Insensitive));
+    }
+
+    [Fact]
+    public void StoredBoundaryMayContainPath_WindowsNamespaceDifferentDrive_DoesNotContainCandidate()
+    {
+        Assert.False(FileSystemPathIdentity.StoredBoundaryMayContainPath(
+            @"\\?\D:\Other",
+            @"C:\Library\Author\Book",
+            FileSystemPathSyntax.Windows,
+            FileSystemCaseSensitivityMode.Insensitive));
+    }
+
+    [Fact]
+    public void StoredPathMayIdentifySamePath_WindowsNamespaceAlias_MatchesOrdinaryPath()
+    {
+        var semantics = new FileSystemPathSemantics(
+            FileSystemPathSyntax.Windows,
+            FileSystemCaseSensitivity.Insensitive);
+
+        Assert.True(FileSystemPathIdentity.StoredPathMayIdentifySamePath(
+            @"\\?\C:\Library\Author\Book",
+            @"C:\Library\Author\Book",
+            semantics));
+    }
+
+    [Fact]
+    public void StoredPathMayIdentifySamePath_WindowsNamespaceDifferentDrive_IsDistinct()
+    {
+        var semantics = new FileSystemPathSemantics(
+            FileSystemPathSyntax.Windows,
+            FileSystemCaseSensitivity.Insensitive);
+
+        Assert.False(FileSystemPathIdentity.StoredPathMayIdentifySamePath(
+            @"\\?\D:\Other\Book",
+            @"C:\Library\Author\Book",
+            semantics));
+    }
+
+    [Fact]
+    public void StoredPathMayIdentifySamePath_NestedPath_IsNotExactDuplicate()
+    {
+        var semantics = new FileSystemPathSemantics(
+            FileSystemPathSyntax.Windows,
+            FileSystemCaseSensitivity.Insensitive);
+
+        Assert.False(FileSystemPathIdentity.StoredPathMayIdentifySamePath(
+            @"C:\Library\Author\Book\Disc 1",
+            @"C:\Library\Author\Book",
+            semantics));
+    }
+
+    [Fact]
+    public void StoredPathMayTouchBoundary_WindowsNamespacePath_FailsClosed()
+    {
+        var semantics = new FileSystemPathSemantics(
+            FileSystemPathSyntax.Windows,
+            FileSystemCaseSensitivity.Insensitive);
+
+        Assert.True(FileSystemPathIdentity.StoredPathMayTouchBoundary(
+            @"\\?\C:\Library\Author\Book",
+            @"C:\Library",
+            semantics));
+    }
+
+    [Fact]
+    public void StoredPathMayTouchBoundary_NamespacePathWithIncompatiblePersistedIdentity_FailsClosed()
+    {
+        var semantics = new FileSystemPathSemantics(
+            FileSystemPathSyntax.Windows,
+            FileSystemCaseSensitivity.Insensitive);
+        var persistedIdentity = new PathIdentitySnapshot(
+            FileSystemPathSyntax.Windows,
+            FileSystemCaseSensitivity.Insensitive,
+            FileSystemCaseSensitivityMode.Insensitive,
+            @"C:\Library");
+
+        Assert.True(FileSystemPathIdentity.StoredPathMayTouchBoundary(
+            @"\\?\D:\Other\Book",
+            @"C:\Library",
+            semantics,
+            persistedIdentity));
+    }
+
+    [Fact]
+    public void StoredPathMayTouchBoundary_WindowsNamespacePathOnDifferentDrive_IsOutside()
+    {
+        var semantics = new FileSystemPathSemantics(
+            FileSystemPathSyntax.Windows,
+            FileSystemCaseSensitivity.Insensitive);
+
+        Assert.False(FileSystemPathIdentity.StoredPathMayTouchBoundary(
+            @"\\?\D:\Other\Book",
+            @"C:\Library",
+            semantics));
+    }
+
+    [Fact]
+    public void UnambiguousStoredPath_WindowsNamespacePath_IsRejected()
+    {
+        var resolved = FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+            @"\\?\C:\Library\Book",
+            out var canonicalPath,
+            out var reason,
+            FileSystemPathSyntax.Windows);
+
+        Assert.False(resolved);
+        Assert.Empty(canonicalPath);
+        Assert.Contains("namespace path", reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void StoredPathMayTouchBoundary_AmbiguousSameHostPath_FailsClosed()
+    {
+        var semantics = new FileSystemPathSemantics(
+            FileSystemPathSyntax.Windows,
+            FileSystemCaseSensitivity.Insensitive);
+
+        Assert.True(FileSystemPathIdentity.StoredPathMayTouchBoundary(
+            "//server/share/Book",
+            @"C:\Library",
+            semantics));
+    }
+
+    [Fact]
+    public void StoredPathMayTouchBoundary_ClearlyForeignSyntax_IsOutside()
+    {
+        var semantics = new FileSystemPathSemantics(
+            FileSystemPathSyntax.Windows,
+            FileSystemCaseSensitivity.Insensitive);
+
+        Assert.False(FileSystemPathIdentity.StoredPathMayTouchBoundary(
+            "/foreign/library/Book",
+            @"C:\Library",
+            semantics));
+    }
+
+    [Fact]
+    public void StoredPathMayTouchBoundary_UnrelatedSameSyntaxPath_IsOutside()
+    {
+        var semantics = new FileSystemPathSemantics(
+            FileSystemPathSyntax.Windows,
+            FileSystemCaseSensitivity.Insensitive);
+
+        Assert.False(FileSystemPathIdentity.StoredPathMayTouchBoundary(
+            @"D:\Other\Book",
+            @"C:\Library",
+            semantics));
     }
 
     [Fact]

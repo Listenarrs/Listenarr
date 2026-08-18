@@ -62,44 +62,74 @@ public sealed partial class RootFolderRelocationService
             : null;
         relocation.CompletedJobs = relocation.MoveJobs.Count(candidate => candidate.Status == MoveJobStatus.Completed);
         relocation.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
-
-        if (relocation.MoveJobs.Any(candidate => candidate.Status is
-            MoveJobStatus.NeedsAttention or MoveJobStatus.Failed or MoveJobStatus.Superseded))
+        PinnedDirectoryCreation.PinnedDirectoryAnchor? finalizationTargetLease = null;
+        try
         {
-            relocation.Status = RootFolderRelocationStatus.NeedsAttention;
-            relocation.Error = relocation.MoveJobs
-                .First(candidate => candidate.Status is
-                    MoveJobStatus.NeedsAttention or MoveJobStatus.Failed or MoveJobStatus.Superseded)
-                .Error
-                ?? "A relocation move job was superseded during queue reconciliation.";
-        }
-        else if (relocation.MoveJobs.All(candidate => candidate.Status == MoveJobStatus.Completed))
-        {
-            if (root == null)
+            if (relocation.MoveJobs.Any(candidate => candidate.Status is
+                MoveJobStatus.NeedsAttention or MoveJobStatus.Failed or MoveJobStatus.Superseded))
             {
                 relocation.Status = RootFolderRelocationStatus.NeedsAttention;
-                relocation.ActiveRootFolderId = null;
-                relocation.Error = "The root folder no longer exists; relocation finalization requires manual review.";
+                relocation.Error = relocation.MoveJobs
+                    .First(candidate => candidate.Status is
+                        MoveJobStatus.NeedsAttention or MoveJobStatus.Failed or MoveJobStatus.Superseded)
+                    .Error
+                    ?? "A relocation move job was superseded during queue reconciliation.";
+            }
+            else if (relocation.MoveJobs.All(candidate => candidate.Status == MoveJobStatus.Completed))
+            {
+                if (root == null)
+                {
+                    relocation.Status = RootFolderRelocationStatus.NeedsAttention;
+                    relocation.ActiveRootFolderId = null;
+                    relocation.Error = "The root folder no longer exists; relocation finalization requires manual review.";
+                }
+                else
+                {
+                    var registrationBoundaryConflict =
+                        await FindRegistrationBoundaryRecoveryConflictAsync(
+                            relocation.SourcePath,
+                            relocation.SourceCaseSensitivityMode,
+                            relocation.TargetPath,
+                            relocation.TargetCaseSensitivityMode,
+                            cancellationToken);
+                    if (registrationBoundaryConflict != null)
+                    {
+                        relocation.Status = RootFolderRelocationStatus.NeedsAttention;
+                        relocation.Error = registrationBoundaryConflict.PublicMessage;
+                    }
+                    else
+                    {
+                        finalizationTargetLease = await FinalizeCompletedRelocationAsync(
+                            db,
+                            relocation,
+                            root,
+                            relocation.UpdatedAt ?? timeProvider.GetUtcNow().UtcDateTime,
+                            cancellationToken);
+                    }
+                }
             }
             else
             {
-                await FinalizeCompletedRelocationAsync(
-                    db,
-                    relocation,
-                    root,
-                    relocation.UpdatedAt ?? timeProvider.GetUtcNow().UtcDateTime,
-                    cancellationToken);
+                relocation.Status = RootFolderRelocationStatus.Running;
             }
-        }
-        else
-        {
-            relocation.Status = RootFolderRelocationStatus.Running;
-        }
 
-        await db.SaveChangesAsync(cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
-        await transaction.CommitAsync(CancellationToken.None);
-        return Map(relocation, root?.Path ?? ResolveCurrentPathFallback(relocation));
+            await db.SaveChangesAsync(cancellationToken);
+            BeforeCompletedRelocationAtomicCommitForTest?.Invoke(relocation.Id);
+            if (finalizationTargetLease != null)
+            {
+                RevalidatePinnedTargetDirectoryGeneration(
+                    finalizationTargetLease,
+                    relocation,
+                    CancellationToken.None);
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            await transaction.CommitAsync(CancellationToken.None);
+            return Map(relocation, root?.Path ?? ResolveCurrentPathFallback(relocation));
+        }
+        finally
+        {
+            finalizationTargetLease?.Dispose();
+        }
     }
 
     public async Task ReconcileActiveAsync(CancellationToken cancellationToken = default)
@@ -140,12 +170,6 @@ public sealed partial class RootFolderRelocationService
                     RootFolderRelocationStatus.NeedsAttention
                 && relocation.TargetIdentityEnrollmentState ==
                     TargetIdentityEnrollmentState.Unavailable)
-            .Where(relocation =>
-                relocation.CreatedDirectories.Any(reservation =>
-                    reservation.State ==
-                        RootFolderRelocationCreatedDirectoryState.Planned
-                    || reservation.State ==
-                        RootFolderRelocationCreatedDirectoryState.Created))
             .Select(relocation => relocation.Id)
             .ToListAsync(cancellationToken);
         foreach (var relocationId in recoverableReservationIds)

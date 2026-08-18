@@ -231,8 +231,11 @@ public partial class AudiobookFileService
             return false;
         }
 
-        if (registrationLease.MatchesCurrentPublication())
+        var postCommitPublication = ProbeCurrentPublication(registrationLease);
+        if (postCommitPublication != RegistrationPublicationMatchOutcome.Mismatch)
         {
+            // The generation row is already committed. Temporary storage
+            // unavailability is not evidence that the published namespace changed.
             return true;
         }
 

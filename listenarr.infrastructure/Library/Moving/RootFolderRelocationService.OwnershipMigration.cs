@@ -51,8 +51,12 @@ public sealed partial class RootFolderRelocationService
                     _plan.Source.DirectoryObjectIdentityVersion,
                     _plan.Source.DirectoryObjectIdentity,
                     _plan.Source.OwnershipToken)
-                || !_directory.VisiblePathMatches()
-                || !_parent.VisiblePathMatches())
+                || !ReservationPathMatchesOrThrowUnavailable(
+                    _directory,
+                    "The metadata-only ownership target is temporarily unavailable.")
+                || !ReservationPathMatchesOrThrowUnavailable(
+                    _parent,
+                    "The metadata-only ownership target parent is temporarily unavailable."))
             {
                 throw new InvalidOperationException(
                     "Metadata-only relocation cannot transfer directory ownership to a different physical generation.");

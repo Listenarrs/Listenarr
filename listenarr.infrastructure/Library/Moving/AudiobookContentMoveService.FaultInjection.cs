@@ -2,6 +2,7 @@ namespace Listenarr.Infrastructure.Library.Moving;
 
 internal enum SourceCleanupFaultPoint
 {
+    AfterMarkerlessSourceDeleteAuthorizedState,
     AfterMarkerlessSourceFileDeleteBeforeStateUpdate,
     AfterMarkerlessSourceFileStateUpdate
 }
@@ -12,6 +13,7 @@ internal enum CopyMutationFaultPoint
     AfterMarkerlessFileStateUpdate,
     AfterMarkerlessFileWriteBeforePublishedState,
     BeforeMarkerlessMetadataPreservation,
+    BeforeMarkerlessNativeRenameMutation,
     AfterMarkerlessNativeRenameBeforeStateUpdate
 }
 
@@ -29,6 +31,7 @@ internal enum MoveFinalizationFaultPoint
 internal enum CompletionHandoffFaultPoint
 {
     BeforeHistoryPersist,
+    BeforeCompletionCommitValidation,
     BeforeScanEnqueue
 }
 

@@ -141,10 +141,9 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
                 .WithFolderNamingPattern("{Author}/{Series}/{Title}")
                 .Build());
 
-            await _rootFolderRepository.AddAsync(new RootFolderBuilder()
-                .WithIsDefault()
-                .WithPath(rootPath)
-                .Build());
+            var root = await AddAuthorizedRootAsync(rootPath);
+            root.IsDefault = true;
+            await _rootFolderRepository.UpdateAsync(root);
 
             _seriesCatalogService
                 .Setup(service => service.GetCatalogAsync(

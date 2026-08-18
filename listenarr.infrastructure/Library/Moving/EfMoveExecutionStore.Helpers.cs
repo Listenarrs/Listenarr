@@ -18,6 +18,12 @@ internal sealed partial class EfMoveExecutionStore
             boundaryPath,
             requestedMode,
             cancellationToken);
+        if (resolution.State == PathIdentityState.Unavailable)
+        {
+            throw new IOException(
+                resolution.Reason
+                    ?? $"The move {description} filesystem semantics are temporarily unavailable.");
+        }
         if (resolution.State != PathIdentityState.Valid
             || resolution.Semantics.Syntax != expectedSemantics.Syntax
             || resolution.Semantics.CaseSensitivity != expectedSemantics.CaseSensitivity)
@@ -121,16 +127,28 @@ internal sealed partial class EfMoveExecutionStore
                 || !root.MatchesManagedDirectoryIdentity(
                     relocation.TargetDirectoryObjectIdentityVersion,
                     relocation.TargetDirectoryObjectIdentity)
-                || !root.VisiblePathMatches())
+                || !BoundaryVisibilityMatchesOrThrowUnavailable(
+                    root,
+                    "The relocation target is temporarily unavailable while its authorized physical generation is being verified."))
             {
                 throw new InvalidOperationException(
                     "The relocation target no longer identifies its authorized physical generation.");
             }
         }
+        catch (Exception exception) when (
+            FileSystemSafety.IsProvenMissingPathException(exception))
+        {
+            throw new MoveNeedsAttentionException(
+                $"The relocation target physical generation is no longer authorized: {exception.Message}");
+        }
         catch (Exception exception) when (exception is
             IOException or UnauthorizedAccessException
-                or InvalidOperationException or NotSupportedException
                 or System.ComponentModel.Win32Exception)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is
+            InvalidOperationException or NotSupportedException)
         {
             throw new MoveNeedsAttentionException(
                 $"The relocation target physical generation is no longer authorized: {exception.Message}");
@@ -198,7 +216,10 @@ internal sealed partial class EfMoveExecutionStore
                     expectedDigest,
                     StringComparison.OrdinalIgnoreCase);
             }
-            if (!matchesCurrentIdentity || !boundary.VisiblePathMatches())
+            if (!matchesCurrentIdentity
+                || !BoundaryVisibilityMatchesOrThrowUnavailable(
+                    boundary,
+                    "The move target boundary is temporarily unavailable while its authorized physical generation is being verified."))
             {
                 throw new MoveNeedsAttentionException(
                     "The move target boundary no longer identifies its authorized physical generation.");
@@ -208,14 +229,37 @@ internal sealed partial class EfMoveExecutionStore
         {
             throw;
         }
-        catch (Exception exception) when (exception is
-            IOException or UnauthorizedAccessException
-                or InvalidOperationException or NotSupportedException
-                or System.ComponentModel.Win32Exception)
+        catch (Exception exception) when (
+            FileSystemSafety.IsProvenMissingPathException(exception))
         {
             throw new MoveNeedsAttentionException(
                 $"The move target boundary physical generation is unavailable: {exception.Message}");
         }
+        catch (Exception exception) when (exception is
+            IOException or UnauthorizedAccessException
+                or System.ComponentModel.Win32Exception)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is
+            InvalidOperationException or NotSupportedException)
+        {
+            throw new MoveNeedsAttentionException(
+                $"The move target boundary physical generation is unavailable: {exception.Message}");
+        }
+    }
+
+    private static bool BoundaryVisibilityMatchesOrThrowUnavailable(
+        PinnedDirectoryCreation.PinnedDirectoryAnchor boundary,
+        string unavailableMessage)
+    {
+        var visibility = boundary.ProbeVisiblePathMatch();
+        if (visibility == RegistrationPublicationMatchOutcome.Unavailable)
+        {
+            throw new IOException(unavailableMessage);
+        }
+
+        return visibility == RegistrationPublicationMatchOutcome.Match;
     }
 
     private static async Task<string?> TryResolveConfiguredRootBoundaryDigestAsync(

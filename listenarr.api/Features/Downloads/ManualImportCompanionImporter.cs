@@ -22,6 +22,7 @@ public sealed class ManualImportCompanionImporter
 {
     private readonly IMetadataService _metadataService;
     private readonly IFileMover _fileMover;
+    private readonly IFilePublicationSourceCapability _filePublicationSourceCapability;
     private readonly IFileSystem _fileSystem;
     private readonly ILibraryDirectoryOwnershipStore _directoryOwnershipStore;
     private readonly ILogger<ManualImportCompanionImporter> _logger;
@@ -30,6 +31,7 @@ public sealed class ManualImportCompanionImporter
     public ManualImportCompanionImporter(
         IMetadataService metadataService,
         IFileMover fileMover,
+        IFilePublicationSourceCapability filePublicationSourceCapability,
         IFileSystem fileSystem,
         ILibraryDirectoryOwnershipStore directoryOwnershipStore,
         ILogger<ManualImportCompanionImporter> logger,
@@ -37,6 +39,8 @@ public sealed class ManualImportCompanionImporter
     {
         _metadataService = metadataService;
         _fileMover = fileMover;
+        _filePublicationSourceCapability = filePublicationSourceCapability
+            ?? throw new ArgumentNullException(nameof(filePublicationSourceCapability));
         _fileSystem = fileSystem;
         _directoryOwnershipStore = directoryOwnershipStore;
         _logger = logger;
@@ -149,6 +153,20 @@ public sealed class ManualImportCompanionImporter
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
+                var sourceCapability = await _filePublicationSourceCapability.CheckAsync(
+                    companionFile,
+                    cancellationToken);
+                if (!sourceCapability.IsSupported
+                    || !sourceCapability.SourceProof.HasValue)
+                {
+                    _logger.LogWarning(
+                        "Skipping companion file {FilePath} before destination creation because source publication capability is unavailable: {Reason}",
+                        companionFile,
+                        LogRedaction.SanitizeText(sourceCapability.Reason));
+                    continue;
+                }
+                var sourceProof = sourceCapability.SourceProof.Value;
+
                 var isAudioCompanion = FileUtils.IsAudioFile(companionFile);
                 if (isAudioCompanion)
                 {
@@ -188,6 +206,7 @@ public sealed class ManualImportCompanionImporter
                     action,
                     companionFile,
                     sourceSemantics,
+                    sourceProof,
                     destinationPath,
                     destinationResolution.Semantics);
 
@@ -238,14 +257,25 @@ public sealed class ManualImportCompanionImporter
                         companionFile,
                         destinationPath,
                         operationId,
+                        sourceProof,
                         targetAudiobook!,
                         ownership!,
                         cancellationToken)
-                    : await _fileMover.PerformActionOn(
-                        action,
-                        companionFile,
-                        destinationPath,
-                        operationId);
+                    : action == FileAction.Move
+                        ? await _fileMover.PerformActionOn(
+                            action,
+                            companionFile,
+                            destinationPath,
+                            operationId,
+                            audiobookIds[0],
+                            FileMutationOwner.CompanionFile,
+                            sourceProof)
+                        : await _fileMover.PerformActionOn(
+                            action,
+                            companionFile,
+                            destinationPath,
+                            operationId,
+                            sourceProof);
                 if (success)
                 {
                     destinationTracker.Commit(destinationReservation);
@@ -266,6 +296,7 @@ public sealed class ManualImportCompanionImporter
         string sourcePath,
         string destinationPath,
         Guid operationId,
+        FilePublicationSourceProof expectedSourceProof,
         Audiobook audiobook,
         AudiobookFileOwnershipCheckResult ownership,
         CancellationToken cancellationToken)
@@ -279,12 +310,15 @@ public sealed class ManualImportCompanionImporter
                 sourcePath,
                 destinationPath,
                 operationId,
-                expectedIdentity)
+                expectedIdentity,
+                expectedSourceProof)
             : await _fileMover.PrepareActionForRegistrationAsync(
                 action,
                 sourcePath,
                 destinationPath,
-                operationId);
+                operationId,
+                expectedRegisteredPhysicalObjectIdentity: null,
+                expectedSourceProof);
         if (registrationLease == null
             || _audiobookFileService == null
             || !await _audiobookFileService.RegisterPublishedGenerationAsync(

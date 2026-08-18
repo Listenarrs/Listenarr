@@ -99,6 +99,34 @@ namespace Listenarr.Tests.Features.Infrastructure.Configuration.Paths
 
         [Fact]
         [Trait("Method", "TranslatePathAsync")]
+        public async Task TranslatePathAsync_UnavailableMoreSpecificMapping_DoesNotFallThroughToBroaderMapping()
+        {
+            var broadLocalPath = FileUtils.GetAbsolutePath("remote-broad-imports");
+            await _remotePathMappingRepository.SaveAsync(new RemotePathMappingBuilder()
+                .WithDownloadClientConfiguration(client)
+                .WithRemotePath("/downloads")
+                .WithLocalPath(broadLocalPath)
+                .Build());
+            await _remotePathMappingRepository.SaveAsync(new RemotePathMappingBuilder()
+                .WithDownloadClientConfiguration(client)
+                .WithRemotePath("/downloads/books")
+                .WithLocalPath("relative-unavailable-local-root")
+                .Build());
+            const string reportedPath = "/downloads/books/Author/book.m4b";
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                remotePathMappingService.TranslatePathAsync(
+                    client,
+                    reportedPath));
+
+            Assert.Contains(
+                "matching remote path mapping",
+                exception.Message,
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        [Trait("Method", "TranslatePathAsync")]
         public async Task TranslatePathAsync_DoesNotMapSiblingPrefixPath()
         {
             var remotePath = FileUtils.GetAbsolutePath("downloads");
@@ -171,7 +199,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Configuration.Paths
         }
 
         [WindowsFact]
-        public async Task TranslatePathAsync_ForeignPersistedLocalRoot_DoesNotMapWindowsAlias()
+        public async Task TranslatePathAsync_ForeignPersistedLocalRoot_FailsClosed()
         {
             var nativeLocalRoot = FileUtils.GetAbsolutePath("foreign-local-root");
             var foreignLocalRoot = TempFileService
@@ -184,11 +212,15 @@ namespace Listenarr.Tests.Features.Infrastructure.Configuration.Paths
                 .Build());
 
             var reportedPath = "/downloads/Author/book.m4b";
-            var translated = await remotePathMappingService.TranslatePathAsync(
-                client,
-                reportedPath);
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                remotePathMappingService.TranslatePathAsync(
+                    client,
+                    reportedPath));
 
-            Assert.Equal(reportedPath, translated);
+            Assert.Contains(
+                "matching remote path mapping",
+                exception.Message,
+                StringComparison.OrdinalIgnoreCase);
         }
 
         [Theory]
