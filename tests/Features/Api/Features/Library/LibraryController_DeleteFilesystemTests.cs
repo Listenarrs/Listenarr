@@ -101,6 +101,64 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
+        public async Task DeleteAudiobook_ReadOnlyManagedRoot_BlocksBeforeDeletionIntent()
+        {
+            var storageHealth = new Mock<IRootFolderStorageHealthResolver>(MockBehavior.Strict);
+            storageHealth.Setup(service => service.ResolveAsync(
+                    It.IsAny<RootFolder>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new RootFolderStorageObservation(
+                    RootFolderStorageState.Limited,
+                    RootFolderStorageReason.ReadOnlyFilesystem,
+                    "This storage is mounted read-only.",
+                    CanConfirmCurrentFolder: false,
+                    CanChangePath: true,
+                    CanMutateFilesystem: false,
+                    ConfirmationToken: null));
+            Init(services => services.WithSingleton(storageHealth.Object));
+
+            var rootPath = FileService.GetTempDirectory(
+                "listenarr-delete-readonly-root");
+            var root = new RootFolderBuilder()
+                .WithName("Read-only Root")
+                .WithPath(rootPath)
+                .WithIsDefault()
+                .Build();
+            await AddAuthorizedRootAsync(root);
+            var bookFolder = Path.Join(rootPath, "Author", "Book");
+            Directory.CreateDirectory(bookFolder);
+            var filePath = await FileService.GetFileAsync(
+                bookFolder,
+                "book.m4b",
+                "audio");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Read-only delete")
+                .WithBasePath(bookFolder)
+                .WithFilePath(filePath)
+                .Build());
+            await AddTrackedGenerationAsync(audiobook, filePath);
+
+            var result = await _provider.GetRequiredService<LibraryController>()
+                .DeleteAudiobook(
+                    audiobook.Id,
+                    deleteFiles: true,
+                    deleteFolder: true);
+
+            var conflict = Assert.IsType<ConflictObjectResult>(result);
+            var payload = System.Text.Json.JsonSerializer.Serialize(conflict.Value);
+            Assert.Contains("filesystem_mutation_unavailable", payload, StringComparison.Ordinal);
+            Assert.True(File.Exists(filePath));
+            Assert.NotNull(await _audiobookRepository.GetByIdAsync(audiobook.Id));
+            await using var db = await _provider
+                .GetRequiredService<IDbContextFactory<ListenArrDbContext>>()
+                .CreateDbContextAsync();
+            Assert.DoesNotContain(
+                db.AudiobookDeletionIntents,
+                intent => intent.AudiobookId == audiobook.Id);
+            storageHealth.VerifyAll();
+        }
+
+        [Fact]
         public async Task DeleteAudiobook_DatabaseFailure_PreservesCachedImage()
         {
             var audiobook = new Audiobook

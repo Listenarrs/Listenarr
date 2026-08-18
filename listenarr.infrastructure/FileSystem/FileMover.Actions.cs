@@ -88,6 +88,14 @@ public partial class FileMover
                 "A durable registration publication requires a non-empty operation ID");
             return null;
         }
+        if (await IsNewMutationBlockedByReadOnlyAsync(
+                action,
+                source,
+                destination,
+                operationId))
+        {
+            return null;
+        }
 
         var markerless = await TryPrepareActionForRegistrationMarkerlessAsync(
             action,
@@ -247,6 +255,14 @@ public partial class FileMover
                 destination,
                 "Source and destination identify the same filesystem path");
             return true;
+        }
+        if (await IsNewMutationBlockedByReadOnlyAsync(
+                action,
+                source,
+                destination,
+                operationId))
+        {
+            return false;
         }
 
         try

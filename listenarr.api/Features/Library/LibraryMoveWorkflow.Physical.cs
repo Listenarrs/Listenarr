@@ -34,6 +34,8 @@ public sealed partial class LibraryMoveWorkflow
             }
             var directoryIdentityResolver = scope.ServiceProvider
                 .GetRequiredService<IDirectoryObjectIdentityResolver>();
+            var storageHealthResolver = scope.ServiceProvider
+                .GetRequiredService<IRootFolderStorageHealthResolver>();
             cancellationToken.ThrowIfCancellationRequested();
 
             var allowedMoveRoots = new List<MoveRootBoundary>();
@@ -76,7 +78,8 @@ public sealed partial class LibraryMoveWorkflow
                     rootFolder.DirectoryObjectIdentity,
                     rootFolder.DirectoryObjectIdentityUnavailableReason,
                     RootFolderPathSemantics.ResolvePersisted(rootFolder),
-                    isManagedRoot: true);
+                    isManagedRoot: true,
+                    managedRootFolderId: rootFolder.Id);
                 if (!rootAvailable)
                 {
                     unavailableManagedRoots.Add(new UnavailableManagedMoveRoot(
@@ -159,6 +162,21 @@ public sealed partial class LibraryMoveWorkflow
                     "destination_physical_identity_unavailable",
                     "Destination root physical identity is unavailable or changed.",
                     final);
+            }
+            if (targetBoundary.ManagedRootFolderId is int targetRootFolderId)
+            {
+                var targetRootFolder = rootFolders.First(root => root.Id == targetRootFolderId);
+                var targetStorage = await storageHealthResolver.ResolveAsync(
+                    targetRootFolder,
+                    cancellationToken);
+                if (!targetStorage.CanMutateFilesystem)
+                {
+                    return DestinationValidationResult(
+                        "destination_filesystem_mutation_unavailable",
+                        targetStorage.Message
+                            ?? "Destination root does not currently allow filesystem mutations.",
+                        final);
+                }
             }
 
             var targetParent = Path.GetDirectoryName(final);
@@ -256,6 +274,20 @@ public sealed partial class LibraryMoveWorkflow
                         throw new ApplicationValidationException(
                             "source_physical_identity_unavailable",
                             "Source root physical identity is unavailable or changed.");
+                    }
+                    if (sourceManagedBoundary?.ManagedRootFolderId is int sourceRootFolderId)
+                    {
+                        var sourceRootFolder = rootFolders.First(root => root.Id == sourceRootFolderId);
+                        var sourceStorage = await storageHealthResolver.ResolveAsync(
+                            sourceRootFolder,
+                            lockedToken);
+                        if (!sourceStorage.CanMutateFilesystem)
+                        {
+                            throw new ApplicationValidationException(
+                                "source_filesystem_mutation_unavailable",
+                                sourceStorage.Message
+                                    ?? "Source root does not currently allow filesystem mutations.");
+                        }
                     }
 
                     if (!string.IsNullOrWhiteSpace(request.SourcePath))

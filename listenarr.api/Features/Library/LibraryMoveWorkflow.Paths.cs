@@ -38,7 +38,8 @@ public sealed partial class LibraryMoveWorkflow
         string? expectedDirectoryIdentity = null,
         string? directoryIdentityUnavailableReason = null,
         PersistedRootFolderPathSemantics? persistedSemantics = null,
-        bool isManagedRoot = false)
+        bool isManagedRoot = false,
+        int? managedRootFolderId = null)
     {
         if (string.IsNullOrEmpty(normalizedRoot))
         {
@@ -136,7 +137,8 @@ public sealed partial class LibraryMoveWorkflow
                     semantics.Value,
                     caseSensitivityMode,
                     directoryIdentity,
-                    isManagedRoot);
+                    isManagedRoot,
+                    managedRootFolderId);
             }
 
             return true;
@@ -147,7 +149,8 @@ public sealed partial class LibraryMoveWorkflow
             semantics.Value,
             caseSensitivityMode,
             directoryIdentity,
-            isManagedRoot));
+            isManagedRoot,
+            managedRootFolderId));
         return true;
     }
 
@@ -370,7 +373,8 @@ public sealed partial class LibraryMoveWorkflow
         FileSystemPathSemantics Semantics,
         FileSystemCaseSensitivityMode CaseSensitivityMode,
         DirectoryObjectIdentityResolution DirectoryIdentity,
-        bool IsManagedRoot);
+        bool IsManagedRoot,
+        int? ManagedRootFolderId);
 
     private static BadRequestObjectResult ValidationResult(
         string code,

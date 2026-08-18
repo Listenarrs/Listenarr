@@ -22,6 +22,56 @@ public sealed class FileMoverMarkerlessRegistrationTests : BaseTests
     }
 
     [Fact]
+    public async Task PrepareRegistration_ReadOnlyDestination_BlocksBeforeJournalCreation()
+    {
+        var scenario = await CreateScenarioAsync("registration-readonly-destination");
+        var mover = CreateMover(readOnlyFileSystemProbe: _ => true);
+        var capability = Assert.IsAssignableFrom<IFilePublicationSourceCapability>(mover);
+        var sourceProof = await capability.CheckAsync(scenario.Source);
+        Assert.True(sourceProof.IsSupported, sourceProof.Reason);
+        Assert.True(sourceProof.SourceProof.HasValue);
+
+        using var lease = await mover.PrepareActionForRegistrationAsync(
+            FileAction.Copy,
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId,
+            expectedRegisteredPhysicalObjectIdentity: null,
+            sourceProof.SourceProof.Value);
+
+        Assert.Null(lease);
+        Assert.False(File.Exists(scenario.Destination));
+        await using var db = await _provider
+            .GetRequiredService<IDbContextFactory<ListenArrDbContext>>()
+            .CreateDbContextAsync();
+        Assert.DoesNotContain(
+            db.FileMutationJournals,
+            journal => journal.OperationId == scenario.OperationId);
+    }
+
+    [Fact]
+    public async Task PerformMove_ReadOnlySamePath_RemainsIdempotentWithoutJournal()
+    {
+        var scenario = await CreateScenarioAsync("move-readonly-same-path");
+        var mover = CreateMover(readOnlyFileSystemProbe: _ => true);
+
+        var result = await mover.PerformActionOn(
+            FileAction.Move,
+            scenario.Source,
+            scenario.Source,
+            scenario.OperationId);
+
+        Assert.True(result);
+        Assert.True(File.Exists(scenario.Source));
+        await using var db = await _provider
+            .GetRequiredService<IDbContextFactory<ListenArrDbContext>>()
+            .CreateDbContextAsync();
+        Assert.DoesNotContain(
+            db.FileMutationJournals,
+            journal => journal.OperationId == scenario.OperationId);
+    }
+
+    [Fact]
     public async Task PrepareRegistration_SourceGenerationChangesAfterCapabilityProof_DoesNotPublishReplacement()
     {
         var scenario = await CreateScenarioAsync(
@@ -471,6 +521,40 @@ public sealed class FileMoverMarkerlessRegistrationTests : BaseTests
             FileMutationJournalState.Completed,
             audiobookId: 18);
         AssertNoLibraryArtifacts(scenario.Root);
+    }
+
+    [LinuxFact]
+    public async Task PrepareMove_ExistingJournal_RemainsRecoverableWhenReadOnlyProbeBlocksNewMutations()
+    {
+        var scenario = await CreateScenarioAsync(
+            "registration-move-readonly-recovery");
+        var firstMover = CreateMover(
+            afterRegistrationTargetCreatedBeforeState: () =>
+                throw new IOException("Injected publication state interruption."));
+
+        await Assert.ThrowsAsync<IOException>(() =>
+            firstMover.PrepareActionForRegistrationAsync(
+                FileAction.Move,
+                scenario.Source,
+                scenario.Destination,
+                scenario.OperationId));
+        await AssertJournalStateAsync(
+            scenario.OperationId,
+            FileMutationJournalState.Planned,
+            audiobookId: null);
+
+        var retryMover = CreateMover(readOnlyFileSystemProbe: _ => true);
+        using var lease = await retryMover.PrepareActionForRegistrationAsync(
+            FileAction.Move,
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId);
+
+        Assert.NotNull(lease);
+        await AssertJournalStateAsync(
+            scenario.OperationId,
+            FileMutationJournalState.TargetVerified,
+            audiobookId: null);
     }
 
     [LinuxFact]
@@ -1199,14 +1283,16 @@ public sealed class FileMoverMarkerlessRegistrationTests : BaseTests
         Func<Task>? beforeCompletedJournalCommit = null,
         Func<Task>? beforeRegistrationSourceDelete = null,
         Func<Task>? afterRegistrationTargetCreatedBeforeState = null,
-        Func<Task>? beforePinnedHardlinkCreation = null)
+        Func<Task>? beforePinnedHardlinkCreation = null,
+        Func<string, bool?>? readOnlyFileSystemProbe = null)
     {
         var factory = _provider.GetRequiredService<
             IDbContextFactory<ListenArrDbContext>>();
         return new FileMover(
             new NullLogger<FileMover>(),
             dbContextFactory: factory,
-            timeProvider: TimeProvider.System)
+            timeProvider: TimeProvider.System,
+            readOnlyFileSystemProbe: readOnlyFileSystemProbe)
         {
             FileMoveLockDirectoryForTest = FileService.GetTempDirectory(
                 "file-mover-markerless-registration-locks"),

@@ -37,6 +37,8 @@ namespace Listenarr.Api.Features.Library
         private readonly IAudiobookOperationCoordinator _audiobookOperationCoordinator;
         private readonly IMoveQueueService _moveQueueService;
         private readonly ILibraryFilesystemMutationGate _filesystemMutationGate;
+        private readonly IRootFolderService _rootFolderService;
+        private readonly IRootFolderStorageHealthResolver _storageHealthResolver;
         private readonly ILogger<LibraryDeleteWorkflow> _logger;
 
         public LibraryDeleteWorkflow(
@@ -51,6 +53,8 @@ namespace Listenarr.Api.Features.Library
             IAudiobookOperationCoordinator audiobookOperationCoordinator,
             IMoveQueueService moveQueueService,
             ILibraryFilesystemMutationGate filesystemMutationGate,
+            IRootFolderService rootFolderService,
+            IRootFolderStorageHealthResolver storageHealthResolver,
             ILogger<LibraryDeleteWorkflow> logger)
         {
             _deletionCommitService = deletionCommitService ?? throw new ArgumentNullException(nameof(deletionCommitService));
@@ -65,6 +69,10 @@ namespace Listenarr.Api.Features.Library
             _moveQueueService = moveQueueService ?? throw new ArgumentNullException(nameof(moveQueueService));
             _filesystemMutationGate = filesystemMutationGate
                 ?? throw new ArgumentNullException(nameof(filesystemMutationGate));
+            _rootFolderService = rootFolderService
+                ?? throw new ArgumentNullException(nameof(rootFolderService));
+            _storageHealthResolver = storageHealthResolver
+                ?? throw new ArgumentNullException(nameof(storageHealthResolver));
             _logger = logger;
         }
 
@@ -122,6 +130,19 @@ namespace Listenarr.Api.Features.Library
                 if (snapshot == null)
                 {
                     return new NotFoundObjectResult(new { message = "Audiobook not found" });
+                }
+
+                var storageBlock = await GetManagedStorageMutationBlockAsync(
+                    snapshot,
+                    cancellationToken);
+                if (storageBlock != null)
+                {
+                    return new ConflictObjectResult(new
+                    {
+                        message = storageBlock.Message
+                            ?? "The audiobook storage does not currently allow filesystem mutations.",
+                        code = "filesystem_mutation_unavailable"
+                    });
                 }
 
                 // Cancellation is authoritative until the durable deletion intent is
@@ -246,6 +267,58 @@ namespace Listenarr.Api.Features.Library
                 deletedParentFolder = filesystemResult?.DeletedParentFolder,
                 warnings = filesystemResult?.Warnings ?? new List<string>()
             });
+        }
+
+        private async Task<RootFolderStorageObservation?> GetManagedStorageMutationBlockAsync(
+            Audiobook audiobook,
+            CancellationToken cancellationToken)
+        {
+            var path = !string.IsNullOrWhiteSpace(audiobook.BasePath)
+                ? audiobook.BasePath
+                : !string.IsNullOrWhiteSpace(audiobook.FilePath)
+                    ? audiobook.FilePath
+                    : audiobook.Files?
+                        .Select(file => file.Path)
+                        .FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate));
+            if (string.IsNullOrWhiteSpace(path)
+                || !FileSystemPathIdentity.TryDetectAbsoluteSyntaxForHost(path, out var pathSyntax))
+            {
+                return null;
+            }
+
+            RootFolder? bestRoot = null;
+            var bestLength = -1;
+            foreach (var root in await _rootFolderService.GetAllAsync())
+            {
+                if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                        root.Path,
+                        out var canonicalRoot,
+                        out _)
+                    || !FileSystemPathIdentity.StoredBoundaryMayContainPath(
+                        canonicalRoot,
+                        path,
+                        pathSyntax,
+                        root.CaseSensitivityMode))
+                {
+                    continue;
+                }
+
+                if (canonicalRoot.Length > bestLength)
+                {
+                    bestRoot = root;
+                    bestLength = canonicalRoot.Length;
+                }
+            }
+
+            if (bestRoot == null)
+            {
+                return null;
+            }
+
+            var observation = await _storageHealthResolver.ResolveAsync(
+                bestRoot,
+                cancellationToken);
+            return observation.CanMutateFilesystem ? null : observation;
         }
 
         private async Task DeleteCachedImageAsync(Audiobook audiobook)

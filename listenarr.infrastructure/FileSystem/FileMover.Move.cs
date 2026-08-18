@@ -95,6 +95,14 @@ namespace Listenarr.Infrastructure.FileSystem
                     return false;
                 }
             }
+            if (await IsNewMutationBlockedByReadOnlyAsync(
+                    FileAction.Move,
+                    source,
+                    destination,
+                    operationId))
+            {
+                return false;
+            }
 
             var markerlessResult =
                 await TryMoveFilePreservingPhysicalIdentityMarkerlessAsync(
@@ -142,6 +150,14 @@ namespace Listenarr.Infrastructure.FileSystem
                     StringComparison.Ordinal))
             {
                 return true;
+            }
+            if (await IsNewMutationBlockedByReadOnlyAsync(
+                    FileAction.Move,
+                    sourceFile,
+                    destFile,
+                    operationId))
+            {
+                return false;
             }
 
             var markerlessResult = await TryMoveFileMarkerlessAsync(

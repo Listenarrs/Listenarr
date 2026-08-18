@@ -44,6 +44,7 @@ namespace Listenarr.Infrastructure.FileSystem
         private readonly IFileSystemSemanticsResolver _semanticsResolver;
         private readonly IFileMutationJournalStore? _fileMutationJournalStore;
         private readonly IApplicationPathService _applicationPathService;
+        private readonly Func<string, bool?> _readOnlyFileSystemProbe;
 
         public FileMover(
             ILogger<FileMover> logger,
@@ -52,7 +53,8 @@ namespace Listenarr.Infrastructure.FileSystem
             IFileSystemSemanticsResolver? semanticsResolver = null,
             IDbContextFactory<ListenArrDbContext>? dbContextFactory = null,
             TimeProvider? timeProvider = null,
-            IApplicationPathService? applicationPathService = null)
+            IApplicationPathService? applicationPathService = null,
+            Func<string, bool?>? readOnlyFileSystemProbe = null)
         {
             _logger = logger;
             _ = processRunner;
@@ -60,6 +62,8 @@ namespace Listenarr.Infrastructure.FileSystem
             _semanticsResolver = semanticsResolver ?? new FileSystemSemanticsResolver();
             _applicationPathService = applicationPathService
                 ?? new ApplicationPathService(AppContext.BaseDirectory);
+            _readOnlyFileSystemProbe = readOnlyFileSystemProbe
+                ?? FileSystemMutationCapabilityProbe.ProbeReadOnlyDirectory;
             _fileMutationJournalStore = dbContextFactory == null
                 ? null
                 : new EfFileMutationJournalStore(

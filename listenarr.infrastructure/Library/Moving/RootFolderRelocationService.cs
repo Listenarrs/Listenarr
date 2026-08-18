@@ -17,7 +17,6 @@ public sealed partial class RootFolderRelocationService(
     IDirectoryObjectIdentityResolver? directoryObjectIdentityResolver = null,
     IFileRegistrationRecoveryProbe? fileRegistrationRecoveryProbe = null) : IRootFolderRelocationService
 {
-    private readonly SemaphoreSlim _rootIdentityGate = new(1, 1);
     private readonly IFilesystemMutationCoordinator _mutationCoordinator =
         mutationCoordinator ?? throw new ArgumentNullException(nameof(mutationCoordinator));
     private readonly IAudiobookOperationCoordinator _audiobookOperationCoordinator =
@@ -28,7 +27,6 @@ public sealed partial class RootFolderRelocationService(
         directoryObjectIdentityResolver;
     private readonly IFileRegistrationRecoveryProbe? _fileRegistrationRecoveryProbe =
         fileRegistrationRecoveryProbe;
-    private bool _rootIdentitiesReconciled;
     private async Task<StartOutcome> StartCoreAsync(
         int rootFolderId,
         RootFolderPathChangeCommand command,
@@ -57,6 +55,7 @@ public sealed partial class RootFolderRelocationService(
                 "Listenarr cannot verify the new root folder path. Make sure the destination is mounted and accessible, or choose an explicit filesystem case-sensitivity setting, then try again.",
                 targetResolution.Reason ?? "Target filesystem semantics are unavailable; select an explicit override.");
         }
+        EnsureRelocationTargetMutationCapability(command.Mode, targetPath);
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var root = await db.RootFolders.SingleOrDefaultAsync(
@@ -64,6 +63,7 @@ public sealed partial class RootFolderRelocationService(
             cancellationToken)
             ?? throw new KeyNotFoundException("Root folder not found");
         ValidateExpectedCurrentPath(command, root);
+        EnsureRelocationSourceMutationCapability(command.Mode, root);
 
         if (await db.RootFolderRelocations.AnyAsync(
             relocation => relocation.ActiveRootFolderId == rootFolderId,

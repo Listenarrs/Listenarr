@@ -4713,6 +4713,112 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                 StringComparison.OrdinalIgnoreCase));
     }
 
+    [ReadOnlyBindMountFact]
+    public async Task Relocate_RealReadOnlySource_BlocksBeforeSagaCreation()
+    {
+        var source = Path.GetFullPath(
+            Environment.GetEnvironmentVariable(
+                ReadOnlyBindMountFactAttribute.LibraryPathEnvironmentVariable)
+            ?? throw new InvalidOperationException(
+                "The read-only library bind mount was not provided."));
+        var target = FileService.GetTempDirectory("relocate-readonly-source-target");
+        var semantics = await new FileSystemSemanticsResolver().ResolveAsync(source);
+        Assert.Equal(PathIdentityState.Valid, semantics.State);
+        var identity = await new DirectoryObjectIdentityResolver().ResolveAsync(source);
+        Assert.True(identity.IsAvailable, identity.UnavailableReason);
+        int rootId;
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var root = new RootFolder
+            {
+                Name = "Read-only Source",
+                Path = source,
+                CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
+                ResolvedCaseSensitivity = semantics.Semantics.CaseSensitivity,
+                PathIdentityState = PathIdentityState.Valid,
+                PathIdentityKey = FileSystemPathIdentity.CreateKey(
+                    "root",
+                    source,
+                    semantics.Semantics),
+                DirectoryObjectIdentityVersion = identity.Version,
+                DirectoryObjectIdentity = identity.Value
+            };
+            db.RootFolders.Add(root);
+            await db.SaveChangesAsync();
+            rootId = root.Id;
+        }
+
+        var exception = await Assert.ThrowsAsync<RootFolderPathChangeRejectedException>(() =>
+            CreateService().StartAsync(
+                rootId,
+                new RootFolderPathChangeCommand(
+                    target,
+                    RootFolderRelocationMode.Relocate,
+                    true,
+                    "Moved",
+                    false,
+                    FileSystemCaseSensitivityMode.Sensitive)));
+
+        Assert.Equal(
+            "root_folder_source_filesystem_mutation_unavailable",
+            exception.Code);
+        await using var verification = await _factory.CreateDbContextAsync();
+        Assert.False(await verification.RootFolderRelocations.AnyAsync());
+    }
+
+    [ReadOnlyBindMountFact]
+    public async Task Relocate_RealReadOnlyTarget_BlocksBeforeSagaCreation()
+    {
+        var target = Path.GetFullPath(
+            Environment.GetEnvironmentVariable(
+                ReadOnlyBindMountFactAttribute.LibraryPathEnvironmentVariable)
+            ?? throw new InvalidOperationException(
+                "The read-only library bind mount was not provided."));
+        var source = FileService.GetTempDirectory("relocate-readonly-target-source");
+        var semantics = await new FileSystemSemanticsResolver().ResolveAsync(source);
+        Assert.Equal(PathIdentityState.Valid, semantics.State);
+        var identity = await new DirectoryObjectIdentityResolver().ResolveAsync(source);
+        Assert.True(identity.IsAvailable, identity.UnavailableReason);
+        int rootId;
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var root = new RootFolder
+            {
+                Name = "Writable Source",
+                Path = source,
+                CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
+                ResolvedCaseSensitivity = semantics.Semantics.CaseSensitivity,
+                PathIdentityState = PathIdentityState.Valid,
+                PathIdentityKey = FileSystemPathIdentity.CreateKey(
+                    "root",
+                    source,
+                    semantics.Semantics),
+                DirectoryObjectIdentityVersion = identity.Version,
+                DirectoryObjectIdentity = identity.Value
+            };
+            db.RootFolders.Add(root);
+            await db.SaveChangesAsync();
+            rootId = root.Id;
+        }
+
+        var exception = await Assert.ThrowsAsync<RootFolderPathChangeRejectedException>(() =>
+            CreateService().StartAsync(
+                rootId,
+                new RootFolderPathChangeCommand(
+                    target,
+                    RootFolderRelocationMode.Relocate,
+                    true,
+                    "Moved",
+                    false,
+                    FileSystemCaseSensitivityMode.Sensitive)));
+
+        Assert.Equal(
+            "root_folder_target_filesystem_mutation_unavailable",
+            exception.Code);
+        await using var verification = await _factory.CreateDbContextAsync();
+        Assert.False(await verification.RootFolderRelocations.AnyAsync());
+    }
+
     [Fact]
     public async Task ReconcileOwnershipMigration_MetadataRollback_DoesNotLeakTrackedChanges()
     {

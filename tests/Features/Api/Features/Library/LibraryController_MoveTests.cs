@@ -1530,6 +1530,143 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
         [Fact]
         [Trait("Method", "EnqueueMove")]
+        [Trait("Scenario", "ReadOnlyDestinationRootRejectsBeforeEnqueue")]
+        public async Task MoveAudiobook_ReadOnlyDestinationRoot_RejectsBeforeEnqueue()
+        {
+            var moveQueue = CreateStrictMoveQueueMock();
+            var storageHealth = new Mock<IRootFolderStorageHealthResolver>(MockBehavior.Strict);
+            Init(services => services
+                .WithSingleton(moveQueue.Object)
+                .WithSingleton(storageHealth.Object));
+            var sourceRootPath = FileService.GetTempDirectory(
+                "listenarr-move-writable-source-root");
+            var targetRootPath = FileService.GetTempDirectory(
+                "listenarr-move-readonly-target-root");
+            var sourceRoot = await AddAuthorizedRootAsync(
+                sourceRootPath,
+                "Writable Source Root");
+            var targetRoot = await AddAuthorizedRootAsync(
+                targetRootPath,
+                "Read-only Target Root");
+            storageHealth.Setup(service => service.ResolveAsync(
+                    It.Is<RootFolder>(root => root.Id == targetRoot.Id),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new RootFolderStorageObservation(
+                    RootFolderStorageState.Limited,
+                    RootFolderStorageReason.ReadOnlyFilesystem,
+                    "This storage is mounted read-only.",
+                    CanConfirmCurrentFolder: false,
+                    CanChangePath: true,
+                    CanMutateFilesystem: false,
+                    ConfirmationToken: null));
+
+            var sourcePath = Path.Join(sourceRootPath, "Author", "Source");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Read-only destination")
+                .WithBasePath(sourcePath)
+                .Build());
+            await AddTrackedFileAsync(
+                audiobook,
+                sourcePath,
+                identityBoundary: sourceRoot.Path);
+
+            var result = await _provider.GetRequiredService<LibraryController>().EnqueueMove(
+                audiobook.Id,
+                new LibraryController.MoveRequest
+                {
+                    DestinationPath = Path.Join(targetRootPath, "Author", "Target"),
+                    SourcePath = sourcePath,
+                    MoveFiles = true
+                });
+
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            var payload = JsonSerializer.Serialize(badRequest.Value);
+            Assert.Contains(
+                "destination_filesystem_mutation_unavailable",
+                payload,
+                StringComparison.Ordinal);
+            moveQueue.Verify(service => service.EnqueueMoveAsync(
+                It.IsAny<MoveEnqueueCommand>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+            storageHealth.VerifyAll();
+        }
+
+        [Fact]
+        [Trait("Method", "EnqueueMove")]
+        [Trait("Scenario", "ReadOnlySourceRootRejectsBeforeEnqueue")]
+        public async Task MoveAudiobook_ReadOnlySourceRoot_RejectsBeforeEnqueue()
+        {
+            var moveQueue = CreateStrictMoveQueueMock();
+            var storageHealth = new Mock<IRootFolderStorageHealthResolver>(MockBehavior.Strict);
+            Init(services => services
+                .WithSingleton(moveQueue.Object)
+                .WithSingleton(storageHealth.Object));
+            var sourceRootPath = FileService.GetTempDirectory(
+                "listenarr-move-readonly-source-root");
+            var targetRootPath = FileService.GetTempDirectory(
+                "listenarr-move-writable-target-root");
+            var sourceRoot = await AddAuthorizedRootAsync(
+                sourceRootPath,
+                "Read-only Source Root");
+            var targetRoot = await AddAuthorizedRootAsync(
+                targetRootPath,
+                "Writable Target Root");
+            storageHealth.Setup(service => service.ResolveAsync(
+                    It.Is<RootFolder>(root => root.Id == targetRoot.Id),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new RootFolderStorageObservation(
+                    RootFolderStorageState.Healthy,
+                    RootFolderStorageReason.None,
+                    null,
+                    CanConfirmCurrentFolder: false,
+                    CanChangePath: true,
+                    CanMutateFilesystem: true,
+                    ConfirmationToken: null));
+            storageHealth.Setup(service => service.ResolveAsync(
+                    It.Is<RootFolder>(root => root.Id == sourceRoot.Id),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new RootFolderStorageObservation(
+                    RootFolderStorageState.Limited,
+                    RootFolderStorageReason.ReadOnlyFilesystem,
+                    "This storage is mounted read-only.",
+                    CanConfirmCurrentFolder: false,
+                    CanChangePath: true,
+                    CanMutateFilesystem: false,
+                    ConfirmationToken: null));
+
+            var sourcePath = Path.Join(sourceRootPath, "Author", "Source");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Read-only source")
+                .WithBasePath(sourcePath)
+                .Build());
+            await AddTrackedFileAsync(
+                audiobook,
+                sourcePath,
+                identityBoundary: sourceRoot.Path);
+
+            var result = await _provider.GetRequiredService<LibraryController>().EnqueueMove(
+                audiobook.Id,
+                new LibraryController.MoveRequest
+                {
+                    DestinationPath = Path.Join(targetRootPath, "Author", "Target"),
+                    SourcePath = sourcePath,
+                    MoveFiles = true
+                });
+
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            var payload = JsonSerializer.Serialize(badRequest.Value);
+            Assert.Contains(
+                "source_filesystem_mutation_unavailable",
+                payload,
+                StringComparison.Ordinal);
+            moveQueue.Verify(service => service.EnqueueMoveAsync(
+                It.IsAny<MoveEnqueueCommand>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+            storageHealth.VerifyAll();
+        }
+
+        [Fact]
+        [Trait("Method", "EnqueueMove")]
         [Trait("Scenario", "NarrowTrackedIdentityBoundaryUsesManagedRootMutationAuthority")]
         public async Task MoveAudiobook_NarrowTrackedIdentityBoundary_UsesManagedRootMutationAuthority()
         {
