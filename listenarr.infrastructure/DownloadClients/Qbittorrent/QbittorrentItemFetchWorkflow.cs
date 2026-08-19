@@ -87,14 +87,31 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
 
                 foreach (var torrent in torrents)
                 {
-                    items.Add(QbittorrentResponseMapper.MapDownloadClientItem(
-                        torrent,
-                        client,
-                        removeCompletedDownloads,
-                        globalMaxRatioEnabled,
-                        globalMaxRatio,
-                        globalMaxSeedingTimeEnabled,
-                        globalMaxSeedingTime));
+                    // Same per-item isolation as the queue fetch. This list is what completion and
+                    // import decisions are made from, so a torrent lost here is not just a missing
+                    // row in a view: everything after it stops being considered for import at all.
+                    try
+                    {
+                        items.Add(QbittorrentResponseMapper.MapDownloadClientItem(
+                            torrent,
+                            client,
+                            removeCompletedDownloads,
+                            globalMaxRatioEnabled,
+                            globalMaxRatio,
+                            globalMaxSeedingTimeEnabled,
+                            globalMaxSeedingTime));
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                    {
+                        var hash = torrent.TryGetValue("hash", out var hashEl) && hashEl.ValueKind == JsonValueKind.String
+                            ? hashEl.GetString() ?? string.Empty
+                            : string.Empty;
+                        logger.LogWarning(
+                            ex,
+                            "Skipping unreadable qBittorrent torrent {TorrentHash} for client {ClientId}; the rest of the item list is unaffected",
+                            LogRedaction.SanitizeText(hash),
+                            LogRedaction.SanitizeText(client.Id));
+                    }
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)

@@ -98,17 +98,35 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
 
                 foreach (var torrent in torrents)
                 {
-                    var hash = torrent.TryGetValue("hash", out var hashEl) ? hashEl.GetString() ?? string.Empty : string.Empty;
+                    var hash = torrent.TryGetValue("hash", out var hashEl) && hashEl.ValueKind == JsonValueKind.String
+                        ? hashEl.GetString() ?? string.Empty
+                        : string.Empty;
 
-                    List<Dictionary<string, JsonElement>> files = [];
-                    using var filesResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/files?hash={hash}", ct);
-                    if (filesResp.IsSuccessStatusCode)
+                    // One torrent that cannot be read must not take the rest of the response with
+                    // it. Without this, an exception raised while mapping torrent N escapes the
+                    // loop and is caught only by the handler below, so torrents N..end are dropped
+                    // while the poll still reports itself as a healthy live snapshot: the queue
+                    // simply appears shorter, with nothing to say a row was lost.
+                    try
                     {
-                        var filesJson = await filesResp.Content.ReadAsStringAsync(ct);
-                        files = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(filesJson) ?? [];
-                    }
+                        List<Dictionary<string, JsonElement>> files = [];
+                        using var filesResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/files?hash={hash}", ct);
+                        if (filesResp.IsSuccessStatusCode)
+                        {
+                            var filesJson = await filesResp.Content.ReadAsStringAsync(ct);
+                            files = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(filesJson) ?? [];
+                        }
 
-                    items.Add(QbittorrentResponseMapper.MapQueueItem(torrent, client, files));
+                        items.Add(QbittorrentResponseMapper.MapQueueItem(torrent, client, files));
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                    {
+                        logger.LogWarning(
+                            ex,
+                            "Skipping unreadable qBittorrent torrent {TorrentHash} for client {ClientId}; the rest of the queue is unaffected",
+                            LogRedaction.SanitizeText(hash),
+                            LogRedaction.SanitizeText(client.Id));
+                    }
                 }
             }
             catch (DownloadClientAdapterPollingException)
