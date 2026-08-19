@@ -405,15 +405,27 @@ namespace Listenarr.Infrastructure.Library.Scanning
 
         /// <summary>
         /// Extracts a normalized title stem from a filename for grouping purposes.
-        /// Strips leading track numbers, trailing Part/CD/Disc numbers, year and
-        /// series decorations in brackets. Files that resolve to the same stem are
-        /// treated as parts of the same audiobook. Returns the folder name as fallback
-        /// when the stem would otherwise be empty (for example purely numeric filenames).
+        /// Strips a trailing "N of M" index, leading track numbers, trailing
+        /// Part/CD/Disc numbers, year and series decorations in brackets. Files that
+        /// resolve to the same stem are treated as parts of the same audiobook. Returns
+        /// the folder name as fallback when the stem would otherwise be empty (for
+        /// example purely numeric filenames).
         /// </summary>
         private static string ExtractTitleStem(string filePath, string folderPath)
         {
             var name = Path.GetFileNameWithoutExtension(filePath);
 
+            // Strip a trailing "N of M" index: "Title 001 of 498", "Title - 3 of 12".
+            //
+            // This runs BEFORE the leading-track strip on purpose. A file named "001 of 498"
+            // with no title in it would otherwise lose its leading "001 " first, leaving
+            // "of 498" — a different stem in every file, and no longer numeric, so the
+            // folder-name fallback at the end never gets the chance to group them.
+            //
+            // Unlike a bare "(N)", this form is not ambiguous with a series marker: it
+            // carries its own total, so it says the file is one part of a set rather than
+            // one entry among separate works. Nothing is titled "Book 1 of 12".
+            name = Regex.Replace(name, @"[\s\-_]*\d+\s*of\s*\d+$", "", RegexOptions.IgnoreCase);
             // Strip leading track/disc number prefix: "01 - ", "Track 01 - ", "1. "
             name = Regex.Replace(name, @"^(track\s*)?\d+[\s\-_\.]+", "", RegexOptions.IgnoreCase);
             // Strip trailing Part/CD/Disc/Chapter number: "- Part 1", "CD2", "Disc 2", "pt00"

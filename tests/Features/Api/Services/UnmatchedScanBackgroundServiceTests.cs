@@ -119,5 +119,63 @@ namespace Listenarr.Tests.Features.Api.Services
             Assert.Contains(groups, group => group.Single() == fileA);
             Assert.Contains(groups, group => group.Single() == fileB);
         }
+
+        [Fact]
+        public void BuildGroupedFilesForFolder_GroupsChapterFilesIndexedAsNumberOfTotal()
+        {
+            // A chapter-per-file rip that numbers its parts "N of M". The index carries its
+            // own total, so it describes a set rather than distinct works, and every file
+            // belongs to the one book the folder names.
+            var folder = @"D:\test\Jack of Shadows";
+            var files = Enumerable.Range(1, 4)
+                .Select(n => Path.Join(folder, $"Jack of Shadows {n:000} of 004.mp3"))
+                .ToArray();
+
+            var groups = UnmatchedScanBackgroundService.BuildGroupedFilesForFolder(
+                files,
+                folder,
+                FileSystemPathSemantics.CurrentHostDefault);
+
+            var group = Assert.Single(groups);
+            Assert.Equal(4, group.Count);
+        }
+
+        [Fact]
+        public void BuildGroupedFilesForFolder_GroupsBareNumberOfTotalFilenames()
+        {
+            // The same convention with no title in the filename at all. Stripping the index
+            // empties the stem, which is what lets the folder-name fallback gather them.
+            var folder = @"D:\test\Jack of Shadows";
+            var files = Enumerable.Range(1, 3)
+                .Select(n => Path.Join(folder, $"{n:000} of 003.mp3"))
+                .ToArray();
+
+            var groups = UnmatchedScanBackgroundService.BuildGroupedFilesForFolder(
+                files,
+                folder,
+                FileSystemPathSemantics.CurrentHostDefault);
+
+            var group = Assert.Single(groups);
+            Assert.Equal(3, group.Count);
+        }
+
+        [Fact]
+        public void BuildGroupedFilesForFolder_KeepsTitlesWhoseOwnWordsReadLikeAnIndex()
+        {
+            // "of" between two words is not an index, and a trailing number is not a total.
+            // Two separate works in one author folder must stay separate.
+            var folder = @"D:\test\Roger Zelazny";
+            var jack = Path.Join(folder, "Jack of Shadows.mp3");
+            var nine = Path.Join(folder, "Nine Princes in Amber 2.mp3");
+
+            var groups = UnmatchedScanBackgroundService.BuildGroupedFilesForFolder(
+                new[] { jack, nine },
+                folder,
+                FileSystemPathSemantics.CurrentHostDefault);
+
+            Assert.Equal(2, groups.Count);
+            Assert.Contains(groups, group => group.Single() == jack);
+            Assert.Contains(groups, group => group.Single() == nine);
+        }
     }
 }
