@@ -35,21 +35,40 @@
           />
         </FormRow>
 
-        <FormRow label="Filesystem case sensitivity" labelFor="root-case-sensitivity">
-          <select
-            id="root-case-sensitivity"
-            v-model="form.caseSensitivityMode"
-            class="form-input"
-            :disabled="rootFilesystemMutationLocked"
-          >
-            <option value="Auto">Auto-detect</option>
-            <option value="Sensitive">Case-sensitive</option>
-            <option value="Insensitive">Case-insensitive</option>
-          </select>
-          <small v-if="root" class="semantics-help">
-            Detected: {{ root.resolvedCaseSensitivity ?? 'Unknown' }} · Storage:
-            {{ root.storageState ?? 'Unavailable' }}
-          </small>
+        <FormRow label="Filesystem behavior">
+          <div class="filesystem-behavior-summary">
+            <div>
+              <strong>{{ filesystemBehaviorTitle }}</strong>
+              <small class="semantics-help">{{ filesystemBehaviorDetail }}</small>
+            </div>
+
+            <button
+              v-if="needsCaseSettingConfirmation"
+              type="button"
+              class="btn btn-primary detected-semantics-action"
+              :disabled="rootFilesystemMutationLocked"
+              @click="useDetectedCaseSetting"
+            >
+              Use detected setting: {{ detectedCaseSettingLabel }}
+            </button>
+          </div>
+
+          <details class="advanced-semantics">
+            <summary>Advanced options</summary>
+            <label for="root-case-sensitivity" class="advanced-semantics-label">
+              Case sensitivity
+            </label>
+            <select
+              id="root-case-sensitivity"
+              v-model="form.caseSensitivityMode"
+              class="form-input"
+              :disabled="rootFilesystemMutationLocked"
+            >
+              <option value="Auto">Automatic (recommended)</option>
+              <option value="Sensitive">Case-sensitive</option>
+              <option value="Insensitive">Case-insensitive</option>
+            </select>
+          </details>
         </FormRow>
 
         <FormRow label="Path" labelFor="root-path">
@@ -138,6 +157,11 @@ import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import type { RootFolder } from '@/types'
 import { detectPathKind, validateLibraryDestinationPath, type PathKind } from '@/utils/path'
 import { persistedRootPathKind, rootFolderPathChanged } from '@/utils/rootFolderPath'
+import {
+  caseSensitivityLabel,
+  detectedMutationSemantics,
+  needsMutationSemanticsConfirmation,
+} from '@/composables/useMutationSemanticsConfirmation'
 
 const { root } = defineProps<{ root?: RootFolder }>()
 const emit = defineEmits<{
@@ -164,6 +188,41 @@ const form = ref({
 const showConfirm = ref(false)
 const modalMoveFiles = ref(true)
 const modalDeleteEmpty = ref(true)
+
+const detectedCaseSetting = computed(() => (root ? detectedMutationSemantics(root) : null))
+const needsCaseSettingConfirmation = computed(
+  () =>
+    Boolean(root) &&
+    form.value.caseSensitivityMode === 'Auto' &&
+    needsMutationSemanticsConfirmation(root!),
+)
+const detectedCaseSettingLabel = computed(() =>
+  detectedCaseSetting.value ? caseSensitivityLabel(detectedCaseSetting.value) : 'unknown',
+)
+const filesystemBehaviorTitle = computed(() => {
+  if (needsCaseSettingConfirmation.value) return 'Confirmation needed'
+  if (form.value.caseSensitivityMode === 'Sensitive') return 'Case-sensitive'
+  if (form.value.caseSensitivityMode === 'Insensitive') return 'Case-insensitive'
+  return 'Automatic (recommended)'
+})
+const filesystemBehaviorDetail = computed(() => {
+  if (needsCaseSettingConfirmation.value) {
+    return `Listenarr detected ${detectedCaseSettingLabel.value} behavior, but this storage cannot report it reliably enough for file moves and deletes. Confirm the detected setting to enable those operations.`
+  }
+  if (form.value.caseSensitivityMode !== 'Auto') {
+    return 'File operations will use this explicitly configured behavior.'
+  }
+  if (root?.resolvedCaseSensitivity && root.resolvedCaseSensitivity !== 'Unknown') {
+    return `Detected ${caseSensitivityLabel(root.resolvedCaseSensitivity)} behavior automatically.`
+  }
+  return 'Listenarr will detect case behavior automatically when the storage provides reliable evidence.'
+})
+
+function useDetectedCaseSetting() {
+  if (detectedCaseSetting.value) {
+    form.value.caseSensitivityMode = detectedCaseSetting.value
+  }
+}
 
 // Local state for showing the inline folder browser
 const showBrowser = ref(false)
@@ -573,6 +632,45 @@ async function confirmChange(moveFiles: boolean) {
 .checkbox-row label input[type='checkbox']:focus {
   outline: 2px solid rgba(var(--brand-rgb), 0.3);
   outline-offset: 2px;
+}
+
+.filesystem-behavior-summary {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.875rem;
+  border: 1px solid var(--border-color, #444);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.filesystem-behavior-summary strong,
+.filesystem-behavior-summary .semantics-help {
+  display: block;
+}
+
+.filesystem-behavior-summary .semantics-help {
+  margin-top: 0.25rem;
+  line-height: 1.45;
+}
+
+.detected-semantics-action {
+  justify-self: start;
+}
+
+.advanced-semantics {
+  margin-top: 0.75rem;
+}
+
+.advanced-semantics summary {
+  cursor: pointer;
+  color: var(--text-secondary, #aaa);
+}
+
+.advanced-semantics-label {
+  display: block;
+  margin: 0.75rem 0 0.35rem;
+  color: var(--text-secondary, #bbb);
+  font-size: 0.875rem;
 }
 
 /* Form input styling to match login and other forms */

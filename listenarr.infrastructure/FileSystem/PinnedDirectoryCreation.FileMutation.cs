@@ -6,6 +6,10 @@ namespace Listenarr.Infrastructure.FileSystem;
 
 internal sealed partial class PinnedDirectoryCreation
 {
+    internal readonly record struct PinnedRenameAttempt(
+        bool Published,
+        int NativeErrorCode);
+
     internal sealed partial class PinnedFileEntry
     {
         internal PinnedFileEntry CreateHardLinkTo(
@@ -119,6 +123,19 @@ internal sealed partial class PinnedDirectoryCreation
             PinnedDirectoryAnchor destinationParent,
             string destinationName)
         {
+            var attempt = TryMoveToNoReplace(destinationParent, destinationName);
+            if (!attempt.Published)
+            {
+                throw new Win32Exception(
+                    attempt.NativeErrorCode,
+                    "Could not publish a pinned filesystem entry relative to its owned directory.");
+            }
+        }
+
+        internal PinnedRenameAttempt TryMoveToNoReplace(
+            PinnedDirectoryAnchor destinationParent,
+            string destinationName)
+        {
             ThrowIfDisposed();
             ArgumentNullException.ThrowIfNull(destinationParent);
             ValidateLeafName(destinationName);
@@ -146,12 +163,28 @@ internal sealed partial class PinnedDirectoryCreation
             }
 
             using var destinationHandle = destinationParent.DuplicateHandleForOperation();
-            RenameRelativeEntry(
-                _parentHandle,
-                _fileHandle,
-                _fileName,
-                destinationHandle,
-                destinationName);
+            if (OperatingSystem.IsLinux())
+            {
+                var nativeError = TryRenameRelativeEntryNoReplaceLinux(
+                    _parentHandle,
+                    _fileName,
+                    destinationHandle,
+                    destinationName);
+                if (nativeError != 0)
+                {
+                    return new PinnedRenameAttempt(false, nativeError);
+                }
+            }
+            else
+            {
+                RenameRelativeEntry(
+                    _parentHandle,
+                    _fileHandle,
+                    _fileName,
+                    destinationHandle,
+                    destinationName);
+            }
+
             using var published = OperatingSystem.IsWindows()
                 ? OpenRelativeFileWindows(
                     destinationHandle,
@@ -175,6 +208,7 @@ internal sealed partial class PinnedDirectoryCreation
             _fileName = destinationName;
             _parentFollowsVisibleFinalLink =
                 destinationParent.FollowsVisibleFinalLink;
+            return new PinnedRenameAttempt(true, 0);
         }
 
         internal void MoveWithinParent(string destinationName)

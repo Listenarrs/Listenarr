@@ -17,16 +17,6 @@ public sealed partial class RootFolderRelocationService(
     IDirectoryObjectIdentityResolver? directoryObjectIdentityResolver = null,
     IFileRegistrationRecoveryProbe? fileRegistrationRecoveryProbe = null) : IRootFolderRelocationService
 {
-    private readonly IFilesystemMutationCoordinator _mutationCoordinator =
-        mutationCoordinator ?? throw new ArgumentNullException(nameof(mutationCoordinator));
-    private readonly IAudiobookOperationCoordinator _audiobookOperationCoordinator =
-        audiobookOperationCoordinator ?? throw new ArgumentNullException(nameof(audiobookOperationCoordinator));
-    private readonly IServiceScopeFactory _manifestScopeFactory =
-        manifestScopeFactory ?? throw new ArgumentNullException(nameof(manifestScopeFactory));
-    private readonly IDirectoryObjectIdentityResolver? _directoryObjectIdentityResolver =
-        directoryObjectIdentityResolver;
-    private readonly IFileRegistrationRecoveryProbe? _fileRegistrationRecoveryProbe =
-        fileRegistrationRecoveryProbe;
     private async Task<StartOutcome> StartCoreAsync(
         int rootFolderId,
         RootFolderPathChangeCommand command,
@@ -55,6 +45,10 @@ public sealed partial class RootFolderRelocationService(
                 "Listenarr cannot verify the new root folder path. Make sure the destination is mounted and accessible, or choose an explicit filesystem case-sensitivity setting, then try again.",
                 targetResolution.Reason ?? "Target filesystem semantics are unavailable; select an explicit override.");
         }
+        EnsureRelocationTargetMutationSemanticsAuthority(
+            command.Mode,
+            command.TargetCaseSensitivityMode,
+            targetResolution);
         EnsureRelocationTargetMutationCapability(command.Mode, targetPath);
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
@@ -108,6 +102,10 @@ public sealed partial class RootFolderRelocationService(
                 "Listenarr cannot access or verify the current root folder, so its files cannot be moved safely. Restore access to the current folder, or change the path without moving files to repair the stored location.",
                 "The current root folder path is invalid or unavailable; use metadata-only path change to repair it before relocating files.");
         }
+        EnsureRelocationSourceMutationSemanticsAuthority(
+            command.Mode,
+            root.CaseSensitivityMode,
+            sourceResolution);
 
         var sourcePathSemantics = ResolveStartSourcePathSemantics(
             root,

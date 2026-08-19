@@ -314,6 +314,7 @@ export interface RootFolder {
     | 'IdentityUnstable'
     | 'FilesystemSemanticsUnavailable'
     | 'FilesystemSemanticsChanged'
+    | 'MutationSemanticsUnproven'
     | 'ReadOnlyFilesystem'
     | 'MutationCapabilityUnavailable'
     | 'NoAuthorizedIdentity'

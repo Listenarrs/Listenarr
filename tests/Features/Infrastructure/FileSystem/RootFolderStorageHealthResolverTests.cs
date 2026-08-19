@@ -37,6 +37,100 @@ public sealed class RootFolderStorageHealthResolverTests : BaseTests
     }
 
     [Fact]
+    public async Task ResolveAsync_AuthorizedGenerationWithBehavioralAutoSemantics_DisablesMutation()
+    {
+        var path = Path.GetFullPath("root-storage-behavioral-auto-semantics");
+        var root = BuildRoot(path, identity: "authorized");
+        root.CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto;
+        var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
+        identityResolver
+            .Setup(resolver => resolver.ResolveExistingAsync(
+                path,
+                ManagedDirectoryIdentity.CurrentVersion,
+                "authorized",
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DirectoryObjectIdentityResolution(
+                ManagedDirectoryIdentity.CurrentVersion,
+                "authorized",
+                null));
+        var semanticsResolver = new Mock<IFileSystemSemanticsResolver>(MockBehavior.Strict);
+        semanticsResolver
+            .Setup(resolver => resolver.ResolveAsync(
+                path,
+                FileSystemCaseSensitivityMode.Auto,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileSystemSemanticsResolution(
+                new FileSystemPathSemantics(
+                    FileSystemPathSemantics.CurrentHostDefault.Syntax,
+                    root.ResolvedCaseSensitivity),
+                PathIdentityState.Valid,
+                path,
+                EvidenceKind: FileSystemSemanticsEvidenceKind.BehavioralObservation));
+        var resolver = new RootFolderStorageHealthResolver(
+            identityResolver.Object,
+            semanticsResolver.Object,
+            readOnlyFileSystemProbe: _ => false);
+
+        var result = await resolver.ResolveAsync(root);
+
+        Assert.Equal(RootFolderStorageState.Limited, result.State);
+        Assert.Equal(RootFolderStorageReason.MutationSemanticsUnproven, result.Reason);
+        Assert.True(result.CanReadFilesystem);
+        Assert.True(result.CanScanFilesystem);
+        Assert.False(result.CanMutateFilesystem);
+        Assert.Contains(
+            "Sensitive or Insensitive",
+            result.Message ?? string.Empty,
+            StringComparison.Ordinal);
+        identityResolver.VerifyAll();
+        semanticsResolver.VerifyAll();
+    }
+
+    [Fact]
+    public async Task ResolveAsync_BehavioralAutoSemanticsOnReadOnlyMount_PrefersReadOnlyReason()
+    {
+        var path = Path.GetFullPath("root-storage-behavioral-auto-read-only");
+        var root = BuildRoot(path, identity: "authorized");
+        root.CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto;
+        var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
+        identityResolver
+            .Setup(resolver => resolver.ResolveExistingAsync(
+                path,
+                ManagedDirectoryIdentity.CurrentVersion,
+                "authorized",
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DirectoryObjectIdentityResolution(
+                ManagedDirectoryIdentity.CurrentVersion,
+                "authorized",
+                null));
+        var semanticsResolver = new Mock<IFileSystemSemanticsResolver>(MockBehavior.Strict);
+        semanticsResolver
+            .Setup(resolver => resolver.ResolveAsync(
+                path,
+                FileSystemCaseSensitivityMode.Auto,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileSystemSemanticsResolution(
+                new FileSystemPathSemantics(
+                    FileSystemPathSemantics.CurrentHostDefault.Syntax,
+                    root.ResolvedCaseSensitivity),
+                PathIdentityState.Valid,
+                path,
+                EvidenceKind: FileSystemSemanticsEvidenceKind.BehavioralObservation));
+        var resolver = new RootFolderStorageHealthResolver(
+            identityResolver.Object,
+            semanticsResolver.Object,
+            readOnlyFileSystemProbe: _ => true);
+
+        var result = await resolver.ResolveAsync(root);
+
+        Assert.Equal(RootFolderStorageState.Limited, result.State);
+        Assert.Equal(RootFolderStorageReason.ReadOnlyFilesystem, result.Reason);
+        Assert.False(result.CanMutateFilesystem);
+        identityResolver.VerifyAll();
+        semanticsResolver.VerifyAll();
+    }
+
+    [Fact]
     public async Task ResolveAsync_AuthorizedGenerationOnReadOnlyMount_ReturnsLimitedScanOnlyCapability()
     {
         var path = Path.GetFullPath("root-storage-read-only");

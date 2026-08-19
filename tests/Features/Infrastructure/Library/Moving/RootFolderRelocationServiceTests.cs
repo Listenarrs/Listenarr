@@ -196,6 +196,121 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
     }
 
     [Fact]
+    public async Task StartRelocation_TargetAutoSemanticsOnlyBehavioral_RejectsBeforeSagaCreation()
+    {
+        var source = Path.Join(TempRoot, $"behavioral-target-source-{Guid.NewGuid():N}");
+        var target = Path.Join(TempRoot, $"behavioral-target-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(source);
+        Directory.CreateDirectory(target);
+        int rootId;
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var root = new RootFolder { Name = "Library", Path = source };
+            db.RootFolders.Add(root);
+            await db.SaveChangesAsync();
+            rootId = root.Id;
+        }
+
+        var semantics = FileSystemPathSemantics.CurrentHostDefault;
+        var semanticsResolver = new Mock<IFileSystemSemanticsResolver>(MockBehavior.Strict);
+        semanticsResolver
+            .Setup(resolver => resolver.ResolveAsync(
+                Path.GetFullPath(target),
+                FileSystemCaseSensitivityMode.Auto,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileSystemSemanticsResolution(
+                semantics,
+                PathIdentityState.Valid,
+                target,
+                EvidenceKind: FileSystemSemanticsEvidenceKind.BehavioralObservation));
+
+        var exception = await Assert.ThrowsAsync<RootFolderPathChangeRejectedException>(() =>
+            CreateService(semanticsResolver: semanticsResolver.Object).StartAsync(
+                rootId,
+                BuildRelocationCommand(target)));
+
+        Assert.Equal(
+            "root_folder_target_mutation_semantics_unproven",
+            exception.Code);
+        await using var verification = await _factory.CreateDbContextAsync();
+        Assert.False(await verification.RootFolderRelocations.AnyAsync());
+        Assert.False(await verification.MoveJobs.AnyAsync());
+        semanticsResolver.VerifyAll();
+    }
+
+    [Fact]
+    public async Task StartRelocation_SourceAutoSemanticsOnlyBehavioral_RejectsBeforeSagaCreation()
+    {
+        var source = Path.Join(TempRoot, $"behavioral-source-{Guid.NewGuid():N}");
+        var target = Path.Join(TempRoot, $"behavioral-source-target-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(source);
+        Directory.CreateDirectory(target);
+        var semantics = FileSystemPathSemantics.CurrentHostDefault;
+        int rootId;
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var root = new RootFolder
+            {
+                Name = "Library",
+                Path = source,
+                CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
+                ResolvedCaseSensitivity = semantics.CaseSensitivity,
+                PathIdentityState = PathIdentityState.Valid,
+                PathIdentityKey = FileSystemPathIdentity.CreateKey(
+                    "root",
+                    source,
+                    semantics)
+            };
+            db.RootFolders.Add(root);
+            await db.SaveChangesAsync();
+            rootId = root.Id;
+        }
+
+        var explicitMode = semantics.CaseSensitivity == FileSystemCaseSensitivity.Sensitive
+            ? FileSystemCaseSensitivityMode.Sensitive
+            : FileSystemCaseSensitivityMode.Insensitive;
+        var semanticsResolver = new Mock<IFileSystemSemanticsResolver>(MockBehavior.Strict);
+        semanticsResolver
+            .Setup(resolver => resolver.ResolveAsync(
+                Path.GetFullPath(target),
+                explicitMode,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileSystemSemanticsResolution(
+                semantics,
+                PathIdentityState.Valid,
+                target));
+        semanticsResolver
+            .Setup(resolver => resolver.ResolveAsync(
+                Path.GetFullPath(source),
+                FileSystemCaseSensitivityMode.Auto,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileSystemSemanticsResolution(
+                semantics,
+                PathIdentityState.Valid,
+                source,
+                EvidenceKind: FileSystemSemanticsEvidenceKind.BehavioralObservation));
+
+        var exception = await Assert.ThrowsAsync<RootFolderPathChangeRejectedException>(() =>
+            CreateService(semanticsResolver: semanticsResolver.Object).StartAsync(
+                rootId,
+                new RootFolderPathChangeCommand(
+                    target,
+                    RootFolderRelocationMode.Relocate,
+                    true,
+                    "Moved Library",
+                    false,
+                    explicitMode)));
+
+        Assert.Equal(
+            "root_folder_source_mutation_semantics_unproven",
+            exception.Code);
+        await using var verification = await _factory.CreateDbContextAsync();
+        Assert.False(await verification.RootFolderRelocations.AnyAsync());
+        Assert.False(await verification.MoveJobs.AnyAsync());
+        semanticsResolver.VerifyAll();
+    }
+
+    [Fact]
     public async Task StartRelocation_PersistsSagaAndJobsWithoutChangingRootOrAudiobooks()
     {
         var source = Path.Join(Path.GetTempPath(), $"relocation-source-{Guid.NewGuid():N}");

@@ -21,6 +21,7 @@ public enum RootFolderStorageReason
     IdentityUnstable,
     FilesystemSemanticsUnavailable,
     FilesystemSemanticsChanged,
+    MutationSemanticsUnproven,
     ReadOnlyFilesystem,
     MutationCapabilityUnavailable,
     NoAuthorizedIdentity,

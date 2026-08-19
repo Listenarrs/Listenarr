@@ -1886,6 +1886,334 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
         }
 
         [LinuxFact]
+        public async Task MoveContentsAsync_MarkerlessNativeRenameUnsupported_FallsBackToVerifiedCopy()
+        {
+            var root = FileService.GetTempDirectory(
+                "content-move-markerless-native-rename-unsupported-root");
+            var source = Path.Join(root, "source");
+            Directory.CreateDirectory(source);
+            var sourceFile = await FileService.GetFileAsync(
+                source,
+                "book.m4b",
+                "audio");
+            var target = Path.Join(root, "destination", "Book");
+            var targetFile = Path.Join(target, "book.m4b");
+            var request = await CreateLeasedMoveRequestAsync(
+                source,
+                target,
+                sourceCleanupBoundary: root,
+                executionProtocolVersion:
+                    MoveExecutionProtocol.MarkerlessDatabaseState);
+            string sourceIdentity;
+            using (var lease = PinnedAudiobookFileRegistrationLease.Open(sourceFile))
+            {
+                sourceIdentity = lease.PhysicalObjectIdentity;
+            }
+            var service = new AudiobookContentMoveService(
+                _provider.GetRequiredService<
+                    ILogger<AudiobookContentMoveService>>(),
+                _provider.GetRequiredService<
+                    IDbContextFactory<ListenArrDbContext>>(),
+                TimeProvider.System,
+                new NativeRenameUnsupported(22));
+
+            var result = await service.MoveContentsAsync(
+                request,
+                CancellationToken.None);
+            await service.FinalizeMoveAsync(
+                request,
+                result,
+                CancellationToken.None);
+            await service.CleanupCompletedMoveArtifactsAsync(
+                request,
+                result,
+                CancellationToken.None);
+
+            Assert.False(Directory.Exists(source));
+            Assert.Equal("audio", await File.ReadAllTextAsync(targetFile));
+            using (var lease = PinnedAudiobookFileRegistrationLease.Open(targetFile))
+            {
+                Assert.False(lease.MatchesPhysicalObjectIdentity(sourceIdentity));
+            }
+            var factory = _provider.GetRequiredService<
+                IDbContextFactory<ListenArrDbContext>>();
+            await using var db = await factory.CreateDbContextAsync();
+            var entry = await db.MoveJobEntries
+                .AsNoTracking()
+                .SingleAsync(candidate =>
+                    candidate.MoveJobId == request.JobId
+                    && candidate.EntryType == MoveJobEntryType.File);
+            Assert.Equal(MoveJobEntryCopyState.Verified, entry.CopyState);
+            Assert.Equal(MoveJobEntryCleanupState.Deleted, entry.CleanupState);
+            Assert.NotEqual(
+                entry.SourcePhysicalObjectIdentity,
+                entry.TargetPhysicalObjectIdentity);
+            AssertNoListenarrArtifacts(root);
+        }
+
+        [LinuxFact]
+        public async Task MoveContentsAsync_MarkerlessMultiFile_CanMixNativeRenameAndVerifiedCopyFallback()
+        {
+            var root = FileService.GetTempDirectory(
+                "content-move-markerless-mixed-native-copy-root");
+            var source = Path.Join(root, "source");
+            Directory.CreateDirectory(source);
+            var firstSource = await FileService.GetFileAsync(
+                source,
+                "a.m4b",
+                "first audio");
+            var secondSource = await FileService.GetFileAsync(
+                source,
+                "b.m4b",
+                "second audio");
+            var target = Path.Join(root, "destination", "Book");
+            var request = await CreateLeasedMoveRequestAsync(
+                source,
+                target,
+                sourceCleanupBoundary: root,
+                executionProtocolVersion:
+                    MoveExecutionProtocol.MarkerlessDatabaseState);
+            var sourceIdentities = new Dictionary<string, string>(StringComparer.Ordinal);
+            using (var firstLease = PinnedAudiobookFileRegistrationLease.Open(firstSource))
+            using (var secondLease = PinnedAudiobookFileRegistrationLease.Open(secondSource))
+            {
+                sourceIdentities["a.m4b"] = firstLease.PhysicalObjectIdentity;
+                sourceIdentities["b.m4b"] = secondLease.PhysicalObjectIdentity;
+            }
+            var service = new AudiobookContentMoveService(
+                _provider.GetRequiredService<
+                    ILogger<AudiobookContentMoveService>>(),
+                _provider.GetRequiredService<
+                    IDbContextFactory<ListenArrDbContext>>(),
+                TimeProvider.System,
+                new NativeRenameFirstThenUnsupported());
+
+            var result = await service.MoveContentsAsync(
+                request,
+                CancellationToken.None);
+
+            Assert.True(result.SourceCleanupCompleted);
+            Assert.False(Directory.Exists(source));
+            Assert.Equal(
+                "first audio",
+                await File.ReadAllTextAsync(Path.Join(target, "a.m4b")));
+            Assert.Equal(
+                "second audio",
+                await File.ReadAllTextAsync(Path.Join(target, "b.m4b")));
+            var factory = _provider.GetRequiredService<
+                IDbContextFactory<ListenArrDbContext>>();
+            await using var db = await factory.CreateDbContextAsync();
+            var entries = await db.MoveJobEntries
+                .AsNoTracking()
+                .Where(candidate =>
+                    candidate.MoveJobId == request.JobId
+                    && candidate.EntryType == MoveJobEntryType.File)
+                .OrderBy(candidate => candidate.RelativePath)
+                .ToListAsync();
+            Assert.Equal(2, entries.Count);
+            var preservedGenerationCount = entries.Count(entry =>
+                sourceIdentities.TryGetValue(entry.RelativePath, out var sourceIdentity)
+                && string.Equals(
+                    sourceIdentity,
+                    entry.TargetPhysicalObjectIdentity,
+                    StringComparison.Ordinal));
+            Assert.Equal(1, preservedGenerationCount);
+            Assert.Equal(1, entries.Count - preservedGenerationCount);
+            Assert.All(
+                entries,
+                entry => Assert.Equal(
+                    MoveJobEntryCopyState.Verified,
+                    entry.CopyState));
+            AssertNoListenarrArtifacts(root);
+        }
+
+        [LinuxFact]
+        public async Task MoveContentsAsync_MarkerlessNativeRenameErrorAfterPublication_RecoversPublishedGenerationWithoutCopy()
+        {
+            var root = FileService.GetTempDirectory(
+                "content-move-markerless-native-rename-published-error-root");
+            var source = Path.Join(root, "source");
+            Directory.CreateDirectory(source);
+            var sourceFile = await FileService.GetFileAsync(
+                source,
+                "book.m4b",
+                "audio");
+            var target = Path.Join(root, "destination", "Book");
+            var targetFile = Path.Join(target, "book.m4b");
+            var request = await CreateLeasedMoveRequestAsync(
+                source,
+                target,
+                sourceCleanupBoundary: root,
+                executionProtocolVersion:
+                    MoveExecutionProtocol.MarkerlessDatabaseState);
+            string sourceIdentity;
+            using (var lease = PinnedAudiobookFileRegistrationLease.Open(sourceFile))
+            {
+                sourceIdentity = lease.PhysicalObjectIdentity;
+            }
+            var service = new AudiobookContentMoveService(
+                _provider.GetRequiredService<
+                    ILogger<AudiobookContentMoveService>>(),
+                _provider.GetRequiredService<
+                    IDbContextFactory<ListenArrDbContext>>(),
+                TimeProvider.System,
+                new NativeRenamePublishedBeforeError(22));
+
+            var result = await service.MoveContentsAsync(
+                request,
+                CancellationToken.None);
+            await service.FinalizeMoveAsync(
+                request,
+                result,
+                CancellationToken.None);
+            await service.CleanupCompletedMoveArtifactsAsync(
+                request,
+                result,
+                CancellationToken.None);
+
+            Assert.False(Directory.Exists(source));
+            Assert.Equal("audio", await File.ReadAllTextAsync(targetFile));
+            using (var lease = PinnedAudiobookFileRegistrationLease.Open(targetFile))
+            {
+                Assert.True(lease.MatchesPhysicalObjectIdentity(sourceIdentity));
+            }
+            var factory = _provider.GetRequiredService<
+                IDbContextFactory<ListenArrDbContext>>();
+            await using var db = await factory.CreateDbContextAsync();
+            var entry = await db.MoveJobEntries
+                .AsNoTracking()
+                .SingleAsync(candidate =>
+                    candidate.MoveJobId == request.JobId
+                    && candidate.EntryType == MoveJobEntryType.File);
+            Assert.Equal(
+                entry.SourcePhysicalObjectIdentity,
+                entry.TargetPhysicalObjectIdentity);
+            AssertNoListenarrArtifacts(root);
+        }
+
+        [LinuxFact]
+        public async Task MoveContentsAsync_MarkerlessNativeRenameUnsupported_TargetAppearsBeforeObservation_FailsClosedWithoutOverwrite()
+        {
+            var root = FileService.GetTempDirectory(
+                "content-move-markerless-native-rename-target-race-root");
+            var source = Path.Join(root, "source");
+            Directory.CreateDirectory(source);
+            var sourceFile = await FileService.GetFileAsync(
+                source,
+                "book.m4b",
+                "audio");
+            var target = Path.Join(root, "destination", "Book");
+            var targetFile = Path.Join(target, "book.m4b");
+            var request = await CreateLeasedMoveRequestAsync(
+                source,
+                target,
+                sourceCleanupBoundary: root,
+                executionProtocolVersion:
+                    MoveExecutionProtocol.MarkerlessDatabaseState);
+            var service = new AudiobookContentMoveService(
+                _provider.GetRequiredService<
+                    ILogger<AudiobookContentMoveService>>(),
+                _provider.GetRequiredService<
+                    IDbContextFactory<ListenArrDbContext>>(),
+                TimeProvider.System,
+                new CreateTargetAfterNativeRenameFailure(targetFile));
+
+            var exception = await Assert.ThrowsAsync<MoveNeedsAttentionException>(() =>
+                service.MoveContentsAsync(
+                    request,
+                    CancellationToken.None));
+
+            Assert.Contains(
+                "ambiguous",
+                exception.Message,
+                StringComparison.OrdinalIgnoreCase);
+            Assert.True(File.Exists(sourceFile));
+            Assert.Equal("audio", await File.ReadAllTextAsync(sourceFile));
+            Assert.Equal("foreign", await File.ReadAllTextAsync(targetFile));
+            AssertNoListenarrArtifacts(root);
+        }
+
+        [LinuxFact]
+        public async Task MoveContentsAsync_MarkerlessNativeRenameUnsupported_SourceReplacedAfterFallbackAuthorization_DoesNotPublishTarget()
+        {
+            var root = FileService.GetTempDirectory(
+                "content-move-markerless-native-rename-source-race-root");
+            var source = Path.Join(root, "source");
+            Directory.CreateDirectory(source);
+            var sourceFile = await FileService.GetFileAsync(
+                source,
+                "book.m4b",
+                "audio");
+            var target = Path.Join(root, "destination", "Book");
+            var targetFile = Path.Join(target, "book.m4b");
+            var request = await CreateLeasedMoveRequestAsync(
+                source,
+                target,
+                sourceCleanupBoundary: root,
+                executionProtocolVersion:
+                    MoveExecutionProtocol.MarkerlessDatabaseState);
+            var service = new AudiobookContentMoveService(
+                _provider.GetRequiredService<
+                    ILogger<AudiobookContentMoveService>>(),
+                _provider.GetRequiredService<
+                    IDbContextFactory<ListenArrDbContext>>(),
+                TimeProvider.System,
+                new ReplaceSourceAfterNativeRenameFallbackAuthorized(sourceFile));
+
+            var exception = await Assert.ThrowsAsync<MoveNeedsAttentionException>(() =>
+                service.MoveContentsAsync(
+                    request,
+                    CancellationToken.None));
+
+            Assert.Contains(
+                "changed physical generation",
+                exception.Message,
+                StringComparison.OrdinalIgnoreCase);
+            Assert.Equal("replacement", await File.ReadAllTextAsync(sourceFile));
+            Assert.False(File.Exists(targetFile));
+            AssertNoListenarrArtifacts(root);
+        }
+
+        [LinuxFact]
+        public async Task MoveContentsAsync_MarkerlessNativeRenameFailureThatIsNotUnsupported_DoesNotCopy()
+        {
+            var root = FileService.GetTempDirectory(
+                "content-move-markerless-native-rename-denied-root");
+            var source = Path.Join(root, "source");
+            Directory.CreateDirectory(source);
+            var sourceFile = await FileService.GetFileAsync(
+                source,
+                "book.m4b",
+                "audio");
+            var target = Path.Join(root, "destination", "Book");
+            var targetFile = Path.Join(target, "book.m4b");
+            var request = await CreateLeasedMoveRequestAsync(
+                source,
+                target,
+                sourceCleanupBoundary: root,
+                executionProtocolVersion:
+                    MoveExecutionProtocol.MarkerlessDatabaseState);
+            var service = new AudiobookContentMoveService(
+                _provider.GetRequiredService<
+                    ILogger<AudiobookContentMoveService>>(),
+                _provider.GetRequiredService<
+                    IDbContextFactory<ListenArrDbContext>>(),
+                TimeProvider.System,
+                new NativeRenameUnsupported(13));
+
+            var exception = await Assert.ThrowsAsync<System.ComponentModel.Win32Exception>(() =>
+                service.MoveContentsAsync(
+                    request,
+                    CancellationToken.None));
+
+            Assert.Equal(13, exception.NativeErrorCode);
+            Assert.True(File.Exists(sourceFile));
+            Assert.Equal("audio", await File.ReadAllTextAsync(sourceFile));
+            Assert.False(File.Exists(targetFile));
+            AssertNoListenarrArtifacts(root);
+        }
+
+        [LinuxFact]
         public async Task MoveContentsAsync_MarkerlessNativeRename_CompatibleExpectedSourceToken_PersistsSameDurableTargetToken()
         {
             var root = FileService.GetTempDirectory(
@@ -3541,6 +3869,77 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
         private sealed class DisableMarkerlessFileRename : IMoveFaultInjector
         {
             public bool AllowMarkerlessFileRename => false;
+        }
+
+        private sealed class NativeRenameUnsupported(int nativeErrorCode)
+            : IMoveFaultInjector
+        {
+            public bool AllowMarkerlessFileRename => true;
+            public int? MarkerlessNativeRenameErrorForTest => nativeErrorCode;
+        }
+
+        private sealed class NativeRenameFirstThenUnsupported : IMoveFaultInjector
+        {
+            private int _attempt;
+
+            public bool AllowMarkerlessFileRename => true;
+            public int? MarkerlessNativeRenameErrorForTest =>
+                Interlocked.Increment(ref _attempt) == 1 ? null : 22;
+        }
+
+        private sealed class NativeRenamePublishedBeforeError(int nativeErrorCode)
+            : IMoveFaultInjector
+        {
+            public bool AllowMarkerlessFileRename => true;
+            public int? MarkerlessNativeRenameErrorForTest => nativeErrorCode;
+            public bool MarkerlessNativeRenamePublishesBeforeErrorForTest => true;
+        }
+
+        private sealed class CreateTargetAfterNativeRenameFailure(string targetFile)
+            : IMoveFaultInjector
+        {
+            private int _created;
+
+            public bool AllowMarkerlessFileRename => true;
+            public int? MarkerlessNativeRenameErrorForTest => 22;
+
+            public void OnCopyMutation(
+                Guid jobId,
+                CopyMutationFaultPoint faultPoint)
+            {
+                if (faultPoint
+                        != CopyMutationFaultPoint.AfterMarkerlessNativeRenameFailureBeforeObservation
+                    || Interlocked.Exchange(ref _created, 1) != 0)
+                {
+                    return;
+                }
+
+                File.WriteAllText(targetFile, "foreign");
+            }
+        }
+
+        private sealed class ReplaceSourceAfterNativeRenameFallbackAuthorized(string sourceFile)
+            : IMoveFaultInjector
+        {
+            private int _replaced;
+
+            public bool AllowMarkerlessFileRename => true;
+            public int? MarkerlessNativeRenameErrorForTest => 22;
+
+            public void OnCopyMutation(
+                Guid jobId,
+                CopyMutationFaultPoint faultPoint)
+            {
+                if (faultPoint
+                        != CopyMutationFaultPoint.AfterMarkerlessNativeRenameFallbackAuthorized
+                    || Interlocked.Exchange(ref _replaced, 1) != 0)
+                {
+                    return;
+                }
+
+                File.Delete(sourceFile);
+                File.WriteAllText(sourceFile, "replacement");
+            }
         }
 
         private sealed class MutateBeforeMarkerlessNativeRename(

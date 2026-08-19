@@ -61,6 +61,10 @@ public sealed class FileSystemSemanticsResolverTests : BaseTests
             Assert.Equal(
                 FileSystemCaseSensitivity.Sensitive,
                 resolution.Semantics.CaseSensitivity);
+            Assert.Equal(
+                FileSystemSemanticsEvidenceKind.Authoritative,
+                resolution.EvidenceKind);
+            Assert.True(resolution.HasDurableMutationSemanticsAuthority);
             Assert.Equal(before, Snapshot(parent));
             Assert.False(Directory.Exists(Path.Join(parent, "future")));
         }
@@ -332,6 +336,53 @@ public sealed class FileSystemSemanticsResolverTests : BaseTests
 
     [LinuxFact]
     [SupportedOSPlatform("linux")]
+    public async Task Auto_WhenKnownCasefoldFlagFilesystemLacksCasefold_IsAuthoritativelySensitive()
+    {
+        var fileSystemTypes = new long[]
+        {
+            0x0000ef53L, // ext family
+            0xf2f52010L, // F2FS
+            0x01021994L, // tmpfs
+            0xca451a4eL // bcachefs
+        };
+
+        foreach (var fileSystemType in fileSystemTypes)
+        {
+            var boundary = Path.Join(
+                Path.GetTempPath(),
+                "filesystem-semantics-authoritative-flags-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(boundary);
+            try
+            {
+                var resolver = new FileSystemSemanticsResolver(
+                    _ => new FileSystemSemanticsResolver.LinuxFilesystemFlagsProbe(
+                        Success: true,
+                        Flags: 0,
+                        ErrorCode: 0,
+                        FileSystemType: fileSystemType));
+
+                var resolution = await resolver.ResolveAsync(
+                    boundary,
+                    FileSystemCaseSensitivityMode.Auto);
+
+                Assert.Equal(PathIdentityState.Valid, resolution.State);
+                Assert.Equal(
+                    FileSystemCaseSensitivity.Sensitive,
+                    resolution.Semantics.CaseSensitivity);
+                Assert.Equal(
+                    FileSystemSemanticsEvidenceKind.Authoritative,
+                    resolution.EvidenceKind);
+                Assert.True(resolution.HasDurableMutationSemanticsAuthority);
+            }
+            finally
+            {
+                Directory.Delete(boundary, true);
+            }
+        }
+    }
+
+    [LinuxFact]
+    [SupportedOSPlatform("linux")]
     public async Task Auto_WhenFilesystemFlagsLackCasefoldAndDirectoryIsEmpty_RemainsUnavailable()
     {
         var boundary = Path.Join(
@@ -395,6 +446,10 @@ public sealed class FileSystemSemanticsResolverTests : BaseTests
             Assert.Equal(
                 FileSystemCaseSensitivity.Sensitive,
                 resolution.Semantics.CaseSensitivity);
+            Assert.Equal(
+                FileSystemSemanticsEvidenceKind.BehavioralObservation,
+                resolution.EvidenceKind);
+            Assert.False(resolution.HasDurableMutationSemanticsAuthority);
             Assert.Equal(before, Snapshot(boundary));
             Assert.Equal(
                 "unchanged",

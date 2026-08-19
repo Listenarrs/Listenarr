@@ -673,6 +673,7 @@ import { safeText, stripHtmlAndNormalize } from '@/utils/textUtils'
 import { logger } from '@/utils/logger'
 import { errorTracking } from '@/services/errorTracking'
 import { useProtectedImages } from '@/composables/useProtectedImages'
+import { preparePhysicalDeleteRetry } from '@/composables/useMutationSemanticsConfirmation'
 import { buildAudibleProductUrl } from '@/utils/marketDomains'
 import EditAudiobookModal from '@/components/domain/audiobook/EditAudiobookModal.vue'
 import ManualSearchModal from '@/components/domain/search/ManualSearchModal.vue'
@@ -1576,6 +1577,10 @@ async function executeDelete() {
     const success = await libraryStore.removeFromLibrary(audiobook.value.id, {
       deleteFiles: shouldDeleteFiles,
       deleteFolder: shouldDeleteFolder,
+      retryAfterBlockedMutation: shouldDeleteFiles
+        ? (error) =>
+            preparePhysicalDeleteRetry(error, audiobook.value!.id, audiobook.value?.basePath)
+        : undefined,
     })
     if (success) {
       const toast = useToast()
@@ -1588,7 +1593,7 @@ async function executeDelete() {
       }
       // Navigate back to library after successful deletion
       router.push('/audiobooks')
-    } else {
+    } else if (success === false) {
       const toast = useToast()
       toast.error('Delete failed', libraryStore.error || 'Failed to delete audiobook')
     }

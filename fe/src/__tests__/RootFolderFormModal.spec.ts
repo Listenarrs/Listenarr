@@ -132,6 +132,47 @@ describe('RootFolderFormModal', () => {
     expect(wrapper.get('.btn-inline-browse').attributes('disabled')).toBeDefined()
   })
 
+  it('guides an unproven Automatic root to the detected case setting', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const root = {
+      id: 13,
+      name: 'Network Library',
+      path: '/library',
+      pathSyntax: 'Unix' as const,
+      isDefault: true,
+      caseSensitivityMode: 'Auto' as const,
+      resolvedCaseSensitivity: 'Sensitive' as const,
+      pathIdentityState: 'Valid' as const,
+      storageState: 'Limited' as const,
+      storageReason: 'MutationSemanticsUnproven' as const,
+      canChangePath: true,
+      canReadFilesystem: true,
+      canScanFilesystem: true,
+      canMutateFilesystem: false,
+    }
+    const wrapper = mount(RootFolderFormModal, {
+      props: { root },
+      global: {
+        plugins: [pinia],
+        stubs: { FolderBrowserModal: true },
+      },
+    })
+
+    expect(wrapper.text()).toContain('Confirmation needed')
+    expect(wrapper.text()).toContain('Use detected setting: case-sensitive')
+    expect((wrapper.get('#root-case-sensitivity').element as HTMLSelectElement).value).toBe('Auto')
+
+    await wrapper.get('.detected-semantics-action').trigger('click')
+
+    expect((wrapper.get('#root-case-sensitivity').element as HTMLSelectElement).value).toBe(
+      'Sensitive',
+    )
+    expect(wrapper.text()).toContain(
+      'File operations will use this explicitly configured behavior.',
+    )
+  })
+
   it('keeps metadata editing available while filesystem path controls are locked', async () => {
     filesystemReadinessMock.filesystemReady = false
     const pinia = createPinia()

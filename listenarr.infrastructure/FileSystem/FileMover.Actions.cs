@@ -88,7 +88,7 @@ public partial class FileMover
                 "A durable registration publication requires a non-empty operation ID");
             return null;
         }
-        if (await IsNewMutationBlockedByReadOnlyAsync(
+        if (await IsNewMutationBlockedByCapabilityAsync(
                 action,
                 source,
                 destination,
@@ -256,7 +256,7 @@ public partial class FileMover
                 "Source and destination identify the same filesystem path");
             return true;
         }
-        if (await IsNewMutationBlockedByReadOnlyAsync(
+        if (await IsNewMutationBlockedByCapabilityAsync(
                 action,
                 source,
                 destination,

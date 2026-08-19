@@ -119,6 +119,47 @@ describe('RootFoldersSettings', () => {
     await wrapper.vm.$nextTick()
   })
 
+  it('offers a one-click detected case setting for mutation-limited network storage', async () => {
+    const unprovenRoot: RootFolder = {
+      ...rootFolder(null),
+      caseSensitivityMode: 'Auto',
+      resolvedCaseSensitivity: 'Sensitive',
+      storageState: 'Limited',
+      storageReason: 'MutationSemanticsUnproven',
+      storageMessage: 'Automatic case semantics need confirmation.',
+      canMutateFilesystem: false,
+    }
+    vi.mocked(apiService.getRootFolders).mockResolvedValue([unprovenRoot])
+    const pinia = createReadyPinia()
+    const wrapper = mount(RootFoldersSettings, { global: { plugins: [pinia] } })
+    await flushPromises()
+
+    const store = useRootFoldersStore()
+    const update = vi.spyOn(store, 'update').mockResolvedValue({
+      ...unprovenRoot,
+      caseSensitivityMode: 'Sensitive',
+      storageState: 'Healthy',
+      storageReason: 'None',
+      canMutateFilesystem: true,
+    })
+
+    expect(wrapper.text()).toContain('Needs case setting')
+    expect(wrapper.text()).toContain('Use detected setting: case-sensitive')
+
+    await wrapper.get('[data-cy="mutation-semantics-guidance"] button').trigger('click')
+    await flushPromises()
+
+    expect(update).toHaveBeenCalledWith(
+      unprovenRoot.id,
+      expect.objectContaining({
+        id: unprovenRoot.id,
+        path: unprovenRoot.path,
+        caseSensitivityMode: 'Sensitive',
+      }),
+      { expectedCurrentPath: unprovenRoot.path },
+    )
+  })
+
   it('presents partial metadata repair as an actionable progress panel', async () => {
     const skippedAudiobookIds = [8, 10, 11, 12, 13, 14, 15, 18, 19, 20, 21, 22, 23, 32]
     const active = {

@@ -830,6 +830,7 @@ import FiltersDropdown from '@/components/ui/FiltersDropdown.vue'
 import CustomFilterModal from '@/components/domain/collection/CustomFilterModal.vue'
 import { EmptyState } from '@/components/base'
 import { showConfirm } from '@/composables/useConfirm'
+import { preparePhysicalDeleteRetry } from '@/composables/useMutationSemanticsConfirmation'
 import type { Audiobook, AudiobookStatus, QualityProfile } from '@/types'
 import { evaluateRules } from '@/utils/customFilterEvaluator'
 import type { RuleLike } from '@/utils/customFilterEvaluator'
@@ -2226,6 +2227,10 @@ async function executeDelete() {
     await libraryStore.removeFromLibrary(deleteTarget.value.id, {
       deleteFiles: shouldDeleteFiles,
       deleteFolder: shouldDeleteFolder,
+      retryAfterBlockedMutation: shouldDeleteFiles
+        ? (error) =>
+            preparePhysicalDeleteRetry(error, deleteTarget.value!.id, deleteTarget.value?.basePath)
+        : undefined,
     })
   } catch (err) {
     errorTracking.captureException(err as Error, {

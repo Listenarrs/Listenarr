@@ -50,6 +50,112 @@ public sealed class FileMoverMarkerlessRegistrationTests : BaseTests
     }
 
     [Fact]
+    public async Task PrepareRegistration_ManagedDestinationWithoutMutationCapability_BlocksBeforeJournalCreation()
+    {
+        var scenario = await CreateScenarioAsync("registration-managed-capability-blocked");
+        var root = new RootFolder
+        {
+            Id = 41,
+            Name = "Managed Root",
+            Path = scenario.Root,
+            CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
+            ResolvedCaseSensitivity = FileSystemPathSemantics.CurrentHostDefault.CaseSensitivity,
+            PathIdentityState = PathIdentityState.Valid
+        };
+        var rootRepository = new Mock<IRootFolderRepository>(MockBehavior.Strict);
+        rootRepository
+            .Setup(repository => repository.GetAllAsync())
+            .ReturnsAsync([root]);
+        var storageHealth = new Mock<IRootFolderStorageHealthResolver>(MockBehavior.Strict);
+        storageHealth
+            .Setup(resolver => resolver.ResolveAsync(
+                root,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RootFolderStorageObservation(
+                RootFolderStorageState.Limited,
+                RootFolderStorageReason.MutationSemanticsUnproven,
+                "Select Sensitive or Insensitive explicitly.",
+                CanConfirmCurrentFolder: false,
+                CanChangePath: true,
+                CanMutateFilesystem: false,
+                ConfirmationToken: null));
+        var mover = CreateMover(
+            readOnlyFileSystemProbe: _ => false,
+            rootFolderRepository: rootRepository.Object,
+            rootFolderStorageHealthResolver: storageHealth.Object);
+        var capability = Assert.IsAssignableFrom<IFilePublicationSourceCapability>(mover);
+        var sourceProof = await capability.CheckAsync(scenario.Source);
+        Assert.True(sourceProof.IsSupported, sourceProof.Reason);
+        Assert.True(sourceProof.SourceProof.HasValue);
+
+        using var lease = await mover.PrepareActionForRegistrationAsync(
+            FileAction.Copy,
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId,
+            expectedRegisteredPhysicalObjectIdentity: null,
+            sourceProof.SourceProof.Value);
+
+        Assert.Null(lease);
+        Assert.False(File.Exists(scenario.Destination));
+        await using var db = await _provider
+            .GetRequiredService<IDbContextFactory<ListenArrDbContext>>()
+            .CreateDbContextAsync();
+        Assert.DoesNotContain(
+            db.FileMutationJournals,
+            journal => journal.OperationId == scenario.OperationId);
+        rootRepository.VerifyAll();
+        storageHealth.VerifyAll();
+    }
+
+    [Fact]
+    public async Task PrepareRegistration_ManagedDestinationWithMutationCapability_PublishesNormally()
+    {
+        var scenario = await CreateScenarioAsync("registration-managed-capability-allowed");
+        var root = new RootFolder
+        {
+            Id = 42,
+            Name = "Managed Root",
+            Path = scenario.Root,
+            CaseSensitivityMode = FileSystemCaseSensitivityMode.Sensitive,
+            ResolvedCaseSensitivity = FileSystemPathSemantics.CurrentHostDefault.CaseSensitivity,
+            PathIdentityState = PathIdentityState.Valid
+        };
+        var rootRepository = new Mock<IRootFolderRepository>(MockBehavior.Strict);
+        rootRepository
+            .Setup(repository => repository.GetAllAsync())
+            .ReturnsAsync([root]);
+        var storageHealth = new Mock<IRootFolderStorageHealthResolver>(MockBehavior.Strict);
+        storageHealth
+            .Setup(resolver => resolver.ResolveAsync(
+                root,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RootFolderStorageObservation(
+                RootFolderStorageState.Healthy,
+                RootFolderStorageReason.None,
+                Message: null,
+                CanConfirmCurrentFolder: false,
+                CanChangePath: true,
+                CanMutateFilesystem: true,
+                ConfirmationToken: null));
+        var mover = CreateMover(
+            readOnlyFileSystemProbe: _ => false,
+            rootFolderRepository: rootRepository.Object,
+            rootFolderStorageHealthResolver: storageHealth.Object);
+
+        using var lease = await mover.PrepareActionForRegistrationAsync(
+            FileAction.Copy,
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId);
+
+        Assert.NotNull(lease);
+        Assert.True(File.Exists(scenario.Destination));
+        rootRepository.VerifyAll();
+        storageHealth.VerifyAll();
+    }
+
+    [Fact]
     public async Task PerformMove_ReadOnlySamePath_RemainsIdempotentWithoutJournal()
     {
         var scenario = await CreateScenarioAsync("move-readonly-same-path");
@@ -1284,7 +1390,9 @@ public sealed class FileMoverMarkerlessRegistrationTests : BaseTests
         Func<Task>? beforeRegistrationSourceDelete = null,
         Func<Task>? afterRegistrationTargetCreatedBeforeState = null,
         Func<Task>? beforePinnedHardlinkCreation = null,
-        Func<string, bool?>? readOnlyFileSystemProbe = null)
+        Func<string, bool?>? readOnlyFileSystemProbe = null,
+        IRootFolderRepository? rootFolderRepository = null,
+        IRootFolderStorageHealthResolver? rootFolderStorageHealthResolver = null)
     {
         var factory = _provider.GetRequiredService<
             IDbContextFactory<ListenArrDbContext>>();
@@ -1292,7 +1400,9 @@ public sealed class FileMoverMarkerlessRegistrationTests : BaseTests
             new NullLogger<FileMover>(),
             dbContextFactory: factory,
             timeProvider: TimeProvider.System,
-            readOnlyFileSystemProbe: readOnlyFileSystemProbe)
+            readOnlyFileSystemProbe: readOnlyFileSystemProbe,
+            rootFolderRepository: rootFolderRepository,
+            rootFolderStorageHealthResolver: rootFolderStorageHealthResolver)
         {
             FileMoveLockDirectoryForTest = FileService.GetTempDirectory(
                 "file-mover-markerless-registration-locks"),

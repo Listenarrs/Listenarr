@@ -64,6 +64,12 @@ namespace Listenarr.Infrastructure.Library.Moving
                     throw new MoveNeedsAttentionException(
                         $"The {(target ? "target" : "source")} filesystem identity changed after the move was queued.");
                 }
+                if (!current.HasDurableMutationSemanticsAuthority
+                    && !MoveRecoveryPolicy.HasFilesystemExecutionEvidence(job))
+                {
+                    throw new MoveNeedsAttentionException(
+                        $"The {(target ? "target" : "source")} filesystem case semantics are available only through a behavioral lookup probe. Select Sensitive or Insensitive explicitly for the root, then start a new move.");
+                }
             }
 
             return identity;

@@ -53,6 +53,12 @@
                   <div class="folder-badges">
                     <Pill variant="success" v-if="folder.isDefault">Default</Pill>
                     <Pill v-if="folder.storageState === 'Healthy'" variant="success">Healthy</Pill>
+                    <Pill
+                      v-else-if="folder.storageReason === 'MutationSemanticsUnproven'"
+                      variant="warning"
+                    >
+                      Needs case setting
+                    </Pill>
                     <Pill v-else-if="folder.storageState === 'Limited'" variant="warning">
                       Limited
                     </Pill>
@@ -138,8 +144,36 @@
               <PhFolder />
               <code>{{ folder.path }}</code>
             </div>
+            <div
+              v-if="needsMutationSemanticsConfirmation(folder)"
+              class="storage-guidance"
+              data-cy="mutation-semantics-guidance"
+            >
+              <PhWarningCircle class="storage-guidance-icon" />
+              <div class="storage-guidance-copy">
+                <strong>One storage setting needs confirmation</strong>
+                <span>
+                  Listenarr detected this root as
+                  {{ detectedCaseSettingLabel(folder) }}, but the storage cannot report that
+                  reliably enough for file moves and deletes.
+                </span>
+              </div>
+              <button
+                type="button"
+                class="btn btn-primary storage-guidance-action"
+                :disabled="confirmingSemanticsRootId === folder.id || !!folder.activeRelocation"
+                @click="confirmDetectedCaseSetting(folder)"
+              >
+                <PhSpinner v-if="confirmingSemanticsRootId === folder.id" class="ph-spin" />
+                {{
+                  confirmingSemanticsRootId === folder.id
+                    ? 'Saving...'
+                    : `Use detected setting: ${detectedCaseSettingLabel(folder)}`
+                }}
+              </button>
+            </div>
             <p
-              v-if="folder.storageState !== 'Healthy' && folder.storageMessage"
+              v-else-if="folder.storageState !== 'Healthy' && folder.storageMessage"
               class="storage-message"
             >
               {{ folder.storageMessage }}
@@ -468,6 +502,12 @@ import type {
   RootFolderRelocationSkipReasonCode,
 } from '@/types'
 import { signalRService } from '@/services/signalr'
+import {
+  applyDetectedMutationSemantics,
+  caseSensitivityLabel,
+  detectedMutationSemantics,
+  needsMutationSemanticsConfirmation,
+} from '@/composables/useMutationSemanticsConfirmation'
 
 interface Props {
   hideHeader?: boolean
@@ -487,6 +527,7 @@ const editingRoot = computed(() => editing.value as RootFolder | undefined)
 const toast = useToast()
 const retryingRelocationId = ref<string | null>(null)
 const abandoningRelocationId = ref<string | null>(null)
+const confirmingSemanticsRootId = ref<number | null>(null)
 const relocationToAbandon = ref<{
   relocationId: string
   rootName: string
@@ -544,6 +585,21 @@ function openAdd() {
 function scanUnmatched(folder: RootFolder) {
   scanningFolder.value = folder
   showUnmatchedModal.value = true
+}
+
+function detectedCaseSettingLabel(folder: RootFolder): string {
+  const detected = detectedMutationSemantics(folder)
+  return detected ? caseSensitivityLabel(detected) : 'unknown'
+}
+
+async function confirmDetectedCaseSetting(folder: RootFolder) {
+  if (!folder.id || confirmingSemanticsRootId.value !== null) return
+  confirmingSemanticsRootId.value = folder.id
+  try {
+    await applyDetectedMutationSemantics(folder)
+  } finally {
+    confirmingSemanticsRootId.value = null
+  }
 }
 
 function edit(r: { id?: number; name: string; path: string }) {
@@ -1062,6 +1118,50 @@ defineExpose({
 .folder-confirmation-target-path {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.storage-guidance {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  margin: -0.75rem 1.5rem 1.5rem;
+  padding: 0.875rem;
+  border: 1px solid color-mix(in srgb, var(--warning-500) 45%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning-500) 8%, transparent);
+}
+
+.storage-guidance-icon {
+  color: var(--warning-500);
+  font-size: 1.25rem;
+}
+
+.storage-guidance-copy {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.storage-guidance-copy span {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.storage-guidance-action {
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .storage-guidance {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .storage-guidance-action {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
 }
 
 .storage-message {

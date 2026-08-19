@@ -211,12 +211,38 @@ internal sealed class RootFolderStorageHealthResolver(
                 $"Persisted case sensitivity is {persistedSemantics.Value.Semantics.CaseSensitivity}, but the live storage resolves as {currentSemantics.Semantics.CaseSensitivity}.");
         }
 
-        return observation.State == RootFolderStorageState.Healthy
-            ? ApplyMutationCapability(
-                canonicalPath,
-                observation,
-                _readOnlyFileSystemProbe(canonicalPath))
-            : observation;
+        if (observation.State != RootFolderStorageState.Healthy)
+        {
+            return observation;
+        }
+
+        var mutationCapability = ApplyMutationCapability(
+            canonicalPath,
+            observation,
+            _readOnlyFileSystemProbe(canonicalPath));
+        if (!mutationCapability.CanMutateFilesystem)
+        {
+            return mutationCapability;
+        }
+
+        if (root.CaseSensitivityMode == FileSystemCaseSensitivityMode.Auto
+            && !currentSemantics.HasDurableMutationSemanticsAuthority)
+        {
+            return mutationCapability with
+            {
+                State = RootFolderStorageState.Limited,
+                Reason = RootFolderStorageReason.MutationSemanticsUnproven,
+                Message =
+                    "Listenarr can read and scan this storage, but automatic case-sensitivity detection is not stable enough to authorize filesystem mutations. Select Sensitive or Insensitive explicitly to enable moves, deletes, and other writes.",
+                CanConfirmCurrentFolder = false,
+                CanMutateFilesystem = false,
+                ConfirmationToken = null,
+                Detail =
+                    "Automatic case sensitivity was inferred from an existing directory entry rather than an authoritative filesystem capability."
+            };
+        }
+
+        return mutationCapability;
     }
 
     private static RootFolderStorageObservation ApplyMutationCapability(

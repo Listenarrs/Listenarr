@@ -95,7 +95,7 @@ namespace Listenarr.Infrastructure.FileSystem
                     return false;
                 }
             }
-            if (await IsNewMutationBlockedByReadOnlyAsync(
+            if (await IsNewMutationBlockedByCapabilityAsync(
                     FileAction.Move,
                     source,
                     destination,
@@ -151,7 +151,7 @@ namespace Listenarr.Infrastructure.FileSystem
             {
                 return true;
             }
-            if (await IsNewMutationBlockedByReadOnlyAsync(
+            if (await IsNewMutationBlockedByCapabilityAsync(
                     FileAction.Move,
                     sourceFile,
                     destFile,

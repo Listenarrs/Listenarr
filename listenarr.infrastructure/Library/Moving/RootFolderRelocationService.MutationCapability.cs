@@ -1,7 +1,46 @@
+using Listenarr.Domain.Common;
+
 namespace Listenarr.Infrastructure.Library.Moving;
 
 public sealed partial class RootFolderRelocationService
 {
+    private static void EnsureRelocationTargetMutationSemanticsAuthority(
+        RootFolderRelocationMode mode,
+        FileSystemCaseSensitivityMode requestedMode,
+        FileSystemSemanticsResolution resolution)
+    {
+        if (mode != RootFolderRelocationMode.Relocate
+            || requestedMode != FileSystemCaseSensitivityMode.Auto
+            || resolution.HasDurableMutationSemanticsAuthority)
+        {
+            return;
+        }
+
+        throw new RootFolderPathChangeRejectedException(
+            "root_folder_target_mutation_semantics_unproven",
+            "Listenarr can read the new root folder, but automatic case-sensitivity detection is not stable enough to move files there. Select Sensitive or Insensitive explicitly and try again.",
+            "The target filesystem semantics were inferred from a behavioral lookup probe rather than an authoritative filesystem capability.");
+    }
+
+    private static void EnsureRelocationSourceMutationSemanticsAuthority(
+        RootFolderRelocationMode mode,
+        FileSystemCaseSensitivityMode requestedMode,
+        FileSystemSemanticsResolution? resolution)
+    {
+        if (mode != RootFolderRelocationMode.Relocate
+            || requestedMode != FileSystemCaseSensitivityMode.Auto
+            || resolution == null
+            || resolution.HasDurableMutationSemanticsAuthority)
+        {
+            return;
+        }
+
+        throw new RootFolderPathChangeRejectedException(
+            "root_folder_source_mutation_semantics_unproven",
+            "Listenarr can read the current root folder, but automatic case-sensitivity detection is not stable enough to move files from it. Select Sensitive or Insensitive explicitly and try again.",
+            "The source filesystem semantics were inferred from a behavioral lookup probe rather than an authoritative filesystem capability.");
+    }
+
     private static void EnsureRelocationTargetMutationCapability(
         RootFolderRelocationMode mode,
         string targetPath)

@@ -45,6 +45,8 @@ namespace Listenarr.Infrastructure.FileSystem
         private readonly IFileMutationJournalStore? _fileMutationJournalStore;
         private readonly IApplicationPathService _applicationPathService;
         private readonly Func<string, bool?> _readOnlyFileSystemProbe;
+        private readonly IRootFolderRepository? _rootFolderRepository;
+        private readonly IRootFolderStorageHealthResolver? _rootFolderStorageHealthResolver;
 
         public FileMover(
             ILogger<FileMover> logger,
@@ -54,7 +56,9 @@ namespace Listenarr.Infrastructure.FileSystem
             IDbContextFactory<ListenArrDbContext>? dbContextFactory = null,
             TimeProvider? timeProvider = null,
             IApplicationPathService? applicationPathService = null,
-            Func<string, bool?>? readOnlyFileSystemProbe = null)
+            Func<string, bool?>? readOnlyFileSystemProbe = null,
+            IRootFolderRepository? rootFolderRepository = null,
+            IRootFolderStorageHealthResolver? rootFolderStorageHealthResolver = null)
         {
             _logger = logger;
             _ = processRunner;
@@ -64,6 +68,8 @@ namespace Listenarr.Infrastructure.FileSystem
                 ?? new ApplicationPathService(AppContext.BaseDirectory);
             _readOnlyFileSystemProbe = readOnlyFileSystemProbe
                 ?? FileSystemMutationCapabilityProbe.ProbeReadOnlyDirectory;
+            _rootFolderRepository = rootFolderRepository;
+            _rootFolderStorageHealthResolver = rootFolderStorageHealthResolver;
             _fileMutationJournalStore = dbContextFactory == null
                 ? null
                 : new EfFileMutationJournalStore(

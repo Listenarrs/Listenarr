@@ -14,6 +14,8 @@ internal enum CopyMutationFaultPoint
     AfterMarkerlessFileWriteBeforePublishedState,
     BeforeMarkerlessMetadataPreservation,
     BeforeMarkerlessNativeRenameMutation,
+    AfterMarkerlessNativeRenameFailureBeforeObservation,
+    AfterMarkerlessNativeRenameFallbackAuthorized,
     AfterMarkerlessNativeRenameBeforeStateUpdate
 }
 
@@ -44,6 +46,8 @@ internal interface IMoveFaultInjector
 {
     bool AllowMarkerlessFileRename => false;
     bool ForceCrossVolumeForTest => false;
+    int? MarkerlessNativeRenameErrorForTest => null;
+    bool MarkerlessNativeRenamePublishesBeforeErrorForTest => false;
 
     Task AfterPublishedAsync(Guid jobId, CancellationToken cancellationToken) =>
         Task.CompletedTask;

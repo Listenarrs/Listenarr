@@ -369,6 +369,46 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
             Assert.False(Directory.Exists(target));
         }
 
+        [Fact]
+        public async Task ProcessJobAsync_AutoSemanticsOnlyBehavioral_BlocksBeforeFilesystemMutation()
+        {
+            var semanticsResolver = new BehavioralSemanticsResolver();
+            Init(builder => builder.WithSingleton<IFileSystemSemanticsResolver>(
+                semanticsResolver));
+
+            var source = FileService.GetTempDirectory(
+                "move-processor-behavioral-semantics-source");
+            var sourceFile = await FileService.GetFileAsync(
+                source,
+                "book.m4b",
+                "audio");
+            var target = Path.Join(
+                FileService.GetTempPath(),
+                $"move-processor-behavioral-semantics-target-{Guid.NewGuid():N}");
+            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+            {
+                Title = "Behavioral Filesystem Semantics",
+                BasePath = source
+            });
+            var (queue, job) = await CreateQueuedMoveJobAsync(
+                audiobook,
+                target,
+                source);
+
+            await _provider.GetRequiredService<IMoveJobProcessor>()
+                .ProcessJobAsync(job, CancellationToken.None);
+
+            var updated = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
+            Assert.Equal(MoveJobStatus.NeedsAttention, updated.Status);
+            Assert.Contains(
+                "start a new move",
+                updated.Error,
+                StringComparison.OrdinalIgnoreCase);
+            Assert.False(MoveRecoveryPolicy.HasFilesystemExecutionEvidence(updated));
+            Assert.True(File.Exists(sourceFile));
+            Assert.False(Directory.Exists(target));
+        }
+
         [LinuxFact]
         [System.Runtime.Versioning.SupportedOSPlatform("linux")]
         public async Task ProcessJobAsync_ReadOnlyRemountDuringTargetScaffolding_SchedulesRetryWithoutMutation()
@@ -1677,6 +1717,26 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
             }
 
             public void Dispose() => _inner.Dispose();
+        }
+
+        private sealed class BehavioralSemanticsResolver : IFileSystemSemanticsResolver
+        {
+            private readonly FileSystemSemanticsResolver _inner = new();
+
+            public async ValueTask<FileSystemSemanticsResolution> ResolveAsync(
+                string path,
+                FileSystemCaseSensitivityMode mode,
+                CancellationToken cancellationToken = default)
+            {
+                var resolution = await _inner.ResolveAsync(path, mode, cancellationToken);
+                return mode == FileSystemCaseSensitivityMode.Auto
+                    && resolution.State == PathIdentityState.Valid
+                    ? resolution with
+                    {
+                        EvidenceKind = FileSystemSemanticsEvidenceKind.BehavioralObservation
+                    }
+                    : resolution;
+            }
         }
 
         private sealed class ToggleUnavailableSemanticsResolver : IFileSystemSemanticsResolver

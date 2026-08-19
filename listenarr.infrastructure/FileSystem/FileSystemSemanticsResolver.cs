@@ -25,6 +25,8 @@ public sealed partial class FileSystemSemanticsResolver : IFileSystemSemanticsRe
     private const int FsCasefoldFlag = 0x40000000;
     private const long LinuxExtFamilySuperMagic = 0x0000ef53L;
     private const long LinuxF2fsSuperMagic = 0xf2f52010L;
+    private const long LinuxTmpfsSuperMagic = 0x01021994L;
+    private const long LinuxBcachefsSuperMagic = 0xca451a4eL;
     private const int LinuxStatFsBufferBytes = 256;
     // Darwin bsd/sys/unistd.h: _PC_CASE_SENSITIVE.
     private const int MacPathConfCaseSensitive = 11;
@@ -86,7 +88,8 @@ public sealed partial class FileSystemSemanticsResolver : IFileSystemSemanticsRe
                 new FileSystemPathSemantics(syntax, explicitSensitivity),
                 PathIdentityState.Valid,
                 explicitBoundary,
-                CanonicalPath: fullPath));
+                CanonicalPath: fullPath,
+                EvidenceKind: FileSystemSemanticsEvidenceKind.Authoritative));
         }
 
         string? boundary;
@@ -259,11 +262,11 @@ public sealed partial class FileSystemSemanticsResolver : IFileSystemSemanticsRe
             && IsDirectoryCasefoldFlagAuthoritativeFileSystem(
                 flagsProbe.FileSystemType))
         {
-            // ext-family and F2FS case-insensitivity is enabled on the
-            // directory itself via FS_CASEFOLD_FL. On those filesystems an
-            // unset bit is therefore negative proof even when the directory
-            // is empty. Do not generalize this to mount/server-defined
-            // filesystems such as XFS, HFS+, 9P, SMB, NFS, or FUSE.
+            // These filesystems expose their case-insensitive lookup mode
+            // through FS_CASEFOLD_FL. On them an unset bit is therefore
+            // negative proof even when the directory is empty. Do not
+            // generalize this to server-defined filesystems such as 9P, SMB,
+            // NFS, or FUSE, where lookup semantics may be controlled remotely.
             return Valid(
                 syntax,
                 boundary,
@@ -322,12 +325,14 @@ public sealed partial class FileSystemSemanticsResolver : IFileSystemSemanticsRe
                         return Valid(
                             syntax,
                             boundary,
-                            FileSystemCaseSensitivity.Sensitive);
+                            FileSystemCaseSensitivity.Sensitive,
+                            FileSystemSemanticsEvidenceKind.BehavioralObservation);
                     case PinnedDirectoryCreation.LinuxCaseAliasProbeOutcome.Insensitive:
                         return Valid(
                             syntax,
                             boundary,
-                            FileSystemCaseSensitivity.Insensitive);
+                            FileSystemCaseSensitivity.Insensitive,
+                            FileSystemSemanticsEvidenceKind.BehavioralObservation);
                     case PinnedDirectoryCreation.LinuxCaseAliasProbeOutcome.Unavailable:
                         return Unavailable(
                             syntax,
@@ -426,7 +431,10 @@ public sealed partial class FileSystemSemanticsResolver : IFileSystemSemanticsRe
 
     private static bool IsDirectoryCasefoldFlagAuthoritativeFileSystem(
         long? fileSystemType) =>
-        fileSystemType is LinuxExtFamilySuperMagic or LinuxF2fsSuperMagic;
+        fileSystemType is LinuxExtFamilySuperMagic
+            or LinuxF2fsSuperMagic
+            or LinuxTmpfsSuperMagic
+            or LinuxBcachefsSuperMagic;
 
     private string? FindExistingBoundary(string path)
     {
@@ -459,11 +467,14 @@ public sealed partial class FileSystemSemanticsResolver : IFileSystemSemanticsRe
     private static FileSystemSemanticsResolution Valid(
         FileSystemPathSyntax syntax,
         string boundary,
-        FileSystemCaseSensitivity sensitivity) =>
+        FileSystemCaseSensitivity sensitivity,
+        FileSystemSemanticsEvidenceKind evidenceKind =
+            FileSystemSemanticsEvidenceKind.Authoritative) =>
         new(
             new FileSystemPathSemantics(syntax, sensitivity),
             PathIdentityState.Valid,
-            boundary);
+            boundary,
+            EvidenceKind: evidenceKind);
 
     private static FileSystemSemanticsResolution Unavailable(
         FileSystemPathSyntax syntax,
@@ -476,6 +487,7 @@ public sealed partial class FileSystemSemanticsResolver : IFileSystemSemanticsRe
             PathIdentityState.Unavailable,
             boundary,
             reason,
-            boundary);
+            boundary,
+            FileSystemSemanticsEvidenceKind.Unavailable);
 
 }

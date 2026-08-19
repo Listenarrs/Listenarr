@@ -1,3 +1,6 @@
+using System.ComponentModel;
+using Microsoft.Extensions.Logging;
+
 namespace Listenarr.Infrastructure.Library.Moving;
 
 internal sealed partial class AudiobookContentMoveService
@@ -190,13 +193,94 @@ internal sealed partial class AudiobookContentMoveService
             faultInjector?.OnCopyMutation(
                 request.JobId,
                 CopyMutationFaultPoint.BeforeMarkerlessNativeRenameMutation);
-            renameEntry.MoveTo(
-                targetParent,
-                Path.GetFileName(ResolveManifestPath(
-                    target,
-                    entry,
-                    request.TargetSemantics,
-                    "target")));
+            var targetName = Path.GetFileName(ResolveManifestPath(
+                target,
+                entry,
+                request.TargetSemantics,
+                "target"));
+            PinnedDirectoryCreation.PinnedRenameAttempt renameAttempt;
+            if (faultInjector?.MarkerlessNativeRenameErrorForTest is int injectedError)
+            {
+                if (faultInjector.MarkerlessNativeRenamePublishesBeforeErrorForTest)
+                {
+                    var publishedAttempt = renameEntry.TryMoveToNoReplace(
+                        targetParent,
+                        targetName);
+                    if (!publishedAttempt.Published)
+                    {
+                        throw new InvalidOperationException(
+                            "The native-rename published-error test hook could not publish its source entry.");
+                    }
+                }
+                renameAttempt = new PinnedDirectoryCreation.PinnedRenameAttempt(
+                    false,
+                    injectedError);
+            }
+            else
+            {
+                renameAttempt = renameEntry.TryMoveToNoReplace(
+                    targetParent,
+                    targetName);
+            }
+            if (!renameAttempt.Published)
+            {
+                faultInjector?.OnCopyMutation(
+                    request.JobId,
+                    CopyMutationFaultPoint.AfterMarkerlessNativeRenameFailureBeforeObservation);
+                var observation = ObserveFailedMarkerlessNativeRename(
+                    sourceParent,
+                    Path.GetFileName(sourceEntry.FullPath),
+                    targetParent,
+                    targetName,
+                    entry.SourcePhysicalObjectIdentity!);
+                if (observation == MarkerlessNativeRenameFailureObservation.Published)
+                {
+                    return await RecoverObservedMarkerlessNativeRenameAsync(
+                        request,
+                        entry,
+                        sourceParent,
+                        targetParent,
+                        targetName,
+                        cancellationToken);
+                }
+                if (observation == MarkerlessNativeRenameFailureObservation.NotApplied
+                    && IsUnsupportedMarkerlessNativeRenameError(
+                        renameAttempt.NativeErrorCode))
+                {
+                    if (!await PinnedFileMatchesManifestAsync(
+                            sourceEntry,
+                            entry,
+                            cancellationToken))
+                    {
+                        throw new MoveNeedsAttentionException(
+                            $"The source content changed before native-rename fallback could be authorized: {entry.RelativePath}");
+                    }
+                    ValidateMarkerlessSourceEntry(request, entry, sourceEntry);
+                    faultInjector?.OnCopyMutation(
+                        request.JobId,
+                        CopyMutationFaultPoint.AfterMarkerlessNativeRenameFallbackAuthorized);
+                    logger.LogDebug(
+                        "Native no-replace rename is unsupported for {File} (errno {Error}); using verified copy fallback",
+                        LogRedaction.SanitizeFilePath(entry.RelativePath),
+                        renameAttempt.NativeErrorCode);
+                    return (false, null);
+                }
+                if (observation == MarkerlessNativeRenameFailureObservation.Unavailable)
+                {
+                    throw new IOException(
+                        $"The filesystem became temporarily unavailable while determining whether native rename was applied: {entry.RelativePath}");
+                }
+                if (observation == MarkerlessNativeRenameFailureObservation.NotApplied)
+                {
+                    throw new Win32Exception(
+                        renameAttempt.NativeErrorCode,
+                        "Could not publish a pinned filesystem entry relative to its owned directory.");
+                }
+
+                throw new MoveNeedsAttentionException(
+                    $"The native rename result is ambiguous and copy fallback is not authorized: {entry.RelativePath}");
+            }
+
             sourceParent.FlushDirectoryEntry();
             if (!string.Equals(
                     sourceParent.FullPath,
