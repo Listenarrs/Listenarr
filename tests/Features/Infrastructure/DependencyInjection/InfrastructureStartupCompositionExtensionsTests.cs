@@ -110,6 +110,81 @@ public sealed class InfrastructureStartupCompositionExtensionsTests : BaseTests
     }
 
     [Fact]
+    [Trait("Scenario", "AudiobookAddedDateBackfill")]
+    public void ApplyListenarrDatabaseMigrations_BackfillsAudiobookAddedDateFromBestAvailableEvidence()
+    {
+        using var connection = new SqliteConnection("DataSource=:memory:");
+        connection.Open();
+        var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+            .UseSqlite(connection, sqlite =>
+                sqlite.MigrationsAssembly(typeof(ListenArrDbContext).Assembly.GetName().Name))
+            .Options;
+        var historyAddedAt = new DateTime(2025, 5, 4, 12, 30, 0, DateTimeKind.Utc);
+        var laterHistoryAddedAt = historyAddedAt.AddDays(2);
+        var misleadingEarlierFileAt = historyAddedAt.AddYears(-1);
+        var fileAddedAt = new DateTime(2025, 7, 8, 9, 15, 0, DateTimeKind.Utc);
+        var laterFileAddedAt = fileAddedAt.AddHours(3);
+        const int historyBookId = 910001;
+        const int fileBookId = 910002;
+        const int unknownBookId = 910003;
+
+        using (var baseline = new ListenArrDbContext(options))
+        {
+            baseline.GetService<IMigrator>().Migrate(
+                "20260818132300_AddFileMutationParentGenerationProofs");
+            baseline.Database.ExecuteSqlInterpolated($"""
+                INSERT INTO "Audiobooks" ("Id", "Title", "Explicit", "Abridged", "Monitored")
+                VALUES
+                    ({historyBookId}, {"History Book"}, {false}, {false}, {true}),
+                    ({fileBookId}, {"File Book"}, {false}, {false}, {true}),
+                    ({unknownBookId}, {"Unknown Book"}, {false}, {false}, {true});
+                """);
+            baseline.Database.ExecuteSqlInterpolated($"""
+                INSERT INTO "History" (
+                    "AudiobookId", "AudiobookTitle", "EventType", "Timestamp",
+                    "NotificationSent", "Outcome", "CorrelationId")
+                VALUES
+                    ({historyBookId}, {"History Book"}, {"Added"}, {laterHistoryAddedAt},
+                     {false}, {(int)HistoryOutcome.Succeeded}, {Guid.NewGuid().ToString("N")}),
+                    ({historyBookId}, {"History Book"}, {"Added"}, {historyAddedAt},
+                     {false}, {(int)HistoryOutcome.Succeeded}, {Guid.NewGuid().ToString("N")});
+                """);
+            baseline.Database.ExecuteSqlInterpolated($"""
+                INSERT INTO "AudiobookFiles" ("AudiobookId", "CreatedAt")
+                VALUES
+                    ({historyBookId}, {misleadingEarlierFileAt}),
+                    ({fileBookId}, {laterFileAddedAt}),
+                    ({fileBookId}, {fileAddedAt});
+                """);
+        }
+
+        var services = new ServiceCollection();
+        services.AddDbContextFactory<ListenArrDbContext>(builder =>
+            builder.UseSqlite(connection, sqlite =>
+                sqlite.MigrationsAssembly(typeof(ListenArrDbContext).Assembly.GetName().Name)));
+        using var provider = services.BuildServiceProvider();
+
+        provider.ApplyListenarrDatabaseMigrations();
+        provider.ApplyListenarrDatabaseMigrations();
+
+        using var verified = provider
+            .GetRequiredService<IDbContextFactory<ListenArrDbContext>>()
+            .CreateDbContext();
+        var historyBook = verified.Audiobooks.AsNoTracking()
+            .Single(book => book.Id == historyBookId);
+        var fileBook = verified.Audiobooks.AsNoTracking()
+            .Single(book => book.Id == fileBookId);
+        var unknownBook = verified.Audiobooks.AsNoTracking()
+            .Single(book => book.Id == unknownBookId);
+
+        Assert.Equal(historyAddedAt, historyBook.Added);
+        Assert.Equal(DateTimeKind.Utc, historyBook.Added!.Value.Kind);
+        Assert.Equal(fileAddedAt, fileBook.Added);
+        Assert.Equal(DateTimeKind.Utc, fileBook.Added!.Value.Kind);
+        Assert.Null(unknownBook.Added);
+    }
+
+    [Fact]
     [Trait("Scenario", "RepeatedMigrationStartup")]
     public void ApplyListenarrDatabaseMigrations_RepeatedStartupPreservesCurrentMoveIdentity()
     {

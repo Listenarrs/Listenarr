@@ -70,6 +70,30 @@ describe('customFilterEvaluator - grouping and precedence', () => {
     expect(evaluateRules(b4 as Audiobook, rules)).toBe(false)
   })
 
+  it('compares date-added rules by the user-local calendar date and excludes unknown dates', () => {
+    const added = new Date(2026, 7, 19, 12, 30, 0)
+    const addedKey = `${added.getFullYear().toString().padStart(4, '0')}-${(added.getMonth() + 1)
+      .toString()
+      .padStart(2, '0')}-${added.getDate().toString().padStart(2, '0')}`
+    const previousDay = new Date(added.getFullYear(), added.getMonth(), added.getDate() - 1)
+    const previousDayKey = `${previousDay.getFullYear().toString().padStart(4, '0')}-${(
+      previousDay.getMonth() + 1
+    )
+      .toString()
+      .padStart(2, '0')}-${previousDay.getDate().toString().padStart(2, '0')}`
+    const book = { ...base, added: added.toISOString() } as Audiobook
+
+    expect(evaluateRules(book, [{ field: 'added', operator: 'eq', value: addedKey }])).toBe(true)
+    expect(evaluateRules(book, [{ field: 'added', operator: 'gt', value: previousDayKey }])).toBe(
+      true,
+    )
+    expect(
+      evaluateRules({ ...book, added: null }, [
+        { field: 'added', operator: 'ne', value: addedKey },
+      ]),
+    ).toBe(false)
+  })
+
   it('uses slim list file summary fields for path, filesize, and file count filters', () => {
     const slimBook = {
       ...base,

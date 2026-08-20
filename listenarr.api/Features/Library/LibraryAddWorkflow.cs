@@ -227,6 +227,7 @@ namespace Listenarr.Api.Features.Library
                 return new ConflictObjectResult(new { message = "Audiobook already exists in library", audiobook = ex.Audiobook });
             }
 
+            audiobook.Added = DateTime.UtcNow;
             await _repo.AddAsync(audiobook);
             await ResolveAuthorAsinsAsync(audiobook);
             await SendAddedNotificationAsync(audiobook);

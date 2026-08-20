@@ -46,6 +46,7 @@ namespace Listenarr.Application.Audiobooks.Common
         public List<string>? Genres { get; set; }
         public string[]? Tags { get; set; }
         public string? Description { get; set; }
+        public DateTime? Added { get; set; }
         public string? PublishYear { get; set; }
         public string? PublishedDate { get; set; }
         public string? Series { get; set; }

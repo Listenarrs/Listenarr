@@ -30,6 +30,34 @@ function normalizeString(s: unknown) {
   return (s ?? '').toString().toLowerCase()
 }
 
+function toLocalDateKey(value: string | null | undefined): string | null {
+  if (!value) return null
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+
+  const year = date.getFullYear().toString().padStart(4, '0')
+  const month = (date.getMonth() + 1).toString().padStart(2, '0')
+  const day = date.getDate().toString().padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function normalizeDateRuleValue(value: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
+
+  const [year, month, day] = value.split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day))
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return null
+  }
+
+  return value
+}
+
 function resolveFileCount(a: Audiobook): number {
   if (Array.isArray(a.files)) {
     return a.files.length
@@ -88,6 +116,9 @@ function evalSingle(a: Audiobook, r: RuleLike): boolean {
     case 'filesize':
       left = String((a as unknown as Record<string, unknown>)['fileSize'] ?? '')
       break
+    case 'added':
+      left = toLocalDateKey(a.added) ?? ''
+      break
     default:
       left = String((a as unknown as Record<string, unknown>)[field] ?? '')
       break
@@ -95,6 +126,31 @@ function evalSingle(a: Audiobook, r: RuleLike): boolean {
 
   const l = normalizeString(left)
   const v = normalizeString(val)
+
+  if (field === 'added') {
+    const leftDate = left || null
+    const valueDate = normalizeDateRuleValue(val)
+    if (!leftDate || !valueDate) return false
+
+    switch (op) {
+      case 'eq':
+      case 'is':
+        return leftDate === valueDate
+      case 'ne':
+      case 'is_not':
+        return leftDate !== valueDate
+      case 'lt':
+        return leftDate < valueDate
+      case 'lte':
+        return leftDate <= valueDate
+      case 'gt':
+        return leftDate > valueDate
+      case 'gte':
+        return leftDate >= valueDate
+      default:
+        return true
+    }
+  }
 
   const numericFields = new Set(['publishYear', 'publishedYear', 'files', 'filesize'])
   if (numericFields.has(field)) {

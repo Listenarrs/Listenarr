@@ -256,6 +256,7 @@ namespace Listenarr.Application.Audiobooks.Catalog
             }
 
             audiobook.ImageUrl = preparedImage.FallbackImageUrl;
+            audiobook.Added = DateTime.UtcNow;
             cancellationToken.ThrowIfCancellationRequested();
             await _commitStore.CommitAsync(
                 audiobook,

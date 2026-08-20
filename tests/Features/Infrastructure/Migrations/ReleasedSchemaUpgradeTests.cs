@@ -17,6 +17,48 @@ namespace Listenarr.Tests.Features.Infrastructure.Migrations;
 public sealed class ReleasedSchemaUpgradeTests
 {
     [Fact]
+    public async Task PreviousSchema_AddsNullableAudiobookAddedDateWithoutInventingHistory()
+    {
+        var databasePath = Path.Join(
+            Path.GetTempPath(),
+            "listenarr-tests",
+            $"audiobook-added-upgrade-{Guid.NewGuid():N}.db");
+        Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
+        var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+            .UseSqlite($"Data Source={databasePath};Pooling=False")
+            .Options;
+        const int legacyBookId = 910001;
+
+        try
+        {
+            await using (var db = new ListenArrDbContext(options))
+            {
+                var migrator = db.GetService<IMigrator>();
+                await migrator.MigrateAsync("20260818132300_AddFileMutationParentGenerationProofs");
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO "Audiobooks" ("Id", "Title", "Explicit", "Abridged", "Monitored")
+                    VALUES ({legacyBookId}, {"Legacy Book"}, {false}, {false}, {true});
+                    """);
+                await migrator.MigrateAsync();
+            }
+
+            await using var verified = new ListenArrDbContext(options);
+            var legacyBook = await verified.Audiobooks.AsNoTracking()
+                .SingleAsync(book => book.Id == legacyBookId);
+
+            Assert.Null(legacyBook.Added);
+            Assert.Empty(await verified.Database.GetPendingMigrationsAsync());
+        }
+        finally
+        {
+            if (File.Exists(databasePath))
+            {
+                File.Delete(databasePath);
+            }
+        }
+    }
+
+    [Fact]
     public async Task PreviousMoveSchema_PreservesLegacyJournalProtocolAndDefaultsNewRowsToCurrent()
     {
         var databasePath = Path.Join(

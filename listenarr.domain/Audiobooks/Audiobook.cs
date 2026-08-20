@@ -36,6 +36,7 @@ namespace Listenarr.Domain.Audiobooks
         public string? SeriesNumber { get; set; }
         public List<AudiobookSeriesMembership>? SeriesMemberships { get; set; }
         public string? Description { get; set; }
+        public DateTime? Added { get; set; } = DateTime.UtcNow;
         public List<string>? Genres { get; set; }
         public List<string>? Tags { get; set; }
         public List<string>? Narrators { get; set; }

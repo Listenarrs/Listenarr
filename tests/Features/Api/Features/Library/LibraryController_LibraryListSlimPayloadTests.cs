@@ -87,6 +87,10 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             Assert.Equal(book.FilePath, item.GetProperty("filePath").GetString());
             Assert.Equal(book.FileSize, item.GetProperty("fileSize").GetInt64());
             Assert.Equal(1, item.GetProperty("fileCount").GetInt32());
+            Assert.True(item.TryGetProperty("added", out var added));
+            Assert.NotNull(book.Added);
+            Assert.Equal(book.Added.Value, added.GetDateTime());
+            Assert.EndsWith("Z", added.GetString(), StringComparison.Ordinal);
 
             Assert.False(item.TryGetProperty("files", out _));
             Assert.False(item.TryGetProperty("description", out _));

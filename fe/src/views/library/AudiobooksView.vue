@@ -1175,6 +1175,17 @@ const filteredAndSortedAudiobooks = computed(() => {
         av = getAudiobookStatus(a)
         bv = getAudiobookStatus(b)
         break
+      case 'added': {
+        const aTime = a.added ? Date.parse(a.added) : Number.NaN
+        const bTime = b.added ? Date.parse(b.added) : Number.NaN
+        const aHasDate = Number.isFinite(aTime)
+        const bHasDate = Number.isFinite(bTime)
+
+        if (!aHasDate && !bHasDate) return 0
+        if (!aHasDate) return 1
+        if (!bHasDate) return -1
+        return (aTime - bTime) * (sortOrder.value === 'asc' ? 1 : -1)
+      }
     }
 
     if (typeof av === 'boolean' && typeof bv === 'boolean') {
@@ -1557,6 +1568,7 @@ const sortOptions = computed(() => {
       { value: 'narrator-first', label: 'Narrator First Name' },
       { value: 'publisher', label: 'Publisher' },
       { value: 'year', label: 'Release Year' },
+      { value: 'added', label: 'Date Added' },
       { value: 'monitored', label: 'Monitored' },
       { value: 'status', label: 'Status' },
     ]
@@ -1586,7 +1598,7 @@ const sortKeyProxy = computed<string>({
       sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
     } else {
       sortKey.value = val
-      sortOrder.value = 'asc'
+      sortOrder.value = val === 'added' ? 'desc' : 'asc'
     }
   },
 })

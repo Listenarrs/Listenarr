@@ -111,6 +111,7 @@ namespace Listenarr.Application.Audiobooks.Catalog
                     Narrators = a.Narrators?.ToArray(),
                     PublishYear = a.PublishYear,
                     PublishedDate = a.PublishedDate,
+                    Added = a.Added,
                     Series = a.Series,
                     SeriesNumber = a.SeriesNumber,
                     SeriesMemberships = membershipsByAudiobookId.TryGetValue(a.Id, out var memberships) && memberships.Count > 0

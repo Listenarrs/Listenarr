@@ -174,6 +174,36 @@ public class MigrationMetadataTests
     }
 
     [Fact]
+    public void AddAudiobookAddedDate_IsDiscoverableAndSchemaOnly()
+    {
+        AssertMigrationId<AddAudiobookAddedDate>(
+            "20260820015101_AddAudiobookAddedDate");
+
+        var migration = new AddAudiobookAddedDate();
+        var upBuilder = BuildOperations(migration, "Up");
+        var downBuilder = BuildOperations(migration, "Down");
+
+        var addition = Assert.Single(upBuilder.Operations.OfType<AddColumnOperation>());
+        Assert.Equal("Added", addition.Name);
+        Assert.Equal("Audiobooks", addition.Table);
+        Assert.Equal(typeof(DateTime), addition.ClrType);
+        Assert.True(addition.IsNullable);
+
+        Assert.Single(upBuilder.Operations);
+        Assert.Empty(upBuilder.Operations.OfType<SqlOperation>());
+
+        var removal = Assert.Single(downBuilder.Operations.OfType<DropColumnOperation>());
+        Assert.Equal("Added", removal.Name);
+        Assert.Equal("Audiobooks", removal.Table);
+        Assert.Single(downBuilder.Operations);
+
+        var audiobook = AssertEntity(
+            migration.TargetModel,
+            "Listenarr.Domain.Audiobooks.Audiobook");
+        Assert.True(audiobook.FindProperty("Added")?.IsNullable);
+    }
+
+    [Fact]
     public void FinalMoveMigration_TargetModelMatchesFinalContracts()
     {
         var model = new AddFileMutationParentGenerationProofs().TargetModel;
