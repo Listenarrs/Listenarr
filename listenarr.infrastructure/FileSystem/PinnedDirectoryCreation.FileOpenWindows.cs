@@ -259,7 +259,8 @@ internal sealed partial class PinnedDirectoryCreation
     private static SafeFileHandle OpenRelativeFileForWriteWindows(
         SafeFileHandle parentHandle,
         string fileName,
-        string fullPath)
+        string fullPath,
+        bool readable = false)
     {
         var nameBuffer = Marshal.StringToHGlobalUni(fileName);
         var unicodeStringPointer = IntPtr.Zero;
@@ -281,7 +282,8 @@ internal sealed partial class PinnedDirectoryCreation
             };
             var status = NtCreateFile(
                 out var rawHandle,
-                GenericWrite | FileReadAttributes | Synchronize,
+                (readable ? GenericRead : 0u)
+                    | GenericWrite | FileReadAttributes | Synchronize,
                 ref attributes,
                 out _,
                 IntPtr.Zero,
