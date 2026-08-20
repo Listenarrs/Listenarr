@@ -170,9 +170,7 @@ public partial class FileMover
 
     private static SafeFileHandle OpenRegularFileIdentityHandleUnix(string path)
     {
-        var flags = OperatingSystem.IsMacOS()
-            ? 0x4 | 0x100 | 0x1000000
-            : 0x800 | 0x20000 | 0x80000;
+        var flags = UnixOpenFlags.OpenReadNoFollow();
         var descriptor = OpenRegularFileIdentityUnix(path, flags);
         if (descriptor >= 0)
         {

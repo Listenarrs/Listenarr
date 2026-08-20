@@ -66,7 +66,7 @@ internal sealed partial class PinnedDirectoryCreation
         var fd = OpenAt(
             parentHandle.DangerousGetHandle().ToInt32(),
             fileName,
-            GetUnixReadWriteCreateFlags(),
+            UnixOpenFlags.CreateReadWriteExclusiveNoFollow(),
             UnixFileMode);
         if (fd >= 0)
         {
@@ -86,7 +86,7 @@ internal sealed partial class PinnedDirectoryCreation
         var fd = OpenAt(
             parentHandle.DangerousGetHandle().ToInt32(),
             fileName,
-            GetUnixReadFlags(),
+            UnixOpenFlags.OpenReadNoFollow(),
             mode: 0);
         if (fd >= 0)
         {
@@ -106,7 +106,7 @@ internal sealed partial class PinnedDirectoryCreation
         var fd = OpenAt(
             parentHandle.DangerousGetHandle().ToInt32(),
             fileName,
-            GetUnixWriteExistingFlags(),
+            UnixOpenFlags.OpenWriteNoFollow(),
             mode: 0);
         if (fd >= 0)
         {
@@ -139,16 +139,4 @@ internal sealed partial class PinnedDirectoryCreation
                 "A pinned file cannot be a symbolic link or reparse point.");
         }
     }
-
-    private static int GetUnixReadFlags() => OperatingSystem.IsMacOS()
-        ? 0x4 | 0x100 | 0x1000000
-        : 0x800 | 0x20000 | 0x80000;
-
-    private static int GetUnixReadWriteCreateFlags() => OperatingSystem.IsMacOS()
-        ? 0x2 | 0x200 | 0x800 | 0x100 | 0x1000000
-        : 0x2 | 0x40 | 0x80 | 0x20000 | 0x80000;
-
-    private static int GetUnixWriteExistingFlags() => OperatingSystem.IsMacOS()
-        ? 0x1 | 0x100 | 0x1000000
-        : 0x1 | 0x20000 | 0x80000;
 }

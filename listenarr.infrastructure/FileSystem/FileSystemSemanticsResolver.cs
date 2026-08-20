@@ -17,9 +17,6 @@ public sealed partial class FileSystemSemanticsResolver : IFileSystemSemanticsRe
     private const int FileCaseSensitiveInfo = 23;
     private const uint FileCsFlagCaseSensitiveDir = 0x00000001;
 
-    private const int OpenReadOnly = 0;
-    private const int OpenDirectory = 0x10000;
-    private const int OpenCloseOnExec = 0x80000;
     private const ulong FsIocGetFlags64 = 0x80086601;
     private const ulong FsIocGetFlags32 = 0x80046601;
     private const int FsCasefoldFlag = 0x40000000;
@@ -230,7 +227,7 @@ public sealed partial class FileSystemSemanticsResolver : IFileSystemSemanticsRe
     {
         var descriptor = OpenUnix(
             boundary,
-            OpenReadOnly | OpenDirectory | OpenCloseOnExec);
+            UnixOpenFlags.Directory(noFollow: false));
         if (descriptor < 0)
         {
             return Unavailable(

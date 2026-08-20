@@ -176,22 +176,6 @@ internal sealed partial class PinnedDirectoryCreation
             $"Could not create '{child}' relative to '{parent}'.");
     }
 
-    private static int GetUnixDirectoryFlags(bool noFollow)
-    {
-        var flags = OperatingSystem.IsMacOS()
-            ? 0x100000 | 0x1000000
-            : 0x10000 | 0x80000;
-        if (noFollow)
-        {
-            flags |= OperatingSystem.IsMacOS() ? 0x100 : 0x20000;
-        }
-        return flags;
-    }
-
-    private static int GetUnixWriteFlags() => OperatingSystem.IsMacOS()
-        ? 0x1 | 0x200 | 0x800 | 0x100 | 0x1000000
-        : 0x1 | 0x40 | 0x80 | 0x20000 | 0x80000;
-
     private static void RemoveDirectoryAtUnix(
         SafeFileHandle parentHandle,
         string childName)

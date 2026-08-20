@@ -285,7 +285,7 @@ internal sealed partial class PinnedDirectoryCreation : IDisposable
         SafeFileHandle directoryHandle,
         string fileName)
     {
-        var flags = GetUnixWriteFlags();
+        var flags = UnixOpenFlags.CreateWriteExclusiveNoFollow();
         var fd = OpenAt(
             directoryHandle.DangerousGetHandle().ToInt32(),
             fileName,

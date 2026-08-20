@@ -61,7 +61,7 @@ internal sealed partial class PinnedDirectoryCreation
         string path,
         bool noFollow)
     {
-        var fd = OpenUnix(path, GetUnixDirectoryFlags(noFollow));
+        var fd = OpenUnix(path, UnixOpenFlags.Directory(noFollow));
         if (fd >= 0)
         {
             return new SafeFileHandle(new IntPtr(fd), ownsHandle: true);
@@ -79,7 +79,7 @@ internal sealed partial class PinnedDirectoryCreation
         var fd = OpenAt(
             parentHandle.DangerousGetHandle().ToInt32(),
             childName,
-            GetUnixDirectoryFlags(noFollow: true),
+            UnixOpenFlags.Directory(noFollow: true),
             mode: 0);
         if (fd >= 0)
         {
