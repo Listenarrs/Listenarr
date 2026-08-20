@@ -90,7 +90,11 @@ namespace Listenarr.Infrastructure.Library.Files
 
         private static void ApplyAsinTag(TagLib.File file, string asin)
         {
-            if (file.Tag is TagLib.Mpeg4.AppleTag appleTag)
+            // An MPEG-4 file's Tag is a CombinedTag wrapping the Apple tag, never the AppleTag
+            // itself, so a type test on file.Tag matches nothing here and the save that follows
+            // writes an unchanged file while still reporting success. The tag has to be asked
+            // for by type. Only MPEG-4 answers to Apple, so mp3 and flac fall through as before.
+            if (file.GetTag(TagLib.TagTypes.Apple, create: true) is TagLib.Mpeg4.AppleTag appleTag)
                 appleTag.SetDashBox("com.apple.iTunes", "ASIN", asin);
             else if (file.GetTag(TagLib.TagTypes.Id3v2) is TagLib.Id3v2.Tag id3Tag)
             {
