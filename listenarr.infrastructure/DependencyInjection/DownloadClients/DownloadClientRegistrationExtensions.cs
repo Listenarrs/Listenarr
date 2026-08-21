@@ -24,21 +24,24 @@ internal static class DownloadClientRegistrationExtensions
 {
     public static IServiceCollection AddDownloadClientHttpClients(this IServiceCollection services)
     {
+        // The retry policy is stateless, so one instance shared by every client is correct and is
+        // how Polly is meant to be used. A circuit breaker is not: its open/closed state and its
+        // failure count live inside the policy instance. Sharing one gives all these clients a
+        // single global breaker rather than one each, so a run of failures against any one of them
+        // stops polling for all of them. Each client gets its own.
         var retryPolicy = HttpPolicyExtensions.HandleTransientHttpError()
             .WaitAndRetryAsync(3, attempt => TimeSpan.FromSeconds(Math.Pow(2, attempt)));
-        var circuitBreakerPolicy = HttpPolicyExtensions.HandleTransientHttpError()
-            .CircuitBreakerAsync(3, TimeSpan.FromSeconds(30));
 
         services.AddHttpClient("DownloadClient")
             .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(30))
             .ConfigurePrimaryHttpMessageHandler(CreateHandler)
             .AddPolicyHandler(retryPolicy)
-            .AddPolicyHandler(circuitBreakerPolicy);
+            .AddPolicyHandler(CreateCircuitBreakerPolicy());
 
-        AddAdapterClient(services, DownloadClientTypes.Qbittorrent, useCookies: true, retryPolicy, circuitBreakerPolicy);
-        AddAdapterClient(services, DownloadClientTypes.Transmission, useCookies: false, retryPolicy, circuitBreakerPolicy);
-        AddAdapterClient(services, DownloadClientTypes.Sabnzbd, useCookies: false, retryPolicy, circuitBreakerPolicy);
-        AddAdapterClient(services, DownloadClientTypes.Nzbget, useCookies: false, retryPolicy, circuitBreakerPolicy);
+        AddAdapterClient(services, DownloadClientTypes.Qbittorrent, useCookies: true, retryPolicy);
+        AddAdapterClient(services, DownloadClientTypes.Transmission, useCookies: false, retryPolicy);
+        AddAdapterClient(services, DownloadClientTypes.Sabnzbd, useCookies: false, retryPolicy);
+        AddAdapterClient(services, DownloadClientTypes.Nzbget, useCookies: false, retryPolicy);
         return services;
     }
 
@@ -264,18 +267,23 @@ internal static class DownloadClientRegistrationExtensions
         return services;
     }
 
+    // A new breaker per call. Returning a fresh instance is the whole point: one shared instance
+    // would put every download client behind a single circuit.
+    internal static IAsyncPolicy<HttpResponseMessage> CreateCircuitBreakerPolicy() =>
+        HttpPolicyExtensions.HandleTransientHttpError()
+            .CircuitBreakerAsync(3, TimeSpan.FromSeconds(30));
+
     private static void AddAdapterClient(
         IServiceCollection services,
         string name,
         bool useCookies,
-        IAsyncPolicy<HttpResponseMessage> retryPolicy,
-        IAsyncPolicy<HttpResponseMessage> circuitBreakerPolicy)
+        IAsyncPolicy<HttpResponseMessage> retryPolicy)
     {
         services.AddHttpClient(name)
             .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(30))
             .ConfigurePrimaryHttpMessageHandler(() => CreateHandler(useCookies))
             .SetHandlerLifetime(TimeSpan.FromMinutes(5))
-            .AddPolicyHandler(circuitBreakerPolicy)
+            .AddPolicyHandler(CreateCircuitBreakerPolicy())
             .AddPolicyHandler(retryPolicy);
     }
 
