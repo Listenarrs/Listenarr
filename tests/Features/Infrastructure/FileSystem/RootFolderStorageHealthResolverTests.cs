@@ -241,7 +241,9 @@ public sealed class RootFolderStorageHealthResolverTests : BaseTests
                 ManagedDirectoryIdentity.CurrentVersion,
                 "replacement",
                 null));
-        var resolver = new RootFolderStorageHealthResolver(identityResolver.Object);
+        var resolver = new RootFolderStorageHealthResolver(
+            identityResolver.Object,
+            readOnlyFileSystemProbe: _ => false);
 
         var result = await resolver.ResolveAsync(root);
 
@@ -276,7 +278,9 @@ public sealed class RootFolderStorageHealthResolverTests : BaseTests
                 ManagedDirectoryIdentity.CurrentVersion,
                 "strong-current",
                 null));
-        var resolver = new RootFolderStorageHealthResolver(identityResolver.Object);
+        var resolver = new RootFolderStorageHealthResolver(
+            identityResolver.Object,
+            readOnlyFileSystemProbe: _ => false);
 
         var result = await resolver.ResolveAsync(root);
 
@@ -528,7 +532,9 @@ public sealed class RootFolderStorageHealthResolverTests : BaseTests
                 ManagedDirectoryIdentity.CurrentVersion,
                 "current-strong-identity",
                 null));
-        var resolver = new RootFolderStorageHealthResolver(identityResolver.Object);
+        var resolver = new RootFolderStorageHealthResolver(
+            identityResolver.Object,
+            readOnlyFileSystemProbe: _ => false);
 
         var result = await resolver.ResolveAsync(root);
 
