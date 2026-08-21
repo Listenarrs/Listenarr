@@ -93,7 +93,11 @@ namespace Listenarr.Application.Downloads.Common
         {
             var adapter = ResolveAdapter(client);
             var items = await adapter.GetQueueAsync(client, ct);
-            var tasks = items.Select(item => TranslateQueueItemPathsAsync(client, item));
+            // Resolved once for the batch. Translating each item used to query for the client's
+            // mappings itself, inside this fan-out, against a scoped repository shared by everything
+            // else in the scope.
+            var mappings = await remotePathMappingService.GetPathMappingByClientAsync(client);
+            var tasks = items.Select(item => TranslateQueueItemPathsAsync(mappings, client, item));
             return [.. await Task.WhenAll(tasks)];
         }
 
@@ -137,7 +141,9 @@ namespace Listenarr.Application.Downloads.Common
             var adapter = ResolveAdapter(client);
             var item = await adapter.GetImportItemAsync(client, download, queueItem, null, ct);
 
-            return await TranslateQueueItemPathsAsync(client, item);
+            // Single item, so the lookup here is one query either way.
+            var mappings = await remotePathMappingService.GetPathMappingByClientAsync(client);
+            return await TranslateQueueItemPathsAsync(mappings, client, item);
         }
 
         public async Task<List<Download>> FetchDownloadsAsync(DownloadClientConfiguration client, List<Download> downloads, CancellationToken ct = default)
@@ -165,7 +171,8 @@ namespace Listenarr.Application.Downloads.Common
                     ex);
             }
 
-            var tasks = items.Select(item => TranslateQueueItemPathsAsync(client, item));
+            var mappings = await remotePathMappingService.GetPathMappingByClientAsync(client);
+            var tasks = items.Select(item => TranslateQueueItemPathsAsync(mappings, client, item));
             items = [.. await Task.WhenAll(tasks)];
 
             foreach (QueueItem item in items)
@@ -228,20 +235,24 @@ namespace Listenarr.Application.Downloads.Common
         /// Make sure all paths are locally accessible after processing and
         /// that a proper list of sanitized source files is produced
         /// </summary>
+        /// <param name="mappings">Remote path mappings already resolved for this client</param>
         /// <param name="client">Download client configuration to use for path mapping</param>
         /// <param name="item">Queue item to translate/sanitize</param>
         /// <returns></returns>
-        private async Task<QueueItem> TranslateQueueItemPathsAsync(DownloadClientConfiguration client, QueueItem item)
+        private async Task<QueueItem> TranslateQueueItemPathsAsync(
+            IReadOnlyList<RemotePathMapping> mappings,
+            DownloadClientConfiguration client,
+            QueueItem item)
         {
             if (!string.IsNullOrEmpty(item.RemotePath))
             {
-                item.LocalPath = await remotePathMappingService.TranslatePathAsync(client, item.RemotePath);
+                item.LocalPath = remotePathMappingService.TranslatePath(mappings, client, item.RemotePath);
                 EnsureNativePath(item.LocalPath, client.Name);
             }
 
             if (!string.IsNullOrEmpty(item.ContentPath))
             {
-                item.ContentPath = await remotePathMappingService.TranslatePathAsync(client, item.ContentPath);
+                item.ContentPath = remotePathMappingService.TranslatePath(mappings, client, item.ContentPath);
                 EnsureNativePath(item.ContentPath, client.Name);
             }
 

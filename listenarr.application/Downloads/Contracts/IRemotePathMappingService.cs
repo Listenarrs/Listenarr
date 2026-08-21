@@ -66,4 +66,17 @@ public interface IRemotePathMappingService
     /// A matching mapping exists but its local side is unavailable or unsafe on this host.
     /// </exception>
     Task<string> TranslatePathAsync(DownloadClientConfiguration client, string remotePath);
+
+    /// <summary>
+    /// Translates a remote path using mappings the caller has already resolved.
+    /// </summary>
+    /// <remarks>
+    /// For callers translating many paths for one client. Resolving the mappings once and
+    /// translating from them keeps a parallel batch off the scoped repository, and so off the
+    /// scoped DbContext behind it, which permits one operation at a time.
+    /// </remarks>
+    string TranslatePath(
+        IReadOnlyList<RemotePathMapping> mappings,
+        DownloadClientConfiguration client,
+        string remotePath);
 }

@@ -123,7 +123,23 @@ namespace Listenarr.Infrastructure.Configuration.Paths
                 return remotePath;
             }
 
-            var mappings = await GetPathMappingByClientAsync(client);
+            return TranslatePath(await GetPathMappingByClientAsync(client), client, remotePath);
+        }
+
+        // The mapping lookup and the translation are separated so a caller translating many paths
+        // for one client can resolve the mappings once. The repository is scoped and so is the
+        // DbContext behind it, so translating a batch in parallel while each call did its own
+        // lookup meant concurrent queries on a context that permits one at a time.
+        public string TranslatePath(
+            IReadOnlyList<RemotePathMapping> mappings,
+            DownloadClientConfiguration client,
+            string remotePath)
+        {
+            if (string.IsNullOrEmpty(remotePath))
+            {
+                return remotePath;
+            }
+
             foreach (var mapping in mappings)
             {
                 if (!TryGetRemoteSemantics(
