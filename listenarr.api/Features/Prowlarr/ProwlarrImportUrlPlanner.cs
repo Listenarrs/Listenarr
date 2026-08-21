@@ -43,6 +43,28 @@ namespace Listenarr.Api.Features.Prowlarr
             return $"{root}/{indexerId}/api";
         }
 
+        /// <summary>
+        /// Return the base URL the Prowlarr API actually answered on. A Prowlarr instance running under a
+        /// URL base redirects the discovery request onto that base, so the URL the user supplied can be
+        /// missing a path segment that every proxied indexer URL needs.
+        /// </summary>
+        public static string ResolveBaseUrlFromDiscovery(string requestedBaseUrl, Uri? discoveryUri, string discoveryPath)
+        {
+            if (discoveryUri == null || !discoveryUri.IsAbsoluteUri)
+            {
+                return requestedBaseUrl;
+            }
+
+            var answered = discoveryUri.GetLeftPart(UriPartial.Path).TrimEnd('/');
+            if (!answered.EndsWith(discoveryPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return requestedBaseUrl;
+            }
+
+            var resolved = answered.Substring(0, answered.Length - discoveryPath.Length).TrimEnd('/');
+            return string.IsNullOrEmpty(resolved) ? requestedBaseUrl : resolved;
+        }
+
         public static string NormalizeProxyUrl(string? rawUrl)
         {
             if (string.IsNullOrWhiteSpace(rawUrl)) return rawUrl ?? string.Empty;
