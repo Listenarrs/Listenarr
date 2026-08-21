@@ -258,7 +258,10 @@ public sealed class ManualImportPathPlanner
         bool isMultiFile,
         out int? stableSuffixNumber)
     {
-        var variables = new Dictionary<string, object>();
+        // Ordinal-ignore-case to match RenameService.BuildNamingVariables. The token regex in
+        // FileNamingService is already case-insensitive, so a case-sensitive dictionary here means
+        // a pattern written {series} resolves under rename and misses under manual import.
+        var variables = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
 
         var author = audiobook.Authors?.FirstOrDefault();
         if (!string.IsNullOrWhiteSpace(author)) variables["Author"] = author;
@@ -286,6 +289,12 @@ public sealed class ManualImportPathPlanner
         variables["Title"] = !string.IsNullOrWhiteSpace(titleFull) ? titleFull : "Unknown Title";
 
         if (!string.IsNullOrWhiteSpace(audiobook.Series)) variables["Series"] = audiobook.Series;
+        // SeriesNumber and Quality were absent from this table entirely while both are present
+        // in the rename and library-add tables, so a pattern using either rendered under those
+        // and silently lost the segment here. Inserted on the same terms as their neighbours:
+        // present when known, absent when not, so the missing-variable cleanup still applies.
+        if (!string.IsNullOrWhiteSpace(audiobook.SeriesNumber)) variables["SeriesNumber"] = audiobook.SeriesNumber;
+        if (!string.IsNullOrWhiteSpace(audiobook.Quality)) variables["Quality"] = audiobook.Quality;
         if (!string.IsNullOrWhiteSpace(audiobook.PublishYear)) variables["Year"] = audiobook.PublishYear;
 
         var effectiveDiskNumber = item.DiskNumberHint
