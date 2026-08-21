@@ -103,6 +103,10 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
                 .ThrowsAsync(new DownloadClientSubmissionException("Unable to obtain a verified hash from the torrent metadata."));
 
             var historyMock = new Mock<IDownloadHistoryService>(MockBehavior.Strict);
+            historyMock
+                .Setup(h => h.RecordDownloadFailedAsync(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()))
+                .Returns(Task.CompletedTask);
             var notificationMock = new Mock<INotificationService>(MockBehavior.Strict);
             _services.AddSingleton(gatewayMock.Object);
             _services.AddSingleton(historyMock.Object);
@@ -126,8 +130,56 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
 
             Assert.Equal(initialDownloadCount, (await _downloadRepository.GetAllAsync()).Count);
             gatewayMock.VerifyAll();
-            historyMock.VerifyNoOtherCalls();
+            historyMock.Verify(
+                h => h.RecordGrabbedAsync(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                    It.IsAny<DownloadProtocol>(), It.IsAny<Guid?>()),
+                Times.Never);
             notificationMock.VerifyNoOtherCalls();
+        }
+
+        [Fact]
+        public async Task SendToDownloadClientAsync_WhenClientRejectsSubmission_RecordsFailedAttemptInHistory()
+        {
+            var rejection = new DownloadClientSubmissionException("qBittorrent rejected the torrent with HTTP 409.");
+            var gatewayMock = new Mock<IDownloadClientGateway>(MockBehavior.Strict);
+            gatewayMock
+                .Setup(g => g.AddAsync(
+                    It.Is<DownloadClientConfiguration>(client => client.Id == "qb-1"),
+                    It.IsAny<PreparedDownloadSubmission>(),
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(rejection);
+
+            var historyMock = new Mock<IDownloadHistoryService>(MockBehavior.Strict);
+            historyMock
+                .Setup(h => h.RecordDownloadFailedAsync(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()))
+                .Returns(Task.CompletedTask);
+            _services.AddSingleton(gatewayMock.Object);
+            _services.AddSingleton(historyMock.Object);
+
+            Init();
+            await InitData();
+            var downloadService = _provider.GetRequiredService<DownloadService>();
+            var searchResult = new SearchResult
+            {
+                Title = "Artemis",
+                Artist = "Andy Weir",
+                DownloadType = "Torrent",
+                MagnetLink = "magnet:?xt=urn:btih:ABCDEF1234567890ABCDEF1234567890ABCDEF12",
+                Size = 123456789
+            };
+
+            await Assert.ThrowsAsync<DownloadClientSubmissionException>(
+                () => downloadService.SendToDownloadClientAsync(searchResult, _client.Id));
+
+            historyMock.Verify(
+                h => h.RecordDownloadFailedAsync(
+                    It.Is<string>(id => !string.IsNullOrWhiteSpace(id)),
+                    "qb-1",
+                    "Artemis",
+                    rejection.Message),
+                Times.Once);
         }
 
         [Fact]
@@ -142,6 +194,10 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
                 .ReturnsAsync(new DownloadClientSubmissionResult(string.Empty));
 
             var historyMock = new Mock<IDownloadHistoryService>(MockBehavior.Strict);
+            historyMock
+                .Setup(h => h.RecordDownloadFailedAsync(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()))
+                .Returns(Task.CompletedTask);
             var notificationMock = new Mock<INotificationService>(MockBehavior.Strict);
             _services.AddSingleton(gatewayMock.Object);
             _services.AddSingleton(historyMock.Object);
@@ -165,7 +221,11 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
 
             Assert.Equal(initialDownloadCount, (await _downloadRepository.GetAllAsync()).Count);
             gatewayMock.VerifyAll();
-            historyMock.VerifyNoOtherCalls();
+            historyMock.Verify(
+                h => h.RecordGrabbedAsync(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                    It.IsAny<DownloadProtocol>(), It.IsAny<Guid?>()),
+                Times.Never);
             notificationMock.VerifyNoOtherCalls();
         }
 
