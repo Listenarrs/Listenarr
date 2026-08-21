@@ -65,7 +65,24 @@ public sealed partial class FileRegistrationRecoveryService
                     cancellationToken);
         }
 
+        // Name every journal, not just the first. This disables filesystem mutations for the whole
+        // application until an operator resolves them, and there is no in-app route to do that, so
+        // this message is the entire brief they get. Reporting one at a time turns a single repair
+        // into one restart per affected journal, with no way to know how many are left.
+        const int listed = 10;
+        var identifiers = string.Join(
+            ", ",
+            unsupported
+                .Take(listed)
+                .Select(journal => $"{journal.OperationId} ({journal.State})"));
+        var remainder = unsupported.Count > listed
+            ? $", and {unsupported.Count - listed} more"
+            : string.Empty;
+
         throw new InvalidOperationException(
-            $"File-mutation journal {unsupported[0].OperationId} uses legacy recovery protocol state {unsupported[0].State} and requires operator repair before filesystem mutations can resume.");
+            $"{unsupported.Count} file-mutation journal(s) use a legacy recovery protocol and require "
+            + $"operator repair before filesystem mutations can resume: {identifiers}{remainder}. "
+            + "Each was interrupted before this build's durable parent-directory generation fencing "
+            + "existed and cannot be resumed automatically.");
     }
 }
