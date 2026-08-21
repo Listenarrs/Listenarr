@@ -348,6 +348,10 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                         {
                             JobId = job.Id,
                             result.Action,
+                            result.RequestedAction,
+                            result.EffectiveAction,
+                            result.SourceDisposition,
+                            result.WarningCode,
                             result.SourcePath,
                             result.FinalPath,
                             result.WasRegisteredToAudiobook
@@ -355,6 +359,9 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                     }, cancellationToken);
                 }
 
+                job.JobData["SourceRetained"] = results.Any(result =>
+                    result.SourceDisposition
+                        == ImportSourceDisposition.Retained);
                 job.SetCheckpoint("FilesImported", results.Count);
                 await downloadProcessingJobService.UpdateJobAsync(job);
             }

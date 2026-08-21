@@ -11,6 +11,66 @@ namespace Listenarr.Tests.Features.Infrastructure.Persistence;
 public sealed class FileRenameRecoveryReconcilerTests : BaseTests
 {
     [Fact]
+    public async Task ReconcileAsync_CommittedCompanionPublication_RetiresExactSource()
+    {
+        var root = FileService.GetTempDirectory("companion-registration-recovery");
+        await AddAuthorizedRootAsync(root);
+        var sourceDirectory = Path.Join(root, "source");
+        var destinationDirectory = Path.Join(root, "library");
+        Directory.CreateDirectory(sourceDirectory);
+        Directory.CreateDirectory(destinationDirectory);
+        var source = Path.Join(sourceDirectory, "cover.jpg");
+        var destination = Path.Join(destinationDirectory, "cover.jpg");
+        await File.WriteAllTextAsync(source, "cover");
+        var audiobook = await _audiobookRepository.AddAsync(
+            new AudiobookBuilder()
+                .WithTitle("Companion Recovery")
+                .WithBasePath(destinationDirectory)
+                .Build());
+        var operationId = Guid.NewGuid();
+        var mover = _provider.GetRequiredService<FileMover>();
+        var capability = await mover.CheckAsync(source);
+        Assert.True(capability.IsSupported, capability.Reason);
+
+        var preparation = await mover.PrepareActionForRegistrationDetailedAsync(
+            FilePublicationPlan.Durable(FileAction.Move),
+            source,
+            destination,
+            operationId,
+            expectedRegisteredPhysicalObjectIdentity: null,
+            capability.SourceProof!.Value,
+            isCompanionFile: true,
+            companionAudiobookId: audiobook.Id);
+        using (var lease = Assert.IsAssignableFrom<
+            IAudiobookFileRegistrationLease>(preparation.RegistrationLease))
+        {
+            Assert.True(lease.PrepareCleanupRecovery(audiobook.Id));
+            Assert.Equal(
+                RegistrationPublicationCompletion.Completed,
+                lease.CompletePublication());
+        }
+
+        Assert.True(File.Exists(source));
+        Assert.Equal("cover", await File.ReadAllTextAsync(destination));
+
+        await _provider.GetRequiredService<IFileRenameRecoveryReconciler>()
+            .ReconcileAsync();
+
+        Assert.False(File.Exists(source));
+        Assert.Equal("cover", await File.ReadAllTextAsync(destination));
+        var factory = _provider.GetRequiredService<
+            IDbContextFactory<ListenArrDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var journal = await db.FileMutationJournals.SingleAsync(candidate =>
+            candidate.OperationId == operationId);
+        Assert.Equal(FileMutationJournalState.Completed, journal.State);
+        Assert.Equal(audiobook.Id, journal.AudiobookId);
+        Assert.Equal(
+            FileMutationOwner.RegistrationCompanionFile,
+            journal.AudiobookFileId);
+    }
+
+    [Fact]
     public async Task ReconcileAsync_CompletedFilesystemRenameBeforeMetadataCommit_RepairsTrackedPath()
     {
         var scenario = await CreateScenarioAsync("completed-before-metadata");

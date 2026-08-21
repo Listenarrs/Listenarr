@@ -15,11 +15,16 @@ public static class FileMutationOwner
 {
     // AudiobookFileId is an owner discriminator as well as an optional row ID:
     // null = registration publication, 0 = legacy Audiobook.FilePath,
-    // positive = tracked AudiobookFile, -1 = owner-bound companion file.
+    // positive = tracked AudiobookFile, -1 = legacy direct companion move,
+    // -2 = registration-backed companion publication.
     public const int CompanionFile = -1;
+    public const int RegistrationCompanionFile = -2;
 
     public static bool IsCompanionFile(int? audiobookFileId) =>
-        audiobookFileId == CompanionFile;
+        audiobookFileId is CompanionFile or RegistrationCompanionFile;
+
+    public static bool IsRegistrationCompanionFile(int? audiobookFileId) =>
+        audiobookFileId == RegistrationCompanionFile;
 }
 
 public enum FileMutationJournalState

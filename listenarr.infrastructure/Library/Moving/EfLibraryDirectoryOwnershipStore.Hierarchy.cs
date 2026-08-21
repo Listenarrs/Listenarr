@@ -1,9 +1,89 @@
+using System.ComponentModel;
 using Listenarr.Domain.Common;
 
 namespace Listenarr.Infrastructure.Library.Moving;
 
 internal sealed partial class EfLibraryDirectoryOwnershipStore
 {
+    public Task EnsureAdditiveHierarchyAsync(
+        string destinationDirectory,
+        string managedBoundary,
+        FileSystemPathSemantics semantics,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(destinationDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(managedBoundary);
+        EnsureResolved(semantics);
+
+        var destination = FileSystemPathIdentity.Canonicalize(
+            destinationDirectory,
+            semantics.Syntax);
+        var boundary = FileSystemPathIdentity.Canonicalize(
+            managedBoundary,
+            semantics.Syntax);
+        if (!FileSystemPathIdentity.IsSameOrInside(
+                destination,
+                boundary,
+                semantics))
+        {
+            throw new InvalidOperationException(
+                "The additive directory destination is outside its managed boundary.");
+        }
+
+        var hierarchy = new List<string>();
+        var currentPath = destination;
+        while (!FileSystemPathIdentity.AreEquivalent(
+            currentPath,
+            boundary,
+            semantics))
+        {
+            hierarchy.Add(currentPath);
+            currentPath = Path.GetDirectoryName(currentPath)
+                ?? throw new InvalidOperationException(
+                    "The additive directory hierarchy escaped its managed boundary.");
+        }
+        hierarchy.Reverse();
+
+        var current = PinnedDirectoryCreation.OpenPinnedBoundary(boundary);
+        try
+        {
+            foreach (var directory in hierarchy)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var childName = Path.GetFileName(directory);
+                PinnedDirectoryCreation.PinnedDirectoryAnchor next;
+                try
+                {
+                    next = current.OpenExistingChild(childName);
+                }
+                catch (Win32Exception exception) when (
+                    exception.NativeErrorCode is 2 or 3)
+                {
+                    using var creation = current.TryCreateChild(childName);
+                    next = creation.Created
+                        ? creation.OpenCreatedDirectoryAnchor()
+                        : current.OpenExistingChild(childName);
+                }
+
+                if (!next.VisiblePathMatches())
+                {
+                    next.Dispose();
+                    throw new IOException(
+                        "An additive directory component changed while it was being pinned.");
+                }
+
+                current.Dispose();
+                current = next;
+            }
+        }
+        finally
+        {
+            current.Dispose();
+        }
+
+        return Task.CompletedTask;
+    }
+
     public async Task<IReadOnlyList<LibraryDirectoryOwnership>> EnsureCreatedHierarchyAsync(
         string destinationDirectory,
         string managedBoundary,

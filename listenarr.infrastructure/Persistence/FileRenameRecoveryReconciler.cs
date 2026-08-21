@@ -49,6 +49,8 @@ public sealed partial class FileRenameRecoveryReconciler(
                 && journal.AudiobookId != null
                 && journal.AudiobookFileId != null
                 && (journal.AudiobookFileId == FileMutationOwner.CompanionFile
+                    || journal.AudiobookFileId
+                        == FileMutationOwner.RegistrationCompanionFile
                     ? journal.State != FileMutationJournalState.Completed
                     : journal.State != FileMutationJournalState.OwnerMetadataReconciled))
             .OrderBy(journal => journal.CreatedAt)
@@ -117,13 +119,9 @@ public sealed partial class FileRenameRecoveryReconciler(
             try
             {
                 resumed = FileMutationOwner.IsCompanionFile(ownerAudiobookFileId)
-                    ? await fileMover.PerformActionOn(
-                        FileAction.Move,
-                        journal.SourcePath,
-                        journal.DestinationPath,
-                        journal.OperationId,
-                        ownerAudiobookId,
-                        FileMutationOwner.CompanionFile)
+                    ? await ResumeCompanionMoveAsync(
+                        journal,
+                        ownerAudiobookId)
                     : audiobookFile == null
                         ? await fileMover.PerformActionOn(
                             FileAction.Move,
@@ -389,6 +387,49 @@ public sealed partial class FileRenameRecoveryReconciler(
             "Reconciled interrupted organize journal {OperationId} for audiobook {AudiobookId}",
             operationId,
             trackedAudiobook.Id);
+    }
+
+    private async Task<bool> ResumeCompanionMoveAsync(
+        FileMutationJournal journal,
+        int audiobookId)
+    {
+        if (!FileMutationOwner.IsRegistrationCompanionFile(
+                journal.AudiobookFileId)
+            || string.IsNullOrWhiteSpace(journal.SourceSha256)
+            || string.IsNullOrWhiteSpace(journal.TargetPhysicalObjectIdentity))
+        {
+            return await fileMover.PerformActionOn(
+                FileAction.Move,
+                journal.SourcePath,
+                journal.DestinationPath,
+                journal.OperationId,
+                audiobookId,
+                FileMutationOwner.CompanionFile);
+        }
+
+        var preparation = await fileMover
+            .PrepareActionForRegistrationDetailedAsync(
+                FilePublicationPlan.Durable(FileAction.Move),
+                journal.SourcePath,
+                journal.DestinationPath,
+                journal.OperationId,
+                journal.TargetPhysicalObjectIdentity,
+                new FilePublicationSourceProof(
+                    journal.SourcePhysicalObjectIdentity,
+                    journal.SourceLength,
+                    journal.SourceSha256),
+                isCompanionFile: true,
+                companionAudiobookId: audiobookId);
+        using var lease = preparation.RegistrationLease;
+        return lease != null
+            && lease.PrepareCleanupRecovery(audiobookId)
+            && lease.CompletePublication()
+                == RegistrationPublicationCompletion.Completed
+            && await fileMover.CompletePreparedMoveAsync(
+                journal.SourcePath,
+                journal.DestinationPath,
+                lease,
+                journal.OperationId);
     }
 
     private async Task MarkNeedsAttentionAsync(

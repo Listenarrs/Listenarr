@@ -213,7 +213,22 @@ internal sealed class RootFolderStorageHealthResolver(
 
         if (observation.State != RootFolderStorageState.Healthy)
         {
-            return observation;
+            var limitedReadOnly = _readOnlyFileSystemProbe(canonicalPath);
+            if (limitedReadOnly != false)
+            {
+                return ApplyMutationCapability(
+                    canonicalPath,
+                    observation,
+                    limitedReadOnly);
+            }
+
+            return observation with
+            {
+                CanPublishNewFiles =
+                    observation.State == RootFolderStorageState.Limited
+                    && observation.Reason == RootFolderStorageReason.IdentityUnsupported
+                    && !observation.CanConfirmCurrentFolder
+            };
         }
 
         var mutationCapability = ApplyMutationCapability(
@@ -236,6 +251,7 @@ internal sealed class RootFolderStorageHealthResolver(
                     "Listenarr can read and scan this storage, but automatic case-sensitivity detection is not stable enough to authorize filesystem mutations. Select Sensitive or Insensitive explicitly to enable moves, deletes, and other writes.",
                 CanConfirmCurrentFolder = false,
                 CanMutateFilesystem = false,
+                CanPublishNewFiles = false,
                 ConfirmationToken = null,
                 Detail =
                     "Automatic case sensitivity was inferred from an existing directory entry rather than an authoritative filesystem capability."
@@ -252,7 +268,10 @@ internal sealed class RootFolderStorageHealthResolver(
     {
         if (isReadOnly == false)
         {
-            return observation;
+            return observation with
+            {
+                CanPublishNewFiles = observation.CanMutateFilesystem
+            };
         }
 
         return observation with
@@ -266,6 +285,7 @@ internal sealed class RootFolderStorageHealthResolver(
                 : "Listenarr can read and scan this storage, but it cannot verify that filesystem mutations are available safely.",
             CanConfirmCurrentFolder = false,
             CanMutateFilesystem = false,
+            CanPublishNewFiles = false,
             ConfirmationToken = null,
             Detail = isReadOnly == true
                 ? "The filesystem reports the ST_RDONLY mount flag."
@@ -314,6 +334,7 @@ internal sealed class RootFolderStorageHealthResolver(
                     : "The folder at this location changed and Listenarr cannot verify its path rules safely. Review the root folder settings.",
                 CanConfirmCurrentFolder = false,
                 CanMutateFilesystem = false,
+                CanPublishNewFiles = false,
                 ConfirmationToken = null,
                 Detail = detail
             };

@@ -6,6 +6,25 @@ namespace Listenarr.Infrastructure.FileSystem;
 
 public partial class FileMover
 {
+    private static async Task<FilePublicationSourceProof>
+        CaptureContentOnlySourceProofAsync(
+            PinnedDirectoryCreation.PinnedFileEntry source,
+            CancellationToken cancellationToken)
+    {
+        await using var stream = source.OpenReadStream(
+            bufferSize: 128 * 1024,
+            asynchronous: false);
+        var length = stream.Length;
+        stream.Position = 0;
+        var sha256 = Convert.ToHexString(
+            await SHA256.HashDataAsync(stream, cancellationToken));
+        return new FilePublicationSourceProof(
+            $"content-only:{sha256}",
+            length,
+            sha256,
+            FilePublicationSourceAuthority.ContentOnly);
+    }
+
     private static async Task<MarkerlessSourceProof>
         CaptureMarkerlessSourceProofAsync(
             PinnedDirectoryCreation.PinnedFileEntry source,
@@ -75,6 +94,8 @@ public partial class FileMover
     private static bool MatchesExpectedSourceProof(
         MarkerlessSourceProof actual,
         FilePublicationSourceProof expected) =>
+        expected.HasDurablePhysicalObjectIdentity
+        &&
         PinnedDirectoryCreation.ArePersistedObjectIdentitiesDurablyEquivalent(
             actual.PhysicalObjectIdentity,
             expected.PhysicalObjectIdentity)

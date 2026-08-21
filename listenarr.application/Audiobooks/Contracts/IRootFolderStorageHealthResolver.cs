@@ -37,7 +37,8 @@ public sealed record RootFolderStorageObservation(
     bool CanChangePath,
     bool CanMutateFilesystem,
     string? ConfirmationToken,
-    string? Detail = null)
+    string? Detail = null,
+    bool CanPublishNewFiles = false)
 {
     public bool CanReadFilesystem =>
         State is RootFolderStorageState.Healthy or RootFolderStorageState.Limited;

@@ -65,6 +65,48 @@ public sealed class ReadOnlyBindMountFactAttribute : FactAttribute
     }
 }
 
+public sealed class CrossVolumeFactAttribute : FactAttribute
+{
+    public const string DestinationPathEnvironmentVariable =
+        "LISTENARR_CROSS_VOLUME_DESTINATION_PATH";
+
+    public CrossVolumeFactAttribute()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Skip = "This test requires native Linux cross-volume storage.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                DestinationPathEnvironmentVariable)))
+        {
+            Skip = "The native test runner did not provide a destination on another filesystem.";
+        }
+    }
+}
+
+public sealed class NetworkStorageTheoryAttribute : TheoryAttribute
+{
+    public const string PathEnvironmentVariable =
+        "LISTENARR_NETWORK_STORAGE_PATH";
+
+    public NetworkStorageTheoryAttribute()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Skip = "This test requires a native Linux network filesystem mount.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                PathEnvironmentVariable)))
+        {
+            Skip = "The native test runner did not provide a network filesystem mount.";
+        }
+    }
+}
+
 public sealed class DirectoryLinkFactAttribute : FactAttribute
 {
     public DirectoryLinkFactAttribute()

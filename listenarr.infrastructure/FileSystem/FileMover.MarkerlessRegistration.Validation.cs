@@ -115,10 +115,17 @@ public partial class FileMover
     private async Task ValidateMarkerlessRegistrationJournalAsync(
         FileMutationJournal journal,
         FileAction action,
-        FileMoveGateLease gate)
+        FileMoveGateLease gate,
+        bool isCompanionFile,
+        int? companionAudiobookId)
     {
         if (journal.ProtocolVersion != FileMutationProtocol.Current
             || journal.Action != action
+            || journal.AudiobookFileId != (isCompanionFile
+                ? FileMutationOwner.RegistrationCompanionFile
+                : null)
+            || (isCompanionFile
+                && journal.AudiobookId != companionAudiobookId)
             || !await JournalPathsMatchGateAsync(journal, gate))
         {
             throw new InvalidOperationException(

@@ -101,7 +101,20 @@ describe('library import store', () => {
     }
 
     store.action = 'move'
-    await store.importSelected('D:\\library')
+    startManualImport.mockResolvedValueOnce({
+      importedCount: 3,
+      totalCount: 3,
+      results: [
+        {
+          success: true,
+          sourcePath: 'C:\\incoming\\Part 1.mp3',
+          destinationPath: 'D:\\library\\Ordered Book\\Part 1.mp3',
+          warning: 'The source file was retained because durable identity is unavailable.',
+        },
+      ],
+    })
+
+    const result = await store.importSelected('D:\\library')
 
     expect(addToLibrary).toHaveBeenCalledTimes(1)
     expect(startManualImport).toHaveBeenCalledTimes(1)
@@ -117,6 +130,9 @@ describe('library import store', () => {
         { fullPath: 'C:\\incoming\\Part 10.mp3', matchedAudiobookId: 42 },
       ],
     })
+    expect(result.warnings).toEqual([
+      'The source file was retained because durable identity is unavailable.',
+    ])
   })
 
   it('registers files in place using the discovered book folder and backend success result', async () => {
@@ -176,7 +192,7 @@ describe('library import store', () => {
         },
       ],
     })
-    expect(result).toEqual({ imported: 1, errors: [] })
+    expect(result).toEqual({ imported: 1, errors: [], warnings: [] })
     expect(store.itemList).toHaveLength(0)
   })
 

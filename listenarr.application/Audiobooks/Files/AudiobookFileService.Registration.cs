@@ -45,6 +45,109 @@ public partial class AudiobookFileService
             cancellationToken);
     }
 
+    public Task<bool> RegisterCompatibilityPublicationAsync(
+        Audiobook audiobook,
+        AudiobookFileOwnershipCheckResult initialOwnership,
+        IAudiobookFileRegistrationLease registrationLease,
+        string? source = "scan",
+        CancellationToken cancellationToken = default) =>
+        RegisterCompatibilityPublicationCoreAsync(
+            audiobook,
+            initialOwnership,
+            registrationLease,
+            authoritativeBasePath: null,
+            source,
+            cancellationToken);
+
+    public Task<bool> RegisterCompatibilityPublicationWithBasePathAsync(
+        Audiobook audiobook,
+        AudiobookFileOwnershipCheckResult initialOwnership,
+        IAudiobookFileRegistrationLease registrationLease,
+        string authoritativeBasePath,
+        string? source = "scan",
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(authoritativeBasePath);
+        return RegisterCompatibilityPublicationCoreAsync(
+            audiobook,
+            initialOwnership,
+            registrationLease,
+            FileUtils.NormalizeStoredPath(authoritativeBasePath),
+            source,
+            cancellationToken);
+    }
+
+    private async Task<bool> RegisterCompatibilityPublicationCoreAsync(
+        Audiobook audiobook,
+        AudiobookFileOwnershipCheckResult initialOwnership,
+        IAudiobookFileRegistrationLease registrationLease,
+        string? authoritativeBasePath,
+        string? source,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(audiobook);
+        ArgumentNullException.ThrowIfNull(registrationLease);
+        if (registrationLease.HasDurablePhysicalObjectIdentity)
+        {
+            throw new InvalidOperationException(
+                "Compatibility registration accepts path-only publication leases only.");
+        }
+        if (!registrationLease.MatchesCurrentPublication()
+            || !registrationLease.PrepareCleanupRecovery(audiobook.Id))
+        {
+            return false;
+        }
+
+        BasePathRegistrationOutcome registration;
+        switch (initialOwnership.Outcome)
+        {
+            case AudiobookFileOwnershipCheckOutcome.Available:
+                registration = authoritativeBasePath == null
+                    ? new BasePathRegistrationOutcome(
+                        await EnsureAudiobookFileAsync(
+                            audiobook,
+                            registrationLease,
+                            source,
+                            cancellationToken),
+                        null)
+                    : await EnsureAudiobookFileWithBasePathAsync(
+                        audiobook,
+                        registrationLease,
+                        authoritativeBasePath,
+                        source,
+                        cancellationToken);
+                break;
+
+            case AudiobookFileOwnershipCheckOutcome.AlreadyOwnedByAudiobook:
+                if (!string.IsNullOrWhiteSpace(
+                    initialOwnership.ExistingFile?.PhysicalObjectIdentity))
+                {
+                    return false;
+                }
+
+                registration = authoritativeBasePath == null
+                    ? new BasePathRegistrationOutcome(true, null)
+                    : await ApplyAuthoritativeBasePathAsync(
+                        audiobook.Id,
+                        authoritativeBasePath,
+                        cancellationToken);
+                break;
+
+            default:
+                return false;
+        }
+
+        if (!registration.Success)
+        {
+            return false;
+        }
+
+        ApplyCommittedBasePath(audiobook, registration.Mutation);
+        var completion = registrationLease.CompletePublication();
+        return completion is RegistrationPublicationCompletion.Completed
+            or RegistrationPublicationCompletion.CommittedCleanupPending;
+    }
+
     private async Task<bool> RegisterPublishedGenerationCoreAsync(
         Audiobook audiobook,
         AudiobookFileOwnershipCheckResult initialOwnership,

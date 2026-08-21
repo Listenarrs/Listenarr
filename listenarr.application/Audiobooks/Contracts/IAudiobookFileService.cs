@@ -122,6 +122,21 @@ namespace Listenarr.Application.Audiobooks.Contracts
             string? source = "scan",
             CancellationToken cancellationToken = default);
 
+        Task<bool> RegisterCompatibilityPublicationAsync(
+            Audiobook audiobook,
+            AudiobookFileOwnershipCheckResult initialOwnership,
+            IAudiobookFileRegistrationLease registrationLease,
+            string? source = "scan",
+            CancellationToken cancellationToken = default);
+
+        Task<bool> RegisterCompatibilityPublicationWithBasePathAsync(
+            Audiobook audiobook,
+            AudiobookFileOwnershipCheckResult initialOwnership,
+            IAudiobookFileRegistrationLease registrationLease,
+            string authoritativeBasePath,
+            string? source = "scan",
+            CancellationToken cancellationToken = default);
+
         Task RollbackPublishedGenerationIfStaleAsync(
             Audiobook audiobook,
             IAudiobookFileRegistrationLease registrationLease);

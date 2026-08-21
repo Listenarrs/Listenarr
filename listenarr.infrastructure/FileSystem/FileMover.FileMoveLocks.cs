@@ -103,18 +103,23 @@ public partial class FileMover
     private async Task<FileMoveGateLease?> TryAcquireFileMoveGateAsync(
         string sourceFile,
         string destinationFile,
-        bool allowExistingAliasForRecovery = false)
+        bool allowExistingAliasForRecovery = false,
+        bool allowWeakPathOnlyCompatibility = false)
     {
-        if (!allowExistingAliasForRecovery
+        if (!allowWeakPathOnlyCompatibility
+            && !allowExistingAliasForRecovery
             && await IsFilesystemAliasAsync(sourceFile, destinationFile))
         {
             LogBlockedAlias(sourceFile, destinationFile);
             return null;
         }
 
-        var sourceEndpoint = await ResolveFileMoveEndpointAsync(sourceFile);
-        var destinationEndpoint = await ResolveFileMoveEndpointAsync(
-            destinationFile);
+        var sourceEndpoint = allowWeakPathOnlyCompatibility
+            ? ResolveCompatibilityFileMoveEndpoint(sourceFile)
+            : await ResolveFileMoveEndpointAsync(sourceFile);
+        var destinationEndpoint = allowWeakPathOnlyCompatibility
+            ? ResolveCompatibilityFileMoveEndpoint(destinationFile)
+            : await ResolveFileMoveEndpointAsync(destinationFile);
         if (sourceEndpoint == null || destinationEndpoint == null)
         {
             _logger.LogWarning(
@@ -130,8 +135,14 @@ public partial class FileMover
                 destinationFile);
         }
 
-        if (!allowExistingAliasForRecovery
+        if (string.Equals(
+                sourceEndpoint.LockIdentity,
+                destinationEndpoint.LockIdentity,
+                StringComparison.Ordinal)
+            || (!allowWeakPathOnlyCompatibility
+            && !allowExistingAliasForRecovery
             && await IsFilesystemAliasAsync(sourceFile, destinationFile))
+            )
         {
             LogBlockedAlias(sourceFile, destinationFile);
             return null;
@@ -171,8 +182,12 @@ public partial class FileMover
                         lockName));
             }
 
-            var currentSource = await ResolveFileMoveEndpointAsync(sourceFile);
-            var currentDestination = await ResolveFileMoveEndpointAsync(destinationFile);
+            var currentSource = allowWeakPathOnlyCompatibility
+                ? ResolveCompatibilityFileMoveEndpoint(sourceFile)
+                : await ResolveFileMoveEndpointAsync(sourceFile);
+            var currentDestination = allowWeakPathOnlyCompatibility
+                ? ResolveCompatibilityFileMoveEndpoint(destinationFile)
+                : await ResolveFileMoveEndpointAsync(destinationFile);
             if (currentSource == null
                 || currentDestination == null
                 || !string.Equals(
@@ -193,15 +208,21 @@ public partial class FileMover
             var destinationParentPath =
                 Path.GetDirectoryName(currentDestination.ResolvedPath)
                 ?? throw new IOException("The file-move destination has no parent.");
-            sourceParent = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
-                sourceParentPath,
-                createMissing: false);
-            destinationParent = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
-                destinationParentPath,
-                createMissing: false);
-            var pinnedSource = await ResolveFileMoveEndpointAsync(sourceFile);
-            var pinnedDestination = await ResolveFileMoveEndpointAsync(
-                destinationFile);
+            if (!allowWeakPathOnlyCompatibility)
+            {
+                sourceParent = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                    sourceParentPath,
+                    createMissing: false);
+                destinationParent = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                    destinationParentPath,
+                    createMissing: false);
+            }
+            var pinnedSource = allowWeakPathOnlyCompatibility
+                ? ResolveCompatibilityFileMoveEndpoint(sourceFile)
+                : await ResolveFileMoveEndpointAsync(sourceFile);
+            var pinnedDestination = allowWeakPathOnlyCompatibility
+                ? ResolveCompatibilityFileMoveEndpoint(destinationFile)
+                : await ResolveFileMoveEndpointAsync(destinationFile);
             if (pinnedSource == null
                 || pinnedDestination == null
                 || !string.Equals(
@@ -212,8 +233,9 @@ public partial class FileMover
                     pinnedDestination.LockIdentity,
                     currentDestination.LockIdentity,
                     StringComparison.Ordinal)
-                || !sourceParent.VisiblePathMatches()
-                || !destinationParent.VisiblePathMatches())
+                || (!allowWeakPathOnlyCompatibility
+                    && (!sourceParent!.VisiblePathMatches()
+                        || !destinationParent!.VisiblePathMatches())))
             {
                 throw new IOException(
                     "A file-move endpoint changed while its physical parents were pinned.");
@@ -228,7 +250,8 @@ public partial class FileMover
                 currentDestination,
                 sourceParent,
                 destinationParent);
-            if (!allowExistingAliasForRecovery
+            if (!allowWeakPathOnlyCompatibility
+                && !allowExistingAliasForRecovery
                 && await IsFilesystemAliasAsync(sourceFile, destinationFile))
             {
                 lease.Dispose();

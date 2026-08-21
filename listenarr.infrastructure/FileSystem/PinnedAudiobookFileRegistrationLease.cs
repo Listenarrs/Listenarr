@@ -186,7 +186,9 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
 
     internal static PinnedAudiobookFileRegistrationLease CreatePinnedPathOnly(
         PinnedDirectoryCreation.PinnedFileEntry file,
-        string publicPath)
+        string publicPath,
+        Func<int, bool>? commitRegistration = null,
+        Func<bool>? completePublication = null)
     {
         ArgumentNullException.ThrowIfNull(file);
         ArgumentException.ThrowIfNullOrWhiteSpace(publicPath);
@@ -230,8 +232,8 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
                 hasDurablePhysicalObjectIdentity: false,
                 sourcePhysicalObjectIdentity: null,
                 prepareCleanupRecovery: null,
-                completePublication: null,
-                commitRegistration: null);
+                completePublication,
+                commitRegistration);
             stableHandle = null;
             return result;
         }

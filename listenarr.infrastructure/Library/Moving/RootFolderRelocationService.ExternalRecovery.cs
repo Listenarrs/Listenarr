@@ -316,6 +316,8 @@ public sealed partial class RootFolderRelocationService
                 && audiobookIds.Contains(journal.AudiobookId.Value)
                 && journal.AudiobookFileId != null
                 && (journal.AudiobookFileId == FileMutationOwner.CompanionFile
+                    || journal.AudiobookFileId
+                        == FileMutationOwner.RegistrationCompanionFile
                     ? journal.State != FileMutationJournalState.Completed
                     : journal.State != FileMutationJournalState.OwnerMetadataReconciled))
             .Select(journal => journal.AudiobookId)

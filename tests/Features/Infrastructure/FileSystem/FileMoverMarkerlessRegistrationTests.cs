@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Security.Cryptography;
+using System.Text;
 
 using Listenarr.Tests.Common;
 
@@ -19,6 +21,24 @@ public sealed class FileMoverMarkerlessRegistrationTests : BaseTests
 
         Assert.True(result.IsSupported, result.Reason);
         Assert.False(string.IsNullOrWhiteSpace(result.PhysicalObjectIdentity));
+    }
+
+    [Fact]
+    public async Task CheckPublicationSource_IdentityUnsupported_ReturnsContentOnlyProof()
+    {
+        var scenario = await CreateScenarioAsync(
+            "registration-source-content-only-capability");
+        var capability = Assert.IsAssignableFrom<IFilePublicationSourceCapability>(
+            CreateMover(forceContentOnlySourceProof: true));
+
+        var result = await capability.CheckAsync(scenario.Source);
+
+        Assert.True(result.IsSupported, result.Reason);
+        Assert.True(result.SourceProof.HasValue);
+        var proof = result.SourceProof.Value;
+        Assert.False(proof.HasDurablePhysicalObjectIdentity);
+        Assert.Equal(FilePublicationSourceAuthority.ContentOnly, proof.Authority);
+        Assert.Equal(5, proof.Length);
     }
 
     [Fact]
@@ -436,7 +456,7 @@ public sealed class FileMoverMarkerlessRegistrationTests : BaseTests
     }
 
     [LinuxFact]
-    public async Task PrepareMove_ForcedCrossVolumeRejectsBeforePublicationOrJournalCreation()
+    public async Task PrepareMove_ForcedCrossVolumeCopiesRegistersThenRetiresExactSource()
     {
         var scenario = await CreateScenarioAsync("registration-cross-volume-blocked");
         var mover = CreateMover(forceCrossVolume: true);
@@ -447,15 +467,327 @@ public sealed class FileMoverMarkerlessRegistrationTests : BaseTests
             scenario.Destination,
             scenario.OperationId);
 
-        Assert.Null(lease);
+        Assert.NotNull(lease);
         Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Source));
-        Assert.False(File.Exists(scenario.Destination));
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Destination));
+        Assert.True(lease.PrepareCleanupRecovery(73));
+        Assert.Equal(
+            RegistrationPublicationCompletion.Completed,
+            lease.CompletePublication());
+        Assert.True(await mover.CompletePreparedMoveAsync(
+            scenario.Source,
+            scenario.Destination,
+            lease,
+            scenario.OperationId));
+        Assert.False(File.Exists(scenario.Source));
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Destination));
+        await AssertJournalStateAsync(
+            scenario.OperationId,
+            FileMutationJournalState.Completed,
+            audiobookId: 73);
+        AssertNoLibraryArtifacts(scenario.Root);
+    }
+
+    [LinuxFact]
+    public async Task PrepareCompanionMove_UsesCompanionRecoveryOwnerAcrossVolumes()
+    {
+        var scenario = await CreateScenarioAsync("registration-companion-cross-volume");
+        var mover = CreateMover(forceCrossVolume: true);
+        var capability = Assert.IsAssignableFrom<
+            IFilePublicationSourceCapability>(mover);
+        var sourceCapability = await capability.CheckAsync(scenario.Source);
+        Assert.True(sourceCapability.IsSupported, sourceCapability.Reason);
+
+        var preparation = await mover.PrepareActionForRegistrationDetailedAsync(
+            FilePublicationPlan.Durable(FileAction.Move),
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId,
+            expectedRegisteredPhysicalObjectIdentity: null,
+            sourceCapability.SourceProof!.Value,
+            isCompanionFile: true,
+            companionAudiobookId: 73);
+
+        using var lease = Assert.IsAssignableFrom<
+            IAudiobookFileRegistrationLease>(preparation.RegistrationLease);
+        Assert.True(lease.PrepareCleanupRecovery(73));
+        Assert.Equal(
+            RegistrationPublicationCompletion.Completed,
+            lease.CompletePublication());
+
+        var factory = _provider.GetRequiredService<
+            IDbContextFactory<ListenArrDbContext>>();
+        await using (var committedDb = await factory.CreateDbContextAsync())
+        {
+            var committed = await committedDb.FileMutationJournals
+                .SingleAsync(candidate =>
+                    candidate.OperationId == scenario.OperationId);
+            Assert.Equal(73, committed.AudiobookId);
+            Assert.Equal(
+                FileMutationOwner.RegistrationCompanionFile,
+                committed.AudiobookFileId);
+            Assert.Equal(
+                FileMutationJournalState.RegistrationCommitted,
+                committed.State);
+        }
+
+        Assert.True(await mover.CompletePreparedMoveAsync(
+            scenario.Source,
+            scenario.Destination,
+            lease,
+            scenario.OperationId));
+        Assert.False(File.Exists(scenario.Source));
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Destination));
+        await AssertJournalStateAsync(
+            scenario.OperationId,
+            FileMutationJournalState.Completed,
+            audiobookId: 73);
+        AssertNoLibraryArtifacts(scenario.Root);
+    }
+
+    [CrossVolumeFact]
+    public async Task PrepareCompanionMove_RealCrossVolumeCopiesThenRetiresSource()
+    {
+        var sourceRoot = FileService.GetTempDirectory(
+            "registration-real-cross-volume-source");
+        var source = Path.Join(sourceRoot, "cover.jpg");
+        await File.WriteAllTextAsync(source, "cover");
+        var providedDestinationRoot = Path.GetFullPath(
+            Environment.GetEnvironmentVariable(
+                CrossVolumeFactAttribute.DestinationPathEnvironmentVariable)
+            ?? throw new InvalidOperationException(
+                "A real cross-volume destination was not provided."));
+        var destinationRoot = Path.Join(
+            providedDestinationRoot,
+            $"listenarr-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(destinationRoot);
+        var destination = Path.Join(destinationRoot, "cover.jpg");
+        var operationId = Guid.NewGuid();
+
+        try
+        {
+            var mover = CreateMover();
+            var capability = Assert.IsAssignableFrom<
+                IFilePublicationSourceCapability>(mover);
+            var sourceCapability = await capability.CheckAsync(source);
+            Assert.True(sourceCapability.IsSupported, sourceCapability.Reason);
+
+            var preparation = await mover
+                .PrepareActionForRegistrationDetailedAsync(
+                    FilePublicationPlan.Durable(FileAction.Move),
+                    source,
+                    destination,
+                    operationId,
+                    expectedRegisteredPhysicalObjectIdentity: null,
+                    sourceCapability.SourceProof!.Value,
+                    isCompanionFile: true,
+                    companionAudiobookId: 75);
+            using var lease = Assert.IsAssignableFrom<
+                IAudiobookFileRegistrationLease>(
+                    preparation.RegistrationLease);
+            Assert.NotEqual(
+                lease.SourcePhysicalObjectIdentity,
+                lease.PhysicalObjectIdentity);
+            Assert.True(lease.PrepareCleanupRecovery(75));
+            Assert.Equal(
+                RegistrationPublicationCompletion.Completed,
+                lease.CompletePublication());
+            Assert.True(await mover.CompletePreparedMoveAsync(
+                source,
+                destination,
+                lease,
+                operationId));
+
+            Assert.False(File.Exists(source));
+            Assert.Equal("cover", await File.ReadAllTextAsync(destination));
+            await AssertJournalStateAsync(
+                operationId,
+                FileMutationJournalState.Completed,
+                audiobookId: 75);
+        }
+        finally
+        {
+            if (Directory.Exists(destinationRoot))
+            {
+                Directory.Delete(destinationRoot, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task PrepareCompatibilityMove_CopiesAndRetainsSourceWithoutDurableMoveJournal()
+    {
+        var scenario = await CreateScenarioAsync("registration-compatible-move");
+        var mover = CreateMover();
+        var hash = Convert.ToHexString(
+            SHA256.HashData(Encoding.UTF8.GetBytes("audio")));
+        var proof = new FilePublicationSourceProof(
+            $"content-only:{hash}",
+            5,
+            hash,
+            FilePublicationSourceAuthority.ContentOnly);
+
+        var preparation = await mover.PrepareActionForRegistrationDetailedAsync(
+            FilePublicationPlan.Additive(FileAction.Move),
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId,
+            expectedRegisteredPhysicalObjectIdentity: null,
+            proof,
+            isCompanionFile: true,
+            companionAudiobookId: 74);
+
+        Assert.True(preparation.IsSuccess, preparation.Message);
+        Assert.Equal(FileAction.Copy, preparation.EffectiveAction);
+        Assert.Equal(
+            FilePublicationSourceDisposition.Retained,
+            preparation.SourceDisposition);
+        using var lease = Assert.IsAssignableFrom<
+            IAudiobookFileRegistrationLease>(preparation.RegistrationLease);
+        Assert.False(lease.HasDurablePhysicalObjectIdentity);
+        Assert.True(lease.PrepareCleanupRecovery(74));
+        Assert.Equal(
+            RegistrationPublicationCompletion.Completed,
+            lease.CompletePublication());
+
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Source));
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Destination));
         var factory = _provider.GetRequiredService<
             IDbContextFactory<ListenArrDbContext>>();
         await using var db = await factory.CreateDbContextAsync();
-        Assert.False(await db.FileMutationJournals
-            .AsNoTracking()
-            .AnyAsync(candidate => candidate.OperationId == scenario.OperationId));
+        Assert.Empty(await db.FileMutationJournals.ToListAsync());
+        var journal = await db.CompatibilityFilePublicationJournals
+            .SingleAsync(candidate =>
+                candidate.OperationId == scenario.OperationId);
+        Assert.Equal(
+            CompatibilityFilePublicationState.Completed,
+            journal.State);
+        Assert.Equal(FileAction.Move, journal.RequestedAction);
+        Assert.Equal(FileAction.Copy, journal.EffectiveAction);
+        Assert.True(journal.IsCompanionFile);
+        AssertNoLibraryArtifacts(scenario.Root);
+    }
+
+    [NetworkStorageTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PrepareCompatibilityMove_OnNetworkStorage_CopiesAndRetainsSource(
+        bool isCompanionFile)
+    {
+        var providedRoot = Path.GetFullPath(
+            Environment.GetEnvironmentVariable(
+                NetworkStorageTheoryAttribute.PathEnvironmentVariable)
+            ?? throw new InvalidOperationException(
+                "A network filesystem path was not provided."));
+        var scenarioRoot = Path.Join(
+            providedRoot,
+            $"listenarr-{Guid.NewGuid():N}");
+        var sourceDirectory = Path.Join(scenarioRoot, "source");
+        var destinationDirectory = Path.Join(scenarioRoot, "destination");
+        Directory.CreateDirectory(sourceDirectory);
+        Directory.CreateDirectory(destinationDirectory);
+        var source = Path.Join(sourceDirectory, "cover.jpg");
+        var destination = Path.Join(destinationDirectory, "cover.jpg");
+        await File.WriteAllTextAsync(source, "cover");
+        var operationId = Guid.NewGuid();
+
+        try
+        {
+            var nativeCapability = Assert.IsAssignableFrom<
+                IFilePublicationSourceCapability>(CreateMover());
+            var nativeResult = await nativeCapability.CheckAsync(source);
+            Assert.True(nativeResult.IsSupported, nativeResult.Reason);
+
+            var mover = CreateMover(forceContentOnlySourceProof: true);
+            var weakCapability = Assert.IsAssignableFrom<
+                IFilePublicationSourceCapability>(mover);
+            var sourceCapability = await weakCapability.CheckAsync(source);
+            Assert.True(sourceCapability.IsSupported, sourceCapability.Reason);
+            var proof = Assert.NotNull(sourceCapability.SourceProof);
+            Assert.False(proof.HasDurablePhysicalObjectIdentity);
+            Assert.Equal(FilePublicationSourceAuthority.ContentOnly, proof.Authority);
+            var preparation = await mover
+                .PrepareActionForRegistrationDetailedAsync(
+                    FilePublicationPlan.Additive(FileAction.Move),
+                    source,
+                    destination,
+                    operationId,
+                    expectedRegisteredPhysicalObjectIdentity: null,
+                    proof,
+                    isCompanionFile,
+                    companionAudiobookId: isCompanionFile ? 76 : null);
+
+            Assert.True(preparation.IsSuccess, preparation.Message);
+            Assert.Equal(FileAction.Copy, preparation.EffectiveAction);
+            Assert.Equal(
+                FilePublicationSourceDisposition.Retained,
+                preparation.SourceDisposition);
+            using var lease = Assert.IsAssignableFrom<
+                IAudiobookFileRegistrationLease>(
+                    preparation.RegistrationLease);
+            Assert.False(lease.HasDurablePhysicalObjectIdentity);
+            Assert.True(lease.PrepareCleanupRecovery(76));
+            Assert.Equal(
+                RegistrationPublicationCompletion.Completed,
+                lease.CompletePublication());
+
+            Assert.Equal("cover", await File.ReadAllTextAsync(source));
+            Assert.Equal("cover", await File.ReadAllTextAsync(destination));
+            var factory = _provider.GetRequiredService<
+                IDbContextFactory<ListenArrDbContext>>();
+            await using var db = await factory.CreateDbContextAsync();
+            var journal = await db.CompatibilityFilePublicationJournals
+                .SingleAsync(candidate =>
+                    candidate.OperationId == operationId);
+            Assert.Equal(
+                CompatibilityFilePublicationState.Completed,
+                journal.State);
+            Assert.Equal(isCompanionFile, journal.IsCompanionFile);
+        }
+        finally
+        {
+            if (Directory.Exists(scenarioRoot))
+            {
+                Directory.Delete(scenarioRoot, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task PrepareCompatibilityCopy_PreexistingTargetIsPreservedAndNeedsAttention()
+    {
+        var scenario = await CreateScenarioAsync("registration-compatible-existing");
+        await File.WriteAllTextAsync(scenario.Destination, "foreign");
+        var mover = CreateMover();
+        var hash = Convert.ToHexString(
+            SHA256.HashData(Encoding.UTF8.GetBytes("audio")));
+        var proof = new FilePublicationSourceProof(
+            $"content-only:{hash}",
+            5,
+            hash,
+            FilePublicationSourceAuthority.ContentOnly);
+
+        var preparation = await mover.PrepareActionForRegistrationDetailedAsync(
+            FilePublicationPlan.Additive(FileAction.Copy),
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId,
+            expectedRegisteredPhysicalObjectIdentity: null,
+            proof);
+
+        Assert.False(preparation.IsSuccess);
+        Assert.Null(preparation.RegistrationLease);
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Source));
+        Assert.Equal("foreign", await File.ReadAllTextAsync(scenario.Destination));
+        var factory = _provider.GetRequiredService<
+            IDbContextFactory<ListenArrDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var journal = await db.CompatibilityFilePublicationJournals
+            .SingleAsync(candidate =>
+                candidate.OperationId == scenario.OperationId);
+        Assert.Equal(
+            CompatibilityFilePublicationState.NeedsAttention,
+            journal.State);
         AssertNoLibraryArtifacts(scenario.Root);
     }
 
@@ -1392,7 +1724,8 @@ public sealed class FileMoverMarkerlessRegistrationTests : BaseTests
         Func<Task>? beforePinnedHardlinkCreation = null,
         Func<string, bool?>? readOnlyFileSystemProbe = null,
         IRootFolderRepository? rootFolderRepository = null,
-        IRootFolderStorageHealthResolver? rootFolderStorageHealthResolver = null)
+        IRootFolderStorageHealthResolver? rootFolderStorageHealthResolver = null,
+        bool forceContentOnlySourceProof = false)
     {
         var factory = _provider.GetRequiredService<
             IDbContextFactory<ListenArrDbContext>>();
@@ -1407,6 +1740,7 @@ public sealed class FileMoverMarkerlessRegistrationTests : BaseTests
             FileMoveLockDirectoryForTest = FileService.GetTempDirectory(
                 "file-mover-markerless-registration-locks"),
             ForceCrossVolumeForTest = forceCrossVolume,
+            ForceContentOnlySourceProofForTest = forceContentOnlySourceProof,
             BeforePinnedHardlinkCreationForTestAsync =
                 beforePinnedHardlinkCreation,
             BeforeMarkerlessRegistrationSourceDeleteForTestAsync =

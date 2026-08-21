@@ -38,6 +38,8 @@ public partial class ManualImportController : ControllerBase
     private readonly IRootFolderService _rootFolderService;
     private readonly IFileMover _fileMover;
     private readonly IFilePublicationSourceCapability _filePublicationSourceCapability;
+    private readonly IFilePublicationCapabilityResolver?
+        _filePublicationCapabilityResolver;
     private readonly IAudiobookFileService _audiobookFileService;
     private readonly IFileSystem _fileSystem;
     private readonly IFileSystemSemanticsResolver _semanticsResolver;
@@ -72,7 +74,8 @@ public partial class ManualImportController : ControllerBase
         ILibraryDirectoryOwnershipStore directoryOwnershipStore,
         ILibraryFilesystemMutationGate filesystemMutationGate,
         ManualImportPathPlanner? pathPlanner = null,
-        ManualImportCompanionImporter? companionImporter = null)
+        ManualImportCompanionImporter? companionImporter = null,
+        IFilePublicationCapabilityResolver? filePublicationCapabilityResolver = null)
     {
         _logger = logger;
         _audiobookRepository = audiobookRepository;
@@ -88,6 +91,7 @@ public partial class ManualImportController : ControllerBase
         _fileMover = fileMover;
         _filePublicationSourceCapability = filePublicationSourceCapability
             ?? throw new ArgumentNullException(nameof(filePublicationSourceCapability));
+        _filePublicationCapabilityResolver = filePublicationCapabilityResolver;
         _audiobookFileService = audiobookFileService;
         _fileSystem = fileSystem;
         _semanticsResolver = semanticsResolver;
@@ -107,7 +111,8 @@ public partial class ManualImportController : ControllerBase
             fileSystem,
             directoryOwnershipStore,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<ManualImportCompanionImporter>.Instance,
-            audiobookFileService);
+            audiobookFileService,
+            filePublicationCapabilityResolver);
     }
 
     /// <summary>

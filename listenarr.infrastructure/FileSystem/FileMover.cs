@@ -43,10 +43,13 @@ namespace Listenarr.Infrastructure.FileSystem
         private readonly ILogger<FileMover> _logger;
         private readonly IFileSystemSemanticsResolver _semanticsResolver;
         private readonly IFileMutationJournalStore? _fileMutationJournalStore;
+        private readonly CompatibilityFilePublicationJournalStore?
+            _compatibilityFilePublicationJournalStore;
         private readonly IApplicationPathService _applicationPathService;
         private readonly Func<string, bool?> _readOnlyFileSystemProbe;
         private readonly IRootFolderRepository? _rootFolderRepository;
         private readonly IRootFolderStorageHealthResolver? _rootFolderStorageHealthResolver;
+        private readonly WeakPublicationMode _weakPublicationMode;
 
         public FileMover(
             ILogger<FileMover> logger,
@@ -70,12 +73,19 @@ namespace Listenarr.Infrastructure.FileSystem
                 ?? FileSystemMutationCapabilityProbe.ProbeReadOnlyDirectory;
             _rootFolderRepository = rootFolderRepository;
             _rootFolderStorageHealthResolver = rootFolderStorageHealthResolver;
+            _weakPublicationMode = options?.Value.WeakPublicationMode
+                ?? WeakPublicationMode.CopyAndRetainSource;
             _fileMutationJournalStore = dbContextFactory == null
                 ? null
                 : new EfFileMutationJournalStore(
                     dbContextFactory,
                     timeProvider ?? TimeProvider.System,
                     _semanticsResolver);
+            _compatibilityFilePublicationJournalStore = dbContextFactory == null
+                ? null
+                : new CompatibilityFilePublicationJournalStore(
+                    dbContextFactory,
+                    timeProvider ?? TimeProvider.System);
         }
 
     }

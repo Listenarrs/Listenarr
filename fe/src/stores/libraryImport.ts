@@ -485,9 +485,10 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
 
   async function importSelected(
     rootFolderPath: string,
-  ): Promise<{ imported: number; errors: string[] }> {
+  ): Promise<{ imported: number; errors: string[]; warnings: string[] }> {
     const toImport = itemList.value.filter((i) => i.selected && i.selectedMatch)
     importErrors.value = []
+    const warnings: string[] = []
     let imported = 0
 
     for (const item of toImport) {
@@ -553,6 +554,12 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
           )
         }
 
+        for (const result of importResult.results ?? []) {
+          if (result.success && result.warning && !warnings.includes(result.warning)) {
+            warnings.push(result.warning)
+          }
+        }
+
         // Remove imported item from store only after the backend confirms every
         // source file represented by this book row was registered successfully.
         const updated = { ...items.value }
@@ -567,7 +574,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
       }
     }
 
-    return { imported, errors: importErrors.value }
+    return { imported, errors: importErrors.value, warnings }
   }
 
   return {

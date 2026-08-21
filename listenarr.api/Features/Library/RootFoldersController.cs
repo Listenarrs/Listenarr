@@ -38,6 +38,7 @@ namespace Listenarr.Api.Features.Library
         bool CanChangePath,
         bool CanReadFilesystem,
         bool CanScanFilesystem,
+        bool CanPublishNewFiles,
         bool CanMutateFilesystem,
         string? ConfirmationToken,
         DateTime CreatedAt,

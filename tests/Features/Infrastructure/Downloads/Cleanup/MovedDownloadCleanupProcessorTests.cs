@@ -257,6 +257,27 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Cleanup
         }
 
         [Fact]
+        public async Task RunCycleAsync_DowngradesDeleteFilesWhenCompatibilityImportRetainedSource()
+        {
+            var client = await CreateRemovableClientAsync("remove_and_delete");
+            _gateway.RemoveResult = true;
+            var download = await AddMovedDownloadAsync(client, canBeRemoved: true);
+            await AddCompletedImportJobAsync(
+                download,
+                sourceRetained: true);
+
+            await _provider.GetRequiredService<IMovedDownloadCleanupProcessor>()
+                .RunCycleAsync(CancellationToken.None);
+
+            Assert.Null(await _downloadRepository.GetByIdAsync(download.Id));
+            Assert.Equal(1, _gateway.GetCallCount(nameof(_gateway.RemoveAsync)));
+            Assert.False(_gateway.LastRemoveDeleteFiles);
+            var history = await GetCleanupHistoryAsync(download.Id);
+            Assert.Contains(history.Records, entry =>
+                DetailValue(entry, "SourceRetained") == bool.TrueString);
+        }
+
+        [Fact]
         public async Task RunCycleAsync_BlocksRecentMovedWithoutImportProof()
         {
             var client = await CreateRemovableClientAsync("remove");
@@ -317,7 +338,8 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Cleanup
         private async Task AddCompletedImportJobAsync(
             Download download,
             string? correlationId = null,
-            DateTime? completedAt = null)
+            DateTime? completedAt = null,
+            bool sourceRetained = false)
         {
             var job = new DownloadProcessingJobBuilder()
                 .WithDownload(download)
@@ -327,6 +349,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Cleanup
             {
                 job.JobData["CorrelationId"] = correlationId;
             }
+            job.JobData["SourceRetained"] = sourceRetained;
 
             await _downloadProcessingJobRepository.AddAsync(job);
         }

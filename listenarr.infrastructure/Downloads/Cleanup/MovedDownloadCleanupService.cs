@@ -22,69 +22,6 @@ using System.Text.Json;
 
 namespace Listenarr.Infrastructure.Downloads.Cleanup
 {
-    /// <summary>
-    /// Background service that handles moved downloads to remove them from client
-    /// Runs every 10 seconds to check for moved downloads
-    /// </summary>
-    public class MovedDownloadCleanupService(
-        IMovedDownloadCleanupProcessor processor,
-        ILogger<MovedDownloadCleanupService> logger,
-        IWorkerCycleRunner cycleRunner,
-        IServiceScopeFactory scopeFactory) : BackgroundService
-    {
-        private TimeSpan _pollingInterval = TimeSpan.FromSeconds(10);
-
-        public override async Task StartAsync(CancellationToken cancellationToken)
-        {
-            logger.LogInformation("MovedDownloadCleanupService starting");
-
-            try
-            {
-                using var scope = scopeFactory.CreateScope();
-                var configurationService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
-                var settings = await configurationService.GetApplicationSettingsAsync();
-                if (settings.PollingIntervalSeconds > 0)
-                {
-                    _pollingInterval = TimeSpan.FromSeconds(settings.PollingIntervalSeconds);
-                }
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                logger.LogInformation("MovedDownloadCleanupService startup canceled");
-            }
-            catch (OperationCanceledException ex)
-            {
-                logger.LogWarning(ex, "MovedDownloadCleanupService settings load canceled/timed out during startup; using default interval");
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                logger.LogWarning(ex, "Failed to load polling interval from settings, using default");
-            }
-
-            await base.StartAsync(cancellationToken);
-        }
-
-        public override async Task StopAsync(CancellationToken cancellationToken)
-        {
-            logger.LogInformation("MovedDownloadCleanupService stopping");
-            await base.StopAsync(cancellationToken);
-        }
-
-        protected override async Task ExecuteAsync(CancellationToken cancellationToken)
-        {
-            logger.LogInformation("MovedDownloadCleanupService background task started");
-
-            await cycleRunner.RunPeriodicAsync(
-                nameof(MovedDownloadCleanupService),
-                initialDelay: null,
-                intervalProvider: () => _pollingInterval,
-                runCycle: processor.RunCycleAsync,
-                cancellationToken);
-
-            logger.LogInformation("MovedDownloadCleanupService background task stopped");
-        }
-    }
-
     public class MovedDownloadCleanupProcessor(
         IServiceScopeFactory scopeFactory,
         ILogger<MovedDownloadCleanupProcessor> logger) : IMovedDownloadCleanupProcessor
@@ -107,9 +44,12 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
             ImportProofKind Kind,
             string CorrelationId,
             string? ProcessingJobId,
-            DateTime? ProvenAt)
+            DateTime? ProvenAt,
+            bool SourceRetained = false)
         {
-            public bool AllowsDestructiveCleanup => Kind is not ImportProofKind.LegacyMovedState;
+            public bool AllowsDestructiveCleanup =>
+                Kind is not ImportProofKind.LegacyMovedState
+                && !SourceRetained;
         }
 
         /// <summary>
@@ -386,7 +326,14 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
                     ImportProofKind.CompletedProcessingJob,
                     completedJob.GetOrCreateCorrelationId(),
                     completedJob.Id,
-                    completedJob.CompletedAt);
+                    completedJob.CompletedAt,
+                    completedJob.JobData.TryGetValue(
+                        "SourceRetained",
+                        out var retainedValue)
+                    && bool.TryParse(
+                        retainedValue?.ToString(),
+                        out var sourceRetained)
+                    && sourceRetained);
             }
 
             if (download.LastImportedAt.HasValue)
@@ -452,7 +399,8 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
             {
                 ["ImportProof"] = proof.Kind.ToString(),
                 ["RemovalPolicy"] = removalPolicy,
-                ["DeleteFiles"] = deleteFiles
+                ["DeleteFiles"] = deleteFiles,
+                ["SourceRetained"] = proof.SourceRetained
             };
 
             if (!string.IsNullOrWhiteSpace(proof.ProcessingJobId))

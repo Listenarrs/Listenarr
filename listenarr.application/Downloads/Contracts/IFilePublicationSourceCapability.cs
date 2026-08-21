@@ -8,6 +8,12 @@ public enum FilePublicationSourceCapabilityFailureKind
     Unsupported = 3
 }
 
+public enum FilePublicationSourceAuthority
+{
+    DurableObjectIdentity = 0,
+    ContentOnly = 1
+}
+
 /// <summary>
 /// Exact source evidence used to derive and later revalidate a durable file-publication
 /// operation. Physical generation alone is insufficient because a downloader may rewrite
@@ -16,8 +22,13 @@ public enum FilePublicationSourceCapabilityFailureKind
 public readonly record struct FilePublicationSourceProof(
     string PhysicalObjectIdentity,
     long Length,
-    string Sha256)
+    string Sha256,
+    FilePublicationSourceAuthority Authority =
+        FilePublicationSourceAuthority.DurableObjectIdentity)
 {
+    public bool HasDurablePhysicalObjectIdentity =>
+        Authority == FilePublicationSourceAuthority.DurableObjectIdentity;
+
     public void Validate()
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(PhysicalObjectIdentity);

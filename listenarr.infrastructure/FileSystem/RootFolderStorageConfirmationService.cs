@@ -281,6 +281,8 @@ internal sealed class RootFolderStorageConfirmationService(
                 || (journal.AudiobookId != null
                     && journal.AudiobookFileId != null
                     && (journal.AudiobookFileId == FileMutationOwner.CompanionFile
+                        || journal.AudiobookFileId
+                            == FileMutationOwner.RegistrationCompanionFile
                         ? journal.State != FileMutationJournalState.Completed
                         : journal.State != FileMutationJournalState.OwnerMetadataReconciled)))
             .ToListAsync(cancellationToken);

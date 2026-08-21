@@ -17,7 +17,9 @@ public partial class FileMover
             destination,
             operationId,
             expectedRegisteredPhysicalObjectIdentity: null,
-            expectedSourceProof: null);
+            expectedSourceProof: null,
+            isCompanionFile: false,
+            companionAudiobookId: null);
     }
 
     public Task<IAudiobookFileRegistrationLease?> PrepareActionForRegistrationAsync(
@@ -35,7 +37,9 @@ public partial class FileMover
             destination,
             operationId,
             expectedRegisteredPhysicalObjectIdentity,
-            expectedSourceProof: null);
+            expectedSourceProof: null,
+            isCompanionFile: false,
+            companionAudiobookId: null);
     }
 
     public Task<IAudiobookFileRegistrationLease?> PrepareActionForRegistrationAsync(
@@ -53,7 +57,9 @@ public partial class FileMover
             destination,
             operationId,
             expectedRegisteredPhysicalObjectIdentity,
-            expectedSourceProof);
+            expectedSourceProof,
+            isCompanionFile: false,
+            companionAudiobookId: null);
     }
 
     private async Task<IAudiobookFileRegistrationLease?>
@@ -63,7 +69,9 @@ public partial class FileMover
             string destination,
             Guid operationId,
             string? expectedRegisteredPhysicalObjectIdentity,
-            FilePublicationSourceProof? expectedSourceProof)
+            FilePublicationSourceProof? expectedSourceProof,
+            bool isCompanionFile,
+            int? companionAudiobookId)
     {
         if (action is not (
                 FileAction.Move or
@@ -103,7 +111,9 @@ public partial class FileMover
             destination,
             operationId,
             expectedRegisteredPhysicalObjectIdentity,
-            expectedSourceProof);
+            expectedSourceProof,
+            isCompanionFile,
+            companionAudiobookId);
         if (markerless.Handled)
         {
             return markerless.Lease;
@@ -314,7 +324,9 @@ public partial class FileMover
             destination,
             operationId,
             expectedRegisteredPhysicalObjectIdentity: null,
-            expectedSourceProof);
+            expectedSourceProof,
+            isCompanionFile: false,
+            companionAudiobookId: null);
         if (!markerless.Handled)
         {
             LogMutation(
@@ -408,12 +420,30 @@ public partial class FileMover
     private void LogMutation(FileMutationOutcome outcome, FileAction action, string source, string? destination, string? reason = null)
     {
         var result = new FileMutationResult(outcome, action, source, destination, reason);
-        _logger.LogInformation(
-            "File mutation {Outcome}: {Action} {Source} -> {Destination}. Reason: {Reason}",
+        var arguments = new object?[]
+        {
             result.Outcome,
             result.Action,
             LogRedaction.SanitizeFilePath(result.SourcePath),
             LogRedaction.SanitizeFilePath(result.DestinationPath ?? string.Empty),
-            LogRedaction.SanitizeText(result.Reason ?? string.Empty));
+            LogRedaction.SanitizeText(result.Reason ?? string.Empty)
+        };
+        const string template =
+            "File mutation {Outcome}: {Action} {Source} -> {Destination}. Reason: {Reason}";
+        switch (outcome)
+        {
+            case FileMutationOutcome.Blocked:
+                _logger.LogWarning(template, arguments);
+                break;
+            case FileMutationOutcome.Failed:
+                _logger.LogError(template, arguments);
+                break;
+            case FileMutationOutcome.Skipped:
+                _logger.LogDebug(template, arguments);
+                break;
+            default:
+                _logger.LogInformation(template, arguments);
+                break;
+        }
     }
 }

@@ -55,10 +55,30 @@ public partial class FileMover : IFilePublicationSourceCapability
                     FilePublicationSourceCapabilityFailureKind.Unavailable);
             }
 
-            var proof = await CaptureMarkerlessSourceProofAsync(
-                entry,
-                cancellationToken,
-                includeSha256: true);
+            FilePublicationSourceProof sourceProof;
+            try
+            {
+                if (ForceContentOnlySourceProofForTest)
+                {
+                    throw new PlatformNotSupportedException(
+                        "Durable source identity was disabled for this test.");
+                }
+                var proof = await CaptureMarkerlessSourceProofAsync(
+                    entry,
+                    cancellationToken,
+                    includeSha256: true);
+                sourceProof = new FilePublicationSourceProof(
+                    proof.PhysicalObjectIdentity,
+                    proof.Length,
+                    proof.Sha256!);
+            }
+            catch (Exception exception) when (exception is
+                PlatformNotSupportedException or NotSupportedException)
+            {
+                sourceProof = await CaptureContentOnlySourceProofAsync(
+                    entry,
+                    cancellationToken);
+            }
             if (!anchor.VisiblePathMatches()
                 || !entry.VisiblePathMatches())
             {
@@ -68,10 +88,7 @@ public partial class FileMover : IFilePublicationSourceCapability
             }
 
             return FilePublicationSourceCapabilityResult.SupportedForProof(
-                new FilePublicationSourceProof(
-                    proof.PhysicalObjectIdentity,
-                    proof.Length,
-                    proof.Sha256!));
+                sourceProof);
         }
         catch (Exception exception) when (
             FileSystemSafety.IsProvenMissingPathException(exception))

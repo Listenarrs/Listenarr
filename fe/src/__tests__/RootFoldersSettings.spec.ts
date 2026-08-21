@@ -384,6 +384,27 @@ describe('RootFoldersSettings', () => {
     wrapper.unmount()
   })
 
+  it('states that weak-storage moves copy and retain the source', async () => {
+    vi.mocked(apiService.getRootFolders).mockResolvedValue([
+      {
+        ...rootFolder(null),
+        storageState: 'Limited',
+        storageReason: 'IdentityUnsupported',
+        storageMessage: 'Durable file identity is unavailable.',
+        canPublishNewFiles: true,
+        canMutateFilesystem: false,
+      },
+    ])
+    const pinia = createReadyPinia()
+    const wrapper = mount(RootFoldersSettings, { global: { plugins: [pinia] } })
+    await flushPromises()
+
+    const policy = wrapper.get('[data-cy="compatibility-publication-message"]')
+    expect(policy.text()).toContain('will copy files into this storage and retain the source')
+    expect(policy.text()).toContain('will not attempt source cleanup')
+    wrapper.unmount()
+  })
+
   it('shows initializing, blocks filesystem actions, and keeps metadata editing available', async () => {
     const folder = {
       ...rootFolder(null),

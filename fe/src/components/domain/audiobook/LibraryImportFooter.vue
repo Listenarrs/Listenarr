@@ -53,6 +53,18 @@
         <PhWarning :size="14" />
         {{ store.metadataFetchCount }} API lookups - rate limit: 150/window
       </div>
+
+      <div
+        v-if="usesCopyAndRetainMovePolicy"
+        class="move-policy-warning"
+        data-testid="move-policy-warning"
+      >
+        <PhWarning :size="16" />
+        <span>
+          This storage cannot prove durable file identity. Move will copy the selected files and
+          retain the source; Listenarr will not attempt source cleanup.
+        </span>
+      </div>
     </div>
 
     <div class="footer-center">
@@ -117,7 +129,10 @@ import { useToast } from '@/services/toastService'
 import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import type { RootFolder } from '@/types'
 
-const props = defineProps<{ folders: RootFolder[] }>()
+const props = defineProps<{
+  folders: RootFolder[]
+  sourceFolder?: RootFolder
+}>()
 
 const store = useLibraryImportStore()
 const filesystemReadinessStore = useFilesystemReadinessStore()
@@ -130,6 +145,18 @@ const importingCount = ref(0)
 const destinationPath = computed(() => {
   if (store.action == 'none') return ''
   return props.folders.find((f) => f.id === destinationFolderId.value)?.path ?? ''
+})
+
+const destinationFolder = computed(() =>
+  props.folders.find((folder) => folder.id === destinationFolderId.value),
+)
+
+const usesCopyAndRetainMovePolicy = computed(() => {
+  if (store.action !== 'move') return false
+
+  return [props.sourceFolder, destinationFolder.value].some(
+    (folder) => folder?.canPublishNewFiles === true && folder.canMutateFilesystem === false,
+  )
 })
 
 const displayImportCount = computed(() =>
@@ -155,7 +182,7 @@ async function handleImport() {
   isImporting.value = true
 
   try {
-    const { imported, errors } = await store.importSelected(destinationPath.value)
+    const { imported, errors, warnings = [] } = await store.importSelected(destinationPath.value)
 
     if (imported > 0) {
       let msg = `${imported} book${imported !== 1 ? 's' : ''} imported`
@@ -168,6 +195,10 @@ async function handleImport() {
         'Import errors',
         `${errors.length} item${errors.length !== 1 ? 's' : ''} failed - check logs`,
       )
+    }
+
+    if (warnings.length > 0) {
+      toast.warning('Import completed with warnings', warnings.join('\n'))
     }
   } finally {
     isImporting.value = false
@@ -243,6 +274,20 @@ async function handleImport() {
   border: 1px solid rgba(245, 158, 11, 0.3);
   border-radius: 4px;
   padding: 0.2rem 0.5rem;
+}
+
+.move-policy-warning {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: 620px;
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 4px;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.78rem;
+  white-space: normal;
 }
 
 .footer-center {

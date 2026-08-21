@@ -19,9 +19,14 @@ public partial class FileMover
             gate.DestinationName,
             requireDeleteAccess: false);
 
+        var sourceSharesDestinationVolume = sourceEntry != null
+            && !ForceCrossVolumeForTest
+            && sourceEntry.IsOnSameVolume(gate.DestinationParent);
         var requiresGenerationPreservingLink =
             action == FileAction.HardlinkCopy
-            || (action == FileAction.Move && !OperatingSystem.IsWindows());
+            || (action == FileAction.Move
+                && !OperatingSystem.IsWindows()
+                && sourceSharesDestinationVolume);
 
         if (existingTarget != null)
         {
@@ -83,7 +88,7 @@ public partial class FileMover
         string targetIdentity;
         PinnedDirectoryCreation.PinnedFileEntry? publishedHardlink = null;
         if (requiresGenerationPreservingLink
-            && sourceEntry.IsOnSameVolume(gate.DestinationParent))
+            && sourceSharesDestinationVolume)
         {
             try
             {

@@ -25,6 +25,8 @@ public sealed class FileMoverOptionsValidator : IValidateOptions<FileMoverOption
             failures.Add("FileMover:MinBackoffMs cannot be negative.");
         if (options.MaxBackoffMs < options.MinBackoffMs)
             failures.Add("FileMover:MaxBackoffMs must be greater than or equal to MinBackoffMs.");
+        if (!Enum.IsDefined(options.WeakPublicationMode))
+            failures.Add("FileMover:WeakPublicationMode must be CopyAndRetainSource or Disabled.");
 
         return failures.Count == 0
             ? ValidateOptionsResult.Success

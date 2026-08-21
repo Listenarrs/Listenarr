@@ -5,7 +5,50 @@ namespace Listenarr.Application.Downloads.Import;
 
 public partial class DownloadImportService
 {
-    private async Task<bool> PerformOwnedFileActionAsync(
+    private Task<FilePublicationPlan> ResolvePublicationPlanAsync(
+        FileAction requestedAction,
+        string source,
+        string destination,
+        FilePublicationSourceProof sourceProof,
+        CancellationToken cancellationToken)
+    {
+        return filePublicationCapabilityResolver == null
+            ? Task.FromResult(sourceProof.HasDurablePhysicalObjectIdentity
+                ? FilePublicationPlan.Durable(requestedAction)
+                : FilePublicationPlan.Additive(requestedAction))
+            : filePublicationCapabilityResolver.ResolveAsync(
+                requestedAction,
+                source,
+                destination,
+                sourceProof,
+                cancellationToken);
+    }
+
+    private static ImportResult CreateBlockedImportResult(
+        FilePublicationPlan publicationPlan,
+        string source,
+        string destination)
+    {
+        var blocked = ImportResult.ImportFailure(
+            publicationPlan.RequestedAction,
+            source,
+            destination);
+        blocked.Message = publicationPlan.Message;
+        return blocked;
+    }
+
+    private static ImportSourceDisposition ToImportSourceDisposition(
+        FilePublicationPlan publicationPlan) =>
+        publicationPlan.SourceDisposition switch
+        {
+            FilePublicationSourceDisposition.Retained =>
+                ImportSourceDisposition.Retained,
+            FilePublicationSourceDisposition.Retired =>
+                ImportSourceDisposition.Retired,
+            _ => ImportSourceDisposition.Unchanged
+        };
+
+    private async Task<FilePublicationPlan?> PerformOwnedFileActionAsync(
         FileAction action,
         string source,
         string destination,
@@ -17,6 +60,25 @@ public partial class DownloadImportService
         CancellationToken cancellationToken)
     {
         expectedSourceProof.Validate();
+        var publicationPlan = filePublicationCapabilityResolver == null
+            ? expectedSourceProof.HasDurablePhysicalObjectIdentity
+                ? FilePublicationPlan.Durable(action)
+                : FilePublicationPlan.Additive(action)
+            : await filePublicationCapabilityResolver.ResolveAsync(
+                action,
+                source,
+                destination,
+                expectedSourceProof,
+                cancellationToken);
+        if (!publicationPlan.IsAllowed)
+        {
+            logger.LogWarning(
+                "Blocked companion publication for {Source}: {Reason}",
+                LogRedaction.SanitizeFilePath(source),
+                LogRedaction.SanitizeText(publicationPlan.Message));
+            return null;
+        }
+
         if (!await EnsureOwnedImportDestinationAsync(
                 source,
                 destination,
@@ -24,31 +86,54 @@ public partial class DownloadImportService
                 semantics,
                 operationId,
                 audiobookId,
+                publicationPlan,
                 cancellationToken))
         {
-            return false;
+            return null;
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        return action == FileAction.Move
-            ? await fileMover.PerformActionOn(
-                action,
+        var preparation = await fileMover
+            .PrepareActionForRegistrationDetailedAsync(
+                publicationPlan,
                 source,
                 destination,
                 operationId,
-                audiobookId,
-                FileMutationOwner.CompanionFile,
-                expectedSourceProof)
-            : await fileMover.PerformActionOn(
-                action,
+                expectedRegisteredPhysicalObjectIdentity: null,
+                expectedSourceProof,
+                isCompanionFile: true,
+                companionAudiobookId: audiobookId);
+        using var lease = preparation.RegistrationLease;
+        if (lease == null || !lease.PrepareCleanupRecovery(audiobookId))
+        {
+            return null;
+        }
+
+        var completion = lease.CompletePublication();
+        if (completion
+            == RegistrationPublicationCompletion.CommittedCleanupPending)
+        {
+            logger.LogWarning(
+                "Companion publication committed, but cleanup remains pending for {Path}",
+                LogRedaction.SanitizeFilePath(destination));
+            return null;
+        }
+
+        if (publicationPlan.EffectiveAction == FileAction.Move
+            && !await fileMover.CompletePreparedMoveAsync(
                 source,
                 destination,
-                operationId,
-                expectedSourceProof);
+                lease,
+                operationId))
+        {
+            return null;
+        }
+
+        return publicationPlan;
     }
 
-    private async Task<IAudiobookFileRegistrationLease?> PrepareOwnedFileActionForRegistrationAsync(
-        FileAction action,
+    private async Task<FilePublicationPreparationResult> PrepareOwnedFileActionForRegistrationAsync(
+        FilePublicationPlan publicationPlan,
         string source,
         string destination,
         string managedBoundary,
@@ -67,31 +152,56 @@ public partial class DownloadImportService
                 semantics,
                 operationId,
                 audiobookId,
+                publicationPlan,
                 cancellationToken))
         {
-            return null;
+            return new FilePublicationPreparationResult(
+                FilePublicationOutcome.Blocked,
+                publicationPlan.RequestedAction,
+                publicationPlan.EffectiveAction,
+                publicationPlan.SourceDisposition,
+                ReasonCode: "destination_ownership_unavailable",
+                Message: "The import destination could not be prepared safely.");
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        if (action == FileAction.HardlinkCopy
-            && !string.IsNullOrWhiteSpace(
-                expectedRegisteredPhysicalObjectIdentity))
+        if (publicationPlan.Mode == FilePublicationExecutionMode.Durable)
         {
-            return await fileMover.PrepareActionForRegistrationAsync(
-                action,
-                source,
-                destination,
-                operationId,
-                expectedRegisteredPhysicalObjectIdentity,
-                expectedSourceProof);
+            var lease = publicationPlan.EffectiveAction == FileAction.HardlinkCopy
+                && !string.IsNullOrWhiteSpace(
+                    expectedRegisteredPhysicalObjectIdentity)
+                    ? await fileMover.PrepareActionForRegistrationAsync(
+                        publicationPlan.EffectiveAction,
+                        source,
+                        destination,
+                        operationId,
+                        expectedRegisteredPhysicalObjectIdentity,
+                        expectedSourceProof)
+                    : await fileMover.PrepareActionForRegistrationAsync(
+                        publicationPlan.EffectiveAction,
+                        source,
+                        destination,
+                        operationId,
+                        expectedRegisteredPhysicalObjectIdentity: null,
+                        expectedSourceProof);
+            return new FilePublicationPreparationResult(
+                lease == null
+                    ? FilePublicationOutcome.Blocked
+                    : FilePublicationOutcome.Success,
+                publicationPlan.RequestedAction,
+                publicationPlan.EffectiveAction,
+                publicationPlan.SourceDisposition,
+                lease);
         }
 
-        return await fileMover.PrepareActionForRegistrationAsync(
-            action,
+        return await fileMover.PrepareActionForRegistrationDetailedAsync(
+            publicationPlan,
             source,
             destination,
             operationId,
-            expectedRegisteredPhysicalObjectIdentity: null,
+            publicationPlan.EffectiveAction == FileAction.HardlinkCopy
+                ? expectedRegisteredPhysicalObjectIdentity
+                : null,
             expectedSourceProof);
     }
 
@@ -121,6 +231,7 @@ public partial class DownloadImportService
         FileSystemPathSemantics semantics,
         Guid operationId,
         int audiobookId,
+        FilePublicationPlan? publicationPlan,
         CancellationToken cancellationToken)
     {
         var destinationDirectory = Path.GetDirectoryName(destination)
@@ -156,14 +267,26 @@ public partial class DownloadImportService
             return false;
         }
 
-        await directoryOwnershipStore.EnsureCreatedHierarchyAsync(
-            destinationDirectory,
-            managedBoundary,
-            semantics,
-            "download-import",
-            operationId,
-            audiobookId,
-            cancellationToken);
+        if (publicationPlan?.Mode
+            == FilePublicationExecutionMode.AdditiveCopyRetainSource)
+        {
+            await directoryOwnershipStore.EnsureAdditiveHierarchyAsync(
+                destinationDirectory,
+                managedBoundary,
+                semantics,
+                cancellationToken);
+        }
+        else
+        {
+            await directoryOwnershipStore.EnsureCreatedHierarchyAsync(
+                destinationDirectory,
+                managedBoundary,
+                semantics,
+                "download-import",
+                operationId,
+                audiobookId,
+                cancellationToken);
+        }
         return true;
     }
 }

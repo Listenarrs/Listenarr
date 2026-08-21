@@ -16,7 +16,9 @@ public partial class FileMover
             string destination,
             Guid operationId,
             string? expectedRegisteredPhysicalObjectIdentity,
-            FilePublicationSourceProof? expectedSourceProof)
+            FilePublicationSourceProof? expectedSourceProof,
+            bool isCompanionFile,
+            int? companionAudiobookId)
     {
         if (_fileMutationJournalStore == null)
         {
@@ -58,20 +60,6 @@ public partial class FileMover
                 && !initialSource.MatchesObjectIdentity(
                     expectedSourceProof.Value.PhysicalObjectIdentity))
             {
-                return new MarkerlessRegistrationPreparation(true, null);
-            }
-
-            if (action == FileAction.Move
-                && !OperatingSystem.IsWindows()
-                && (ForceCrossVolumeForTest
-                    || !initialSource.IsOnSameVolume(gate.DestinationParent)))
-            {
-                LogMutation(
-                    FileMutationOutcome.Blocked,
-                    action,
-                    source,
-                    destination,
-                    "Unix cross-volume registration moves require source retirement that cannot be generation-fenced without a library-side namespace claim");
                 return new MarkerlessRegistrationPreparation(true, null);
             }
 
@@ -120,7 +108,11 @@ public partial class FileMover
                     gate.DestinationParent.GetDirectoryObjectIdentity(),
                     proof.PhysicalObjectIdentity,
                     proof.Length,
-                    proof.Sha256),
+                    proof.Sha256,
+                    AudiobookId: companionAudiobookId,
+                    AudiobookFileId: isCompanionFile
+                        ? FileMutationOwner.RegistrationCompanionFile
+                        : null),
                 cancellationToken);
             if (initialDestination != null)
             {
@@ -135,7 +127,12 @@ public partial class FileMover
         }
         else
         {
-            await ValidateMarkerlessRegistrationJournalAsync(journal, action, gate);
+            await ValidateMarkerlessRegistrationJournalAsync(
+                journal,
+                action,
+                gate,
+                isCompanionFile,
+                companionAudiobookId);
             if (!JournalParentGenerationsMatchGate(journal, gate))
             {
                 await MarkMarkerlessRegistrationNeedsAttentionAsync(

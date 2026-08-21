@@ -42,6 +42,9 @@ internal static class LibraryRegistrationExtensions
         services.AddScoped<IAudiobookFilePathIdentityResolver, AudiobookFilePathIdentityResolver>();
         services.AddScoped<IFileRenameCommitStore, FileRenameCommitStore>();
         services.AddScoped<IFileRegistrationRecoveryService, FileRegistrationRecoveryService>();
+        services.AddScoped<CompatibilityFilePublicationRecoveryService>();
+        services.AddScoped<ICompatibilityFilePublicationRecoveryService>(provider =>
+            provider.GetRequiredService<CompatibilityFilePublicationRecoveryService>());
         services.AddScoped<IFileRenameRecoveryReconciler, FileRenameRecoveryReconciler>();
         services.AddScoped<IAudiobookFileIdentityReconciler, AudiobookFileIdentityReconciler>();
         services.AddScoped<IRootFolderObjectIdentityReconciler, RootFolderObjectIdentityReconciler>();

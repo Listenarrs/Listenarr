@@ -178,6 +178,14 @@
             >
               {{ folder.storageMessage }}
             </p>
+            <p
+              v-if="folder.canPublishNewFiles === true && folder.canMutateFilesystem === false"
+              class="storage-message compatibility-publication-message"
+              data-cy="compatibility-publication-message"
+            >
+              Move policy: Listenarr will copy files into this storage and retain the source. It
+              will not attempt source cleanup while durable file identity is unavailable.
+            </p>
             <details
               v-if="folder.storageState !== 'Healthy' && folder.storageDetail"
               class="storage-detail"
