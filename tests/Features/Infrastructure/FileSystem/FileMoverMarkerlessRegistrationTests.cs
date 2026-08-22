@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -666,6 +667,55 @@ public sealed class FileMoverMarkerlessRegistrationTests : BaseTests
         Assert.Equal(FileAction.Copy, journal.EffectiveAction);
         Assert.True(journal.IsCompanionFile);
         AssertNoLibraryArtifacts(scenario.Root);
+    }
+
+    [Fact]
+    public async Task PrepareCompatibilityMove_BlockedLogIncludesFileContext()
+    {
+        var scenario = await CreateScenarioAsync(
+            "registration-compatible-blocked-log");
+        LogLevel? capturedLevel = null;
+        string? capturedMessage = null;
+        var logger = new Mock<ILogger<FileMover>>();
+        logger.Setup(candidate => candidate.Log(
+                It.IsAny<LogLevel>(),
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception?>(),
+                (Func<It.IsAnyType, Exception?, string>)It.IsAny<object>()))
+            .Callback(new InvocationAction(invocation =>
+            {
+                capturedLevel = (LogLevel)invocation.Arguments[0];
+                capturedMessage = invocation.Arguments[2]?.ToString();
+            }));
+        var mover = CreateMover(
+            logger: logger.Object,
+            options: Options.Create(new FileMoverOptions
+            {
+                WeakPublicationMode = WeakPublicationMode.Disabled
+            }));
+        var hash = Convert.ToHexString(
+            SHA256.HashData(Encoding.UTF8.GetBytes("audio")));
+        var proof = new FilePublicationSourceProof(
+            $"content-only:{hash}",
+            5,
+            hash,
+            FilePublicationSourceAuthority.ContentOnly);
+
+        var preparation = await mover.PrepareActionForRegistrationDetailedAsync(
+            FilePublicationPlan.Additive(FileAction.Move),
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId,
+            expectedRegisteredPhysicalObjectIdentity: null,
+            proof);
+
+        Assert.False(preparation.IsSuccess);
+        Assert.Equal("compatibility_publication_disabled", preparation.ReasonCode);
+        Assert.Equal(LogLevel.Warning, capturedLevel);
+        Assert.NotNull(capturedMessage);
+        Assert.Contains(Path.GetFileName(scenario.Source), capturedMessage);
+        Assert.Contains(Path.GetFileName(scenario.Destination), capturedMessage);
     }
 
     [NetworkStorageTheory]
@@ -1725,12 +1775,15 @@ public sealed class FileMoverMarkerlessRegistrationTests : BaseTests
         Func<string, bool?>? readOnlyFileSystemProbe = null,
         IRootFolderRepository? rootFolderRepository = null,
         IRootFolderStorageHealthResolver? rootFolderStorageHealthResolver = null,
-        bool forceContentOnlySourceProof = false)
+        bool forceContentOnlySourceProof = false,
+        ILogger<FileMover>? logger = null,
+        IOptions<FileMoverOptions>? options = null)
     {
         var factory = _provider.GetRequiredService<
             IDbContextFactory<ListenArrDbContext>>();
         return new FileMover(
-            new NullLogger<FileMover>(),
+            logger ?? new NullLogger<FileMover>(),
+            options: options,
             dbContextFactory: factory,
             timeProvider: TimeProvider.System,
             readOnlyFileSystemProbe: readOnlyFileSystemProbe,

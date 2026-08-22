@@ -442,7 +442,7 @@ namespace Listenarr.Application.Downloads.Import
                                 continue;
                             }
 
-                            if (!await PrepareRegisterAndCompletePublicationAsync(
+                            var publicationFailure = await PrepareRegisterAndCompletePublicationAsync(
                                     publicationPlan,
                                     file,
                                     destination,
@@ -453,12 +453,10 @@ namespace Listenarr.Application.Downloads.Import
                                     sourceProof.Value,
                                     audiobook,
                                     ownership,
-                                    ct))
+                                    ct);
+                            if (publicationFailure != null)
                             {
-                                results.Add(ImportResult.ImportFailure(
-                                    completedFileAction,
-                                    file,
-                                    destination));
+                                results.Add(publicationFailure);
                                 continue;
                             }
 
@@ -468,7 +466,8 @@ namespace Listenarr.Application.Downloads.Import
                             results.Add(ImportResult.ImportSuccess(
                                 completedFileAction,
                                 publicationPlan.EffectiveAction,
-                                ToImportSourceDisposition(publicationPlan),
+                                ToImportSourceDisposition(
+                                    publicationPlan.SourceDisposition),
                                 file,
                                 destination,
                                 wasRegisteredToAudiobook: true,

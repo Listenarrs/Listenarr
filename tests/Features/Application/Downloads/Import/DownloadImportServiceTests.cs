@@ -1293,6 +1293,141 @@ namespace Listenarr.Tests.Features.Application.Downloads.Import
         }
 
         [Fact]
+        public async Task ImportDownloadFilesAsync_BlockedPublication_PreservesPlanDetails()
+        {
+            const string reasonCode = "weak_publication_blocked";
+            const string message = "Weak publication was blocked for this source.";
+            var publicationResolver = new Mock<IFilePublicationCapabilityResolver>(
+                MockBehavior.Strict);
+            publicationResolver.Setup(resolver => resolver.ResolveAsync(
+                    FileAction.Move,
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<FilePublicationSourceProof>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(FilePublicationPlan.Blocked(
+                    FileAction.Move,
+                    reasonCode,
+                    message));
+            Init(builder => builder.WithSingleton<IFilePublicationCapabilityResolver>(
+                publicationResolver.Object));
+            await AddAuthorizedRootAsync(FileService.GetTempPath());
+
+            var outputDirectory = FileService.GetTempDirectory(
+                "download-import-blocked-plan-dst");
+            var sourceDirectory = FileService.GetTempDirectory(
+                "download-import-blocked-plan-src");
+            var source = await FileService.GetFileAsync(
+                sourceDirectory,
+                "blocked.mp3",
+                "audio");
+            var audiobook = await _audiobookRepository.AddAsync(
+                new AudiobookBuilder()
+                    .WithTitle("Blocked Publication")
+                    .WithBasePath(outputDirectory)
+                    .Build());
+            await _applicationSettingsRepository.SaveAsync(
+                new ApplicationSettingsBuilder()
+                    .WithOutputPath(outputDirectory)
+                    .WithMoveFileOnCompleted()
+                    .WithoutMetadataProcessing()
+                    .WithFolderNamingPattern("")
+                    .WithFileNamingPattern("{Title}")
+                    .WithMultiFileNamingPattern("{Title}")
+                    .Build());
+
+            var result = Assert.Single(await _provider
+                .GetRequiredService<IDownloadImportService>()
+                .ImportDownloadFilesAsync(audiobook, [source]));
+
+            Assert.False(result.Success);
+            Assert.Equal(FileAction.Move, result.Action);
+            Assert.Equal(FileAction.Move, result.RequestedAction);
+            Assert.Equal(FileAction.Move, result.EffectiveAction);
+            Assert.Equal(ImportSourceDisposition.Unchanged, result.SourceDisposition);
+            Assert.Equal(reasonCode, result.WarningCode);
+            Assert.Equal(message, result.Message);
+            publicationResolver.VerifyAll();
+        }
+
+        [Fact]
+        public async Task ImportDownloadFilesAsync_FailedCompatibilityPreparation_PreservesDetails()
+        {
+            const string reasonCode = "target_verification_failed";
+            const string message = "The compatibility target could not be verified.";
+            var publicationPlan = FilePublicationPlan.Additive(FileAction.Move);
+            var publicationResolver = new Mock<IFilePublicationCapabilityResolver>(
+                MockBehavior.Strict);
+            publicationResolver.Setup(resolver => resolver.ResolveAsync(
+                    FileAction.Move,
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<FilePublicationSourceProof>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(publicationPlan);
+            var fileMover = new Mock<IFileMover>(MockBehavior.Strict);
+            fileMover.Setup(mover => mover.PrepareActionForRegistrationDetailedAsync(
+                    publicationPlan,
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<Guid>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<FilePublicationSourceProof>(),
+                    false,
+                    null))
+                .ReturnsAsync(new FilePublicationPreparationResult(
+                    FilePublicationOutcome.Blocked,
+                    FileAction.Move,
+                    FileAction.Copy,
+                    FilePublicationSourceDisposition.Retained,
+                    ReasonCode: reasonCode,
+                    Message: message));
+            Init(builder => builder
+                .WithSingleton<IFilePublicationCapabilityResolver>(
+                    publicationResolver.Object)
+                .WithSingleton<IFileMover>(fileMover.Object));
+            await AddAuthorizedRootAsync(FileService.GetTempPath());
+
+            var outputDirectory = FileService.GetTempDirectory(
+                "download-import-failed-compatibility-dst");
+            var sourceDirectory = FileService.GetTempDirectory(
+                "download-import-failed-compatibility-src");
+            var source = await FileService.GetFileAsync(
+                sourceDirectory,
+                "failed.mp3",
+                "audio");
+            var audiobook = await _audiobookRepository.AddAsync(
+                new AudiobookBuilder()
+                    .WithTitle("Failed Compatibility Publication")
+                    .WithBasePath(outputDirectory)
+                    .Build());
+            await _applicationSettingsRepository.SaveAsync(
+                new ApplicationSettingsBuilder()
+                    .WithOutputPath(outputDirectory)
+                    .WithMoveFileOnCompleted()
+                    .WithoutMetadataProcessing()
+                    .WithFolderNamingPattern("")
+                    .WithFileNamingPattern("{Title}")
+                    .WithMultiFileNamingPattern("{Title}")
+                    .Build());
+
+            var result = Assert.Single(await _provider
+                .GetRequiredService<IDownloadImportService>()
+                .ImportDownloadFilesAsync(audiobook, [source]));
+
+            Assert.False(result.Success);
+            Assert.Equal(FileAction.Copy, result.Action);
+            Assert.Equal(FileAction.Move, result.RequestedAction);
+            Assert.Equal(FileAction.Copy, result.EffectiveAction);
+            Assert.Equal(ImportSourceDisposition.Retained, result.SourceDisposition);
+            Assert.Equal(reasonCode, result.WarningCode);
+            Assert.Equal(message, result.Message);
+            Assert.True(File.Exists(source));
+            publicationResolver.VerifyAll();
+            fileMover.VerifyAll();
+        }
+
+        [Fact]
         public async Task ImportDownloadFilesAsync_FailedPublication_DoesNotReserveDestinationForLaterFiles()
         {
             var attemptedDestinations = new List<string>();

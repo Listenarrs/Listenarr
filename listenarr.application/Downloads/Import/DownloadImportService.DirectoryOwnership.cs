@@ -27,19 +27,70 @@ public partial class DownloadImportService
     private static ImportResult CreateBlockedImportResult(
         FilePublicationPlan publicationPlan,
         string source,
-        string destination)
-    {
-        var blocked = ImportResult.ImportFailure(
+        string destination) =>
+        CreatePublicationFailureResult(
             publicationPlan.RequestedAction,
+            publicationPlan.EffectiveAction,
+            publicationPlan.SourceDisposition,
+            source,
+            destination,
+            publicationPlan.ReasonCode,
+            publicationPlan.Message);
+
+    private static ImportResult CreatePublicationFailureResult(
+        FilePublicationPreparationResult preparation,
+        string source,
+        string destination) =>
+        CreatePublicationFailureResult(
+            preparation.RequestedAction,
+            preparation.EffectiveAction,
+            preparation.SourceDisposition,
+            source,
+            destination,
+            preparation.ReasonCode,
+            preparation.Message);
+
+    private static ImportResult CreatePublicationFailureResult(
+        FilePublicationPlan publicationPlan,
+        string source,
+        string destination) =>
+        CreatePublicationFailureResult(
+            publicationPlan.RequestedAction,
+            publicationPlan.EffectiveAction,
+            publicationPlan.SourceDisposition,
+            source,
+            destination,
+            publicationPlan.ReasonCode,
+            message: null);
+
+    private static ImportResult CreatePublicationFailureResult(
+        FileAction requestedAction,
+        FileAction effectiveAction,
+        FilePublicationSourceDisposition sourceDisposition,
+        string source,
+        string destination,
+        string? reasonCode,
+        string? message)
+    {
+        var failed = ImportResult.ImportFailure(
+            effectiveAction,
             source,
             destination);
-        blocked.Message = publicationPlan.Message;
-        return blocked;
+        failed.RequestedAction = requestedAction;
+        failed.EffectiveAction = effectiveAction;
+        failed.SourceDisposition = ToImportSourceDisposition(sourceDisposition);
+        failed.WarningCode = reasonCode;
+        if (!string.IsNullOrWhiteSpace(message))
+        {
+            failed.Message = message;
+        }
+
+        return failed;
     }
 
     private static ImportSourceDisposition ToImportSourceDisposition(
-        FilePublicationPlan publicationPlan) =>
-        publicationPlan.SourceDisposition switch
+        FilePublicationSourceDisposition sourceDisposition) =>
+        sourceDisposition switch
         {
             FilePublicationSourceDisposition.Retained =>
                 ImportSourceDisposition.Retained,
