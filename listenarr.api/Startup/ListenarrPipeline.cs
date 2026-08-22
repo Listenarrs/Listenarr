@@ -30,6 +30,7 @@ public static class ListenarrPipeline
         app.UseMiddleware<RequestTelemetryMiddleware>();
         app.UseListenarrExceptionHandler();
         app.UseForwardedHeaders();
+        app.UseListenarrUrlBase();
         app.MapListenarrStaticAssets();
         app.UseRouting();
         app.UseMiddleware<RequestBodyLoggingMiddleware>();
