@@ -15,6 +15,8 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using Listenarr.Tests.Common;
+
 namespace Listenarr.Tests.Features.Api.Services
 {
     /// <summary>
@@ -22,7 +24,10 @@ namespace Listenarr.Tests.Features.Api.Services
     /// These cover the group disappearing when every token inside it is empty, and surviving with the
     /// empty tokens stripped when some content remains.
     /// </summary>
-    public class FileNamingService_OptionalTokenElisionTests
+    [Trait("Area", "Api")]
+    [Trait("Name", "FileNamingService_OptionalTokenElisionTests")]
+    [Trait("Category", "FileNamingService")]
+    public class FileNamingService_OptionalTokenElisionTests : BaseTests
     {
         private const string FolderPattern =
             "{Author}/[{Series} {SeriesNumber}] {Title} {{Narrator}} ({Year})";
