@@ -39,6 +39,7 @@ namespace Listenarr.Domain.Downloads
     public class Download
     {
         public static string METADATA_EXTERNAL_ID_KEY = "ClientDownloadId";
+        public const string SourceRetainedMetadataKey = "SourceRetained";
         public static int MaxImportAttempts = 3;
 
         public string Id { get; set; } = Guid.NewGuid().ToString();

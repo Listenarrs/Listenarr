@@ -7,6 +7,7 @@
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  */
+using System.Text.Json;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 
@@ -35,7 +36,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Import
 
             await Assert.ThrowsAsync<InvalidOperationException>(() => service.FinalizeAsync(
                 job.Id, download.Id, audiobook.Id, audiobook.Title ?? download.Title,
-                client.Id, "finalization-checkpoints"));
+                client.Id, "finalization-checkpoints", sourceRetained: null));
 
             Assert.Equal(DownloadStatus.ImportPending, (await _downloadRepository.GetByIdAsync(download.Id))!.Status);
             Assert.Equal(ProcessingJobStatus.Processing, (await _downloadProcessingJobRepository.GetByIdAsync(job.Id))!.Status);
@@ -63,20 +64,27 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Import
             var service = _provider.GetRequiredService<IImportFinalizationService>();
             await service.FinalizeAsync(
                 job.Id, download.Id, audiobook.Id, audiobook.Title ?? download.Title,
-                client.Id, "finalization-success");
+                client.Id, "finalization-success", sourceRetained: true);
             await service.FinalizeAsync(
                 job.Id, download.Id, audiobook.Id, audiobook.Title ?? download.Title,
-                client.Id, "finalization-success");
+                client.Id, "finalization-success", sourceRetained: true);
 
-            Assert.Equal(DownloadStatus.Moved, (await _downloadRepository.GetByIdAsync(download.Id))!.Status);
+            var finalizedDownload = (await _downloadRepository.GetByIdAsync(download.Id))!;
+            Assert.Equal(DownloadStatus.Moved, finalizedDownload.Status);
+            Assert.Equal(
+                bool.TrueString,
+                finalizedDownload.GetMetadataString(Download.SourceRetainedMetadataKey));
             Assert.Equal(ProcessingJobStatus.Completed, (await _downloadProcessingJobRepository.GetByIdAsync(job.Id))!.Status);
             var page = await _historyRepository.QueryAsync(new HistoryQuery
             {
                 CorrelationId = "finalization-success"
             });
-            Assert.Single(page.Records, entry =>
+            var imported = Assert.Single(page.Records, entry =>
                 entry.EventType == HistoryEvents.Imported &&
                 entry.Outcome == HistoryOutcome.Succeeded);
+            using var details = JsonDocument.Parse(imported.Data!);
+            Assert.True(details.RootElement.GetProperty("SourceRetentionKnown").GetBoolean());
+            Assert.True(details.RootElement.GetProperty(Download.SourceRetainedMetadataKey).GetBoolean());
         }
     }
 }

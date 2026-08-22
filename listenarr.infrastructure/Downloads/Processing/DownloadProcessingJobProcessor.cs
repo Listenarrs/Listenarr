@@ -359,7 +359,7 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                     }, cancellationToken);
                 }
 
-                job.JobData["SourceRetained"] = results.Any(result =>
+                job.JobData[Download.SourceRetainedMetadataKey] = results.Any(result =>
                     result.SourceDisposition
                         == ImportSourceDisposition.Retained);
                 job.SetCheckpoint("FilesImported", results.Count);
@@ -422,6 +422,12 @@ namespace Listenarr.Infrastructure.Downloads.Processing
             }
 
             var finalizationService = scope.ServiceProvider.GetRequiredService<IImportFinalizationService>();
+            bool? sourceRetained = job.TryGetJobDataString(
+                    Download.SourceRetainedMetadataKey,
+                    out var sourceRetainedValue)
+                && bool.TryParse(sourceRetainedValue, out var parsedSourceRetained)
+                    ? parsedSourceRetained
+                    : null;
             try
             {
                 await finalizationService.FinalizeAsync(
@@ -431,6 +437,7 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                     audiobook.Title ?? download.Title,
                     client?.Id ?? download.DownloadClientId,
                     correlationId,
+                    sourceRetained,
                     new Dictionary<string, object>
                     {
                         ["JobId"] = job.Id,
