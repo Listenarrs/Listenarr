@@ -95,11 +95,11 @@ internal sealed class CompatibilityFilePublicationRecoveryService(
             == CompatibilityFilePublicationState.RegistrationCommitted)
         {
             var hasOwner = journal.IsCompanionFile
-                || (journal.AudiobookId.HasValue
+                || (journal.AudiobookId is int audiobookId
                 && await context.AudiobookFiles
                     .AsNoTracking()
                     .AnyAsync(
-                        file => file.AudiobookId == journal.AudiobookId.Value
+                        file => file.AudiobookId == audiobookId
                             && (file.Path == journal.DestinationPath
                                 || file.CanonicalPath == journal.DestinationPath),
                         cancellationToken));
