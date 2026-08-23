@@ -440,6 +440,7 @@ internal partial class MoveJobProcessor
                     contentMoveService,
                     moveRequest,
                     moveResult.TargetVerificationLease,
+                    moveResult.SourceRetained,
                     registerPostCommit,
                     stoppingToken))
             {
@@ -448,10 +449,10 @@ internal partial class MoveJobProcessor
 
             metrics.Increment("worker.move.job.completed");
             logger.LogInformation(
-                "Move job {JobId} completed: {Source} -> {Target}",
-                job.Id,
+                "Move job {JobId} completed: {Source} -> {Target}. SourceRetained={SourceRetained}", job.Id,
                 LogRedaction.SanitizeFilePath(source),
-                LogRedaction.SanitizeFilePath(target));
+                LogRedaction.SanitizeFilePath(target),
+                moveResult.SourceRetained);
         }
         catch (Exception ex) when (ex is PersistenceException or MoveLeaseLostException)
         {
@@ -496,5 +497,4 @@ internal partial class MoveJobProcessor
             moveResult?.TargetVerificationLease?.Dispose();
         }
     }
-
 }

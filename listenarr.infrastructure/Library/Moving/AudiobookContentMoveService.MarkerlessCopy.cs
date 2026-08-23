@@ -7,6 +7,7 @@ internal sealed partial class AudiobookContentMoveService
         string source,
         string target,
         IReadOnlyCollection<MoveJobEntry> manifest,
+        bool retainSource,
         MarkerlessTargetVerificationLease targetVerificationLease,
         CancellationToken cancellationToken)
     {
@@ -72,6 +73,11 @@ internal sealed partial class AudiobookContentMoveService
 
             if (sourceEntry == null)
             {
+                if (retainSource)
+                {
+                    throw new MoveNeedsAttentionException(
+                        $"A source file disappeared during copy-and-retain publication: {entry.RelativePath}");
+                }
                 var wasVerified = entry.CopyState == MoveJobEntryCopyState.Verified;
                 if (existingTarget == null
                     || !await TryRecoverMarkerlessNativeRenameAsync(
@@ -116,7 +122,8 @@ internal sealed partial class AudiobookContentMoveService
             }
 
             PinnedDirectoryCreation.PinnedFileEntry? stableRenameEntry = null;
-            if (existingTarget == null
+            if (!retainSource
+                && existingTarget == null
                 && entry.CopyState == MoveJobEntryCopyState.Pending
                 && string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity))
             {

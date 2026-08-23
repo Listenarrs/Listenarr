@@ -29,6 +29,27 @@ function setFilesystemReadiness(ready: boolean) {
 }
 
 describe('MoveAudiobookModal filesystem readiness', () => {
+  it('explains the copy-and-retain fallback before a filesystem move', () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    setFilesystemReadiness(true)
+    const wrapper = mount(MoveAudiobookModal, {
+      props: {
+        visible: true,
+        pendingMove: {
+          original: '/downloads/Author/Book',
+          combined: '/audiobooks/Author/Book',
+        },
+        moveFiles: true,
+      },
+      global: { plugins: [pinia] },
+    })
+
+    expect(wrapper.text()).toContain('cross-volume NFS move')
+    expect(wrapper.text()).toContain('keeps the source')
+    expect(wrapper.text()).toContain('explicitly reports that retention')
+  })
+
   it('keeps path-only updates available but disables physical moves while initializing', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -69,5 +90,32 @@ describe('MoveAudiobookModal filesystem readiness', () => {
 
     expect(wrapper.get('input[aria-label="Move files now"]').attributes('disabled')).toBeUndefined()
     expect(wrapper.get('.btn.btn-primary').text()).toBe('Move Files')
+  })
+
+  it('retains the managed library root when moving root-level files', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    setFilesystemReadiness(true)
+    const wrapper = mount(MoveAudiobookModal, {
+      props: {
+        visible: true,
+        pendingRootPath: 'D:\\Audiobooks\\Author\\Book',
+        moveFiles: true,
+        deleteEmpty: true,
+        allowDeleteEmpty: false,
+      },
+      global: { plugins: [pinia] },
+    })
+
+    const deleteEmpty = wrapper.get('input[aria-label="Clean up empty folders"]')
+    expect(deleteEmpty.attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('source is the managed library root')
+
+    await wrapper.get('.btn.btn-primary').trigger('click')
+
+    expect(wrapper.emitted('confirm')?.[0]?.[0]).toMatchObject({
+      moveFiles: true,
+      deleteEmpty: false,
+    })
   })
 })

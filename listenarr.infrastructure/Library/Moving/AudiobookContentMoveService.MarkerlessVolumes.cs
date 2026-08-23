@@ -2,7 +2,7 @@ namespace Listenarr.Infrastructure.Library.Moving;
 
 internal sealed partial class AudiobookContentMoveService
 {
-    private void ValidateUnixMarkerlessMoveVolumes(
+    private bool RequiresUnixCrossVolumeSourceRetention(
         AudiobookContentMoveRequest request,
         string source,
         string target,
@@ -10,7 +10,7 @@ internal sealed partial class AudiobookContentMoveService
     {
         if (OperatingSystem.IsWindows())
         {
-            return;
+            return false;
         }
 
         foreach (var entry in files)
@@ -51,10 +51,11 @@ internal sealed partial class AudiobookContentMoveService
                 && (faultInjector?.ForceCrossVolumeForTest == true
                     || !sourceEntry.IsOnSameVolume(targetParent)))
             {
-                throw new MoveNeedsAttentionException(
-                    "Unix cross-volume library moves are blocked because exact source-generation retirement would require a library-side namespace claim.");
+                return true;
             }
         }
+
+        return false;
     }
 
     private static string FindNearestExistingTargetAncestor(string targetParentPath)

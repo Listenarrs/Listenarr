@@ -2830,7 +2830,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
         }
 
         [LinuxFact]
-        public async Task MoveContentsAsync_ForcedCrossVolumeRejectsBeforeFilePublicationWithoutScratchArtifacts()
+        public async Task MoveContentsAsync_ForcedCrossVolumeCopiesAndDurablyRetainsSource()
         {
             var root = FileService.GetTempDirectory(
                 "content-move-markerless-cross-volume-blocked");
@@ -2840,6 +2840,12 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 source,
                 "book.m4b",
                 "audio");
+            var companionDirectory = Path.Join(source, "metadata");
+            Directory.CreateDirectory(companionDirectory);
+            var companionFile = await FileService.GetFileAsync(
+                companionDirectory,
+                "cover.jpg",
+                "image");
             var target = Path.Join(root, "destination", "Book");
             var request = await CreateLeasedMoveRequestAsync(
                 source,
@@ -2855,28 +2861,174 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 TimeProvider.System,
                 new ForceCrossVolumeMoveFaultInjector());
 
-            var exception = await Assert.ThrowsAsync<MoveNeedsAttentionException>(() =>
-                service.MoveContentsAsync(
-                    request,
-                    CancellationToken.None));
+            var result = await service.MoveContentsAsync(
+                request,
+                CancellationToken.None);
 
-            Assert.Contains(
-                "cross-volume",
-                exception.Message,
-                StringComparison.OrdinalIgnoreCase);
+            Assert.True(result.SourceCleanupCompleted);
+            Assert.True(result.SourceRetained);
             Assert.Equal("audio", await File.ReadAllTextAsync(sourceFile));
-            Assert.False(File.Exists(Path.Join(target, "book.m4b")));
-            Assert.False(Directory.Exists(target));
+            Assert.Equal("image", await File.ReadAllTextAsync(companionFile));
+            Assert.Equal(
+                "audio",
+                await File.ReadAllTextAsync(Path.Join(target, "book.m4b")));
+            Assert.Equal(
+                "image",
+                await File.ReadAllTextAsync(
+                    Path.Join(target, "metadata", "cover.jpg")));
+            Assert.True(Directory.Exists(target));
             AssertNoListenarrArtifacts(root);
             await using var db = await _provider
                 .GetRequiredService<IDbContextFactory<ListenArrDbContext>>()
                 .CreateDbContextAsync();
-            Assert.DoesNotContain(
-                await db.MoveJobCreatedDirectories
+            var persisted = await db.MoveJobs
+                .AsNoTracking()
+                .Include(job => job.Entries)
+                .SingleAsync(job => job.Id == request.JobId);
+            Assert.Equal(
+                MoveJobEntryCleanupState.Retained,
+                persisted.SourceDirectoryCleanupState);
+            Assert.All(
+                persisted.Entries.Where(entry =>
+                    !MoveManifestIdentity.IsBoundaryAuthorization(entry)),
+                entry => Assert.Equal(
+                    MoveJobEntryCleanupState.Retained,
+                    entry.CleanupState));
+
+            var recovered = await service.MoveContentsAsync(
+                request,
+                CancellationToken.None);
+            Assert.True(recovered.SourceRetained);
+            Assert.Equal("audio", await File.ReadAllTextAsync(sourceFile));
+            Assert.Equal("image", await File.ReadAllTextAsync(companionFile));
+        }
+
+        [LinuxFact]
+        public async Task MoveContentsAsync_CrossVolumeRetentionInterrupted_ResumesWithoutDeletingSource()
+        {
+            var root = FileService.GetTempDirectory(
+                "content-move-markerless-cross-volume-retention-retry");
+            var source = Path.Join(root, "source");
+            Directory.CreateDirectory(source);
+            var sourceFile = await FileService.GetFileAsync(
+                source,
+                "book.m4b",
+                "audio");
+            var companionFile = await FileService.GetFileAsync(
+                source,
+                "cover.jpg",
+                "image");
+            var target = Path.Join(root, "destination", "Book");
+            var request = await CreateLeasedMoveRequestAsync(
+                source,
+                target,
+                sourceCleanupBoundary: root,
+                executionProtocolVersion:
+                    MoveExecutionProtocol.MarkerlessDatabaseState);
+            var faultInjector = new FailOnceDuringCrossVolumeRetention();
+            var service = new AudiobookContentMoveService(
+                _provider.GetRequiredService<
+                    ILogger<AudiobookContentMoveService>>(),
+                _provider.GetRequiredService<
+                    IDbContextFactory<ListenArrDbContext>>(),
+                TimeProvider.System,
+                faultInjector);
+
+            await Assert.ThrowsAsync<IOException>(() => service.MoveContentsAsync(
+                request,
+                CancellationToken.None));
+
+            Assert.Equal("audio", await File.ReadAllTextAsync(sourceFile));
+            Assert.Equal("image", await File.ReadAllTextAsync(companionFile));
+            await using (var interruptedDb = await _provider
+                .GetRequiredService<IDbContextFactory<ListenArrDbContext>>()
+                .CreateDbContextAsync())
+            {
+                var interruptedEntries = await interruptedDb.MoveJobEntries
                     .AsNoTracking()
-                    .Where(directory => directory.MoveJobId == request.JobId)
-                    .ToListAsync(),
-                directory => Directory.Exists(directory.Path));
+                    .Where(entry => entry.MoveJobId == request.JobId)
+                    .ToListAsync();
+                interruptedEntries = interruptedEntries
+                    .Where(entry =>
+                        !MoveManifestIdentity.IsBoundaryAuthorization(entry))
+                    .ToList();
+                Assert.Contains(interruptedEntries, entry =>
+                    entry.CleanupState == MoveJobEntryCleanupState.Retained);
+                Assert.Contains(interruptedEntries, entry =>
+                    entry.CleanupState == MoveJobEntryCleanupState.Pending);
+            }
+
+            var recovered = await service.MoveContentsAsync(
+                request,
+                CancellationToken.None);
+
+            Assert.True(recovered.SourceRetained);
+            Assert.NotNull(recovered.TargetVerificationLease);
+            Assert.Equal("audio", await File.ReadAllTextAsync(sourceFile));
+            Assert.Equal("image", await File.ReadAllTextAsync(companionFile));
+            Assert.Equal(
+                "audio",
+                await File.ReadAllTextAsync(Path.Join(target, "book.m4b")));
+            Assert.Equal(
+                "image",
+                await File.ReadAllTextAsync(Path.Join(target, "cover.jpg")));
+        }
+
+        [LinuxFact]
+        public async Task GetRecoverableMoveAsync_MixedRetainedAndDeletedDisposition_FailsClosed()
+        {
+            var root = FileService.GetTempDirectory(
+                "content-move-markerless-cross-volume-mixed-cleanup");
+            var source = Path.Join(root, "source");
+            Directory.CreateDirectory(source);
+            await FileService.GetFileAsync(source, "book.m4b", "audio");
+            var companionFile = await FileService.GetFileAsync(
+                source,
+                "cover.jpg",
+                "image");
+            var target = Path.Join(root, "destination", "Book");
+            var request = await CreateLeasedMoveRequestAsync(
+                source,
+                target,
+                sourceCleanupBoundary: root,
+                executionProtocolVersion:
+                    MoveExecutionProtocol.MarkerlessDatabaseState);
+            var service = new AudiobookContentMoveService(
+                _provider.GetRequiredService<
+                    ILogger<AudiobookContentMoveService>>(),
+                _provider.GetRequiredService<
+                    IDbContextFactory<ListenArrDbContext>>(),
+                TimeProvider.System,
+                new ForceCrossVolumeMoveFaultInjector());
+
+            var result = await service.MoveContentsAsync(
+                request,
+                CancellationToken.None);
+            result.TargetVerificationLease?.Dispose();
+            File.Delete(companionFile);
+            await using (var db = await _provider
+                .GetRequiredService<IDbContextFactory<ListenArrDbContext>>()
+                .CreateDbContextAsync())
+            {
+                var companionEntry = await db.MoveJobEntries.SingleAsync(entry =>
+                    entry.MoveJobId == request.JobId
+                    && entry.RelativePath == "cover.jpg");
+                companionEntry.CleanupState = MoveJobEntryCleanupState.Deleted;
+                await db.SaveChangesAsync();
+            }
+
+            var exception = await Assert.ThrowsAsync<MoveNeedsAttentionException>(
+                () => service.GetRecoverableMoveAsync(
+                    request,
+                    CancellationToken.None));
+
+            Assert.Contains(
+                "mixes retained and deleted",
+                exception.Message,
+                StringComparison.OrdinalIgnoreCase);
+            Assert.True(File.Exists(Path.Join(source, "book.m4b")));
+            Assert.True(File.Exists(Path.Join(target, "book.m4b")));
+            Assert.True(File.Exists(Path.Join(target, "cover.jpg")));
         }
 
         [Fact]
@@ -3245,6 +3397,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 TargetInsideSource: false,
                 SourceInsideTarget: false,
                 SourceCleanupCompleted: false,
+                SourceRetained: false,
                 TargetPhysicalObjectIdentities:
                     new Dictionary<string, string>());
 
@@ -4054,6 +4207,25 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
         private sealed class ForceCrossVolumeMoveFaultInjector : IMoveFaultInjector
         {
             public bool ForceCrossVolumeForTest => true;
+        }
+
+        private sealed class FailOnceDuringCrossVolumeRetention : IMoveFaultInjector
+        {
+            private int _failed;
+
+            public bool ForceCrossVolumeForTest => true;
+
+            public void OnSourceRetentionMutation(
+                Guid jobId,
+                SourceRetentionFaultPoint faultPoint)
+            {
+                if (faultPoint == SourceRetentionFaultPoint.AfterEntryStateUpdate
+                    && Interlocked.Exchange(ref _failed, 1) == 0)
+                {
+                    throw new IOException(
+                        "Injected interruption after source retention persistence.");
+                }
+            }
         }
 
         private sealed class FailOnceAtTargetScaffoldPreparationPoint(

@@ -326,8 +326,23 @@ public sealed partial class LibraryMoveWorkflow
                             "Source and target paths are identical; nothing to move.");
                     }
 
+                    var effectiveDeleteEmptySource = deleteEmptySource;
+                    if (effectiveDeleteEmptySource
+                        && sourceManagedBoundary != null
+                        && FileSystemPathIdentity.AreEquivalent(
+                            manifest.SourceRoot,
+                            sourceManagedBoundary.Path,
+                            sourceManagedBoundary.Semantics))
+                    {
+                        effectiveDeleteEmptySource = false;
+                        _logger.LogInformation(
+                            "Disabled empty-source deletion for audiobook {AudiobookId} because the source is the managed library root {SourceRoot}",
+                            id,
+                            LogRedaction.SanitizeFilePath(sourceManagedBoundary.Path));
+                    }
+
                     string? sourceCleanupBoundary = null;
-                    if (deleteEmptySource)
+                    if (effectiveDeleteEmptySource)
                     {
                         if (sourceManagedBoundary != null)
                         {
@@ -405,7 +420,7 @@ public sealed partial class LibraryMoveWorkflow
                             sourceDirectoryIdentity.Value!,
                             targetBoundary.DirectoryIdentity.Version!.Value,
                             targetBoundary.DirectoryIdentity.Value!,
-                            deleteEmptySource,
+                            effectiveDeleteEmptySource,
                             persistedSourceBoundary),
                         lockedToken);
                 },

@@ -206,6 +206,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                     target,
                     targetSemantics,
                     cancellationToken);
+            var sourceRetained = MoveJobPublicProjection.IsSourceRetained(job);
             return new FinalizedMoveRecoveryOutcome(
                 Handled: false,
                 new AudiobookContentMoveResult(
@@ -214,6 +215,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                     targetInsideSource,
                     sourceInsideTarget,
                     SourceCleanupCompleted: true,
+                    SourceRetained: sourceRetained,
                     targetPhysicalObjectIdentities));
         }
 
@@ -339,6 +341,7 @@ namespace Listenarr.Infrastructure.Library.Moving
             AudiobookContentMoveService contentMoveService,
             AudiobookContentMoveRequest moveRequest,
             MarkerlessTargetVerificationLease? targetVerificationLease,
+            bool sourceRetained,
             Action<MovePostCommitContext> registerPostCommit,
             CancellationToken cancellationToken)
         {
@@ -352,6 +355,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                     contentMoveService,
                     moveRequest,
                     targetVerificationLease,
+                    sourceRetained,
                     registerPostCommit,
                     cancellationToken);
                 return true;

@@ -535,6 +535,36 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
         }
 
         [Fact]
+        public void PublicProjection_CompletedRetainedMove_ReportsSourceRetention()
+        {
+            var job = new MoveJob
+            {
+                Id = Guid.NewGuid(),
+                AudiobookId = 42,
+                Status = MoveJobStatus.Completed,
+                SourceDirectoryCleanupState = MoveJobEntryCleanupState.Retained,
+                Entries =
+                [
+                    new MoveJobEntry
+                    {
+                        EntryType = MoveJobEntryType.File,
+                        RelativePath = "book.m4b",
+                        CleanupState = MoveJobEntryCleanupState.Retained
+                    }
+                ]
+            };
+
+            var update = MoveJobPublicProjection.CreateUpdate(
+                job.Id,
+                job.Status,
+                fallbackError: null,
+                fallbackUpdatedAt: DateTime.UtcNow,
+                persistedJob: job);
+
+            Assert.True(update.SourceRetained);
+        }
+
+        [Fact]
         public async Task NotifyPersistedJobState_CanceledWaiter_ReleasesPublicationGateEntry()
         {
             var job = new MoveJob
@@ -1711,8 +1741,11 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
                 It.IsAny<CancellationToken>()), Times.Never);
         }
 
-        [Fact]
-        public async Task RequeueMoveAsync_MarkerlessNeedsAttentionUnknownWithCompletedRecoveryEvidence_Requeues()
+        [Theory]
+        [InlineData(MoveJobEntryCleanupState.Deleted)]
+        [InlineData(MoveJobEntryCleanupState.Retained)]
+        public async Task RequeueMoveAsync_MarkerlessNeedsAttentionUnknownWithCompletedRecoveryEvidence_Requeues(
+            MoveJobEntryCleanupState completedCleanupState)
         {
             var sourcePath = Path.GetFullPath(Path.Join(Path.GetTempPath(), "listenarr-recoverable-source", "Title"));
             var targetPath = Path.GetFullPath(Path.Join(Path.GetTempPath(), "listenarr-recoverable-target", "Title"));
@@ -1731,7 +1764,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
                 Status = MoveJobStatus.NeedsAttention,
                 Phase = MoveJobPhase.Published,
                 ExecutionProtocolVersion = MoveExecutionProtocol.MarkerlessDatabaseState,
-                SourceDirectoryCleanupState = MoveJobEntryCleanupState.Deleted,
+                SourceDirectoryCleanupState = completedCleanupState,
                 TargetDirectoryObjectIdentity = "target-generation",
                 FailureKind = MoveFailureKind.Unknown,
                 Error = "A prior build could not reconcile stale target ownership.",
@@ -1745,7 +1778,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
                         LastWriteTimeUtc = DateTime.UnixEpoch,
                         Sha256 = new string('A', 64),
                         CopyState = MoveJobEntryCopyState.Verified,
-                        CleanupState = MoveJobEntryCleanupState.Deleted
+                        CleanupState = completedCleanupState
                     },
                     MoveManifestIdentity.CreateSourceBoundaryAuthorization(
                         2,

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using System.Security.Cryptography;
+using System.Runtime.Versioning;
 using System.Text;
 
 using Listenarr.Tests.Common;
@@ -793,6 +794,76 @@ public sealed class FileMoverMarkerlessRegistrationTests : BaseTests
                 CompatibilityFilePublicationState.Completed,
                 journal.State);
             Assert.Equal(isCompanionFile, journal.IsCompanionFile);
+        }
+        finally
+        {
+            if (Directory.Exists(scenarioRoot))
+            {
+                Directory.Delete(scenarioRoot, recursive: true);
+            }
+        }
+    }
+
+    [ForeignOwnedNetworkStorageFact]
+    [SupportedOSPlatform("linux")]
+    public async Task PreserveMarkerlessMetadata_OnNetworkStorage_FromForeignOwnedSource_KeepsOwnerWriteMode()
+    {
+        var providedRoot = Path.GetFullPath(
+            Environment.GetEnvironmentVariable(
+                NetworkStorageTheoryAttribute.PathEnvironmentVariable)!);
+        var source = Path.GetFullPath(
+            Environment.GetEnvironmentVariable(
+                ForeignOwnedNetworkStorageFactAttribute.SourcePathEnvironmentVariable)!);
+        var scenarioRoot = Path.Join(
+            providedRoot,
+            $"listenarr-foreign-source-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(scenarioRoot);
+        var destination = Path.Join(scenarioRoot, "cover.jpg");
+
+        try
+        {
+            var sourceMode = File.GetUnixFileMode(source);
+            Assert.True(sourceMode.HasFlag(UnixFileMode.UserWrite));
+            Assert.Throws<UnauthorizedAccessException>(() =>
+            {
+                using var _ = new FileStream(
+                    source,
+                    FileMode.Open,
+                    FileAccess.Write,
+                    FileShare.Read);
+            });
+
+            using var sourceParent = PinnedDirectoryCreation
+                .OpenPinnedHierarchyNoFollow(
+                    Path.GetDirectoryName(source)!,
+                    createMissing: false);
+            using var destinationParent = PinnedDirectoryCreation
+                .OpenPinnedHierarchyNoFollow(
+                    scenarioRoot,
+                    createMissing: false);
+            using var sourceEntry = sourceParent
+                .OpenExistingFileForStableRead(Path.GetFileName(source));
+            using var destinationEntry = destinationParent
+                .CreateNewFile(Path.GetFileName(destination));
+            await using (var sourceStream = sourceEntry.OpenReadStream(
+                bufferSize: 128 * 1024,
+                asynchronous: false))
+            await using (var destinationStream = destinationEntry.OpenWriteStream(
+                bufferSize: 128 * 1024,
+                asynchronous: false))
+            {
+                await sourceStream.CopyToAsync(destinationStream);
+            }
+
+            sourceEntry.PreserveMarkerlessMetadataTo(destinationEntry);
+
+            var destinationMode = File.GetUnixFileMode(destination);
+            Assert.Equal(sourceMode, destinationMode);
+            Assert.True(destinationMode.HasFlag(UnixFileMode.UserWrite));
+            using var metadataStream = destinationEntry.OpenWriteStream(
+                bufferSize: 4096,
+                asynchronous: false);
+            Assert.True(metadataStream.CanWrite);
         }
         finally
         {

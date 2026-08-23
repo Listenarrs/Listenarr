@@ -97,6 +97,18 @@ internal sealed partial class PinnedDirectoryCreation
                 File.SetUnixFileMode(
                     destination._fileHandle,
                     File.GetUnixFileMode(_fileHandle));
+
+                // UnixFileMode is the authoritative permission contract on Unix.
+                // FileAttributes.ReadOnly reflects the current caller's effective
+                // access, so copying it from a differently owned source can remove
+                // the destination owner's write bit after the mode was preserved.
+                File.SetLastWriteTimeUtc(
+                    destination._fileHandle,
+                    File.GetLastWriteTimeUtc(_fileHandle));
+                File.SetCreationTimeUtc(
+                    destination._fileHandle,
+                    File.GetCreationTimeUtc(_fileHandle));
+                return;
             }
             File.SetAttributes(
                 destination._fileHandle,
@@ -123,9 +135,6 @@ internal sealed partial class PinnedDirectoryCreation
             File.SetUnixFileMode(
                 destination._fileHandle,
                 File.GetUnixFileMode(_fileHandle));
-            File.SetAttributes(
-                destination._fileHandle,
-                File.GetAttributes(_fileHandle));
             File.SetLastWriteTimeUtc(
                 destination._fileHandle,
                 File.GetLastWriteTimeUtc(_fileHandle));

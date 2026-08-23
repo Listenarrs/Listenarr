@@ -13,6 +13,7 @@ internal partial class MoveJobProcessor
         AudiobookContentMoveService contentMoveService,
         AudiobookContentMoveRequest moveRequest,
         MarkerlessTargetVerificationLease? targetVerificationLease,
+        bool sourceRetained,
         Action<MovePostCommitContext> registerPostCommit,
         CancellationToken cancellationToken)
     {
@@ -41,7 +42,8 @@ internal partial class MoveJobProcessor
                 audiobook.Title,
                 source,
                 target,
-                now),
+                now,
+                sourceRetained),
             validationToken =>
             {
                 contentMoveService.OnCompletionHandoff(
@@ -64,7 +66,8 @@ internal partial class MoveJobProcessor
             target,
             completion.Handoff.Id,
             completion.MoveHistory.Id,
-            completion.MoveHistoryCreated));
+            completion.MoveHistoryCreated,
+            sourceRetained));
     }
 
     public async Task RunPostCompletionEffectsAsync(
@@ -184,6 +187,7 @@ internal partial class MoveJobProcessor
                         context.AudiobookTitle,
                         Source = context.Source,
                         Target = context.Target,
+                        context.SourceRetained,
                         Timestamp = timeProvider.GetUtcNow().UtcDateTime
                     },
                     webhook.Url,
@@ -214,12 +218,16 @@ internal partial class MoveJobProcessor
     {
         try
         {
-            var message = !string.IsNullOrEmpty(context.AudiobookTitle)
-                ? $"Moved {context.AudiobookTitle} to {context.Target}"
-                : $"Moved audiobook to {context.Target}";
+            var message = context.SourceRetained
+                ? !string.IsNullOrEmpty(context.AudiobookTitle)
+                    ? $"Copied {context.AudiobookTitle} to {context.Target}; source retained"
+                    : $"Copied audiobook to {context.Target}; source retained"
+                : !string.IsNullOrEmpty(context.AudiobookTitle)
+                    ? $"Moved {context.AudiobookTitle} to {context.Target}"
+                    : $"Moved audiobook to {context.Target}";
             await toastService.PublishToastAsync(
                 "success",
-                "Move Complete",
+                context.SourceRetained ? "Copy Complete" : "Move Complete",
                 message,
                 timeoutMs: 5000);
             logger.LogDebug("Sent toast notification for move job {JobId}", context.JobId);

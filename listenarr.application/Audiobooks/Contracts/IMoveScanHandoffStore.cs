@@ -10,7 +10,8 @@ public sealed record MoveCompletionCommit(
     string? AudiobookTitle,
     string Source,
     string Target,
-    DateTimeOffset Now);
+    DateTimeOffset Now,
+    bool SourceRetained = false);
 
 public sealed record MoveCompletionCommitResult(
     MoveScanHandoff Handoff,

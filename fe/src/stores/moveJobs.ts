@@ -41,6 +41,7 @@ export interface TrackedMoveJob {
   error?: string
   recoveryDisposition?: string
   canRetry?: boolean
+  sourceRetained?: boolean
 }
 
 export interface MoveRecoveryState {
@@ -65,6 +66,7 @@ type MoveJobUpdate = {
   error?: string
   recoveryDisposition?: string
   canRetry?: boolean
+  sourceRetained?: boolean
 }
 
 const terminalStatuses = new Set<MoveJobStatus>([
@@ -372,6 +374,7 @@ export const useMoveJobsStore = defineStore('moveJobs', () => {
       error: update.error,
       recoveryDisposition: update.recoveryDisposition ?? existing.recoveryDisposition,
       canRetry: update.canRetry ?? existing.canRetry,
+      sourceRetained: update.sourceRetained ?? existing.sourceRetained,
     }
     setTrackedJob(key, next)
 
@@ -385,7 +388,12 @@ export const useMoveJobsStore = defineStore('moveJobs', () => {
     }
 
     if (status === 'Completed') {
-      toast.success('Move completed', `Files moved to ${next.target || 'selected destination'}`)
+      toast.success(
+        next.sourceRetained ? 'Copy completed' : 'Move completed',
+        next.sourceRetained
+          ? `Files copied to ${next.target || 'selected destination'}; source retained`
+          : `Files moved to ${next.target || 'selected destination'}`,
+      )
     } else if (status === 'Superseded') {
       toast.info('Move superseded', 'A newer library state replaced this queued move.')
     } else {

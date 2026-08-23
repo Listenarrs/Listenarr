@@ -81,13 +81,24 @@ internal sealed partial class AudiobookContentMoveService
                 "Source cleanup is blocked because no persisted move manifest is available.");
         }
 
-        await DeleteMarkerlessSourceAsync(
-            request,
-            result.Source,
-            result.Target,
-            result.TargetInsideSource,
-            manifest,
-            cancellationToken);
+        if (result.SourceRetained)
+        {
+            await RetainMarkerlessSourceAsync(
+                request,
+                result.Target,
+                manifest,
+                cancellationToken);
+        }
+        else
+        {
+            await DeleteMarkerlessSourceAsync(
+                request,
+                result.Source,
+                result.Target,
+                result.TargetInsideSource,
+                manifest,
+                cancellationToken);
+        }
         VerifySourceCleanupState(
             request,
             result.Source,

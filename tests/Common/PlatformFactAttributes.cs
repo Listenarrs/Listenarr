@@ -107,6 +107,29 @@ public sealed class NetworkStorageTheoryAttribute : TheoryAttribute
     }
 }
 
+public sealed class ForeignOwnedNetworkStorageFactAttribute : FactAttribute
+{
+    public const string SourcePathEnvironmentVariable =
+        "LISTENARR_NETWORK_FOREIGN_SOURCE_PATH";
+
+    public ForeignOwnedNetworkStorageFactAttribute()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Skip = "This test requires a native Linux network filesystem mount.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                NetworkStorageTheoryAttribute.PathEnvironmentVariable))
+            || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                SourcePathEnvironmentVariable)))
+        {
+            Skip = "The native test runner did not provide a network mount and foreign-owned source.";
+        }
+    }
+}
+
 public sealed class DirectoryLinkFactAttribute : FactAttribute
 {
     public DirectoryLinkFactAttribute()

@@ -2,6 +2,60 @@ namespace Listenarr.Infrastructure.Library.Moving;
 
 internal sealed partial class AudiobookContentMoveService
 {
+    private async Task RetainMarkerlessSourceAsync(
+        AudiobookContentMoveRequest request,
+        string target,
+        IReadOnlyCollection<MoveJobEntry> manifest,
+        CancellationToken cancellationToken)
+    {
+        await VerifyMarkerlessTargetAsync(
+            request,
+            target,
+            manifest,
+            cancellationToken);
+
+        foreach (var entry in manifest.Where(IsPhysicalManifestEntry))
+        {
+            if (entry.CleanupState is
+                MoveJobEntryCleanupState.DeleteAuthorized
+                    or MoveJobEntryCleanupState.Deleted)
+            {
+                throw new MoveNeedsAttentionException(
+                    $"Source retention cannot replace destructive cleanup already recorded for: {entry.RelativePath}");
+            }
+
+            await RetainMarkerlessSourceEntryAsync(
+                request,
+                entry,
+                cancellationToken);
+            faultInjector?.OnSourceRetentionMutation(
+                request.JobId,
+                SourceRetentionFaultPoint.AfterEntryStateUpdate);
+        }
+
+        var endpoints = await GetEndpointObjectIdentitiesAsync(
+            request.JobId,
+            cancellationToken);
+        if (endpoints.SourceDirectoryCleanupState is
+            MoveJobEntryCleanupState.DeleteAuthorized
+                or MoveJobEntryCleanupState.Deleted)
+        {
+            throw new MoveNeedsAttentionException(
+                "Source retention cannot replace destructive source-root cleanup already recorded.");
+        }
+        if (endpoints.SourceDirectoryCleanupState
+            != MoveJobEntryCleanupState.Retained)
+        {
+            await UpdateSourceDirectoryCleanupStateAsync(
+                request.JobId,
+                request.LeaseToken,
+                MoveJobEntryCleanupState.Retained,
+                cancellationToken);
+        }
+
+        await ReportProgressAsync(request, 90, "Source retained", cancellationToken);
+    }
+
     private async Task DeleteMarkerlessSourceAsync(
         AudiobookContentMoveRequest request,
         string source,

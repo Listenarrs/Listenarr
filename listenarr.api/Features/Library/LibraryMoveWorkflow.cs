@@ -41,7 +41,8 @@ namespace Listenarr.Api.Features.Library
         DateTime? UpdatedAt,
         DateTime? NextAttemptAt,
         string RecoveryDisposition,
-        bool CanRetry);
+        bool CanRetry,
+        bool SourceRetained);
 
     internal sealed record MoveRecoveryStateResponse(
         bool HasUnresolvedMove,
@@ -265,7 +266,8 @@ namespace Listenarr.Api.Features.Library
                 job.UpdatedAt,
                 job.NextAttemptAt,
                 disposition.ToString(),
-                disposition == MoveRecoveryDisposition.RetryAvailable);
+                disposition == MoveRecoveryDisposition.RetryAvailable,
+                MoveJobPublicProjection.IsSourceRetained(job));
         }
 
         public async Task<IActionResult> GetRecoveryStateAsync(

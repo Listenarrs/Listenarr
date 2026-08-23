@@ -126,13 +126,20 @@
               <input
                 type="checkbox"
                 class="checkbox-input"
-                :checked="deleteEmpty"
+                :checked="deleteEmpty && allowDeleteEmpty"
+                :disabled="!allowDeleteEmpty"
                 @change="onToggleDeleteEmpty($event)"
                 aria-label="Clean up empty folders"
               />
               <div class="checkbox-content">
                 <span class="checkbox-title">Clean up empty folders</span>
-                <small>Delete the original folder if it becomes empty after moving</small>
+                <small v-if="allowDeleteEmpty"
+                  >Delete the original folder if it becomes empty after moving</small
+                >
+                <small v-else
+                  >The source is the managed library root, so Listenarr will keep that
+                  folder.</small
+                >
               </div>
             </label>
           </div>
@@ -145,6 +152,11 @@
             The primary button will <strong>{{ buttonLabel }}</strong> based on the checkbox. Use
             <strong>Move files now</strong> to perform the move immediately, or leave it unchecked
             to only update the path.
+          </p>
+          <p class="confirm-note" v-if="!rootFolderChange && moveFiles">
+            When safe source cleanup cannot be proven, such as a cross-volume NFS move, Listenarr
+            copies and verifies the files, keeps the source, and explicitly reports that retention
+            when the job completes.
           </p>
         </div>
       </ModalBody>
@@ -185,6 +197,7 @@ const props = withDefaults(
     rootFolderName?: string | null
     showMoveOption?: boolean
     allowMoveFiles?: boolean
+    allowDeleteEmpty?: boolean
     moveFiles?: boolean
     deleteEmpty?: boolean
     icon?: Component | undefined
@@ -200,6 +213,7 @@ const props = withDefaults(
     rootFolderName: null,
     showMoveOption: true,
     allowMoveFiles: true,
+    allowDeleteEmpty: true,
     moveFiles: true,
     deleteEmpty: true,
     icon: undefined,
@@ -266,7 +280,7 @@ function onToggleMoveFiles(e: Event) {
 }
 function onToggleDeleteEmpty(e: Event) {
   const t = e.target as HTMLInputElement | null
-  emit('update:deleteEmpty', Boolean(t && t.checked))
+  emit('update:deleteEmpty', Boolean(props.allowDeleteEmpty && t && t.checked))
 }
 
 const buttonLabel = computed(() => {
@@ -282,7 +296,7 @@ const buttonLabel = computed(() => {
 function onSubmit() {
   emit('confirm', {
     moveFiles: Boolean(props.moveFiles && effectiveAllowMoveFiles.value),
-    deleteEmpty: Boolean(props.deleteEmpty),
+    deleteEmpty: Boolean(props.deleteEmpty && props.allowDeleteEmpty),
   })
 }
 </script>

@@ -1339,6 +1339,7 @@ class ApiService {
       error?: string
       recoveryDisposition?: string
       canRetry?: boolean
+      sourceRetained?: boolean
     }>
   > {
     const jobs = await this.request<
@@ -1352,6 +1353,7 @@ class ApiService {
         error?: string
         recoveryDisposition?: string
         canRetry?: boolean
+        sourceRetained?: boolean
       }>
     >('/library/move')
 
@@ -1365,6 +1367,7 @@ class ApiService {
       error: job.error,
       recoveryDisposition: job.recoveryDisposition,
       canRetry: job.canRetry,
+      sourceRetained: job.sourceRetained,
     }))
   }
 
@@ -1378,6 +1381,7 @@ class ApiService {
     error?: string
     recoveryDisposition?: string
     canRetry?: boolean
+    sourceRetained?: boolean
   }> {
     const job = await this.request<{
       id: string
@@ -1393,6 +1397,7 @@ class ApiService {
       nextAttemptAt?: string
       recoveryDisposition?: string
       canRetry?: boolean
+      sourceRetained?: boolean
     }>('/library/move/' + encodeURIComponent(jobId))
 
     return {
@@ -1405,6 +1410,7 @@ class ApiService {
       error: job.error,
       recoveryDisposition: job.recoveryDisposition,
       canRetry: job.canRetry,
+      sourceRetained: job.sourceRetained,
     }
   }
 

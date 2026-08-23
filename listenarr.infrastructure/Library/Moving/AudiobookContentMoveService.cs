@@ -40,6 +40,7 @@ internal sealed record AudiobookContentMoveResult(
     bool TargetInsideSource,
     bool SourceInsideTarget,
     bool SourceCleanupCompleted,
+    bool SourceRetained,
     IReadOnlyDictionary<string, string> TargetPhysicalObjectIdentities,
     MarkerlessTargetVerificationLease? TargetVerificationLease = null);
 

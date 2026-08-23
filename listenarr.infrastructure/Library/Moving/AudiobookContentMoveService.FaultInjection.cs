@@ -7,6 +7,11 @@ internal enum SourceCleanupFaultPoint
     AfterMarkerlessSourceFileStateUpdate
 }
 
+internal enum SourceRetentionFaultPoint
+{
+    AfterEntryStateUpdate
+}
+
 internal enum CopyMutationFaultPoint
 {
     AfterMarkerlessFileCreationBeforeStateUpdate,
@@ -55,6 +60,12 @@ internal interface IMoveFaultInjector
     void OnSourceCleanupMutation(
         Guid jobId,
         SourceCleanupFaultPoint faultPoint)
+    {
+    }
+
+    void OnSourceRetentionMutation(
+        Guid jobId,
+        SourceRetentionFaultPoint faultPoint)
     {
     }
 

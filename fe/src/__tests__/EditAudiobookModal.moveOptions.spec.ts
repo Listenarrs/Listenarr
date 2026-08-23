@@ -119,6 +119,7 @@ vi.mock('@/services/signalr', () => ({
 vi.mock('@/composables/useMutationSemanticsConfirmation', () => mutationSemanticsMocks)
 
 import EditAudiobookModal from '@/components/domain/audiobook/EditAudiobookModal.vue'
+import MoveAudiobookModal from '@/components/feedback/MoveAudiobookModal.vue'
 
 const audiobook = {
   id: 1,
@@ -190,6 +191,46 @@ describe('EditAudiobookModal move options', () => {
       enqueuedAt: '2026-08-19T00:00:00Z',
       canRequeue: true,
     })
+  })
+
+  it('disables source cleanup when the audiobook is stored at the managed root', async () => {
+    const { createPinia } = await import('pinia')
+    const { useRootFoldersStore } = await import('@/stores/rootFolders')
+    const pinia = createPinia()
+    const rootStore = useRootFoldersStore(pinia)
+    const wrapper = mount(EditAudiobookModal, {
+      props: {
+        isOpen: true,
+        audiobook: {
+          ...audiobook,
+          basePath: 'C:\\root',
+        },
+      },
+      attachTo: document.body,
+      global: { plugins: [pinia] },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    rootStore.folders = [
+      {
+        id: 7,
+        name: 'Managed Root',
+        path: 'C:\\root',
+        isDefault: true,
+        caseSensitivityMode: 'Auto',
+        resolvedCaseSensitivity: 'Insensitive',
+      },
+    ]
+
+    const confirmation = (wrapper.vm as unknown).askMoveConfirmation(
+      'C:\\root',
+      'D:\\Audiobooks\\Author\\Book',
+    )
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.getComponent(MoveAudiobookModal).props('allowDeleteEmpty')).toBe(false)
+    expect((wrapper.vm as unknown).modalDeleteEmpty).toBe(false)
+    ;(wrapper.vm as unknown).cancelMoveConfirm()
+    await confirmation
   })
 
   it('disables destination edits and move resume while filesystem initialization is running', async () => {
