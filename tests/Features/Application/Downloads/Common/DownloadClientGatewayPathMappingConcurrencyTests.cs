@@ -115,4 +115,51 @@ public sealed class DownloadClientGatewayPathMappingConcurrencyTests : BaseTests
         // Ten items, each carrying two translatable paths, resolved from one lookup.
         Assert.Equal(1, mappingService.LookupCount);
     }
+
+    [Fact]
+    public async Task GetQueueAsync_ResolvesOncePerBatch_WhenItemsCarrySourceFiles()
+    {
+        var mappingService = new OverlapRecordingMappingService();
+        var client = new DownloadClientConfiguration
+        {
+            Id = "client-1",
+            Name = "qbittorrent",
+            Type = "qBittorrent"
+        };
+
+        // qBittorrent's queue mapper populates SourceFiles from the torrent's file list, so a
+        // real queue item arrives with one entry per file rather than with the list empty.
+        var items = Enumerable.Range(0, 10)
+            .Select(i => new QueueItem
+            {
+                Id = $"item-{i}",
+                RemotePath = $"/remote/downloads/book-{i}",
+                ContentPath = $"/remote/downloads/book-{i}/audio.m4b",
+                SourceFiles =
+                [
+                    $"/remote/downloads/book-{i}/01.m4b",
+                    $"/remote/downloads/book-{i}/02.m4b",
+                    $"/remote/downloads/book-{i}/03.m4b"
+                ]
+            })
+            .ToList();
+
+        var adapter = new Mock<IDownloadClientAdapter>();
+        adapter.Setup(a => a.GetQueueAsync(client, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(items);
+        var factory = new Mock<IDownloadClientAdapterFactory>();
+        factory.Setup(f => f.GetByType(It.IsAny<string>())).Returns(adapter.Object);
+
+        var gateway = new DownloadClientGateway(
+            mappingService,
+            factory.Object,
+            new LocalFileSystem(),
+            new FileSystemSemanticsResolver(),
+            NullLogger<DownloadClientGateway>.Instance);
+
+        await gateway.GetQueueAsync(client);
+
+        Assert.Equal(1, mappingService.MaxConcurrentLookups);
+        Assert.Equal(1, mappingService.LookupCount);
+    }
 }

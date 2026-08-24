@@ -390,6 +390,11 @@ namespace Listenarr.Tests.Features.Application.Downloads.Common
                     It.IsAny<DownloadClientConfiguration>(),
                     It.IsAny<string>()))
                 .ReturnsAsync((DownloadClientConfiguration _, string path) => path);
+            mapping.Setup(service => service.TranslatePath(
+                    It.IsAny<IReadOnlyList<RemotePathMapping>>(),
+                    It.IsAny<DownloadClientConfiguration>(),
+                    It.IsAny<string>()))
+                .Returns((IReadOnlyList<RemotePathMapping> _, DownloadClientConfiguration _, string path) => path);
             var resolver = new Mock<IFileSystemSemanticsResolver>();
             resolver.Setup(service => service.ResolveAsync(
                     It.IsAny<string>(),
