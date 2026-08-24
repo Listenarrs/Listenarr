@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Globalization;
+using Listenarr.Tests.Common;
 
 namespace Listenarr.Tests.Features.Application.Metadata
 {
@@ -31,7 +32,9 @@ namespace Listenarr.Tests.Features.Application.Metadata
     ///   de-DE: '.' is the GROUP separator, so "1.5" parsed as 15 and sorted after book 10.
     ///   fr-FR: "1.5" did not parse at all, fell to decimal.MaxValue, and sorted last.
     /// </summary>
-    public class SeriesPositionOrderingTests
+    [Trait("Name", "SeriesPositionOrderingTests")]
+    [Trait("Category", "Unit")]
+    public class SeriesPositionOrderingTests : BaseTests
     {
         private static void InCulture(string culture, Action body)
         {
