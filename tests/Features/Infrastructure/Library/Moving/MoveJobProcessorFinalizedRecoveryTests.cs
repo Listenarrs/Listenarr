@@ -47,9 +47,23 @@ public partial class MoveJobProcessorTests
 
         await processor.ProcessJobAsync(state.Job, CancellationToken.None);
 
+        var persisted = Assert.IsType<MoveJob>(
+            await state.Queue.GetJobAsync(state.Job.Id));
+        Assert.True(
+            persisted.Status == MoveJobStatus.Completed,
+            $"Expected Completed but found {persisted.Status}: {persisted.Error}");
+        Assert.Null(persisted.Error);
         Assert.Equal(
-            MoveJobStatus.Completed,
-            (await state.Queue.GetJobAsync(state.Job.Id))?.Status);
+            MoveJobEntryCleanupState.Retained,
+            persisted.SourceDirectoryCleanupState);
+        Assert.All(
+            persisted.Entries.Where(entry =>
+                entry.EntryType == MoveJobEntryType.File
+                && !MoveManifestIdentity.IsBoundaryAuthorization(entry)),
+            entry => Assert.Equal(
+                MoveJobEntryCleanupState.Deleted,
+                entry.CleanupState));
+        Assert.False(MoveJobPublicProjection.IsSourceRetained(persisted));
         Assert.True(File.Exists(Path.Join(state.Target, "book.m4b")));
     }
 

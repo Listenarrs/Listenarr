@@ -161,108 +161,82 @@ namespace Listenarr.Infrastructure.Library.Moving
                 targetSemantics,
                 CreateLeaseToken(job),
                 cleanupBoundaryResolution?.Boundary);
+            MarkerlessTargetVerificationLease? targetVerificationLease =
+                new(targetSemantics);
             try
             {
-                await contentMoveService.VerifyFinalizedMoveAsync(
-                    finalizedRequest,
-                    cancellationToken);
-            }
-            catch (MoveNeedsAttentionException exception)
-            {
-                await UpdateJobStatusAsync(
-                    job,
-                    MoveJobStatus.NeedsAttention,
-                    exception.Message,
-                    cancellationToken);
-                metrics.Increment("worker.move.job.needs_attention");
-                logger.LogWarning(
-                    exception,
-                    "Move job {JobId} could not prove markerless completion",
-                    job.Id);
-                return FinalizedMoveRecoveryOutcome.HandledFailure;
-            }
-            catch (Exception exception) when (IsTransientFilesystemException(exception))
-            {
-                await ScheduleTransientRetryAsync(
-                    job,
-                    $"Finalized move verification will be retried: {exception.Message}",
-                    exception,
-                    "Move job {JobId} could not verify its published target",
-                    cancellationToken);
-                return FinalizedMoveRecoveryOutcome.HandledFailure;
-            }
+                try
+                {
+                    await contentMoveService.VerifyFinalizedMoveAsync(
+                        finalizedRequest,
+                        cancellationToken,
+                        targetVerificationLease);
+                }
+                catch (MoveNeedsAttentionException exception)
+                {
+                    await UpdateJobStatusAsync(
+                        job,
+                        MoveJobStatus.NeedsAttention,
+                        exception.Message,
+                        cancellationToken);
+                    metrics.Increment("worker.move.job.needs_attention");
+                    logger.LogWarning(
+                        exception,
+                        "Move job {JobId} could not prove markerless completion",
+                        job.Id);
+                    return FinalizedMoveRecoveryOutcome.HandledFailure;
+                }
+                catch (Exception exception) when (IsTransientFilesystemException(exception))
+                {
+                    await ScheduleTransientRetryAsync(
+                        job,
+                        $"Finalized move verification will be retried: {exception.Message}",
+                        exception,
+                        "Move job {JobId} could not verify its published target",
+                        cancellationToken);
+                    return FinalizedMoveRecoveryOutcome.HandledFailure;
+                }
 
-            var targetInsideSource = FileSystemPathIdentity.IsSameOrInside(
-                target,
-                source,
-                sourceSemantics.Value);
-            var sourceInsideTarget = FileSystemPathIdentity.IsSameOrInside(
-                source,
-                target,
-                targetSemantics);
-            var targetPhysicalObjectIdentities =
-                await contentMoveService.CapturePublishedTargetPhysicalIdentitiesAsync(
-                    job.Id,
+                var targetInsideSource = FileSystemPathIdentity.IsSameOrInside(
                     target,
-                    targetSemantics,
-                    cancellationToken);
-            var sourceRetained = MoveJobPublicProjection.IsSourceRetained(job);
-            return new FinalizedMoveRecoveryOutcome(
-                Handled: false,
-                new AudiobookContentMoveResult(
+                    source,
+                    sourceSemantics.Value);
+                var sourceInsideTarget = FileSystemPathIdentity.IsSameOrInside(
+                    source,
+                    target,
+                    targetSemantics);
+                var targetPhysicalObjectIdentities =
+                    await contentMoveService.CapturePublishedTargetPhysicalIdentitiesAsync(
+                        job.Id,
+                        target,
+                        targetSemantics,
+                        cancellationToken);
+                var persistedJob = await moveQueueService.GetJobAsync(
+                    job.Id,
+                    cancellationToken)
+                    ?? throw new MoveLeaseLostException(
+                        job.Id,
+                        job.LeaseGeneration);
+                var sourceRetained = MoveJobPublicProjection.IsSourceRetained(
+                    persistedJob);
+                var result = new AudiobookContentMoveResult(
                     source,
                     target,
                     targetInsideSource,
                     sourceInsideTarget,
                     SourceCleanupCompleted: true,
                     SourceRetained: sourceRetained,
-                    targetPhysicalObjectIdentities));
-        }
-
-        private static bool HasFinalizedMoveEvidence(
-            MoveJob job,
-            Audiobook audiobook,
-            string target,
-            FileSystemPathSemantics targetSemantics)
-        {
-            if (job.Phase >= MoveJobPhase.Published)
-            {
-                return true;
+                    targetPhysicalObjectIdentities,
+                    targetVerificationLease);
+                targetVerificationLease = null;
+                return new FinalizedMoveRecoveryOutcome(
+                    Handled: false,
+                    result);
             }
-
-            if (string.IsNullOrWhiteSpace(audiobook.BasePath))
+            finally
             {
-                return false;
+                targetVerificationLease?.Dispose();
             }
-
-            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
-                    audiobook.BasePath,
-                    out var currentBasePath,
-                    out _))
-            {
-                return false;
-            }
-
-            try
-            {
-                return FileSystemPathIdentity.AreEquivalent(
-                    currentBasePath,
-                    target,
-                    targetSemantics);
-            }
-            catch (Exception exception) when (exception is
-                ArgumentException or NotSupportedException or PathTooLongException or System.Security.SecurityException)
-            {
-                return false;
-            }
-        }
-
-        private sealed record FinalizedMoveRecoveryOutcome(
-            bool Handled,
-            AudiobookContentMoveResult? MoveResult)
-        {
-            public static FinalizedMoveRecoveryOutcome NotAttempted { get; } = new(false, null);
-            public static FinalizedMoveRecoveryOutcome HandledFailure { get; } = new(true, null);
         }
 
         private async Task<bool> TryFinalizeMoveAsync(
