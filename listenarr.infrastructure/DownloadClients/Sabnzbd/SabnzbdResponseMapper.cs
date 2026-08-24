@@ -198,7 +198,7 @@ internal static class SabnzbdResponseMapper
         var parts = speedStr.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length == 0) return 0;
 
-        if (!double.TryParse(parts[0], out var value)) return 0;
+        if (!double.TryParse(parts[0], NumberStyles.Any, CultureInfo.InvariantCulture, out var value)) return 0;
 
         if (parts.Length > 1)
         {
@@ -317,7 +317,8 @@ internal static class SabnzbdResponseMapper
         if (property.ValueKind == JsonValueKind.Number)
             return property.GetDouble();
 
-        if (property.ValueKind == JsonValueKind.String && double.TryParse(property.GetString() ?? "0", out var value))
+        if (property.ValueKind == JsonValueKind.String
+            && double.TryParse(property.GetString() ?? "0", NumberStyles.Any, CultureInfo.InvariantCulture, out var value))
             return value;
 
         return 0;
