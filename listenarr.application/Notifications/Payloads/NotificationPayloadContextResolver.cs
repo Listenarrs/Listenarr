@@ -29,7 +29,16 @@ namespace Listenarr.Application.Notifications.Payloads
             bool validateImageBaseUrl = false)
         {
             var startup = await configurationService.GetStartupConfigAsync();
-            var baseUrl = startup?.UrlBase;
+            var baseUrl = startup?.ApplicationUrl;
+
+            if (string.IsNullOrWhiteSpace(baseUrl) && IsAbsoluteUrl(startup?.UrlBase))
+            {
+                // Before ApplicationUrl existed this was the only way to get images into a
+                // notification, so keep honouring it rather than breaking those installations.
+                logger.LogWarning(
+                    "UrlBase is set to an absolute URL and is being used as the notification base. Move the value to ApplicationUrl: UrlBase is the path Listenarr is served under");
+                baseUrl = startup?.UrlBase;
+            }
 
             if (string.IsNullOrWhiteSpace(baseUrl) && requestContextAccessor?.Current != null)
             {
@@ -39,15 +48,20 @@ namespace Listenarr.Application.Notifications.Payloads
 
             if (validateImageBaseUrl &&
                 !string.IsNullOrWhiteSpace(baseUrl) &&
-                !(baseUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || baseUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
+                !IsAbsoluteUrl(baseUrl))
             {
-                logger.LogWarning("Invalid base URL configured: {BaseUrl} - notifications will not include images", LogRedaction.SanitizeUrl(baseUrl));
+                logger.LogWarning("ApplicationUrl is not an absolute URL: {BaseUrl} - notifications will not include images", LogRedaction.SanitizeUrl(baseUrl));
                 baseUrl = null;
             }
 
             var apiVersion = ApiVersionUtils.ResolveApiVersion(requestContextAccessor?.Current?.Path, startup?.ApiVersion);
             return new NotificationPayloadContext(baseUrl, apiVersion);
         }
+
+        private static bool IsAbsoluteUrl(string? value) =>
+            !string.IsNullOrWhiteSpace(value) &&
+            (value.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+             value.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
     }
 
     public sealed record NotificationPayloadContext(string? BaseUrl, string ApiVersion);
