@@ -274,11 +274,10 @@ public partial class AudiobookFileService
         string? source,
         bool replaceMetadata)
     {
+        var fileInfo = new FileInfo(registrationLease.MetadataPath);
         var replacement = AudiobookFile.CreateUnresolved(currentFile.Path);
         replacement.AudiobookId = currentFile.AudiobookId;
-        replacement.Size = ResolveRegisteredLength(
-            registrationLease,
-            registrationLease.MetadataPath) ?? currentFile.Size;
+        replacement.Size = fileInfo.Exists ? fileInfo.Length : currentFile.Size;
         replacement.DurationSeconds = replaceMetadata
             ? metadata?.Duration.TotalSeconds
             : Math.Abs(metadata?.Duration.TotalSeconds ?? 0) > double.Epsilon

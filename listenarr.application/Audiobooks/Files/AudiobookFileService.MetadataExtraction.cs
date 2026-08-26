@@ -5,44 +5,6 @@ namespace Listenarr.Application.Audiobooks.Files;
 
 public partial class AudiobookFileService
 {
-    /// <summary>
-    /// The byte length of the file a registration lease holds open.
-    /// </summary>
-    /// <remarks>
-    /// A lease's metadata path is not always a path to the file. On Linux it is a
-    /// <c>/proc/{pid}/fd/{fd}</c> descriptor link, and stat'ing the link reports the length of
-    /// the link itself rather than of its target, which is a constant 64 bytes. Reading the
-    /// length from the pinned handle keeps the generation guarantee the lease exists to
-    /// provide, since it never consults the visible path, and reports the bytes the file
-    /// actually has.
-    ///
-    /// Leases that do not expose generation-bound reads fall back to the metadata path, which
-    /// is the public path for those callers.
-    /// </remarks>
-    private static long? ResolveRegisteredLength(
-        IAudiobookFileRegistrationLease? registrationLease,
-        string metadataPath)
-    {
-        if (registrationLease != null)
-        {
-            try
-            {
-                using var stream = registrationLease.OpenMetadataReadStream();
-                if (stream.CanSeek)
-                {
-                    return stream.Length;
-                }
-            }
-            catch (NotSupportedException)
-            {
-                // The lease does not expose generation-bound reads; fall through to the path.
-            }
-        }
-
-        var fileInfo = new FileInfo(metadataPath);
-        return fileInfo.Exists ? fileInfo.Length : null;
-    }
-
     private async Task<AudioMetadata?> ExtractMetadataAsync(
         string metadataPath,
         string cacheIdentity,
