@@ -429,9 +429,13 @@ public partial class AudiobookFileService
         if (!string.IsNullOrWhiteSpace(source.PhysicalObjectIdentity)
             && source.PhysicalIdentityObservedAtUtc.HasValue)
         {
+            // The source row may have been materialized from the database, where
+            // the UTC-by-contract observation time round-trips as Unspecified.
             clone.ApplyPhysicalObjectIdentity(
                 source.PhysicalObjectIdentity,
-                source.PhysicalIdentityObservedAtUtc.Value);
+                DateTime.SpecifyKind(
+                    source.PhysicalIdentityObservedAtUtc.Value,
+                    DateTimeKind.Utc));
         }
 
         return clone;

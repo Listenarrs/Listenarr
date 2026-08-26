@@ -175,8 +175,12 @@ public partial class EfAudiobookFileRepository
             return;
         }
 
+        // The source row may have been materialized from the database, where
+        // the UTC-by-contract observation time round-trips as Unspecified.
         target.ApplyPhysicalObjectIdentity(
             source.PhysicalObjectIdentity,
-            source.PhysicalIdentityObservedAtUtc.Value);
+            DateTime.SpecifyKind(
+                source.PhysicalIdentityObservedAtUtc.Value,
+                DateTimeKind.Utc));
     }
 }
