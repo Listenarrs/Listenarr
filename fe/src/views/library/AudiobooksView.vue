@@ -3674,9 +3674,11 @@ defineExpose({
 }
 
 .monitored-badge.unmonitored {
-  background-color: rgba(231, 76, 60, 0.2);
-  border-color: rgba(231, 76, 60, 0.4);
-  color: #e74c3c;
+  /* Neutral, not red: an unmonitored or not-yet-added book is a state, not a
+     destructive action. Red stays reserved for delete. */
+  background-color: rgba(148, 163, 184, 0.15);
+  border-color: rgba(148, 163, 184, 0.35);
+  color: var(--text-muted);
 }
 
 .monitored-badge i {
