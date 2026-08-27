@@ -63,8 +63,8 @@ public class IndexerSearchWorkflow
 
         if (!indexers.Any())
         {
-            _logger.LogWarning("No indexers configured, returning mock results for query: {Query}", query);
-            return GenerateMockIndexerResults(query);
+            _logger.LogWarning("No indexers configured or enabled; search returned no results for query: {Query}", query);
+            return results;
         }
 
         var searchTasks = indexers.Select(async indexer =>
@@ -253,62 +253,5 @@ public class IndexerSearchWorkflow
         {
             return "Indexer";
         }
-    }
-
-    private List<IndexerSearchResult> GenerateMockIndexerResults(string query)
-    {
-        return GenerateMockIndexerResults(query, "Mock Indexer", "Torrent");
-    }
-
-    private List<IndexerSearchResult> GenerateMockIndexerResults(string query, string indexerName, string indexerType)
-    {
-        var random = new Random();
-        var results = new List<IndexerSearchResult>();
-        var isUsenet = indexerType.Equals("Usenet", StringComparison.OrdinalIgnoreCase);
-
-        _logger.LogInformation("Generating {Count} mock {Type} results for indexer {IndexerName}", 5, indexerType, indexerName);
-
-        for (int i = 0; i < 5; i++)
-        {
-            var result = new IndexerSearchResult
-            {
-                Id = Guid.NewGuid().ToString(),
-                Title = $"{query} - Quality {i + 1}",
-                Artist = "Various Authors",
-                Album = $"{query} Series",
-                Category = "Audiobook",
-                Size = random.Next(200_000_000, 1_500_000_000),
-                Seeders = isUsenet ? 0 : random.Next(5, 100),
-                Leechers = isUsenet ? 0 : random.Next(0, 20),
-                Source = indexerName,
-                PublishedDate = DateTime.UtcNow.AddDays(-random.Next(1, 365)).ToString("o"),
-                Quality = i switch
-                {
-                    0 => "MP3 64kbps",
-                    1 => "MP3 128kbps",
-                    2 => "MP3 192kbps",
-                    3 => "M4B 128kbps",
-                    _ => "FLAC"
-                },
-                Format = i >= 3 ? "M4B" : "MP3",
-                Language = "English"
-            };
-
-            if (isUsenet)
-            {
-                result.NzbUrl = $"https://{indexerName.ToLowerInvariant()}.example.com/api/nzb/{Guid.NewGuid():N}";
-                result.MagnetLink = string.Empty;
-                result.TorrentUrl = string.Empty;
-            }
-            else
-            {
-                result.MagnetLink = $"magnet:?xt=urn:btih:{Guid.NewGuid():N}";
-                result.NzbUrl = string.Empty;
-            }
-
-            results.Add(result);
-        }
-
-        return results;
     }
 }
