@@ -51,7 +51,13 @@
 
       <div v-if="store.metadataFetchCount > 100" class="rate-limit-warning">
         <PhWarning :size="14" />
-        {{ store.metadataFetchCount }} API lookups - rate limit: 150/window
+        {{ store.metadataFetchCount }} API lookups - external providers may throttle
+      </div>
+
+      <div v-if="store.failedCount > 0" class="lookup-failure-warning">
+        <PhWarning :size="14" />
+        {{ store.failedCount }} lookup{{ store.failedCount === 1 ? '' : 's' }} failed - these were
+        not matched and will be retried on the next run
       </div>
 
       <div
@@ -262,6 +268,18 @@ async function handleImport() {
   font-family: monospace;
   font-size: 0.78rem;
   max-width: 280px;
+}
+
+.lookup-failure-warning {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 4px;
+  padding: 0.2rem 0.5rem;
 }
 
 .rate-limit-warning {

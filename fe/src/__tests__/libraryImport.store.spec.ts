@@ -417,4 +417,45 @@ describe('library import store', () => {
       'Jack of Shadows',
     )
   })
+
+  it('keeps a failed lookup unprocessed instead of recording it as no match', async () => {
+    const { useLibraryImportStore } = await import('@/stores/libraryImport')
+    const store = useLibraryImportStore()
+
+    // A throttled provider rejects; that is not an answer about the book.
+    advancedSearch.mockRejectedValue(new Error('429 Too Many Requests'))
+
+    const path = 'C:\\incoming\\Rate Limited.mp3'
+    store.items = {
+      [path]: {
+        id: path,
+        fullPath: path,
+        sourceFiles: [path],
+        folderPath: 'C:\\incoming',
+        relativePath: 'rate-limited',
+        folderName: 'rate-limited',
+        detectedTitle: 'Rate Limited',
+        detectedAuthor: 'Some Author',
+        format: 'MP3',
+        fileCount: 1,
+        selectedMatch: null,
+        hasSearched: false,
+        searchFailed: false,
+        isSearching: false,
+        selected: false,
+      },
+    }
+
+    store.startProcessing()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const item = store.items[path]
+    expect(item?.searchFailed).toBe(true)
+    expect(item?.selectedMatch).toBeNull()
+
+    // The row must stay in the unprocessed set so the next run retries it.
+    expect(item?.hasSearched).toBe(false)
+    expect(store.hasUnprocessedItems).toBe(true)
+    expect(store.failedCount).toBe(1)
+  })
 })
