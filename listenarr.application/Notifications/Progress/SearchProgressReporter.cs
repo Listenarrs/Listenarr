@@ -26,15 +26,23 @@ namespace Listenarr.Application.Notifications.Progress
     {
         private readonly IHubBroadcaster? _hubBroadcaster;
         private readonly ILogger<SearchProgressReporter> _logger;
+        private readonly ISearchActivityTracker? _activityTracker;
 
-        public SearchProgressReporter(IHubBroadcaster? hubBroadcaster, ILogger<SearchProgressReporter> logger)
+        public SearchProgressReporter(
+            IHubBroadcaster? hubBroadcaster,
+            ILogger<SearchProgressReporter> logger,
+            ISearchActivityTracker? activityTracker = null)
         {
             _hubBroadcaster = hubBroadcaster;
             _logger = logger;
+            _activityTracker = activityTracker;
         }
 
         /// <summary>
-        /// Broadcasts a search progress message to all connected realtime clients.
+        /// Broadcasts an interactive (user-initiated) search progress message to
+        /// all connected realtime clients. These are scoped to the page that
+        /// started the search (e.g. Add New) and are not recorded in the
+        /// background-activity tracker.
         /// </summary>
         /// <param name="message">The progress message to broadcast</param>
         /// <param name="asin">Optional ASIN associated with this progress update</param>
@@ -51,6 +59,45 @@ namespace Listenarr.Application.Notifications.Progress
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 _logger.LogDebug(ex, "Failed to broadcast SearchProgress: {Message}", ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Broadcasts a background automatic-search activity update and records it
+        /// in the <see cref="ISearchActivityTracker"/> so freshly-loaded clients
+        /// can hydrate the live indicator. Clients opt in to these via the
+        /// <c>includeAutomatic</c> flag on their SearchProgress subscription.
+        /// </summary>
+        /// <param name="message">Human-readable status (e.g. "Searching 13 indexers for …").</param>
+        /// <param name="stage">One of <c>searching</c>/<c>grabbed</c>/<c>no_results</c>/<c>idle</c>.</param>
+        /// <param name="audiobookId">The book this event concerns, if any.</param>
+        /// <param name="asin">Associated ASIN, if any.</param>
+        /// <param name="addToFeed">
+        /// Whether the event enters the recent-outcomes feed. Transient stages
+        /// (searching/idle) pass false so the feed lists outcomes, not play-by-play.
+        /// </param>
+        public async Task BroadcastAutomaticAsync(
+            string message,
+            string stage,
+            int? audiobookId = null,
+            string? asin = null,
+            bool addToFeed = true)
+        {
+            var evt = new SearchActivityEvent(message, stage, audiobookId, asin, DateTime.UtcNow);
+            _activityTracker?.Record(evt, addToFeed);
+
+            try
+            {
+                if (_hubBroadcaster != null)
+                {
+                    await _hubBroadcaster.BroadcastAsync(
+                        "SearchProgress",
+                        new { message, asin, audiobookId, type = "automatic", stage, timestamp = evt.Timestamp });
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                _logger.LogDebug(ex, "Failed to broadcast automatic SearchProgress: {Message}", ex.Message);
             }
         }
     }

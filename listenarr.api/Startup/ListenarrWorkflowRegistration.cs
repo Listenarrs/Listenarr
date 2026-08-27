@@ -54,6 +54,7 @@ public static class ListenarrWorkflowRegistration
 
     private static IServiceCollection AddListenarrSearchWorkflows(this IServiceCollection services)
     {
+        services.AddSingleton<ISearchActivityTracker, SearchActivityTracker>();
         services.AddScoped<SearchProgressReporter>();
         services.AddScoped<IndexerAdditionalSettingsParser>();
         services.AddScoped<IndexerSearchWorkflow>();

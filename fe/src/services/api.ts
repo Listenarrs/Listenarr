@@ -62,6 +62,7 @@ import type {
   RenamePreview,
   RenameOperation,
   RenameResult,
+  SearchActivityResponse,
 } from '@/types'
 import { getStartupConfigCached, resetCache as resetStartupConfigCache } from './startupConfigCache'
 import { sessionTokenManager } from '@/utils/sessionToken'
@@ -314,6 +315,14 @@ class ApiService {
     if (sortDirection) params.append('sortDirection', sortDirection)
 
     return this.request<SearchResult[]>(`/search/indexers?${params}`)
+  }
+
+  /**
+   * Current background automatic-search activity + recent outcomes, for hydrating
+   * the live indicator (sidebar) on page load before SignalR streams.
+   */
+  async getSearchActivity(): Promise<SearchActivityResponse> {
+    return this.request<SearchActivityResponse>(`/search/activity`)
   }
 
   async searchByApi(
