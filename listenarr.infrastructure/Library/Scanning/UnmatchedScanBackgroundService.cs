@@ -355,7 +355,8 @@ namespace Listenarr.Infrastructure.Library.Scanning
                         var parsed = PathMetadataParser.ParsePathOnly(
                             representative,
                             rootFolderPath,
-                            semantics);
+                            semantics,
+                            appSettings?.FolderNamingPattern);
                         if (hasDurableGenerationProof)
                         {
                             await ApplyPinnedFolderMetadataAsync(
@@ -400,7 +401,7 @@ namespace Listenarr.Infrastructure.Library.Scanning
 
                         if (tags != null)
                         {
-                            ApplyEmbeddedTags(parsed, tags);
+                            ApplyEmbeddedTags(parsed, tags, appSettings?.FolderNamingPattern);
                         }
 
                         var relativeFolder = bookFolder.Length > rootFolderPath.Length

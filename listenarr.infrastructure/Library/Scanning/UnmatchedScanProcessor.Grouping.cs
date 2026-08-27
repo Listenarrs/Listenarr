@@ -391,9 +391,18 @@ namespace Listenarr.Infrastructure.Library.Scanning
             }
         }
 
-        private static void ApplyEmbeddedTags(PathParsedMetadata target, PathParsedMetadata tags)
+        private static void ApplyEmbeddedTags(
+            PathParsedMetadata target,
+            PathParsedMetadata tags,
+            string? folderNamingPattern = null)
         {
-            if (!string.IsNullOrEmpty(tags.Title)) target.Title = tags.Title;
+            // Album/title tags often carry the whole rendered folder name. Reduce such a value to
+            // its title so display and search see "Dilation Sleep", not
+            // "[Revelation Space 10] Dilation Sleep".
+            if (!string.IsNullOrEmpty(tags.Title))
+            {
+                target.Title = NamingPatternFolderMatcher.ExtractTitle(tags.Title, folderNamingPattern);
+            }
             if (!string.IsNullOrEmpty(tags.Author)) target.Author = tags.Author;
             if (!string.IsNullOrEmpty(tags.Narrator)) target.Narrator = tags.Narrator;
             if (!string.IsNullOrEmpty(tags.Series)) target.Series = tags.Series;
