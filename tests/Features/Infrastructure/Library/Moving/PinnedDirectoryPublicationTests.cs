@@ -45,7 +45,7 @@ public sealed partial class PinnedDirectoryCreationTests : BaseTests
                 File.Delete(filePath);
                 Directory.Delete(scenarioRoot);
             }
-            catch
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
                 // Best-effort cleanup on externally supplied network storage.
             }
