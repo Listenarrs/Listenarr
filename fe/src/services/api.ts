@@ -42,6 +42,7 @@ import type {
   SearchSortDirection,
   AudibleSearchResponse,
   AudibleBookMetadata,
+  AudibleSeriesSearchItem,
   AuthorCatalogResponse,
   AuthorLookupResponse,
   AuthorMonitoringStatusResponse,
@@ -370,9 +371,12 @@ class ApiService {
   }
 
   // Audible series helpers (proxied through backend)
-  async searchAudibleSeries(name: string, region: string = 'us'): Promise<unknown> {
+  async searchAudibleSeries(
+    name: string,
+    region: string = 'us',
+  ): Promise<AudibleSeriesSearchItem[]> {
     const params = new URLSearchParams({ name, region })
-    return this.request<unknown>(`/search/audible/series?${params}`)
+    return this.request<AudibleSeriesSearchItem[]>(`/search/audible/series?${params}`)
   }
 
   async getAudibleSeriesBooks(seriesAsin: string, region: string = 'us'): Promise<unknown> {
