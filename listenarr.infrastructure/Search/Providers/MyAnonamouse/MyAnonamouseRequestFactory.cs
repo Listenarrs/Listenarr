@@ -82,26 +82,20 @@ internal static class MyAnonamouseRequestFactory
             queryParameters.Add(new($"tor[srchIn][{field.Key}]", field.Value ? "true" : "false"));
         }
 
-        queryParameters.Add(new("tor[searchType]", searchType));
-
-        switch (request?.MyAnonamouse?.Filter)
+        // MaM uses tor[searchType] for both text-search mode (title/author/all) and
+        // content filters (active, fl, nVIP, etc.). A filter takes precedence over the
+        // text-search mode value, so resolve the final value once and add it once.
+        var filterValue = request?.MyAnonamouse?.Filter switch
         {
-            case MamTorrentFilter.Active:
-                queryParameters.Add(new("tor[onlyActive]", "1"));
-                break;
-            case MamTorrentFilter.Freeleech:
-                queryParameters.Add(new("tor[onlyFreeleech]", "1"));
-                break;
-            case MamTorrentFilter.FreeleechOrVip:
-                queryParameters.Add(new("tor[freeleechOrVip]", "1"));
-                break;
-            case MamTorrentFilter.Vip:
-                queryParameters.Add(new("tor[onlyVip]", "1"));
-                break;
-            case MamTorrentFilter.NotVip:
-                queryParameters.Add(new("tor[notVip]", "1"));
-                break;
-        }
+            MamTorrentFilter.Active         => "active",
+            MamTorrentFilter.Freeleech      => "fl",
+            MamTorrentFilter.FreeleechOrVip => "fl-VIP",
+            MamTorrentFilter.Vip            => "VIP",
+            MamTorrentFilter.NotVip         => "nVIP",
+            _                               => null
+        };
+
+        queryParameters.Add(new("tor[searchType]", filterValue ?? searchType));
 
         if (request?.MyAnonamouse?.FreeleechWedge is { } freeleechWedge)
         {
