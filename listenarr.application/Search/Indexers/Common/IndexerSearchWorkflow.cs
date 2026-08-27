@@ -78,7 +78,16 @@ public class IndexerSearchWorkflow
                 _logger.LogInformation("Found {Count} results from indexer {Name}", indexerResults.Count, indexer.Name);
                 return indexerResults;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            catch (OperationCanceledException ex)
+            {
+                // No workflow-level cancellation token flows into this search, so an
+                // OperationCanceledException here is an HttpClient per-request timeout
+                // (TaskCanceledException derives from OperationCanceledException). Contain it
+                // to this indexer so a single slow indexer can't abort every other one's results.
+                _logger.LogWarning(ex, "Timed out searching indexer {Name} for query: {Query}", indexer.Name, query);
+                return new List<IndexerSearchResult>();
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 _logger.LogError(ex, "Error searching indexer {Name} for query: {Query}", indexer.Name, query);
                 return new List<IndexerSearchResult>();
