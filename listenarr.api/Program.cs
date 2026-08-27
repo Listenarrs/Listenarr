@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Api.Plugins;
 using Listenarr.Api.Startup;
 using Listenarr.Infrastructure.DependencyInjection;
 using Listenarr.Infrastructure.FileSystem;
@@ -28,12 +29,28 @@ var builder = ListenarrBuilderFactory.Create(args, realtimeLogSink, bootstrapFil
 builder.AddListenarrApiServices(bootstrapFileSystem);
 builder.Services.AddListenarrInfrastructureComposition(builder.Configuration, builder.Environment);
 
+// Load any plugins dropped into the app's plugins/ folder. No-op on a stock install.
+var pluginsDir = Path.Combine(AppContext.BaseDirectory, "plugins");
+builder.AddListenarrPlugins(pluginsDir);
+
+// Runtime plugin manager (Settings → Plugins): install/uninstall from repositories.
+var pluginConfigDir = Path.Combine(AppContext.BaseDirectory, "config");
+builder.Services.AddHttpClient();
+builder.Services.AddSingleton(sp => new Listenarr.Api.Plugins.PluginManager(
+    sp.GetRequiredService<IHttpClientFactory>(),
+    pluginsDir,
+    pluginConfigDir,
+    sp.GetRequiredService<ILogger<Listenarr.Api.Plugins.PluginManager>>()));
+
 var app = builder.Build();
 
 app.Services.ApplyListenarrDatabaseMigrations();
 await app.RunListenarrStartupTasksAsync();
 
 realtimeLogSink.InitializeListenarrRealtimeLogging(app.Services);
+
+// Serve runtime-installable plugin frontends (manifest + ui assets) before the SPA fallback.
+app.UseListenarrPluginAssets(pluginsDir);
 
 app.UseListenarrRequestPipeline(endpoints => endpoints.MapListenarrRealtimeHubs(app.Environment));
 

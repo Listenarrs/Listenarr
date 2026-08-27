@@ -92,6 +92,14 @@
             <PhSliders />
             General Settings
           </button>
+          <button
+            @click="router.push({ hash: '#plugins' })"
+            :class="{ active: activeTab === 'plugins' }"
+            class="tab-button"
+          >
+            <PhPuzzlePiece />
+            Plugins
+          </button>
         </div>
 
         <button
@@ -269,6 +277,9 @@
           }
         "
       />
+
+      <!-- Plugins Tab -->
+      <PluginsTab v-if="activeTab === 'plugins'" />
     </div>
 
     <!-- Metadata Source Configuration Modal -->
@@ -418,6 +429,7 @@ import IndexersTab from '@/views/settings/IndexersTab.vue'
 import { Modal, ModalHeader, ModalFooter } from '@/components/feedback'
 import DeleteConfirmationModal from '@/components/feedback/DeleteConfirmationModal.vue'
 import GeneralSettingsTab from '@/views/settings/GeneralSettingsTab.vue'
+import PluginsTab from '@/views/settings/PluginsTab.vue'
 import CustomSelect from '@/components/form/CustomSelect.vue'
 import PasswordInput from '@/components/form/PasswordInput.vue'
 import {
@@ -434,6 +446,7 @@ import {
   PhX,
   PhCheck,
   PhDownloadSimple,
+  PhPuzzlePiece,
 } from '@phosphor-icons/vue'
 import { useToast } from '@/services/toastService'
 
@@ -455,7 +468,14 @@ const filesystemReadinessStore = useFilesystemReadinessStore()
 const auth = useAuthStore()
 const toast = useToast()
 const activeTab = ref<
-  'rootfolders' | 'indexers' | 'clients' | 'quality-profiles' | 'notifications' | 'bot' | 'general'
+  | 'rootfolders'
+  | 'indexers'
+  | 'clients'
+  | 'quality-profiles'
+  | 'notifications'
+  | 'bot'
+  | 'general'
+  | 'plugins'
 >('rootfolders')
 
 const mobileTabOptions = computed(() => [
@@ -466,7 +486,7 @@ const mobileTabOptions = computed(() => [
   { value: 'notifications', label: 'Notifications', icon: PhBell },
   { value: 'bot', label: 'Discord Bot', icon: PhGlobe },
   { value: 'general', label: 'General Settings', icon: PhSliders },
-  // Integrations removed
+  { value: 'plugins', label: 'Plugins', icon: PhPuzzlePiece },
 ])
 // Desktop tabs carousel refs/state
 const desktopTabsRef = ref<HTMLElement | null>(null)
@@ -1126,6 +1146,7 @@ const syncTabFromHash = () => {
     | 'notifications'
     | 'bot'
     | 'general'
+    | 'plugins'
   if (
     hash &&
     [
@@ -1136,6 +1157,7 @@ const syncTabFromHash = () => {
       'notifications',
       'bot',
       'general',
+      'plugins',
     ].includes(hash)
   ) {
     activeTab.value = hash as typeof activeTab.value
