@@ -55,7 +55,16 @@
               {{ isCurrentAuthorMonitored ? 'Monitoring Author' : 'Not Monitored' }}
             </Pill>
             <Pill variant="success"> {{ authorLibraryCount }} in library </Pill>
-            <Pill v-if="authorNotAddedCount > 0" variant="warning">
+            <Pill
+              v-if="authorNotAddedCount > 0"
+              variant="warning"
+              class="clickable-pill"
+              role="button"
+              tabindex="0"
+              title="Add all of these to your library"
+              @click="showAddMissingModal = true"
+              @keydown="onAddMissingPillKeydown"
+            >
               {{ authorNotAddedCount }} ready to add
             </Pill>
             <Pill variant="info">
@@ -172,7 +181,16 @@
               {{ isCurrentSeriesMonitored ? 'Monitoring Series' : 'Not Monitored' }}
             </Pill>
             <Pill variant="success"> {{ seriesLibraryCount }} in library </Pill>
-            <Pill v-if="seriesNotAddedCount > 0" variant="warning">
+            <Pill
+              v-if="seriesNotAddedCount > 0"
+              variant="warning"
+              class="clickable-pill"
+              role="button"
+              tabindex="0"
+              title="Add all of these to your library"
+              @click="showAddMissingModal = true"
+              @keydown="onAddMissingPillKeydown"
+            >
               {{ seriesNotAddedCount }} ready to add
             </Pill>
             <Pill variant="primary"> {{ seriesCatalogTotalCount }} total books </Pill>
@@ -284,6 +302,15 @@
               <component v-else :is="isCurrentAuthorMonitored ? PhEye : PhPlus" />
               {{ isCurrentAuthorMonitored ? 'Monitoring Author' : 'Monitor Author' }}
             </button>
+            <button
+              v-if="missingWorks.length > 0"
+              class="toolbar-btn author-addmissing-btn"
+              @click="showAddMissingModal = true"
+              :title="`Add the ${missingWorks.length} book(s) by this author not yet in your library`"
+            >
+              <PhPlus />
+              Add missing ({{ missingWorks.length }})
+            </button>
           </div>
         </div>
         <div v-else-if="isSeriesCollection" class="author-monitoring-controls">
@@ -310,6 +337,15 @@
               <PhArrowClockwise v-if="seriesMonitoringBusy" class="spin-icon" />
               <component v-else :is="isCurrentSeriesMonitored ? PhEye : PhPlus" />
               {{ isCurrentSeriesMonitored ? 'Monitoring Series' : 'Monitor Series' }}
+            </button>
+            <button
+              v-if="missingWorks.length > 0"
+              class="toolbar-btn series-addmissing-btn"
+              @click="showAddMissingModal = true"
+              :title="`Add the ${missingWorks.length} missing book(s) in this series`"
+            >
+              <PhPlus />
+              Add missing ({{ missingWorks.length }})
             </button>
           </div>
         </div>
@@ -764,6 +800,17 @@
       @close="closeAddLibraryModal"
       @added="handleBookAdded"
     />
+
+    <AddSelectedBooksModal
+      v-if="showAddMissingModal"
+      :visible="showAddMissingModal"
+      :books="missingWorks"
+      :series-name="isSeriesCollection ? resolvedSeriesName : undefined"
+      :series-asin="isSeriesCollection ? seriesHeroAsin : undefined"
+      :region="seriesCatalogRegion"
+      @close="showAddMissingModal = false"
+      @done="onMissingBooksAdded"
+    />
   </div>
 </template>
 
@@ -801,6 +848,7 @@ import { errorTracking } from '@/services/errorTracking'
 import { useToast } from '@/services/toastService'
 import EditAudiobookModal from '@/components/domain/audiobook/EditAudiobookModal.vue'
 import AddLibraryModal from '@/components/domain/audiobook/AddLibraryModal.vue'
+import AddSelectedBooksModal from '@/components/domain/audiobook/AddSelectedBooksModal.vue'
 import BulkEditModal from '@/components/domain/collection/BulkEditModal.vue'
 import RenamePreviewModal from '@/components/domain/organize/RenamePreviewModal.vue'
 import DeleteConfirmationModal from '@/components/feedback/DeleteConfirmationModal.vue'
@@ -1326,6 +1374,38 @@ const totalAddedAudiobooks = computed(() => audiobooks.value.filter((book) => bo
 const totalNotAddedAudiobooks = computed(() => audiobooks.value.filter((book) => !book.inLibrary))
 const authorLibraryCount = computed(() => totalAddedAudiobooks.value.length)
 const authorNotAddedCount = computed(() => totalNotAddedAudiobooks.value.length)
+
+// --- Bulk-add missing books ---------------------------------------------------------
+const showAddMissingModal = ref(false)
+
+// Single keydown handler: two @keydown modifiers on one element compile to a
+// duplicate onKeydown key, which the pinned vue-tsc (3.x) rejects (TS1117).
+function onAddMissingPillKeydown(e: KeyboardEvent) {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault()
+    showAddMissingModal.value = true
+  }
+}
+
+// Missing (not-owned) works in this collection, as add-metadata for the bulk-add modal.
+const missingWorks = computed(() =>
+  audiobooks.value
+    .filter((book) => !book.inLibrary && book.addMetadata)
+    .map((book) => book.addMetadata as NonNullable<typeof book.addMetadata>),
+)
+
+// The series name as the library actually spells it (route param may differ in case/punctuation).
+const resolvedSeriesName = computed(() => {
+  if (!isSeriesCollection.value) return name.value
+  const match = libraryCollectionAudiobooks.value.find((book) => book.series?.trim())
+  return match?.series?.trim() || name.value
+})
+
+async function onMissingBooksAdded() {
+  showAddMissingModal.value = false
+  // One refresh after the batch (not per-add) so the added books re-render as in-library.
+  await libraryStore.fetchLibrary()
+}
 const seriesLibraryCount = computed(() => totalAddedAudiobooks.value.length)
 const seriesNotAddedCount = computed(() => totalNotAddedAudiobooks.value.length)
 const seriesVisibleBookCount = computed(() => audiobooks.value.length)
@@ -4502,5 +4582,20 @@ defineExpose({
     width: 100%;
     height: 120px;
   }
+}
+
+/* The "ready to add" pill doubles as a shortcut to the bulk-add modal. */
+.clickable-pill {
+  cursor: pointer;
+  transition:
+    filter 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.clickable-pill:hover {
+  filter: brightness(1.15);
+}
+.clickable-pill:focus-visible {
+  outline: 2px solid var(--brand, #5aa9e6);
+  outline-offset: 2px;
 }
 </style>
