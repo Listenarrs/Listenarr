@@ -40,6 +40,8 @@ internal static class LibraryRegistrationExtensions
         services.AddScoped<IAudiobookDeletionIntentStore, AudiobookDeletionIntentStore>();
         services.AddScoped<IAudiobookDeletionIntentReconciler, AudiobookDeletionIntentReconciler>();
         services.AddScoped<IRootFolderStorageConfirmationService, RootFolderStorageConfirmationService>();
+        services.AddScoped<IRootFolderWeakStoragePolicyService, RootFolderWeakStoragePolicyService>();
+        services.AddScoped<ICompatibilitySourceCleanupCoordinator, CompatibilitySourceCleanupCoordinator>();
         services.AddScoped<IAudiobookFilePathIdentityResolver, AudiobookFilePathIdentityResolver>();
         services.AddScoped<IFileRenameCommitStore, FileRenameCommitStore>();
         services.AddScoped<IFileRegistrationRecoveryService, FileRegistrationRecoveryService>();
