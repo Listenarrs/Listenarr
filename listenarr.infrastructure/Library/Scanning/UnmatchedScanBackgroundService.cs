@@ -355,7 +355,8 @@ namespace Listenarr.Infrastructure.Library.Scanning
                         var parsed = PathMetadataParser.ParsePathOnly(
                             representative,
                             rootFolderPath,
-                            semantics);
+                            semantics,
+                            appSettings?.FolderNamingPattern);
                         if (hasDurableGenerationProof)
                         {
                             await ApplyPinnedFolderMetadataAsync(

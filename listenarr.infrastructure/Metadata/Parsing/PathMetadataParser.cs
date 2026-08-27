@@ -58,20 +58,23 @@ namespace Listenarr.Infrastructure.Metadata.Parsing
         public static PathParsedMetadata Parse(
             string filePath,
             string rootFolderPath,
-            FileSystemPathSemantics semantics) =>
-            ParseCore(filePath, rootFolderPath, semantics, includeFilesystemMetadata: true);
+            FileSystemPathSemantics semantics,
+            string? folderNamingPattern = null) =>
+            ParseCore(filePath, rootFolderPath, semantics, includeFilesystemMetadata: true, folderNamingPattern);
 
         internal static PathParsedMetadata ParsePathOnly(
             string filePath,
             string rootFolderPath,
-            FileSystemPathSemantics semantics) =>
-            ParseCore(filePath, rootFolderPath, semantics, includeFilesystemMetadata: false);
+            FileSystemPathSemantics semantics,
+            string? folderNamingPattern = null) =>
+            ParseCore(filePath, rootFolderPath, semantics, includeFilesystemMetadata: false, folderNamingPattern);
 
         private static PathParsedMetadata ParseCore(
             string filePath,
             string rootFolderPath,
             FileSystemPathSemantics semantics,
-            bool includeFilesystemMetadata)
+            bool includeFilesystemMetadata,
+            string? folderNamingPattern = null)
         {
             var result = new PathParsedMetadata();
 
@@ -94,25 +97,60 @@ namespace Listenarr.Infrastructure.Metadata.Parsing
             if (parts.Length < 2) return result;
             var folderParts = parts[..^1];
 
-            // Find the first folder level that matches the "Year - Title" pattern
+            // Prefer the configured folder naming pattern so scanning reads back exactly the layout
+            // the renamer writes; fall back to the built-in "{Year} - {Title}" convention.
             int bookFolderIndex = -1;
-            for (int i = 0; i < folderParts.Length; i++)
+            Match? configuredMatch = null;
+            var configuredPattern = NamingPatternFolderMatcher.GetOrBuild(folderNamingPattern);
+
+            if (configuredPattern != null)
             {
-                if (BookFolderPattern.IsMatch(folderParts[i]))
+                for (int i = 0; i < folderParts.Length; i++)
                 {
-                    bookFolderIndex = i;
-                    break;
+                    var candidate = configuredPattern.Match(folderParts[i]);
+                    if (candidate.Success && NamingPatternFolderMatcher.HasBookFolderMarker(candidate))
+                    {
+                        bookFolderIndex = i;
+                        configuredMatch = candidate;
+                        break;
+                    }
+                }
+            }
+
+            if (bookFolderIndex < 0)
+            {
+                for (int i = 0; i < folderParts.Length; i++)
+                {
+                    if (BookFolderPattern.IsMatch(folderParts[i]))
+                    {
+                        bookFolderIndex = i;
+                        break;
+                    }
                 }
             }
 
             if (bookFolderIndex < 0) return result;
 
-            // Parse year, title, series, seriesNumber from the matched folder
-            var m = BookFolderPattern.Match(folderParts[bookFolderIndex]);
-            result.Year = m.Groups[1].Value;
-            result.Title = m.Groups[2].Value.Trim();
-            if (m.Groups[3].Success) result.Series = m.Groups[3].Value.Trim();
-            if (m.Groups[4].Success) result.SeriesNumber = m.Groups[4].Value.Trim();
+            if (configuredMatch != null)
+            {
+                AssignGroup(configuredMatch, "Title", v => result.Title = v);
+                AssignGroup(configuredMatch, "Series", v => result.Series = v);
+                AssignGroup(configuredMatch, "SeriesNumber", v => result.SeriesNumber = v);
+                AssignGroup(configuredMatch, "Narrator", v => result.Narrator = v);
+                AssignGroup(configuredMatch, "Asin", v => result.Asin = v);
+                result.Year = configuredMatch.Groups["Year"].Success
+                    ? configuredMatch.Groups["Year"].Value
+                    : string.Empty;
+            }
+            else
+            {
+                // Parse year, title, series, seriesNumber from the matched folder
+                var m = BookFolderPattern.Match(folderParts[bookFolderIndex]);
+                result.Year = m.Groups[1].Value;
+                result.Title = m.Groups[2].Value.Trim();
+                if (m.Groups[3].Success) result.Series = m.Groups[3].Value.Trim();
+                if (m.Groups[4].Success) result.SeriesNumber = m.Groups[4].Value.Trim();
+            }
 
             // Assign Author and Series from path levels before the book folder
             if (bookFolderIndex == 1)
@@ -288,6 +326,14 @@ namespace Listenarr.Infrastructure.Metadata.Parsing
                 RegexOptions.IgnoreCase);
 
             return match.Success ? match.Value.ToUpperInvariant() : null;
+        }
+
+        private static void AssignGroup(Match match, string name, Action<string> assign)
+        {
+            var group = match.Groups[name];
+            if (!group.Success) return;
+            var value = group.Value.Trim();
+            if (value.Length > 0) assign(value);
         }
 
         private static void TryReadSidecar(string folder, string filename, Action<string> assign)
