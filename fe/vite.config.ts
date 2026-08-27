@@ -4,6 +4,7 @@ import type { ServerResponse } from 'node:http'
 import { defineConfig } from 'vite'
 import type { PluginOption } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import { VitePWA } from 'vite-plugin-pwa'
 import { visualizer } from 'rollup-plugin-visualizer'
 
 // https://vite.dev/config/
@@ -16,6 +17,21 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [
       vue(),
+      // Service worker for installability (Add to Home Screen / desktop Install) + an
+      // offline app shell. Reuses the existing /site.webmanifest (manifest: false), so this
+      // only adds the SW + registration. Audio streams and the API are never cached.
+      VitePWA({
+        registerType: 'autoUpdate',
+        injectRegister: 'auto',
+        manifest: false,
+        workbox: {
+          globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+          navigateFallback: '/index.html',
+          navigateFallbackDenylist: [/^\/api/, /^\/plugins/, /^\/hubs/, /^\/swagger/],
+          cleanupOutdatedCaches: true,
+          maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+        },
+      }),
       ...(analyzeBundle
         ? [
             (visualizer({
