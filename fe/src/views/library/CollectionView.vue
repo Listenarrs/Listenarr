@@ -3956,7 +3956,8 @@ defineExpose({
 
 .series-bottom-title {
   font-size: 12px;
-  color: #fff;
+  /* Sits on the card surface, not on the cover art, so it must follow the theme. */
+  color: var(--text-color);
   margin: 0 0 4px 0;
   font-weight: 500;
   text-align: center;
@@ -3964,14 +3965,14 @@ defineExpose({
 
 .series-bottom-author {
   font-size: 11px;
-  color: #bfcad6;
+  color: var(--text-muted);
   margin: 0 0 2px 0;
   text-align: center;
 }
 
 .series-bottom-meta {
   font-size: 11px;
-  color: #bfcad6;
+  color: var(--text-muted);
   margin: 0;
   text-align: center;
 }
