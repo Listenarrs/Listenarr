@@ -43,6 +43,8 @@ namespace Listenarr.Application.Search.Core
         public string? Isbn { get; set; }
         public string? Series { get; set; }
 
+        public string? Narrator { get; set; }
+
         public Pagination? Pagination { get; set; } = new Pagination();
 
         public string Region { get; set; } = "us";

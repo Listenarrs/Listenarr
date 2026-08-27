@@ -682,6 +682,58 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             Assert.Equal(System.Text.Json.JsonValueKind.Array, arr.ValueKind);
             Assert.True(arr.GetArrayLength() > 0, "Series-only search should return at least one book");
         }
+        [Fact]
+        [Trait("Method", "AdvancedSearch")]
+        public async Task AdvancedSearch_Narrator_UsesTheNarratorFieldNotTheKeywordComposer()
+        {
+            var stubAudible = new StubAudibleService
+            {
+                NarratorResponseToReturn = new AudibleSearchResponse
+                {
+                    Results = new List<AudibleSearchResult>
+                    {
+                        new AudibleSearchResultBuilder().WithAsin("NARR01").WithTitle("Mythos").Build()
+                    },
+                    TotalResults = 1
+                }
+            };
+            var controller = CreateController(audibleService: stubAudible);
+
+            var req = new SearchRequest
+            {
+                Mode = SearchMode.Advanced,
+                Narrator = "Stephen Fry",
+                Pagination = new Pagination { Page = 1, Limit = 10 }
+            };
+            await controller.Search(System.Text.Json.JsonSerializer.SerializeToElement(req));
+
+            // Routed to Audible's narrator field. Going through ComposeAdvancedQuery would send
+            // "NARRATOR:Stephen Fry" as keywords, where the prefix matches nothing.
+            Assert.Equal("SearchByNarratorAsync", stubAudible.LastMethod);
+            Assert.Equal("Stephen Fry", stubAudible.LastNarrator);
+        }
+
+        [Fact]
+        [Trait("Method", "AdvancedSearch")]
+        public async Task AdvancedSearch_NarratorWithAuthor_LeavesTheRequestOnTheAuthorPath()
+        {
+            var stubAudible = new StubAudibleService();
+            var controller = CreateController(audibleService: stubAudible);
+
+            var req = new SearchRequest
+            {
+                Mode = SearchMode.Advanced,
+                Narrator = "Stephen Fry",
+                Author = "J.K. Rowling",
+                Pagination = new Pagination { Page = 1, Limit = 10 }
+            };
+            await controller.Search(System.Text.Json.JsonSerializer.SerializeToElement(req));
+
+            // Author is the more selective field; narrowing to the narrator endpoint would
+            // discard it entirely.
+            Assert.NotEqual("SearchByNarratorAsync", stubAudible.LastMethod);
+        }
+
     }
 
     internal class StubAudibleService : AudibleService
@@ -709,6 +761,18 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             LastPage = page;
             LastLimit = limit;
             return Task.FromResult(ResponseToReturn);
+        }
+
+        public AudibleSearchResponse? NarratorResponseToReturn { get; set; }
+
+        public string? LastNarrator { get; set; }
+
+        public override Task<AudibleSearchResponse?> SearchByNarratorAsync(string narrator, string? title = null, int page = 1, int limit = 50, string region = "us", string? language = null)
+        {
+            LastMethod = "SearchByNarratorAsync";
+            LastNarrator = narrator;
+            LastTitle = title;
+            return Task.FromResult(NarratorResponseToReturn);
         }
 
         public override Task<object?> SearchSeriesByNameAsync(string name, string region = "us")
