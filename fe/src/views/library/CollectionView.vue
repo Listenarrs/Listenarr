@@ -50,8 +50,17 @@
           </div>
 
           <div class="status-badges author-hero-badges">
-            <Pill :variant="isCurrentAuthorMonitored ? 'primary' : 'default'">
-              <component :is="isCurrentAuthorMonitored ? PhEye : PhEyeSlash" />
+            <Pill
+              interactive
+              :variant="isCurrentAuthorMonitored ? 'primary' : 'default'"
+              :disabled="authorMonitoringBusy || authorMetadataRefreshBusy"
+              :title="
+                isCurrentAuthorMonitored ? 'Stop monitoring this author' : 'Monitor this author'
+              "
+              @click="toggleAuthorMonitoring"
+            >
+              <PhArrowClockwise v-if="authorMonitoringBusy" class="spin-icon" />
+              <component v-else :is="isCurrentAuthorMonitored ? PhEye : PhEyeSlash" />
               {{ isCurrentAuthorMonitored ? 'Monitoring Author' : 'Not Monitored' }}
             </Pill>
             <Pill variant="success"> {{ authorLibraryCount }} in library </Pill>
@@ -167,8 +176,17 @@
           </div>
 
           <div class="status-badges author-hero-badges">
-            <Pill :variant="isCurrentSeriesMonitored ? 'primary' : 'default'">
-              <component :is="isCurrentSeriesMonitored ? PhEye : PhEyeSlash" />
+            <Pill
+              interactive
+              :variant="isCurrentSeriesMonitored ? 'primary' : 'default'"
+              :disabled="seriesMonitoringBusy || seriesMetadataRefreshBusy"
+              :title="
+                isCurrentSeriesMonitored ? 'Stop monitoring this series' : 'Monitor this series'
+              "
+              @click="toggleSeriesMonitoring"
+            >
+              <PhArrowClockwise v-if="seriesMonitoringBusy" class="spin-icon" />
+              <component v-else :is="isCurrentSeriesMonitored ? PhEye : PhEyeSlash" />
               {{ isCurrentSeriesMonitored ? 'Monitoring Series' : 'Not Monitored' }}
             </Pill>
             <Pill variant="success"> {{ seriesLibraryCount }} in library </Pill>
