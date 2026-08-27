@@ -1181,11 +1181,16 @@ async function syncFormFromAudiobook(audiobook: Audiobook, loadSupportingData: b
   }
 }
 
-function normalizeNumericInput(value: string | null | undefined): string {
-  return (value || '').trim()
+// NOTE: `<input type="number" v-model="formData.runtime">` makes Vue coerce the bound
+// value to a JS *number* (vModelText casts when el.type === 'number'), even though
+// formData.runtime is typed as string. So this must accept number too — calling .trim()
+// on a number throws "trim is not a function", which fired on every keystroke in the
+// Listening Length field and tore the edit modal down.
+function normalizeNumericInput(value: string | number | null | undefined): string {
+  return (value == null ? '' : String(value)).trim()
 }
 
-function parseRuntimeInput(value: string | null | undefined): number | undefined {
+function parseRuntimeInput(value: string | number | null | undefined): number | undefined {
   const normalized = normalizeNumericInput(value)
   if (!normalized) return undefined
   const parsed = Number.parseInt(normalized, 10)
