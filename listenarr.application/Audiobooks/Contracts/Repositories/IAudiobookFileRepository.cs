@@ -86,5 +86,6 @@ namespace Listenarr.Application.Audiobooks.Contracts.Repositories
             CancellationToken ct = default);
         Task<List<AudiobookFormatSummary>> GetFormatSummariesAsync(CancellationToken ct = default);
         Task<Dictionary<int, int>> GetCountsByAudiobookIdAsync(CancellationToken ct = default);
+        Task<Dictionary<int, DateTime>> GetEarliestCreatedAtByAudiobookIdAsync(CancellationToken ct = default);
     }
 }
