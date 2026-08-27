@@ -35,7 +35,11 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
 
             if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
             {
-                return "https://evermeet.cx/ffmpeg/ffmpeg-6.0.zip";
+                // Must be the ffprobe archive: every caller looks for an "ffprobe" binary in the
+                // extracted files, so the ffmpeg archive installs nothing and the scan then runs
+                // without embedded-tag metadata. "getrelease" tracks the current build rather than
+                // pinning a version that ages out.
+                return "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip";
             }
 
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
