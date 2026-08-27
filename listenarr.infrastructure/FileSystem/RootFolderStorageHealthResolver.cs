@@ -214,21 +214,10 @@ internal sealed class RootFolderStorageHealthResolver(
         if (observation.State != RootFolderStorageState.Healthy)
         {
             var limitedReadOnly = _readOnlyFileSystemProbe(canonicalPath);
-            if (limitedReadOnly != false)
-            {
-                return ApplyMutationCapability(
-                    canonicalPath,
-                    observation,
-                    limitedReadOnly);
-            }
-
-            return observation with
-            {
-                CanPublishNewFiles =
-                    observation.State == RootFolderStorageState.Limited
-                    && observation.Reason == RootFolderStorageReason.IdentityUnsupported
-                    && !observation.CanConfirmCurrentFolder
-            };
+            return ApplyMutationCapability(
+                canonicalPath,
+                observation,
+                limitedReadOnly);
         }
 
         var mutationCapability = ApplyMutationCapability(
@@ -252,6 +241,8 @@ internal sealed class RootFolderStorageHealthResolver(
                 CanConfirmCurrentFolder = false,
                 CanMutateFilesystem = false,
                 CanPublishNewFiles = false,
+                CanRetireWithDurableIdentity = false,
+                CanRetireAfterVerifiedCopy = false,
                 ConfirmationToken = null,
                 Detail =
                     "Automatic case sensitivity was inferred from an existing directory entry rather than an authoritative filesystem capability."
@@ -268,9 +259,16 @@ internal sealed class RootFolderStorageHealthResolver(
     {
         if (isReadOnly == false)
         {
+            var supportsVerifiedCompatibilityCleanup =
+                observation.CanMutateFilesystem
+                || (observation.State == RootFolderStorageState.Limited
+                    && observation.Reason == RootFolderStorageReason.IdentityUnsupported
+                    && !observation.CanConfirmCurrentFolder);
             return observation with
             {
-                CanPublishNewFiles = observation.CanMutateFilesystem
+                CanPublishNewFiles = supportsVerifiedCompatibilityCleanup,
+                CanRetireWithDurableIdentity = observation.CanMutateFilesystem,
+                CanRetireAfterVerifiedCopy = supportsVerifiedCompatibilityCleanup
             };
         }
 
@@ -286,6 +284,8 @@ internal sealed class RootFolderStorageHealthResolver(
             CanConfirmCurrentFolder = false,
             CanMutateFilesystem = false,
             CanPublishNewFiles = false,
+            CanRetireWithDurableIdentity = false,
+            CanRetireAfterVerifiedCopy = false,
             ConfirmationToken = null,
             Detail = isReadOnly == true
                 ? "The filesystem reports the ST_RDONLY mount flag."
@@ -335,6 +335,8 @@ internal sealed class RootFolderStorageHealthResolver(
                 CanConfirmCurrentFolder = false,
                 CanMutateFilesystem = false,
                 CanPublishNewFiles = false,
+                CanRetireWithDurableIdentity = false,
+                CanRetireAfterVerifiedCopy = false,
                 ConfirmationToken = null,
                 Detail = detail
             };

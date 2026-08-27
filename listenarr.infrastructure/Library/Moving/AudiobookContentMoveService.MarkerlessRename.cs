@@ -121,7 +121,7 @@ internal sealed partial class AudiobookContentMoveService
                 || !PinnedDirectoryVisibleOrThrowUnavailable(
                     targetParent,
                     $"The markerless native-rename target parent is temporarily unavailable: {entry.RelativePath}")
-                || !stableEntry.MatchesMetadata(entry.Length, entry.LastWriteTimeUtc)
+                || !PinnedFileLengthMatchesManifest(stableEntry, entry)
                 || string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
                 || !stableEntry.MatchesObjectIdentity(
                     entry.SourcePhysicalObjectIdentity))
@@ -361,9 +361,10 @@ internal sealed partial class AudiobookContentMoveService
                 && (string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity)
                     || !targetEntry.MatchesObjectIdentity(
                         entry.TargetPhysicalObjectIdentity)))
-            || !targetEntry.MatchesMetadata(
-                entry.Length,
-                entry.LastWriteTimeUtc))
+            || !await PinnedFileMatchesManifestAsync(
+                targetEntry,
+                entry,
+                cancellationToken))
         {
             return false;
         }
@@ -420,9 +421,10 @@ internal sealed partial class AudiobookContentMoveService
             requireDeleteAccess: false);
         if (targetEntry == null
             || !TargetMatchesMarkerlessRenameEntry(entry, targetEntry)
-            || !targetEntry.MatchesMetadata(
-                entry.Length,
-                entry.LastWriteTimeUtc))
+            || !await PinnedFileMatchesManifestAsync(
+                targetEntry,
+                entry,
+                cancellationToken))
         {
             return false;
         }

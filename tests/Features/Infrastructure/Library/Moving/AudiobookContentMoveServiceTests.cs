@@ -2751,6 +2751,143 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
             AssertNoListenarrArtifacts(root);
         }
 
+        [LinuxFact]
+        public async Task VerifyFinalizedMoveAsync_CrossFilesystemTimestampPrecision_UsesObservedTargetTimestamp()
+        {
+            var root = FileService.GetTempDirectory(
+                "content-move-cross-filesystem-timestamp-precision");
+            var source = Path.Join(root, "source");
+            Directory.CreateDirectory(source);
+            var sourceFile = await FileService.GetFileAsync(
+                source,
+                "book.m4b",
+                "audio");
+            var sourceTimestamp = new DateTime(
+                2026,
+                8,
+                26,
+                12,
+                34,
+                56,
+                789,
+                DateTimeKind.Utc).AddTicks(1234);
+            File.SetLastWriteTimeUtc(sourceFile, sourceTimestamp);
+            var target = Path.Join(root, "destination", "Book");
+            var targetFile = Path.Join(target, "book.m4b");
+            var request = await CreateLeasedMoveRequestAsync(
+                source,
+                target,
+                sourceCleanupBoundary: root,
+                executionProtocolVersion:
+                    MoveExecutionProtocol.MarkerlessDatabaseState);
+            var service = new AudiobookContentMoveService(
+                _provider.GetRequiredService<
+                    ILogger<AudiobookContentMoveService>>(),
+                _provider.GetRequiredService<
+                    IDbContextFactory<ListenArrDbContext>>(),
+                TimeProvider.System,
+                new ForceCrossVolumeMoveFaultInjector());
+
+            var result = await service.MoveContentsAsync(
+                request,
+                CancellationToken.None);
+            Assert.NotNull(result.TargetVerificationLease);
+
+            var coarseTargetTimestamp = new DateTime(
+                sourceTimestamp.Ticks
+                    - sourceTimestamp.Ticks % TimeSpan.TicksPerSecond,
+                DateTimeKind.Utc);
+            File.SetLastWriteTimeUtc(targetFile, coarseTargetTimestamp);
+            Assert.NotEqual(sourceTimestamp, File.GetLastWriteTimeUtc(targetFile));
+
+            await service.VerifyFinalizedMoveAsync(
+                request,
+                CancellationToken.None,
+                result.TargetVerificationLease);
+            await service.VerifyFinalizedMoveAsync(
+                request,
+                CancellationToken.None,
+                result.TargetVerificationLease);
+
+            File.SetLastWriteTimeUtc(
+                targetFile,
+                coarseTargetTimestamp.AddSeconds(1));
+            await service.VerifyFinalizedMoveAsync(
+                request,
+                CancellationToken.None,
+                result.TargetVerificationLease);
+
+            await File.WriteAllTextAsync(targetFile, "other");
+            var exception = await Assert.ThrowsAsync<MoveNeedsAttentionException>(() =>
+                service.VerifyFinalizedMoveAsync(
+                    request,
+                    CancellationToken.None,
+                    result.TargetVerificationLease));
+            Assert.Contains(
+                "failed final content verification",
+                exception.Message,
+                StringComparison.OrdinalIgnoreCase);
+            result.TargetVerificationLease!.Dispose();
+        }
+
+        [LinuxFact]
+        public async Task MoveContentsAsync_StalePlannedSourceTimestamp_RefreshesAfterPinnedContentProof()
+        {
+            var root = FileService.GetTempDirectory(
+                "content-move-stale-source-timestamp");
+            var source = Path.Join(root, "source");
+            Directory.CreateDirectory(source);
+            var sourceFile = await FileService.GetFileAsync(
+                source,
+                "book.m4b",
+                "audio");
+            var actualTimestamp = File.GetLastWriteTimeUtc(sourceFile);
+            var target = Path.Join(root, "destination", "Book");
+            var request = await CreateLeasedMoveRequestAsync(
+                source,
+                target,
+                sourceCleanupBoundary: root,
+                executionProtocolVersion:
+                    MoveExecutionProtocol.MarkerlessDatabaseState);
+
+            var factory = _provider.GetRequiredService<
+                IDbContextFactory<ListenArrDbContext>>();
+            await using (var db = await factory.CreateDbContextAsync())
+            {
+                var entry = await db.MoveJobEntries.SingleAsync(candidate =>
+                    candidate.MoveJobId == request.JobId
+                    && candidate.EntryType == MoveJobEntryType.File);
+                entry.LastWriteTimeUtc = actualTimestamp.AddSeconds(-2);
+                await db.SaveChangesAsync();
+            }
+
+            var service = new AudiobookContentMoveService(
+                _provider.GetRequiredService<
+                    ILogger<AudiobookContentMoveService>>(),
+                factory,
+                TimeProvider.System,
+                new ForceCrossVolumeMoveFaultInjector());
+
+            var result = await service.MoveContentsAsync(
+                request,
+                CancellationToken.None);
+
+            Assert.Equal(
+                "audio",
+                await File.ReadAllTextAsync(Path.Join(target, "book.m4b")));
+            await using (var db = await factory.CreateDbContextAsync())
+            {
+                var persisted = await db.MoveJobEntries
+                    .AsNoTracking()
+                    .SingleAsync(candidate =>
+                        candidate.MoveJobId == request.JobId
+                        && candidate.EntryType == MoveJobEntryType.File);
+                Assert.Equal(actualTimestamp, persisted.LastWriteTimeUtc);
+                Assert.NotNull(persisted.Sha256);
+            }
+            result.TargetVerificationLease?.Dispose();
+        }
+
         [Fact]
         public async Task MoveContentsAsync_MarkerlessRetryAfterTargetFileStateUpdate_Completes()
         {
@@ -2829,6 +2966,88 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
             AssertNoListenarrArtifacts(root);
         }
 
+        [Fact]
+        public async Task MoveContentsAsync_ForcedCopyRetention_OnSameVolume_NeverDeletesSource()
+        {
+            var root = FileService.GetTempDirectory(
+                "content-move-forced-copy-retention");
+            var source = Path.Join(root, "source");
+            Directory.CreateDirectory(source);
+            var sourceFile = await FileService.GetFileAsync(
+                source,
+                "book.m4b",
+                "audio");
+            var target = Path.Join(root, "destination", "Book");
+            var request = (await CreateLeasedMoveRequestAsync(
+                source,
+                target,
+                sourceCleanupBoundary: root,
+                executionProtocolVersion:
+                    MoveExecutionProtocol.MarkerlessDatabaseState)) with
+            {
+                ForceCopyAndRetainSource = true
+            };
+            var service = _provider.GetRequiredService<AudiobookContentMoveService>();
+
+            var result = await service.MoveContentsAsync(
+                request,
+                CancellationToken.None);
+
+            Assert.True(result.SourceCleanupCompleted);
+            Assert.True(result.SourceRetained);
+            Assert.Equal("audio", await File.ReadAllTextAsync(sourceFile));
+            Assert.Equal(
+                "audio",
+                await File.ReadAllTextAsync(Path.Join(target, "book.m4b")));
+        }
+
+        [Fact]
+        public async Task ResumeSourceCleanupAsync_ForcedCopyRetention_RejectsDestructiveResult()
+        {
+            var root = FileService.GetTempDirectory(
+                "content-move-forced-retention-resume-guard");
+            var source = Path.Join(root, "source");
+            Directory.CreateDirectory(source);
+            var sourceFile = await FileService.GetFileAsync(
+                source,
+                "book.m4b",
+                "audio");
+            var target = Path.Join(root, "destination", "Book");
+            var request = (await CreateLeasedMoveRequestAsync(
+                source,
+                target,
+                sourceCleanupBoundary: root,
+                executionProtocolVersion:
+                    MoveExecutionProtocol.MarkerlessDatabaseState)) with
+            {
+                ForceCopyAndRetainSource = true
+            };
+            var service = _provider.GetRequiredService<AudiobookContentMoveService>();
+            var completed = await service.MoveContentsAsync(
+                request,
+                CancellationToken.None);
+            var contradictory = completed with
+            {
+                SourceCleanupCompleted = true,
+                SourceRetained = false
+            };
+
+            var exception = await Assert.ThrowsAsync<MoveNeedsAttentionException>(() =>
+                service.ResumeSourceCleanupAsync(
+                    request,
+                    contradictory,
+                    CancellationToken.None));
+
+            Assert.Contains(
+                "Forced source retention cannot accept a destructive recovery result",
+                exception.Message,
+                StringComparison.OrdinalIgnoreCase);
+            Assert.Equal("audio", await File.ReadAllTextAsync(sourceFile));
+            Assert.Equal(
+                "audio",
+                await File.ReadAllTextAsync(Path.Join(target, "book.m4b")));
+        }
+
         [LinuxFact]
         public async Task MoveContentsAsync_ForcedCrossVolumeCopiesAndDurablyRetainsSource()
         {
@@ -2901,6 +3120,54 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
             Assert.True(recovered.SourceRetained);
             Assert.Equal("audio", await File.ReadAllTextAsync(sourceFile));
             Assert.Equal("image", await File.ReadAllTextAsync(companionFile));
+        }
+
+        [LinuxFact]
+        public async Task MoveContentsAsync_ForcedCrossVolumeAuthorized_DeletesFilesButKeepsManagedRoot()
+        {
+            var root = FileService.GetTempDirectory(
+                "content-move-markerless-cross-volume-authorized");
+            var source = Path.Join(root, "source");
+            Directory.CreateDirectory(source);
+            var sourceFile = await FileService.GetFileAsync(
+                source,
+                "book.m4b",
+                "audio");
+            var target = Path.Join(root, "destination", "Book");
+            var request = (await CreateLeasedMoveRequestAsync(
+                source,
+                target,
+                sourceCleanupBoundary: source,
+                executionProtocolVersion:
+                    MoveExecutionProtocol.MarkerlessDatabaseState)) with
+            {
+                DeleteEmptySource = false,
+                SourceCleanupMode = MoveSourceCleanupMode.DeleteAfterVerifiedCopy,
+                SourceRootFolderId = 1,
+                SourcePolicyRevision = 3,
+                TargetRootFolderId = 2,
+                TargetPolicyRevision = 4
+            };
+            var service = new AudiobookContentMoveService(
+                _provider.GetRequiredService<
+                    ILogger<AudiobookContentMoveService>>(),
+                _provider.GetRequiredService<
+                    IDbContextFactory<ListenArrDbContext>>(),
+                TimeProvider.System,
+                new ForceCrossVolumeMoveFaultInjector(),
+                sourceCleanupPolicyResolver: new AlwaysCurrentMoveCleanupPolicyResolver());
+
+            var result = await service.MoveContentsAsync(
+                request,
+                CancellationToken.None);
+
+            Assert.True(result.SourceCleanupCompleted);
+            Assert.False(result.SourceRetained);
+            Assert.False(File.Exists(sourceFile));
+            Assert.True(Directory.Exists(source));
+            Assert.Equal(
+                "audio",
+                await File.ReadAllTextAsync(Path.Join(target, "book.m4b")));
         }
 
         [LinuxFact]
@@ -4207,6 +4474,21 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
         private sealed class ForceCrossVolumeMoveFaultInjector : IMoveFaultInjector
         {
             public bool ForceCrossVolumeForTest => true;
+        }
+
+        private sealed class AlwaysCurrentMoveCleanupPolicyResolver
+            : IMoveSourceCleanupPolicyResolver
+        {
+            public Task<MoveSourceCleanupAuthorization> ResolveAsync(
+                string sourcePath,
+                string targetPath,
+                CancellationToken cancellationToken = default) =>
+                throw new NotSupportedException();
+
+            public Task<bool> IsCurrentAsync(
+                MoveSourceCleanupAuthorization authorization,
+                CancellationToken cancellationToken = default) =>
+                Task.FromResult(true);
         }
 
         private sealed class FailOnceDuringCrossVolumeRetention : IMoveFaultInjector

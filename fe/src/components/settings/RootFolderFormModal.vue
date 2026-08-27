@@ -64,7 +64,7 @@
               class="form-input"
               :disabled="rootFilesystemMutationLocked"
             >
-              <option value="Auto">Automatic (recommended)</option>
+              <option value="Auto">Automatic when supported</option>
               <option value="Sensitive">Case-sensitive</option>
               <option value="Insensitive">Case-insensitive</option>
             </select>
@@ -107,6 +107,20 @@
         </FormRow>
 
         <CheckboxCard v-model="form.isDefault" title="Set as default root folder" />
+
+        <CheckboxCard
+          v-if="root?.id"
+          v-model="form.allowVerifiedWeakStorageDelete"
+          title="Allow verified source deletion on weak storage"
+          description="For Move operations only, Listenarr copies and verifies every destination before removing sources. If both endpoints are configured root folders, enable this on both roots. Copy, hardlink-copy, seeding, incomplete batches, and verification failures retain the source."
+        />
+        <p
+          v-if="root?.id && form.allowVerifiedWeakStorageDelete"
+          class="destructive-policy-warning"
+        >
+          This is an advanced compatibility option. Cleanup fails closed whenever the source cannot
+          be proven safe to remove.
+        </p>
       </FormSection>
     </template>
 
@@ -183,6 +197,8 @@ const form = ref({
   path: root?.path || '',
   isDefault: !!root?.isDefault,
   caseSensitivityMode: root?.caseSensitivityMode ?? ('Auto' as const),
+  allowVerifiedWeakStorageDelete:
+    root?.weakStorageSourceCleanupPolicy === 'DeleteSourceAfterVerifiedCopy',
 })
 
 const showConfirm = ref(false)
@@ -203,7 +219,7 @@ const filesystemBehaviorTitle = computed(() => {
   if (needsCaseSettingConfirmation.value) return 'Confirmation needed'
   if (form.value.caseSensitivityMode === 'Sensitive') return 'Case-sensitive'
   if (form.value.caseSensitivityMode === 'Insensitive') return 'Case-insensitive'
-  return 'Automatic (recommended)'
+  return 'Automatic when supported'
 })
 const filesystemBehaviorDetail = computed(() => {
   if (needsCaseSettingConfirmation.value) {
@@ -297,6 +313,7 @@ async function save() {
         },
         { expectedCurrentPath: root.path },
       )
+      newRoot = await persistWeakStoragePolicy(newRoot)
       if (newRoot.activeRelocation?.status === 'NeedsAttention') {
         toast.warning(
           'Root folder changed',
@@ -323,7 +340,7 @@ async function save() {
 async function confirmChange(moveFiles: boolean) {
   showConfirm.value = false
   try {
-    const updated = await store.update(
+    let updated = await store.update(
       root!.id,
       {
         id: root!.id,
@@ -339,6 +356,7 @@ async function confirmChange(moveFiles: boolean) {
         deleteEmptySource: modalDeleteEmpty.value,
       },
     )
+    updated = await persistWeakStoragePolicy(updated)
     if (!moveFiles && updated.activeRelocation?.status === 'NeedsAttention') {
       toast.warning(
         'Root folder changed',
@@ -351,6 +369,21 @@ async function confirmChange(moveFiles: boolean) {
   } catch (e: unknown) {
     toast.error('Error', rootFolderSaveError(e))
   }
+}
+
+async function persistWeakStoragePolicy(updated: RootFolder): Promise<RootFolder> {
+  if (!root?.id) return updated
+  const requestedPolicy = form.value.allowVerifiedWeakStorageDelete
+    ? 'DeleteSourceAfterVerifiedCopy'
+    : 'RetainSource'
+  if (requestedPolicy === (root.weakStorageSourceCleanupPolicy ?? 'RetainSource')) {
+    return updated
+  }
+  return store.updateWeakStoragePolicy(
+    root.id,
+    requestedPolicy,
+    root.weakStoragePolicyRevision ?? 0,
+  )
 }
 </script>
 
@@ -671,6 +704,17 @@ async function confirmChange(moveFiles: boolean) {
   margin: 0.75rem 0 0.35rem;
   color: var(--text-secondary, #bbb);
   font-size: 0.875rem;
+}
+
+.destructive-policy-warning {
+  margin: -0.25rem 0 0;
+  padding: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--warning-500) 45%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--warning-500) 8%, transparent);
+  color: var(--text-secondary, #bbb);
+  font-size: 0.85rem;
+  line-height: 1.45;
 }
 
 /* Form input styling to match login and other forms */

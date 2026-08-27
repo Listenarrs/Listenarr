@@ -25,6 +25,7 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         Assert.Equal(ManagedDirectoryIdentity.CurrentVersion, confirmed.DirectoryObjectIdentityVersion);
         Assert.False(string.IsNullOrWhiteSpace(confirmed.DirectoryObjectIdentity));
         Assert.Null(confirmed.DirectoryObjectIdentityUnavailableReason);
+        Assert.Equal(1, confirmed.StorageContractRevision);
         var persisted = await fixture.LoadRootAsync();
         var refreshed = await fixture.HealthResolver.ResolveAsync(persisted);
         Assert.Equal(RootFolderStorageState.Healthy, refreshed.State);

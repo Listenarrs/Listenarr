@@ -40,6 +40,8 @@ public class SqliteMigrationSchemaTests : BaseTests
         "20260818132300_AddFileMutationParentGenerationProofs";
     private const string CompatibilityFilePublicationMigrationId =
         "20260821141235_AddCompatibilityFilePublication";
+    private const string WeakStorageVerifiedCleanupMigrationId =
+        "20260825021432_AddWeakStorageVerifiedCleanup";
 
     private static (SqliteConnection Connection, ListenArrDbContext Context)
         CreateMigratedSqliteContext()
@@ -145,6 +147,38 @@ public class SqliteMigrationSchemaTests : BaseTests
     }
 
     [Fact]
+    [Trait("Scenario", "MoveSourceCleanupPolicySnapshot")]
+    public async Task WeakStorageMigration_AddsFailClosedMovePolicySnapshot()
+    {
+        await using var connection = new SqliteConnection("DataSource=:memory:");
+        await connection.OpenAsync();
+        await using var context = new ListenArrDbContext(CreateOptions(connection));
+
+        await context.Database.MigrateAsync();
+
+        Assert.True(await ColumnExistsAsync(connection, "MoveJobs", "SourceCleanupMode"));
+        Assert.True(await ColumnExistsAsync(connection, "MoveJobs", "ForceCopyAndRetainSource"));
+        Assert.True(await ColumnExistsAsync(connection, "MoveJobs", "SourceRootFolderId"));
+        Assert.True(await ColumnExistsAsync(connection, "MoveJobs", "SourcePolicyRevision"));
+        Assert.True(await ColumnExistsAsync(connection, "MoveJobs", "SourceStorageContractRevision"));
+        Assert.True(await ColumnExistsAsync(connection, "MoveJobs", "TargetRootFolderId"));
+        Assert.True(await ColumnExistsAsync(connection, "MoveJobs", "TargetPolicyRevision"));
+        Assert.True(await ColumnExistsAsync(connection, "MoveJobs", "TargetStorageContractRevision"));
+        Assert.True(await ColumnExistsAsync(connection, "RootFolders", "StorageContractRevision"));
+        Assert.True(await ColumnExistsAsync(
+            connection,
+            "CompatibilityFilePublicationJournals",
+            "SourceStorageContractRevision"));
+        Assert.True(await ColumnExistsAsync(
+            connection,
+            "CompatibilityFilePublicationJournals",
+            "DestinationStorageContractRevision"));
+        Assert.Equal(
+            "'RetainSource'",
+            await ColumnDefaultAsync(connection, "MoveJobs", "SourceCleanupMode"));
+    }
+
+    [Fact]
     [Trait("Scenario", "FinalMigrationHistoryIsConsolidated")]
     public async Task MigrationHistory_ContainsOnlyRetainedRepairsAndConsolidatedPrMigrationAfterCanary()
     {
@@ -164,7 +198,8 @@ public class SqliteMigrationSchemaTests : BaseTests
                 ConsolidatedMigrationId,
                 MoveJobRelocationForeignKeyMigrationId,
                 FileMutationParentGenerationProofsMigrationId,
-                CompatibilityFilePublicationMigrationId
+                CompatibilityFilePublicationMigrationId,
+                WeakStorageVerifiedCleanupMigrationId
             ],
             postCanary);
         Assert.Contains("20251124102000_AddMoveJobSourcePath", applied);

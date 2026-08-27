@@ -78,6 +78,9 @@ public sealed class RootFolderStorageHealthResolverTests : BaseTests
         Assert.True(result.CanReadFilesystem);
         Assert.True(result.CanScanFilesystem);
         Assert.False(result.CanMutateFilesystem);
+        Assert.False(result.CanPublishAdditively);
+        Assert.False(result.CanRetireDurably);
+        Assert.False(result.CanRetireVerifiedSource);
         Assert.Contains(
             "Sensitive or Insensitive",
             result.Message ?? string.Empty,
@@ -157,6 +160,9 @@ public sealed class RootFolderStorageHealthResolverTests : BaseTests
         Assert.True(result.CanReadFilesystem);
         Assert.True(result.CanScanFilesystem);
         Assert.False(result.CanMutateFilesystem);
+        Assert.False(result.CanPublishAdditively);
+        Assert.False(result.CanRetireDurably);
+        Assert.False(result.CanRetireVerifiedSource);
         Assert.Contains("read-only", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
         identityResolver.VerifyAll();
     }
@@ -289,6 +295,8 @@ public sealed class RootFolderStorageHealthResolverTests : BaseTests
         Assert.True(result.CanReadFilesystem);
         Assert.True(result.CanScanFilesystem);
         Assert.False(result.CanMutateFilesystem);
+        Assert.False(result.CanPublishAdditively);
+        Assert.False(result.CanRetireVerifiedSource);
         Assert.True(result.CanConfirmCurrentFolder);
         Assert.False(string.IsNullOrWhiteSpace(result.ConfirmationToken));
         identityResolver.VerifyAll();
@@ -506,6 +514,9 @@ public sealed class RootFolderStorageHealthResolverTests : BaseTests
         Assert.True(result.CanScanFilesystem);
         Assert.True(result.CanPublishNewFiles);
         Assert.False(result.CanMutateFilesystem);
+        Assert.True(result.CanPublishAdditively);
+        Assert.False(result.CanRetireDurably);
+        Assert.True(result.CanRetireVerifiedSource);
         identityResolver.VerifyAll();
     }
 
@@ -543,6 +554,8 @@ public sealed class RootFolderStorageHealthResolverTests : BaseTests
         Assert.False(result.CanReadFilesystem);
         Assert.False(result.CanScanFilesystem);
         Assert.False(result.CanMutateFilesystem);
+        Assert.False(result.CanPublishAdditively);
+        Assert.False(result.CanRetireVerifiedSource);
         Assert.True(result.CanConfirmCurrentFolder);
         Assert.False(string.IsNullOrWhiteSpace(result.ConfirmationToken));
         identityResolver.VerifyAll();

@@ -72,16 +72,10 @@ public sealed class CrossVolumeFactAttribute : FactAttribute
 
     public CrossVolumeFactAttribute()
     {
-        if (!OperatingSystem.IsLinux())
-        {
-            Skip = "This test requires native Linux cross-volume storage.";
-            return;
-        }
-
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
                 DestinationPathEnvironmentVariable)))
         {
-            Skip = "The native test runner did not provide a destination on another filesystem.";
+            Skip = "The native test runner did not provide a destination on another filesystem or volume.";
         }
     }
 }

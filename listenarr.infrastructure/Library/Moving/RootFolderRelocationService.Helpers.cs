@@ -320,6 +320,7 @@ public sealed partial class RootFolderRelocationService
         root.ResolvedCaseSensitivity = resolution.Semantics.CaseSensitivity;
         root.PathIdentityState = resolution.State;
         root.PathIdentityKey = identityKey;
+        root.StorageContractRevision = checked(root.StorageContractRevision + 1);
         root.UpdatedAt = DateTime.UtcNow;
     }
 

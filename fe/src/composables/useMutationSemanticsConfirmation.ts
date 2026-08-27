@@ -20,6 +20,7 @@ export type MutationSemanticsConfirmationOutcome = 'retry' | 'cancelled' | 'not-
 
 const MUTATION_UNAVAILABLE_CODES = new Set([
   'destination_filesystem_mutation_unavailable',
+  'destination_file_publication_unavailable',
   'source_filesystem_mutation_unavailable',
   'filesystem_mutation_unavailable',
 ])

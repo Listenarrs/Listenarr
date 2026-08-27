@@ -103,13 +103,16 @@ internal sealed partial class AudiobookContentMoveService
                 entry.Sha256 = await ComputePinnedFileSha256Async(
                     file,
                     cancellationToken);
+                var observedLastWriteTimeUtc = file.GetLastWriteTimeUtc();
                 await UpdateSourceEntryProofAsync(
                     request.JobId,
                     request.LeaseToken,
                     entry.RelativePath,
                     entry.SourcePhysicalObjectIdentity,
                     entry.Sha256,
+                    observedLastWriteTimeUtc,
                     cancellationToken);
+                entry.LastWriteTimeUtc = observedLastWriteTimeUtc;
             }
 
             Func<long, Task>? reportFileProgress = null;
@@ -143,10 +146,7 @@ internal sealed partial class AudiobookContentMoveService
                         $"A protected markerless target generation is temporarily unavailable: {entry.RelativePath}")
                     || !leasedTargetEntry.IdentifiesSameEntry(file)
                     || !leasedTargetEntry.MatchesObjectIdentity(
-                        entry.TargetPhysicalObjectIdentity)
-                    || !leasedTargetEntry.MatchesMetadata(
-                        entry.Length,
-                        entry.LastWriteTimeUtc))
+                        entry.TargetPhysicalObjectIdentity))
                 {
                     throw new MoveNeedsAttentionException(
                         $"A protected markerless target generation changed after native publication: {entry.RelativePath}");

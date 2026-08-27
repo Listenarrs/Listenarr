@@ -63,6 +63,7 @@ namespace Listenarr.Api.Features.Library
         private readonly IFileSystem _fileSystem;
         private readonly IFileSystemSemanticsResolver _semanticsResolver;
         private readonly IMoveCleanupBoundaryResolver _cleanupBoundaryResolver;
+        private readonly IMoveSourceCleanupPolicyResolver? _sourceCleanupPolicyResolver;
         private readonly IAudiobookDestinationRewriteService _destinationRewriteService;
         private readonly IFilesystemMutationCoordinator _mutationCoordinator;
         private readonly IAudiobookOperationCoordinator _audiobookOperationCoordinator;
@@ -80,7 +81,8 @@ namespace Listenarr.Api.Features.Library
             IFilesystemMutationCoordinator mutationCoordinator,
             IAudiobookOperationCoordinator audiobookOperationCoordinator,
             ILibraryFilesystemMutationGate filesystemMutationGate,
-            IMoveQueueService? moveQueueService = null)
+            IMoveQueueService? moveQueueService = null,
+            IMoveSourceCleanupPolicyResolver? sourceCleanupPolicyResolver = null)
         {
             _repo = repo;
             _scopeFactory = scopeFactory;
@@ -88,6 +90,7 @@ namespace Listenarr.Api.Features.Library
             _logger = logger;
             _semanticsResolver = semanticsResolver;
             _cleanupBoundaryResolver = cleanupBoundaryResolver;
+            _sourceCleanupPolicyResolver = sourceCleanupPolicyResolver;
             _destinationRewriteService = destinationRewriteService;
             _mutationCoordinator = mutationCoordinator ?? throw new ArgumentNullException(nameof(mutationCoordinator));
             _audiobookOperationCoordinator = audiobookOperationCoordinator ?? throw new ArgumentNullException(nameof(audiobookOperationCoordinator));

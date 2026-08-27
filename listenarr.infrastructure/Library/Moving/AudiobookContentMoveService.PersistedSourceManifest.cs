@@ -139,9 +139,13 @@ internal sealed partial class AudiobookContentMoveService
             return false;
         }
 
+        // The queued timestamp is metadata, not durable ownership evidence. Remote
+        // filesystems such as CIFS can refresh attribute-cache timestamps after the
+        // plan was persisted without changing the file generation or bytes. Freeze
+        // the structural source shape here; pinned identity and content proof are
+        // re-established immediately before mutation.
         var fileInfo = new FileInfo(path);
-        return fileInfo.Length == manifestEntry.Length
-            && fileInfo.LastWriteTimeUtc == manifestEntry.LastWriteTimeUtc;
+        return fileInfo.Length == manifestEntry.Length;
     }
 
     private static void ValidateManifestAncestorChain(

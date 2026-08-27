@@ -219,13 +219,20 @@ internal sealed class MarkerlessTargetVerificationLease : IDisposable
         }
     }
 
-    private sealed class TargetFileLease(
-        PinnedDirectoryCreation.PinnedFileEntry entry,
-        long? expectedLength,
-        string? expectedSha256)
+    private sealed class TargetFileLease
     {
-        public PinnedDirectoryCreation.PinnedFileEntry Entry { get; } = entry;
-        public long? ExpectedLength { get; set; } = expectedLength;
-        public string? ExpectedSha256 { get; set; } = expectedSha256;
+        public TargetFileLease(
+            PinnedDirectoryCreation.PinnedFileEntry entry,
+            long? expectedLength,
+            string? expectedSha256)
+        {
+            Entry = entry;
+            ExpectedLength = expectedLength;
+            ExpectedSha256 = expectedSha256;
+        }
+
+        public PinnedDirectoryCreation.PinnedFileEntry Entry { get; }
+        public long? ExpectedLength { get; set; }
+        public string? ExpectedSha256 { get; set; }
     }
 }

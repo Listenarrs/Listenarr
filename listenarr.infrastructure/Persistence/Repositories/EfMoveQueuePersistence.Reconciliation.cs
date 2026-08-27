@@ -160,7 +160,8 @@ public sealed partial class EfMoveQueuePersistence
                 .Distinct()
                 .ToListAsync(cancellationToken);
             var jobIdsWithScaffolding = await db.MoveJobCreatedDirectories
-                .Where(directory => activeJobIds.Contains(directory.MoveJobId))
+                .Where(directory => activeJobIds.Contains(directory.MoveJobId)
+                    && directory.State != MoveCreatedDirectoryState.Planned)
                 .Select(directory => directory.MoveJobId)
                 .Distinct()
                 .ToListAsync(cancellationToken);

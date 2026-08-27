@@ -84,7 +84,7 @@ internal sealed partial class PinnedDirectoryCreation
                 bufferSize: 1,
                 asynchronous: false);
             return stream.Length == expectedLength
-                && File.GetLastWriteTimeUtc(_fileHandle) == expectedLastWriteTimeUtc;
+                && GetLastWriteTimeUtc() == expectedLastWriteTimeUtc;
         }
 
         internal void PreserveMetadataTo(PinnedFileEntry destination)
@@ -104,7 +104,7 @@ internal sealed partial class PinnedDirectoryCreation
                 // the destination owner's write bit after the mode was preserved.
                 File.SetLastWriteTimeUtc(
                     destination._fileHandle,
-                    File.GetLastWriteTimeUtc(_fileHandle));
+                    GetLastWriteTimeUtc());
                 File.SetCreationTimeUtc(
                     destination._fileHandle,
                     File.GetCreationTimeUtc(_fileHandle));
@@ -115,7 +115,7 @@ internal sealed partial class PinnedDirectoryCreation
                 File.GetAttributes(_fileHandle));
             File.SetLastWriteTimeUtc(
                 destination._fileHandle,
-                File.GetLastWriteTimeUtc(_fileHandle));
+                GetLastWriteTimeUtc());
             File.SetCreationTimeUtc(
                 destination._fileHandle,
                 File.GetCreationTimeUtc(_fileHandle));
@@ -137,7 +137,7 @@ internal sealed partial class PinnedDirectoryCreation
                 File.GetUnixFileMode(_fileHandle));
             File.SetLastWriteTimeUtc(
                 destination._fileHandle,
-                File.GetLastWriteTimeUtc(_fileHandle));
+                GetLastWriteTimeUtc());
         }
 
         private void PreserveMarkerlessMetadataWindows(

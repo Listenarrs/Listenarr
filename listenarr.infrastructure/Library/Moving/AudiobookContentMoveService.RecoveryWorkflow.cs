@@ -61,6 +61,11 @@ internal sealed partial class AudiobookContentMoveService
         request = await WithValidatedTargetDirectoryOwnershipAsync(
             request,
             cancellationToken);
+        if (request.ForceCopyAndRetainSource && !result.SourceRetained)
+        {
+            throw new MoveNeedsAttentionException(
+                "Forced source retention cannot accept a destructive recovery result.");
+        }
         if (result.SourceCleanupCompleted)
         {
             return result;

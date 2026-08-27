@@ -10,6 +10,7 @@ internal sealed partial class EfMoveExecutionStore
         string relativePath,
         string sourcePhysicalObjectIdentity,
         string? sha256,
+        DateTime lastWriteTimeUtc,
         CancellationToken cancellationToken) =>
         ExecuteAsync(
             "persist markerless source-entry proof",
@@ -82,12 +83,14 @@ internal sealed partial class EfMoveExecutionStore
 
                 var observedIdentity = entry.SourcePhysicalObjectIdentity;
                 var observedSha256 = entry.Sha256;
+                var observedLastWriteTimeUtc = entry.LastWriteTimeUtc;
                 var desiredIdentity = observedIdentity ?? sourcePhysicalObjectIdentity;
                 var desiredSha256 = observedSha256 ?? sha256;
                 if (!db.Database.IsRelational())
                 {
                     entry.SourcePhysicalObjectIdentity = desiredIdentity;
                     entry.Sha256 = desiredSha256;
+                    entry.LastWriteTimeUtc = lastWriteTimeUtc;
                     entry.MoveJob.UpdatedAt = nowUtc;
                     await db.SaveChangesAsync(cancellationToken);
                     return;
@@ -100,6 +103,7 @@ internal sealed partial class EfMoveExecutionStore
                         && candidate.RelativePath == relativePath
                         && candidate.SourcePhysicalObjectIdentity == observedIdentity
                         && candidate.Sha256 == observedSha256
+                        && candidate.LastWriteTimeUtc == observedLastWriteTimeUtc
                         && candidate.MoveJob.Status == MoveJobStatus.Running
                         && candidate.MoveJob.LeaseOwner == leaseToken.Owner
                         && candidate.MoveJob.LeaseGeneration == leaseToken.Generation
@@ -110,7 +114,10 @@ internal sealed partial class EfMoveExecutionStore
                             .SetProperty(
                                 candidate => candidate.SourcePhysicalObjectIdentity,
                                 desiredIdentity)
-                            .SetProperty(candidate => candidate.Sha256, desiredSha256),
+                            .SetProperty(candidate => candidate.Sha256, desiredSha256)
+                            .SetProperty(
+                                candidate => candidate.LastWriteTimeUtc,
+                                lastWriteTimeUtc),
                         cancellationToken);
                 if (affected != 1)
                 {

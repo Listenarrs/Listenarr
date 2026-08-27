@@ -19,6 +19,8 @@
 using Listenarr.Application.Common;
 using Listenarr.Application.Search.Filters;
 using Listenarr.Application.Search.Strategies;
+using Listenarr.Infrastructure.Persistence;
+using Listenarr.Infrastructure.FileSystem;
 
 namespace Listenarr.Api.Startup;
 
@@ -27,6 +29,8 @@ public static class ListenarrWorkflowRegistration
     public static IServiceCollection AddListenarrDomainWorkflows(this IServiceCollection services)
     {
         services.AddScoped<IRootFolderService, RootFolderService>();
+        services.AddScoped<IRootFolderWeakStoragePolicyService, RootFolderWeakStoragePolicyService>();
+        services.AddScoped<ICompatibilitySourceCleanupCoordinator, CompatibilitySourceCleanupCoordinator>();
         services.AddScoped<IAudiobookDestinationRewriteService, AudiobookDestinationRewriteService>();
         services.AddScoped<ILegacyOutputPathMigrator, LegacyOutputPathMigrator>();
         services.AddMemoryCache();

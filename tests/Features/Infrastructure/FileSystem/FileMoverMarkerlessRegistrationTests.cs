@@ -671,6 +671,63 @@ public sealed class FileMoverMarkerlessRegistrationTests : BaseTests
     }
 
     [Fact]
+    public async Task PrepareCompatibilityMove_VerifiedCleanup_RemainsRegistrationCommittedUntilBatchCoordinator()
+    {
+        var scenario = await CreateScenarioAsync("registration-compatible-verified-cleanup");
+        var mover = CreateMover();
+        var hash = Convert.ToHexString(
+            SHA256.HashData(Encoding.UTF8.GetBytes("audio")));
+        var proof = new FilePublicationSourceProof(
+            $"content-only:{hash}",
+            5,
+            hash,
+            FilePublicationSourceAuthority.ContentOnly);
+        var batchId = Guid.NewGuid();
+        var plan = FilePublicationPlan.VerifiedCleanup(
+            batchId,
+            CompatibilityCleanupOwner.Listenarr,
+            sourceRootFolderId: null,
+            sourcePolicyRevision: null,
+            destinationRootFolderId: 87,
+            destinationPolicyRevision: 4,
+            sourceStorageContractRevision: null,
+            destinationStorageContractRevision: 9);
+
+        var preparation = await mover.PrepareActionForRegistrationDetailedAsync(
+            plan,
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId,
+            expectedRegisteredPhysicalObjectIdentity: null,
+            proof);
+
+        Assert.True(preparation.IsSuccess, preparation.Message);
+        using var lease = Assert.IsAssignableFrom<IAudiobookFileRegistrationLease>(
+            preparation.RegistrationLease);
+        Assert.True(lease.PrepareCleanupRecovery(74));
+        Assert.Equal(
+            RegistrationPublicationCompletion.CommittedCleanupPending,
+            lease.CompletePublication());
+        Assert.Equal(
+            RegistrationPublicationCompletion.CommittedCleanupPending,
+            lease.CompletePublication());
+
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Source));
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Destination));
+        var factory = _provider.GetRequiredService<
+            IDbContextFactory<ListenArrDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var journal = await db.CompatibilityFilePublicationJournals
+            .SingleAsync(candidate => candidate.OperationId == scenario.OperationId);
+        Assert.Equal(batchId, journal.BatchId);
+        Assert.Equal(CompatibilityCleanupOwner.Listenarr, journal.CleanupOwner);
+        Assert.Equal(74, journal.AudiobookId);
+        Assert.Equal(
+            CompatibilityFilePublicationState.RegistrationCommitted,
+            journal.State);
+    }
+
+    [Fact]
     public async Task PrepareCompatibilityMove_BlockedLogIncludesFileContext()
     {
         var scenario = await CreateScenarioAsync(

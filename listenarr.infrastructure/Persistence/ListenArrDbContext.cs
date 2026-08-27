@@ -43,6 +43,7 @@ namespace Listenarr.Infrastructure.Persistence
         public DbSet<DownloadProcessingJob> DownloadProcessingJobs { get; set; } = null!;
         public DbSet<FileMutationJournal> FileMutationJournals { get; set; } = null!;
         public DbSet<CompatibilityFilePublicationJournal> CompatibilityFilePublicationJournals { get; set; } = null!;
+        public DbSet<WeakStorageScanCandidate> WeakStorageScanCandidates { get; set; } = null!;
         public DbSet<DownloadHistory> DownloadHistories { get; set; } = null!;
         public DbSet<QualityProfile> QualityProfiles { get; set; } = null!;
         public DbSet<RemotePathMapping> RemotePathMappings { get; set; } = null!;

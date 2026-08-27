@@ -165,6 +165,97 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
         }
 
         [Fact]
+        public async Task EnqueueMoveAsync_DifferentActiveMoveForSameAudiobook_BlocksCompetingMove()
+        {
+            const int audiobookId = 4245;
+            var jobs = new List<MoveJob>();
+            var persistence = CreateInMemoryPersistence(jobs);
+            var service = new MoveQueueServiceTestAdapter(
+                NullLogger<MoveQueueService>.Instance,
+                persistence.Object,
+                new NoopHubBroadcaster(),
+                TimeProvider.System,
+                BuildSemanticsResolver());
+
+            var firstId = await service.EnqueueMoveAsync(
+                audiobookId,
+                "/library/FirstTitle",
+                "/downloads/Title");
+            var first = Assert.Single(jobs);
+            first.Phase = MoveJobPhase.Copying;
+            first.Entries.First(entry => entry.EntryType == MoveJobEntryType.File).CopyState =
+                MoveJobEntryCopyState.Staged;
+
+            var blocked = await Assert.ThrowsAsync<ApplicationConflictException>(() =>
+                service.EnqueueMoveAsync(
+                    audiobookId,
+                    "/library/SecondTitle",
+                    "/downloads/Title"));
+
+            Assert.Equal("move_already_active", blocked.Code);
+            Assert.Single(jobs);
+            Assert.Equal(firstId, jobs[0].Id);
+        }
+
+        [Fact]
+        public async Task EnqueueMoveAsync_UnresolvedMoveExecutionEvidence_BlocksCompetingMove()
+        {
+            const int audiobookId = 4245;
+            var source = FileSystemPathIdentity.ResolveNativeAbsolutePath("/downloads/Title");
+            var unresolvedTarget = FileSystemPathIdentity.ResolveNativeAbsolutePath("/library/OldTitle");
+            var jobs = new List<MoveJob>
+            {
+                new()
+                {
+                    Id = Guid.NewGuid(),
+                    AudiobookId = audiobookId,
+                    SourcePath = source,
+                    RequestedPath = unresolvedTarget,
+                    Status = MoveJobStatus.NeedsAttention,
+                    Phase = MoveJobPhase.Published,
+                    FailureKind = MoveFailureKind.Verification,
+                    ExecutionProtocolVersion = MoveExecutionProtocol.Current,
+                    ActiveDeduplicationKey = null,
+                    Entries =
+                    [
+                        new MoveJobEntry
+                        {
+                            RelativePath = "book.m4b",
+                            EntryType = MoveJobEntryType.File,
+                            Length = 1,
+                            LastWriteTimeUtc = DateTime.UnixEpoch,
+                            Sha256 = new string('A', 64),
+                            CopyState = MoveJobEntryCopyState.Verified,
+                            CleanupState = MoveJobEntryCleanupState.Pending
+                        }
+                    ]
+                }
+            };
+            var persistence = CreateInMemoryPersistence(jobs);
+            persistence.Setup(store => store.GetRecoveryCandidatesByAudiobookAsync(
+                    audiobookId,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => jobs
+                    .Where(job => job.AudiobookId == audiobookId)
+                    .ToList());
+            var service = new MoveQueueServiceTestAdapter(
+                NullLogger<MoveQueueService>.Instance,
+                persistence.Object,
+                new NoopHubBroadcaster(),
+                TimeProvider.System,
+                BuildSemanticsResolver());
+
+            var blocked = await Assert.ThrowsAsync<ApplicationConflictException>(() =>
+                service.EnqueueMoveAsync(
+                    audiobookId,
+                    "/library/NewTitle",
+                    "/downloads/Title"));
+
+            Assert.Equal("move_repair_required", blocked.Code);
+            Assert.Single(jobs);
+        }
+
+        [Fact]
         public async Task EnsureFilesystemMutationAllowedAsync_UnreconciledOwnerBoundRenameBlocksMutation()
         {
             const int audiobookId = 4343;
@@ -650,6 +741,17 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
                     db.MoveJobs.SingleOrDefault(job => job.ActiveDeduplicationKey == key));
             persistence.Setup(store => store.GetByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((Guid id, CancellationToken _) => db.MoveJobs.Find(id));
+            persistence.Setup(store => store.GetRecoveryCandidatesByAudiobookAsync(
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((int audiobookId, CancellationToken _) => db.MoveJobs
+                    .Where(job => job.AudiobookId == audiobookId
+                        && (job.Status == MoveJobStatus.Queued
+                            || job.Status == MoveJobStatus.Running
+                            || job.Status == MoveJobStatus.RetryScheduled
+                            || job.Status == MoveJobStatus.Failed
+                            || job.Status == MoveJobStatus.NeedsAttention))
+                    .ToList());
             persistence.Setup(store => store.AddAsync(It.IsAny<MoveJob>(), It.IsAny<CancellationToken>()))
                 .Returns(async (MoveJob job, CancellationToken ct) =>
                 {
@@ -838,6 +940,23 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
 
                     return Task.CompletedTask;
                 });
+            persistence.Setup(store => store.GetRecoveryCandidatesByAudiobookAsync(
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((int audiobookId, CancellationToken _) =>
+                {
+                    lock (sync)
+                    {
+                        return jobs
+                            .Where(job => job.AudiobookId == audiobookId
+                                && job.Status is MoveJobStatus.Queued
+                                    or MoveJobStatus.Running
+                                    or MoveJobStatus.RetryScheduled
+                                    or MoveJobStatus.Failed
+                                    or MoveJobStatus.NeedsAttention)
+                            .ToList();
+                    }
+                });
             var service = new MoveQueueService(
                 NullLogger<MoveQueueService>.Instance,
                 persistence.Object,
@@ -917,6 +1036,31 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
                 deleteEmptySource: false);
 
             var job = Assert.Single(jobs, candidate => candidate.Id == jobId);
+            Assert.False(job.DeleteEmptySource);
+        }
+
+        [Fact]
+        public async Task EnqueueMoveAsync_ForcedCopyRetention_DisablesDirectoryRetirementBeforePersistence()
+        {
+            var jobs = new List<MoveJob>();
+            var persistence = CreateInMemoryPersistence(jobs);
+            var service = new MoveQueueService(
+                NullLogger<MoveQueueService>.Instance,
+                persistence.Object,
+                new NoopHubBroadcaster(),
+                TimeProvider.System,
+                BuildSemanticsResolver());
+
+            var jobId = await service.EnqueueMoveAsync(
+                9,
+                "/library/Title",
+                "/downloads/Title",
+                deleteEmptySource: true,
+                forceCopyAndRetainSource: true);
+
+            var job = Assert.Single(jobs, candidate => candidate.Id == jobId);
+            Assert.True(job.ForceCopyAndRetainSource);
+            Assert.Equal(MoveSourceCleanupMode.RetainSource, job.SourceCleanupMode);
             Assert.False(job.DeleteEmptySource);
         }
 
@@ -1106,6 +1250,10 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
                     It.IsAny<string>(),
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(existingJob);
+            persistence.Setup(store => store.GetRecoveryCandidatesByAudiobookAsync(
+                    existingJob.AudiobookId,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync([existingJob]);
             var service = new MoveQueueService(
                 NullLogger<MoveQueueService>.Instance,
                 persistence.Object,
@@ -2340,6 +2488,17 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
                     jobs.SingleOrDefault(job => job.ActiveDeduplicationKey == key));
             persistence.Setup(store => store.GetByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((Guid id, CancellationToken _) => jobs.SingleOrDefault(job => job.Id == id));
+            persistence.Setup(store => store.GetRecoveryCandidatesByAudiobookAsync(
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((int audiobookId, CancellationToken _) => jobs
+                    .Where(job => job.AudiobookId == audiobookId
+                        && job.Status is MoveJobStatus.Queued
+                            or MoveJobStatus.Running
+                            or MoveJobStatus.RetryScheduled
+                            or MoveJobStatus.Failed
+                            or MoveJobStatus.NeedsAttention)
+                    .ToList());
             persistence.Setup(store => store.AddAsync(It.IsAny<MoveJob>(), It.IsAny<CancellationToken>()))
                 .Returns((MoveJob job, CancellationToken _) =>
                 {
@@ -2474,7 +2633,9 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
             string requestedPath,
             string? sourcePath = null,
             bool deleteEmptySource = true,
-            string? sourceCleanupBoundary = null)
+            string? sourceCleanupBoundary = null,
+            MoveSourceCleanupMode sourceCleanupMode = MoveSourceCleanupMode.RetainSource,
+            bool forceCopyAndRetainSource = false)
         {
             var target = FileSystemPathIdentity.ResolveNativeAbsolutePath(requestedPath);
             var source = FileSystemPathIdentity.ResolveNativeAbsolutePath(
@@ -2536,7 +2697,9 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
                 TargetBoundaryDirectoryObjectIdentityVersion: 2,
                 TargetBoundaryDirectoryObjectIdentity: "test-target-boundary-identity",
                 DeleteEmptySource: deleteEmptySource,
-                SourceCleanupBoundary: effectiveSourceCleanupBoundary));
+                SourceCleanupBoundary: effectiveSourceCleanupBoundary,
+                SourceCleanupMode: sourceCleanupMode,
+                ForceCopyAndRetainSource: forceCopyAndRetainSource));
         }
     }
 }

@@ -51,6 +51,8 @@ public partial class ManualImportController : ControllerBase
     private readonly ManualImportPathPlanner _pathPlanner;
     private readonly ManualImportCompanionImporter _companionImporter;
     private readonly ILibraryDirectoryOwnershipStore _directoryOwnershipStore;
+    private readonly ICompatibilitySourceCleanupCoordinator?
+        _compatibilitySourceCleanupCoordinator;
 
     public ManualImportController(
         ILogger<ManualImportController> logger,
@@ -75,7 +77,8 @@ public partial class ManualImportController : ControllerBase
         ILibraryFilesystemMutationGate filesystemMutationGate,
         ManualImportPathPlanner? pathPlanner = null,
         ManualImportCompanionImporter? companionImporter = null,
-        IFilePublicationCapabilityResolver? filePublicationCapabilityResolver = null)
+        IFilePublicationCapabilityResolver? filePublicationCapabilityResolver = null,
+        ICompatibilitySourceCleanupCoordinator? compatibilitySourceCleanupCoordinator = null)
     {
         _logger = logger;
         _audiobookRepository = audiobookRepository;
@@ -92,6 +95,7 @@ public partial class ManualImportController : ControllerBase
         _filePublicationSourceCapability = filePublicationSourceCapability
             ?? throw new ArgumentNullException(nameof(filePublicationSourceCapability));
         _filePublicationCapabilityResolver = filePublicationCapabilityResolver;
+        _compatibilitySourceCleanupCoordinator = compatibilitySourceCleanupCoordinator;
         _audiobookFileService = audiobookFileService;
         _fileSystem = fileSystem;
         _semanticsResolver = semanticsResolver;
@@ -202,6 +206,7 @@ public partial class ManualImportController : ControllerBase
         _filesystemMutationGate.EnsureReady();
 
         var results = new List<ManualImportResultDto>();
+        var compatibilityBatchId = Guid.NewGuid();
         var destinationTracker = new ManualImportDestinationTracker(
             _fileSystem,
             _filePublicationSourceCapability);
@@ -289,6 +294,7 @@ public partial class ManualImportController : ControllerBase
                                 rootFolders,
                                 appSettings,
                                 fileCount > 1,
+                                compatibilityBatchId,
                                 operationToken);
                             _logger.LogDebug(
                                 "Import result {Index}: Success={Success}, Destination={Destination}, Error={Error}",
@@ -299,9 +305,10 @@ public partial class ManualImportController : ControllerBase
                             results.Add(result);
                         }
 
+                        var companionPassSucceeded = true;
                         if (request.IncludeCompanionFiles && request.Action != FileAction.None)
                         {
-                            var companionImportCount = await _companionImporter.ImportAsync(
+                            var companionPass = await _companionImporter.ImportWithOutcomeAsync(
                                 request.Action,
                                 orderedItems,
                                 results,
@@ -311,10 +318,25 @@ public partial class ManualImportController : ControllerBase
                                 sourceSemantics,
                                 planningDestinationResolutions,
                                 appSettings.ImportBlacklistExtensions,
+                                compatibilityBatchId,
                                 operationToken);
+                            companionPassSucceeded = companionPass.Succeeded;
                             _logger.LogInformation(
                                 "Manual import companion-file pass completed with {Count} imported companion file(s)",
-                                companionImportCount);
+                                companionPass.ImportedCount);
+                        }
+
+                        if (request.Action == FileAction.Move
+                            && _compatibilitySourceCleanupCoordinator != null)
+                        {
+                            var batchSucceeded = companionPassSucceeded
+                                && results.All(result => result.Success);
+                            var cleanup = await _compatibilitySourceCleanupCoordinator
+                                .CompleteBatchAsync(
+                                    compatibilityBatchId,
+                                    batchSucceeded,
+                                    CancellationToken.None);
+                            ApplyCompatibilityCleanupResult(results, cleanup);
                         }
 
                         if (request.Action != FileAction.None
@@ -382,6 +404,32 @@ public partial class ManualImportController : ControllerBase
         {
             _logger.LogError(ex, "Error starting manual import");
             return StatusCode(500, new { error = "Failed to start import" });
+        }
+    }
+
+    private static void ApplyCompatibilityCleanupResult(
+        IEnumerable<ManualImportResultDto> results,
+        CompatibilityBatchCleanupResult cleanup)
+    {
+        foreach (var result in results.Where(result =>
+            result.WarningCode == "verified_cleanup_pending"))
+        {
+            if (cleanup.Disposition
+                == CompatibilityBatchCleanupDisposition.RetiredByListenarr)
+            {
+                result.SourceDisposition = ImportSourceDisposition.Retired.ToString();
+                result.WarningCode = null;
+                result.Warning = "Destination verified and source removed through protected cleanup.";
+            }
+            else
+            {
+                result.SourceDisposition = ImportSourceDisposition.Retained.ToString();
+                result.WarningCode = cleanup.Disposition
+                    == CompatibilityBatchCleanupDisposition.PartialNeedsAttention
+                        ? "source_cleanup_needs_attention"
+                        : "source_retained";
+                result.Warning = "Destination verified, but the source was retained.";
+            }
         }
     }
 

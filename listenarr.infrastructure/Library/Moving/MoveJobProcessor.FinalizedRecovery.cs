@@ -19,11 +19,12 @@ namespace Listenarr.Infrastructure.Library.Moving
             string target,
             FileSystemPathSemantics targetSemantics)
         {
-            if (job.Phase >= MoveJobPhase.Published)
-            {
-                return true;
-            }
-
+            // A published target is not the same as a finalized move. Source cleanup
+            // may still be pending or partially journaled, in which case the normal
+            // markerless workflow must resume from its durable database state. Only
+            // metadata already pointing at the target is independent evidence that the
+            // workflow crossed the metadata-rewrite boundary and should use finalized
+            // verification here.
             if (string.IsNullOrWhiteSpace(audiobook.BasePath))
             {
                 return false;

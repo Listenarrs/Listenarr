@@ -11,7 +11,15 @@ internal sealed record CompatibilityFilePublicationClaim(
     string DestinationPath,
     long SourceLength,
     string SourceSha256,
-    bool IsCompanionFile);
+    bool IsCompanionFile,
+    Guid? BatchId = null,
+    CompatibilityCleanupOwner CleanupOwner = CompatibilityCleanupOwner.None,
+    int? SourceRootFolderId = null,
+    int? SourcePolicyRevision = null,
+    int? DestinationRootFolderId = null,
+    int? DestinationPolicyRevision = null,
+    int? SourceStorageContractRevision = null,
+    int? DestinationStorageContractRevision = null);
 
 internal sealed class CompatibilityFilePublicationJournalStore(
     IDbContextFactory<ListenArrDbContext> dbContextFactory,
@@ -50,9 +58,17 @@ internal sealed class CompatibilityFilePublicationJournalStore(
         var journal = new CompatibilityFilePublicationJournal
         {
             OperationId = claim.OperationId,
+            BatchId = claim.BatchId,
             RequestedAction = claim.RequestedAction,
             EffectiveAction = FileAction.Copy,
             SourceDisposition = CompatibilitySourceDisposition.Retained,
+            CleanupOwner = claim.CleanupOwner,
+            SourceRootFolderId = claim.SourceRootFolderId,
+            SourcePolicyRevision = claim.SourcePolicyRevision,
+            SourceStorageContractRevision = claim.SourceStorageContractRevision,
+            DestinationRootFolderId = claim.DestinationRootFolderId,
+            DestinationPolicyRevision = claim.DestinationPolicyRevision,
+            DestinationStorageContractRevision = claim.DestinationStorageContractRevision,
             SourcePath = Path.GetFullPath(claim.SourcePath),
             DestinationPath = Path.GetFullPath(claim.DestinationPath),
             SourceLength = claim.SourceLength,
@@ -114,7 +130,9 @@ internal sealed class CompatibilityFilePublicationJournalStore(
             ?? throw new InvalidOperationException(
                 "The compatibility publication journal no longer exists.");
 
-        if (journal.ProtocolVersion != CompatibilityFilePublicationProtocol.Current)
+        if (journal.ProtocolVersion is not (
+                CompatibilityFilePublicationProtocol.RetainOnly or
+                CompatibilityFilePublicationProtocol.Current))
         {
             throw new InvalidOperationException(
                 "The compatibility publication journal protocol is unsupported.");
@@ -125,8 +143,7 @@ internal sealed class CompatibilityFilePublicationJournalStore(
             throw new InvalidOperationException(
                 "A compatibility publication requiring attention cannot advance.");
         }
-        if (state != CompatibilityFilePublicationState.NeedsAttention
-            && state < journal.State)
+        if (!CanAdvance(journal.State, state))
         {
             throw new InvalidOperationException(
                 "A compatibility publication cannot move to an earlier state.");
@@ -142,11 +159,44 @@ internal sealed class CompatibilityFilePublicationJournalStore(
         return journal;
     }
 
+    private static bool CanAdvance(
+        CompatibilityFilePublicationState current,
+        CompatibilityFilePublicationState next)
+    {
+        if (next == CompatibilityFilePublicationState.NeedsAttention
+            || next == current)
+        {
+            return true;
+        }
+
+        return current switch
+        {
+            CompatibilityFilePublicationState.Planned =>
+                next == CompatibilityFilePublicationState.TargetVerified,
+            CompatibilityFilePublicationState.TargetVerified =>
+                next == CompatibilityFilePublicationState.RegistrationCommitted,
+            CompatibilityFilePublicationState.RegistrationCommitted =>
+                next is CompatibilityFilePublicationState.Completed
+                    or CompatibilityFilePublicationState.SourceDeleteAuthorized,
+            CompatibilityFilePublicationState.SourceDeleteAuthorized =>
+                next == CompatibilityFilePublicationState.SourceQuarantinePlanned,
+            CompatibilityFilePublicationState.SourceQuarantinePlanned =>
+                next == CompatibilityFilePublicationState.SourceQuarantined,
+            CompatibilityFilePublicationState.SourceQuarantined =>
+                next == CompatibilityFilePublicationState.SourceDeleted,
+            CompatibilityFilePublicationState.SourceDeleted =>
+                next == CompatibilityFilePublicationState.Completed,
+            _ => false
+        };
+    }
+
     private static void ValidateClaim(
         CompatibilityFilePublicationJournal journal,
         CompatibilityFilePublicationClaim claim)
     {
-        if (journal.ProtocolVersion != CompatibilityFilePublicationProtocol.Current
+        if (journal.ProtocolVersion is not (
+                CompatibilityFilePublicationProtocol.RetainOnly or
+                CompatibilityFilePublicationProtocol.Current)
             || journal.RequestedAction != claim.RequestedAction
             || !string.Equals(
                 journal.SourcePath,
@@ -158,6 +208,15 @@ internal sealed class CompatibilityFilePublicationJournalStore(
                 StringComparison.Ordinal)
             || journal.SourceLength != claim.SourceLength
             || journal.IsCompanionFile != claim.IsCompanionFile
+            || (journal.ProtocolVersion == CompatibilityFilePublicationProtocol.Current
+                && (journal.BatchId != claim.BatchId
+                    || journal.CleanupOwner != claim.CleanupOwner
+                    || journal.SourceRootFolderId != claim.SourceRootFolderId
+                    || journal.SourcePolicyRevision != claim.SourcePolicyRevision
+                    || journal.SourceStorageContractRevision != claim.SourceStorageContractRevision
+                    || journal.DestinationRootFolderId != claim.DestinationRootFolderId
+                    || journal.DestinationPolicyRevision != claim.DestinationPolicyRevision
+                    || journal.DestinationStorageContractRevision != claim.DestinationStorageContractRevision))
             || !string.Equals(
                 journal.SourceSha256,
                 claim.SourceSha256,

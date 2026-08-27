@@ -24,7 +24,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Features.Library
 {
-    public sealed class LibraryDeleteWorkflow
+    public sealed partial class LibraryDeleteWorkflow
     {
         private readonly IAudiobookDeletionCommitService _deletionCommitService;
         private readonly IAudiobookRepository _audiobookRepository;

@@ -64,6 +64,12 @@ internal sealed partial class AudiobookContentMoveService
         IReadOnlyCollection<MoveJobEntry> manifest,
         CancellationToken cancellationToken)
     {
+        if (request.ForceCopyAndRetainSource)
+        {
+            throw new MoveNeedsAttentionException(
+                "Forced source retention forbids destructive source cleanup.");
+        }
+
         var endpoints = await GetEndpointObjectIdentitiesAsync(
             request.JobId,
             cancellationToken);

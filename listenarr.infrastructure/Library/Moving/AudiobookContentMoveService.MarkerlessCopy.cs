@@ -136,7 +136,7 @@ internal sealed partial class AudiobookContentMoveService
 
             try
             {
-                var observedHash = await ComputeMarkerlessSourceProofHashAsync(
+                var observedProof = await ComputeMarkerlessSourceProofHashAsync(
                     request,
                     entry,
                     sourcePath,
@@ -148,24 +148,24 @@ internal sealed partial class AudiobookContentMoveService
                 if (!string.IsNullOrWhiteSpace(entry.Sha256)
                     && !string.Equals(
                         entry.Sha256,
-                        observedHash,
+                        observedProof.Sha256,
                         StringComparison.OrdinalIgnoreCase))
                 {
                     throw new MoveNeedsAttentionException(
                         $"Source file changed before markerless publication: {entry.RelativePath}");
                 }
-                if (string.IsNullOrWhiteSpace(entry.Sha256))
-                {
-                    await UpdateSourceEntryProofAsync(
-                        request.JobId,
-                        request.LeaseToken,
-                        entry.RelativePath,
-                        entry.SourcePhysicalObjectIdentity
-                            ?? sourceEntry.GetObjectIdentity(),
-                        observedHash,
-                        cancellationToken);
-                    entry.Sha256 = observedHash;
-                }
+
+                await UpdateSourceEntryProofAsync(
+                    request.JobId,
+                    request.LeaseToken,
+                    entry.RelativePath,
+                    entry.SourcePhysicalObjectIdentity
+                        ?? sourceEntry.GetObjectIdentity(),
+                    observedProof.Sha256,
+                    observedProof.LastWriteTimeUtc,
+                    cancellationToken);
+                entry.Sha256 ??= observedProof.Sha256;
+                entry.LastWriteTimeUtc = observedProof.LastWriteTimeUtc;
                 completedWorkUnits += GetProgressUnits(entry);
                 await ReportProgressAsync(
                     request,

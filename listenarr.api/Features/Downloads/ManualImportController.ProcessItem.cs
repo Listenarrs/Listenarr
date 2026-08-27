@@ -16,6 +16,7 @@ public partial class ManualImportController
         List<RootFolder> rootFolders,
         ApplicationSettings settings,
         bool hasMultipleFile,
+        Guid compatibilityBatchId,
         CancellationToken cancellationToken)
     {
         try
@@ -267,7 +268,9 @@ public partial class ManualImportController
                     item.FullPath,
                     destinationPath,
                     sourceProof,
-                    cancellationToken);
+                    cancellationToken,
+                    compatibilityBatchId,
+                    CompatibilityCleanupOwner.Listenarr);
             if (!publicationPlan.IsAllowed)
             {
                 return new ManualImportResultDto
@@ -321,8 +324,9 @@ public partial class ManualImportController
                     };
                 }
 
-                var registered = publicationPlan.Mode
-                        == FilePublicationExecutionMode.AdditiveCopyRetainSource
+                var registered = publicationPlan.Mode is
+                        FilePublicationExecutionMode.AdditiveCopyRetainSource or
+                        FilePublicationExecutionMode.CompatibilityCopyVerifiedCleanup
                         ? await _audiobookFileService
                             .RegisterCompatibilityPublicationWithBasePathAsync(
                                 audiobook,

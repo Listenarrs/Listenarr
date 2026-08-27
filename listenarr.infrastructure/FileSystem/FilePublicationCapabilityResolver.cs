@@ -15,7 +15,9 @@ internal sealed class FilePublicationCapabilityResolver(
         string source,
         string destination,
         FilePublicationSourceProof sourceProof,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Guid? compatibilityBatchId = null,
+        CompatibilityCleanupOwner cleanupOwner = CompatibilityCleanupOwner.None)
     {
         sourceProof.Validate();
         if (requestedAction is not (
@@ -27,9 +29,8 @@ internal sealed class FilePublicationCapabilityResolver(
                 "The requested action cannot publish an audiobook file.");
         }
 
-        var destinationRoot = await FindContainingRootAsync(
-            destination,
-            cancellationToken);
+        var roots = await rootFolderRepository.GetAllAsync();
+        var destinationRoot = FindContainingRoot(destination, roots);
         if (destinationRoot == null)
         {
             return FilePublicationPlan.Blocked(
@@ -41,8 +42,7 @@ internal sealed class FilePublicationCapabilityResolver(
         var destinationHealth = await storageHealthResolver.ResolveAsync(
             destinationRoot,
             cancellationToken);
-        if (!destinationHealth.CanMutateFilesystem
-            && !destinationHealth.CanPublishNewFiles)
+        if (!destinationHealth.CanPublishAdditively)
         {
             return FilePublicationPlan.Blocked(
                 requestedAction,
@@ -51,18 +51,28 @@ internal sealed class FilePublicationCapabilityResolver(
                     ?? "The destination does not authorize new file publication.");
         }
 
+        RootFolder? sourceRoot = null;
         var sourceCanBeRetired = sourceProof.HasDurablePhysicalObjectIdentity;
+        var sourceCanBeRetiredAfterVerifiedCopy = true;
         if (requestedAction == FileAction.Move)
         {
-            var sourceRoot = await FindContainingRootAsync(
-                source,
-                cancellationToken);
+            sourceRoot = FindContainingRoot(source, roots);
             if (sourceRoot != null)
             {
                 var sourceHealth = await storageHealthResolver.ResolveAsync(
                     sourceRoot,
                     cancellationToken);
-                sourceCanBeRetired &= sourceHealth.CanMutateFilesystem;
+                sourceCanBeRetired &= sourceHealth.CanRetireDurably;
+                sourceCanBeRetiredAfterVerifiedCopy =
+                    sourceHealth.CanRetireVerifiedSource;
+            }
+            else if (MayOverlapUnresolvedRoot(source, roots))
+            {
+                // A configured root whose persisted semantics are unavailable must not be
+                // reclassified as an unmanaged external source. Retain until its boundary
+                // can be resolved authoritatively.
+                sourceCanBeRetired = false;
+                sourceCanBeRetiredAfterVerifiedCopy = false;
             }
         }
 
@@ -73,6 +83,28 @@ internal sealed class FilePublicationCapabilityResolver(
             return FilePublicationPlan.Durable(requestedAction);
         }
 
+        if (requestedAction == FileAction.Move
+            && compatibilityBatchId is Guid batchId
+            && batchId != Guid.Empty
+            && cleanupOwner != CompatibilityCleanupOwner.None
+            && sourceCanBeRetiredAfterVerifiedCopy
+            && destinationRoot.WeakStorageSourceCleanupPolicy
+                == WeakStorageSourceCleanupPolicy.DeleteSourceAfterVerifiedCopy
+            && (sourceRoot == null
+                || sourceRoot.WeakStorageSourceCleanupPolicy
+                    == WeakStorageSourceCleanupPolicy.DeleteSourceAfterVerifiedCopy))
+        {
+            return FilePublicationPlan.VerifiedCleanup(
+                batchId,
+                cleanupOwner,
+                sourceRoot?.Id,
+                sourceRoot?.WeakStoragePolicyRevision,
+                destinationRoot.Id,
+                destinationRoot.WeakStoragePolicyRevision,
+                sourceRoot?.StorageContractRevision,
+                destinationRoot.StorageContractRevision);
+        }
+
         return options?.Value.WeakPublicationMode == WeakPublicationMode.Disabled
             ? FilePublicationPlan.Blocked(
                 requestedAction,
@@ -81,16 +113,15 @@ internal sealed class FilePublicationCapabilityResolver(
             : FilePublicationPlan.Additive(requestedAction);
     }
 
-    private async Task<RootFolder?> FindContainingRootAsync(
+    private static RootFolder? FindContainingRoot(
         string path,
-        CancellationToken cancellationToken)
+        IReadOnlyCollection<RootFolder> roots)
     {
         var fullPath = Path.GetFullPath(path);
         RootFolder? best = null;
         var bestLength = -1;
-        foreach (var root in await rootFolderRepository.GetAllAsync())
+        foreach (var root in roots)
         {
-            cancellationToken.ThrowIfCancellationRequested();
             var persisted = RootFolderPathSemantics.ResolvePersisted(root);
             if (!persisted.HasValue
                 || persisted.Value.DetectAmbiguousCaseMatches
@@ -114,5 +145,43 @@ internal sealed class FilePublicationCapabilityResolver(
         }
 
         return best;
+    }
+
+    private static bool MayOverlapUnresolvedRoot(
+        string path,
+        IReadOnlyCollection<RootFolder> roots)
+    {
+        var fullPath = Path.GetFullPath(path);
+        if (!FileSystemPathIdentity.TryDetectAbsoluteSyntaxForHost(
+                fullPath,
+                out var pathSyntax))
+        {
+            return true;
+        }
+
+        foreach (var root in roots)
+        {
+            var persisted = RootFolderPathSemantics.ResolvePersisted(root);
+            if (persisted.HasValue
+                && !persisted.Value.DetectAmbiguousCaseMatches
+                && FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    root.Path,
+                    out _,
+                    out _))
+            {
+                continue;
+            }
+
+            if (FileSystemPathIdentity.AmbiguousStoredBoundaryMayContainPath(
+                    root.Path,
+                    fullPath,
+                    pathSyntax,
+                    root.CaseSensitivityMode))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

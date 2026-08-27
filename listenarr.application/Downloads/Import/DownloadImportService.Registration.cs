@@ -38,8 +38,9 @@ public partial class DownloadImportService
                 destination);
         }
 
-        var registered = publicationPlan.Mode
-                == FilePublicationExecutionMode.AdditiveCopyRetainSource
+        var registered = publicationPlan.Mode is
+                FilePublicationExecutionMode.AdditiveCopyRetainSource or
+                FilePublicationExecutionMode.CompatibilityCopyVerifiedCleanup
                 ? await audiobookFileService.RegisterCompatibilityPublicationAsync(
                     audiobook,
                     ownership,

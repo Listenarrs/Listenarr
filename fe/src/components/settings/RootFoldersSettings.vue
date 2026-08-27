@@ -183,8 +183,12 @@
               class="storage-message compatibility-publication-message"
               data-cy="compatibility-publication-message"
             >
-              Move policy: Listenarr will copy files into this storage and retain the source. It
-              will not attempt source cleanup while durable file identity is unavailable.
+              Move policy:
+              {{
+                folder.weakStorageSourceCleanupPolicy === 'DeleteSourceAfterVerifiedCopy'
+                  ? 'Listenarr will copy and verify files before attempting protected source cleanup. Moves between configured roots require this option on both roots.'
+                  : 'Listenarr will copy files into this storage and retain the source; it will not attempt source cleanup.'
+              }}
             </p>
             <details
               v-if="folder.storageState !== 'Healthy' && folder.storageDetail"

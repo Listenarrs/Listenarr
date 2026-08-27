@@ -10,7 +10,15 @@ public static class MoveExecutionContract
         PathIdentitySnapshot targetIdentity,
         bool deleteEmptySource,
         string? sourceCleanupBoundary,
-        Guid? relocationId)
+        Guid? relocationId,
+        MoveSourceCleanupMode sourceCleanupMode = MoveSourceCleanupMode.RetainSource,
+        int? sourceRootFolderId = null,
+        int? sourcePolicyRevision = null,
+        int? targetRootFolderId = null,
+        int? targetPolicyRevision = null,
+        int? sourceStorageContractRevision = null,
+        int? targetStorageContractRevision = null,
+        bool forceCopyAndRetainSource = false)
     {
         ArgumentNullException.ThrowIfNull(existingJob);
 
@@ -37,6 +45,14 @@ public static class MoveExecutionContract
         return IdentityMatches(existingSourceIdentity, sourceIdentity)
             && IdentityMatches(existingTargetIdentity, targetIdentity)
             && existingJob.DeleteEmptySource == deleteEmptySource
+            && existingJob.SourceCleanupMode == sourceCleanupMode
+            && existingJob.SourceRootFolderId == sourceRootFolderId
+            && existingJob.SourcePolicyRevision == sourcePolicyRevision
+            && existingJob.TargetRootFolderId == targetRootFolderId
+            && existingJob.TargetPolicyRevision == targetPolicyRevision
+            && existingJob.SourceStorageContractRevision == sourceStorageContractRevision
+            && existingJob.TargetStorageContractRevision == targetStorageContractRevision
+            && existingJob.ForceCopyAndRetainSource == forceCopyAndRetainSource
             && existingJob.RelocationId == relocationId
             && OptionalBoundaryMatches(
                 existingJob.SourceCleanupBoundary,
@@ -75,7 +91,15 @@ public static class MoveExecutionContract
             leftTargetIdentity,
             left.DeleteEmptySource,
             left.SourceCleanupBoundary,
-            left.RelocationId);
+            left.RelocationId,
+            left.SourceCleanupMode,
+            left.SourceRootFolderId,
+            left.SourcePolicyRevision,
+            left.TargetRootFolderId,
+            left.TargetPolicyRevision,
+            left.SourceStorageContractRevision,
+            left.TargetStorageContractRevision,
+            left.ForceCopyAndRetainSource);
     }
 
     private static bool IdentityMatches(

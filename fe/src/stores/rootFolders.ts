@@ -146,6 +146,16 @@ export const useRootFoldersStore = defineStore('rootFolders', () => {
     return result
   }
 
+  async function updateWeakStoragePolicy(
+    id: number,
+    policy: 'RetainSource' | 'DeleteSourceAfterVerifiedCopy',
+    expectedRevision: number,
+  ) {
+    const result = await apiService.updateRootFolderWeakStoragePolicy(id, policy, expectedRevision)
+    await load()
+    return result
+  }
+
   async function abandonUnpublishedRelocation(relocationId: string) {
     const result = await apiService.abandonUnpublishedRootFolderRelocation(relocationId)
     await load()
@@ -171,6 +181,7 @@ export const useRootFoldersStore = defineStore('rootFolders', () => {
     load,
     create,
     update,
+    updateWeakStoragePolicy,
     confirmCurrentFolder,
     abandonUnpublishedRelocation,
     retryRelocation,

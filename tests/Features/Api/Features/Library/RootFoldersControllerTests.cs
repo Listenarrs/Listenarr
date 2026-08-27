@@ -2162,7 +2162,8 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             IRootFolderStorageHealthResolver? storageHealthResolver = null,
             IRootFolderStorageConfirmationService? storageConfirmationService = null,
             ILibraryFilesystemReadiness? filesystemReadiness = null,
-            ILibraryFilesystemMutationGate? filesystemMutationGate = null)
+            ILibraryFilesystemMutationGate? filesystemMutationGate = null,
+            IRootFolderWeakStoragePolicyService? weakStoragePolicyService = null)
             : base(
                 service,
                 unmatchedQueue,
@@ -2174,7 +2175,8 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 storageHealthResolver ?? new HealthyStorageResolver(),
                 storageConfirmationService ?? Mock.Of<IRootFolderStorageConfirmationService>(),
                 filesystemReadiness ?? TestLibraryFilesystemReadiness.Ready(),
-                filesystemMutationGate ?? TestLibraryFilesystemReadiness.Ready())
+                filesystemMutationGate ?? TestLibraryFilesystemReadiness.Ready(),
+                weakStoragePolicyService ?? Mock.Of<IRootFolderWeakStoragePolicyService>())
         {
         }
 

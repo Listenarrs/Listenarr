@@ -94,7 +94,15 @@ public partial class FileMover
                 gate.DestinationPath,
                 expectedSourceProof.Length,
                 expectedSourceProof.Sha256,
-                isCompanionFile),
+                isCompanionFile,
+                plan.CompatibilityBatchId,
+                plan.CleanupOwner,
+                plan.SourceRootFolderId,
+                plan.SourcePolicyRevision,
+                plan.DestinationRootFolderId,
+                plan.DestinationPolicyRevision,
+                plan.SourceStorageContractRevision,
+                plan.DestinationStorageContractRevision),
             cancellationToken);
         if (journal.State == CompatibilityFilePublicationState.NeedsAttention)
         {
@@ -293,6 +301,15 @@ public partial class FileMover
             return false;
         }
 
+        if (current?.ProtocolVersion == CompatibilityFilePublicationProtocol.Current
+            && current.CleanupOwner != CompatibilityCleanupOwner.None)
+        {
+            // The batch coordinator owns the source-retirement barrier. Keep the
+            // publication at RegistrationCommitted until the coordinator has
+            // verified that every primary and companion publication succeeded.
+            return false;
+        }
+
         _compatibilityFilePublicationJournalStore!.Advance(
             operationId,
             CompatibilityFilePublicationState.Completed,
@@ -301,27 +318,63 @@ public partial class FileMover
         return true;
     }
 
-    private static bool CompatibilityTargetMatches(
+    private bool CompatibilityTargetMatches(
         string destination,
         long length,
         string sha256)
     {
-        try
+        for (var attempt = 1; attempt <= 2; attempt++)
         {
-            using var target = OpenCompatibilityRead(destination);
-            return CompatibilityStreamMatchesAsync(
-                    target,
-                    length,
-                    sha256,
-                    CancellationToken.None)
-                .GetAwaiter()
-                .GetResult();
+            try
+            {
+                using var target = OpenCompatibilityRead(destination);
+                var observedLength = target.Length;
+                if (observedLength == length)
+                {
+                    var matches = CompatibilityStreamMatchesAsync(
+                            target,
+                            length,
+                            sha256,
+                            CancellationToken.None)
+                        .GetAwaiter()
+                        .GetResult();
+                    if (matches)
+                    {
+                        return true;
+                    }
+                    _logger.LogWarning(
+                        "Compatibility destination hash mismatch on attempt {Attempt}/2 for {Destination}; expected length {ExpectedLength}, observed length {ObservedLength}",
+                        attempt,
+                        LogRedaction.SanitizeFilePath(destination),
+                        length,
+                        observedLength);
+                }
+                else
+                {
+                    _logger.LogDebug(
+                        "Compatibility destination length is not stable on attempt {Attempt}/2 for {Destination}; expected {ExpectedLength}, observed {ObservedLength}",
+                        attempt,
+                        LogRedaction.SanitizeFilePath(destination),
+                        length,
+                        observedLength);
+                }
+            }
+            catch (Exception exception) when (exception is not (
+                OutOfMemoryException or StackOverflowException))
+            {
+                _logger.LogDebug(
+                    exception,
+                    "Compatibility destination reopen failed on attempt {Attempt}/2 for {Destination}",
+                    attempt,
+                    LogRedaction.SanitizeFilePath(destination));
+            }
+
+            if (attempt == 1)
+            {
+                Thread.Sleep(TimeSpan.FromMilliseconds(150));
+            }
         }
-        catch (Exception exception) when (exception is not (
-            OutOfMemoryException or StackOverflowException))
-        {
-            return false;
-        }
+        return false;
     }
 
     private static FileStream OpenCompatibilityRead(string path) => new(

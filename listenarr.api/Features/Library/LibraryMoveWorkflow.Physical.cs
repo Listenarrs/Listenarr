@@ -169,12 +169,12 @@ public sealed partial class LibraryMoveWorkflow
                 var targetStorage = await storageHealthResolver.ResolveAsync(
                     targetRootFolder,
                     cancellationToken);
-                if (!targetStorage.CanMutateFilesystem)
+                if (!targetStorage.CanPublishAdditively)
                 {
                     return DestinationValidationResult(
-                        "destination_filesystem_mutation_unavailable",
+                        "destination_file_publication_unavailable",
                         targetStorage.Message
-                            ?? "Destination root does not currently allow filesystem mutations.",
+                            ?? "Destination root does not currently allow new file publication.",
                         final);
                 }
             }
@@ -275,20 +275,11 @@ public sealed partial class LibraryMoveWorkflow
                             "source_physical_identity_unavailable",
                             "Source root physical identity is unavailable or changed.");
                     }
-                    if (sourceManagedBoundary?.ManagedRootFolderId is int sourceRootFolderId)
-                    {
-                        var sourceRootFolder = rootFolders.First(root => root.Id == sourceRootFolderId);
-                        var sourceStorage = await storageHealthResolver.ResolveAsync(
-                            sourceRootFolder,
-                            lockedToken);
-                        if (!sourceStorage.CanMutateFilesystem)
-                        {
-                            throw new ApplicationValidationException(
-                                "source_filesystem_mutation_unavailable",
-                                sourceStorage.Message
-                                    ?? "Source root does not currently allow filesystem mutations.");
-                        }
-                    }
+                    var sourceStorage = await ResolveReadableSourceStorageAsync(
+                        sourceManagedBoundary,
+                        rootFolders,
+                        storageHealthResolver,
+                        lockedToken);
 
                     if (!string.IsNullOrWhiteSpace(request.SourcePath))
                     {
@@ -408,6 +399,29 @@ public sealed partial class LibraryMoveWorkflow
                     var persistedSourceBoundary = sourceCleanupBoundary
                         ?? sourceManagedBoundary?.Path;
 
+                    var sourceCleanupAuthorization = _sourceCleanupPolicyResolver == null
+                        ? new MoveSourceCleanupAuthorization(
+                            MoveSourceCleanupMode.RetainSource,
+                            sourceManagedBoundary?.ManagedRootFolderId,
+                            null,
+                            targetBoundary.ManagedRootFolderId,
+                            null,
+                            sourceManagedBoundary != null
+                                && FileSystemPathIdentity.AreEquivalent(
+                                    manifest.SourceRoot,
+                                    sourceManagedBoundary.Path,
+                                    sourceManagedBoundary.Semantics),
+                            "Source files will be retained because verified cleanup policy resolution is unavailable.")
+                        : await _sourceCleanupPolicyResolver.ResolveAsync(
+                            manifest.SourceRoot,
+                            final,
+                            lockedToken);
+                    (sourceCleanupAuthorization, var forceCopyAndRetainSource, effectiveDeleteEmptySource) =
+                        ApplySourceStorageCapabilities(
+                            sourceCleanupAuthorization,
+                            sourceStorage,
+                            effectiveDeleteEmptySource);
+
                     return await _moveQueueService!.EnqueueMoveAsync(
                         new MoveEnqueueCommand(
                             id,
@@ -421,7 +435,15 @@ public sealed partial class LibraryMoveWorkflow
                             targetBoundary.DirectoryIdentity.Version!.Value,
                             targetBoundary.DirectoryIdentity.Value!,
                             effectiveDeleteEmptySource,
-                            persistedSourceBoundary),
+                            persistedSourceBoundary,
+                            SourceCleanupMode: sourceCleanupAuthorization.Mode,
+                            SourceRootFolderId: sourceCleanupAuthorization.SourceRootFolderId,
+                            SourcePolicyRevision: sourceCleanupAuthorization.SourcePolicyRevision,
+                            TargetRootFolderId: sourceCleanupAuthorization.TargetRootFolderId,
+                            TargetPolicyRevision: sourceCleanupAuthorization.TargetPolicyRevision,
+                            SourceStorageContractRevision: sourceCleanupAuthorization.SourceStorageContractRevision,
+                            TargetStorageContractRevision: sourceCleanupAuthorization.TargetStorageContractRevision,
+                            ForceCopyAndRetainSource: forceCopyAndRetainSource),
                         lockedToken);
                 },
                 cancellationToken);

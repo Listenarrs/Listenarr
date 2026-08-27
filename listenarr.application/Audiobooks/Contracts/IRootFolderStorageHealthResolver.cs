@@ -38,8 +38,19 @@ public sealed record RootFolderStorageObservation(
     bool CanMutateFilesystem,
     string? ConfirmationToken,
     string? Detail = null,
-    bool CanPublishNewFiles = false)
+    bool CanPublishNewFiles = false,
+    bool CanRetireWithDurableIdentity = false,
+    bool CanRetireAfterVerifiedCopy = false)
 {
+    public bool CanPublishAdditively =>
+        CanPublishNewFiles || CanMutateFilesystem;
+
+    public bool CanRetireDurably =>
+        CanRetireWithDurableIdentity || CanMutateFilesystem;
+
+    public bool CanRetireVerifiedSource =>
+        CanRetireAfterVerifiedCopy || CanMutateFilesystem;
+
     public bool CanReadFilesystem =>
         State is RootFolderStorageState.Healthy or RootFolderStorageState.Limited;
 

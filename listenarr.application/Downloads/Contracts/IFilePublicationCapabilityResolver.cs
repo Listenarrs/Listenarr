@@ -4,7 +4,8 @@ public enum FilePublicationExecutionMode
 {
     Durable = 0,
     AdditiveCopyRetainSource = 1,
-    Blocked = 2
+    Blocked = 2,
+    CompatibilityCopyVerifiedCleanup = 3
 }
 
 public enum FilePublicationSourceDisposition
@@ -21,7 +22,15 @@ public sealed record FilePublicationPlan(
     FilePublicationExecutionMode Mode,
     FilePublicationSourceDisposition SourceDisposition,
     string? ReasonCode = null,
-    string? Message = null)
+    string? Message = null,
+    Guid? CompatibilityBatchId = null,
+    CompatibilityCleanupOwner CleanupOwner = CompatibilityCleanupOwner.None,
+    int? SourceRootFolderId = null,
+    int? SourcePolicyRevision = null,
+    int? DestinationRootFolderId = null,
+    int? DestinationPolicyRevision = null,
+    int? SourceStorageContractRevision = null,
+    int? DestinationStorageContractRevision = null)
 {
     public bool IsAllowed => Mode != FilePublicationExecutionMode.Blocked;
 
@@ -45,6 +54,33 @@ public sealed record FilePublicationPlan(
                 ? "The destination was copied successfully, but the source was retained because exact source retirement cannot be proven on this storage."
                 : "The file was copied using compatibility publication because durable filesystem identity is unavailable.");
 
+    public static FilePublicationPlan VerifiedCleanup(
+        Guid batchId,
+        CompatibilityCleanupOwner cleanupOwner,
+        int? sourceRootFolderId,
+        int? sourcePolicyRevision,
+        int destinationRootFolderId,
+        int destinationPolicyRevision,
+        int? sourceStorageContractRevision,
+        int destinationStorageContractRevision) =>
+        new(
+            FileAction.Move,
+            FileAction.Copy,
+            FilePublicationExecutionMode.CompatibilityCopyVerifiedCleanup,
+            FilePublicationSourceDisposition.Retained,
+            "verified_cleanup_pending",
+            cleanupOwner == CompatibilityCleanupOwner.DownloadClient
+                ? "The destination will be verified before source cleanup is delegated to the download client."
+                : "The destination will be verified before protected source cleanup begins.",
+            batchId,
+            cleanupOwner,
+            sourceRootFolderId,
+            sourcePolicyRevision,
+            destinationRootFolderId,
+            destinationPolicyRevision,
+            sourceStorageContractRevision,
+            destinationStorageContractRevision);
+
     public static FilePublicationPlan Blocked(
         FileAction requestedAction,
         string reasonCode,
@@ -65,5 +101,7 @@ public interface IFilePublicationCapabilityResolver
         string source,
         string destination,
         FilePublicationSourceProof sourceProof,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        Guid? compatibilityBatchId = null,
+        CompatibilityCleanupOwner cleanupOwner = CompatibilityCleanupOwner.None);
 }

@@ -53,8 +53,9 @@ internal sealed class CompatibilityFilePublicationRecoveryService(
             return;
         }
 
-        if (journal.ProtocolVersion
-            != CompatibilityFilePublicationProtocol.Current)
+        if (journal.ProtocolVersion is not (
+                CompatibilityFilePublicationProtocol.RetainOnly or
+                CompatibilityFilePublicationProtocol.Current))
         {
             MarkNeedsAttention(
                 journal,
@@ -81,6 +82,15 @@ internal sealed class CompatibilityFilePublicationRecoveryService(
             {
                 return;
             }
+        }
+        else if (journal.ProtocolVersion == CompatibilityFilePublicationProtocol.Current
+            && journal.State is
+                CompatibilityFilePublicationState.SourceDeleteAuthorized or
+                CompatibilityFilePublicationState.SourceQuarantinePlanned or
+                CompatibilityFilePublicationState.SourceQuarantined or
+                CompatibilityFilePublicationState.SourceDeleted)
+        {
+            ReconcileInterruptedCleanup(journal);
         }
         else if (!ContentMatches(
             journal.DestinationPath,
@@ -109,6 +119,17 @@ internal sealed class CompatibilityFilePublicationRecoveryService(
                     journal,
                     "The committed compatibility destination no longer has its expected audiobook owner.");
             }
+            else if (journal.ProtocolVersion
+                    == CompatibilityFilePublicationProtocol.Current
+                && journal.CleanupOwner != CompatibilityCleanupOwner.None)
+            {
+                // The original batch must decide whether every publication succeeded.
+                // Startup recovery cannot reconstruct that manifest, so it revokes
+                // destructive authority and completes retain-only.
+                journal.SourceDisposition = CompatibilitySourceDisposition.Retained;
+                journal.State = CompatibilityFilePublicationState.Completed;
+                journal.Error = "Interrupted compatibility batch recovered retain-only.";
+            }
             else
             {
                 journal.State = CompatibilityFilePublicationState.Completed;
@@ -124,6 +145,98 @@ internal sealed class CompatibilityFilePublicationRecoveryService(
 
         journal.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
         await context.SaveChangesAsync(cancellationToken);
+    }
+
+    private void ReconcileInterruptedCleanup(
+        CompatibilityFilePublicationJournal journal)
+    {
+        if (!ContentMatches(
+                journal.DestinationPath,
+                journal.TargetLength ?? journal.SourceLength,
+                journal.TargetSha256 ?? journal.SourceSha256))
+        {
+            MarkNeedsAttention(
+                journal,
+                "The verified destination changed during interrupted source cleanup.");
+            return;
+        }
+
+        if (journal.State == CompatibilityFilePublicationState.SourceDeleted)
+        {
+            if (File.Exists(journal.SourcePath)
+                || (!string.IsNullOrWhiteSpace(journal.QuarantinePath)
+                    && File.Exists(journal.QuarantinePath)))
+            {
+                journal.SourceDisposition =
+                    CompatibilitySourceDisposition.PartialNeedsAttention;
+                MarkNeedsAttention(
+                    journal,
+                    "A source reappeared after source deletion was recorded.");
+                return;
+            }
+
+            journal.SourceDisposition = CompatibilitySourceDisposition.RetiredByListenarr;
+            journal.State = CompatibilityFilePublicationState.Completed;
+            journal.Error = null;
+            return;
+        }
+
+        var sourceMatches = ContentMatches(
+            journal.SourcePath,
+            journal.SourceLength,
+            journal.SourceSha256);
+        var quarantineMatches = !string.IsNullOrWhiteSpace(journal.QuarantinePath)
+            && ContentMatches(
+                journal.QuarantinePath,
+                journal.SourceLength,
+                journal.SourceSha256);
+        if (sourceMatches && !quarantineMatches)
+        {
+            journal.SourceDisposition = CompatibilitySourceDisposition.Retained;
+            journal.State = CompatibilityFilePublicationState.Completed;
+            journal.Error = "Interrupted source cleanup recovered retain-only.";
+            return;
+        }
+        if (!sourceMatches && quarantineMatches)
+        {
+            try
+            {
+                var quarantinePath = journal.QuarantinePath!;
+                using var quarantineParent =
+                    PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(
+                        Path.GetDirectoryName(quarantinePath)!);
+                using var sourceParent =
+                    PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(
+                        Path.GetDirectoryName(journal.SourcePath)!);
+                using var quarantined = quarantineParent.OpenExistingFileForStableDelete(
+                    Path.GetFileName(quarantinePath));
+                quarantined.MoveTo(sourceParent, Path.GetFileName(journal.SourcePath));
+                quarantineParent.FlushDirectoryEntry();
+                sourceParent.FlushDirectoryEntry();
+                journal.SourceDisposition = CompatibilitySourceDisposition.Retained;
+                journal.State = CompatibilityFilePublicationState.Completed;
+                journal.Error = "Interrupted source cleanup restored from quarantine.";
+                return;
+            }
+            catch (Exception exception) when (exception is not (
+                OutOfMemoryException or StackOverflowException))
+            {
+                journal.SourceDisposition =
+                    CompatibilitySourceDisposition.PartialNeedsAttention;
+                MarkNeedsAttention(
+                    journal,
+                    "The quarantined source could not be restored without overwrite: "
+                    + exception.Message);
+                return;
+            }
+        }
+
+        journal.SourceDisposition = CompatibilitySourceDisposition.PartialNeedsAttention;
+        MarkNeedsAttention(
+            journal,
+            sourceMatches && quarantineMatches
+                ? "Both source and quarantine exist after interrupted cleanup."
+                : "Both source and quarantine are missing or changed after interrupted cleanup.");
     }
 
     private void MarkNeedsAttention(

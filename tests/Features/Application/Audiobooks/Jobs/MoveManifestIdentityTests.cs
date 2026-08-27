@@ -86,6 +86,104 @@ public sealed class MoveManifestIdentityTests : BaseTests
     }
 
     [Fact]
+    public void CreateDeduplicationKey_SourceTimestampAndHashRefresh_DoNotChangeIdentity()
+    {
+        var semantics = new FileSystemPathSemantics(
+            FileSystemPathSyntax.Unix,
+            FileSystemCaseSensitivity.Sensitive);
+        var sourceIdentity = new PathIdentitySnapshot(
+            semantics.Syntax,
+            semantics.CaseSensitivity,
+            FileSystemCaseSensitivityMode.Sensitive,
+            "/source");
+        var targetIdentity = new PathIdentitySnapshot(
+            semantics.Syntax,
+            semantics.CaseSensitivity,
+            FileSystemCaseSensitivityMode.Sensitive,
+            "/target");
+        var first = new[]
+        {
+            SourceFile("book.m4b", length: 10, ticks: 10, hashCharacter: 'A')
+        };
+        var refreshed = new[]
+        {
+            SourceFile("book.m4b", length: 10, ticks: 999, hashCharacter: 'B')
+        };
+
+        var firstKey = MoveManifestIdentity.CreateDeduplicationKey(
+            1,
+            "/source/book",
+            sourceIdentity,
+            "/target/book",
+            targetIdentity,
+            first);
+        var refreshedKey = MoveManifestIdentity.CreateDeduplicationKey(
+            1,
+            "/source/book",
+            sourceIdentity,
+            "/target/book",
+            targetIdentity,
+            refreshed);
+
+        Assert.Equal(firstKey, refreshedKey);
+
+        var lengthChangedKey = MoveManifestIdentity.CreateDeduplicationKey(
+            1,
+            "/source/book",
+            sourceIdentity,
+            "/target/book",
+            targetIdentity,
+            new[] { SourceFile("book.m4b", length: 11, ticks: 999, hashCharacter: 'B') });
+        Assert.NotEqual(firstKey, lengthChangedKey);
+    }
+
+    [Fact]
+    public void CreateDeduplicationKey_PersistedFileTimestampAndHashRefresh_DoNotChangeIdentity()
+    {
+        var semantics = new FileSystemPathSemantics(
+            FileSystemPathSyntax.Unix,
+            FileSystemCaseSensitivity.Sensitive);
+        var sourceIdentity = new PathIdentitySnapshot(
+            semantics.Syntax,
+            semantics.CaseSensitivity,
+            FileSystemCaseSensitivityMode.Sensitive,
+            "/source");
+        var targetIdentity = new PathIdentitySnapshot(
+            semantics.Syntax,
+            semantics.CaseSensitivity,
+            FileSystemCaseSensitivityMode.Sensitive,
+            "/target");
+        var first = new List<MoveJobEntry>
+        {
+            PersistedFile("book.m4b", 10, 10, 'A'),
+            MoveManifestIdentity.CreateSourceBoundaryAuthorization(1, "source-generation"),
+            MoveManifestIdentity.CreateTargetBoundaryAuthorization(1, "target-generation")
+        };
+        var refreshed = new List<MoveJobEntry>
+        {
+            PersistedFile("book.m4b", 10, 999, 'B'),
+            MoveManifestIdentity.CreateSourceBoundaryAuthorization(1, "source-generation"),
+            MoveManifestIdentity.CreateTargetBoundaryAuthorization(1, "target-generation")
+        };
+
+        Assert.Equal(
+            MoveManifestIdentity.CreateDeduplicationKey(
+                1,
+                "/source/book",
+                sourceIdentity,
+                "/target/book",
+                targetIdentity,
+                first),
+            MoveManifestIdentity.CreateDeduplicationKey(
+                1,
+                "/source/book",
+                sourceIdentity,
+                "/target/book",
+                targetIdentity,
+                refreshed));
+    }
+
+    [Fact]
     public void TryGetSourceBoundaryAuthorization_RawIdentityChangedWithoutDigestChange_IsRejected()
     {
         var authorization = MoveManifestIdentity.CreateSourceBoundaryAuthorization(
@@ -349,6 +447,34 @@ public sealed class MoveManifestIdentityTests : BaseTests
         Assert.True(MoveManifestIdentity.SourceManifestsMatch(
             current,
             persisted,
+            semantics));
+    }
+
+    [Fact]
+    public void SourceManifestShapesMatch_IgnoresTimestampAndHashButPreservesStructure()
+    {
+        var semantics = new FileSystemPathSemantics(
+            FileSystemPathSyntax.Unix,
+            FileSystemCaseSensitivity.Sensitive);
+        var current = new[]
+        {
+            SourceFile("book.m4b", length: 10, ticks: 10, hashCharacter: 'A')
+        };
+        var persisted = PersistedFile(
+            "book.m4b",
+            length: 10,
+            ticks: 99,
+            hashCharacter: 'B');
+
+        Assert.True(MoveManifestIdentity.SourceManifestShapesMatch(
+            current,
+            [persisted],
+            semantics));
+
+        persisted.Length++;
+        Assert.False(MoveManifestIdentity.SourceManifestShapesMatch(
+            current,
+            [persisted],
             semantics));
     }
 

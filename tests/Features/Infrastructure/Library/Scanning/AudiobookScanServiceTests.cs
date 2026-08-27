@@ -897,7 +897,7 @@ public sealed class AudiobookScanServiceTests : BaseTests
     }
 
     [LinuxFact]
-    public async Task ScanAsync_PinnedPathOnly_ClaimsVisiblePathWithoutPhysicalIdentityAndPreservesMissingRows()
+    public async Task ScanAsync_PinnedPathOnly_ClaimsVisiblePathAndStagesMissingConfirmation()
     {
         var root = FileService.GetTempDirectory("scan-service-limited-storage");
         var bookDirectory = Path.Join(root, "Author", "Book");
@@ -958,7 +958,12 @@ public sealed class AudiobookScanServiceTests : BaseTests
         Assert.False(result.ReconciliationPerformed);
         Assert.Empty(result.RemovedFiles);
         Assert.Contains(result.Diagnostics, diagnostic =>
-            diagnostic.Code == "ReconciliationNotAuthorized");
+            diagnostic.Code == "WeakStorageMissingFilesRequireConfirmation");
+        var pending = Assert.Single(await _provider
+            .GetRequiredService<IWeakStorageScanCandidateStore>()
+            .GetPendingAsync(audiobook.Id));
+        Assert.Equal(missing.Id, pending.AudiobookFileId);
+        Assert.Equal(missingPath, pending.ExpectedResolvedPath);
         Assert.Contains(result.Diagnostics, diagnostic =>
             diagnostic.Code == "MetadataEnrichmentSkippedLimitedStorage");
         authorization.VerifyAll();

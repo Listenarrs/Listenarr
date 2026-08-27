@@ -47,20 +47,24 @@ public sealed partial class EfMoveQueuePersistence
 
             if (!db.Database.IsRelational())
             {
-                var tracked = await db.MoveJobs.SingleOrDefaultAsync(
-                    job => job.Id == command.JobId
-                        && job.Status == command.ExpectedStatus,
-                    cancellationToken);
+                var tracked = await db.MoveJobs
+                    .Include(job => job.CreatedDirectories)
+                    .SingleOrDefaultAsync(
+                        job => job.Id == command.JobId
+                            && job.Status == command.ExpectedStatus,
+                        cancellationToken);
                 if (tracked == null)
                 {
                     return new MoveRequeueResult(MoveRequeueOutcome.StaleState);
                 }
 
+                ResetRemovedTargetScaffolding(tracked);
                 ApplyRequeue(tracked, command);
                 await db.SaveChangesAsync(cancellationToken);
             }
             else
             {
+                await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
                 var affected = await db.MoveJobs
                     .Where(job => job.Id == command.JobId
                         && job.Status == command.ExpectedStatus)
@@ -95,6 +99,22 @@ public sealed partial class EfMoveQueuePersistence
                     return new MoveRequeueResult(
                         exists ? MoveRequeueOutcome.StaleState : MoveRequeueOutcome.NotFound);
                 }
+
+                _ = await db.MoveJobCreatedDirectories
+                    .Where(directory => directory.MoveJobId == command.JobId
+                        && directory.State == MoveCreatedDirectoryState.Removed)
+                    .ExecuteUpdateAsync(
+                        updates => updates
+                            .SetProperty(
+                                directory => directory.State,
+                                MoveCreatedDirectoryState.Planned)
+                            .SetProperty(
+                                directory => directory.DirectoryObjectIdentity,
+                                (string?)null),
+                        cancellationToken);
+
+                cancellationToken.ThrowIfCancellationRequested();
+                await transaction.CommitAsync(CancellationToken.None);
             }
 
             var repaired = await db.MoveJobs
@@ -168,6 +188,16 @@ public sealed partial class EfMoveQueuePersistence
         && job.NextAttemptAt == null
         && job.LeaseOwner == null
         && job.LeaseExpiresAt == null;
+
+    private static void ResetRemovedTargetScaffolding(MoveJob job)
+    {
+        foreach (var directory in job.CreatedDirectories.Where(directory =>
+                     directory.State == MoveCreatedDirectoryState.Removed))
+        {
+            directory.State = MoveCreatedDirectoryState.Planned;
+            directory.DirectoryObjectIdentity = null;
+        }
+    }
 
     private static void ApplyRequeue(MoveJob job, RequeueMoveCommand command)
     {

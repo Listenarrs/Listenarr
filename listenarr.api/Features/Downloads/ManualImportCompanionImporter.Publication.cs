@@ -28,8 +28,9 @@ public sealed partial class ManualImportCompanionImporter
         using var registrationLease = preparation.RegistrationLease;
         if (registrationLease == null
             || _audiobookFileService == null
-            || !(publicationPlan.Mode
-                == FilePublicationExecutionMode.AdditiveCopyRetainSource
+            || !(publicationPlan.Mode is
+                FilePublicationExecutionMode.AdditiveCopyRetainSource or
+                FilePublicationExecutionMode.CompatibilityCopyVerifiedCleanup
                 ? await _audiobookFileService.RegisterCompatibilityPublicationAsync(
                     audiobook,
                     ownership,
@@ -103,7 +104,6 @@ public sealed partial class ManualImportCompanionImporter
             _logger.LogWarning(
                 "Manual import companion publication committed, but cleanup remains pending for {Path}",
                 LogRedaction.SanitizeFilePath(destinationPath));
-            return false;
         }
 
         return publicationPlan.EffectiveAction != FileAction.Move

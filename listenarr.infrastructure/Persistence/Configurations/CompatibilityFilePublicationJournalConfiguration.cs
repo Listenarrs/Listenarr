@@ -24,7 +24,10 @@ internal sealed class CompatibilityFilePublicationJournalConfiguration
             .HasMaxLength(64);
         builder.Property(journal => journal.Error)
             .HasMaxLength(2048);
+        builder.Property(journal => journal.QuarantinePath)
+            .HasMaxLength(4096);
         builder.HasIndex(journal => journal.State);
         builder.HasIndex(journal => journal.AudiobookId);
+        builder.HasIndex(journal => journal.BatchId);
     }
 }

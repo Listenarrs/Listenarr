@@ -89,6 +89,7 @@ internal interface IMoveExecutionStore
         string relativePath,
         string sourcePhysicalObjectIdentity,
         string? sha256,
+        DateTime lastWriteTimeUtc,
         CancellationToken cancellationToken);
 
     Task UpdateTargetEntryStateAsync(

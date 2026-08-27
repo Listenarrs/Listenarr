@@ -330,8 +330,32 @@ export interface RootFolder {
   canScanFilesystem?: boolean
   canPublishNewFiles?: boolean
   canMutateFilesystem?: boolean
+  canRetireWithDurableIdentity?: boolean
+  canRetireAfterVerifiedCopy?: boolean
+  weakStorageSourceCleanupPolicy?: 'RetainSource' | 'DeleteSourceAfterVerifiedCopy'
+  weakStoragePolicyRevision?: number
   confirmationToken?: string | null
   activeRelocation?: RootFolderPathChangeResult | null
+}
+
+export interface AudiobookDeleteCapabilities {
+  canRemoveFromLibrary: boolean
+  canDeleteTrackedFiles: boolean
+  canDeleteFolder: boolean
+  reason?: string | null
+  fallbackAction: 'RemoveFromLibraryOnly'
+}
+
+export interface WeakStorageMissingFileCandidate {
+  id: string
+  audiobookFileId: number
+  path: string
+}
+
+export interface WeakStorageMissingFilesResponse {
+  scanToken?: string | null
+  expiresAt?: string | null
+  items: WeakStorageMissingFileCandidate[]
 }
 
 export type RootFolderRelocationSkipReasonCode =

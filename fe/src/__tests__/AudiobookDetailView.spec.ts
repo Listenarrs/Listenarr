@@ -23,6 +23,7 @@ import { useLibraryStore } from '@/stores/library'
 import { useScanNotificationsStore } from '@/stores/scanNotifications'
 import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import { apiService, ensureImageCached } from '@/services/api'
+import { signalRService } from '@/services/signalr'
 import AudiobookDetailViewCmp from '@/views/library/AudiobookDetailView.vue'
 const routerPushMock = vi.fn()
 // Mock useRoute to provide params for the detail view
@@ -38,6 +39,8 @@ vi.mock('@/services/api', () => ({
     getQualityProfiles: vi.fn(async () => []),
     getLibrary: vi.fn(async () => []),
     scanAudiobook: vi.fn(),
+    getWeakStorageMissingFiles: vi.fn(async () => ({ items: [] })),
+    confirmWeakStorageMissingFiles: vi.fn(),
   },
   ensureImageCached: vi.fn(async () => true),
 }))
@@ -311,6 +314,61 @@ describe('AudiobookDetailView image recache behavior', () => {
       status: 'Queued',
       visible: true,
     })
+  })
+
+  it('keeps the newest weak-storage missing-file response when refreshes overlap', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useLibraryStore()
+    store.audiobooks = [{ id: 5, title: 'Detail Book', files: [] }] as unknown as ReturnType<
+      typeof useLibraryStore
+    >['audiobooks']
+    store.fetchLibrary = vi.fn(async () => undefined)
+    vi.mocked(apiService.getWeakStorageMissingFiles).mockResolvedValueOnce({ items: [] })
+
+    const wrapper = mount(AudiobookDetailViewCmp, { global: { plugins: [pinia] } })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    const scanCallback = vi.mocked(signalRService.onScanJobUpdate).mock.calls[0]?.[0] as
+      | ((job: { audiobookId: number; status: string }) => void)
+      | undefined
+    expect(scanCallback).toBeDefined()
+
+    let resolveOlder!: (value: {
+      scanToken: string
+      items: Array<{ id: string; audiobookFileId: number; path: string }>
+    }) => void
+    let resolveNewer!: typeof resolveOlder
+    const older = new Promise<Parameters<typeof resolveOlder>[0]>((resolve) => {
+      resolveOlder = resolve
+    })
+    const newer = new Promise<Parameters<typeof resolveNewer>[0]>((resolve) => {
+      resolveNewer = resolve
+    })
+    vi.mocked(apiService.getWeakStorageMissingFiles)
+      .mockImplementationOnce(() => older)
+      .mockImplementationOnce(() => newer)
+
+    scanCallback!({ audiobookId: 5, status: 'Completed' })
+    scanCallback!({ audiobookId: 5, status: 'Completed' })
+
+    resolveNewer({
+      scanToken: 'new-token',
+      items: [{ id: 'new', audiobookFileId: 12, path: 'newer.m4b' }],
+    })
+    await Promise.resolve()
+    resolveOlder({
+      scanToken: 'old-token',
+      items: [{ id: 'old', audiobookFileId: 11, path: 'older.m4b' }],
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const filesTab = wrapper.findAll('.tab').find((tab) => tab.text().includes('Files'))
+    await filesTab!.trigger('click')
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('.weak-storage-missing-files').text()).toContain('newer.m4b')
+    expect(wrapper.find('.weak-storage-missing-files').text()).not.toContain('older.m4b')
   })
 
   it('disables Scan Folder while library filesystem initialization is incomplete', async () => {

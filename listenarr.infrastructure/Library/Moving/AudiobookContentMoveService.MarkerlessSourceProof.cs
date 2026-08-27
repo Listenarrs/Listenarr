@@ -120,13 +120,14 @@ internal sealed partial class AudiobookContentMoveService
                     entry.RelativePath,
                     identity,
                     entry.Sha256,
+                    entry.LastWriteTimeUtc,
                     cancellationToken);
                 entry.SourcePhysicalObjectIdentity = identity;
             }
         }
     }
 
-    private static async Task<string> ComputeMarkerlessSourceProofHashAsync(
+    private static async Task<(string Sha256, DateTime LastWriteTimeUtc)> ComputeMarkerlessSourceProofHashAsync(
         AudiobookContentMoveRequest request,
         MoveJobEntry entry,
         string fullPath,
@@ -140,11 +141,10 @@ internal sealed partial class AudiobookContentMoveService
         await using var stream = file.OpenReadStream(
             bufferSize: 1024 * 1024,
             asynchronous: false);
-        if (stream.Length != entry.Length
-            || initialLastWriteTimeUtc != entry.LastWriteTimeUtc)
+        if (stream.Length != entry.Length)
         {
             throw new MoveNeedsAttentionException(
-                $"Source file metadata changed before content proof was captured: {entry.RelativePath}");
+                $"Source file length changed before content proof was captured: {entry.RelativePath}");
         }
 
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
@@ -196,7 +196,10 @@ internal sealed partial class AudiobookContentMoveService
                     $"Source file changed while its content proof was being captured: {entry.RelativePath}");
             }
 
-            return Convert.ToHexString(hash.GetHashAndReset());
+            ValidateMarkerlessSourceEntry(request, entry, file);
+            return (
+                Convert.ToHexString(hash.GetHashAndReset()),
+                initialLastWriteTimeUtc);
         }
         finally
         {

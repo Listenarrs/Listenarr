@@ -76,6 +76,12 @@ namespace Listenarr.Domain.Audiobooks
         Retained
     }
 
+    public enum MoveSourceCleanupMode
+    {
+        RetainSource = 0,
+        DeleteAfterVerifiedCopy = 1
+    }
+
     public static class MoveIdentityProtocol
     {
         public const int Current = 2;
@@ -141,6 +147,15 @@ namespace Listenarr.Domain.Audiobooks
         public string? TargetIdentityBoundary { get; set; }
         public string? SourceCleanupBoundary { get; set; }
         public bool DeleteEmptySource { get; set; } = true;
+        public MoveSourceCleanupMode SourceCleanupMode { get; set; } =
+            MoveSourceCleanupMode.RetainSource;
+        public bool ForceCopyAndRetainSource { get; set; }
+        public int? SourceRootFolderId { get; set; }
+        public int? SourcePolicyRevision { get; set; }
+        public int? SourceStorageContractRevision { get; set; }
+        public int? TargetRootFolderId { get; set; }
+        public int? TargetPolicyRevision { get; set; }
+        public int? TargetStorageContractRevision { get; set; }
         public ICollection<MoveJobEntry> Entries { get; set; } = new List<MoveJobEntry>();
         public ICollection<MoveJobCreatedDirectory> CreatedDirectories { get; set; } = new List<MoveJobCreatedDirectory>();
         public MoveScanHandoff? ScanHandoff { get; set; }

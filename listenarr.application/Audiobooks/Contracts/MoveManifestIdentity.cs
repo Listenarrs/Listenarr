@@ -44,7 +44,9 @@ public static partial class MoveManifestIdentity
             sourceIdentity,
             target,
             targetIdentity,
-            persistedEntries.Select(ToIdentityEntry));
+            persistedEntries
+                .Select(ToIdentityEntry)
+                .Select(NormalizeDeduplicationEntry));
     }
 
     public static string CreateDeduplicationKey(
@@ -60,7 +62,9 @@ public static partial class MoveManifestIdentity
             sourceIdentity,
             target,
             targetIdentity,
-            entries.Select(ToIdentityEntry));
+            entries
+                .Select(ToIdentityEntry)
+                .Select(NormalizeDeduplicationEntry));
 
     public static string CreateReconciliationKey(
         int audiobookId,
@@ -110,13 +114,21 @@ public static partial class MoveManifestIdentity
             ComputeManifestDigest(
                 currentEntries
                     .Select(ToIdentityEntry)
-                    .Select(entry => entry with { Sha256 = null }),
+                    .Select(entry => entry with
+                    {
+                        LastWriteTimeUtc = DateTime.UnixEpoch,
+                        Sha256 = null
+                    }),
                 semantics),
             ComputeManifestDigest(
                 persistedEntries
                     .Where(entry => !IsBoundaryAuthorization(entry))
                     .Select(ToIdentityEntry)
-                    .Select(entry => entry with { Sha256 = null }),
+                    .Select(entry => entry with
+                    {
+                        LastWriteTimeUtc = DateTime.UnixEpoch,
+                        Sha256 = null
+                    }),
                 semantics),
             StringComparison.Ordinal);
     }
@@ -388,6 +400,16 @@ public static partial class MoveManifestIdentity
         BinaryPrimitives.WriteInt64BigEndian(bytes, value);
         hash.AppendData(bytes);
     }
+
+    private static ManifestIdentityEntry NormalizeDeduplicationEntry(
+        ManifestIdentityEntry entry) =>
+        entry.EntryType == MoveJobEntryType.File
+            ? entry with
+            {
+                LastWriteTimeUtc = DateTime.UnixEpoch,
+                Sha256 = null
+            }
+            : entry;
 
     private static ManifestIdentityEntry NormalizeEntry(
         ManifestIdentityEntry entry,

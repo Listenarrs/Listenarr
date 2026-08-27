@@ -55,9 +55,8 @@ public static class MoveRecoveryPolicy
             return true;
         }
 
-        return job.CreatedDirectories.Any(directory => directory.State is
-            MoveCreatedDirectoryState.Created or
-            MoveCreatedDirectoryState.Retained);
+        return job.CreatedDirectories.Any(directory =>
+            directory.State != MoveCreatedDirectoryState.Planned);
     }
 
     public static bool BlocksFilesystemMutation(MoveJob job)

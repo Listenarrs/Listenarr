@@ -138,6 +138,7 @@ internal sealed partial class AudiobookContentMoveService
         string relativePath,
         string sourcePhysicalObjectIdentity,
         string? sha256,
+        DateTime lastWriteTimeUtc,
         CancellationToken cancellationToken) =>
         executionStore.UpdateSourceEntryProofAsync(
             jobId,
@@ -145,6 +146,7 @@ internal sealed partial class AudiobookContentMoveService
             relativePath,
             sourcePhysicalObjectIdentity,
             sha256,
+            lastWriteTimeUtc,
             cancellationToken);
 
     private Task UpdateTargetEntryStateAsync(

@@ -41,7 +41,7 @@ internal sealed partial class AudiobookContentMoveService
             return resumedCleanup;
         }
 
-        var retainSource = RequiresUnixCrossVolumeSourceRetention(
+        var crossVolumeMove = IsUnixCrossVolumeMove(
             request,
             source,
             target,
@@ -138,7 +138,7 @@ internal sealed partial class AudiobookContentMoveService
                 source,
                 target,
                 manifest,
-                retainSource,
+                crossVolumeMove || request.ForceCopyAndRetainSource,
                 targetVerificationLease,
                 cancellationToken);
             await UpdateJobPhaseAsync(
@@ -152,6 +152,15 @@ internal sealed partial class AudiobookContentMoveService
             {
                 await faultInjector.AfterPublishedAsync(request.JobId, cancellationToken);
             }
+
+            // Cross-volume moves always copy the complete manifest first. Only after every
+            // target is durably verified do we revalidate the persisted root-folder policy
+            // snapshot and decide whether source deletion may begin.
+            var retainSource = request.ForceCopyAndRetainSource
+                || crossVolumeMove
+                    && !await CanDeleteVerifiedCrossVolumeSourceAsync(
+                        request,
+                        cancellationToken);
 
             await UpdateJobPhaseAsync(
                 request.JobId,
@@ -227,6 +236,12 @@ internal sealed partial class AudiobookContentMoveService
         if (cleanupDisposition == MarkerlessSourceCleanupDisposition.NotStarted)
         {
             return null;
+        }
+        if (request.ForceCopyAndRetainSource
+            && cleanupDisposition == MarkerlessSourceCleanupDisposition.Delete)
+        {
+            throw new MoveNeedsAttentionException(
+                "Forced source retention cannot resume after destructive source cleanup was authorized.");
         }
         var retainSource = cleanupDisposition
             == MarkerlessSourceCleanupDisposition.Retain;
@@ -403,6 +418,11 @@ internal sealed partial class AudiobookContentMoveService
             var sourceRetained = ResolveCompletedMarkerlessSourceRetention(
                 completedCleanupState,
                 physicalEntries);
+            if (request.ForceCopyAndRetainSource && !sourceRetained)
+            {
+                throw new MoveNeedsAttentionException(
+                    "Forced source retention has contradictory completed destructive cleanup evidence.");
+            }
             var identities = CreatePersistedTargetPhysicalIdentityMap(
                 target,
                 files,

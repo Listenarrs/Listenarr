@@ -10,6 +10,48 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving;
 [Trait("Category", "Infrastructure")]
 public sealed partial class PinnedDirectoryCreationTests : BaseTests
 {
+    [NetworkStorageTheory]
+    [InlineData("pinned-file-metadata")]
+    public async Task OpenExistingFileForStableRead_NetworkStorage_ReportsFileLastWriteTime(
+        string scenarioName)
+    {
+        var providedRoot = Path.GetFullPath(
+            Environment.GetEnvironmentVariable(
+                NetworkStorageTheoryAttribute.PathEnvironmentVariable)
+            ?? throw new InvalidOperationException(
+                "A network filesystem path was not provided."));
+        var scenarioRoot = Path.Join(
+            providedRoot,
+            $"listenarr-{scenarioName}-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(scenarioRoot);
+        var filePath = Path.Join(scenarioRoot, "book.m4b");
+        await File.WriteAllTextAsync(filePath, "metadata");
+
+        try
+        {
+            using var anchor = PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(scenarioRoot);
+            using var entry = anchor.OpenExistingFileForStableRead("book.m4b");
+            var firstPinnedRead = entry.GetLastWriteTimeUtc();
+            var visiblePathRead = File.GetLastWriteTimeUtc(filePath);
+            var secondPinnedRead = entry.GetLastWriteTimeUtc();
+
+            Assert.Equal(visiblePathRead, firstPinnedRead);
+            Assert.Equal(firstPinnedRead, secondPinnedRead);
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(filePath);
+                Directory.Delete(scenarioRoot);
+            }
+            catch
+            {
+                // Best-effort cleanup on externally supplied network storage.
+            }
+        }
+    }
+
     [LinuxFact]
     public async Task OpenExistingFile_LinuxNamedPipe_DoesNotBlockInspection()
     {

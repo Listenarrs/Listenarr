@@ -28,6 +28,15 @@ internal sealed partial class AudiobookContentMoveService
         string targetPath,
         IReadOnlyCollection<MoveJobEntry> manifest)
     {
+        if (request.ForceCopyAndRetainSource
+            && manifest
+                .Where(IsPhysicalManifestEntry)
+                .Any(entry => IsDestructiveCleanupState(entry.CleanupState)))
+        {
+            throw new MoveNeedsAttentionException(
+                "Forced source retention has contradictory destructive cleanup evidence.");
+        }
+
         var source = Path.GetFullPath(sourcePath);
         if (!AuthorizedSourceDirectoryExists(request, source))
         {

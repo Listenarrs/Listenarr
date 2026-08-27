@@ -72,6 +72,8 @@ namespace Listenarr.Application.Audiobooks.Jobs
             CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(command);
+            command = NormalizeSourceCleanupAuthorization(command);
+            ValidateSourceCleanupAuthorization(command);
             await EnsureExternalRecoveryAllowsMutationAsync(
                 command.AudiobookId,
                 allowActiveDeletionIntent: false,
@@ -162,6 +164,10 @@ namespace Listenarr.Application.Audiobooks.Jobs
                 var existingDb = await _persistence.GetActiveByKeyAsync(
                     deduplicationKey,
                     token);
+                await EnsureMoveEnqueueRecoveryAllowsPublicationAsync(
+                    command.AudiobookId,
+                    existingDb?.Id,
+                    token);
                 if (existingDb != null)
                 {
                     EnsureMatchingActiveExecutionOptions(
@@ -189,6 +195,14 @@ namespace Listenarr.Application.Audiobooks.Jobs
                     SourcePath = source,
                     SourceCleanupBoundary = persistedSourceBoundary,
                     DeleteEmptySource = command.DeleteEmptySource,
+                    SourceCleanupMode = command.SourceCleanupMode,
+                    SourceRootFolderId = command.SourceRootFolderId,
+                    SourcePolicyRevision = command.SourcePolicyRevision,
+                    SourceStorageContractRevision = command.SourceStorageContractRevision,
+                    TargetRootFolderId = command.TargetRootFolderId,
+                    TargetPolicyRevision = command.TargetPolicyRevision,
+                    TargetStorageContractRevision = command.TargetStorageContractRevision,
+                    ForceCopyAndRetainSource = command.ForceCopyAndRetainSource,
                     RelocationId = command.RelocationId,
                     Entries = persistedEntries
                 };

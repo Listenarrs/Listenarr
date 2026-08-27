@@ -137,14 +137,12 @@ internal partial class MoveJobProcessor
                 }
 
                 cleanupBoundaryResolution = GetPersistedCleanupBoundary(job);
-                var recoveryRequest = new AudiobookContentMoveRequest(
+                var recoveryRequest = CreateContentMoveRequest(
+                    job,
                     source,
                     target,
-                    job.Id,
-                    job.DeleteEmptySource,
                     resolvedSourceIdentity.Semantics,
                     targetSemantics,
-                    CreateLeaseToken(job),
                     cleanupBoundaryResolution.Boundary);
                 try
                 {
@@ -369,17 +367,15 @@ internal partial class MoveJobProcessor
         AudiobookContentMoveResult? moveResult = recoveredMove;
         try
         {
-            moveRequest = new AudiobookContentMoveRequest(
+            moveRequest = CreateContentMoveRequest(
+                job,
                 source,
                 target,
-                job.Id,
-                job.DeleteEmptySource,
                 sourceSemantics,
                 targetSemantics,
-                CreateLeaseToken(job),
                 cleanupBoundaryResolution.Boundary,
-                SourcePhysicalObjectIdentities: sourcePhysicalObjectIdentities,
-                ProgressReporter: (progress, phase, token) =>
+                sourcePhysicalObjectIdentities,
+                (progress, phase, token) =>
                     moveQueueService.PublishProgressAsync(
                         job.Id,
                         progress,

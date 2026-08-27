@@ -1,8 +1,10 @@
+using Microsoft.Extensions.Logging;
+
 namespace Listenarr.Infrastructure.Library.Moving;
 
 internal sealed partial class AudiobookContentMoveService
 {
-    private bool RequiresUnixCrossVolumeSourceRetention(
+    private bool IsUnixCrossVolumeMove(
         AudiobookContentMoveRequest request,
         string source,
         string target,
@@ -56,6 +58,39 @@ internal sealed partial class AudiobookContentMoveService
         }
 
         return false;
+    }
+
+    private async Task<bool> CanDeleteVerifiedCrossVolumeSourceAsync(
+        AudiobookContentMoveRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request.SourceCleanupMode
+                != MoveSourceCleanupMode.DeleteAfterVerifiedCopy
+            || sourceCleanupPolicyResolver == null)
+        {
+            return false;
+        }
+
+        var authorization = new MoveSourceCleanupAuthorization(
+            request.SourceCleanupMode,
+            request.SourceRootFolderId,
+            request.SourcePolicyRevision,
+            request.TargetRootFolderId,
+            request.TargetPolicyRevision,
+            SourceIsManagedRoot: false,
+            Message: string.Empty,
+            SourceStorageContractRevision: request.SourceStorageContractRevision,
+            TargetStorageContractRevision: request.TargetStorageContractRevision);
+        var isCurrent = await sourceCleanupPolicyResolver.IsCurrentAsync(
+            authorization,
+            cancellationToken);
+        if (!isCurrent)
+        {
+            logger.LogInformation(
+                "Retaining source for move job {JobId} because its verified source-deletion policy authorization is no longer current",
+                request.JobId);
+        }
+        return isCurrent;
     }
 
     private static string FindNearestExistingTargetAncestor(string targetParentPath)

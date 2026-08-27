@@ -109,13 +109,17 @@ namespace Listenarr.Tests.Common
         protected async Task<RootFolder> AddAuthorizedRootAsync(
             string path,
             string name = "Test Library Root",
-            FileSystemCaseSensitivityMode caseSensitivityMode =
-                FileSystemCaseSensitivityMode.Auto)
+            FileSystemCaseSensitivityMode? caseSensitivityMode = null)
         {
             Directory.CreateDirectory(path);
+            var resolvedMode = caseSensitivityMode
+                ?? (FileSystemPathSemantics.CurrentHostDefault.CaseSensitivity
+                    == FileSystemCaseSensitivity.Sensitive
+                        ? FileSystemCaseSensitivityMode.Sensitive
+                        : FileSystemCaseSensitivityMode.Insensitive);
             var semanticsResolution = await _provider
                 .GetRequiredService<IFileSystemSemanticsResolver>()
-                .ResolveAsync(path, caseSensitivityMode);
+                .ResolveAsync(path, resolvedMode);
             Assert.Equal(PathIdentityState.Valid, semanticsResolution.State);
             var identity = await _provider
                 .GetRequiredService<IDirectoryObjectIdentityResolver>()
@@ -138,9 +142,9 @@ namespace Listenarr.Tests.Common
             root ??= new RootFolderBuilder()
                 .WithName(name)
                 .WithPath(canonicalPath)
-                .WithCaseSensitivityMode(caseSensitivityMode)
+                .WithCaseSensitivityMode(resolvedMode)
                 .Build();
-            root.CaseSensitivityMode = caseSensitivityMode;
+            root.CaseSensitivityMode = resolvedMode;
             root.ResolvedCaseSensitivity = semantics.CaseSensitivity;
             root.PathIdentityState = PathIdentityState.Valid;
             root.PathIdentityKey = FileSystemPathIdentity.CreateKey(

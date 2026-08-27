@@ -33,8 +33,9 @@ public partial class ManualImportController
 
         expectedSourceProof.Validate();
 
-        if (publicationPlan.Mode
-            == FilePublicationExecutionMode.AdditiveCopyRetainSource)
+        if (publicationPlan.Mode is
+            FilePublicationExecutionMode.AdditiveCopyRetainSource or
+            FilePublicationExecutionMode.CompatibilityCopyVerifiedCleanup)
         {
             await _directoryOwnershipStore.EnsureAdditiveHierarchyAsync(
                 destinationDirectory,

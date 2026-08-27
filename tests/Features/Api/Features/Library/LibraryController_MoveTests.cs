@@ -1582,7 +1582,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             var badRequest = Assert.IsType<BadRequestObjectResult>(result);
             var payload = JsonSerializer.Serialize(badRequest.Value);
             Assert.Contains(
-                "destination_filesystem_mutation_unavailable",
+                "destination_file_publication_unavailable",
                 payload,
                 StringComparison.Ordinal);
             moveQueue.Verify(service => service.EnqueueMoveAsync(
@@ -1593,10 +1593,89 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
         [Fact]
         [Trait("Method", "EnqueueMove")]
-        [Trait("Scenario", "ReadOnlySourceRootRejectsBeforeEnqueue")]
-        public async Task MoveAudiobook_ReadOnlySourceRoot_RejectsBeforeEnqueue()
+        [Trait("Scenario", "WeakWritableDestinationAllowsAdditivePublication")]
+        public async Task MoveAudiobook_WeakWritableDestination_EnqueuesMove()
         {
             var moveQueue = CreateStrictMoveQueueMock();
+            moveQueue.Setup(service => service.EnqueueMoveAsync(
+                    It.IsAny<MoveEnqueueCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
+            var storageHealth = new Mock<IRootFolderStorageHealthResolver>(MockBehavior.Strict);
+            Init(services => services
+                .WithSingleton(moveQueue.Object)
+                .WithSingleton(storageHealth.Object));
+            var sourceRootPath = FileService.GetTempDirectory(
+                "listenarr-move-weak-target-source-root");
+            var targetRootPath = FileService.GetTempDirectory(
+                "listenarr-move-weak-target-root");
+            var sourceRoot = await AddAuthorizedRootAsync(
+                sourceRootPath,
+                "Source Root");
+            var targetRoot = await AddAuthorizedRootAsync(
+                targetRootPath,
+                "Weak Target Root");
+            storageHealth.Setup(service => service.ResolveAsync(
+                    It.Is<RootFolder>(root => root.Id == targetRoot.Id),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new RootFolderStorageObservation(
+                    RootFolderStorageState.Limited,
+                    RootFolderStorageReason.IdentityUnsupported,
+                    "Durable identity is unavailable.",
+                    CanConfirmCurrentFolder: false,
+                    CanChangePath: true,
+                    CanMutateFilesystem: false,
+                    ConfirmationToken: null,
+                    CanPublishNewFiles: true,
+                    CanRetireAfterVerifiedCopy: true));
+            storageHealth.Setup(service => service.ResolveAsync(
+                    It.Is<RootFolder>(root => root.Id == sourceRoot.Id),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new RootFolderStorageObservation(
+                    RootFolderStorageState.Healthy,
+                    RootFolderStorageReason.None,
+                    null,
+                    CanConfirmCurrentFolder: false,
+                    CanChangePath: true,
+                    CanMutateFilesystem: true,
+                    ConfirmationToken: null));
+
+            var sourcePath = Path.Join(sourceRootPath, "Author", "Source");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Weak destination")
+                .WithBasePath(sourcePath)
+                .Build());
+            await AddTrackedFileAsync(
+                audiobook,
+                sourcePath,
+                identityBoundary: sourceRoot.Path);
+
+            var result = await _provider.GetRequiredService<LibraryController>().EnqueueMove(
+                audiobook.Id,
+                new LibraryController.MoveRequest
+                {
+                    DestinationPath = Path.Join(targetRootPath, "Author", "Target"),
+                    SourcePath = sourcePath,
+                    MoveFiles = true
+                });
+
+            Assert.IsType<AcceptedResult>(result);
+            moveQueue.Verify(service => service.EnqueueMoveAsync(
+                It.IsAny<MoveEnqueueCommand>(),
+                It.IsAny<CancellationToken>()), Times.Once);
+            storageHealth.VerifyAll();
+        }
+
+        [Fact]
+        [Trait("Method", "EnqueueMove")]
+        [Trait("Scenario", "ReadOnlySourceRootCopiesAndRetainsSource")]
+        public async Task MoveAudiobook_ReadOnlySourceRoot_CopiesAndRetainsSource()
+        {
+            var moveQueue = CreateStrictMoveQueueMock();
+            moveQueue.Setup(service => service.EnqueueMoveAsync(
+                    It.IsAny<MoveEnqueueCommand>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
             var storageHealth = new Mock<IRootFolderStorageHealthResolver>(MockBehavior.Strict);
             Init(services => services
                 .WithSingleton(moveQueue.Object)
@@ -1653,15 +1732,13 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                     MoveFiles = true
                 });
 
-            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
-            var payload = JsonSerializer.Serialize(badRequest.Value);
-            Assert.Contains(
-                "source_filesystem_mutation_unavailable",
-                payload,
-                StringComparison.Ordinal);
+            Assert.IsType<AcceptedResult>(result);
             moveQueue.Verify(service => service.EnqueueMoveAsync(
-                It.IsAny<MoveEnqueueCommand>(),
-                It.IsAny<CancellationToken>()), Times.Never);
+                It.Is<MoveEnqueueCommand>(command =>
+                    command.SourceCleanupMode == MoveSourceCleanupMode.RetainSource
+                    && command.ForceCopyAndRetainSource
+                    && !command.DeleteEmptySource),
+                It.IsAny<CancellationToken>()), Times.Once);
             storageHealth.VerifyAll();
         }
 

@@ -109,7 +109,7 @@ describe('mutation semantics confirmation', () => {
     const error = Object.assign(new Error('API error'), {
       status: 400,
       body: JSON.stringify({
-        code: 'destination_filesystem_mutation_unavailable',
+        code: 'destination_file_publication_unavailable',
         field: 'destinationPath',
         message: 'Automatic case semantics need confirmation.',
       }),

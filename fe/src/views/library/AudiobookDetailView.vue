@@ -403,6 +403,23 @@
             </div>
           </div>
         </div>
+        <section v-if="weakStorageMissingFiles.items.length" class="weak-storage-missing-files">
+          <div>
+            <strong>Missing tracked files need confirmation</strong>
+            <p>
+              This storage cannot prove durable file generations. Review these paths before removing
+              their library records.
+            </p>
+            <ul>
+              <li v-for="candidate in weakStorageMissingFiles.items" :key="candidate.id">
+                <code>{{ candidate.path }}</code>
+              </li>
+            </ul>
+          </div>
+          <button class="btn btn-danger" type="button" @click="confirmMissingFileRecords">
+            Remove missing records
+          </button>
+        </section>
         <div v-if="audiobook.files && audiobook.files.length" class="file-list">
           <div
             v-for="f in audiobook.files"
@@ -568,7 +585,10 @@
                 type="checkbox"
                 class="checkbox-input"
                 aria-label="Remove all files in the audiobook folder from disk"
-                :disabled="!filesystemReadinessStore.filesystemReady"
+                :disabled="
+                  !filesystemReadinessStore.filesystemReady ||
+                  deleteCapabilities?.canDeleteTrackedFiles === false
+                "
               />
               <div class="checkbox-content">
                 <span class="checkbox-title"
@@ -589,7 +609,10 @@
                 type="checkbox"
                 class="checkbox-input"
                 aria-label="Remove audiobook folder from disk"
-                :disabled="!filesystemReadinessStore.filesystemReady"
+                :disabled="
+                  !filesystemReadinessStore.filesystemReady ||
+                  deleteCapabilities?.canDeleteFolder === false
+                "
               />
               <div class="checkbox-content">
                 <span class="checkbox-title">Also remove the audiobook folder</span>
@@ -600,6 +623,9 @@
               </div>
             </label>
           </div>
+          <p v-if="deleteCapabilities?.reason" class="warning-text">
+            {{ deleteCapabilities.reason }} The audiobook can still be removed from the library.
+          </p>
         </div>
       </template>
     </DeleteConfirmationModal>
@@ -666,8 +692,10 @@ import type {
   Audiobook,
   AudiobookExternalIdentifier,
   AudiobookSeriesMembership,
+  AudiobookDeleteCapabilities,
   History,
   SearchResult,
+  WeakStorageMissingFilesResponse,
 } from '@/types'
 import { safeText, stripHtmlAndNormalize } from '@/utils/textUtils'
 import { logger } from '@/utils/logger'
@@ -737,9 +765,12 @@ const showManualSearchModal = ref(false)
 const deleting = ref(false)
 const deleteFilesOnDisk = ref(false)
 const deleteFolderOnDisk = ref(false)
+const deleteCapabilities = ref<AudiobookDeleteCapabilities | null>(null)
 const showFullDescription = ref(false)
 const scanning = ref(false)
 const rescanningMetadata = ref(false)
+const weakStorageMissingFiles = ref<WeakStorageMissingFilesResponse>({ items: [] })
+let weakStorageMissingFilesRequestId = 0
 const trackedScanJob = computed(() => {
   const currentBookId = audiobook.value?.id
   if (!currentBookId) return undefined
@@ -1221,6 +1252,7 @@ onMounted(async () => {
   document.addEventListener('click', handleClickOutside)
 
   await loadAudiobook()
+  await loadWeakStorageMissingFiles()
 
   // Keep the shared scan notification store current when this detail view is mounted.
   // App.vue also subscribes globally; duplicate updates are monotonic/idempotent in the store.
@@ -1228,6 +1260,9 @@ onMounted(async () => {
     if (!audiobook.value) return
     if (String(job.audiobookId) !== String(audiobook.value.id)) return
     scanNotificationsStore.applyUpdate(job)
+    if (job.status.toLowerCase() === 'completed') {
+      void loadWeakStorageMissingFiles()
+    }
   })
 
   // subscribe to AudiobookUpdate messages and merge detail when this audiobook is updated (e.g., after a move)
@@ -1522,6 +1557,57 @@ async function scanFiles() {
   }
 }
 
+async function loadWeakStorageMissingFiles() {
+  const audiobookId = audiobook.value?.id
+  if (!audiobookId) return
+  const requestId = ++weakStorageMissingFilesRequestId
+  try {
+    const response = await apiService.getWeakStorageMissingFiles(audiobookId)
+    if (requestId !== weakStorageMissingFilesRequestId || audiobook.value?.id !== audiobookId)
+      return
+    weakStorageMissingFiles.value = response
+  } catch {
+    if (requestId !== weakStorageMissingFilesRequestId || audiobook.value?.id !== audiobookId)
+      return
+    weakStorageMissingFiles.value = { items: [] }
+  }
+}
+
+async function confirmMissingFileRecords() {
+  if (
+    !audiobook.value ||
+    !weakStorageMissingFiles.value.scanToken ||
+    weakStorageMissingFiles.value.items.length === 0
+  ) {
+    return
+  }
+  if (
+    !window.confirm(
+      'Remove the selected missing file records? Listenarr will check every path and database row again before making changes.',
+    )
+  ) {
+    return
+  }
+
+  try {
+    const result = await apiService.confirmWeakStorageMissingFiles(
+      audiobook.value.id,
+      weakStorageMissingFiles.value.scanToken,
+      weakStorageMissingFiles.value.items.map((candidate) => candidate.id),
+    )
+    const toast = useToast()
+    toast.success('Missing records reviewed', `${result.removedCount} record(s) removed`)
+    await loadAudiobook()
+    await loadWeakStorageMissingFiles()
+  } catch (error) {
+    const toast = useToast()
+    toast.error(
+      'Missing records changed',
+      error instanceof Error ? error.message : 'Scan the audiobook again and retry.',
+    )
+  }
+}
+
 // Watch library store for updates (SignalR pushes) and refresh audiobook object reactively
 watch(
   () => libraryStore.audiobooks,
@@ -1557,13 +1643,20 @@ function toggleMonitored() {
   }
 }
 
-function confirmDelete() {
+async function confirmDelete() {
   resetDeleteOptions()
+  if (!audiobook.value) return
+  try {
+    deleteCapabilities.value = await apiService.getAudiobookDeleteCapabilities(audiobook.value.id)
+  } catch {
+    deleteCapabilities.value = unavailableDeleteCapabilities()
+  }
   showDeleteDialog.value = true
 }
 
 function cancelDelete() {
   resetDeleteOptions()
+  deleteCapabilities.value = null
   showDeleteDialog.value = false
 }
 
@@ -1606,6 +1699,7 @@ async function executeDelete() {
   } finally {
     deleting.value = false
     resetDeleteOptions()
+    deleteCapabilities.value = null
     showDeleteDialog.value = false
   }
 }
@@ -1613,6 +1707,16 @@ async function executeDelete() {
 function resetDeleteOptions() {
   deleteFilesOnDisk.value = false
   deleteFolderOnDisk.value = false
+}
+
+function unavailableDeleteCapabilities(): AudiobookDeleteCapabilities {
+  return {
+    canRemoveFromLibrary: true,
+    canDeleteTrackedFiles: false,
+    canDeleteFolder: false,
+    reason: 'Physical-delete safety could not be checked.',
+    fallbackAction: 'RemoveFromLibraryOnly',
+  }
 }
 
 watch(deleteFolderOnDisk, (checked) => {
@@ -2740,6 +2844,28 @@ a.identifier-link:hover {
 .history-header h3 {
   margin: 0;
   color: #fff;
+}
+
+.weak-storage-missing-files {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, var(--warning-500) 45%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning-500) 8%, transparent);
+}
+
+.weak-storage-missing-files p,
+.weak-storage-missing-files ul {
+  margin: 0.4rem 0 0;
+  color: var(--text-secondary);
+}
+
+.weak-storage-missing-files code {
+  overflow-wrap: anywhere;
 }
 
 .action-btn {

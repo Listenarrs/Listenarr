@@ -200,6 +200,7 @@ internal sealed class RootFolderStorageConfirmationService(
                 "root",
                 root.Path,
                 semantics.Semantics);
+            root.StorageContractRevision = checked(root.StorageContractRevision + 1);
             root.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(cancellationToken);
 

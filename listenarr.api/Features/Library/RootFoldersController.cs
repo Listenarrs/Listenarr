@@ -40,6 +40,10 @@ namespace Listenarr.Api.Features.Library
         bool CanScanFilesystem,
         bool CanPublishNewFiles,
         bool CanMutateFilesystem,
+        bool CanRetireWithDurableIdentity,
+        bool CanRetireAfterVerifiedCopy,
+        string WeakStorageSourceCleanupPolicy,
+        int WeakStoragePolicyRevision,
         string? ConfirmationToken,
         DateTime CreatedAt,
         DateTime? UpdatedAt,
@@ -63,6 +67,10 @@ namespace Listenarr.Api.Features.Library
         string ExpectedCurrentPath,
         string ConfirmationToken);
 
+    public sealed record RootFolderWeakStoragePolicyRequest(
+        WeakStorageSourceCleanupPolicy Policy,
+        int ExpectedRevision);
+
     [ApiController]
     [Route("api/v{version:apiVersion}/rootfolders")]
     [Tags("Root Folders")]
@@ -79,6 +87,7 @@ namespace Listenarr.Api.Features.Library
         private readonly IRootFolderStorageConfirmationService _storageConfirmationService;
         private readonly ILibraryFilesystemReadiness _filesystemReadiness;
         private readonly ILibraryFilesystemMutationGate _filesystemMutationGate;
+        private readonly IRootFolderWeakStoragePolicyService _weakStoragePolicyService;
 
         public RootFoldersController(
             IRootFolderService service,
@@ -91,7 +100,8 @@ namespace Listenarr.Api.Features.Library
             IRootFolderStorageHealthResolver storageHealthResolver,
             IRootFolderStorageConfirmationService storageConfirmationService,
             ILibraryFilesystemReadiness filesystemReadiness,
-            ILibraryFilesystemMutationGate filesystemMutationGate)
+            ILibraryFilesystemMutationGate filesystemMutationGate,
+            IRootFolderWeakStoragePolicyService weakStoragePolicyService)
         {
             _service = service;
             _unmatchedQueue = unmatchedQueue;
@@ -106,6 +116,8 @@ namespace Listenarr.Api.Features.Library
                 ?? throw new ArgumentNullException(nameof(filesystemReadiness));
             _filesystemMutationGate = filesystemMutationGate
                 ?? throw new ArgumentNullException(nameof(filesystemMutationGate));
+            _weakStoragePolicyService = weakStoragePolicyService
+                ?? throw new ArgumentNullException(nameof(weakStoragePolicyService));
         }
 
         /// <summary>

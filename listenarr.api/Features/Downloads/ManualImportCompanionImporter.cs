@@ -18,6 +18,10 @@ using Listenarr.Domain.Common;
 
 namespace Listenarr.Api.Features.Downloads;
 
+public sealed record ManualImportCompanionPassResult(
+    int ImportedCount,
+    bool Succeeded);
+
 public sealed partial class ManualImportCompanionImporter
 {
     private readonly IMetadataService _metadataService;
@@ -80,6 +84,56 @@ public sealed partial class ManualImportCompanionImporter
         FileSystemPathSemantics sourceSemantics,
         IReadOnlyDictionary<int, FileSystemSemanticsResolution> destinationResolutionsByAudiobook,
         IEnumerable<string> importBlacklist,
+        CancellationToken cancellationToken = default) =>
+        (await ImportWithOutcomeAsync(
+            action,
+            orderedItems,
+            results,
+            sourceRootPath,
+            selectedAudioProfiles,
+            destinationTracker,
+            sourceSemantics,
+            destinationResolutionsByAudiobook,
+            importBlacklist,
+            Guid.NewGuid(),
+            cancellationToken)).ImportedCount;
+
+    public async Task<int> ImportAsync(
+        FileAction action,
+        IReadOnlyCollection<ManualImportItemDto> orderedItems,
+        IReadOnlyCollection<ManualImportResultDto> results,
+        string sourceRootPath,
+        IReadOnlyCollection<FileUtils.AudioMatchProfile> selectedAudioProfiles,
+        ManualImportDestinationTracker destinationTracker,
+        FileSystemPathSemantics sourceSemantics,
+        IReadOnlyDictionary<int, FileSystemSemanticsResolution> destinationResolutionsByAudiobook,
+        IEnumerable<string> importBlacklist,
+        Guid compatibilityBatchId,
+        CancellationToken cancellationToken = default) =>
+        (await ImportWithOutcomeAsync(
+            action,
+            orderedItems,
+            results,
+            sourceRootPath,
+            selectedAudioProfiles,
+            destinationTracker,
+            sourceSemantics,
+            destinationResolutionsByAudiobook,
+            importBlacklist,
+            compatibilityBatchId,
+            cancellationToken)).ImportedCount;
+
+    public async Task<ManualImportCompanionPassResult> ImportWithOutcomeAsync(
+        FileAction action,
+        IReadOnlyCollection<ManualImportItemDto> orderedItems,
+        IReadOnlyCollection<ManualImportResultDto> results,
+        string sourceRootPath,
+        IReadOnlyCollection<FileUtils.AudioMatchProfile> selectedAudioProfiles,
+        ManualImportDestinationTracker destinationTracker,
+        FileSystemPathSemantics sourceSemantics,
+        IReadOnlyDictionary<int, FileSystemSemanticsResolution> destinationResolutionsByAudiobook,
+        IEnumerable<string> importBlacklist,
+        Guid compatibilityBatchId,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -91,7 +145,7 @@ public sealed partial class ManualImportCompanionImporter
         if (audiobookIds.Count != 1)
         {
             _logger.LogDebug("Skipping companion-file import because the batch contains {Count} audiobook targets", audiobookIds.Count);
-            return 0;
+            return new ManualImportCompanionPassResult(0, Succeeded: true);
         }
         if (!destinationResolutionsByAudiobook.TryGetValue(
                 audiobookIds[0],
@@ -101,7 +155,7 @@ public sealed partial class ManualImportCompanionImporter
             _logger.LogWarning(
                 "Skipping companion-file import because no authoritative destination filesystem semantics are available for audiobook {AudiobookId}",
                 audiobookIds[0]);
-            return 0;
+            return new ManualImportCompanionPassResult(0, Succeeded: false);
         }
 
         var targetAudiobook = results
@@ -116,7 +170,7 @@ public sealed partial class ManualImportCompanionImporter
         if (string.IsNullOrWhiteSpace(destinationRoot))
         {
             _logger.LogDebug("Skipping companion-file import because no destination root could be resolved for {SourceRoot}", sourceRootPath);
-            return 0;
+            return new ManualImportCompanionPassResult(0, Succeeded: false);
         }
 
         var selectedSourceFiles = new HashSet<string>(
@@ -148,10 +202,11 @@ public sealed partial class ManualImportCompanionImporter
             _logger.LogWarning(
                 "Skipping companion-file import because destination root {DestinationRoot} escaped its authorized filesystem boundary",
                 destinationRoot);
-            return 0;
+            return new ManualImportCompanionPassResult(0, Succeeded: false);
         }
 
         var importedCount = 0;
+        var succeeded = true;
         foreach (var companionFile in companionFiles)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -167,6 +222,7 @@ public sealed partial class ManualImportCompanionImporter
                         "Skipping companion file {FilePath} before destination creation because source publication capability is unavailable: {Reason}",
                         companionFile,
                         LogRedaction.SanitizeText(sourceCapability.Reason));
+                    succeeded = false;
                     continue;
                 }
                 var sourceProof = sourceCapability.SourceProof.Value;
@@ -196,6 +252,7 @@ public sealed partial class ManualImportCompanionImporter
                     _logger.LogWarning(
                         "Skipping companion file {FilePath} because no contained destination could be resolved",
                         companionFile);
+                    succeeded = false;
                     continue;
                 }
 
@@ -222,13 +279,16 @@ public sealed partial class ManualImportCompanionImporter
                         companionFile,
                         destinationPath,
                         sourceProof,
-                        cancellationToken);
+                        cancellationToken,
+                        compatibilityBatchId,
+                        CompatibilityCleanupOwner.Listenarr);
                 if (!publicationPlan.IsAllowed)
                 {
                     _logger.LogWarning(
                         "Skipping companion file {FilePath}: {Reason}",
                         companionFile,
                         LogRedaction.SanitizeText(publicationPlan.Message));
+                    succeeded = false;
                     continue;
                 }
 
@@ -253,6 +313,7 @@ public sealed partial class ManualImportCompanionImporter
                             destinationPath,
                             ownership.Outcome,
                             ownership.Reason);
+                        succeeded = false;
                         continue;
                     }
                 }
@@ -261,11 +322,13 @@ public sealed partial class ManualImportCompanionImporter
                     _logger.LogWarning(
                         "Skipping companion file {FilePath} because destination ownership cannot be verified",
                         companionFile);
+                    succeeded = false;
                     continue;
                 }
 
-                if (publicationPlan.Mode
-                    == FilePublicationExecutionMode.AdditiveCopyRetainSource)
+                if (publicationPlan.Mode is
+                    FilePublicationExecutionMode.AdditiveCopyRetainSource or
+                    FilePublicationExecutionMode.CompatibilityCopyVerifiedCleanup)
                 {
                     await _directoryOwnershipStore.EnsureAdditiveHierarchyAsync(
                         destinationDirectory,
@@ -307,14 +370,19 @@ public sealed partial class ManualImportCompanionImporter
                     destinationTracker.Commit(destinationReservation);
                     importedCount++;
                 }
+                else
+                {
+                    succeeded = false;
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 _logger.LogWarning(ex, "Failed to import companion file {FilePath} during manual import", companionFile);
+                succeeded = false;
             }
         }
 
-        return importedCount;
+        return new ManualImportCompanionPassResult(importedCount, succeeded);
     }
 
     private static bool TryResolveCompanionDestination(

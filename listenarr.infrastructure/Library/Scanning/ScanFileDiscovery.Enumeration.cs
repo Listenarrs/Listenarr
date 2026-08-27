@@ -1,4 +1,5 @@
 using Listenarr.Domain.Common;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Library.Scanning;
@@ -154,6 +155,14 @@ internal static partial class ScanFileDiscovery
 
                             var childName = Path.GetFileName(
                                 Path.TrimEndingDirectorySeparator(visibleChild));
+                            if (IsOwnedCompatibilityQuarantine(visibleChild, childName))
+                            {
+                                logger.LogDebug(
+                                    "Skipped Listenarr compatibility quarantine while scanning job {JobId}: {Dir}",
+                                    jobId,
+                                    LogRedaction.SanitizeFilePath(visibleChild));
+                                continue;
+                            }
                             var childAnchor = directory.OpenExistingChild(childName);
                             localChildren.Add(new DirectoryEnumerationAnchor(
                                 childAnchor,
@@ -273,6 +282,36 @@ internal static partial class ScanFileDiscovery
             or NotSupportedException
             or PathTooLongException
             or System.ComponentModel.Win32Exception;
+
+    private static bool IsOwnedCompatibilityQuarantine(
+        string directoryPath,
+        string childName)
+    {
+        const string prefix = ".listenarr-quarantine-";
+        if (!childName.StartsWith(prefix, StringComparison.Ordinal)
+            || !Guid.TryParseExact(childName[prefix.Length..], "N", out var batchId))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var marker = JsonDocument.Parse(
+                File.ReadAllText(Path.Join(directoryPath, ".listenarr-owner-v2")));
+            return marker.RootElement.TryGetProperty("ProtocolVersion", out var protocol)
+                && protocol.GetInt32() == CompatibilityFilePublicationProtocol.Current
+                && marker.RootElement.TryGetProperty("BatchId", out var storedBatch)
+                && storedBatch.ValueKind == JsonValueKind.String
+                && Guid.TryParse(storedBatch.GetString(), out var parsedBatch)
+                && parsedBatch == batchId;
+        }
+        catch (Exception exception) when (exception is
+            IOException or UnauthorizedAccessException or JsonException
+                or InvalidOperationException or FormatException)
+        {
+            return false;
+        }
+    }
 
     private static void RecordEnumerationFailure(
         ICollection<ScanDiscoveryIssue> issues,

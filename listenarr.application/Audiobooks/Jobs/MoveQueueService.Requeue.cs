@@ -242,7 +242,15 @@ public partial class MoveQueueService
                             targetIdentity,
                             job.DeleteEmptySource,
                             job.RelocationId,
-                            job.SourceCleanupBoundary))
+                            job.SourceCleanupBoundary,
+                            job.SourceCleanupMode,
+                            job.SourceRootFolderId,
+                            job.SourcePolicyRevision,
+                            job.TargetRootFolderId,
+                            job.TargetPolicyRevision,
+                            job.SourceStorageContractRevision,
+                            job.TargetStorageContractRevision,
+                            job.ForceCopyAndRetainSource))
                     {
                         _logger.LogWarning(
                             "Move job {JobId} cannot be requeued because the conflicting active job uses different execution options",

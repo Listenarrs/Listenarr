@@ -101,9 +101,10 @@ internal sealed partial class AudiobookContentMoveService
             if (string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
                 || !verificationLease.MatchesObjectIdentity(
                     entry.SourcePhysicalObjectIdentity)
-                || !verificationLease.MatchesMetadata(
-                    entry.Length,
-                    entry.LastWriteTimeUtc)
+                || !await PinnedFileMatchesManifestAsync(
+                    verificationLease,
+                    entry,
+                    cancellationToken)
                 || !PinnedFileVisibleOrThrowUnavailable(
                     verificationLease,
                     $"The observed native-rename target is temporarily unavailable: {entry.RelativePath}"))

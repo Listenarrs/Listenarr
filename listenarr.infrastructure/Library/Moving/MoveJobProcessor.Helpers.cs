@@ -64,8 +64,11 @@ namespace Listenarr.Infrastructure.Library.Moving
                     throw new MoveNeedsAttentionException(
                         $"The {(target ? "target" : "source")} filesystem identity changed after the move was queued.");
                 }
+                var sourceIsCopyAndRetainOnly = !target
+                    && job.ForceCopyAndRetainSource
+                    && job.SourceCleanupMode == MoveSourceCleanupMode.RetainSource;
                 if (!current.HasDurableMutationSemanticsAuthority
-                    && !MoveRecoveryPolicy.HasFilesystemExecutionEvidence(job))
+                    && !sourceIsCopyAndRetainOnly)
                 {
                     throw new MoveNeedsAttentionException(
                         $"The {(target ? "target" : "source")} filesystem case semantics are available only through a behavioral lookup probe. Select Sensitive or Insensitive explicitly for the root, then start a new move.");
@@ -152,14 +155,12 @@ namespace Listenarr.Infrastructure.Library.Moving
                 return FinalizedMoveRecoveryOutcome.NotAttempted;
             }
 
-            var finalizedRequest = new AudiobookContentMoveRequest(
+            var finalizedRequest = CreateContentMoveRequest(
+                job,
                 source,
                 target,
-                job.Id,
-                job.DeleteEmptySource,
                 sourceSemantics.Value,
                 targetSemantics,
-                CreateLeaseToken(job),
                 cleanupBoundaryResolution?.Boundary);
             MarkerlessTargetVerificationLease? targetVerificationLease =
                 new(targetSemantics);

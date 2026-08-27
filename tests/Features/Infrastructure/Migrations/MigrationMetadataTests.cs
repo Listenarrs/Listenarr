@@ -19,6 +19,13 @@ namespace Listenarr.Tests.Features.Infrastructure.Migrations;
 public class MigrationMetadataTests
 {
     [Fact]
+    public void AddWeakStorageVerifiedCleanupMigration_IsDiscoverableByEf()
+    {
+        AssertMigrationId<AddWeakStorageVerifiedCleanup>(
+            "20260825021432_AddWeakStorageVerifiedCleanup");
+    }
+
+    [Fact]
     public void AddImportBlacklistExtensionsMigration_IsDiscoverableByEf()
     {
         AssertMigrationId<AddImportBlacklistExtensionsToApplicationSettings>(
