@@ -66,7 +66,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DependencyInjection
             Assert.Contains(
                 services,
                 descriptor =>
-                    descriptor.ServiceType == typeof(IMyAnonamouseConnectionTester) &&
+                    descriptor.ServiceType == typeof(IIndexerConnectionTester) &&
                     descriptor.ImplementationType == typeof(MyAnonamouseConnectionTester) &&
                     descriptor.Lifetime == ServiceLifetime.Scoped);
         }

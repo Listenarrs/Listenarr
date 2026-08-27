@@ -150,11 +150,31 @@ namespace Listenarr.Tests.Common
 
         public static IndexersController CreateIndexersController(ServiceProvider provider, HttpMessageHandler handler)
         {
+            var httpClient = new HttpClient(handler)
+            {
+                BaseAddress = new Uri("https://listenarr.test")
+            };
+            var indexerRepository = provider.GetRequiredService<IIndexerRepository>();
+            var connectionTesters = new IIndexerConnectionTester[]
+            {
+                new TorznabNewznabConnectionTester(httpClient, provider.GetRequiredService<ILogger<TorznabNewznabConnectionTester>>()),
+                new InternetArchiveConnectionTester(httpClient, provider.GetRequiredService<ILogger<InternetArchiveConnectionTester>>()),
+                new MyAnonamouseConnectionTester(httpClient, provider.GetRequiredService<ILogger<MyAnonamouseConnectionTester>>()),
+                new Listenarr.Infrastructure.Search.Providers.Common.GenericIndexerConnectionTester(
+                    httpClient,
+                    provider.GetRequiredService<ILogger<Listenarr.Infrastructure.Search.Providers.Common.GenericIndexerConnectionTester>>())
+            };
+            var testWorkflow = new IndexerTestWorkflow(
+                indexerRepository,
+                connectionTesters,
+                provider.GetRequiredService<ILogger<IndexerTestWorkflow>>());
+
             return new IndexersController(
-                provider.GetRequiredService<IIndexerRepository>(),
+                indexerRepository,
                 provider.GetRequiredService<ILogger<IndexersController>>(),
-                new HttpClient(handler),
-                provider.GetRequiredService<IConfigurationService>());
+                httpClient,
+                provider.GetRequiredService<IConfigurationService>(),
+                testWorkflow);
         }
     }
 }
