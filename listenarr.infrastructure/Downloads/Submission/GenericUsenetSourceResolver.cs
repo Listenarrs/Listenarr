@@ -48,7 +48,15 @@ public sealed class GenericUsenetSourceResolver(
             candidate.SourceDescriptor.FileName ?? $"{SanitizeFileName(candidate.Title)}.nzb");
     }
 
+    // Beyond filesystem-invalid characters, '"' and '\\' must also be stripped: this
+    // filename is later passed as the multipart Content-Disposition "filename" parameter
+    // when submitting to a download client (e.g. SABnzbd), and both characters are valid
+    // on Linux/macOS filesystems but break .NET's ContentDispositionHeaderValue quoting,
+    // throwing ArgumentException and silently failing the whole download. See
+    // https://github.com/Listenarrs/Listenarr/issues/808.
     private static string SanitizeFileName(string value)
         => string.Concat(value.Select(character =>
-            Path.GetInvalidFileNameChars().Contains(character) ? '_' : character));
+            Path.GetInvalidFileNameChars().Contains(character) || character is '"' or '\\'
+                ? '_'
+                : character));
 }
