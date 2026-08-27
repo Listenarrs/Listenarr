@@ -43,6 +43,20 @@
           <PhRobot />
           Search All
         </button>
+        <button
+          v-if="wantedWithoutProfileCount > 0"
+          class="btn btn-secondary"
+          @click="assignDefaultProfileToWanted"
+          :disabled="assigningQualityProfiles || !defaultQualityProfile"
+          :title="
+            defaultQualityProfile
+              ? `Assign ${defaultQualityProfile.name} to ${wantedWithoutProfileCount} wanted audiobooks`
+              : 'No default quality profile is configured'
+          "
+        >
+          <PhStar />
+          Assign default profile ({{ wantedWithoutProfileCount }})
+        </button>
         <button class="btn btn-secondary" @click="openManualImport">
           <PhFolderPlus />
           Manual Import
@@ -122,7 +136,7 @@
             </div>
             <div class="col-quality">
               <span class="quality-tag">
-                {{ getQualityProfileForAudiobook(item)?.name ?? item.quality ?? 'Unknown' }}
+                {{ getQualityProfileForAudiobook(item)?.name ?? 'No profile' }}
               </span>
             </div>
             <div class="col-status">
@@ -200,6 +214,7 @@ import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
 import { apiService } from '@/services/api'
 import { errorTracking } from '@/services/errorTracking'
+import { useToast } from '@/services/toastService'
 import { handleImageError } from '@/utils/imageFallback'
 import ManualSearchModal from '@/components/domain/search/ManualSearchModal.vue'
 import ManualImportModal from '@/components/feedback/ManualImportModal.vue'
@@ -215,6 +230,7 @@ import {
   PhX,
   PhCheckCircle,
   PhDownloadSimple,
+  PhStar,
 } from '@phosphor-icons/vue'
 import { logger } from '@/utils/logger'
 import { useDownloadsStore } from '@/stores/downloads'
@@ -228,6 +244,7 @@ const configurationStore = useConfigurationStore()
 
 // Filter
 const filterText = ref('')
+const toast = useToast()
 
 // Virtual scrolling setup
 const scrollContainer = ref<HTMLElement | null>(null)
@@ -287,10 +304,21 @@ const getQualityProfileForAudiobook = (audiobook: Audiobook) => {
 
 const loading = computed(() => libraryStore.loading)
 const searching = ref<Record<number, boolean>>({})
+const assigningQualityProfiles = ref(false)
 const searchResults = ref<Record<number, string>>({})
 const showManualSearchModal = ref(false)
 const selectedAudiobook = ref<Audiobook | null>(null)
 const showManualImportModal = ref(false)
+
+const defaultQualityProfile = computed(
+  () => configurationStore.qualityProfiles.find((profile) => profile.isDefault) ?? null,
+)
+
+const wantedWithoutProfile = computed(() =>
+  wantedAudiobooks.value.filter((audiobook) => !audiobook.qualityProfileId),
+)
+
+const wantedWithoutProfileCount = computed(() => wantedWithoutProfile.value.length)
 
 const syncWantedLayout = async () => {
   await nextTick()
@@ -444,6 +472,61 @@ const searchMissing = async () => {
   for (const audiobook of categorizedWanted.value.missing) {
     await searchAudiobook(audiobook)
     await new Promise((resolve) => setTimeout(resolve, 1000))
+  }
+}
+
+const assignDefaultProfileToWanted = async () => {
+  const profile = defaultQualityProfile.value
+  const candidates = wantedWithoutProfile.value
+
+  if (!profile) {
+    toast.error('No default profile', 'Set a default quality profile first.')
+    return
+  }
+
+  if (profile.id == null) {
+    toast.error('No default profile', 'The default quality profile is missing an ID.')
+    return
+  }
+
+  if (candidates.length === 0) {
+    return
+  }
+
+  const confirmed = window.confirm(
+    `Assign "${profile.name}" to ${candidates.length} wanted audiobook(s) with no quality profile?`,
+  )
+  if (!confirmed) return
+
+  assigningQualityProfiles.value = true
+  try {
+    const ids = candidates.map((item) => item.id)
+    const result = await apiService.bulkUpdateAudiobooks(ids, { qualityProfileId: profile.id })
+    const failed = result.results.filter((row) => !row.success)
+
+    await libraryStore.fetchLibrary()
+    await configurationStore.loadQualityProfiles()
+
+    if (failed.length > 0) {
+      toast.warning(
+        'Partial update',
+        `Assigned ${profile.name} to ${ids.length - failed.length}/${ids.length} wanted audiobook(s).`,
+      )
+    } else {
+      toast.success(
+        'Quality profile assigned',
+        `Assigned ${profile.name} to ${ids.length} wanted audiobook(s).`,
+      )
+    }
+  } catch (err) {
+    errorTracking.captureException(err as Error, {
+      component: 'WantedView',
+      operation: 'assignDefaultProfileToWanted',
+      metadata: { count: candidates.length },
+    })
+    toast.error('Assignment failed', 'Could not update the wanted audiobooks.')
+  } finally {
+    assigningQualityProfiles.value = false
   }
 }
 
