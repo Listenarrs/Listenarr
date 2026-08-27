@@ -112,7 +112,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                 {
                     try
                     {
-                        var queueItem = SabnzbdResponseMapper.MapQueueSlotToQueueItem(client, slot, configuredCategory ?? string.Empty, speed);
+                        var queueItem = SabnzbdResponseMapper.MapQueueSlotToQueueItem(client, slot, configuredCategory ?? string.Empty, speed, monitoredIdSet);
                         if (queueItem != null)
                         {
                             items.Add(queueItem);
@@ -141,7 +141,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
 
                 var historyLimit = isMonitorPoll ? MonitorHistoryLimit : DisplayHistoryLimit;
                 var historyFailureIsFatal = isMonitorPoll && missingTrackedIds.Count > 0;
-                await AddHistoryItemsAsync(client, requestContext, configuredCategory, items, http, historyLimit, historyFailureIsFatal, ct);
+                await AddHistoryItemsAsync(client, requestContext, configuredCategory, items, http, historyLimit, historyFailureIsFatal, monitoredIdSet, ct);
             }
             catch (DownloadClientAdapterPollingException)
             {
@@ -167,6 +167,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
             HttpClient http,
             int historyLimit,
             bool historyFailureIsFatal,
+            ISet<string> monitoredIdSet,
             CancellationToken ct)
         {
             var existingNzoIds = new HashSet<string>(items.Select(i => i.Id), StringComparer.OrdinalIgnoreCase);
@@ -220,7 +221,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                 {
                     try
                     {
-                        var historyItem = SabnzbdResponseMapper.MapHistorySlotToQueueItem(client, slot, configuredCategory ?? string.Empty, existingNzoIds);
+                        var historyItem = SabnzbdResponseMapper.MapHistorySlotToQueueItem(client, slot, configuredCategory ?? string.Empty, existingNzoIds, monitoredIdSet);
                         if (historyItem != null)
                         {
                             items.Add(historyItem);

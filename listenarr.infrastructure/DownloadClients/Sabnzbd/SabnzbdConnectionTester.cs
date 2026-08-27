@@ -8,6 +8,7 @@
  * (at your option) any later version.
  */
 using System.Net;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
@@ -51,7 +52,20 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                     return (false, $"SABnzbd: returned {resp.StatusCode}");
                 }
 
-                return (true, "SABnzbd: connected");
+                // Version check passed. If a category is configured, verify it exists in
+                // SABnzbd: unknown categories are silently reassigned to Default, which
+                // hides jobs from category-scoped reads and strands them unimported.
+                // This is an advisory, not a hard failure, so the connection tests green.
+                var configuredCategory = DownloadClientCategoryFilter.GetConfiguredCategory(client);
+                if (string.IsNullOrWhiteSpace(configuredCategory))
+                {
+                    return (true, "SABnzbd: connected");
+                }
+
+                var categoryWarning = await CheckCategoryExistsAsync(requestContext, http, configuredCategory, ct);
+                return categoryWarning is null
+                    ? (true, "SABnzbd: connected")
+                    : (true, categoryWarning);
             }
             catch (HttpRequestException httpEx)
             {
@@ -67,6 +81,59 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
             {
                 logger.LogDebug(ex, "SABnzbd TestConnection failed");
                 return (false, "SABnzbd: connection failed");
+            }
+        }
+
+        private async Task<string?> CheckCategoryExistsAsync(
+            SabnzbdRequestContext requestContext,
+            HttpClient http,
+            string configuredCategory,
+            CancellationToken ct)
+        {
+            try
+            {
+                var url = requestBuilder.BuildUrl(requestContext, new Dictionary<string, string>
+                {
+                    ["mode"] = "get_cats",
+                    ["output"] = "json"
+                });
+                var resp = await http.GetAsync(url, ct);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    // Best effort: an unavailable category list must not fail an
+                    // otherwise healthy connection.
+                    return null;
+                }
+
+                var json = await resp.Content.ReadAsStringAsync(ct);
+                if (string.IsNullOrWhiteSpace(json))
+                {
+                    return null;
+                }
+
+                using var doc = JsonDocument.Parse(json);
+                if (!doc.RootElement.TryGetProperty("categories", out var categories) ||
+                    categories.ValueKind != JsonValueKind.Array)
+                {
+                    return null;
+                }
+
+                foreach (var category in categories.EnumerateArray())
+                {
+                    var name = category.ValueKind == JsonValueKind.String ? category.GetString() : null;
+                    if (string.Equals(name?.Trim(), configuredCategory.Trim(), StringComparison.OrdinalIgnoreCase))
+                    {
+                        return null;
+                    }
+                }
+
+                return $"SABnzbd: connected, but category '{configuredCategory}' does not exist in SABnzbd. " +
+                       "Jobs will fall into Default and may not import. Create the category in SABnzbd (Config > Categories).";
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                logger.LogDebug(ex, "SABnzbd get_cats probe failed (non-fatal)");
+                return null;
             }
         }
     }
