@@ -849,7 +849,7 @@ import type {
 import { evaluateRules } from '@/utils/customFilterEvaluator'
 import type { RuleLike } from '@/utils/customFilterEvaluator'
 import { computeAudiobookStatus, formatAudiobookStatus } from '@/utils/audiobookStatus'
-import { safeText } from '@/utils/textUtils'
+import { normalizeCollectionText, safeText } from '@/utils/textUtils'
 import { formatSeriesMemberships } from '@/utils/seriesUtils'
 import { getPlaceholderUrl } from '@/utils/placeholder'
 import { errorTracking } from '@/services/errorTracking'
@@ -1407,14 +1407,15 @@ const groupedCollections = computed(() => {
   >()
 
   books.forEach((book) => {
-    const keys =
+    const rawKeys =
       groupBy.value === 'authors'
         ? book.authors?.[0]
           ? [book.authors[0]]
           : []
         : getBookSeriesNames(book)
-    for (const key of keys) {
-      if (!key) continue
+    for (const rawKey of rawKeys) {
+      if (!rawKey) continue
+      const key = normalizeCollectionText(rawKey)
       if (!groups.has(key)) {
         if (groupBy.value === 'authors') {
           // Prefer override (fetched author image) first, then author ASIN, then book cover
@@ -1426,10 +1427,10 @@ const groupedCollections = computed(() => {
             // Access via (global) variable — will be undefined initially.
             // eslint-disable-next-line @typescript-eslint/ban-ts-comment
             // @ts-ignore
-            if (authorCoverOverrides && authorCoverOverrides[key]) {
+            if (authorCoverOverrides && authorCoverOverrides[rawKey]) {
               // eslint-disable-next-line @typescript-eslint/ban-ts-comment
               // @ts-ignore
-              cover = authorCoverOverrides[key]
+              cover = authorCoverOverrides[rawKey]
             }
           } catch {}
 
@@ -1440,9 +1441,9 @@ const groupedCollections = computed(() => {
             } catch {}
           }
 
-          groups.set(key, { name: key, count: 0, coverUrl: cover })
+          groups.set(key, { name: rawKey, count: 0, coverUrl: cover })
         } else {
-          groups.set(key, { name: key, count: 0, coverUrls: [] })
+          groups.set(key, { name: rawKey, count: 0, coverUrls: [] })
         }
       }
       const group = groups.get(key)!
