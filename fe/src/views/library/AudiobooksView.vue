@@ -919,11 +919,50 @@ const DEFAULT_SORTS = {
   series: { key: 'title', order: 'asc' },
 } as const
 
-const sortState = reactive({
-  books: { key: 'title', order: 'asc' as 'asc' | 'desc' },
-  authors: { key: 'author-last', order: 'asc' as 'asc' | 'desc' },
-  series: { key: 'title', order: 'asc' as 'asc' | 'desc' },
-})
+type GroupSort = { key: string; order: 'asc' | 'desc' }
+type SortStateShape = Record<'books' | 'authors' | 'series', GroupSort>
+
+// Persist the chosen sort (key + order, per grouping) so the library keeps the user's last
+// preference across visits instead of resetting to Title every time.
+const SORT_STATE_KEY = 'listenarr.sortState'
+
+function loadSortState(): SortStateShape {
+  const state: SortStateShape = {
+    books: { ...DEFAULT_SORTS.books },
+    authors: { ...DEFAULT_SORTS.authors },
+    series: { ...DEFAULT_SORTS.series },
+  }
+  try {
+    const raw = localStorage.getItem(SORT_STATE_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      for (const group of ['books', 'authors', 'series'] as const) {
+        const saved = parsed?.[group]
+        if (saved && typeof saved.key === 'string' && (saved.order === 'asc' || saved.order === 'desc')) {
+          state[group] = { key: saved.key, order: saved.order }
+        }
+      }
+    }
+  } catch {
+    // Corrupt/unavailable storage — fall back to defaults.
+  }
+  return state
+}
+
+const sortState = reactive<SortStateShape>(loadSortState())
+
+// Persist whenever the sort changes (any grouping).
+watch(
+  sortState,
+  (value) => {
+    try {
+      localStorage.setItem(SORT_STATE_KEY, JSON.stringify(value))
+    } catch {
+      // Ignore storage write failures (private mode / quota).
+    }
+  },
+  { deep: true },
+)
 
 const sortKey = computed({
   get: () => sortState[groupBy.value].key,
