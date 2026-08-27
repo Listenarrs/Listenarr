@@ -43,6 +43,7 @@ global using Listenarr.Application.Notifications.Contracts;
 global using Listenarr.Application.Realtime.Contracts;
 global using Listenarr.Application.Search.Contracts;
 global using Listenarr.Application.Search.Contracts.Repositories;
+global using Listenarr.Application.Search.DomainRotation;
 global using Listenarr.Application.Security.Contracts;
 global using Listenarr.Application.SystemDiagnostics.Contracts;
 global using Listenarr.Application.Notifications.Payloads;

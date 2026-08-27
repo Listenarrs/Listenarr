@@ -57,6 +57,7 @@ internal static class WorkerRegistrationExtensions
             DownloadProcessingJobCleanupService>(services);
 
         AddHostedProcessor<UnmatchedScanProcessor, IUnmatchedScanProcessor, UnmatchedScanBackgroundService>(services);
+        AddHostedProcessor<IndexerDomainRotationProcessor, IIndexerDomainRotationProcessor, IndexerDomainRotationBackgroundService>(services);
         return services;
     }
 

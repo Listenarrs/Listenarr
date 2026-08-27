@@ -113,4 +113,9 @@ namespace Listenarr.Application.Common.Contracts
     {
         Task<TimeSpan> RunCycleAsync(CancellationToken cancellationToken);
     }
+
+    public interface IIndexerDomainRotationProcessor
+    {
+        Task RunCycleAsync(CancellationToken cancellationToken);
+    }
 }
