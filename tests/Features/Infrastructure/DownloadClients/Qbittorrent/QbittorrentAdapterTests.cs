@@ -128,6 +128,26 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
         }
 
         [Fact]
+        public async Task TestConnection_WithFullUrlAsUrlBase_ReturnsClearError()
+        {
+            var client = await _downloadClientConfigurationRepository.SaveAsync(new DownloadClientConfigurationBuilder()
+                .WithHost("192.168.50.111")
+                .WithPort(8080)
+                .WithoutSsl()
+                .WithType("qbittorrent")
+                .WithUsername("admin")
+                .WithPassword("admin")
+                .WithUrlBase("https://seedbox.example.com/qbittorrent")
+                .Build());
+
+            var adapter = _provider.GetRequiredService<IDownloadClientGateway>();
+            var (success, message) = await adapter.TestConnectionAsync(client);
+
+            Assert.False(success);
+            Assert.Contains("URL Base must be a path", message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
         public async Task AddAsync_WhenMagnetAndTorrentUrlAreProvided_UsesVerifiedMagnetHashWithoutDownloading()
         {
             var downloader = new Mock<ITorrentFileDownloader>(MockBehavior.Strict);

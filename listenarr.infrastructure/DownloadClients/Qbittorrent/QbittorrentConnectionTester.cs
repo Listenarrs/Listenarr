@@ -68,6 +68,10 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
             {
                 return (false, "Connection timed out.");
             }
+            catch (QbittorrentException exception)
+            {
+                return (false, exception.Message);
+            }
             catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
             {
                 return (false, "Connection failed.");
