@@ -17,6 +17,7 @@
  */
 
 using Microsoft.Extensions.DependencyInjection;
+using Listenarr.Application.Downloads.Contracts;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Downloads.Monitoring
@@ -383,6 +384,31 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
                 download.DownloadClientId,
                 download.Title ?? "Unknown",
                 errorMessage);
+
+            // Block the release before the auto-search below, so the search that follows a
+            // failure cannot pick the same broken release straight back up.
+            //
+            // Only downloads the client accepted and then failed reach this method. A
+            // release the client refused at submission never gets here, which is what keeps
+            // a qBittorrent 409 out of the blocklist: that answer means the client already
+            // holds the release, so blocking it would ban something the user is currently
+            // downloading. The carve-out is structural rather than a condition to remember.
+            if (download.AudiobookId.HasValue)
+            {
+                var blocklistService = scope.ServiceProvider.GetRequiredService<IBlocklistService>();
+                var identifier = ReleaseIdentity.For(
+                    download.GetMetadataString("TorrentHash"),
+                    download.OriginalUrl);
+                if (identifier is not null)
+                {
+                    await blocklistService.BlockAsync(
+                        download.AudiobookId.Value,
+                        identifier,
+                        download.Title ?? "Unknown",
+                        download.TotalSize > 0 ? download.TotalSize : download.ExpectedFileSize,
+                        errorMessage);
+                }
+            }
 
             if (!settings.FailedDownloadHandlingEnabled)
             {
