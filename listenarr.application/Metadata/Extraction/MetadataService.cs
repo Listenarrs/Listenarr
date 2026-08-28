@@ -256,6 +256,51 @@ namespace Listenarr.Application.Metadata.Extraction
                 asin);
         }
 
+        public async Task WriteImportTagsAsync(
+            IAudiobookFileRegistrationLease registrationLease,
+            string asin,
+            string? coverArtUrl)
+        {
+            ArgumentNullException.ThrowIfNull(registrationLease);
+
+            var coverArt = await ResolveCoverArtAsync(coverArtUrl);
+            await _audioTagWriter.WriteTagsAsync(registrationLease, asin, coverArt);
+        }
+
+        /// <summary>
+        /// Fetch and identify cover artwork, but only when the setting asks for it.
+        ///
+        /// The setting is read first so that an instance with embedding off never makes the
+        /// request at all: this runs on the import path, and a network round trip per file
+        /// is not something to spend when the result would be discarded. Any failure to
+        /// resolve artwork returns null rather than throwing, because a missing cover must
+        /// not fail an import that has otherwise succeeded.
+        /// </summary>
+        private async Task<AudioCoverArt?> ResolveCoverArtAsync(string? coverArtUrl)
+        {
+            if (string.IsNullOrWhiteSpace(coverArtUrl))
+            {
+                return null;
+            }
+
+            var settings = await _configurationService.GetApplicationSettingsAsync();
+            if (settings?.EmbedCoverArtInAudioFiles != true)
+            {
+                return null;
+            }
+
+            var bytes = await DownloadCoverArtAsync(coverArtUrl);
+            var coverArt = AudioCoverArt.FromBytes(bytes);
+            if (coverArt is null && bytes is not null)
+            {
+                _logger.LogDebug(
+                    "Cover art from {Url} was not a recognised image, so nothing was embedded",
+                    LogRedaction.SanitizeUrl(coverArtUrl));
+            }
+
+            return coverArt;
+        }
+
         public async Task<byte[]?> DownloadCoverArtAsync(string coverArtUrl)
         {
             try

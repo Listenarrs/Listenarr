@@ -52,9 +52,15 @@ namespace Listenarr.Infrastructure.Library.Files
         public Task WriteAsinTagAsync(
             IAudiobookFileRegistrationLease registrationLease,
             string asin)
+            => WriteTagsAsync(registrationLease, asin, coverArt: null);
+
+        public Task WriteTagsAsync(
+            IAudiobookFileRegistrationLease registrationLease,
+            string? asin,
+            AudioCoverArt? coverArt)
         {
             ArgumentNullException.ThrowIfNull(registrationLease);
-            if (string.IsNullOrWhiteSpace(asin))
+            if (string.IsNullOrWhiteSpace(asin) && coverArt is null)
             {
                 return Task.CompletedTask;
             }
@@ -70,22 +76,56 @@ namespace Listenarr.Infrastructure.Library.Files
             {
                 using var file = TagLib.File.Create(
                     new RegistrationLeaseFileAbstraction(registrationLease));
-                ApplyAsinTag(file, asin);
+
+                if (!string.IsNullOrWhiteSpace(asin))
+                {
+                    ApplyAsinTag(file, asin);
+                }
+
+                var wroteCover = coverArt is not null && ApplyCoverArt(file, coverArt);
                 file.Save();
                 _logger.LogDebug(
-                    "Wrote ASIN tag '{Asin}' to generation-bound file {File}",
-                    asin,
-                    LogRedaction.SanitizeFilePath(registrationLease.PublicPath));
+                    "Wrote tags to generation-bound file {File}. ASIN: {Asin}, cover art embedded: {Cover}",
+                    LogRedaction.SanitizeFilePath(registrationLease.PublicPath),
+                    asin ?? "(none)",
+                    wroteCover);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 _logger.LogWarning(
                     ex,
-                    "Failed to write ASIN tag to generation-bound file {File} - import will continue",
+                    "Failed to write tags to generation-bound file {File} - import will continue",
                     LogRedaction.SanitizeFilePath(registrationLease.PublicPath));
             }
 
             return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Replace the file's embedded pictures with the supplied artwork.
+        ///
+        /// Replacing rather than appending: a file that already carries a cover and gains a
+        /// second one shows whichever the player happens to pick first, which looks like a
+        /// bug to whoever asked for the artwork to be corrected. Returns false when the
+        /// container reports no tag to write into, so the caller can say so rather than
+        /// claim a write that did not happen.
+        /// </summary>
+        private static bool ApplyCoverArt(TagLib.File file, AudioCoverArt coverArt)
+        {
+            if (file.Tag is null)
+            {
+                return false;
+            }
+
+            var picture = new TagLib.Picture(new TagLib.ByteVector(coverArt.Data))
+            {
+                Type = TagLib.PictureType.FrontCover,
+                MimeType = coverArt.MimeType,
+                Description = "Cover"
+            };
+
+            file.Tag.Pictures = new TagLib.IPicture[] { picture };
+            return true;
         }
 
         private static void ApplyAsinTag(TagLib.File file, string asin)

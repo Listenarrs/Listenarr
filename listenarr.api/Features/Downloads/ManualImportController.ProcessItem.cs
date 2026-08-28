@@ -373,16 +373,17 @@ public partial class ManualImportController
                 {
                     try
                     {
-                        await _metadataService.WriteAsinTagAsync(
+                        await _metadataService.WriteImportTagsAsync(
                             registrationLease,
-                            audiobook.Asin);
+                            audiobook.Asin,
+                            audiobook.ImageUrl);
                     }
                     catch (Exception exception) when (exception is not (
                         OutOfMemoryException or StackOverflowException))
                     {
                         _logger.LogWarning(
                             exception,
-                            "Manual import completed, but generation-bound ASIN tag enrichment failed for audiobook {AudiobookId} at {Path}",
+                            "Manual import completed, but generation-bound tag enrichment failed for audiobook {AudiobookId} at {Path}",
                             audiobook.Id,
                             LogRedaction.SanitizeFilePath(destinationPath));
                     }

@@ -2312,9 +2312,10 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                     Format = "mp3",
                     BitRate = 128000
                 });
-            metadata.Setup(service => service.WriteAsinTagAsync(
+            metadata.Setup(service => service.WriteImportTagsAsync(
                     It.IsAny<IAudiobookFileRegistrationLease>(),
-                    book.Asin))
+                    book.Asin,
+                    It.IsAny<string?>()))
                 .ThrowsAsync(new IOException("simulated tag failure"));
             var controller = GetController(
                 book,
@@ -2361,9 +2362,10 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                 "audio",
                 await File.ReadAllTextAsync(
                     Path.Join(destinationRoot, "Tagged Book.mp3")));
-            metadata.Verify(service => service.WriteAsinTagAsync(
+            metadata.Verify(service => service.WriteImportTagsAsync(
                 It.IsAny<IAudiobookFileRegistrationLease>(),
-                book.Asin), Times.Never);
+                book.Asin,
+                It.IsAny<string?>()), Times.Never);
             metadata.Verify(service => service.WriteAsinTagAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>()), Times.Never);
