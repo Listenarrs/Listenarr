@@ -27,10 +27,10 @@
       />
 
       <CheckboxCard
-        :modelValue="settings.enableCoverArtDownload"
-        @update:modelValue="updateEnableCoverArtDownload"
-        title="Enable Cover Art Download"
-        description="Download and embed cover art for audiobooks"
+        :modelValue="settings.embedCoverArtInAudioFiles"
+        @update:modelValue="updateEmbedCoverArtInAudioFiles"
+        title="Embed Cover Art In Audio Files"
+        description="Write cover art into audiobook files as they are imported. Rewrites the file, so it is off by default."
       />
 
       <CheckboxCard
@@ -70,8 +70,8 @@ function updateEnableMetadataProcessing(value: boolean) {
   updateField('enableMetadataProcessing', value)
 }
 
-function updateEnableCoverArtDownload(value: boolean) {
-  updateField('enableCoverArtDownload', value)
+function updateEmbedCoverArtInAudioFiles(value: boolean) {
+  updateField('embedCoverArtInAudioFiles', value)
 }
 
 function updateEnableNotifications(value: boolean) {
