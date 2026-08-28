@@ -97,6 +97,7 @@ namespace Listenarr.Application.Downloads.Import
             try
             {
                 var completedFileAction = settings.CompletedFileAction;
+                var extractedArchives = false;
 
                 if (settings.ExtractArchives || options?.ForceArchiveExtraction == true)
                 {
@@ -106,7 +107,8 @@ namespace Listenarr.Application.Downloads.Import
                         .ToList();
                     files = [.. files.Where(file => !archives.Contains(file))];
                     files.AddRange(await archiveImportExtractor.ExtractAsync(archives));
-                    if (archives.Count > 0 && completedFileAction == FileAction.HardlinkCopy)
+                    extractedArchives = archives.Count > 0;
+                    if (extractedArchives && completedFileAction == FileAction.HardlinkCopy)
                     {
                         completedFileAction = FileAction.Copy;
                         logger.LogWarning($"Audiobook {audiobook.Id} contains archives thus Hard link mode is impossible: Completed action switched to copy");
@@ -116,17 +118,14 @@ namespace Listenarr.Application.Downloads.Import
                 var results = recoveredResults;
                 var folderPattern = settings.FolderNamingPattern;
                 var candidateFiles = files.Where(file => !FileUtils.IsBlacklistedFile(file, settings.ImportBlacklistExtensions)).ToList();
-                var sourceRootPath = FileUtils.GetCommonDirectory(candidateFiles);
-                FileSystemPathSemantics? sourceSemantics = null;
-                var sourcePathComparer = StringComparer.Ordinal;
-                if (!string.IsNullOrWhiteSpace(sourceRootPath))
-                {
-                    sourceSemantics = await ResolvePathSemanticsAsync(
-                        sourceRootPath,
-                        "Source filesystem identity is unavailable.",
+                var sourceCaseSensitivityMode = ResolveSourceCaseSensitivityMode(
+                    options,
+                    extractedArchives);
+                var (sourceRootPath, sourceSemantics, sourcePathComparer) =
+                    await ResolveSourceSemanticsAsync(
+                        candidateFiles,
+                        sourceCaseSensitivityMode,
                         ct);
-                    sourcePathComparer = sourceSemantics.Value.Comparer;
-                }
                 var sourceFiles = candidateFiles.Distinct(sourcePathComparer).ToList();
                 sourceRootPath = FileUtils.GetCommonDirectory(sourceFiles);
                 var plannedAudioFiles = MultiFileImportPlanner.BuildPlans(
@@ -170,6 +169,7 @@ namespace Listenarr.Application.Downloads.Import
                         var fileSourceSemantics = sourceSemantics
                             ?? await ResolvePathSemanticsAsync(
                                 file,
+                                sourceCaseSensitivityMode,
                                 "Source filesystem identity is unavailable.",
                                 ct);
                         if (!FileUtils.IsAudioFile(file))

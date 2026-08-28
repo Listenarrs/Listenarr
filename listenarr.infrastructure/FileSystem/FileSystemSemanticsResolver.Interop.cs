@@ -46,31 +46,8 @@ public sealed partial class FileSystemSemanticsResolver
         ulong request,
         out int flags);
 
-    [DllImport("libc", EntryPoint = "fstatfs", SetLastError = true)]
-    private static extern int FStatFsUnix(int descriptor, IntPtr buffer);
-
     [DllImport("libc", EntryPoint = "pathconf", SetLastError = true)]
     private static extern long PathConfUnix(
         [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
         int name);
-
-    private static long? TryGetLinuxFileSystemType(int descriptor)
-    {
-        var buffer = Marshal.AllocHGlobal(LinuxStatFsBufferBytes);
-        try
-        {
-            if (FStatFsUnix(descriptor, buffer) != 0)
-            {
-                return null;
-            }
-
-            return IntPtr.Size == sizeof(long)
-                ? Marshal.ReadInt64(buffer)
-                : Marshal.ReadInt32(buffer);
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(buffer);
-        }
-    }
 }

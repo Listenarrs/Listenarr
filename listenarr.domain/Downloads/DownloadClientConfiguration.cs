@@ -1,9 +1,13 @@
 using System.Text.Json;
+using Listenarr.Domain.Common;
 
 namespace Listenarr.Domain.Downloads
 {
     public class DownloadClientConfiguration
     {
+        public const string SourceCaseSensitivityModeSetting =
+            "sourceCaseSensitivityMode";
+
         public string Id { get; set; } = Guid.NewGuid().ToString();
         public string Name { get; set; } = string.Empty;
         public string Type { get; set; } = string.Empty; // "qbittorrent", "transmission", "sabnzbd", "nzbget"
@@ -43,6 +47,30 @@ namespace Listenarr.Domain.Downloads
             }
 
             return defaultInterval;
+        }
+
+        public FileSystemCaseSensitivityMode GetSourceCaseSensitivityMode()
+        {
+            var settings = Settings;
+            if (!settings.TryGetValue(
+                    SourceCaseSensitivityModeSetting,
+                    out var configuredValue))
+            {
+                return FileSystemCaseSensitivityMode.Auto;
+            }
+
+            var value = configuredValue?.ToString() ?? string.Empty;
+            foreach (var name in Enum.GetNames<FileSystemCaseSensitivityMode>())
+            {
+                if (string.Equals(name, value, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Enum.Parse<FileSystemCaseSensitivityMode>(name);
+                }
+            }
+
+            var descriptor = !string.IsNullOrWhiteSpace(Name) ? Name : Id;
+            throw new InvalidOperationException(
+                $"Download client '{descriptor}' setting '{SourceCaseSensitivityModeSetting}' must be Auto, Sensitive, or Insensitive; received '{value}'.");
         }
     }
 }

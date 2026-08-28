@@ -125,6 +125,26 @@ public sealed class DirectoryObjectIdentityResolverTests : BaseTests
     }
 
     [Fact]
+    public async Task ResolveAsync_TrustPolicyRejection_IsObservableAsIdentityUnsupported()
+    {
+        var directory = FileService.GetTempDirectory(
+            "directory-object-identity-trust-policy");
+        const string reason =
+            "Opaque FUSE file-handle persistence is not trusted automatically.";
+        var resolver = new DirectoryObjectIdentityResolver(
+            nativeIdentityCandidatesResolver: static _ =>
+                throw new PlatformNotSupportedException(reason));
+
+        var resolution = await resolver.ResolveAsync(directory);
+
+        Assert.False(resolution.IsAvailable);
+        Assert.Equal(
+            DirectoryObjectIdentityFailureKind.IdentityUnsupported,
+            resolution.FailureKind);
+        Assert.Equal(reason, resolution.UnavailableReason);
+    }
+
+    [Fact]
     public async Task ResolveExistingAsync_DifferentNativeGeneration_IsUnavailable()
     {
         var directory = FileService.GetTempDirectory("directory-object-identity-recreated");

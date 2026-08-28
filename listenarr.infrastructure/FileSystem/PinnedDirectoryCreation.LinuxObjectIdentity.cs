@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using Listenarr.Domain.Common;
 using Microsoft.Win32.SafeHandles;
 
 namespace Listenarr.Infrastructure.FileSystem;
@@ -24,24 +25,31 @@ internal sealed partial class PinnedDirectoryCreation
     private static IReadOnlyList<string> GetLinuxGenerationIdentityCandidates(
         SafeFileHandle handle)
     {
-        var candidates = new List<string>(2);
-        var fileHandle = TryGetLinuxFileHandleIdentity(
-            handle,
-            LinuxAtEmptyPath | LinuxAtHandleFid,
-            retryWithoutHandleFid: true);
-        if (!string.IsNullOrWhiteSpace(fileHandle))
-        {
-            candidates.Add($"fh:{fileHandle}");
-        }
+        // This PoC deliberately leaves the final carrier open: a root folder,
+        // storage endpoint, or mount provider can later select an explicit mode.
+        const FileSystemObjectIdentityTrustMode trustMode =
+            FileSystemObjectIdentityTrustMode.Auto;
+        var fileSystemType = LinuxFileSystemType.TryGet(
+            handle.DangerousGetHandle().ToInt32());
+        var trustsFileHandle = CanUseLinuxFileHandleAsDurableGeneration(
+            trustMode,
+            fileSystemType);
+        var fileHandle = trustsFileHandle
+            ? TryGetLinuxFileHandleIdentity(
+                handle,
+                LinuxAtEmptyPath | LinuxAtHandleFid,
+                retryWithoutHandleFid: true)
+            : null;
+        var hasInodeGeneration = false;
+        var inodeGeneration = 0U;
 
         try
         {
-            if (TryGetLinuxInodeGeneration(handle, out var generation))
-            {
-                candidates.Add(FormattableString.Invariant($"gen:{generation:x8}"));
-            }
+            hasInodeGeneration = TryGetLinuxInodeGeneration(
+                handle,
+                out inodeGeneration);
         }
-        catch (Win32Exception) when (candidates.Count > 0)
+        catch (Win32Exception) when (!string.IsNullOrWhiteSpace(fileHandle))
         {
             // A second, supplementary capability failing unexpectedly must not
             // invalidate a strong identity already obtained from this pinned
@@ -49,7 +57,75 @@ internal sealed partial class PinnedDirectoryCreation
             // still fail closed because their candidate will be absent.
         }
 
+        return CreateLinuxGenerationIdentityCandidatesFromEvidence(
+            fileHandle,
+            hasInodeGeneration,
+            inodeGeneration,
+            trustMode,
+            fileSystemType);
+    }
+
+    internal static IReadOnlyList<string>
+        CreateLinuxGenerationIdentityCandidatesFromEvidence(
+            string? fileHandle,
+            bool hasInodeGeneration,
+            uint inodeGeneration,
+            FileSystemObjectIdentityTrustMode trustMode,
+            long? fileSystemType)
+    {
+        var candidates = new List<string>(2);
+        var hasFileHandle = !string.IsNullOrWhiteSpace(fileHandle);
+        var trustsFileHandle = CanUseLinuxFileHandleAsDurableGeneration(
+            trustMode,
+            fileSystemType);
+        if (hasFileHandle && trustsFileHandle)
+        {
+            candidates.Add($"fh:{fileHandle}");
+        }
+        if (hasInodeGeneration)
+        {
+            candidates.Add(FormattableString.Invariant(
+                $"gen:{inodeGeneration:x8}"));
+        }
+
+        if (candidates.Count == 0 && !trustsFileHandle)
+        {
+            throw new PlatformNotSupportedException(
+                CreateUntrustedLinuxFileHandleReason(trustMode, fileSystemType));
+        }
+
         return candidates;
+    }
+
+    internal static bool CanUseLinuxFileHandleAsDurableGeneration(
+        FileSystemObjectIdentityTrustMode trustMode,
+        long? fileSystemType) =>
+        trustMode switch
+        {
+            FileSystemObjectIdentityTrustMode.Trusted => true,
+            FileSystemObjectIdentityTrustMode.Untrusted => false,
+            FileSystemObjectIdentityTrustMode.Auto =>
+                fileSystemType.HasValue
+                && fileSystemType.Value != LinuxFileSystemType.FuseSuperMagic,
+            _ => throw new ArgumentOutOfRangeException(nameof(trustMode))
+        };
+
+    private static string CreateUntrustedLinuxFileHandleReason(
+        FileSystemObjectIdentityTrustMode trustMode,
+        long? fileSystemType)
+    {
+        if (trustMode == FileSystemObjectIdentityTrustMode.Auto
+            && fileSystemType == LinuxFileSystemType.FuseSuperMagic)
+        {
+            return "Opaque FUSE file-handle persistence is not trusted automatically, and the filesystem exposes no independent inode generation.";
+        }
+
+        if (trustMode == FileSystemObjectIdentityTrustMode.Auto)
+        {
+            return "Opaque Linux file-handle persistence is not trusted automatically when the filesystem type is unavailable, and the filesystem exposes no independent inode generation.";
+        }
+
+        return "Opaque Linux file-handle persistence is disabled by the filesystem object identity trust policy, and the filesystem exposes no independent inode generation.";
     }
 
     private static string? TryGetLinuxFileHandleIdentity(

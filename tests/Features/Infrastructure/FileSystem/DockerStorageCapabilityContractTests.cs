@@ -6,6 +6,64 @@ namespace Listenarr.Tests.Features.Infrastructure.FileSystem;
 [Trait("Category", "Infrastructure")]
 public sealed class DockerStorageCapabilityContractTests : BaseTests
 {
+    [Theory]
+    [InlineData(
+        "Auto",
+        LinuxFileSystemType.FuseSuperMagic,
+        false)]
+    [InlineData(
+        "Auto",
+        0x58465342L,
+        true)]
+    [InlineData(
+        "Auto",
+        null,
+        false)]
+    [InlineData(
+        "Trusted",
+        LinuxFileSystemType.FuseSuperMagic,
+        true)]
+    [InlineData(
+        "Untrusted",
+        0x58465342L,
+        false)]
+    public void LinuxGenerationEvidence_TrustModeChangesOnlyFileHandleAdmission(
+        string trustModeName,
+        long? fileSystemType,
+        bool expectsFileHandle)
+    {
+        var trustMode = Enum.Parse<FileSystemObjectIdentityTrustMode>(trustModeName);
+        var candidates = PinnedDirectoryCreation
+            .CreateLinuxGenerationIdentityCandidatesFromEvidence(
+                "00000001:01020304",
+                hasInodeGeneration: true,
+                inodeGeneration: 0,
+                trustMode,
+                fileSystemType);
+
+        Assert.Equal(expectsFileHandle, candidates.Contains("fh:00000001:01020304"));
+        Assert.Contains("gen:00000000", candidates);
+    }
+
+    [Theory]
+    [InlineData(LinuxFileSystemType.FuseSuperMagic, "FUSE file-handle persistence")]
+    [InlineData(null, "filesystem type is unavailable")]
+    public void LinuxGenerationEvidence_AutoWithoutIndependentGeneration_FailsClearly(
+        long? fileSystemType,
+        string expectedReason)
+    {
+        var exception = Assert.Throws<PlatformNotSupportedException>(() =>
+            PinnedDirectoryCreation.CreateLinuxGenerationIdentityCandidatesFromEvidence(
+                "00000081:01020304",
+                hasInodeGeneration: false,
+                inodeGeneration: 0,
+                FileSystemObjectIdentityTrustMode.Auto,
+                fileSystemType));
+
+        Assert.Contains(expectedReason, exception.Message);
+        Assert.Contains("not trusted automatically", exception.Message);
+    }
+
     [Fact]
     public void Restart_StrongFileHandleThenBirthTimeOnly_FailsClosedRatherThanDowngradingAuthority()
     {

@@ -24,7 +24,6 @@ public sealed partial class FileSystemSemanticsResolver : IFileSystemSemanticsRe
     private const long LinuxF2fsSuperMagic = 0xf2f52010L;
     private const long LinuxTmpfsSuperMagic = 0x01021994L;
     private const long LinuxBcachefsSuperMagic = 0xca451a4eL;
-    private const int LinuxStatFsBufferBytes = 256;
     // Darwin bsd/sys/unistd.h: _PC_CASE_SENSITIVE.
     private const int MacPathConfCaseSensitive = 11;
 
@@ -411,7 +410,7 @@ public sealed partial class FileSystemSemanticsResolver : IFileSystemSemanticsRe
                 true,
                 flags,
                 0,
-                TryGetLinuxFileSystemType(descriptor));
+                LinuxFileSystemType.TryGet(descriptor));
         }
 
         return new LinuxFilesystemFlagsProbe(
