@@ -34,6 +34,7 @@ namespace Listenarr.Application.Downloads.Submission
         IHubBroadcaster hubBroadcaster,
         IDownloadHistoryService downloadHistoryService,
         DownloadClientSelector downloadClientSelector,
+        IBlocklistService blocklistService,
         DownloadCachedTorrentStore cachedTorrentStore,
         IDownloadSubmissionPreparer submissionPreparer,
         DirectDownloadWorkflow directDownloadWorkflow,
@@ -181,8 +182,8 @@ namespace Listenarr.Application.Downloads.Submission
                 }
             }
 
-            // Only consider non-rejected, score > 0 results
-            var topResult = scoredResults
+            // Only consider non-rejected, score > 0 results that are not already blocked
+            var topResult = (await BlockedReleaseFilter.ExcludeAsync(blocklistService, audiobookId, scoredResults, logger))
                 .Where(s => !s.IsRejected && s.TotalScore > 0)
                 .OrderByDescending(s => s.TotalScore)
                 .FirstOrDefault();
