@@ -94,6 +94,15 @@ namespace Listenarr.Application.Metadata.Contracts
         /// </summary>
         /// <param name="coverArtUrl">URL of the cover art image</param>
         /// <returns>Image data as byte array or null if failed</returns>
+        /// <summary>
+        /// Write the tags an import should leave behind: always the ASIN, and cover artwork
+        /// as well when <c>EmbedCoverArtInAudioFiles</c> is on. Both go in one open and save.
+        /// </summary>
+        Task WriteImportTagsAsync(
+            IAudiobookFileRegistrationLease registrationLease,
+            string asin,
+            string? coverArtUrl);
+
         Task<byte[]?> DownloadCoverArtAsync(string coverArtUrl);
     }
 }

@@ -236,6 +236,7 @@ export type ListenarrDomainConfigurationApplicationSettings = {
     multiFileNamingPattern?: string | null;
     enableMetadataProcessing?: boolean;
     enableCoverArtDownload?: boolean;
+    embedCoverArtInAudioFiles?: boolean;
     audnexusApiUrl?: string | null;
     maxConcurrentDownloads?: number;
     pollingIntervalSeconds?: number;
