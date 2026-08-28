@@ -4,6 +4,40 @@ namespace Listenarr.Application.Downloads.Import;
 
 public partial class DownloadImportService
 {
+    private static FileSystemCaseSensitivityMode ResolveSourceCaseSensitivityMode(
+        DownloadImportOptions? options,
+        bool extractedArchives)
+    {
+        // Extraction can mix the client's endpoint with Listenarr's staging
+        // endpoint. One mode cannot describe both, so use Auto for the full set.
+        return extractedArchives
+            ? FileSystemCaseSensitivityMode.Auto
+            : options?.SourceCaseSensitivityMode
+                ?? FileSystemCaseSensitivityMode.Auto;
+    }
+
+    private async Task<(
+        string? RootPath,
+        FileSystemPathSemantics? Semantics,
+        StringComparer Comparer)> ResolveSourceSemanticsAsync(
+            IReadOnlyCollection<string> candidateFiles,
+            FileSystemCaseSensitivityMode mode,
+            CancellationToken cancellationToken)
+    {
+        var rootPath = FileUtils.GetCommonDirectory(candidateFiles);
+        if (string.IsNullOrWhiteSpace(rootPath))
+        {
+            return (rootPath, null, StringComparer.Ordinal);
+        }
+
+        var semantics = await ResolvePathSemanticsAsync(
+            rootPath,
+            mode,
+            "Source filesystem identity is unavailable.",
+            cancellationToken);
+        return (rootPath, semantics, semantics.Comparer);
+    }
+
     private async Task<FileSystemSemanticsResolution> ResolveDestinationResolutionAsync(
         string basePath,
         CancellationToken cancellationToken)
@@ -209,12 +243,13 @@ public partial class DownloadImportService
 
     private async Task<FileSystemPathSemantics> ResolvePathSemanticsAsync(
         string path,
+        FileSystemCaseSensitivityMode mode,
         string defaultReason,
         CancellationToken cancellationToken)
     {
         var resolution = await semanticsResolver.ResolveAsync(
             path,
-            FileSystemCaseSensitivityMode.Auto,
+            mode,
             cancellationToken);
         return resolution.State == PathIdentityState.Valid
             ? resolution.Semantics

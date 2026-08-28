@@ -233,7 +233,76 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Processing
                 It.Is<Audiobook>(item => item.Id == audiobook.Id),
                 It.Is<List<string>>(files => files.Contains(archivePath)),
                 It.IsAny<CancellationToken>(),
-                It.Is<DownloadImportOptions>(options => options.ForceArchiveExtraction)), Times.Once);
+                It.Is<DownloadImportOptions>(options =>
+                    options.ForceArchiveExtraction
+                    && options.SourceCaseSensitivityMode
+                        == FileSystemCaseSensitivityMode.Auto)), Times.Once);
+        }
+
+        [Theory]
+        [InlineData(null)]
+        [InlineData("Sensitive")]
+        public async Task Import_ClientSourceCaseSensitivityMode_IsCarriedIntoOptions(
+            string? configuredMode)
+        {
+            var importService = new Mock<IDownloadImportService>();
+            importService
+                .Setup(service => service.ImportDownloadFilesAsync(
+                    It.IsAny<Audiobook>(),
+                    It.IsAny<List<string>>(),
+                    It.IsAny<CancellationToken>(),
+                    It.IsAny<DownloadImportOptions?>()))
+                .ReturnsAsync((Audiobook _, List<string> files,
+                    CancellationToken _, DownloadImportOptions? _) =>
+                    [ImportResult.ImportSuccess(
+                        FileAction.Copy,
+                        files[0],
+                        files[0],
+                        wasRegisteredToAudiobook: true)]);
+            Init(builder => builder.WithSingleton<IDownloadImportService>(
+                importService.Object));
+            var sourceDirectory = FileService.GetTempDirectory(
+                "client-source-semantics");
+            var sourceFile = await FileService.GetFileAsync(
+                sourceDirectory,
+                "book.m4b");
+            downloadClientGatewayMock.SourceFiles = [sourceFile];
+            var clientBuilder = new DownloadClientConfigurationBuilder();
+            if (configuredMode != null)
+            {
+                clientBuilder.WithSettings(
+                    DownloadClientConfiguration.SourceCaseSensitivityModeSetting,
+                    configuredMode);
+            }
+            var client = await _downloadClientConfigurationRepository.SaveAsync(
+                clientBuilder.Build());
+            var audiobook = await CreateAudiobook();
+            var download = await _downloadRepository.AddAsync(
+                new DownloadBuilder()
+                    .WithAudiobook(audiobook)
+                    .WithDownloadClientConfiguration(client)
+                    .WithPath(sourceDirectory)
+                    .WithCompletedStatus(DateTime.UtcNow)
+                    .Build());
+            await _downloadProcessingJobRepository.AddAsync(
+                new DownloadProcessingJobBuilder()
+                    .WithDownload(download)
+                    .Build());
+
+            await _provider.GetRequiredService<DownloadProcessingJobProcessor>()
+                .ProcessQueueAsync(CancellationToken.None);
+
+            importService.Verify(service => service.ImportDownloadFilesAsync(
+                It.Is<Audiobook>(item => item.Id == audiobook.Id),
+                It.Is<List<string>>(files => files.Contains(sourceFile)),
+                It.IsAny<CancellationToken>(),
+                It.Is<DownloadImportOptions?>(options =>
+                    configuredMode == null
+                        ? options == null
+                        : options != null
+                            && options.SourceCaseSensitivityMode
+                                == FileSystemCaseSensitivityMode.Sensitive)),
+                Times.Once);
         }
 
         [Fact]

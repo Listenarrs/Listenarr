@@ -350,6 +350,61 @@ namespace Listenarr.Tests.Features.Application.Downloads.Import
         }
 
         [Fact]
+        public async Task ImportDownloadFilesAsync_ExplicitSourceMode_BypassesUnavailableAuto()
+        {
+            await _applicationSettingsRepository.SaveAsync(
+                new ApplicationSettingsBuilder()
+                    .WithCopyFileOnCompleted()
+                    .WithoutMetadataProcessing()
+                    .WithFileNamingPattern("{Title}")
+                    .WithMultiFileNamingPattern("{Title}")
+                    .Build());
+            var destination = FileService.GetTempDirectory(
+                "explicit-source-semantics-library");
+            var sourceDirectory = FileService.GetTempDirectory(
+                "explicit-source-semantics-download");
+            var sourceFile = await FileService.GetFileAsync(
+                sourceDirectory,
+                "chapter.mp3");
+            var audiobook = await _audiobookRepository.AddAsync(
+                new AudiobookBuilder()
+                    .WithTitle("Explicit Source Semantics")
+                    .WithBasePath(destination)
+                    .Build());
+            var resolver = new RejectAutoAtPathSemanticsResolver(
+                _provider.GetRequiredService<IFileSystemSemanticsResolver>(),
+                sourceDirectory);
+            var service = ActivatorUtilities.CreateInstance<DownloadImportService>(
+                _provider,
+                resolver);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.ImportDownloadFilesAsync(audiobook, [sourceFile]));
+            var result = Assert.Single(await service.ImportDownloadFilesAsync(
+                audiobook,
+                [sourceFile],
+                options: new DownloadImportOptions(
+                    SourceCaseSensitivityMode:
+                        FileSystemCaseSensitivityMode.Sensitive)));
+
+            Assert.True(result.Success);
+            Assert.Contains(
+                resolver.Calls,
+                call => string.Equals(
+                        call.Path,
+                        sourceDirectory,
+                        StringComparison.Ordinal)
+                    && call.Mode == FileSystemCaseSensitivityMode.Auto);
+            Assert.Contains(
+                resolver.Calls,
+                call => string.Equals(
+                        call.Path,
+                        sourceDirectory,
+                        StringComparison.Ordinal)
+                    && call.Mode == FileSystemCaseSensitivityMode.Sensitive);
+        }
+
+        [Fact]
         public async Task ImportDownloadFilesAsync_StaleAudiobookArgument_UsesCurrentPersistedBasePath()
         {
             var oldBasePath = FileService.GetTempDirectory("download-import-stale-old");
@@ -877,14 +932,18 @@ namespace Listenarr.Tests.Features.Application.Downloads.Import
         }
 
         [Fact]
-        [Trait("Scenario", "ForcedArchiveExtractionImportsContainedFile")]
-        public async Task ArchiveExtraction_ForcedByDownloadPlan_ImportsWhenGlobalSettingIsDisabled()
+        [Trait("Scenario", "ForcedArchiveExtractionMixedSourcesUseAutoSemantics")]
+        public async Task ArchiveExtraction_ForcedByDownloadPlan_MixedSourcesUseAutoSemantics()
         {
             // Given
             var destinationDirectory = FileService.GetTempDirectory("forced-archive-destination");
             var inner = FileService.GetTempDirectory("forced-archive-inner");
             _ = await FileService.GetFileAsync(inner, "forced-audio.mp3");
-            var zipPath = Path.Join(FileService.GetTempPath(), "forced-release.zip");
+            var clientDirectory = FileService.GetTempDirectory("forced-archive-client");
+            var looseAudioPath = await FileService.GetFileAsync(
+                clientDirectory,
+                "loose-audio.mp3");
+            var zipPath = Path.Join(clientDirectory, "forced-release.zip");
             ZipFile.CreateFromDirectory(inner, zipPath);
             var audiobook = await CreateAudiobook();
             audiobook.BasePath = Path.Join(destinationDirectory, "Fake Author/Fake Title/Forced Archive");
@@ -897,17 +956,33 @@ namespace Listenarr.Tests.Features.Application.Downloads.Import
                 .Build());
 
             // When
-            var downloadImportService = _provider.GetRequiredService<IDownloadImportService>();
-            await downloadImportService.ImportDownloadFilesAsync(
+            var resolver = new RecordingSemanticsResolver(
+                _provider.GetRequiredService<IFileSystemSemanticsResolver>());
+            var downloadImportService = ActivatorUtilities
+                .CreateInstance<DownloadImportService>(_provider, resolver);
+            var results = await downloadImportService.ImportDownloadFilesAsync(
                 audiobook,
-                [zipPath],
+                [zipPath, looseAudioPath],
                 CancellationToken.None,
-                new DownloadImportOptions(ForceArchiveExtraction: true));
+                new DownloadImportOptions(
+                    ForceArchiveExtraction: true,
+                    SourceCaseSensitivityMode:
+                        FileSystemCaseSensitivityMode.Sensitive));
 
             // Then
-            var expected = Path.Join(audiobook.BasePath, "forced-audio.mp3");
-            Assert.True(File.Exists(expected));
-            Assert.Single(await _audiobookFileRepository.GetAllAsync());
+            Assert.True(File.Exists(Path.Join(audiobook.BasePath, "forced-audio.mp3")));
+            Assert.True(File.Exists(Path.Join(audiobook.BasePath, "loose-audio.mp3")));
+            Assert.Equal(2, results.Count);
+            Assert.Equal(2, (await _audiobookFileRepository.GetAllAsync()).Count);
+            var sourceRoot = FileUtils.GetCommonDirectory(
+                results.Select(result => result.SourcePath!).ToList());
+            Assert.Contains(
+                resolver.Calls,
+                call => string.Equals(
+                        call.Path,
+                        sourceRoot,
+                        StringComparison.Ordinal)
+                    && call.Mode == FileSystemCaseSensitivityMode.Auto);
         }
 
         [Fact]
@@ -1690,6 +1765,36 @@ namespace Listenarr.Tests.Features.Application.Downloads.Import
                 CancellationToken cancellationToken = default)
             {
                 Calls.Add((path, mode));
+                return inner.ResolveAsync(path, mode, cancellationToken);
+            }
+        }
+
+        private sealed class RejectAutoAtPathSemanticsResolver(
+            IFileSystemSemanticsResolver inner,
+            string rejectedPath) : IFileSystemSemanticsResolver
+        {
+            public List<(string Path, FileSystemCaseSensitivityMode Mode)> Calls { get; } = [];
+
+            public ValueTask<FileSystemSemanticsResolution> ResolveAsync(
+                string path,
+                FileSystemCaseSensitivityMode mode =
+                    FileSystemCaseSensitivityMode.Auto,
+                CancellationToken cancellationToken = default)
+            {
+                Calls.Add((path, mode));
+                if (string.Equals(path, rejectedPath, StringComparison.Ordinal)
+                    && mode == FileSystemCaseSensitivityMode.Auto)
+                {
+                    return ValueTask.FromResult(
+                        new FileSystemSemanticsResolution(
+                            new FileSystemPathSemantics(
+                                FileSystemPathSemantics.CurrentHostDefault.Syntax,
+                                FileSystemCaseSensitivity.Unknown),
+                            PathIdentityState.Unavailable,
+                            path,
+                            "Auto source semantics intentionally unavailable for this test."));
+                }
+
                 return inner.ResolveAsync(path, mode, cancellationToken);
             }
         }

@@ -1,7 +1,12 @@
 
+using Listenarr.Domain.Common;
+
 namespace Listenarr.Application.Downloads.Contracts
 {
-    public sealed record DownloadImportOptions(bool ForceArchiveExtraction = false);
+    public sealed record DownloadImportOptions(
+        bool ForceArchiveExtraction = false,
+        FileSystemCaseSensitivityMode SourceCaseSensitivityMode =
+            FileSystemCaseSensitivityMode.Auto);
 
     /// <summary>
     /// Download import responsible for processing a given download importation

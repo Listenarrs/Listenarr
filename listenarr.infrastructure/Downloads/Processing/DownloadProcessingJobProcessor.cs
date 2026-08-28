@@ -18,6 +18,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
 using System.Text.Json;
+using Listenarr.Domain.Common;
 
 namespace Listenarr.Infrastructure.Downloads.Processing
 {
@@ -277,11 +278,19 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                 try
                 {
                     var downloadImportService = scope.ServiceProvider.GetRequiredService<IDownloadImportService>();
-                    var importOptions = isDirectDownload && string.Equals(
+                    var forceArchiveExtraction = isDirectDownload && string.Equals(
                         download.GetMetadataString(DirectDownloadMetadataKeys.RequiresArchiveExtraction),
                         bool.TrueString,
-                        StringComparison.OrdinalIgnoreCase)
-                        ? new DownloadImportOptions(ForceArchiveExtraction: true)
+                        StringComparison.OrdinalIgnoreCase);
+                    var sourceCaseSensitivityMode =
+                        client?.GetSourceCaseSensitivityMode()
+                        ?? FileSystemCaseSensitivityMode.Auto;
+                    var importOptions = forceArchiveExtraction
+                        || sourceCaseSensitivityMode
+                            != FileSystemCaseSensitivityMode.Auto
+                        ? new DownloadImportOptions(
+                            forceArchiveExtraction,
+                            sourceCaseSensitivityMode)
                         : null;
                     results = await downloadImportService.ImportDownloadFilesAsync(
                         audiobook,
