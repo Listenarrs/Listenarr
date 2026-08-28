@@ -95,6 +95,17 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 var trimmed = urlBaseObj?.ToString()?.Trim().TrimEnd('/');
                 if (!string.IsNullOrEmpty(trimmed))
                 {
+                    // A pasted full URL (e.g. "https://seedbox.example.com/qbittorrent") would
+                    // otherwise be concatenated onto the authority as-is, producing a broken URL
+                    // instead of a clear error. Reject anything that parses as an absolute URI -
+                    // this field only accepts a path.
+                    if (Uri.TryCreate(trimmed, UriKind.Absolute, out _))
+                    {
+                        throw new QbittorrentException(
+                            $"qBittorrent URL Base must be a path (e.g. \"/qbittorrent\"), not a full URL. " +
+                            $"Remove the scheme and host from \"{trimmed}\" and enter only the path.");
+                    }
+
                     return trimmed.StartsWith('/') ? trimmed : "/" + trimmed;
                 }
             }
