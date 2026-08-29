@@ -59,7 +59,7 @@ public partial class ScanQueueService : IScanQueueService
                 if (string.IsNullOrWhiteSpace(command.Path)
                     || !pathIdentity.HasValue
                     || !physicalIdentity.HasValue
-                    || !IsCompletePhysicalIdentity(physicalIdentity.Value))
+                    || !IsUsablePhysicalProof(physicalIdentity.Value))
                 {
                     throw new InvalidOperationException(
                         "A preauthorized path scan must carry its path plus lexical and physical authorization before queue publication.");
@@ -126,10 +126,10 @@ public partial class ScanQueueService : IScanQueueService
         }
 
         claim.TargetIdentity.ValidateForPath(claim.TargetPath);
-        if (!IsCompletePhysicalIdentity(physicalIdentity))
+        if (!physicalIdentity.HasDurableGenerationProof)
         {
             throw new ArgumentException(
-                "Move handoff physical authority is incomplete.",
+                "Move handoff physical authority requires durable generation proof.",
                 nameof(physicalIdentity));
         }
 
@@ -368,10 +368,10 @@ public partial class ScanQueueService : IScanQueueService
         }
     }
 
-    private static bool IsCompletePhysicalIdentity(
+    private static bool IsUsablePhysicalProof(
         ScanPathPhysicalIdentity physicalIdentity) =>
-        !string.IsNullOrWhiteSpace(physicalIdentity.BoundaryObjectIdentity)
-        && !string.IsNullOrWhiteSpace(physicalIdentity.ScanRootObjectIdentity);
+        physicalIdentity.HasDurableGenerationProof
+        || physicalIdentity.ProofKind == ScanPathPhysicalProofKind.PinnedPathOnly;
 
     public bool TryGetJob(Guid id, out ScanJob? job) => _jobs.TryGetValue(id, out job);
 

@@ -130,6 +130,7 @@ internal static class MoveScanHandoffDispatchWorkflow
             if (!authorization.IsAuthorized
                 || !authorization.Identity.HasValue
                 || !authorization.PhysicalIdentity.HasValue
+                || !authorization.PhysicalIdentity.Value.HasDurableGenerationProof
                 || !FileSystemPathIdentity.AreEquivalentEndpoints(
                     claim.TargetPath,
                     claim.TargetIdentity,
@@ -145,6 +146,8 @@ internal static class MoveScanHandoffDispatchWorkflow
                 claim.TargetPath,
                 claim.TargetManifest,
                 claim.TargetIdentity.Semantics,
+                authorization.Identity.Value.BoundaryPath,
+                authorization.PhysicalIdentity.Value.BoundaryObjectIdentity!,
                 cancellationToken);
 
             var currentAuthorization = await authorizationService.AuthorizeAsync(

@@ -8,9 +8,32 @@ namespace Listenarr.Infrastructure.Persistence.Repositories;
 public sealed partial class EfMoveScanHandoffStore(
     IDbContextFactory<ListenArrDbContext> dbFactory) : IMoveScanHandoffStore
 {
-    public async Task<MoveCompletionCommitResult> CommitMoveCompletionAsync(
+    public Task<MoveCompletionCommitResult> CommitMoveCompletionAsync(
         MoveCompletionCommit command,
+        CancellationToken cancellationToken = default) =>
+        CommitMoveCompletionCoreAsync(
+            command,
+            commitValidation: null,
+            cancellationToken);
+
+    public Task<MoveCompletionCommitResult> CommitMoveCompletionAsync(
+        MoveCompletionCommit command,
+        Func<CancellationToken, Task<RegistrationPublicationMatchOutcome>>
+            commitValidation,
         CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(commitValidation);
+        return CommitMoveCompletionCoreAsync(
+            command,
+            commitValidation,
+            cancellationToken);
+    }
+
+    private async Task<MoveCompletionCommitResult> CommitMoveCompletionCoreAsync(
+        MoveCompletionCommit command,
+        Func<CancellationToken, Task<RegistrationPublicationMatchOutcome>>?
+            commitValidation,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -77,7 +100,9 @@ public sealed partial class EfMoveScanHandoffStore(
                     EventType = "Moved",
                     Outcome = HistoryOutcome.Succeeded,
                     Source = "Move",
-                    Message = $"Moved audiobook files from {command.Source} to {command.Target}",
+                    Message = command.SourceRetained
+                        ? $"Copied audiobook files from {command.Source} to {command.Target}; source retained"
+                        : $"Moved audiobook files from {command.Source} to {command.Target}",
                     Timestamp = now,
                     CorrelationId = correlationId,
                     IdempotencyKey = moveIdempotencyKey,
@@ -85,7 +110,8 @@ public sealed partial class EfMoveScanHandoffStore(
                     {
                         JobId = command.MoveJobId,
                         Source = command.Source,
-                        Target = command.Target
+                        Target = command.Target,
+                        command.SourceRetained
                     })
                 };
                 db.History.Add(moveHistory);
@@ -151,7 +177,44 @@ public sealed partial class EfMoveScanHandoffStore(
             job.LeaseExpiresAt = null;
             job.UpdatedAt = now;
 
+            if (commitValidation != null && transaction == null)
+            {
+                var validation = await commitValidation(CancellationToken.None);
+                if (validation == RegistrationPublicationMatchOutcome.Unavailable)
+                {
+                    throw new IOException(
+                        "The finalized move target is temporarily unavailable while durable completion is being committed.");
+                }
+                if (validation != RegistrationPublicationMatchOutcome.Match)
+                {
+                    throw new MoveNeedsAttentionException(
+                        "The finalized move target changed before durable completion could be committed.");
+                }
+            }
+
             await db.SaveChangesAsync(cancellationToken);
+            if (commitValidation != null && transaction != null)
+            {
+                var validation = await commitValidation(CancellationToken.None);
+                if (validation == RegistrationPublicationMatchOutcome.Unavailable)
+                {
+                    if (transaction != null)
+                    {
+                        await transaction.RollbackAsync(CancellationToken.None);
+                    }
+                    throw new IOException(
+                        "The finalized move target is temporarily unavailable while durable completion is being committed.");
+                }
+                if (validation != RegistrationPublicationMatchOutcome.Match)
+                {
+                    if (transaction != null)
+                    {
+                        await transaction.RollbackAsync(CancellationToken.None);
+                    }
+                    throw new MoveNeedsAttentionException(
+                        "The finalized move target changed before durable completion could be committed.");
+                }
+            }
             if (transaction != null)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -326,7 +389,7 @@ public sealed partial class EfMoveScanHandoffStore(
                 .ToListAsync(cancellationToken);
             var targetManifest = persistedEntries
                 .Where(entry =>
-                    !MoveManifestIdentity.IsTargetBoundaryAuthorization(entry))
+                    !MoveManifestIdentity.IsBoundaryAuthorization(entry))
                 .ToList();
             if (!targetManifest.Any(entry =>
                     entry.EntryType == MoveJobEntryType.File))

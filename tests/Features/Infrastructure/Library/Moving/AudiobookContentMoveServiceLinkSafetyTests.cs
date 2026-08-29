@@ -98,6 +98,135 @@ public partial class AudiobookContentMoveServiceTests
         }
     }
 
+    [DirectoryLinkFact]
+    public async Task MoveContentsAsync_TargetParentReplacedByLinkAfterValidation_DoesNotPublishOutsideTarget()
+    {
+        var root = FileService.GetTempDirectory("content-move-target-parent-race-root");
+        var source = Path.Join(root, "source");
+        var sourceDisc = Path.Join(source, "CD1");
+        Directory.CreateDirectory(sourceDisc);
+        var sourceFile = await FileService.GetFileAsync(
+            sourceDisc,
+            "book.m4b",
+            "audio");
+        var target = Path.Join(root, "target");
+        var targetDisc = Path.Join(target, "CD1");
+        var displacedTargetDisc = Path.Join(root, "target-cd1-original");
+        var external = FileService.GetTempDirectory(
+            "content-move-target-parent-race-external");
+        var request = await CreateLeasedMoveRequestAsync(
+            source,
+            target,
+            sourceCleanupBoundary: root,
+            executionProtocolVersion:
+                MoveExecutionProtocol.MarkerlessDatabaseState);
+        var hookRan = false;
+        void ReplaceTargetParent(string path)
+        {
+            if (hookRan
+                || !string.Equals(path, targetDisc, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            hookRan = true;
+            Directory.Move(targetDisc, displacedTargetDisc);
+            Assert.True(
+                TryCreateDirectoryLink(targetDisc, external),
+                "The target-parent replacement link could not be created.");
+        }
+
+        using var hook = ExclusiveDirectoryCreator.PushBeforeOpenParentHook(
+            ReplaceTargetParent);
+        try
+        {
+            var service = _provider.GetRequiredService<AudiobookContentMoveService>();
+            await Assert.ThrowsAnyAsync<Exception>(() =>
+                service.MoveContentsAsync(request, CancellationToken.None));
+
+            Assert.True(hookRan);
+            Assert.Equal("audio", await File.ReadAllTextAsync(sourceFile));
+            Assert.False(File.Exists(Path.Join(external, "book.m4b")));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(external));
+            Assert.True(Directory.Exists(displacedTargetDisc));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(displacedTargetDisc));
+        }
+        finally
+        {
+            TryRemoveDirectoryLink(targetDisc);
+            if (Directory.Exists(displacedTargetDisc)
+                && !Directory.Exists(targetDisc))
+            {
+                Directory.Move(displacedTargetDisc, targetDisc);
+            }
+        }
+    }
+
+    [WindowsFact]
+    public async Task MoveContentsAsync_TargetParentReplacedByJunctionAfterValidation_DoesNotPublishOutsideTarget()
+    {
+        var root = FileService.GetTempDirectory(
+            "content-move-target-parent-junction-race-root");
+        var source = Path.Join(root, "source");
+        var sourceDisc = Path.Join(source, "CD1");
+        Directory.CreateDirectory(sourceDisc);
+        var sourceFile = await FileService.GetFileAsync(
+            sourceDisc,
+            "book.m4b",
+            "audio");
+        var target = Path.Join(root, "target");
+        var targetDisc = Path.Join(target, "CD1");
+        var displacedTargetDisc = Path.Join(root, "target-cd1-original");
+        var external = FileService.GetTempDirectory(
+            "content-move-target-parent-junction-race-external");
+        var request = await CreateLeasedMoveRequestAsync(
+            source,
+            target,
+            sourceCleanupBoundary: root,
+            executionProtocolVersion:
+                MoveExecutionProtocol.MarkerlessDatabaseState);
+        var hookRan = false;
+        void ReplaceTargetParent(string path)
+        {
+            if (hookRan
+                || !string.Equals(path, targetDisc, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            hookRan = true;
+            Directory.Move(targetDisc, displacedTargetDisc);
+            Assert.True(
+                TryCreateWindowsJunction(targetDisc, external),
+                "The target-parent replacement junction could not be created.");
+        }
+
+        using var hook = ExclusiveDirectoryCreator.PushBeforeOpenParentHook(
+            ReplaceTargetParent);
+        try
+        {
+            var service = _provider.GetRequiredService<AudiobookContentMoveService>();
+            await Assert.ThrowsAnyAsync<Exception>(() =>
+                service.MoveContentsAsync(request, CancellationToken.None));
+
+            Assert.True(hookRan);
+            Assert.Equal("audio", await File.ReadAllTextAsync(sourceFile));
+            Assert.False(File.Exists(Path.Join(external, "book.m4b")));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(external));
+            Assert.True(Directory.Exists(displacedTargetDisc));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(displacedTargetDisc));
+        }
+        finally
+        {
+            TryRemoveDirectoryLink(targetDisc);
+            if (Directory.Exists(displacedTargetDisc)
+                && !Directory.Exists(targetDisc))
+            {
+                Directory.Move(displacedTargetDisc, targetDisc);
+            }
+        }
+    }
+
     [FileLinkFact]
     public async Task MoveContentsAsync_NestedFileSymlink_BlocksAtomicRename()
     {

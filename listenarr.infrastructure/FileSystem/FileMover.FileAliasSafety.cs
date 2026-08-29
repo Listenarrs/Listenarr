@@ -35,7 +35,9 @@ public partial class FileMover
             {
                 try
                 {
-                    var resolution = await _semanticsResolver.ResolveAsync(sourcePath);
+                    var resolution = await _semanticsResolver.ResolveAsync(
+                        sourcePath,
+                        FileSystemCaseSensitivityMode.Auto);
                     if (resolution.State == PathIdentityState.Valid
                         && FileSystemPathIdentity.AreEquivalent(
                             sourceResolution.ResolvedPath,

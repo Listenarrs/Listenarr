@@ -214,6 +214,7 @@
     <LibraryImportFooter
       v-if="rootFoldersStore.folders.length > 0"
       :folders="rootFoldersStore.folders"
+      :source-folder="selectedSourceFolder"
     />
   </div>
 
@@ -264,6 +265,9 @@ const configStore = useConfigurationStore()
 const filesystemReadinessStore = useFilesystemReadinessStore()
 
 const selectedFolderId = ref<number | null>(null)
+const selectedSourceFolder = computed(() =>
+  rootFoldersStore.folders.find((folder) => folder.id === selectedFolderId.value),
+)
 const sortKey = ref<LibraryImportSortKey>('folder')
 const sortDirection = ref<LibraryImportSortDirection>('asc')
 const columnWidths = ref<LibraryImportColumnWidths>({ ...DEFAULT_LIBRARY_IMPORT_COLUMN_WIDTHS })

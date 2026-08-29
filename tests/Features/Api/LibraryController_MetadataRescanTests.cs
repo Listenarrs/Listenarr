@@ -39,16 +39,14 @@ namespace Listenarr.Tests.Features.Api
             var metadataMock = new Mock<IAudiobookMetadataService>();
             metadataMock
                 .Setup(service => service.GetMetadataAsync("B0MOVEFENC", "us", false))
-                .ReturnsAsync(new
-                {
-                    metadata = new AudibleBookResponse
+                .ReturnsAsync(new AudiobookMetadataEnvelope(
+                    new AudibleBookResponse
                     {
                         Asin = "B0MOVEFENC",
                         Title = "Provider Title"
                     },
-                    source = "Audible",
-                    sourceUrl = "https://audible.com"
-                });
+                    "Audible",
+                    "https://audible.com"));
             var factory = _factory.WithWebHostBuilder(builder =>
             {
                 builder.ConfigureServices(services =>
@@ -128,9 +126,8 @@ namespace Listenarr.Tests.Features.Api
             var metadataMock = new Mock<IAudiobookMetadataService>();
             metadataMock
                 .Setup(m => m.GetMetadataAsync("B0TESTASIN", "us", false))
-                .ReturnsAsync(new
-                {
-                    metadata = new AudibleBookResponse
+                .ReturnsAsync(new AudiobookMetadataEnvelope(
+                    new AudibleBookResponse
                     {
                         Asin = "B0TESTASIN",
                         Title = "Fixed Metadata Title",
@@ -149,9 +146,8 @@ namespace Listenarr.Tests.Features.Api
                         Language = "English",
                         Isbn = "9781234567897"
                     },
-                    source = "Audible",
-                    sourceUrl = "https://audible.de"
-                });
+                    "Audible",
+                    "https://audible.de"));
 
             var asinLookupMock = new Mock<IAsinLookupService>();
 
@@ -261,16 +257,15 @@ namespace Listenarr.Tests.Features.Api
                     asin,
                     "us",
                     false))
-                .ReturnsAsync(new
-                {
-                    metadata = new AudibleBookResponse
+                .ReturnsAsync(new AudiobookMetadataEnvelope(
+                    new AudibleBookResponse
                     {
                         Asin = asin,
                         Title = "Committed Before Image",
                         ImageUrl = sourceImage
                     },
-                    source = "Audible"
-                });
+                    "Audible",
+                    "https://api.audible.com"));
             Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program>?
                 configuredFactory = null;
             var imageCache = new Mock<IImageCacheService>();
@@ -357,15 +352,14 @@ namespace Listenarr.Tests.Features.Api
                 {
                     lookupStarted.SetResult();
                     await releaseLookup.Task;
-                    return new
-                    {
-                        metadata = new AudibleBookResponse
+                    return new AudiobookMetadataEnvelope(
+                        new AudibleBookResponse
                         {
                             Asin = "B0PATHRACE",
                             Title = "Updated During Race"
                         },
-                        source = "Audible"
-                    };
+                        "Audible",
+                        "https://api.audible.com");
                 });
             var factory = _factory.WithWebHostBuilder(builder =>
             {
@@ -439,15 +433,14 @@ namespace Listenarr.Tests.Features.Api
                 {
                     lookupStarted.SetResult();
                     await releaseLookup.Task;
-                    return new
-                    {
-                        metadata = new AudibleBookResponse
+                    return new AudiobookMetadataEnvelope(
+                        new AudibleBookResponse
                         {
                             Asin = "B0METARACE",
                             Title = "Provider Title"
                         },
-                        source = "Audible"
-                    };
+                        "Audible",
+                        "https://api.audible.com");
                 });
             var factory = _factory.WithWebHostBuilder(builder =>
             {
@@ -523,15 +516,14 @@ namespace Listenarr.Tests.Features.Api
                 {
                     lookupStarted.SetResult();
                     await releaseLookup.Task;
-                    return new
-                    {
-                        metadata = new AudibleBookResponse
+                    return new AudiobookMetadataEnvelope(
+                        new AudibleBookResponse
                         {
                             Asin = asin,
                             Title = "Provider Title"
                         },
-                        source = "Audible"
-                    };
+                        "Audible",
+                        "https://api.audible.com");
                 });
             var factory = _factory.WithWebHostBuilder(builder =>
             {
@@ -596,15 +588,14 @@ namespace Listenarr.Tests.Features.Api
             var metadataMock = new Mock<IAudiobookMetadataService>();
             metadataMock
                 .Setup(m => m.GetMetadataAsync("B0COOLDWN1", "us", false))
-                .ReturnsAsync(new
-                {
-                    metadata = new AudibleBookResponse
+                .ReturnsAsync(new AudiobookMetadataEnvelope(
+                    new AudibleBookResponse
                     {
                         Asin = "B0COOLDWN1",
                         Title = "Cooldown Test"
                     },
-                    source = "Audible"
-                });
+                    "Audible",
+                    "https://api.audible.com"));
 
             var factory = _factory.WithWebHostBuilder(builder =>
             {
@@ -668,7 +659,7 @@ namespace Listenarr.Tests.Features.Api
             var metadataMock = new Mock<IAudiobookMetadataService>();
             metadataMock
                 .Setup(m => m.GetMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), false))
-                .ReturnsAsync((object?)null);
+                .ReturnsAsync((AudiobookMetadataEnvelope?)null);
 
             var factory = _factory.WithWebHostBuilder(builder =>
             {

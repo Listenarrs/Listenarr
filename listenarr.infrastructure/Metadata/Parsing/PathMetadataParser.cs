@@ -32,6 +32,7 @@ namespace Listenarr.Infrastructure.Metadata.Parsing
         public string? Narrator { get; set; }
         public string? CoverPath { get; set; }
         public string? Asin { get; set; }
+        internal string? BookFolderPath { get; set; }
     }
 
     /// <summary>
@@ -57,7 +58,20 @@ namespace Listenarr.Infrastructure.Metadata.Parsing
         public static PathParsedMetadata Parse(
             string filePath,
             string rootFolderPath,
-            FileSystemPathSemantics semantics)
+            FileSystemPathSemantics semantics) =>
+            ParseCore(filePath, rootFolderPath, semantics, includeFilesystemMetadata: true);
+
+        internal static PathParsedMetadata ParsePathOnly(
+            string filePath,
+            string rootFolderPath,
+            FileSystemPathSemantics semantics) =>
+            ParseCore(filePath, rootFolderPath, semantics, includeFilesystemMetadata: false);
+
+        private static PathParsedMetadata ParseCore(
+            string filePath,
+            string rootFolderPath,
+            FileSystemPathSemantics semantics,
+            bool includeFilesystemMetadata)
         {
             var result = new PathParsedMetadata();
 
@@ -112,9 +126,16 @@ namespace Listenarr.Infrastructure.Metadata.Parsing
                     result.Series = folderParts[1];
             }
 
-            // Build absolute path to the book folder for sidecar reading
+            // Keep the matched book directory available to hardened callers that
+            // need to read sidecars through pinned handles rather than public paths.
             var bookFolderPath = Path.Join(normalizedRoot,
                 Path.Join(folderParts[..(bookFolderIndex + 1)]));
+            result.BookFolderPath = bookFolderPath;
+
+            if (!includeFilesystemMetadata)
+            {
+                return result;
+            }
 
             TryReadSidecar(bookFolderPath, "desc.txt", content =>
                 result.Description = content.Length > 2000 ? content[..2000] : content);

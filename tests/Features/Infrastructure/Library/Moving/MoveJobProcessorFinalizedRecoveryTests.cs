@@ -47,9 +47,23 @@ public partial class MoveJobProcessorTests
 
         await processor.ProcessJobAsync(state.Job, CancellationToken.None);
 
+        var persisted = Assert.IsType<MoveJob>(
+            await state.Queue.GetJobAsync(state.Job.Id));
+        Assert.True(
+            persisted.Status == MoveJobStatus.Completed,
+            $"Expected Completed but found {persisted.Status}: {persisted.Error}");
+        Assert.Null(persisted.Error);
         Assert.Equal(
-            MoveJobStatus.Completed,
-            (await state.Queue.GetJobAsync(state.Job.Id))?.Status);
+            MoveJobEntryCleanupState.Retained,
+            persisted.SourceDirectoryCleanupState);
+        Assert.All(
+            persisted.Entries.Where(entry =>
+                entry.EntryType == MoveJobEntryType.File
+                && !MoveManifestIdentity.IsBoundaryAuthorization(entry)),
+            entry => Assert.Equal(
+                MoveJobEntryCleanupState.Deleted,
+                entry.CleanupState));
+        Assert.False(MoveJobPublicProjection.IsSourceRetained(persisted));
         Assert.True(File.Exists(Path.Join(state.Target, "book.m4b")));
     }
 
@@ -201,6 +215,339 @@ public partial class MoveJobProcessorTests
             MoveJobStatus.NeedsAttention,
             (await state.Queue.GetJobAsync(state.Job.Id))?.Status);
         Assert.Empty(Directory.EnumerateFileSystemEntries(state.Target));
+    }
+
+    [Fact]
+    public async Task ProcessJobAsync_RetryAfterPublishedBeforeSourceCleanup_ResumesFilesystemWorkflow()
+    {
+        var source = FileService.GetTempDirectory(
+            "move-processor-published-before-cleanup-src");
+        var sourceFile = await FileService.GetFileAsync(
+            source,
+            "book.m4b",
+            "verified audio");
+        var target = Path.Join(
+            FileService.GetTempPath(),
+            $"move-processor-published-before-cleanup-dst-{Guid.NewGuid():N}");
+        var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+        {
+            Title = "Published Before Cleanup Recovery",
+            BasePath = source
+        });
+        var (queue, job) = await CreateQueuedMoveJobAsync(
+            audiobook,
+            target,
+            source,
+            deleteEmptySource: false);
+        var faultingService = new AudiobookContentMoveService(
+            _provider.GetRequiredService<ILogger<AudiobookContentMoveService>>(),
+            _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>(),
+            TimeProvider.System,
+            new ThrowUnexpectedAfterPublish());
+        var faultingProcessor = ActivatorUtilities.CreateInstance<MoveJobProcessor>(
+            _provider,
+            faultingService);
+
+        await faultingProcessor.ProcessJobAsync(job, CancellationToken.None);
+
+        var failed = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
+        Assert.Equal(MoveJobStatus.Failed, failed.Status);
+        Assert.Equal(MoveJobPhase.Published, failed.Phase);
+        Assert.True(File.Exists(sourceFile));
+        Assert.Equal(
+            "verified audio",
+            await File.ReadAllTextAsync(Path.Join(target, "book.m4b")));
+
+        var requeuedId = await queue.RequeueMoveAsync(job.Id);
+        Assert.Equal(job.Id, requeuedId);
+        var requeued = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
+        await PrepareJobForProcessingAsync(queue, requeued);
+
+        await _provider.GetRequiredService<IMoveJobProcessor>()
+            .ProcessJobAsync(requeued, CancellationToken.None);
+
+        var completed = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
+        Assert.True(
+            completed.Status == MoveJobStatus.Completed,
+            completed.Error ?? $"Unexpected recovery status: {completed.Status}");
+        Assert.False(File.Exists(sourceFile));
+        Assert.True(Directory.Exists(source));
+        Assert.Equal(
+            "verified audio",
+            await File.ReadAllTextAsync(Path.Join(target, "book.m4b")));
+    }
+
+    [Fact]
+    public async Task ProcessJobAsync_RetryDuringMarkerlessCopy_ResumesFromDurableJournal()
+    {
+        var source = FileService.GetTempDirectory(
+            "move-processor-partial-copy-src");
+        var sourceFile = await FileService.GetFileAsync(
+            source,
+            "book.m4b",
+            "partial copy audio");
+        var target = Path.Join(
+            FileService.GetTempPath(),
+            $"move-processor-partial-copy-dst-{Guid.NewGuid():N}");
+        var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+        {
+            Title = "Partial Copy Recovery",
+            BasePath = source
+        });
+        var (queue, job) = await CreateQueuedMoveJobAsync(
+            audiobook,
+            target,
+            source,
+            deleteEmptySource: false);
+        var faultingService = new AudiobookContentMoveService(
+            _provider.GetRequiredService<ILogger<AudiobookContentMoveService>>(),
+            _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>(),
+            TimeProvider.System,
+            new FailOnceAtProcessorCopyMutationPoint(
+                CopyMutationFaultPoint.AfterMarkerlessFileStateUpdate));
+        var faultingProcessor = ActivatorUtilities.CreateInstance<MoveJobProcessor>(
+            _provider,
+            faultingService);
+
+        await faultingProcessor.ProcessJobAsync(job, CancellationToken.None);
+
+        var retry = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
+        Assert.Equal(MoveJobStatus.RetryScheduled, retry.Status);
+        Assert.Equal(MoveJobPhase.Copying, retry.Phase);
+        Assert.True(File.Exists(sourceFile));
+        await MakeRetryDueAsync(job.Id);
+        var generation = Assert.IsType<int>(
+            await queue.TryClaimJobAsync(job.Id, LeaseOwner));
+        retry.LeaseOwner = LeaseOwner;
+        retry.LeaseGeneration = generation;
+
+        await _provider.GetRequiredService<IMoveJobProcessor>()
+            .ProcessJobAsync(retry, CancellationToken.None);
+
+        var completed = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
+        Assert.True(
+            completed.Status == MoveJobStatus.Completed,
+            completed.Error ?? $"Unexpected recovery status: {completed.Status}");
+        Assert.False(File.Exists(sourceFile));
+        Assert.True(Directory.Exists(source));
+        Assert.Equal(
+            "partial copy audio",
+            await File.ReadAllTextAsync(Path.Join(target, "book.m4b")));
+    }
+
+    [Fact]
+    public async Task ProcessJobAsync_RetryDuringForcedRetention_ResumesWithoutDeletingSource()
+    {
+        var source = FileService.GetTempDirectory(
+            "move-processor-partial-retention-src");
+        var firstSource = await FileService.GetFileAsync(
+            source,
+            "book-1.m4b",
+            "audio one");
+        var secondSource = await FileService.GetFileAsync(
+            source,
+            "book-2.m4b",
+            "audio two");
+        var target = Path.Join(
+            FileService.GetTempPath(),
+            $"move-processor-partial-retention-dst-{Guid.NewGuid():N}");
+        var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+        {
+            Title = "Partial Retention Recovery",
+            BasePath = source
+        });
+        var (queue, job) = await CreateQueuedMoveJobAsync(
+            audiobook,
+            target,
+            source,
+            deleteEmptySource: true,
+            sourceCleanupMode: MoveSourceCleanupMode.RetainSource,
+            forceCopyAndRetainSource: true);
+        var faultingService = new AudiobookContentMoveService(
+            _provider.GetRequiredService<ILogger<AudiobookContentMoveService>>(),
+            _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>(),
+            TimeProvider.System,
+            new FailOnceDuringProcessorRetention());
+        var faultingProcessor = ActivatorUtilities.CreateInstance<MoveJobProcessor>(
+            _provider,
+            faultingService);
+
+        await faultingProcessor.ProcessJobAsync(job, CancellationToken.None);
+
+        var retry = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
+        Assert.Equal(MoveJobStatus.RetryScheduled, retry.Status);
+        Assert.Equal(MoveJobPhase.CleaningSource, retry.Phase);
+        Assert.True(File.Exists(firstSource));
+        Assert.True(File.Exists(secondSource));
+        Assert.Contains(
+            retry.Entries.Where(entry => entry.EntryType == MoveJobEntryType.File),
+            entry => entry.CleanupState == MoveJobEntryCleanupState.Retained);
+        Assert.Contains(
+            retry.Entries.Where(entry => entry.EntryType == MoveJobEntryType.File),
+            entry => entry.CleanupState == MoveJobEntryCleanupState.Pending);
+        await MakeRetryDueAsync(job.Id);
+        var generation = Assert.IsType<int>(
+            await queue.TryClaimJobAsync(job.Id, LeaseOwner));
+        retry.LeaseOwner = LeaseOwner;
+        retry.LeaseGeneration = generation;
+
+        await _provider.GetRequiredService<IMoveJobProcessor>()
+            .ProcessJobAsync(retry, CancellationToken.None);
+
+        var completed = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
+        Assert.True(
+            completed.Status == MoveJobStatus.Completed,
+            completed.Error ?? $"Unexpected recovery status: {completed.Status}");
+        Assert.True(MoveJobPublicProjection.IsSourceRetained(completed));
+        Assert.Equal("audio one", await File.ReadAllTextAsync(firstSource));
+        Assert.Equal("audio two", await File.ReadAllTextAsync(secondSource));
+        Assert.Equal(
+            "audio one",
+            await File.ReadAllTextAsync(Path.Join(target, "book-1.m4b")));
+        Assert.Equal(
+            "audio two",
+            await File.ReadAllTextAsync(Path.Join(target, "book-2.m4b")));
+    }
+
+    [Fact]
+    public async Task ProcessJobAsync_ForcedRetentionWithDestructiveRecoveryEvidence_FailsClosed()
+    {
+        var source = FileService.GetTempDirectory(
+            "move-processor-retention-corruption-src");
+        var firstSource = await FileService.GetFileAsync(
+            source,
+            "book-1.m4b",
+            "audio one");
+        var secondSource = await FileService.GetFileAsync(
+            source,
+            "book-2.m4b",
+            "audio two");
+        var target = Path.Join(
+            FileService.GetTempPath(),
+            $"move-processor-retention-corruption-dst-{Guid.NewGuid():N}");
+        var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+        {
+            Title = "Forced Retention Corruption",
+            BasePath = source
+        });
+        var (queue, job) = await CreateQueuedMoveJobAsync(
+            audiobook,
+            target,
+            source,
+            deleteEmptySource: true,
+            sourceCleanupMode: MoveSourceCleanupMode.RetainSource,
+            forceCopyAndRetainSource: true);
+        var faultingService = new AudiobookContentMoveService(
+            _provider.GetRequiredService<ILogger<AudiobookContentMoveService>>(),
+            _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>(),
+            TimeProvider.System,
+            new FailOnceDuringProcessorRetention());
+        var faultingProcessor = ActivatorUtilities.CreateInstance<MoveJobProcessor>(
+            _provider,
+            faultingService);
+
+        await faultingProcessor.ProcessJobAsync(job, CancellationToken.None);
+
+        var retry = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
+        Assert.Equal(MoveJobStatus.RetryScheduled, retry.Status);
+        var dbFactory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+        await using (var db = await dbFactory.CreateDbContextAsync())
+        {
+            var retained = await db.MoveJobEntries.FirstAsync(entry =>
+                entry.MoveJobId == job.Id
+                && entry.EntryType == MoveJobEntryType.File
+                && entry.CleanupState == MoveJobEntryCleanupState.Retained);
+            retained.CleanupState = MoveJobEntryCleanupState.DeleteAuthorized;
+            await db.SaveChangesAsync();
+        }
+        await MakeRetryDueAsync(job.Id);
+        retry = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
+        var generation = Assert.IsType<int>(
+            await queue.TryClaimJobAsync(job.Id, LeaseOwner));
+        retry.LeaseOwner = LeaseOwner;
+        retry.LeaseGeneration = generation;
+
+        await _provider.GetRequiredService<IMoveJobProcessor>()
+            .ProcessJobAsync(retry, CancellationToken.None);
+
+        var blocked = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
+        Assert.Equal(MoveJobStatus.NeedsAttention, blocked.Status);
+        Assert.Contains(
+            "Forced source retention",
+            blocked.Error,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("audio one", await File.ReadAllTextAsync(firstSource));
+        Assert.Equal("audio two", await File.ReadAllTextAsync(secondSource));
+        Assert.Equal(
+            "audio one",
+            await File.ReadAllTextAsync(Path.Join(target, "book-1.m4b")));
+        Assert.Equal(
+            "audio two",
+            await File.ReadAllTextAsync(Path.Join(target, "book-2.m4b")));
+    }
+
+    [Fact]
+    public async Task ProcessJobAsync_RetryAfterSourceDeleteBeforeStateUpdate_ResumesCleanup()
+    {
+        var source = FileService.GetTempDirectory(
+            "move-processor-source-delete-recovery-src");
+        var sourceFile = await FileService.GetFileAsync(
+            source,
+            "book.m4b",
+            "delete recovery audio");
+        var target = Path.Join(
+            FileService.GetTempPath(),
+            $"move-processor-source-delete-recovery-dst-{Guid.NewGuid():N}");
+        var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+        {
+            Title = "Source Delete Recovery",
+            BasePath = source
+        });
+        var (queue, job) = await CreateQueuedMoveJobAsync(
+            audiobook,
+            target,
+            source,
+            deleteEmptySource: false);
+        var faultingService = new AudiobookContentMoveService(
+            _provider.GetRequiredService<ILogger<AudiobookContentMoveService>>(),
+            _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>(),
+            TimeProvider.System,
+            new FailOnceAtProcessorSourceCleanupPoint(
+                SourceCleanupFaultPoint.AfterMarkerlessSourceFileDeleteBeforeStateUpdate));
+        var faultingProcessor = ActivatorUtilities.CreateInstance<MoveJobProcessor>(
+            _provider,
+            faultingService);
+
+        await faultingProcessor.ProcessJobAsync(job, CancellationToken.None);
+
+        var retry = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
+        Assert.Equal(MoveJobStatus.RetryScheduled, retry.Status);
+        Assert.Equal(MoveJobPhase.CleaningSource, retry.Phase);
+        Assert.False(File.Exists(sourceFile));
+        Assert.Contains(
+            retry.Entries.Where(entry => entry.EntryType == MoveJobEntryType.File),
+            entry => entry.CleanupState == MoveJobEntryCleanupState.DeleteAuthorized);
+        Assert.Equal(
+            "delete recovery audio",
+            await File.ReadAllTextAsync(Path.Join(target, "book.m4b")));
+        await MakeRetryDueAsync(job.Id);
+        var generation = Assert.IsType<int>(
+            await queue.TryClaimJobAsync(job.Id, LeaseOwner));
+        retry.LeaseOwner = LeaseOwner;
+        retry.LeaseGeneration = generation;
+
+        await _provider.GetRequiredService<IMoveJobProcessor>()
+            .ProcessJobAsync(retry, CancellationToken.None);
+
+        var completed = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
+        Assert.True(
+            completed.Status == MoveJobStatus.Completed,
+            completed.Error ?? $"Unexpected recovery status: {completed.Status}");
+        Assert.False(File.Exists(sourceFile));
+        Assert.True(Directory.Exists(source));
+        Assert.Equal(
+            "delete recovery audio",
+            await File.ReadAllTextAsync(Path.Join(target, "book.m4b")));
     }
 
     [Fact]
@@ -392,6 +739,59 @@ public partial class MoveJobProcessorTests
         {
             System.Diagnostics.Debug.WriteLine(
                 $"Failed to remove processor test directory link '{linkPath}': {exception.Message}");
+        }
+    }
+
+    private sealed class FailOnceAtProcessorCopyMutationPoint(
+        CopyMutationFaultPoint expectedPoint) : IMoveFaultInjector
+    {
+        private int _failed;
+
+        public void OnCopyMutation(
+            Guid jobId,
+            CopyMutationFaultPoint faultPoint)
+        {
+            if (faultPoint == expectedPoint
+                && Interlocked.Exchange(ref _failed, 1) == 0)
+            {
+                throw new IOException(
+                    $"Injected processor copy interruption at {faultPoint}.");
+            }
+        }
+    }
+
+    private sealed class FailOnceAtProcessorSourceCleanupPoint(
+        SourceCleanupFaultPoint expectedPoint) : IMoveFaultInjector
+    {
+        private int _failed;
+
+        public void OnSourceCleanupMutation(
+            Guid jobId,
+            SourceCleanupFaultPoint faultPoint)
+        {
+            if (faultPoint == expectedPoint
+                && Interlocked.Exchange(ref _failed, 1) == 0)
+            {
+                throw new IOException(
+                    $"Injected processor source-cleanup interruption at {faultPoint}.");
+            }
+        }
+    }
+
+    private sealed class FailOnceDuringProcessorRetention : IMoveFaultInjector
+    {
+        private int _failed;
+
+        public void OnSourceRetentionMutation(
+            Guid jobId,
+            SourceRetentionFaultPoint faultPoint)
+        {
+            if (faultPoint == SourceRetentionFaultPoint.AfterEntryStateUpdate
+                && Interlocked.Exchange(ref _failed, 1) == 0)
+            {
+                throw new IOException(
+                    "Injected processor retention interruption after durable state update.");
+            }
         }
     }
 

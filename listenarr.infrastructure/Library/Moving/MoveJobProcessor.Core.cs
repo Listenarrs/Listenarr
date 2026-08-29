@@ -18,9 +18,13 @@ internal partial class MoveJobProcessor
         {
             logger.LogInformation("Processing move job {JobId} for audiobook {AudiobookId} to {Path}", job.Id, job.AudiobookId, LogRedaction.SanitizeFilePath(job.RequestedPath));
 
+            if (!await EnsureNoExternalRecoveryOwnerAsync(job, stoppingToken))
+            {
+                return;
+            }
+
             using var scope = scopeFactory.CreateScope();
             var audiobookRepository = scope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
-            var rootFolderRepository = scope.ServiceProvider.GetRequiredService<IRootFolderRepository>();
             var audiobook = await audiobookRepository.GetByIdAsync(job.AudiobookId);
             if (audiobook == null)
             {
@@ -29,7 +33,6 @@ internal partial class MoveJobProcessor
                 return;
             }
 
-            var rootFolders = await rootFolderRepository.GetAllAsync();
             var requested = job.RequestedPath ?? string.Empty;
             if (string.IsNullOrWhiteSpace(requested))
             {
@@ -56,6 +59,16 @@ internal partial class MoveJobProcessor
             {
                 await UpdateJobStatusAsync(job, MoveJobStatus.NeedsAttention, exception.Message, stoppingToken);
                 metrics.Increment("worker.move.job.needs_attention");
+                return;
+            }
+            catch (Exception exception) when (IsTransientFilesystemException(exception))
+            {
+                await ScheduleTransientRetryAsync(
+                    job,
+                    $"Move target identity verification will be retried: {exception.Message}",
+                    exception,
+                    "Move job {JobId} could not verify its target filesystem identity",
+                    stoppingToken);
                 return;
             }
 
@@ -90,8 +103,27 @@ internal partial class MoveJobProcessor
                     metrics.Increment("worker.move.job.needs_attention");
                     return;
                 }
-
+                catch (Exception exception) when (IsTransientFilesystemException(exception))
+                {
+                    await ScheduleTransientRetryAsync(
+                        job,
+                        $"Move source identity verification will be retried: {exception.Message}",
+                        exception,
+                        "Move job {JobId} could not verify its source filesystem identity",
+                        stoppingToken);
+                    return;
+                }
                 recoverySourceSemantics = resolvedSourceIdentity.Semantics;
+                if (!await EnsureNoExternalRecoveryBoundaryOwnerAsync(
+                        job,
+                        source,
+                        resolvedSourceIdentity,
+                        target,
+                        targetIdentity,
+                        stoppingToken))
+                {
+                    return;
+                }
                 if (await TryHandleIdenticalEndpointsAsync(
                         job,
                         source,
@@ -104,20 +136,13 @@ internal partial class MoveJobProcessor
                     return;
                 }
 
-                cleanupBoundaryResolution = await cleanupBoundaryResolver.ResolveAsync(
+                cleanupBoundaryResolution = GetPersistedCleanupBoundary(job);
+                var recoveryRequest = CreateContentMoveRequest(
+                    job,
                     source,
                     target,
-                    rootFolders,
-                    job.SourceCleanupBoundary,
-                    stoppingToken);
-                var recoveryRequest = new AudiobookContentMoveRequest(
-                    source,
-                    target,
-                    job.Id,
-                    job.DeleteEmptySource,
                     resolvedSourceIdentity.Semantics,
                     targetSemantics,
-                    CreateLeaseToken(job),
                     cleanupBoundaryResolution.Boundary);
                 try
                 {
@@ -127,13 +152,6 @@ internal partial class MoveJobProcessor
                         recoveredMove = resumedMove;
                         logger.LogInformation("Resuming move job {JobId} after its filesystem phase completed", job.Id);
                     }
-                    else if (!Directory.Exists(source))
-                    {
-                        logger.LogWarning(
-                            "Persisted source path {Source} for job {JobId} does not exist",
-                            LogRedaction.SanitizeFilePath(source),
-                            job.Id);
-                    }
                 }
                 catch (MoveNeedsAttentionException exception)
                 {
@@ -142,7 +160,7 @@ internal partial class MoveJobProcessor
                     logger.LogWarning(exception, "Move job {JobId} has ambiguous or invalid recovery artifacts", job.Id);
                     return;
                 }
-                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                catch (Exception exception) when (IsTransientFilesystemException(exception))
                 {
                     await ScheduleTransientRetryAsync(
                         job,
@@ -232,6 +250,16 @@ internal partial class MoveJobProcessor
                 metrics.Increment("worker.move.job.needs_attention");
                 return;
             }
+            catch (Exception exception) when (IsTransientFilesystemException(exception))
+            {
+                await ScheduleTransientRetryAsync(
+                    job,
+                    $"Move source identity verification will be retried: {exception.Message}",
+                    exception,
+                    "Move job {JobId} could not verify its source filesystem identity",
+                    stoppingToken);
+                return;
+            }
 
             var currentAudiobook = await ValidateSourceStateBeforeMutationAsync(
                 job,
@@ -269,20 +297,8 @@ internal partial class MoveJobProcessor
                 }
             }
 
-            if (recoveredMove == null && !Directory.Exists(source))
-            {
-                await UpdateJobStatusAsync(job, MoveJobStatus.Failed, "Source path invalid or does not exist", stoppingToken);
-                metrics.Increment("worker.move.job.failed");
-                return;
-            }
-
             var sourceSemantics = sourceIdentity.Semantics;
-            cleanupBoundaryResolution ??= await cleanupBoundaryResolver.ResolveAsync(
-                source,
-                target,
-                rootFolders,
-                job.SourceCleanupBoundary,
-                stoppingToken);
+            cleanupBoundaryResolution ??= GetPersistedCleanupBoundary(job);
             LogCleanupBoundary(job, cleanupBoundaryResolution);
 
             if (IsFilesystemRoot(source, sourceSemantics)
@@ -351,17 +367,15 @@ internal partial class MoveJobProcessor
         AudiobookContentMoveResult? moveResult = recoveredMove;
         try
         {
-            moveRequest = new AudiobookContentMoveRequest(
+            moveRequest = CreateContentMoveRequest(
+                job,
                 source,
                 target,
-                job.Id,
-                job.DeleteEmptySource,
                 sourceSemantics,
                 targetSemantics,
-                CreateLeaseToken(job),
                 cleanupBoundaryResolution.Boundary,
-                SourcePhysicalObjectIdentities: sourcePhysicalObjectIdentities,
-                ProgressReporter: (progress, phase, token) =>
+                sourcePhysicalObjectIdentities,
+                (progress, phase, token) =>
                     moveQueueService.PublishProgressAsync(
                         job.Id,
                         progress,
@@ -421,6 +435,8 @@ internal partial class MoveJobProcessor
                     target,
                     contentMoveService,
                     moveRequest,
+                    moveResult.TargetVerificationLease,
+                    moveResult.SourceRetained,
                     registerPostCommit,
                     stoppingToken))
             {
@@ -429,10 +445,10 @@ internal partial class MoveJobProcessor
 
             metrics.Increment("worker.move.job.completed");
             logger.LogInformation(
-                "Move job {JobId} completed: {Source} -> {Target}",
-                job.Id,
+                "Move job {JobId} completed: {Source} -> {Target}. SourceRetained={SourceRetained}", job.Id,
                 LogRedaction.SanitizeFilePath(source),
-                LogRedaction.SanitizeFilePath(target));
+                LogRedaction.SanitizeFilePath(target),
+                moveResult.SourceRetained);
         }
         catch (Exception ex) when (ex is PersistenceException or MoveLeaseLostException)
         {
@@ -450,7 +466,7 @@ internal partial class MoveJobProcessor
             metrics.Increment("worker.move.job.needs_attention");
             logger.LogWarning(ex, "Move job {JobId} requires operator attention", job.Id);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (IsTransientFilesystemException(ex))
         {
             await ScheduleTransientRetryAsync(
                 job,
@@ -477,5 +493,4 @@ internal partial class MoveJobProcessor
             moveResult?.TargetVerificationLease?.Dispose();
         }
     }
-
 }

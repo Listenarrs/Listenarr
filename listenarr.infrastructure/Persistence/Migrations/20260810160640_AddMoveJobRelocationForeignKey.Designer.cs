@@ -15,7 +15,10 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
     partial class AddMoveJobRelocationForeignKey
     {
         /// <inheritdoc />
-        protected override void BuildTargetModel(ModelBuilder modelBuilder)
+        protected override void BuildTargetModel(ModelBuilder modelBuilder) =>
+            BuildHistoricalModel(modelBuilder);
+
+        internal static void BuildHistoricalModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.8");

@@ -30,14 +30,64 @@ public partial class AudiobookFileService
             return null;
         }
 
+        if (!FileSystemPathIdentity.TryDetectAbsoluteSyntaxForHost(
+                path,
+                out var pathSyntax))
+        {
+            return null;
+        }
+
         LibraryPathSemanticsResolution? bestResolution = null;
         var bestRootLength = -1;
+        var unavailableRootLength = -1;
         foreach (var root in rootFolders)
         {
             if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
                     root.Path,
                     out var canonicalRoot,
                     out _))
+            {
+                if (FileSystemPathIdentity.AmbiguousStoredBoundaryMayContainPath(
+                        root.Path,
+                        path,
+                        pathSyntax,
+                        root.CaseSensitivityMode))
+                {
+                    unavailableRootLength = Math.Max(
+                        unavailableRootLength,
+                        root.Path.Length);
+                }
+
+                continue;
+            }
+
+            var potentialSemantics = new FileSystemPathSemantics(
+                pathSyntax,
+                root.CaseSensitivityMode == FileSystemCaseSensitivityMode.Sensitive
+                    ? FileSystemCaseSensitivity.Sensitive
+                    : FileSystemCaseSensitivity.Insensitive);
+            bool mayContainPath;
+            try
+            {
+                mayContainPath = FileSystemPathIdentity.IsSameOrInside(
+                    path,
+                    canonicalRoot,
+                    potentialSemantics);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException
+                && ex is not OutOfMemoryException
+                && ex is not StackOverflowException)
+            {
+                unavailableRootLength = Math.Max(
+                    unavailableRootLength,
+                    canonicalRoot.Length);
+                logger.LogDebug(
+                    ex,
+                    "Failed to compare configured root folder semantics for {RootPath}",
+                    LogRedaction.SanitizeFilePath(root.Path));
+                continue;
+            }
+            if (!mayContainPath)
             {
                 continue;
             }
@@ -48,8 +98,14 @@ public partial class AudiobookFileService
                     canonicalRoot,
                     root.CaseSensitivityMode,
                     cancellationToken);
-                if (rootResolution.State != PathIdentityState.Valid
-                    || !FileSystemPathIdentity.IsSameOrInside(
+                if (rootResolution.State != PathIdentityState.Valid)
+                {
+                    unavailableRootLength = Math.Max(
+                        unavailableRootLength,
+                        canonicalRoot.Length);
+                    continue;
+                }
+                if (!FileSystemPathIdentity.IsSameOrInside(
                         path,
                         canonicalRoot,
                         rootResolution.Semantics))
@@ -67,6 +123,9 @@ public partial class AudiobookFileService
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
+                unavailableRootLength = Math.Max(
+                    unavailableRootLength,
+                    canonicalRoot.Length);
                 logger.LogDebug(
                     ex,
                     "Failed to resolve configured root folder semantics for {RootPath}",
@@ -74,6 +133,11 @@ public partial class AudiobookFileService
             }
         }
 
+        if (unavailableRootLength >= bestRootLength
+            && unavailableRootLength >= 0)
+        {
+            return null;
+        }
         if (bestResolution != null)
         {
             return bestResolution;
@@ -83,7 +147,8 @@ public partial class AudiobookFileService
         {
             var resolution = await semanticsResolver.ResolveAsync(
                 path,
-                cancellationToken: cancellationToken);
+                FileSystemCaseSensitivityMode.Auto,
+                cancellationToken);
             return resolution.State == PathIdentityState.Valid
                 ? new LibraryPathSemanticsResolution(resolution.Semantics, null)
                 : null;

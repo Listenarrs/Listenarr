@@ -65,6 +65,57 @@ describe('library delete notification operations', () => {
     expect(libraryStore.audiobooks).toEqual([])
   })
 
+  it('retries a blocked physical delete inside the same notification operation', async () => {
+    const blocked = new Error('Filesystem mutation unavailable')
+    removeFromLibraryMock
+      .mockRejectedValueOnce(blocked)
+      .mockResolvedValueOnce({ message: 'deleted', id: 42 })
+    const retryAfterBlockedMutation = vi.fn().mockResolvedValue(true)
+    const libraryStore = useLibraryStore()
+    const operationsStore = useLibraryDeleteOperationsStore()
+    libraryStore.audiobooks = [audiobook(42, 'Network Delete')]
+
+    await expect(
+      libraryStore.removeFromLibrary(42, {
+        deleteFiles: true,
+        deleteFolder: true,
+        retryAfterBlockedMutation,
+      }),
+    ).resolves.toBe(true)
+
+    expect(retryAfterBlockedMutation).toHaveBeenCalledWith(blocked)
+    expect(removeFromLibraryMock).toHaveBeenCalledTimes(2)
+    expect(operationsStore.operations).toHaveLength(1)
+    expect(operationsStore.operations[0]).toMatchObject({
+      kind: 'single',
+      status: 'completed',
+      deleted: 1,
+      failed: 0,
+    })
+    expect(libraryStore.audiobooks).toEqual([])
+  })
+
+  it('removes the in-flight delete notification when storage confirmation is cancelled', async () => {
+    const blocked = new Error('Filesystem mutation unavailable')
+    removeFromLibraryMock.mockRejectedValueOnce(blocked)
+    const retryAfterBlockedMutation = vi.fn().mockResolvedValue('cancel' as const)
+    const libraryStore = useLibraryStore()
+    const operationsStore = useLibraryDeleteOperationsStore()
+    libraryStore.audiobooks = [audiobook(42, 'Cancelled Delete')]
+
+    await expect(
+      libraryStore.removeFromLibrary(42, {
+        deleteFiles: true,
+        retryAfterBlockedMutation,
+      }),
+    ).resolves.toBeNull()
+
+    expect(retryAfterBlockedMutation).toHaveBeenCalledWith(blocked)
+    expect(removeFromLibraryMock).toHaveBeenCalledTimes(1)
+    expect(operationsStore.operations).toHaveLength(0)
+    expect(libraryStore.audiobooks.map((book) => book.id)).toEqual([42])
+  })
+
   it('keeps an interrupted bulk operation failed until every item is processed', () => {
     const operationsStore = useLibraryDeleteOperationsStore()
     const operationId = operationsStore.beginBulk(3)

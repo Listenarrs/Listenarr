@@ -45,6 +45,109 @@ public partial class AudiobookFileService
             cancellationToken);
     }
 
+    public Task<bool> RegisterCompatibilityPublicationAsync(
+        Audiobook audiobook,
+        AudiobookFileOwnershipCheckResult initialOwnership,
+        IAudiobookFileRegistrationLease registrationLease,
+        string? source = "scan",
+        CancellationToken cancellationToken = default) =>
+        RegisterCompatibilityPublicationCoreAsync(
+            audiobook,
+            initialOwnership,
+            registrationLease,
+            authoritativeBasePath: null,
+            source,
+            cancellationToken);
+
+    public Task<bool> RegisterCompatibilityPublicationWithBasePathAsync(
+        Audiobook audiobook,
+        AudiobookFileOwnershipCheckResult initialOwnership,
+        IAudiobookFileRegistrationLease registrationLease,
+        string authoritativeBasePath,
+        string? source = "scan",
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(authoritativeBasePath);
+        return RegisterCompatibilityPublicationCoreAsync(
+            audiobook,
+            initialOwnership,
+            registrationLease,
+            FileUtils.NormalizeStoredPath(authoritativeBasePath),
+            source,
+            cancellationToken);
+    }
+
+    private async Task<bool> RegisterCompatibilityPublicationCoreAsync(
+        Audiobook audiobook,
+        AudiobookFileOwnershipCheckResult initialOwnership,
+        IAudiobookFileRegistrationLease registrationLease,
+        string? authoritativeBasePath,
+        string? source,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(audiobook);
+        ArgumentNullException.ThrowIfNull(registrationLease);
+        if (registrationLease.HasDurablePhysicalObjectIdentity)
+        {
+            throw new InvalidOperationException(
+                "Compatibility registration accepts path-only publication leases only.");
+        }
+        if (!registrationLease.MatchesCurrentPublication()
+            || !registrationLease.PrepareCleanupRecovery(audiobook.Id))
+        {
+            return false;
+        }
+
+        BasePathRegistrationOutcome registration;
+        switch (initialOwnership.Outcome)
+        {
+            case AudiobookFileOwnershipCheckOutcome.Available:
+                registration = authoritativeBasePath == null
+                    ? new BasePathRegistrationOutcome(
+                        await EnsureAudiobookFileAsync(
+                            audiobook,
+                            registrationLease,
+                            source,
+                            cancellationToken),
+                        null)
+                    : await EnsureAudiobookFileWithBasePathAsync(
+                        audiobook,
+                        registrationLease,
+                        authoritativeBasePath,
+                        source,
+                        cancellationToken);
+                break;
+
+            case AudiobookFileOwnershipCheckOutcome.AlreadyOwnedByAudiobook:
+                if (!string.IsNullOrWhiteSpace(
+                    initialOwnership.ExistingFile?.PhysicalObjectIdentity))
+                {
+                    return false;
+                }
+
+                registration = authoritativeBasePath == null
+                    ? new BasePathRegistrationOutcome(true, null)
+                    : await ApplyAuthoritativeBasePathAsync(
+                        audiobook.Id,
+                        authoritativeBasePath,
+                        cancellationToken);
+                break;
+
+            default:
+                return false;
+        }
+
+        if (!registration.Success)
+        {
+            return false;
+        }
+
+        ApplyCommittedBasePath(audiobook, registration.Mutation);
+        var completion = registrationLease.CompletePublication();
+        return completion is RegistrationPublicationCompletion.Completed
+            or RegistrationPublicationCompletion.CommittedCleanupPending;
+    }
+
     private async Task<bool> RegisterPublishedGenerationCoreAsync(
         Audiobook audiobook,
         AudiobookFileOwnershipCheckResult initialOwnership,
@@ -55,6 +158,11 @@ public partial class AudiobookFileService
     {
         ArgumentNullException.ThrowIfNull(audiobook);
         ArgumentNullException.ThrowIfNull(registrationLease);
+        if (!registrationLease.HasDurablePhysicalObjectIdentity)
+        {
+            throw new InvalidOperationException(
+                "Published-generation registration requires durable physical identity evidence.");
+        }
         if (!registrationLease.MatchesCurrentPublication()
             || !registrationLease.PrepareCleanupRecovery(audiobook.Id))
         {
@@ -85,10 +193,13 @@ public partial class AudiobookFileService
                         if (registration.Success)
                         {
                             ApplyCommittedBasePath(audiobook, registration.Mutation);
-                            if (registrationLease.MatchesCurrentPublication())
+                            if (ProbeCurrentPublication(registrationLease)
+                                != RegistrationPublicationMatchOutcome.Mismatch)
                             {
-                                return CompleteRegisteredPublication(
-                                    registrationLease);
+                                return await CompleteRegisteredPublicationAsync(
+                                    audiobook,
+                                    registrationLease,
+                                    registration.Mutation);
                             }
 
                             await RollbackPublishedGenerationIfStaleAsync(
@@ -115,10 +226,10 @@ public partial class AudiobookFileService
                             return false;
                         }
 
-                        if (string.Equals(
-                                existingFile.PhysicalObjectIdentity,
-                                registrationLease.PhysicalObjectIdentity,
-                                StringComparison.Ordinal))
+                        if (!string.IsNullOrWhiteSpace(
+                                existingFile.PhysicalObjectIdentity)
+                            && registrationLease.MatchesPhysicalObjectIdentity(
+                                existingFile.PhysicalObjectIdentity))
                         {
                             var basePathCommit = authoritativeBasePath == null
                                 ? new BasePathRegistrationOutcome(true, null)
@@ -132,10 +243,13 @@ public partial class AudiobookFileService
                             }
 
                             ApplyCommittedBasePath(audiobook, basePathCommit.Mutation);
-                            if (registrationLease.MatchesCurrentPublication())
+                            if (ProbeCurrentPublication(registrationLease)
+                                != RegistrationPublicationMatchOutcome.Mismatch)
                             {
-                                return CompleteRegisteredPublication(
-                                    registrationLease);
+                                return await CompleteRegisteredPublicationAsync(
+                                    audiobook,
+                                    registrationLease,
+                                    basePathCommit.Mutation);
                             }
 
                             await RollbackPublishedGenerationIfStaleAsync(
@@ -169,10 +283,13 @@ public partial class AudiobookFileService
                         }
 
                         ApplyCommittedBasePath(audiobook, refresh.Mutation);
-                        if (registrationLease.MatchesCurrentPublication())
+                        if (ProbeCurrentPublication(registrationLease)
+                            != RegistrationPublicationMatchOutcome.Mismatch)
                         {
-                            return CompleteRegisteredPublication(
-                                registrationLease);
+                            return await CompleteRegisteredPublicationAsync(
+                                audiobook,
+                                registrationLease,
+                                refresh.Mutation);
                         }
 
                         await RollbackPublishedGenerationIfStaleAsync(
@@ -190,11 +307,38 @@ public partial class AudiobookFileService
         return false;
     }
 
-    private static bool CompleteRegisteredPublication(
-        IAudiobookFileRegistrationLease registrationLease) =>
-        registrationLease.CompletePublication() is
-            RegistrationPublicationCompletion.Completed or
-            RegistrationPublicationCompletion.CommittedCleanupPending;
+    private async Task<bool> CompleteRegisteredPublicationAsync(
+        Audiobook audiobook,
+        IAudiobookFileRegistrationLease registrationLease,
+        AudiobookBasePathMutation? basePathMutation)
+    {
+        var completion = registrationLease.CompletePublication();
+        if (completion is not (
+                RegistrationPublicationCompletion.Completed or
+                RegistrationPublicationCompletion.CommittedCleanupPending))
+        {
+            return false;
+        }
+
+        var publicationMatch = ProbeCurrentPublication(registrationLease);
+        if (publicationMatch == RegistrationPublicationMatchOutcome.Match)
+        {
+            return true;
+        }
+        if (publicationMatch == RegistrationPublicationMatchOutcome.Unavailable)
+        {
+            // The ownership row and publication journal are already durably committed.
+            // Temporary storage unavailability is not proof that the namespace changed;
+            // preserve the claim for startup reconciliation instead of rolling it back.
+            return true;
+        }
+
+        await RollbackPublishedGenerationIfStaleAsync(
+            audiobook,
+            registrationLease,
+            basePathMutation);
+        return false;
+    }
 
     public Task RollbackPublishedGenerationIfStaleAsync(
         Audiobook audiobook,
@@ -204,6 +348,14 @@ public partial class AudiobookFileService
             registrationLease,
             basePathMutation: null);
 
+    private static RegistrationPublicationMatchOutcome ProbeCurrentPublication(
+        IAudiobookFileRegistrationLease registrationLease) =>
+        registrationLease is IAudiobookFileRegistrationPublicationProbe probe
+            ? probe.ProbeCurrentPublication()
+            : registrationLease.MatchesCurrentPublication()
+                ? RegistrationPublicationMatchOutcome.Match
+                : RegistrationPublicationMatchOutcome.Mismatch;
+
     private async Task RollbackPublishedGenerationIfStaleAsync(
         Audiobook audiobook,
         IAudiobookFileRegistrationLease registrationLease,
@@ -211,7 +363,8 @@ public partial class AudiobookFileService
     {
         ArgumentNullException.ThrowIfNull(audiobook);
         ArgumentNullException.ThrowIfNull(registrationLease);
-        if (registrationLease.MatchesCurrentPublication())
+        if (ProbeCurrentPublication(registrationLease)
+            != RegistrationPublicationMatchOutcome.Mismatch)
         {
             return;
         }
@@ -227,10 +380,9 @@ public partial class AudiobookFileService
             ? ownership.ExistingFile
             : null;
         if (existingFile == null
-            || !string.Equals(
-                existingFile.PhysicalObjectIdentity,
-                registrationLease.PhysicalObjectIdentity,
-                StringComparison.Ordinal))
+            || string.IsNullOrWhiteSpace(existingFile.PhysicalObjectIdentity)
+            || !registrationLease.MatchesPhysicalObjectIdentity(
+                existingFile.PhysicalObjectIdentity))
         {
             return;
         }
@@ -242,7 +394,7 @@ public partial class AudiobookFileService
                     existingFile.Id,
                     audiobook.Id,
                     existingFile.Path,
-                    registrationLease.PhysicalObjectIdentity,
+                    existingFile.PhysicalObjectIdentity,
                     basePathMutation),
                 globalToken),
             CancellationToken.None);

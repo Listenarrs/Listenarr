@@ -7,6 +7,7 @@ internal sealed partial class AudiobookContentMoveService
         CancellationToken cancellationToken)
     {
         await EnsureCurrentExecutionProtocolAsync(request.JobId, cancellationToken);
+        request = await WithBoundaryAuthorizationAsync(request, cancellationToken);
         await CleanupTerminalMarkerlessTargetDirectoriesAsync(
             request,
             cancellationToken);

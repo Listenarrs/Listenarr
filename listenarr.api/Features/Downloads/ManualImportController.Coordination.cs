@@ -7,7 +7,8 @@ public partial class ManualImportController
 {
     private Task ExecuteWithAudiobookLocksAsync(
         IEnumerable<int> audiobookIds,
-        Func<CancellationToken, Task> operation,
+        IReadOnlyCollection<string> requestedSourcePaths,
+        Func<IReadOnlyDictionary<int, IReadOnlyList<FileRegistrationRecoveryReceipt>>, CancellationToken, Task> operation,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(operation);
@@ -20,14 +21,22 @@ public partial class ManualImportController
                 lockedAudiobookIds,
                 async operationToken =>
                 {
+                    var recoveryReceipts = new Dictionary<int, IReadOnlyList<FileRegistrationRecoveryReceipt>>();
                     foreach (var audiobookId in lockedAudiobookIds)
                     {
+                        recoveryReceipts[audiobookId] =
+                            await _fileRegistrationRecoveryService
+                                .ReconcileAudiobookWithReceiptsAsync(
+                                    audiobookId,
+                                    requestedSourcePaths,
+                                    operationToken)
+                            ?? [];
                         await _moveQueueService.EnsureFilesystemMutationAllowedAsync(
                             audiobookId,
                             operationToken);
                     }
 
-                    await operation(operationToken);
+                    await operation(recoveryReceipts, operationToken);
                 },
                 globalToken),
             cancellationToken);

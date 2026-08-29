@@ -211,12 +211,21 @@ namespace Listenarr.Application.Audiobooks.Renaming
 
         private async Task<List<RootFolder>> LoadRootFoldersAsync()
         {
-            if (_rootFolderService == null) return new();
-            try { return await _rootFolderService.GetAllAsync(); }
+            if (_rootFolderService == null)
+            {
+                return new();
+            }
+
+            try
+            {
+                return await _rootFolderService.GetAllAsync();
+            }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
-                _logger.LogWarning(ex, "Failed to load root folders for organize preview; falling back to application output path");
-                return new();
+                _logger.LogWarning(ex, "Failed to load configured root folders for organize operation");
+                throw new InvalidOperationException(
+                    "Configured root folders could not be loaded safely for organize operation.",
+                    ex);
             }
         }
 
@@ -228,9 +237,10 @@ namespace Listenarr.Application.Audiobooks.Renaming
         {
             if (string.IsNullOrWhiteSpace(currentBasePath))
             {
-                var defaultRoot = rootFolders.FirstOrDefault(r => r.IsDefault)?.Path;
-                var configuredBase = !string.IsNullOrWhiteSpace(defaultRoot)
-                    ? TryResolveStoredAbsolutePathForHost(defaultRoot)
+                var configuredRoot = rootFolders.FirstOrDefault(r => r.IsDefault)?.Path
+                    ?? rootFolders.FirstOrDefault()?.Path;
+                var configuredBase = rootFolders.Count > 0
+                    ? TryResolveStoredAbsolutePathForHost(configuredRoot)
                     : TryResolveStoredAbsolutePathForHost(settings.OutputPath);
                 if (configuredBase == null)
                 {
@@ -255,11 +265,14 @@ namespace Listenarr.Application.Audiobooks.Renaming
                 return (matchingRootPath, false);
             }
 
-            var outputPath = TryResolveStoredAbsolutePathForHost(settings.OutputPath);
-            if (outputPath != null
-                && IsSamePathOrWithin(normalizedCurrent, outputPath, semantics))
+            if (rootFolders.Count == 0)
             {
-                return (outputPath, false);
+                var outputPath = TryResolveStoredAbsolutePathForHost(settings.OutputPath);
+                if (outputPath != null
+                    && IsSamePathOrWithin(normalizedCurrent, outputPath, semantics))
+                {
+                    return (outputPath, false);
+                }
             }
 
             return (normalizedCurrent, true);
@@ -272,10 +285,13 @@ namespace Listenarr.Application.Audiobooks.Renaming
             FileSystemPathSemantics semantics)
         {
             var configuredRoots = new HashSet<string>(semantics.Comparer);
-            var outputPath = TryResolveStoredAbsolutePathForHost(settings.OutputPath);
-            if (outputPath != null)
+            if (rootFolders.Count == 0)
             {
-                configuredRoots.Add(outputPath);
+                var outputPath = TryResolveStoredAbsolutePathForHost(settings.OutputPath);
+                if (outputPath != null)
+                {
+                    configuredRoots.Add(outputPath);
+                }
             }
 
             foreach (var root in rootFolders)

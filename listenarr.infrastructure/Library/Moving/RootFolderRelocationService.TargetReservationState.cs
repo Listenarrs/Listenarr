@@ -31,11 +31,13 @@ public sealed partial class RootFolderRelocationService
 
         if (reservation.DirectoryObjectIdentityVersion
                 != ManagedDirectoryIdentity.CurrentVersion
-            || !string.Equals(
+            || !parent.MatchesManagedDirectoryOwnershipIdentity(
+                reservation.DirectoryObjectIdentityVersion,
                 reservation.DirectoryObjectIdentity,
-                expected,
-                StringComparison.Ordinal)
-            || !parent.VisiblePathMatches())
+                reservation.OwnershipToken)
+            || !ReservationPathMatchesOrThrowUnavailable(
+                parent,
+                "The parent of a planned relocation directory is temporarily unavailable."))
         {
             throw new InvalidOperationException(
                 "The parent of a planned relocation directory changed before creation.");
@@ -48,13 +50,13 @@ public sealed partial class RootFolderRelocationService
     {
         if (reservation.DirectoryObjectIdentityVersion
                 != ManagedDirectoryIdentity.CurrentVersion
-            || !string.Equals(
+            || !parent.MatchesManagedDirectoryOwnershipIdentity(
+                reservation.DirectoryObjectIdentityVersion,
                 reservation.DirectoryObjectIdentity,
-                ManagedDirectoryIdentity.Create(
-                    reservation.OwnershipToken,
-                    parent.GetDirectoryObjectIdentity()),
-                StringComparison.Ordinal)
-            || !parent.VisiblePathMatches())
+                reservation.OwnershipToken)
+            || !ReservationPathMatchesOrThrowUnavailable(
+                parent,
+                "The planned relocation directory parent is temporarily unavailable."))
         {
             throw new InvalidOperationException(
                 "A planned relocation directory lost its parent-generation authorization.");
@@ -65,7 +67,9 @@ public sealed partial class RootFolderRelocationService
         RootFolderRelocationCreatedDirectory reservation,
         PinnedDirectoryCreation.PinnedDirectoryAnchor directory)
     {
-        if (!directory.VisiblePathMatches())
+        if (!ReservationPathMatchesOrThrowUnavailable(
+                directory,
+                "The relocation-created directory is temporarily unavailable before enrollment."))
         {
             throw new InvalidOperationException(
                 "A relocation-created directory changed before enrollment.");
@@ -87,7 +91,9 @@ public sealed partial class RootFolderRelocationService
         RootFolderRelocationCreatedDirectory reservation,
         PinnedDirectoryCreation.PinnedDirectoryAnchor directory)
     {
-        if (!directory.VisiblePathMatches())
+        if (!ReservationPathMatchesOrThrowUnavailable(
+                directory,
+                "The observed relocation directory is temporarily unavailable before retention."))
         {
             throw new InvalidOperationException(
                 "An observed relocation directory changed before retention.");
@@ -103,6 +109,19 @@ public sealed partial class RootFolderRelocationService
                 directory.GetDirectoryObjectIdentity());
         reservation.UpdatedAt =
             timeProvider.GetUtcNow().UtcDateTime;
+    }
+
+    private static bool ReservationPathMatchesOrThrowUnavailable(
+        PinnedDirectoryCreation.PinnedDirectoryAnchor directory,
+        string unavailableMessage)
+    {
+        var outcome = directory.ProbeVisiblePathMatch();
+        if (outcome == RegistrationPublicationMatchOutcome.Unavailable)
+        {
+            throw new IOException(unavailableMessage);
+        }
+
+        return outcome == RegistrationPublicationMatchOutcome.Match;
     }
 
     private static void ValidateReservationPathIsDirectChild(

@@ -7,6 +7,7 @@ public enum DirectoryObjectIdentityFailureKind
     ForeignPathSyntax,
     AccessDenied,
     IdentityUnsupported,
+    LegacyWeakIdentity,
     IdentityMismatch,
     IdentityUnstable,
     InvalidPath,

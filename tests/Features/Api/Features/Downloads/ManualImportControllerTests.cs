@@ -164,6 +164,7 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             Mock<IAudiobookRepository> repoMock = null,
             Mock<IScanQueueService> scanMock = null,
             IFileMover fileMover = null,
+            IFilePublicationSourceCapability filePublicationSourceCapability = null,
             IAudiobookFileService audiobookFileService = null,
             IReadOnlyList<RootFolder> rootFolders = null,
             IFileSystemSemanticsResolver semanticsResolver = null,
@@ -171,11 +172,47 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             ILibraryDirectoryOwnershipStore directoryOwnershipStore = null,
             Mock<IMetadataService> metadataMock = null,
             IMoveQueueService moveQueueServiceOverride = null,
-            ILibraryFilesystemMutationGate filesystemMutationGate = null)
+            ILibraryFilesystemMutationGate filesystemMutationGate = null,
+            IFileRegistrationRecoveryService registrationRecoveryServiceOverride = null,
+            IAudiobookScanService audiobookScanService = null)
         {
             repoMock ??= GetRepoMock(book);
             scanMock ??= GetScanMock();
+            if (audiobookScanService == null)
+            {
+                var audiobookScanServiceMock = new Mock<IAudiobookScanService>();
+                audiobookScanServiceMock
+                    .Setup(service => service.RegisterExistingFileAsync(
+                        It.IsAny<int>(),
+                        It.IsAny<string>(),
+                        It.IsAny<string>(),
+                        It.IsAny<string>(),
+                        It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(true);
+                audiobookScanService = audiobookScanServiceMock.Object;
+            }
             fileMover ??= CreateMarkerlessFileMover();
+            if (filePublicationSourceCapability == null)
+            {
+                if (fileMover is IFilePublicationSourceCapability concreteCapability)
+                {
+                    filePublicationSourceCapability = concreteCapability;
+                }
+                else
+                {
+                    var capabilityMock = new Mock<IFilePublicationSourceCapability>();
+                    capabilityMock.Setup(capability => capability.CheckAsync(
+                            It.IsAny<string>(),
+                            It.IsAny<CancellationToken>()))
+                        .ReturnsAsync(
+                            FilePublicationSourceCapabilityResult.SupportedForProof(
+                                new FilePublicationSourceProof(
+                                    "test-source-generation",
+                                    1,
+                                    new string('A', 64))));
+                    filePublicationSourceCapability = capabilityMock.Object;
+                }
+            }
             if (audiobookFileService == null)
             {
                 var audiobookFileServiceMock = new Mock<IAudiobookFileService>();
@@ -339,6 +376,14 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                 directoryOwnershipStore = directoryOwnershipStoreMock.Object;
             }
 
+            var registrationRecoveryService = new Mock<IFileRegistrationRecoveryService>();
+            registrationRecoveryService
+                .Setup(service => service.ReconcileAudiobookWithReceiptsAsync(
+                    It.IsAny<int>(),
+                    It.IsAny<IReadOnlyCollection<string>>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync([]);
+
             var moveQueueService = new Mock<IMoveQueueService>();
             moveQueueService.Setup(service => service.EnsureFilesystemMutationAllowedAsync(
                     It.IsAny<int>(),
@@ -352,18 +397,207 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                 new FileNamingService(configMock.Object, NullLogger<FileNamingService>.Instance),
                 configMock.Object,
                 scanMock.Object,
+                audiobookScanService,
                 scanAuthorizationMock.Object,
                 rootFolderMock.Object,
                 fileMover,
+                filePublicationSourceCapability,
                 audiobookFileService,
                 new LocalFileSystem(),
                 semanticsResolver,
                 filesystemMutationCoordinator ?? new FilesystemMutationCoordinator(),
                 _operationCoordinator,
+                registrationRecoveryServiceOverride ?? registrationRecoveryService.Object,
                 moveQueueServiceOverride ?? moveQueueService.Object,
                 directoryOwnershipStore,
                 filesystemMutationGate ?? TestLibraryFilesystemReadiness.Ready()
             );
+        }
+
+        [Fact]
+        public async Task Start_MoveRecoveryCompletedBeforeItemLoop_ReturnsRecoveredSuccessWithoutRepublishing()
+        {
+            var basePath = CreateTempDirectory(
+                "listenarr-manual-recovery-destination");
+            var sourceDirectory = CreateTempDirectory(
+                "listenarr-manual-recovery-source");
+            var sourceFile = Path.Join(sourceDirectory, "chapter.mp3");
+            var destination = Path.Join(basePath, "recovered.mp3");
+            await File.WriteAllTextAsync(sourceFile, "audio");
+            await File.WriteAllTextAsync(destination, "audio");
+            var book = new Audiobook
+            {
+                Id = 49,
+                Title = "Recovered Manual Import",
+                BasePath = basePath
+            };
+            var recovery = new Mock<IFileRegistrationRecoveryService>(
+                MockBehavior.Strict);
+            recovery.Setup(service => service.ReconcileAudiobookWithReceiptsAsync(
+                    book.Id,
+                    It.IsAny<IReadOnlyCollection<string>>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns<int, IReadOnlyCollection<string>, CancellationToken>((_, _, _) =>
+                {
+                    File.Delete(sourceFile);
+                    return Task.FromResult<IReadOnlyList<FileRegistrationRecoveryReceipt>>(
+                    [
+                        new FileRegistrationRecoveryReceipt(
+                            Guid.NewGuid(),
+                            book.Id,
+                            sourceFile,
+                            destination)
+                    ]);
+                });
+            var capability = new Mock<IFilePublicationSourceCapability>(
+                MockBehavior.Strict);
+            capability.Setup(service => service.CheckAsync(
+                    sourceFile,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(FilePublicationSourceCapabilityResult.Unsupported(
+                    "The source file does not exist.",
+                    FilePublicationSourceCapabilityFailureKind.Missing));
+            var fileMover = new Mock<IFileMover>(MockBehavior.Strict);
+            var controller = GetController(
+                book,
+                new ApplicationSettings
+                {
+                    OutputPath = basePath,
+                    FolderNamingPattern = "",
+                    FileNamingPattern = "{Title}"
+                },
+                fileMover: fileMover.Object,
+                filePublicationSourceCapability: capability.Object,
+                rootFolders:
+                [
+                    new RootFolder
+                    {
+                        Id = 1,
+                        Name = "Destination",
+                        Path = basePath,
+                        CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto
+                    }
+                ],
+                registrationRecoveryServiceOverride: recovery.Object);
+            var request = new ManualImportRequestDto
+            {
+                Path = sourceDirectory,
+                Mode = "interactive",
+                Action = FileAction.Move,
+                Items =
+                [
+                    new ManualImportItemDto
+                    {
+                        FullPath = sourceFile,
+                        MatchedAudiobookId = book.Id
+                    }
+                ]
+            };
+
+            var action = await controller.Start(request);
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(
+                action.Result);
+            Assert.Equal(
+                1,
+                Assert.IsType<int>(ok.Value!.GetType()
+                    .GetProperty("importedCount")!
+                    .GetValue(ok.Value)));
+            Assert.False(File.Exists(sourceFile));
+            Assert.Equal("audio", await File.ReadAllTextAsync(destination));
+            recovery.VerifyAll();
+            capability.VerifyAll();
+            fileMover.VerifyNoOtherCalls();
+        }
+
+        [Fact]
+        public async Task Start_RecoveryReceiptForRecreatedSource_DoesNotSuppressNewGeneration()
+        {
+            var basePath = CreateTempDirectory(
+                "listenarr-manual-recreated-destination");
+            var sourceDirectory = CreateTempDirectory(
+                "listenarr-manual-recreated-source");
+            var sourceFile = Path.Join(sourceDirectory, "chapter.mp3");
+            var recoveredDestination = Path.Join(basePath, "old-recovered.mp3");
+            await File.WriteAllTextAsync(sourceFile, "new generation");
+            await File.WriteAllTextAsync(recoveredDestination, "old generation");
+            var book = new Audiobook
+            {
+                Id = 50,
+                Title = "Recreated Manual Import",
+                BasePath = basePath
+            };
+            var recovery = new Mock<IFileRegistrationRecoveryService>(
+                MockBehavior.Strict);
+            recovery.Setup(service => service.ReconcileAudiobookWithReceiptsAsync(
+                    book.Id,
+                    It.IsAny<IReadOnlyCollection<string>>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(
+                [
+                    new FileRegistrationRecoveryReceipt(
+                        Guid.NewGuid(),
+                        book.Id,
+                        sourceFile,
+                        recoveredDestination)
+                ]);
+            var controller = GetController(
+                book,
+                new ApplicationSettings
+                {
+                    OutputPath = basePath,
+                    FolderNamingPattern = "",
+                    FileNamingPattern = "{Title}"
+                },
+                rootFolders:
+                [
+                    new RootFolder
+                    {
+                        Id = 1,
+                        Name = "Destination",
+                        Path = basePath,
+                        CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto
+                    }
+                ],
+                registrationRecoveryServiceOverride: recovery.Object);
+            var request = new ManualImportRequestDto
+            {
+                Path = sourceDirectory,
+                Mode = "interactive",
+                Action = FileAction.Move,
+                Items =
+                [
+                    new ManualImportItemDto
+                    {
+                        FullPath = sourceFile,
+                        MatchedAudiobookId = book.Id
+                    }
+                ]
+            };
+
+            var action = await controller.Start(request);
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(
+                action.Result);
+            Assert.Equal(
+                1,
+                Assert.IsType<int>(ok.Value!.GetType()
+                    .GetProperty("importedCount")!
+                    .GetValue(ok.Value)));
+            var returnedResults = Assert.IsAssignableFrom<IEnumerable<ManualImportResultDto>>(
+                ok.Value.GetType().GetProperty("results")!.GetValue(ok.Value));
+            var imported = Assert.Single(returnedResults);
+            Assert.True(imported.Success);
+            Assert.False(string.IsNullOrWhiteSpace(imported.DestinationPath));
+            Assert.NotEqual(recoveredDestination, imported.DestinationPath);
+            Assert.False(File.Exists(sourceFile));
+            Assert.Equal(
+                "new generation",
+                await File.ReadAllTextAsync(imported.DestinationPath!));
+            Assert.Equal(
+                "old generation",
+                await File.ReadAllTextAsync(recoveredDestination));
+            recovery.VerifyAll();
         }
 
         [Fact]
@@ -779,6 +1013,453 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                 resolver.Calls,
                 call => string.Equals(call.Path, bookPath, StringComparison.Ordinal)
                     && call.Mode == FileSystemCaseSensitivityMode.Sensitive);
+            Assert.DoesNotContain(
+                resolver.Calls,
+                call => call.Mode == FileSystemCaseSensitivityMode.Auto
+                    && FileSystemPathIdentity.IsSameOrInside(
+                        call.Path,
+                        innerRoot,
+                        new FileSystemPathSemantics(
+                            FileSystemPathSemantics.CurrentHostDefault.Syntax,
+                            FileSystemCaseSensitivity.Sensitive)));
+        }
+
+        [Fact]
+        public async Task InteractiveManualImport_ExplicitInsensitiveDestination_DoesNotFallBackToAuto()
+        {
+            var destinationRoot = CreateTempDirectory("listenarr-manual-explicit-destination");
+            var sourceRoot = CreateTempDirectory("listenarr-manual-explicit-destination-source");
+            var sourceFile = Path.Join(sourceRoot, "chapter.mp3");
+            await File.WriteAllTextAsync(sourceFile, "audio");
+            var roots = new List<RootFolder>
+            {
+                new()
+                {
+                    Id = 1,
+                    Name = "CIFS Destination",
+                    Path = destinationRoot,
+                    CaseSensitivityMode = FileSystemCaseSensitivityMode.Insensitive,
+                    ResolvedCaseSensitivity = FileSystemCaseSensitivity.Insensitive,
+                    PathIdentityState = PathIdentityState.Valid
+                }
+            };
+            var resolver = new RejectAutoUnderPathSemanticsResolver(
+                destinationRoot,
+                new FileSystemSemanticsResolver());
+            var book = new Audiobook
+            {
+                Id = 45,
+                Title = "CIFS Destination Book",
+                BasePath = destinationRoot
+            };
+            var controller = GetController(
+                book,
+                new ApplicationSettings
+                {
+                    OutputPath = destinationRoot,
+                    FolderNamingPattern = "",
+                    FileNamingPattern = "{Title}"
+                },
+                rootFolders: roots,
+                semanticsResolver: resolver);
+            var request = new ManualImportRequestDto
+            {
+                Path = sourceRoot,
+                Mode = "interactive",
+                Action = FileAction.Copy,
+                Items =
+                [
+                    new ManualImportItemDto
+                    {
+                        FullPath = sourceFile,
+                        MatchedAudiobookId = book.Id
+                    }
+                ]
+            };
+
+            var action = await controller.Start(request);
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(action.Result);
+            Assert.NotNull(ok.Value);
+            Assert.Equal(
+                1,
+                Assert.IsType<int>(ok.Value!.GetType()
+                    .GetProperty("importedCount")!
+                    .GetValue(ok.Value)));
+            Assert.DoesNotContain(
+                resolver.Calls,
+                call => call.Mode == FileSystemCaseSensitivityMode.Auto
+                    && FileSystemPathIdentity.IsSameOrInside(
+                        call.Path,
+                        destinationRoot,
+                        new FileSystemPathSemantics(
+                            FileSystemPathSemantics.CurrentHostDefault.Syntax,
+                            FileSystemCaseSensitivity.Insensitive)));
+        }
+
+        [Fact]
+        public async Task InteractiveManualImport_ExplicitInsensitiveSource_DoesNotFallBackToAuto()
+        {
+            var sourceRoot = CreateTempDirectory("listenarr-manual-explicit-source");
+            var destinationRoot = CreateTempDirectory("listenarr-manual-explicit-source-destination");
+            var sourceFile = Path.Join(sourceRoot, "chapter.mp3");
+            var managedEmptyDirectory = Path.Join(sourceRoot, "empty");
+            await File.WriteAllTextAsync(sourceFile, "audio");
+            Directory.CreateDirectory(managedEmptyDirectory);
+            var roots = new List<RootFolder>
+            {
+                new()
+                {
+                    Id = 1,
+                    Name = "CIFS Source",
+                    Path = sourceRoot,
+                    CaseSensitivityMode = FileSystemCaseSensitivityMode.Insensitive,
+                    ResolvedCaseSensitivity = FileSystemCaseSensitivity.Insensitive,
+                    PathIdentityState = PathIdentityState.Valid
+                },
+                new()
+                {
+                    Id = 2,
+                    Name = "Native Destination",
+                    Path = destinationRoot,
+                    CaseSensitivityMode = FileSystemCaseSensitivityMode.Sensitive,
+                    ResolvedCaseSensitivity = FileSystemCaseSensitivity.Sensitive,
+                    PathIdentityState = PathIdentityState.Valid
+                }
+            };
+            var resolver = new RejectAutoUnderPathSemanticsResolver(
+                sourceRoot,
+                new FileSystemSemanticsResolver());
+            var book = new Audiobook
+            {
+                Id = 46,
+                Title = "CIFS Source Book",
+                BasePath = destinationRoot
+            };
+            var controller = GetController(
+                book,
+                new ApplicationSettings
+                {
+                    OutputPath = destinationRoot,
+                    FolderNamingPattern = "",
+                    FileNamingPattern = "{Title}"
+                },
+                rootFolders: roots,
+                semanticsResolver: resolver);
+            var request = new ManualImportRequestDto
+            {
+                Path = sourceRoot,
+                Mode = "interactive",
+                Action = FileAction.Copy,
+                CleanupEmptySourceFolders = true,
+                Items =
+                [
+                    new ManualImportItemDto
+                    {
+                        FullPath = sourceFile,
+                        MatchedAudiobookId = book.Id
+                    }
+                ]
+            };
+
+            var action = await controller.Start(request);
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(action.Result);
+            Assert.NotNull(ok.Value);
+            Assert.Equal(
+                1,
+                Assert.IsType<int>(ok.Value!.GetType()
+                    .GetProperty("importedCount")!
+                    .GetValue(ok.Value)));
+            Assert.DoesNotContain(
+                resolver.Calls,
+                call => call.Mode == FileSystemCaseSensitivityMode.Auto
+                    && FileSystemPathIdentity.IsSameOrInside(
+                        call.Path,
+                        sourceRoot,
+                        new FileSystemPathSemantics(
+                            FileSystemPathSemantics.CurrentHostDefault.Syntax,
+                            FileSystemCaseSensitivity.Insensitive)));
+            Assert.True(Directory.Exists(managedEmptyDirectory));
+        }
+
+        [LinuxFact]
+        public async Task InteractiveManualImport_AmbiguousConfiguredDestinationRoot_DoesNotBorrowConflictingAutoSemantics()
+        {
+            var basePath = CreateTempDirectory(
+                "listenarr-manual-ambiguous-destination");
+            var sourceDirectory = CreateTempDirectory(
+                "listenarr-manual-ambiguous-destination-source");
+            var sourceFile = Path.Join(sourceDirectory, "chapter.mp3");
+            await File.WriteAllTextAsync(sourceFile, "new audio");
+            var existingCaseAlias = Path.Join(basePath, "title.mp3");
+            await File.WriteAllTextAsync(existingCaseAlias, "existing audio");
+            var ambiguousRoot = "/" + basePath;
+            Assert.False(FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                ambiguousRoot,
+                out _));
+            var book = new Audiobook
+            {
+                Id = 51,
+                Title = "Title",
+                BasePath = basePath
+            };
+            var controller = GetController(
+                book,
+                new ApplicationSettings
+                {
+                    OutputPath = basePath,
+                    FolderNamingPattern = "",
+                    FileNamingPattern = "{Title}"
+                },
+                rootFolders:
+                [
+                    new RootFolder
+                    {
+                        Id = 1,
+                        Name = "Legacy Ambiguous Destination",
+                        Path = ambiguousRoot,
+                        CaseSensitivityMode = FileSystemCaseSensitivityMode.Insensitive
+                    }
+                ]);
+            var request = new ManualImportRequestDto
+            {
+                Path = sourceDirectory,
+                Mode = "interactive",
+                Action = FileAction.Copy,
+                Items =
+                [
+                    new ManualImportItemDto
+                    {
+                        FullPath = sourceFile,
+                        MatchedAudiobookId = book.Id
+                    }
+                ]
+            };
+
+            var action = await controller.Start(request);
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(
+                action.Result);
+            Assert.Equal(
+                0,
+                Assert.IsType<int>(ok.Value!.GetType()
+                    .GetProperty("importedCount")!
+                    .GetValue(ok.Value)));
+            Assert.False(File.Exists(Path.Join(basePath, "Title.mp3")));
+            Assert.Equal("existing audio", await File.ReadAllTextAsync(existingCaseAlias));
+            Assert.Equal("new audio", await File.ReadAllTextAsync(sourceFile));
+        }
+
+        [WindowsFact]
+        public async Task InteractiveManualImport_AmbiguousConfiguredSourceRoot_SkipsGenericCleanup()
+        {
+            var sourceRoot = CreateTempDirectory(
+                "listenarr-manual-ambiguous-managed-source");
+            var destinationRoot = CreateTempDirectory(
+                "listenarr-manual-ambiguous-managed-destination");
+            var sourceFile = Path.Join(sourceRoot, "chapter.mp3");
+            var managedEmptyDirectory = Path.Join(sourceRoot, "empty");
+            await File.WriteAllTextAsync(sourceFile, "audio");
+            Directory.CreateDirectory(managedEmptyDirectory);
+            var ambiguousSourceRoot =
+                "//?/" + Path.GetFullPath(sourceRoot).Replace('\\', '/');
+            Assert.False(FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                ambiguousSourceRoot,
+                out _));
+            Assert.True(Directory.Exists(ambiguousSourceRoot));
+            var roots = new List<RootFolder>
+            {
+                new()
+                {
+                    Id = 1,
+                    Name = "Legacy Ambiguous Source",
+                    Path = ambiguousSourceRoot
+                },
+                new()
+                {
+                    Id = 2,
+                    Name = "Destination",
+                    Path = destinationRoot,
+                    CaseSensitivityMode = FileSystemCaseSensitivityMode.Insensitive,
+                    ResolvedCaseSensitivity = FileSystemCaseSensitivity.Insensitive,
+                    PathIdentityState = PathIdentityState.Valid
+                }
+            };
+            var book = new Audiobook
+            {
+                Id = 47,
+                Title = "Ambiguous Managed Source Book",
+                BasePath = destinationRoot
+            };
+            var controller = GetController(
+                book,
+                new ApplicationSettings
+                {
+                    OutputPath = destinationRoot,
+                    FolderNamingPattern = "",
+                    FileNamingPattern = "{Title}"
+                },
+                rootFolders: roots);
+            var request = new ManualImportRequestDto
+            {
+                Path = sourceRoot,
+                Mode = "interactive",
+                Action = FileAction.Copy,
+                CleanupEmptySourceFolders = true,
+                Items =
+                [
+                    new ManualImportItemDto
+                    {
+                        FullPath = sourceFile,
+                        MatchedAudiobookId = book.Id
+                    }
+                ]
+            };
+
+            var action = await controller.Start(request);
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(
+                action.Result);
+            Assert.Equal(
+                1,
+                Assert.IsType<int>(ok.Value!.GetType()
+                    .GetProperty("importedCount")!
+                    .GetValue(ok.Value)));
+            Assert.True(Directory.Exists(managedEmptyDirectory));
+        }
+
+        [Fact]
+        public async Task InteractiveManualImport_SourceAncestorOfManagedRoot_SkipsGenericCleanup()
+        {
+            var sourceRoot = CreateTempDirectory(
+                "listenarr-manual-source-ancestor-managed-root");
+            var managedRoot = Path.Join(sourceRoot, "managed-library");
+            var incomingDirectory = Path.Join(sourceRoot, "incoming");
+            var managedEmptyDirectory = Path.Join(managedRoot, "empty-managed-directory");
+            Directory.CreateDirectory(incomingDirectory);
+            Directory.CreateDirectory(managedEmptyDirectory);
+            var sourceFile = Path.Join(incomingDirectory, "chapter.mp3");
+            await File.WriteAllTextAsync(sourceFile, "audio");
+            var roots = new List<RootFolder>
+            {
+                new()
+                {
+                    Id = 1,
+                    Name = "Managed Destination",
+                    Path = managedRoot,
+                    CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
+                    PathIdentityState = PathIdentityState.Valid
+                }
+            };
+            var book = new Audiobook
+            {
+                Id = 48,
+                Title = "Managed Descendant Book",
+                BasePath = managedRoot
+            };
+            var controller = GetController(
+                book,
+                new ApplicationSettings
+                {
+                    OutputPath = managedRoot,
+                    FolderNamingPattern = "",
+                    FileNamingPattern = "{Title}"
+                },
+                rootFolders: roots);
+            var request = new ManualImportRequestDto
+            {
+                Path = sourceRoot,
+                Mode = "interactive",
+                Action = FileAction.Copy,
+                CleanupEmptySourceFolders = true,
+                Items =
+                [
+                    new ManualImportItemDto
+                    {
+                        FullPath = sourceFile,
+                        MatchedAudiobookId = book.Id
+                    }
+                ]
+            };
+
+            var action = await controller.Start(request);
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(
+                action.Result);
+            Assert.Equal(
+                1,
+                Assert.IsType<int>(ok.Value!.GetType()
+                    .GetProperty("importedCount")!
+                    .GetValue(ok.Value)));
+            Assert.True(Directory.Exists(managedEmptyDirectory));
+        }
+
+        [Fact]
+        public async Task InteractiveManualImport_UnmanagedSourceStillRequiresAutoSemantics()
+        {
+            var sourceRoot = CreateTempDirectory("listenarr-manual-unmanaged-source");
+            var destinationRoot = CreateTempDirectory("listenarr-manual-unmanaged-source-destination");
+            var sourceFile = Path.Join(sourceRoot, "chapter.mp3");
+            await File.WriteAllTextAsync(sourceFile, "audio");
+            var roots = new List<RootFolder>
+            {
+                new()
+                {
+                    Id = 1,
+                    Name = "Managed Destination",
+                    Path = destinationRoot,
+                    CaseSensitivityMode = FileSystemCaseSensitivityMode.Sensitive,
+                    ResolvedCaseSensitivity = FileSystemCaseSensitivity.Sensitive,
+                    PathIdentityState = PathIdentityState.Valid
+                }
+            };
+            var resolver = new RejectAutoUnderPathSemanticsResolver(
+                sourceRoot,
+                new FileSystemSemanticsResolver());
+            var book = new Audiobook
+            {
+                Id = 47,
+                Title = "Unmanaged Source Book",
+                BasePath = destinationRoot
+            };
+            var controller = GetController(
+                book,
+                new ApplicationSettings
+                {
+                    OutputPath = destinationRoot,
+                    FolderNamingPattern = "",
+                    FileNamingPattern = "{Title}"
+                },
+                rootFolders: roots,
+                semanticsResolver: resolver);
+            var request = new ManualImportRequestDto
+            {
+                Path = sourceRoot,
+                Mode = "interactive",
+                Action = FileAction.Copy,
+                Items =
+                [
+                    new ManualImportItemDto
+                    {
+                        FullPath = sourceFile,
+                        MatchedAudiobookId = book.Id
+                    }
+                ]
+            };
+
+            var action = await controller.Start(request);
+
+            var error = Assert.IsType<Microsoft.AspNetCore.Mvc.ObjectResult>(
+                action.Result);
+            Assert.Equal(500, error.StatusCode);
+            Assert.Contains(
+                resolver.Calls,
+                call => call.Mode == FileSystemCaseSensitivityMode.Auto
+                    && string.Equals(
+                        call.Path,
+                        Path.GetFullPath(sourceRoot),
+                        StringComparison.Ordinal));
         }
 
         [Fact]
@@ -1011,6 +1692,227 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
         }
 
         [Fact]
+        public async Task InteractiveManualImport_NewSourceGenerationAtSamePaths_DoesNotReuseCompletedOperationIdentity()
+        {
+            var destinationRoot = CreateTempDirectory("listenarr-manual-generation-reuse-dest");
+            var sourceDir = CreateTempDirectory("listenarr-manual-generation-reuse-src");
+            var source = Path.Join(sourceDir, "incoming.mp3");
+            await File.WriteAllTextAsync(source, "first-generation");
+
+            var book = new Audiobook
+            {
+                Id = 334,
+                Title = "Generation Reuse",
+                BasePath = destinationRoot
+            };
+            var mover = CreateMarkerlessFileMover();
+            var controller = GetController(
+                book,
+                new ApplicationSettings
+                {
+                    OutputPath = destinationRoot,
+                    FolderNamingPattern = "",
+                    FileNamingPattern = "{Title}"
+                },
+                fileMover: mover);
+            var request = new ManualImportRequestDto
+            {
+                Path = sourceDir,
+                Mode = "interactive",
+                Action = FileAction.Copy,
+                Items =
+                [
+                    new ManualImportItemDto
+                    {
+                        FullPath = source,
+                        MatchedAudiobookId = book.Id
+                    }
+                ]
+            };
+
+            var first = await controller.Start(request);
+            Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(first.Result);
+            var destination = Assert.Single(
+                Directory.GetFiles(
+                    destinationRoot,
+                    "*.mp3",
+                    SearchOption.AllDirectories));
+            Assert.Equal("first-generation", await File.ReadAllTextAsync(destination));
+
+            File.Delete(destination);
+            File.Delete(source);
+            await File.WriteAllTextAsync(source, "second-generation");
+
+            var second = await controller.Start(request);
+
+            var secondOk = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(second.Result);
+            var payload = System.Text.Json.JsonSerializer.Serialize(secondOk.Value);
+            using var document = System.Text.Json.JsonDocument.Parse(payload);
+            var result = Assert.Single(document.RootElement.GetProperty("results").EnumerateArray());
+            Assert.True(result.GetProperty("Success").GetBoolean());
+            Assert.Equal(
+                destination,
+                result.GetProperty("DestinationPath").GetString());
+            Assert.Equal(
+                "second-generation",
+                await File.ReadAllTextAsync(destination));
+        }
+
+        [Fact]
+        public async Task InteractiveManualImport_InPlaceSourceContentChangeAtSamePaths_DoesNotReuseCompletedOperationIdentity()
+        {
+            var destinationRoot = CreateTempDirectory("listenarr-manual-content-reuse-dest");
+            var sourceDir = CreateTempDirectory("listenarr-manual-content-reuse-src");
+            var source = Path.Join(sourceDir, "incoming.mp3");
+            await File.WriteAllTextAsync(source, "first-generation");
+
+            var book = new Audiobook
+            {
+                Id = 335,
+                Title = "Content Reuse",
+                BasePath = destinationRoot
+            };
+            var mover = CreateMarkerlessFileMover();
+            var capability = Assert.IsAssignableFrom<IFilePublicationSourceCapability>(mover);
+            var firstProof = await capability.CheckAsync(source);
+            Assert.True(firstProof.IsSupported, firstProof.Reason);
+            var controller = GetController(
+                book,
+                new ApplicationSettings
+                {
+                    OutputPath = destinationRoot,
+                    FolderNamingPattern = "",
+                    FileNamingPattern = "{Title}"
+                },
+                fileMover: mover);
+            var request = new ManualImportRequestDto
+            {
+                Path = sourceDir,
+                Mode = "interactive",
+                Action = FileAction.Copy,
+                Items =
+                [
+                    new ManualImportItemDto
+                    {
+                        FullPath = source,
+                        MatchedAudiobookId = book.Id
+                    }
+                ]
+            };
+
+            var first = await controller.Start(request);
+            Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(first.Result);
+            var destination = Assert.Single(
+                Directory.GetFiles(
+                    destinationRoot,
+                    "*.mp3",
+                    SearchOption.AllDirectories));
+            Assert.Equal("first-generation", await File.ReadAllTextAsync(destination));
+
+            File.Delete(destination);
+            await File.WriteAllTextAsync(source, "other-generation");
+            var secondProof = await capability.CheckAsync(source);
+            Assert.True(secondProof.IsSupported, secondProof.Reason);
+            Assert.Equal(
+                firstProof.PhysicalObjectIdentity,
+                secondProof.PhysicalObjectIdentity);
+
+            var second = await controller.Start(request);
+
+            var secondOk = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(second.Result);
+            var payload = System.Text.Json.JsonSerializer.Serialize(secondOk.Value);
+            using var document = System.Text.Json.JsonDocument.Parse(payload);
+            var result = Assert.Single(document.RootElement.GetProperty("results").EnumerateArray());
+            Assert.True(result.GetProperty("Success").GetBoolean());
+            Assert.Equal(
+                destination,
+                result.GetProperty("DestinationPath").GetString());
+            Assert.Equal(
+                "other-generation",
+                await File.ReadAllTextAsync(destination));
+        }
+
+        [Fact]
+        public async Task InteractiveManualImport_SourceChangesBeforeProof_DestinationPlanningUsesProvenContent()
+        {
+            var destinationRoot = CreateTempDirectory("listenarr-manual-proof-planning-dest");
+            var sourceDir = CreateTempDirectory("listenarr-manual-proof-planning-src");
+            var source = Path.Join(sourceDir, "incoming.mp3");
+            const string initialSourceContent = "source-before-proof";
+            const string provenSourceContent = "destination-content";
+            await File.WriteAllTextAsync(source, initialSourceContent);
+
+            var book = new Audiobook
+            {
+                Id = 336,
+                Title = "Planner Race",
+                BasePath = destinationRoot
+            };
+            var existingDestination = Path.Join(destinationRoot, "Planner Race.mp3");
+            await File.WriteAllTextAsync(existingDestination, provenSourceContent);
+
+            var mover = CreateMarkerlessFileMover();
+            var capability = new Mock<IFilePublicationSourceCapability>(MockBehavior.Strict);
+            capability.Setup(service => service.CheckAsync(
+                    source,
+                    It.IsAny<CancellationToken>()))
+                .Returns<string, CancellationToken>(async (_, cancellationToken) =>
+                {
+                    await File.WriteAllTextAsync(
+                        source,
+                        provenSourceContent,
+                        cancellationToken);
+                    return await ((IFilePublicationSourceCapability)mover)
+                        .CheckAsync(source, cancellationToken);
+                });
+            capability.Setup(service => service.CheckAsync(
+                    existingDestination,
+                    It.IsAny<CancellationToken>()))
+                .Returns<string, CancellationToken>((_, cancellationToken) =>
+                    ((IFilePublicationSourceCapability)mover)
+                        .CheckAsync(existingDestination, cancellationToken));
+            var controller = GetController(
+                book,
+                new ApplicationSettings
+                {
+                    OutputPath = destinationRoot,
+                    FolderNamingPattern = "",
+                    FileNamingPattern = "{Title}"
+                },
+                fileMover: mover,
+                filePublicationSourceCapability: capability.Object);
+            var request = new ManualImportRequestDto
+            {
+                Path = sourceDir,
+                Mode = "interactive",
+                Action = FileAction.Copy,
+                Items =
+                [
+                    new ManualImportItemDto
+                    {
+                        FullPath = source,
+                        MatchedAudiobookId = book.Id
+                    }
+                ]
+            };
+
+            var action = await controller.Start(request);
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(action.Result);
+            var payload = System.Text.Json.JsonSerializer.Serialize(ok.Value);
+            using var document = System.Text.Json.JsonDocument.Parse(payload);
+            var result = Assert.Single(document.RootElement.GetProperty("results").EnumerateArray());
+            Assert.True(result.GetProperty("Success").GetBoolean());
+            Assert.Equal(
+                existingDestination,
+                result.GetProperty("DestinationPath").GetString());
+            Assert.Equal(
+                [existingDestination],
+                Directory.GetFiles(destinationRoot, "*.mp3", SearchOption.AllDirectories));
+            Assert.Equal(provenSourceContent, await File.ReadAllTextAsync(source));
+        }
+
+        [Fact]
         public async Task InteractiveManualImport_MoveWithCompanionFiles_ImportsSidecarsAndDeletesSourceFolder()
         {
             var destinationRoot = CreateTempDirectory("listenarr-manual-companion-dest");
@@ -1025,13 +1927,31 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             await File.WriteAllTextAsync(coverFile, "cover");
             await File.WriteAllTextAsync(notesFile, "notes");
 
-            var controller = GetController(book, new ApplicationSettings
-            {
-                OutputPath = destinationRoot,
-                FolderNamingPattern = "",
-                FileNamingPattern = "{Title}",
-                ImportBlacklistExtensions = new System.Collections.Generic.List<string>()
-            });
+            var resolver = new RejectAutoUnderPathSemanticsResolver(
+                destinationRoot,
+                new FileSystemSemanticsResolver());
+            var controller = GetController(
+                book,
+                new ApplicationSettings
+                {
+                    OutputPath = destinationRoot,
+                    FolderNamingPattern = "",
+                    FileNamingPattern = "{Title}",
+                    ImportBlacklistExtensions = new System.Collections.Generic.List<string>()
+                },
+                rootFolders:
+                [
+                    new RootFolder
+                    {
+                        Id = 1,
+                        Name = "CIFS Destination",
+                        Path = destinationRoot,
+                        CaseSensitivityMode = FileSystemCaseSensitivityMode.Insensitive,
+                        ResolvedCaseSensitivity = FileSystemCaseSensitivity.Insensitive,
+                        PathIdentityState = PathIdentityState.Valid
+                    }
+                ],
+                semanticsResolver: resolver);
 
             var request = new ManualImportRequestDto
             {
@@ -1053,6 +1973,137 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             Assert.True(File.Exists(Path.Join(destinationRoot, "cover.jpg")));
             Assert.True(File.Exists(Path.Join(destinationRoot, "notes.txt")));
             Assert.False(Directory.Exists(sourceDir));
+            Assert.DoesNotContain(
+                resolver.Calls,
+                call => call.Mode == FileSystemCaseSensitivityMode.Auto
+                    && FileSystemPathIdentity.IsSameOrInside(
+                        call.Path,
+                        destinationRoot,
+                        new FileSystemPathSemantics(
+                            FileSystemPathSemantics.CurrentHostDefault.Syntax,
+                            FileSystemCaseSensitivity.Insensitive)));
+        }
+
+        [Fact]
+        public async Task InteractiveManualImport_ConfiguredRootsExist_LegacyOutputPathDoesNotGrantIndependentDestinationAuthority()
+        {
+            var managedRoot = CreateTempDirectory("listenarr-manual-managed-root");
+            var legacyOutput = CreateTempDirectory("listenarr-manual-legacy-output");
+            var sourceDir = CreateTempDirectory("listenarr-manual-legacy-source");
+            var source = Path.Join(sourceDir, "book.mp3");
+            await File.WriteAllTextAsync(source, "audio");
+            var book = new Audiobook
+            {
+                Id = 332,
+                Title = "Legacy Manual Destination",
+                BasePath = legacyOutput
+            };
+            var caseMode = FileSystemPathSemantics.CurrentHostDefault.CaseSensitivity
+                == FileSystemCaseSensitivity.Sensitive
+                    ? FileSystemCaseSensitivityMode.Sensitive
+                    : FileSystemCaseSensitivityMode.Insensitive;
+            var controller = GetController(
+                book,
+                new ApplicationSettings
+                {
+                    OutputPath = legacyOutput,
+                    FolderNamingPattern = "",
+                    FileNamingPattern = "{Title}"
+                },
+                rootFolders:
+                [
+                    new RootFolder
+                    {
+                        Id = 1,
+                        Name = "Managed Root",
+                        Path = managedRoot,
+                        IsDefault = true,
+                        CaseSensitivityMode = caseMode
+                    }
+                ]);
+            var request = new ManualImportRequestDto
+            {
+                Path = sourceDir,
+                Mode = "interactive",
+                Action = FileAction.Copy,
+                Items =
+                [
+                    new ManualImportItemDto
+                    {
+                        FullPath = source,
+                        MatchedAudiobookId = book.Id
+                    }
+                ]
+            };
+
+            var action = await controller.Start(request);
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(action.Result);
+            var results = Assert.IsAssignableFrom<IEnumerable<ManualImportResultDto>>(
+                ok.Value!.GetType().GetProperty("results")!.GetValue(ok.Value));
+            Assert.False(Assert.Single(results).Success);
+            Assert.False(File.Exists(Path.Join(legacyOutput, "Legacy Manual Destination.mp3")));
+        }
+
+        [Fact]
+        public async Task InteractiveManualImport_MissingBasePath_UsesDefaultRootInsteadOfLegacyOutputPath()
+        {
+            var managedRoot = CreateTempDirectory("listenarr-manual-default-root");
+            var legacyOutput = CreateTempDirectory("listenarr-manual-default-legacy-output");
+            var sourceDir = CreateTempDirectory("listenarr-manual-default-source");
+            var source = Path.Join(sourceDir, "book.mp3");
+            await File.WriteAllTextAsync(source, "audio");
+            var book = new Audiobook
+            {
+                Id = 333,
+                Title = "Default Root Manual Import"
+            };
+            var caseMode = FileSystemPathSemantics.CurrentHostDefault.CaseSensitivity
+                == FileSystemCaseSensitivity.Sensitive
+                    ? FileSystemCaseSensitivityMode.Sensitive
+                    : FileSystemCaseSensitivityMode.Insensitive;
+            var controller = GetController(
+                book,
+                new ApplicationSettings
+                {
+                    OutputPath = legacyOutput,
+                    FolderNamingPattern = "",
+                    FileNamingPattern = "{Title}"
+                },
+                rootFolders:
+                [
+                    new RootFolder
+                    {
+                        Id = 1,
+                        Name = "Managed Root",
+                        Path = managedRoot,
+                        IsDefault = true,
+                        CaseSensitivityMode = caseMode
+                    }
+                ]);
+            var request = new ManualImportRequestDto
+            {
+                Path = sourceDir,
+                Mode = "interactive",
+                Action = FileAction.Copy,
+                Items =
+                [
+                    new ManualImportItemDto
+                    {
+                        FullPath = source,
+                        MatchedAudiobookId = book.Id
+                    }
+                ]
+            };
+
+            var action = await controller.Start(request);
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(action.Result);
+            var results = Assert.IsAssignableFrom<IEnumerable<ManualImportResultDto>>(
+                ok.Value!.GetType().GetProperty("results")!.GetValue(ok.Value));
+            Assert.True(Assert.Single(results).Success);
+            Assert.True(File.Exists(Path.Join(managedRoot, "Default Root Manual Import.mp3")));
+            Assert.False(File.Exists(Path.Join(legacyOutput, "Default Root Manual Import.mp3")));
         }
 
         [Fact]
@@ -1298,6 +2349,73 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
         }
 
         [Fact]
+        public async Task InteractiveManualImport_UnsupportedSourceCapability_DoesNotCreateDestinationHierarchy()
+        {
+            var destinationRoot = CreateTempDirectory("listenarr-manual-capability-destination");
+            var destination = Path.Join(destinationRoot, "Capability Book");
+            var sourceDir = CreateTempDirectory("listenarr-manual-capability-source");
+            var source = Path.Join(sourceDir, "book.mp3");
+            await File.WriteAllTextAsync(source, "audio");
+            var book = new Audiobook
+            {
+                Id = 499,
+                Title = "Capability Book",
+                BasePath = destination
+            };
+            var capability = new Mock<IFilePublicationSourceCapability>(MockBehavior.Strict);
+            capability.Setup(service => service.CheckAsync(
+                    source,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(FilePublicationSourceCapabilityResult.Unsupported(
+                    "Source storage does not expose durable identity."));
+            var fileMover = new Mock<IFileMover>(MockBehavior.Strict);
+            var ownershipStore = new Mock<ILibraryDirectoryOwnershipStore>(MockBehavior.Strict);
+            var controller = GetController(
+                book,
+                new ApplicationSettings
+                {
+                    OutputPath = destinationRoot,
+                    FolderNamingPattern = "",
+                    FileNamingPattern = "{Title}"
+                },
+                fileMover: fileMover.Object,
+                filePublicationSourceCapability: capability.Object,
+                directoryOwnershipStore: ownershipStore.Object);
+            var request = new ManualImportRequestDto
+            {
+                Path = sourceDir,
+                Mode = "interactive",
+                Action = FileAction.Copy,
+                Items =
+                [
+                    new ManualImportItemDto
+                    {
+                        FullPath = source,
+                        MatchedAudiobookId = book.Id
+                    }
+                ]
+            };
+
+            var action = await controller.Start(request);
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(action.Result);
+            var results = Assert.IsAssignableFrom<System.Collections.IEnumerable>(
+                ok.Value!.GetType().GetProperty("results")!.GetValue(ok.Value));
+            var result = Assert.Single(results.Cast<object>());
+            Assert.False((bool)result.GetType().GetProperty("Success")!.GetValue(result)!);
+            Assert.False(Directory.Exists(destination));
+            ownershipStore.Verify(store => store.EnsureCreatedHierarchyAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<FileSystemPathSemantics>(),
+                It.IsAny<string>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<int?>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+            fileMover.VerifyNoOtherCalls();
+        }
+
+        [Fact]
         public async Task InteractiveManualImport_RequestCancelledAfterCommittedMutationReturnsCommittedResultAndQueuesFocusedScan()
         {
             var basePath = CreateTempDirectory("listenarr-manual-post-mutation-cancel-dst");
@@ -1317,14 +2435,24 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                     FileAction.Copy,
                     source,
                     It.IsAny<string>(),
-                    It.IsAny<Guid>()))
-                .Returns<FileAction, string, string, Guid>(async (action, sourcePath, destination, operationId) =>
+                    It.IsAny<Guid>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<FilePublicationSourceProof>()))
+                .Returns<FileAction, string, string, Guid, string?, FilePublicationSourceProof>(async (
+                    action,
+                    sourcePath,
+                    destination,
+                    operationId,
+                    expectedRegisteredIdentity,
+                    expectedSourceProof) =>
                 {
                     var lease = await actualMover.PrepareActionForRegistrationAsync(
                         action,
                         sourcePath,
                         destination,
-                        operationId);
+                        operationId,
+                        expectedRegisteredIdentity,
+                        expectedSourceProof);
                     cancellation.Cancel();
                     return lease;
                 });
@@ -1338,7 +2466,8 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                     FileNamingPattern = "{Title}"
                 },
                 scanMock: scanMock,
-                fileMover: fileMover.Object);
+                fileMover: fileMover.Object,
+                filePublicationSourceCapability: actualMover);
             var request = new ManualImportRequestDto
             {
                 Path = srcDir,
@@ -1471,15 +2600,25 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                     FileAction.Copy,
                     It.IsAny<string>(),
                     It.IsAny<string>(),
-                    It.IsAny<Guid>()))
-                .Returns<FileAction, string, string, Guid>(async (action, sourcePath, destination, operationId) =>
+                    It.IsAny<Guid>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<FilePublicationSourceProof>()))
+                .Returns<FileAction, string, string, Guid, string?, FilePublicationSourceProof>(async (
+                    action,
+                    sourcePath,
+                    destination,
+                    operationId,
+                    expectedRegisteredIdentity,
+                    expectedSourceProof) =>
                 {
                     prepareCount++;
                     return await actualMover.PrepareActionForRegistrationAsync(
                         action,
                         sourcePath,
                         destination,
-                        operationId);
+                        operationId,
+                        expectedRegisteredIdentity,
+                        expectedSourceProof);
                 });
             var fileService = new Mock<IAudiobookFileService>(MockBehavior.Strict);
             fileService.Setup(service => service.CheckAudiobookFileOwnershipAsync(
@@ -1545,6 +2684,7 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                 },
                 scanMock: scanMock,
                 fileMover: fileMover.Object,
+                filePublicationSourceCapability: actualMover,
                 audiobookFileService: fileService.Object,
                 metadataMock: metadata);
             var request = new ManualImportRequestDto
@@ -1624,8 +2764,16 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                     FileAction.Copy,
                     It.IsAny<string>(),
                     It.IsAny<string>(),
-                    It.IsAny<Guid>()))
-                .Returns<FileAction, string, string, Guid>(async (action, source, destination, operationId) =>
+                    It.IsAny<Guid>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<FilePublicationSourceProof>()))
+                .Returns<FileAction, string, string, Guid, string?, FilePublicationSourceProof>(async (
+                    action,
+                    source,
+                    destination,
+                    operationId,
+                    expectedRegisteredIdentity,
+                    expectedSourceProof) =>
                 {
                     attemptedDestinations.Add(destination);
                     callCount++;
@@ -1638,7 +2786,9 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                         action,
                         source,
                         destination,
-                        operationId);
+                        operationId,
+                        expectedRegisteredIdentity,
+                        expectedSourceProof);
                 });
 
             var controller = GetController(firstBook, new ApplicationSettings
@@ -1646,7 +2796,9 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                 OutputPath = basePath,
                 FolderNamingPattern = "",
                 FileNamingPattern = "{Title}"
-            }, repoMock, fileMover: fileMover.Object);
+            }, repoMock,
+                fileMover: fileMover.Object,
+                filePublicationSourceCapability: actualMover);
 
             var request = new ManualImportRequestDto
             {
@@ -1690,13 +2842,23 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                     FileAction.Move,
                     source,
                     It.IsAny<string>(),
-                    It.IsAny<Guid>()))
-                .Returns<FileAction, string, string, Guid>((action, sourcePath, destination, operationId) =>
+                    It.IsAny<Guid>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<FilePublicationSourceProof>()))
+                .Returns<FileAction, string, string, Guid, string?, FilePublicationSourceProof>((
+                    action,
+                    sourcePath,
+                    destination,
+                    operationId,
+                    expectedRegisteredIdentity,
+                    expectedSourceProof) =>
                     actualMover.PrepareActionForRegistrationAsync(
                         action,
                         sourcePath,
                         destination,
-                        operationId));
+                        operationId,
+                        expectedRegisteredIdentity,
+                        expectedSourceProof));
             var fileService = new Mock<IAudiobookFileService>(MockBehavior.Strict);
             fileService.Setup(candidate => candidate.CheckAudiobookFileOwnershipAsync(
                     book,
@@ -1721,6 +2883,7 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                     FileNamingPattern = "{Title}"
                 },
                 fileMover: mover.Object,
+                filePublicationSourceCapability: actualMover,
                 audiobookFileService: fileService.Object);
             var request = new ManualImportRequestDto
             {
@@ -1776,19 +2939,25 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                     FileAction.Move,
                     source,
                     It.IsAny<string>(),
-                    It.IsAny<Guid>()))
-                .Returns<FileAction, string, string, Guid>(async (
+                    It.IsAny<Guid>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<FilePublicationSourceProof>()))
+                .Returns<FileAction, string, string, Guid, string?, FilePublicationSourceProof>(async (
                     action,
                     sourcePath,
                     destination,
-                    operationId) =>
+                    operationId,
+                    expectedRegisteredIdentity,
+                    expectedSourceProof) =>
                 {
                     var inner = await actualMover
                         .PrepareActionForRegistrationAsync(
                             action,
                             sourcePath,
                             destination,
-                            operationId);
+                            operationId,
+                            expectedRegisteredIdentity,
+                            expectedSourceProof);
                     controlledLease = inner == null
                         ? null
                         : new ControllableRegistrationLease(inner);
@@ -1874,6 +3043,7 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                     FileNamingPattern = "{Title}"
                 },
                 fileMover: mover.Object,
+                filePublicationSourceCapability: actualMover,
                 audiobookFileService: fileService.Object);
             var request = new ManualImportRequestDto
             {
@@ -1911,10 +3081,9 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
         }
 
         [Fact]
-        public async Task InteractiveManualImport_FileActionNone_IsACompleteNoOp()
+        public async Task InteractiveManualImport_FileActionNone_RegistersExistingFileWithoutFilesystemMutation()
         {
-            var basePath = CreateTempDirectory("listenarr-manual-neutral-dst");
-            var srcDir = CreateTempDirectory("listenarr-manual-neutral-src");
+            var srcDir = CreateTempDirectory("listenarr-manual-register-in-place");
             var emptySourceDirectory = Path.Join(srcDir, "empty");
             Directory.CreateDirectory(emptySourceDirectory);
 
@@ -1922,7 +3091,7 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             {
                 Id = 126,
                 Title = "Jack of Shadows",
-                BasePath = basePath,
+                BasePath = srcDir,
                 Asin = "B000TEST"
             };
             var source = Path.Join(srcDir, "Chapter 01.mp3");
@@ -1932,6 +3101,18 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             repository.Setup(candidate => candidate.GetByIdAsync(book.Id))
                 .ReturnsAsync(book);
             var scanQueue = new Mock<IScanQueueService>(MockBehavior.Strict);
+            scanQueue.Setup(service => service.EnqueueScanAsync(
+                    It.IsAny<ScanEnqueueCommand>()))
+                .ReturnsAsync(Guid.NewGuid());
+            var audiobookScanService = new Mock<IAudiobookScanService>(MockBehavior.Strict);
+            audiobookScanService
+                .Setup(service => service.RegisterExistingFileAsync(
+                    book.Id,
+                    srcDir,
+                    source,
+                    "manual-import",
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
             var fileMover = new Mock<IFileMover>(MockBehavior.Strict);
             var fileService = new Mock<IAudiobookFileService>(MockBehavior.Strict);
             var ownershipStore = new Mock<ILibraryDirectoryOwnershipStore>(MockBehavior.Strict);
@@ -1942,19 +3123,12 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                     SearchOption.AllDirectories)
                 .OrderBy(path => path, StringComparer.Ordinal)
                 .ToArray();
-            var destinationSnapshot = Directory.GetFileSystemEntries(
-                    basePath,
-                    "*",
-                    SearchOption.AllDirectories)
-                .OrderBy(path => path, StringComparer.Ordinal)
-                .ToArray();
-            var originalBasePath = book.BasePath;
 
             var controller = GetController(
                 book,
                 new ApplicationSettings
                 {
-                    OutputPath = basePath,
+                    OutputPath = srcDir,
                     FolderNamingPattern = "{Author}/{Title}",
                     FileNamingPattern = "{Title}",
                     MultiFileNamingPattern = "{Title}-{DiskNumber:00}"
@@ -1962,9 +3136,10 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                 repository,
                 scanQueue,
                 fileMover.Object,
-                fileService.Object,
+                audiobookFileService: fileService.Object,
                 directoryOwnershipStore: ownershipStore.Object,
-                metadataMock: metadata);
+                metadataMock: metadata,
+                audiobookScanService: audiobookScanService.Object);
             var request = new ManualImportRequestDto
             {
                 Path = srcDir,
@@ -1989,6 +3164,81 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             Assert.NotNull(ok.Value);
             var payload = ok.Value!;
             Assert.Equal(
+                1,
+                Assert.IsType<int>(payload.GetType()
+                    .GetProperty("importedCount")!
+                    .GetValue(payload)));
+            var returnedResults = Assert.IsAssignableFrom<IEnumerable<ManualImportResultDto>>(
+                payload.GetType().GetProperty("results")!.GetValue(payload));
+            var result = Assert.Single(returnedResults);
+            Assert.True(result.Success);
+            Assert.False(result.Skipped);
+            Assert.Equal(source, result.SourcePath);
+            Assert.Equal(source, result.DestinationPath);
+
+            Assert.Equal(srcDir, book.BasePath);
+            Assert.Equal(
+                sourceSnapshot,
+                Directory.GetFileSystemEntries(srcDir, "*", SearchOption.AllDirectories)
+                    .OrderBy(path => path, StringComparer.Ordinal));
+            Assert.True(Directory.Exists(emptySourceDirectory));
+            audiobookScanService.VerifyAll();
+            scanQueue.Verify(service => service.EnqueueScanAsync(
+                It.Is<ScanEnqueueCommand>(command =>
+                    command.Audiobook.Id == book.Id
+                    && command.Path == srcDir)), Times.Once);
+            fileMover.VerifyNoOtherCalls();
+            fileService.VerifyNoOtherCalls();
+            ownershipStore.VerifyNoOtherCalls();
+            metadata.VerifyNoOtherCalls();
+        }
+
+        [Fact]
+        public async Task InteractiveManualImport_FileActionNone_DoesNotRewriteMismatchedAudiobookBasePath()
+        {
+            var existingBasePath = CreateTempDirectory("listenarr-manual-existing-base");
+            var selectedFolder = CreateTempDirectory("listenarr-manual-selected-folder");
+            var source = Path.Join(selectedFolder, "Chapter 01.mp3");
+            await File.WriteAllTextAsync(source, "chapter1");
+            var book = new Audiobook
+            {
+                Id = 127,
+                Title = "Jack of Shadows",
+                BasePath = existingBasePath
+            };
+            var audiobookScanService = new Mock<IAudiobookScanService>(MockBehavior.Strict);
+            var scanQueue = new Mock<IScanQueueService>(MockBehavior.Strict);
+            var controller = GetController(
+                book,
+                new ApplicationSettings
+                {
+                    OutputPath = selectedFolder,
+                    FolderNamingPattern = "{Author}/{Title}",
+                    FileNamingPattern = "{Title}",
+                    MultiFileNamingPattern = "{Title}-{DiskNumber:00}"
+                },
+                scanMock: scanQueue,
+                audiobookScanService: audiobookScanService.Object);
+
+            var action = await controller.Start(new ManualImportRequestDto
+            {
+                Path = selectedFolder,
+                Mode = "interactive",
+                Action = FileAction.None,
+                Items =
+                [
+                    new ManualImportItemDto
+                    {
+                        FullPath = source,
+                        MatchedAudiobookId = book.Id
+                    }
+                ]
+            });
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(action.Result);
+            Assert.NotNull(ok.Value);
+            var payload = ok.Value!;
+            Assert.Equal(
                 0,
                 Assert.IsType<int>(payload.GetType()
                     .GetProperty("importedCount")!
@@ -1997,29 +3247,12 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                 payload.GetType().GetProperty("results")!.GetValue(payload));
             var result = Assert.Single(returnedResults);
             Assert.False(result.Success);
-            Assert.Null(result.DestinationPath);
-            Assert.Equal(source, result.SourcePath);
-            var skippedProperty = typeof(ManualImportResultDto).GetProperty("Skipped");
-            Assert.NotNull(skippedProperty);
-            Assert.True(Assert.IsType<bool>(skippedProperty.GetValue(result)));
-
-            Assert.Equal(originalBasePath, book.BasePath);
             Assert.Equal(
-                sourceSnapshot,
-                Directory.GetFileSystemEntries(srcDir, "*", SearchOption.AllDirectories)
-                    .OrderBy(path => path, StringComparer.Ordinal));
-            Assert.Equal(
-                destinationSnapshot,
-                Directory.GetFileSystemEntries(basePath, "*", SearchOption.AllDirectories)
-                    .OrderBy(path => path, StringComparer.Ordinal));
-            Assert.True(Directory.Exists(emptySourceDirectory));
-            repository.Verify(candidate => candidate.GetByIdAsync(book.Id), Times.Once);
-            repository.VerifyNoOtherCalls();
+                "The selected existing-file folder does not match the audiobook library folder.",
+                result.Error);
+            Assert.Equal(existingBasePath, book.BasePath);
+            audiobookScanService.VerifyNoOtherCalls();
             scanQueue.VerifyNoOtherCalls();
-            fileMover.VerifyNoOtherCalls();
-            fileService.VerifyNoOtherCalls();
-            ownershipStore.VerifyNoOtherCalls();
-            metadata.VerifyNoOtherCalls();
         }
 
         private sealed class ControllableRegistrationLease(
@@ -2063,6 +3296,39 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             {
                 Calls.Add((path, mode));
                 return inner.ResolveAsync(path, mode, cancellationToken);
+            }
+        }
+
+        private sealed class RejectAutoUnderPathSemanticsResolver(
+            string rejectedRoot,
+            IFileSystemSemanticsResolver inner) : IFileSystemSemanticsResolver
+        {
+            private readonly string _rejectedRoot = Path.GetFullPath(rejectedRoot);
+
+            public List<(string Path, FileSystemCaseSensitivityMode Mode)> Calls { get; } = [];
+
+            public ValueTask<FileSystemSemanticsResolution> ResolveAsync(
+                string path,
+                FileSystemCaseSensitivityMode mode = FileSystemCaseSensitivityMode.Auto,
+                CancellationToken cancellationToken = default)
+            {
+                var fullPath = Path.GetFullPath(path);
+                Calls.Add((fullPath, mode));
+                if (mode == FileSystemCaseSensitivityMode.Auto
+                    && FileSystemPathIdentity.IsSameOrInside(
+                        fullPath,
+                        _rejectedRoot,
+                        FileSystemPathSemantics.CurrentHostDefault))
+                {
+                    return ValueTask.FromResult(new FileSystemSemanticsResolution(
+                        FileSystemPathSemantics.CurrentHostDefault,
+                        PathIdentityState.Unavailable,
+                        _rejectedRoot,
+                        "The filesystem does not expose read-only case-sensitivity metadata. Select Sensitive or Insensitive explicitly.",
+                        CanonicalPath: fullPath));
+                }
+
+                return inner.ResolveAsync(fullPath, mode, cancellationToken);
             }
         }
     }

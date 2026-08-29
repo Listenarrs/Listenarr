@@ -62,18 +62,20 @@ internal sealed partial class AudiobookContentMoveService
         string destinationRoot,
         IReadOnlyCollection<MoveJobEntry> manifest,
         FileSystemPathSemantics semantics,
+        string boundaryPath,
+        string boundaryObjectIdentity,
         CancellationToken cancellationToken)
     {
         foreach (var entry in manifest)
         {
             if (IsRootManifestEntry(entry))
             {
-                if (!Directory.Exists(destinationRoot))
-                {
-                    throw new MoveNeedsAttentionException(
-                        "Published destination root is missing.");
-                }
-
+                using var root = OpenPinnedPublishedManifestDirectory(
+                    boundaryPath,
+                    destinationRoot,
+                    semantics,
+                    boundaryObjectIdentity);
+                ValidatePublishedManifestDirectory(root, entry);
                 continue;
             }
 
@@ -89,34 +91,32 @@ internal sealed partial class AudiobookContentMoveService
 
             if (entry.EntryType == MoveJobEntryType.Directory)
             {
-                if (!Directory.Exists(destinationPath))
-                {
-                    throw new MoveNeedsAttentionException(
-                        $"Published directory is missing: {entry.RelativePath}");
-                }
-
+                using var directory = OpenPinnedPublishedManifestDirectory(
+                    boundaryPath,
+                    destinationPath,
+                    semantics,
+                    boundaryObjectIdentity);
+                ValidatePublishedManifestDirectory(directory, entry);
                 continue;
-            }
-
-            if (!File.Exists(destinationPath))
-            {
-                throw new MoveNeedsAttentionException(
-                    $"Published file verification failed: {entry.RelativePath}");
             }
 
             var parentPath = Path.GetDirectoryName(destinationPath)
                 ?? throw new MoveNeedsAttentionException(
                     "A published manifest file has no parent directory.");
-            using var parent = PinnedDirectoryCreation.OpenPinnedBoundary(parentPath);
+            using var parent = OpenPinnedPublishedManifestDirectory(
+                boundaryPath,
+                parentPath,
+                semantics,
+                boundaryObjectIdentity);
             using var file = parent.OpenExistingFile(
                 Path.GetFileName(destinationPath),
                 requireDeleteAccess: false);
-            if (!file.VisiblePathMatches()
+            if (!PinnedFileVisibleOrThrowUnavailable(
+                    file,
+                    $"Published file is temporarily unavailable: {entry.RelativePath}")
                 || (!string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity)
-                    && !string.Equals(
-                        entry.TargetPhysicalObjectIdentity,
-                        file.GetObjectIdentity(),
-                        StringComparison.Ordinal)))
+                    && !file.MatchesObjectIdentity(
+                        entry.TargetPhysicalObjectIdentity)))
             {
                 throw new MoveNeedsAttentionException(
                     $"Published file generation changed: {entry.RelativePath}");
@@ -136,6 +136,72 @@ internal sealed partial class AudiobookContentMoveService
                 throw new MoveNeedsAttentionException(
                     $"Published file verification failed: {entry.RelativePath}");
             }
+        }
+    }
+
+    private static PinnedDirectoryCreation.PinnedDirectoryAnchor
+        OpenPinnedPublishedManifestDirectory(
+            string boundaryPath,
+            string directoryPath,
+            FileSystemPathSemantics semantics,
+            string boundaryObjectIdentity)
+    {
+        if (!FileSystemPathIdentity.TryGetRelativePathWithinBase(
+                boundaryPath,
+                directoryPath,
+                semantics,
+                out var relativePath))
+        {
+            throw new MoveNeedsAttentionException(
+                "A published manifest directory escaped its authorized scan boundary.");
+        }
+
+        var current = PinnedDirectoryCreation.OpenPinnedBoundary(boundaryPath);
+        try
+        {
+            if (!current.MatchesDirectoryObjectIdentity(boundaryObjectIdentity)
+                || !PinnedDirectoryVisibleOrThrowUnavailable(
+                    current,
+                    "The published manifest scan boundary is temporarily unavailable."))
+            {
+                throw new MoveNeedsAttentionException(
+                    "The published manifest scan boundary changed physical generation.");
+            }
+
+            foreach (var segment in SplitMovePathSegments(relativePath, semantics))
+            {
+                var next = current.OpenExistingChild(segment);
+                current.Dispose();
+                current = next;
+            }
+
+            if (!PinnedDirectoryVisibleOrThrowUnavailable(
+                    current,
+                    "The published manifest directory is temporarily unavailable while being pinned."))
+            {
+                throw new MoveNeedsAttentionException(
+                    "A published manifest directory changed while it was being pinned.");
+            }
+
+            return current;
+        }
+        catch
+        {
+            current.Dispose();
+            throw;
+        }
+    }
+
+    private static void ValidatePublishedManifestDirectory(
+        PinnedDirectoryCreation.PinnedDirectoryAnchor directory,
+        MoveJobEntry entry)
+    {
+        if (!string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity)
+            && !directory.MatchesDirectoryObjectIdentity(
+                entry.TargetPhysicalObjectIdentity))
+        {
+            throw new MoveNeedsAttentionException(
+                $"Published directory generation changed: {entry.RelativePath}");
         }
     }
 }

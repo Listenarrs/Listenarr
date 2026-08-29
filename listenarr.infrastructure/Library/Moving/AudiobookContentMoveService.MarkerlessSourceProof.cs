@@ -11,23 +11,29 @@ internal sealed partial class AudiobookContentMoveService
         IReadOnlyCollection<MoveJobEntry> manifest,
         CancellationToken cancellationToken)
     {
-        using (var root = PinnedDirectoryCreation.OpenPinnedBoundary(source))
+        string sourceEndpointIdentity;
+        using (var root = OpenPinnedMoveBoundaryDescendant(
+            request,
+            source,
+            request.SourceSemantics,
+            sourceBoundary: true))
         {
             var rootIdentity = root.GetDirectoryObjectIdentity();
+            sourceEndpointIdentity = rootIdentity;
             var endpoints = await GetEndpointObjectIdentitiesAsync(
                 request.JobId,
                 cancellationToken);
             if (!string.IsNullOrWhiteSpace(
                     endpoints.SourceDirectoryObjectIdentity)
-                && !string.Equals(
-                    endpoints.SourceDirectoryObjectIdentity,
-                    rootIdentity,
-                    StringComparison.Ordinal))
+                && !root.MatchesDirectoryObjectIdentity(
+                    endpoints.SourceDirectoryObjectIdentity))
             {
                 throw new MoveNeedsAttentionException(
                     "The markerless move source root changed physical generation.");
             }
-            if (!root.VisiblePathMatches())
+            if (!PinnedDirectoryVisibleOrThrowUnavailable(
+                    root,
+                    "The markerless move source root is temporarily unavailable while pinned."))
             {
                 throw new MoveNeedsAttentionException(
                     "The markerless move source root changed while it was pinned.");
@@ -53,7 +59,7 @@ internal sealed partial class AudiobookContentMoveService
                 request.SourceSemantics,
                 "source");
             if (entry.EntryType == MoveJobEntryType.File
-                && !File.Exists(fullPath)
+                && !TryGetMarkerlessPathAttributes(fullPath, out _)
                 && IsVerifiedMarkerlessNativeRenameEntry(entry))
             {
                 continue;
@@ -62,14 +68,25 @@ internal sealed partial class AudiobookContentMoveService
             var parentPath = Path.GetDirectoryName(fullPath)
                 ?? throw new MoveNeedsAttentionException(
                     "A source manifest entry has no parent directory.");
-            using var parent = PinnedDirectoryCreation.OpenPinnedBoundary(parentPath);
+            using var parent = OpenPinnedMoveDescendant(
+                request,
+                source,
+                parentPath,
+                request.SourceSemantics,
+                sourceEndpointIdentity,
+                sourceEndpoint: true);
             string identity;
             if (entry.EntryType == MoveJobEntryType.Directory)
             {
                 using var directory = parent.OpenExistingChild(
                     Path.GetFileName(fullPath));
                 identity = directory.GetDirectoryObjectIdentity();
-                if (!directory.VisiblePathMatches())
+                if (!PinnedDirectoryVisibleOrThrowUnavailable(
+                        directory,
+                        $"Source directory is temporarily unavailable while pinned: {entry.RelativePath}")
+                    || (!string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
+                        && !directory.MatchesDirectoryObjectIdentity(
+                            entry.SourcePhysicalObjectIdentity)))
                 {
                     throw new MoveNeedsAttentionException(
                         $"Source directory changed while pinned: {entry.RelativePath}");
@@ -87,16 +104,13 @@ internal sealed partial class AudiobookContentMoveService
                         $"Source file changed while its generation was captured: {entry.RelativePath}");
                 }
                 identity = file.GetObjectIdentity();
-            }
-
-            if (!string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
-                && !string.Equals(
-                    entry.SourcePhysicalObjectIdentity,
-                    identity,
-                    StringComparison.Ordinal))
-            {
-                throw new MoveNeedsAttentionException(
-                    $"Source entry changed physical generation: {entry.RelativePath}");
+                if (!string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
+                    && !file.MatchesObjectIdentity(
+                        entry.SourcePhysicalObjectIdentity))
+                {
+                    throw new MoveNeedsAttentionException(
+                        $"Source entry changed physical generation: {entry.RelativePath}");
+                }
             }
             if (string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity))
             {
@@ -106,30 +120,31 @@ internal sealed partial class AudiobookContentMoveService
                     entry.RelativePath,
                     identity,
                     entry.Sha256,
+                    entry.LastWriteTimeUtc,
                     cancellationToken);
                 entry.SourcePhysicalObjectIdentity = identity;
             }
         }
     }
 
-    private static async Task<string> ComputeMarkerlessSourceProofHashAsync(
+    private static async Task<(string Sha256, DateTime LastWriteTimeUtc)> ComputeMarkerlessSourceProofHashAsync(
         AudiobookContentMoveRequest request,
         MoveJobEntry entry,
         string fullPath,
+        PinnedDirectoryCreation.PinnedDirectoryAnchor parent,
         PinnedDirectoryCreation.PinnedFileEntry file,
         long completedWorkUnits,
         long totalWorkUnits,
         CancellationToken cancellationToken)
     {
-        var initialLastWriteTimeUtc = File.GetLastWriteTimeUtc(fullPath);
+        var initialLastWriteTimeUtc = file.GetLastWriteTimeUtc();
         await using var stream = file.OpenReadStream(
             bufferSize: 1024 * 1024,
             asynchronous: false);
-        if (stream.Length != entry.Length
-            || initialLastWriteTimeUtc != entry.LastWriteTimeUtc)
+        if (stream.Length != entry.Length)
         {
             throw new MoveNeedsAttentionException(
-                $"Source file metadata changed before content proof was captured: {entry.RelativePath}");
+                $"Source file length changed before content proof was captured: {entry.RelativePath}");
         }
 
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
@@ -169,14 +184,22 @@ internal sealed partial class AudiobookContentMoveService
             }
 
             if (hashed != entry.Length
-                || !file.VisiblePathMatches()
-                || File.GetLastWriteTimeUtc(fullPath) != initialLastWriteTimeUtc)
+                || !PinnedFileVisibleOrThrowUnavailable(
+                    file,
+                    $"Source file is temporarily unavailable during content proof capture: {entry.RelativePath}")
+                || !PinnedDirectoryVisibleOrThrowUnavailable(
+                    parent,
+                    $"Source file parent is temporarily unavailable during content proof capture: {entry.RelativePath}")
+                || file.GetLastWriteTimeUtc() != initialLastWriteTimeUtc)
             {
                 throw new MoveNeedsAttentionException(
                     $"Source file changed while its content proof was being captured: {entry.RelativePath}");
             }
 
-            return Convert.ToHexString(hash.GetHashAndReset());
+            ValidateMarkerlessSourceEntry(request, entry, file);
+            return (
+                Convert.ToHexString(hash.GetHashAndReset()),
+                initialLastWriteTimeUtc);
         }
         finally
         {

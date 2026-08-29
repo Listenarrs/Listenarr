@@ -38,30 +38,43 @@ internal sealed partial class MoveCleanupBoundaryResolver(
             return Unavailable($"Move paths could not be normalized: {exception.Message}");
         }
 
-        var sourceResolution = await semanticsResolver.ResolveAsync(
-            sourceFullPath,
-            cancellationToken: cancellationToken);
-        if (sourceResolution.State != PathIdentityState.Valid)
-        {
-            return Unavailable(
-                sourceResolution.Reason ?? "Source filesystem identity is unavailable.");
-        }
-
-        var semantics = sourceResolution.Semantics;
         var sourceParent = Path.GetDirectoryName(sourceFullPath);
         if (string.IsNullOrWhiteSpace(sourceParent))
         {
             return Unavailable("The source path has no removable parent directory.");
         }
 
+        // A configured root owns the case-semantics contract for descendants beneath
+        // it. Resolve that authority first so an explicit Sensitive/Insensitive root
+        // does not accidentally depend on a generic Auto probe that the storage may not
+        // support. Only unmanaged sources fall back to read-only Auto detection.
         var configuredBoundary = await FindDeepestConfiguredBoundaryAsync(
             sourceFullPath,
             configuredRoots,
-            semantics,
             cancellationToken);
         if (!string.IsNullOrWhiteSpace(configuredBoundary.UnavailableReason))
         {
             return Unavailable(configuredBoundary.UnavailableReason);
+        }
+
+        FileSystemPathSemantics semantics;
+        if (configuredBoundary.Semantics.HasValue)
+        {
+            semantics = configuredBoundary.Semantics.Value;
+        }
+        else
+        {
+            var sourceResolution = await semanticsResolver.ResolveAsync(
+                sourceFullPath,
+                FileSystemCaseSensitivityMode.Auto,
+                cancellationToken);
+            if (sourceResolution.State != PathIdentityState.Valid)
+            {
+                return Unavailable(
+                    sourceResolution.Reason ?? "Source filesystem identity is unavailable.");
+            }
+
+            semantics = sourceResolution.Semantics;
         }
 
         if (!string.IsNullOrWhiteSpace(persistedBoundary))
@@ -102,7 +115,8 @@ internal sealed partial class MoveCleanupBoundaryResolver(
         {
             targetResolution = await semanticsResolver.ResolveAsync(
                 targetFullPath,
-                cancellationToken: cancellationToken);
+                FileSystemCaseSensitivityMode.Auto,
+                cancellationToken);
         }
         catch (Exception exception) when (exception is
             ArgumentException or InvalidOperationException or NotSupportedException or PathTooLongException)
@@ -191,20 +205,45 @@ internal sealed partial class MoveCleanupBoundaryResolver(
     private async Task<ConfiguredBoundaryResolution> FindDeepestConfiguredBoundaryAsync(
         string source,
         IEnumerable<RootFolder> configuredRoots,
-        FileSystemPathSemantics sourceSemantics,
         CancellationToken cancellationToken)
     {
+        if (!FileSystemPathIdentity.TryDetectAbsoluteSyntaxForHost(
+                source,
+                out var sourceSyntax))
+        {
+            return new ConfiguredBoundaryResolution(
+                null,
+                null,
+                "The source path syntax is unavailable on this host.");
+        }
+
         var candidates = new List<ConfiguredRootCandidate>();
         foreach (var root in configuredRoots)
         {
             if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
                     root.Path,
                     out var canonicalRoot,
-                    out _)
-                || !FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                    out _))
+            {
+                if (FileSystemPathIdentity.AmbiguousStoredBoundaryMayContainPath(
+                        root.Path,
+                        source,
+                        sourceSyntax,
+                        root.CaseSensitivityMode))
+                {
+                    candidates.Add(new ConfiguredRootCandidate(
+                        root.Path.Length,
+                        null,
+                        null,
+                        $"Configured source root '{root.Path}' may contain the source, but its persisted filesystem identity is ambiguous."));
+                }
+
+                continue;
+            }
+            if (!FileSystemPathIdentity.TryDetectAbsoluteSyntax(
                     canonicalRoot,
                     out var rootSyntax)
-                || rootSyntax != sourceSemantics.Syntax)
+                || rootSyntax != sourceSyntax)
             {
                 continue;
             }
@@ -249,6 +288,7 @@ internal sealed partial class MoveCleanupBoundaryResolver(
                 candidates.Add(new ConfiguredRootCandidate(
                     canonicalLength,
                     null,
+                    null,
                     $"Configured source root '{root.Path}' could contain the source, but its filesystem identity is unavailable: {exception.Message}"));
                 continue;
             }
@@ -258,6 +298,7 @@ internal sealed partial class MoveCleanupBoundaryResolver(
             {
                 candidates.Add(new ConfiguredRootCandidate(
                     canonicalLength,
+                    null,
                     null,
                     rootResolution.Reason
                         ?? $"Configured source root '{root.Path}' could contain the source, but its filesystem identity is unavailable."));
@@ -279,13 +320,14 @@ internal sealed partial class MoveCleanupBoundaryResolver(
                 if (!TryDerivePhysicalBoundary(
                         source,
                         canonicalRoot,
-                        sourceSemantics,
+                        rootResolution.Semantics,
                         rootResolution.Semantics,
                         out var physicalBoundary))
                 {
                     candidates.Add(new ConfiguredRootCandidate(
                         canonicalLength,
                         null,
+                        rootResolution.Semantics,
                         $"Configured source root '{root.Path}' matched the source logically, but its physical cleanup boundary could not be established safely."));
                     continue;
                 }
@@ -293,6 +335,7 @@ internal sealed partial class MoveCleanupBoundaryResolver(
                 candidates.Add(new ConfiguredRootCandidate(
                     canonicalLength,
                     physicalBoundary,
+                    rootResolution.Semantics,
                     null));
             }
             catch (Exception exception) when (exception is
@@ -301,13 +344,14 @@ internal sealed partial class MoveCleanupBoundaryResolver(
                 candidates.Add(new ConfiguredRootCandidate(
                     canonicalLength,
                     null,
+                    rootResolution.Semantics,
                     $"Configured source root '{root.Path}' matched the source, but its cleanup boundary is invalid: {exception.Message}"));
             }
         }
 
         if (candidates.Count == 0)
         {
-            return new ConfiguredBoundaryResolution(null, null);
+            return new ConfiguredBoundaryResolution(null, null, null);
         }
 
         var deepestLength = candidates.Max(candidate => candidate.CanonicalLength);
@@ -318,22 +362,45 @@ internal sealed partial class MoveCleanupBoundaryResolver(
             candidate => !string.IsNullOrWhiteSpace(candidate.UnavailableReason));
         if (unavailable != null)
         {
-            return new ConfiguredBoundaryResolution(null, unavailable.UnavailableReason);
+            return new ConfiguredBoundaryResolution(
+                null,
+                null,
+                unavailable.UnavailableReason);
         }
 
+        var semantics = deepestCandidates
+            .Select(candidate => candidate.Semantics)
+            .Where(candidate => candidate.HasValue)
+            .Select(candidate => candidate!.Value)
+            .Distinct()
+            .ToList();
+        if (semantics.Count != 1)
+        {
+            return new ConfiguredBoundaryResolution(
+                null,
+                null,
+                "Multiple equally specific configured source roots resolved with conflicting filesystem semantics.");
+        }
+
+        var resolvedSemantics = semantics[0];
         var boundaries = deepestCandidates
             .Select(candidate => candidate.Boundary)
             .Where(boundary => !string.IsNullOrWhiteSpace(boundary))
             .Cast<string>()
-            .Distinct(sourceSemantics.Comparer)
+            .Distinct(resolvedSemantics.Comparer)
             .ToList();
         return boundaries.Count switch
         {
             0 => new ConfiguredBoundaryResolution(
                 null,
+                null,
                 "The most-specific configured source root has no safe physical cleanup boundary."),
-            1 => new ConfiguredBoundaryResolution(boundaries[0], null),
+            1 => new ConfiguredBoundaryResolution(
+                boundaries[0],
+                resolvedSemantics,
+                null),
             _ => new ConfiguredBoundaryResolution(
+                null,
                 null,
                 "Multiple equally specific configured source roots resolved to different physical cleanup boundaries.")
         };

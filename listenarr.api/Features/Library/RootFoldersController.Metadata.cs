@@ -13,6 +13,45 @@ namespace Listenarr.Api.Features.Library;
 
 public partial class RootFoldersController
 {
+    [HttpPatch("{id}/weak-storage-policy")]
+    public async Task<IActionResult> PatchWeakStoragePolicy(
+        int id,
+        [FromBody] RootFolderWeakStoragePolicyRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!Enum.IsDefined(request.Policy) || request.ExpectedRevision < 0)
+        {
+            return BadRequest(new { message = "The weak-storage policy request is invalid." });
+        }
+
+        try
+        {
+            var updated = await _weakStoragePolicyService.UpdateAsync(
+                id,
+                new RootFolderWeakStoragePolicyUpdate(
+                    request.Policy,
+                    request.ExpectedRevision),
+                cancellationToken);
+            return Ok(await MapAsync(updated));
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound(new { message = "Root folder not found" });
+        }
+        catch (RootFolderWeakStoragePolicyConflictException exception)
+        {
+            return Conflict(new
+            {
+                message = exception.Message,
+                code = "root_folder_policy_revision_conflict"
+            });
+        }
+        catch (ArgumentException)
+        {
+            return BadRequest(new { message = "The weak-storage policy request is invalid." });
+        }
+    }
+
     [HttpPatch("{id}")]
     public async Task<IActionResult> Patch(
         int id,

@@ -16,12 +16,64 @@ internal sealed partial class AudiobookScanService
         ICollection<AudiobookScanDiagnostic> diagnostics,
         CancellationToken cancellationToken)
     {
-        if (!command.AllowReconciliation || !command.IsAuthoritativeScope)
+        if (!command.AllowReconciliation
+            || !command.IsAuthoritativeScope)
         {
             diagnostics.Add(new AudiobookScanDiagnostic(
                 "ReconciliationNotAuthorized",
                 command.ScanRoot,
                 "This scan scope is not authorized to remove tracked file rows."));
+            return [];
+        }
+
+        if (!command.ScanPhysicalIdentity.HasDurableGenerationProof)
+        {
+            var candidates = new List<WeakStorageMissingFileCandidate>();
+            if (discovery.CanReconcile && weakStorageScanCandidateStore != null)
+            {
+                foreach (var file in existingFiles)
+                {
+                    if (!resolvedPaths.TryGetValue(file.Id, out var resolvedPath)
+                        || !FileSystemPathIdentity.IsSameOrInside(
+                            resolvedPath,
+                            command.ScanRoot,
+                            semantics))
+                    {
+                        continue;
+                    }
+                    ValidateNearestDirectorySnapshot(
+                        command,
+                        pinnedAuthority,
+                        discovery,
+                        resolvedPath);
+                    if (!PinnedFileExists(command, pinnedAuthority, resolvedPath))
+                    {
+                        candidates.Add(new WeakStorageMissingFileCandidate(
+                            file.Id,
+                            file.Path ?? string.Empty,
+                            resolvedPath,
+                            file.PhysicalObjectIdentity));
+                    }
+                }
+
+                var scanToken = await weakStorageScanCandidateStore.ReplaceAsync(
+                    audiobook.Id,
+                    candidates,
+                    cancellationToken);
+                diagnostics.Add(new AudiobookScanDiagnostic(
+                    "WeakStorageMissingFilesRequireConfirmation",
+                    command.ScanRoot,
+                    candidates.Count == 0
+                        ? "No missing tracked files were found on compatibility storage."
+                        : $"{candidates.Count} missing tracked file record(s) require explicit confirmation. Scan token: {scanToken:N}."));
+            }
+            else
+            {
+                diagnostics.Add(new AudiobookScanDiagnostic(
+                    "ReconciliationNotAuthorized",
+                    command.ScanRoot,
+                    "Tracked-file removal was skipped because this storage does not expose durable generation identity."));
+            }
             return [];
         }
 
@@ -93,10 +145,11 @@ internal sealed partial class AudiobookScanService
                     out var discoveredPhysicalIdentity);
                 var physicalGenerationChanged = hasDiscoveredIdentity
                     && !string.IsNullOrWhiteSpace(file.PhysicalObjectIdentity)
-                    && !string.Equals(
-                        file.PhysicalObjectIdentity,
-                        discoveredPhysicalIdentity,
-                        StringComparison.Ordinal);
+                    && !PinnedFileIdentityMatches(
+                        command,
+                        pinnedAuthority,
+                        resolvedPath,
+                        file.PhysicalObjectIdentity);
                 var physicalIdentityMissing = hasDiscoveredIdentity
                     && string.IsNullOrWhiteSpace(file.PhysicalObjectIdentity);
                 if ((physicalGenerationChanged || physicalIdentityMissing)
@@ -304,6 +357,7 @@ internal sealed partial class AudiobookScanService
 
         if (!command.AllowReconciliation
             || !command.IsAuthoritativeScope
+            || !command.ScanPhysicalIdentity.HasDurableGenerationProof
             || !discovery.CanReconcile
             || !FileSystemPathIdentity.IsSameOrInside(
                 resolvedPath,

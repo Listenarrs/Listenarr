@@ -36,38 +36,32 @@ public sealed partial class LibraryDirectoryOwnershipBoundaryAuthorizer(
         var canonicalPath = CanonicalizeHostAuthorizedPath(path, semantics);
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var roots = await db.RootFolders.AsNoTracking().ToListAsync(cancellationToken);
-        var rootMatch = roots
-            .Select(candidate => new
-            {
-                Root = candidate,
-                Semantics = TryGetPersistedRootSemantics(candidate)
-            })
-            .Where(candidate => candidate.Semantics.HasValue
-                && candidate.Semantics.Value.Syntax == semantics.Syntax)
-            .Where(candidate => FileSystemPathIdentity.IsSameOrInside(
-                    canonicalPath,
-                    candidate.Root.Path,
-                    candidate.Semantics!.Value))
-            .OrderByDescending(candidate => candidate.Root.Path.Length)
-            .FirstOrDefault();
-        if (rootMatch != null)
+        var rootSelection = SelectContainingConfiguredRoot(
+            roots,
+            canonicalPath,
+            semantics);
+        if (rootSelection.IsBlocked)
         {
-            if (!await ConfiguredRootSemanticsCurrentAsync(
-                    rootMatch.Root,
-                    rootMatch.Semantics!.Value,
-                    cancellationToken))
-            {
-                throw new InvalidOperationException(
-                    "The configured root filesystem semantics changed and require repair.");
-            }
+            throw new InvalidOperationException(
+                "A more-specific configured root has unavailable or ambiguous persisted filesystem semantics.");
+        }
+        if (rootSelection.Root != null
+            && rootSelection.Semantics.HasValue)
+        {
+            RequireCurrentConfiguredRootSemantics(
+                await GetConfiguredRootSemanticsStatusAsync(
+                    rootSelection.Root,
+                    rootSelection.Semantics.Value,
+                    cancellationToken),
+                "The configured root filesystem semantics changed and require repair.");
             return await AuthorizePathWithinBoundaryAsync(
                 canonicalPath,
-                rootMatch.Semantics.Value,
-                rootMatch.Root.Id,
-                rootMatch.Root.Path,
-                rootMatch.Root.DirectoryObjectIdentityVersion,
-                rootMatch.Root.DirectoryObjectIdentity,
-                rootMatch.Root.DirectoryObjectIdentityUnavailableReason,
+                rootSelection.Semantics.Value,
+                rootSelection.Root.Id,
+                rootSelection.Root.Path,
+                rootSelection.Root.DirectoryObjectIdentityVersion,
+                rootSelection.Root.DirectoryObjectIdentity,
+                rootSelection.Root.DirectoryObjectIdentityUnavailableReason,
                 ignoreUnavailableReason: true,
                 cancellationToken);
         }
@@ -112,41 +106,39 @@ public sealed partial class LibraryDirectoryOwnershipBoundaryAuthorizer(
                 "The retained directory has no parent.");
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var roots = await db.RootFolders.AsNoTracking().ToListAsync(cancellationToken);
-        var rootMatch = roots
-            .Select(candidate => new
-            {
-                Root = candidate,
-                Semantics = TryGetPersistedRootSemantics(candidate)
-            })
-            .Where(candidate => candidate.Semantics.HasValue
-                && candidate.Semantics.Value.Syntax == semantics.Syntax)
-            .Where(candidate => FileSystemPathIdentity.IsSameOrInside(
-                canonicalPath,
-                candidate.Root.Path,
-                candidate.Semantics!.Value))
-            .Where(candidate => FileSystemPathIdentity.IsSameOrInside(
-                parentPath,
-                candidate.Root.Path,
-                candidate.Semantics!.Value))
-            .OrderByDescending(candidate => candidate.Root.Path.Length)
-            .FirstOrDefault();
-        if (rootMatch != null)
+        var rootSelection = SelectContainingConfiguredRoot(
+            roots,
+            canonicalPath,
+            semantics,
+            parentPath);
+        if (rootSelection.IsBlocked)
         {
-            if (!await ConfiguredRootSemanticsCurrentAsync(
-                    rootMatch.Root,
-                    rootMatch.Semantics!.Value,
-                    cancellationToken))
+            return null;
+        }
+        if (rootSelection.Root != null
+            && rootSelection.Semantics.HasValue)
+        {
+            var semanticsStatus = await GetConfiguredRootSemanticsStatusAsync(
+                rootSelection.Root,
+                rootSelection.Semantics.Value,
+                cancellationToken);
+            if (semanticsStatus == ConfiguredRootSemanticsStatus.Unavailable)
+            {
+                throw new IOException(
+                    "The configured root filesystem semantics are temporarily unavailable.");
+            }
+            if (semanticsStatus != ConfiguredRootSemanticsStatus.Current)
             {
                 return null;
             }
             return await TryAuthorizePathWithinBoundaryAsync(
                 canonicalPath,
-                rootMatch.Semantics.Value,
-                rootMatch.Root.Id,
-                rootMatch.Root.Path,
-                rootMatch.Root.DirectoryObjectIdentityVersion,
-                rootMatch.Root.DirectoryObjectIdentity,
-                rootMatch.Root.DirectoryObjectIdentityUnavailableReason,
+                rootSelection.Semantics.Value,
+                rootSelection.Root.Id,
+                rootSelection.Root.Path,
+                rootSelection.Root.DirectoryObjectIdentityVersion,
+                rootSelection.Root.DirectoryObjectIdentity,
+                rootSelection.Root.DirectoryObjectIdentityUnavailableReason,
                 ignoreUnavailableReason: true,
                 cancellationToken);
         }
@@ -212,9 +204,8 @@ public sealed partial class LibraryDirectoryOwnershipBoundaryAuthorizer(
                 cancellationToken);
         }
         catch (Exception exception) when (exception is
-            InvalidOperationException or IOException or UnauthorizedAccessException
-                or ArgumentException or NotSupportedException or PathTooLongException
-                or System.ComponentModel.Win32Exception)
+            InvalidOperationException or ArgumentException
+                or NotSupportedException or PathTooLongException)
         {
             return null;
         }
@@ -247,24 +238,23 @@ public sealed partial class LibraryDirectoryOwnershipBoundaryAuthorizer(
             throw new InvalidOperationException(
                 "The requested directory boundary is not a configured root folder.");
         }
-        if (!await ConfiguredRootSemanticsCurrentAsync(
+        RequireCurrentConfiguredRootSemantics(
+            await GetConfiguredRootSemanticsStatusAsync(
                 rootMatch.Root,
                 rootMatch.Semantics!.Value,
-                cancellationToken))
-        {
-            throw new InvalidOperationException(
-                "The configured root filesystem semantics changed and require repair.");
-        }
+                cancellationToken),
+            "The configured root filesystem semantics changed and require repair.");
         var anchor = PinnedDirectoryCreation.OpenPinnedBoundary(canonicalBoundary);
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
             var liveIdentity = anchor.GetDirectoryObjectIdentity();
-            if (!ManagedDirectoryIdentity.MatchesNativeIdentity(
+            if (!anchor.MatchesManagedDirectoryIdentity(
                     rootMatch.Root.DirectoryObjectIdentityVersion,
-                    rootMatch.Root.DirectoryObjectIdentity,
-                    liveIdentity)
-                || !anchor.VisiblePathMatches())
+                    rootMatch.Root.DirectoryObjectIdentity)
+                || !BoundaryVisibilityMatchesOrThrowUnavailable(
+                    anchor,
+                    "The managed root is temporarily unavailable while its authorized physical generation is being verified."))
             {
                 throw new InvalidOperationException(
                     "The managed root no longer identifies its authorized physical generation.");
@@ -301,15 +291,17 @@ public sealed partial class LibraryDirectoryOwnershipBoundaryAuthorizer(
         var rootSemantics = TryGetPersistedRootSemantics(root)
             ?? throw new InvalidOperationException(
                 "The managed root authorization has incomplete filesystem semantics.");
-        if (rootSemantics.Syntax != semantics.Syntax
-            || !await ConfiguredRootSemanticsCurrentAsync(
-                root,
-                rootSemantics,
-                cancellationToken))
+        if (rootSemantics.Syntax != semantics.Syntax)
         {
             throw new InvalidOperationException(
                 "The managed root authorization uses incompatible or stale filesystem semantics.");
         }
+        RequireCurrentConfiguredRootSemantics(
+            await GetConfiguredRootSemanticsStatusAsync(
+                root,
+                rootSemantics,
+                cancellationToken),
+            "The managed root authorization uses incompatible or stale filesystem semantics.");
         if (FileSystemPathIdentity.IsSameOrInside(
                 parentPath,
                 root.Path,
@@ -389,11 +381,12 @@ public sealed partial class LibraryDirectoryOwnershipBoundaryAuthorizer(
             cancellationToken.ThrowIfCancellationRequested();
             if ((!ignoreUnavailableReason
                     && !string.IsNullOrWhiteSpace(identityUnavailableReason))
-                || !ManagedDirectoryIdentity.MatchesNativeIdentity(
+                || !boundary.MatchesManagedDirectoryIdentity(
                     expectedIdentityVersion,
-                    expectedIdentity,
-                    boundary.GetDirectoryObjectIdentity())
-                || !boundary.VisiblePathMatches())
+                    expectedIdentity)
+                || !BoundaryVisibilityMatchesOrThrowUnavailable(
+                    boundary,
+                    "The managed root boundary is temporarily unavailable while its authorized physical generation is being verified."))
             {
                 throw new InvalidOperationException(
                     "The managed root boundary no longer identifies its authorized physical generation.");
@@ -436,6 +429,19 @@ public sealed partial class LibraryDirectoryOwnershipBoundaryAuthorizer(
         {
             boundary.Dispose();
         }
+    }
+
+    private static bool BoundaryVisibilityMatchesOrThrowUnavailable(
+        PinnedDirectoryCreation.PinnedDirectoryAnchor boundary,
+        string unavailableMessage)
+    {
+        var visibility = boundary.ProbeVisiblePathMatch();
+        if (visibility == RegistrationPublicationMatchOutcome.Unavailable)
+        {
+            throw new IOException(unavailableMessage);
+        }
+
+        return visibility == RegistrationPublicationMatchOutcome.Match;
     }
 
     private static string CanonicalizeHostAuthorizedPath(

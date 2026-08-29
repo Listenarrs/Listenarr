@@ -2,8 +2,14 @@ namespace Listenarr.Infrastructure.Library.Moving;
 
 internal enum SourceCleanupFaultPoint
 {
+    AfterMarkerlessSourceDeleteAuthorizedState,
     AfterMarkerlessSourceFileDeleteBeforeStateUpdate,
     AfterMarkerlessSourceFileStateUpdate
+}
+
+internal enum SourceRetentionFaultPoint
+{
+    AfterEntryStateUpdate
 }
 
 internal enum CopyMutationFaultPoint
@@ -12,6 +18,9 @@ internal enum CopyMutationFaultPoint
     AfterMarkerlessFileStateUpdate,
     AfterMarkerlessFileWriteBeforePublishedState,
     BeforeMarkerlessMetadataPreservation,
+    BeforeMarkerlessNativeRenameMutation,
+    AfterMarkerlessNativeRenameFailureBeforeObservation,
+    AfterMarkerlessNativeRenameFallbackAuthorized,
     AfterMarkerlessNativeRenameBeforeStateUpdate
 }
 
@@ -29,6 +38,7 @@ internal enum MoveFinalizationFaultPoint
 internal enum CompletionHandoffFaultPoint
 {
     BeforeHistoryPersist,
+    BeforeCompletionCommitValidation,
     BeforeScanEnqueue
 }
 
@@ -41,6 +51,8 @@ internal interface IMoveFaultInjector
 {
     bool AllowMarkerlessFileRename => false;
     bool ForceCrossVolumeForTest => false;
+    int? MarkerlessNativeRenameErrorForTest => null;
+    bool MarkerlessNativeRenamePublishesBeforeErrorForTest => false;
 
     Task AfterPublishedAsync(Guid jobId, CancellationToken cancellationToken) =>
         Task.CompletedTask;
@@ -48,6 +60,12 @@ internal interface IMoveFaultInjector
     void OnSourceCleanupMutation(
         Guid jobId,
         SourceCleanupFaultPoint faultPoint)
+    {
+    }
+
+    void OnSourceRetentionMutation(
+        Guid jobId,
+        SourceRetentionFaultPoint faultPoint)
     {
     }
 

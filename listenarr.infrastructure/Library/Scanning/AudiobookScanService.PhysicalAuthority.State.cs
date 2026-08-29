@@ -16,24 +16,20 @@ internal sealed partial class AudiobookScanService
             foreach (var directory in directories)
             {
                 if (!directory.Anchor.VisiblePathMatches()
-                    || !string.Equals(
-                        directory.Anchor.GetDirectoryObjectIdentity(),
-                        directory.ObjectIdentity,
-                        StringComparison.Ordinal))
+                    || (directory.ObjectIdentity != null
+                        && !directory.Anchor.MatchesDirectoryObjectIdentity(
+                            directory.ObjectIdentity)))
                 {
                     throw new InvalidOperationException(
                         "The physical scan hierarchy changed after authorization.");
                 }
             }
 
-            if (!string.Equals(
-                    directories[0].Anchor.GetDirectoryObjectIdentity(),
-                    command.ScanPhysicalIdentity.BoundaryObjectIdentity,
-                    StringComparison.Ordinal)
-                || !string.Equals(
-                    Root.GetDirectoryObjectIdentity(),
-                    command.ScanPhysicalIdentity.ScanRootObjectIdentity,
-                    StringComparison.Ordinal))
+            if (command.ScanPhysicalIdentity.HasDurableGenerationProof
+                && (!directories[0].Anchor.MatchesDirectoryObjectIdentity(
+                        command.ScanPhysicalIdentity.BoundaryObjectIdentity!)
+                    || !Root.MatchesDirectoryObjectIdentity(
+                        command.ScanPhysicalIdentity.ScanRootObjectIdentity!)))
             {
                 throw new InvalidOperationException(
                     "The physical scan-root generation changed after authorization.");
@@ -58,10 +54,15 @@ internal sealed partial class AudiobookScanService
 
     private sealed record PinnedDirectoryState(
         PinnedDirectoryCreation.PinnedDirectoryAnchor Anchor,
-        string ObjectIdentity)
+        string? ObjectIdentity)
     {
         internal static PinnedDirectoryState Capture(
-            PinnedDirectoryCreation.PinnedDirectoryAnchor anchor) =>
-            new(anchor, anchor.GetDirectoryObjectIdentity());
+            PinnedDirectoryCreation.PinnedDirectoryAnchor anchor,
+            bool requireDurableGenerationProof) =>
+            new(
+                anchor,
+                requireDurableGenerationProof
+                    ? anchor.GetDirectoryObjectIdentity()
+                    : null);
     }
 }

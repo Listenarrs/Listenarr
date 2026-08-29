@@ -26,11 +26,21 @@ namespace Listenarr.Application.Audiobooks.Contracts
         IReadOnlyList<MoveSourceManifestEntry> SourceEntries,
         string TargetPath,
         PathIdentitySnapshot TargetIdentity,
+        int SourceBoundaryDirectoryObjectIdentityVersion,
+        string SourceBoundaryDirectoryObjectIdentity,
         int TargetBoundaryDirectoryObjectIdentityVersion,
         string TargetBoundaryDirectoryObjectIdentity,
         bool DeleteEmptySource = true,
         string? SourceCleanupBoundary = null,
-        Guid? RelocationId = null);
+        Guid? RelocationId = null,
+        MoveSourceCleanupMode SourceCleanupMode = MoveSourceCleanupMode.RetainSource,
+        int? SourceRootFolderId = null,
+        int? SourcePolicyRevision = null,
+        int? TargetRootFolderId = null,
+        int? TargetPolicyRevision = null,
+        int? SourceStorageContractRevision = null,
+        int? TargetStorageContractRevision = null,
+        bool ForceCopyAndRetainSource = false);
 
     public enum MoveHeartbeatOutcome
     {

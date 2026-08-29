@@ -57,6 +57,8 @@ function rootFolder(activeRelocation: RootFolderPathChangeResult | null): RootFo
     storageReason: 'None',
     canConfirmCurrentFolder: false,
     canChangePath: true,
+    canReadFilesystem: true,
+    canScanFilesystem: true,
     canMutateFilesystem: true,
     activeRelocation,
   }
@@ -115,6 +117,47 @@ describe('RootFoldersSettings', () => {
     resolveFn([])
     await new Promise((r) => setTimeout(r, 0))
     await wrapper.vm.$nextTick()
+  })
+
+  it('offers a one-click detected case setting for mutation-limited network storage', async () => {
+    const unprovenRoot: RootFolder = {
+      ...rootFolder(null),
+      caseSensitivityMode: 'Auto',
+      resolvedCaseSensitivity: 'Sensitive',
+      storageState: 'Limited',
+      storageReason: 'MutationSemanticsUnproven',
+      storageMessage: 'Automatic case semantics need confirmation.',
+      canMutateFilesystem: false,
+    }
+    vi.mocked(apiService.getRootFolders).mockResolvedValue([unprovenRoot])
+    const pinia = createReadyPinia()
+    const wrapper = mount(RootFoldersSettings, { global: { plugins: [pinia] } })
+    await flushPromises()
+
+    const store = useRootFoldersStore()
+    const update = vi.spyOn(store, 'update').mockResolvedValue({
+      ...unprovenRoot,
+      caseSensitivityMode: 'Sensitive',
+      storageState: 'Healthy',
+      storageReason: 'None',
+      canMutateFilesystem: true,
+    })
+
+    expect(wrapper.text()).toContain('Needs case setting')
+    expect(wrapper.text()).toContain('Use detected setting: case-sensitive')
+
+    await wrapper.get('[data-cy="mutation-semantics-guidance"] button').trigger('click')
+    await flushPromises()
+
+    expect(update).toHaveBeenCalledWith(
+      unprovenRoot.id,
+      expect.objectContaining({
+        id: unprovenRoot.id,
+        path: unprovenRoot.path,
+        caseSensitivityMode: 'Sensitive',
+      }),
+      { expectedCurrentPath: unprovenRoot.path },
+    )
   })
 
   it('presents partial metadata repair as an actionable progress panel', async () => {
@@ -267,13 +310,20 @@ describe('RootFoldersSettings', () => {
   })
 
   it.each([
-    ['Healthy', 'Healthy', true, false],
-    ['Missing', 'Missing', false, false],
-    ['Unavailable', 'Unavailable', false, false],
-    ['Unconfirmed', 'Needs confirmation', false, true],
+    ['Healthy', 'Healthy', true, false, true],
+    ['Limited', 'Limited', false, false, true],
+    ['Missing', 'Missing', false, false, false],
+    ['Unavailable', 'Unavailable', false, false, false],
+    ['Unconfirmed', 'Needs confirmation', false, true, false],
   ] as const)(
     'renders %s storage state with the correct actions',
-    async (storageState, label, canMutateFilesystem, canConfirmCurrentFolder) => {
+    async (
+      storageState,
+      label,
+      canMutateFilesystem,
+      canConfirmCurrentFolder,
+      canScanFilesystem,
+    ) => {
       const folder = {
         ...rootFolder(null),
         storageState,
@@ -284,11 +334,14 @@ describe('RootFoldersSettings', () => {
               ? ('PathMissing' as const)
               : storageState === 'Unconfirmed'
                 ? ('NoAuthorizedIdentity' as const)
-                : ('AccessDenied' as const),
+                : storageState === 'Limited'
+                  ? ('IdentityUnsupported' as const)
+                  : ('AccessDenied' as const),
         storageMessage:
           storageState === 'Healthy' ? null : `Storage is ${storageState.toLowerCase()}.`,
         canMutateFilesystem,
         canConfirmCurrentFolder,
+        canScanFilesystem,
         confirmationToken: canConfirmCurrentFolder ? 'observation-token' : null,
       }
       vi.mocked(apiService.getRootFolders).mockResolvedValue([folder])
@@ -298,12 +351,59 @@ describe('RootFoldersSettings', () => {
 
       expect(wrapper.text()).toContain(label)
       expect(wrapper.get('[data-cy="scan-unmatched"]').attributes('disabled') !== undefined).toBe(
-        !canMutateFilesystem,
+        !canScanFilesystem,
       )
       expect(wrapper.find('[data-cy="confirm-root-folder"]').exists()).toBe(canConfirmCurrentFolder)
       wrapper.unmount()
     },
   )
+
+  it('shows expandable technical storage details without replacing the user-facing message', async () => {
+    const folder = {
+      ...rootFolder(null),
+      storageState: 'Limited' as const,
+      storageReason: 'IdentityUnsupported' as const,
+      storageMessage:
+        'This storage can be read and scanned, but it does not expose the durable file identity required for crash-safe moves and deletions.',
+      storageDetail:
+        'statx omitted birth time and name_to_handle_at returned operation not permitted.',
+      canReadFilesystem: true,
+      canScanFilesystem: true,
+      canMutateFilesystem: false,
+      canConfirmCurrentFolder: false,
+    }
+    vi.mocked(apiService.getRootFolders).mockResolvedValue([folder])
+    const pinia = createReadyPinia()
+    const wrapper = mount(RootFoldersSettings, { global: { plugins: [pinia] } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('read and scanned')
+    const details = wrapper.get('.storage-detail')
+    expect(details.text()).toContain('Technical storage details')
+    expect(details.text()).toContain('statx omitted birth time')
+    wrapper.unmount()
+  })
+
+  it('states that weak-storage moves copy and retain the source', async () => {
+    vi.mocked(apiService.getRootFolders).mockResolvedValue([
+      {
+        ...rootFolder(null),
+        storageState: 'Limited',
+        storageReason: 'IdentityUnsupported',
+        storageMessage: 'Durable file identity is unavailable.',
+        canPublishNewFiles: true,
+        canMutateFilesystem: false,
+      },
+    ])
+    const pinia = createReadyPinia()
+    const wrapper = mount(RootFoldersSettings, { global: { plugins: [pinia] } })
+    await flushPromises()
+
+    const policy = wrapper.get('[data-cy="compatibility-publication-message"]')
+    expect(policy.text()).toContain('will copy files into this storage and retain the source')
+    expect(policy.text()).toContain('will not attempt source cleanup')
+    wrapper.unmount()
+  })
 
   it('shows initializing, blocks filesystem actions, and keeps metadata editing available', async () => {
     const folder = {

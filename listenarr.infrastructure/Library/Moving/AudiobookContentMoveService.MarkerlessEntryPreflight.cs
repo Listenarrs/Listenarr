@@ -7,8 +7,7 @@ internal sealed partial class AudiobookContentMoveService
         string source,
         CancellationToken cancellationToken)
     {
-        if (!Directory.Exists(source)
-            && !File.Exists(source))
+        if (!TryGetMarkerlessPathAttributes(source, out _))
         {
             var endpoints = await GetEndpointObjectIdentitiesAsync(
                 jobId,

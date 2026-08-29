@@ -12,9 +12,45 @@ public enum ScanPathAuthorizationFailure
     IdentityUnavailable
 }
 
-public readonly record struct ScanPathPhysicalIdentity(
-    string BoundaryObjectIdentity,
-    string ScanRootObjectIdentity);
+public enum ScanPathPhysicalProofKind
+{
+    DurableGeneration,
+    PinnedPathOnly
+}
+
+public readonly record struct ScanPathPhysicalIdentity
+{
+    public ScanPathPhysicalIdentity(
+        string boundaryObjectIdentity,
+        string scanRootObjectIdentity)
+        : this(
+            ScanPathPhysicalProofKind.DurableGeneration,
+            boundaryObjectIdentity,
+            scanRootObjectIdentity)
+    {
+    }
+
+    private ScanPathPhysicalIdentity(
+        ScanPathPhysicalProofKind proofKind,
+        string? boundaryObjectIdentity,
+        string? scanRootObjectIdentity)
+    {
+        ProofKind = proofKind;
+        BoundaryObjectIdentity = boundaryObjectIdentity;
+        ScanRootObjectIdentity = scanRootObjectIdentity;
+    }
+
+    public ScanPathPhysicalProofKind ProofKind { get; }
+    public string? BoundaryObjectIdentity { get; init; }
+    public string? ScanRootObjectIdentity { get; init; }
+    public bool HasDurableGenerationProof =>
+        ProofKind == ScanPathPhysicalProofKind.DurableGeneration
+        && !string.IsNullOrWhiteSpace(BoundaryObjectIdentity)
+        && !string.IsNullOrWhiteSpace(ScanRootObjectIdentity);
+
+    public static ScanPathPhysicalIdentity PinnedPathOnly() =>
+        new(ScanPathPhysicalProofKind.PinnedPathOnly, null, null);
+}
 
 public sealed record ScanPathAuthorizationResult(
     string? Path,
@@ -27,10 +63,9 @@ public sealed record ScanPathAuthorizationResult(
         !string.IsNullOrWhiteSpace(Path)
         && Identity.HasValue
         && PhysicalIdentity.HasValue
-        && !string.IsNullOrWhiteSpace(
-            PhysicalIdentity.Value.BoundaryObjectIdentity)
-        && !string.IsNullOrWhiteSpace(
-            PhysicalIdentity.Value.ScanRootObjectIdentity)
+        && (PhysicalIdentity.Value.HasDurableGenerationProof
+            || PhysicalIdentity.Value.ProofKind
+                == ScanPathPhysicalProofKind.PinnedPathOnly)
         && Failure == ScanPathAuthorizationFailure.None
         && string.IsNullOrWhiteSpace(Error);
 

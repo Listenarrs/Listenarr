@@ -76,10 +76,22 @@ namespace Listenarr.Domain.Audiobooks
         Retained
     }
 
+    public enum MoveSourceCleanupMode
+    {
+        RetainSource = 0,
+        DeleteAfterVerifiedCopy = 1
+    }
+
+    public static class MoveIdentityProtocol
+    {
+        public const int Current = 2;
+    }
+
     public static class MoveExecutionProtocol
     {
         public const int PreDurableReleased = 0;
-        public const int MarkerlessDatabaseState = 1;
+        public const int TargetBoundaryMarkerlessDatabaseState = 1;
+        public const int MarkerlessDatabaseState = 2;
         public const int Current = MarkerlessDatabaseState;
 
         public static bool IsCurrent(int version) => version == Current;
@@ -115,7 +127,7 @@ namespace Listenarr.Domain.Audiobooks
         public int AttemptCount { get; set; } = 0;
         public DateTime? UpdatedAt { get; set; }
         public string? ActiveDeduplicationKey { get; set; }
-        public int IdentityKeyVersion { get; set; } = 1;
+        public int IdentityKeyVersion { get; set; } = MoveIdentityProtocol.Current;
         public string? LeaseOwner { get; set; }
         public DateTime? LeaseExpiresAt { get; set; }
         public int LeaseGeneration { get; set; }
@@ -135,6 +147,15 @@ namespace Listenarr.Domain.Audiobooks
         public string? TargetIdentityBoundary { get; set; }
         public string? SourceCleanupBoundary { get; set; }
         public bool DeleteEmptySource { get; set; } = true;
+        public MoveSourceCleanupMode SourceCleanupMode { get; set; } =
+            MoveSourceCleanupMode.RetainSource;
+        public bool ForceCopyAndRetainSource { get; set; }
+        public int? SourceRootFolderId { get; set; }
+        public int? SourcePolicyRevision { get; set; }
+        public int? SourceStorageContractRevision { get; set; }
+        public int? TargetRootFolderId { get; set; }
+        public int? TargetPolicyRevision { get; set; }
+        public int? TargetStorageContractRevision { get; set; }
         public ICollection<MoveJobEntry> Entries { get; set; } = new List<MoveJobEntry>();
         public ICollection<MoveJobCreatedDirectory> CreatedDirectories { get; set; } = new List<MoveJobCreatedDirectory>();
         public MoveScanHandoff? ScanHandoff { get; set; }

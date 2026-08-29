@@ -14,7 +14,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Audiobooks.Moving;
 
-public sealed class AudiobookDestinationRewriteService : IAudiobookDestinationRewriteService
+public sealed partial class AudiobookDestinationRewriteService : IAudiobookDestinationRewriteService
 {
     private readonly IAudiobookRepository _repo;
     private readonly IConfigurationService _configService;
@@ -163,16 +163,19 @@ public sealed class AudiobookDestinationRewriteService : IAudiobookDestinationRe
                 "DestinationPath is invalid: leading whitespace before an absolute path is not allowed.");
         }
 
-        var settings = await _configService.GetApplicationSettingsAsync();
         var rootFolders = await _rootFolderService.GetAllAsync();
+        var settings = rootFolders.Count == 0
+            ? await _configService.GetApplicationSettingsAsync()
+            : null;
 
         var allowedMoveRoots = new List<MoveRootBoundary>();
+        var unavailableConfiguredRoots = new List<UnavailableMoveRoot>();
         // RootFolders are the authoritative managed-storage boundaries. OutputPath is
         // only a compatibility fallback before any root folders have been configured.
         var normalizedOutputPath = rootFolders.Count == 0
-            ? TryNormalizeMoveRoot(settings.OutputPath, "legacy configured output path")
+            ? TryNormalizeMoveRoot(settings!.OutputPath, "legacy configured output path")
             : null;
-        await AddAllowedMoveRootAsync(
+        _ = await AddAllowedMoveRootAsync(
             allowedMoveRoots,
             normalizedOutputPath,
             FileSystemCaseSensitivityMode.Auto,
@@ -184,14 +187,24 @@ public sealed class AudiobookDestinationRewriteService : IAudiobookDestinationRe
             var normalizedRootPath = TryNormalizeMoveRoot(rootFolder.Path, $"root folder {rootFolder.Id}");
             if (normalizedRootPath == null)
             {
+                unavailableConfiguredRoots.Add(new UnavailableMoveRoot(
+                    rootFolder,
+                    CanonicalPath: null));
                 continue;
             }
 
-            await AddAllowedMoveRootAsync(
+            var rootAvailable = await AddAllowedMoveRootAsync(
                 allowedMoveRoots,
                 normalizedRootPath,
                 rootFolder.CaseSensitivityMode,
                 cancellationToken);
+            if (!rootAvailable)
+            {
+                unavailableConfiguredRoots.Add(new UnavailableMoveRoot(
+                    rootFolder,
+                    normalizedRootPath));
+                continue;
+            }
             if (rootFolder.IsDefault && defaultRootPath == null)
             {
                 defaultRootPath = normalizedRootPath;
@@ -240,7 +253,11 @@ public sealed class AudiobookDestinationRewriteService : IAudiobookDestinationRe
         }
 
         var targetBoundary = FindAllowedMoveRoot(final, allowedMoveRoots);
-        if (targetBoundary == null)
+        if (targetBoundary == null
+            || UnavailableConfiguredRootOutranksTargetBoundary(
+                final,
+                targetBoundary,
+                unavailableConfiguredRoots))
         {
             throw new ApplicationValidationException(
                 "destination_filesystem_identity_unavailable",
@@ -272,7 +289,7 @@ public sealed class AudiobookDestinationRewriteService : IAudiobookDestinationRe
         return null;
     }
 
-    private async Task AddAllowedMoveRootAsync(
+    private async Task<bool> AddAllowedMoveRootAsync(
         List<MoveRootBoundary> allowedRoots,
         string? normalizedRoot,
         FileSystemCaseSensitivityMode caseSensitivityMode,
@@ -280,7 +297,7 @@ public sealed class AudiobookDestinationRewriteService : IAudiobookDestinationRe
     {
         if (string.IsNullOrEmpty(normalizedRoot))
         {
-            return;
+            return false;
         }
 
         var resolution = await _semanticsResolver.ResolveAsync(
@@ -293,7 +310,7 @@ public sealed class AudiobookDestinationRewriteService : IAudiobookDestinationRe
                 "Skipping move boundary with unavailable filesystem identity: {Path}. Reason: {Reason}",
                 LogRedaction.SanitizeFilePath(normalizedRoot),
                 resolution.Reason);
-            return;
+            return false;
         }
 
         var semantics = resolution.Semantics;
@@ -314,13 +331,14 @@ public sealed class AudiobookDestinationRewriteService : IAudiobookDestinationRe
                     caseSensitivityMode);
             }
 
-            return;
+            return true;
         }
 
         allowedRoots.Add(new MoveRootBoundary(
             normalizedRoot,
             semantics,
             caseSensitivityMode));
+        return true;
     }
 
     private async Task<bool> TryIsBoundaryProtectedAsync(
@@ -424,6 +442,10 @@ public sealed class AudiobookDestinationRewriteService : IAudiobookDestinationRe
             return false;
         }
     }
+
+    private sealed record UnavailableMoveRoot(
+        RootFolder Root,
+        string? CanonicalPath);
 
     private sealed record MoveRootBoundary(
         string Path,

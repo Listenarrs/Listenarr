@@ -22,6 +22,47 @@ internal sealed partial class EfMoveExecutionStore
             },
             cancellationToken);
 
+    public Task<MarkerlessMoveBoundaryAuthorizationState> GetBoundaryAuthorizationsAsync(
+        Guid jobId,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(
+            "load markerless move boundary authorizations",
+            async () =>
+            {
+                await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+                var job = await db.MoveJobs
+                    .AsNoTracking()
+                    .Include(candidate => candidate.Entries)
+                    .SingleAsync(candidate => candidate.Id == jobId, cancellationToken);
+                var sourceAuthorizationBoundary = job.SourceCleanupBoundary
+                    ?? job.SourceIdentityBoundary;
+                if (string.IsNullOrWhiteSpace(sourceAuthorizationBoundary)
+                    || string.IsNullOrWhiteSpace(job.TargetIdentityBoundary)
+                    || !MoveManifestIdentity.TryGetSourceBoundaryAuthorization(
+                        job.Entries,
+                        out var sourceVersion,
+                        out var sourceIdentity,
+                        out _)
+                    || !MoveManifestIdentity.TryGetTargetBoundaryAuthorization(
+                        job.Entries,
+                        out var targetVersion,
+                        out var targetIdentity,
+                        out _))
+                {
+                    throw new MoveNeedsAttentionException(
+                        "The move lacks durable source or target boundary authorization.");
+                }
+
+                return new MarkerlessMoveBoundaryAuthorizationState(
+                    sourceAuthorizationBoundary,
+                    sourceVersion,
+                    sourceIdentity,
+                    job.TargetIdentityBoundary,
+                    targetVersion,
+                    targetIdentity);
+            },
+            cancellationToken);
+
     public Task UpdateEndpointObjectIdentitiesAsync(
         Guid jobId,
         MoveLeaseToken leaseToken,

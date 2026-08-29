@@ -6,6 +6,25 @@ namespace Listenarr.Infrastructure.FileSystem;
 
 public partial class FileMover
 {
+    private static async Task<FilePublicationSourceProof>
+        CaptureContentOnlySourceProofAsync(
+            PinnedDirectoryCreation.PinnedFileEntry source,
+            CancellationToken cancellationToken)
+    {
+        await using var stream = source.OpenReadStream(
+            bufferSize: 128 * 1024,
+            asynchronous: false);
+        var length = stream.Length;
+        stream.Position = 0;
+        var sha256 = Convert.ToHexString(
+            await SHA256.HashDataAsync(stream, cancellationToken));
+        return new FilePublicationSourceProof(
+            $"content-only:{sha256}",
+            length,
+            sha256,
+            FilePublicationSourceAuthority.ContentOnly);
+    }
+
     private static async Task<MarkerlessSourceProof>
         CaptureMarkerlessSourceProofAsync(
             PinnedDirectoryCreation.PinnedFileEntry source,
@@ -42,11 +61,11 @@ public partial class FileMover
         {
             return journal;
         }
-        if (!source.VisiblePathMatches()
-            || !string.Equals(
-                source.GetObjectIdentity(),
-                journal.SourcePhysicalObjectIdentity,
-                StringComparison.Ordinal))
+        if (!VisiblePathMatchesOrThrowUnavailable(
+                source,
+                "The markerless move source is temporarily unavailable before content hashing.")
+            || !source.MatchesObjectIdentity(
+                journal.SourcePhysicalObjectIdentity))
         {
             throw new IOException(
                 "The markerless move source changed before content hashing.");
@@ -72,20 +91,43 @@ public partial class FileMover
             cancellationToken);
     }
 
+    private static bool MatchesExpectedSourceProof(
+        MarkerlessSourceProof actual,
+        FilePublicationSourceProof expected) =>
+        expected.HasDurablePhysicalObjectIdentity
+        &&
+        PinnedDirectoryCreation.ArePersistedObjectIdentitiesDurablyEquivalent(
+            actual.PhysicalObjectIdentity,
+            expected.PhysicalObjectIdentity)
+        && actual.Length == expected.Length
+        && string.Equals(actual.Sha256, expected.Sha256, StringComparison.Ordinal);
+
+    private static bool JournalMatchesExpectedSourceProof(
+        FileMutationJournal journal,
+        FilePublicationSourceProof expected) =>
+        PinnedDirectoryCreation.ArePersistedObjectIdentitiesDurablyEquivalent(
+            journal.SourcePhysicalObjectIdentity,
+            expected.PhysicalObjectIdentity)
+        && journal.SourceLength == expected.Length
+        && string.Equals(
+            journal.SourceSha256,
+            expected.Sha256,
+            StringComparison.Ordinal);
+
     private static async Task<bool> MatchesMarkerlessSourceProofAsync(
         PinnedDirectoryCreation.PinnedFileEntry source,
         FileMutationJournal journal,
         CancellationToken cancellationToken)
     {
-        if (!source.VisiblePathMatches()
+        if (!VisiblePathMatchesOrThrowUnavailable(
+                source,
+                "The markerless source is temporarily unavailable while its physical generation is being verified.")
             || (journal.Action == FileAction.HardlinkCopy
                 ? !MatchesHardlinkSourceIdentity(
                     source,
                     journal.SourcePhysicalObjectIdentity)
-                : !string.Equals(
-                    source.GetObjectIdentity(),
-                    journal.SourcePhysicalObjectIdentity,
-                    StringComparison.Ordinal)))
+                : !source.MatchesObjectIdentity(
+                    journal.SourcePhysicalObjectIdentity)))
         {
             return false;
         }
@@ -107,10 +149,8 @@ public partial class FileMover
                 ? !MatchesHardlinkSourceIdentity(
                     target,
                     journal.SourcePhysicalObjectIdentity)
-                : !string.Equals(
-                    target.GetObjectIdentity(),
-                    journal.SourcePhysicalObjectIdentity,
-                    StringComparison.Ordinal)))
+                : !target.MatchesObjectIdentity(
+                    journal.SourcePhysicalObjectIdentity)))
         {
             return false;
         }
@@ -145,13 +185,13 @@ public partial class FileMover
     private static bool TargetMatchesMarkerlessJournal(
         PinnedDirectoryCreation.PinnedFileEntry target,
         FileMutationJournal journal) =>
-        target.VisiblePathMatches()
+        VisiblePathMatchesOrThrowUnavailable(
+            target,
+            "The markerless target is temporarily unavailable while its physical generation is being verified.")
         && !string.IsNullOrWhiteSpace(
             journal.TargetPhysicalObjectIdentity)
-        && string.Equals(
-            target.GetObjectIdentity(),
-            journal.TargetPhysicalObjectIdentity,
-            StringComparison.Ordinal);
+        && target.MatchesObjectIdentity(
+            journal.TargetPhysicalObjectIdentity);
 
     private static bool OwnerMetadataReconciledTargetMatches(
         FileMoveGateLease gate,

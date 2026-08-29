@@ -7,8 +7,11 @@ internal sealed partial class AudiobookContentMoveService
         MoveJobEntry manifestEntry,
         CancellationToken cancellationToken)
     {
-        if (!File.Exists(path)
+        var exists = TryGetMarkerlessPathAttributes(path, out var attributes);
+        if (!exists
             || manifestEntry.EntryType != MoveJobEntryType.File
+            || (attributes & FileAttributes.Directory) != 0
+            || (attributes & FileAttributes.ReparsePoint) != 0
             || new FileInfo(path).Length != manifestEntry.Length
             || string.IsNullOrWhiteSpace(manifestEntry.Sha256))
         {

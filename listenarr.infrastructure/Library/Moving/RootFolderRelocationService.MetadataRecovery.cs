@@ -11,6 +11,21 @@ public sealed partial class RootFolderRelocationService
     private const string MetadataOnlyRecoveryAttentionPrefix =
         "Metadata-only root repair recovery is blocked: ";
 
+    private static bool IsTransientMetadataOnlyFilesystemException(Exception exception)
+    {
+        if (exception is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
+        if (exception is System.ComponentModel.Win32Exception native)
+        {
+            return native.NativeErrorCode is 5 or 13 or 16 or 30 or 32 or 33;
+        }
+
+        return exception is InvalidOperationException { InnerException: not null }
+            && IsTransientMetadataOnlyFilesystemException(exception.InnerException);
+    }
+
     private async Task<List<RootFolderPathChangeResult>>
         ReconcileCommittedMetadataOnlyRelocationsAsync(
             CancellationToken cancellationToken)
@@ -68,6 +83,10 @@ public sealed partial class RootFolderRelocationService
         var plans = RehydrateOwnershipMigrationPlans(relocation);
         try
         {
+            await EnsureMetadataRecoveryHasNoExternalOwnerAsync(
+                db,
+                relocation.Id,
+                cancellationToken);
             await CompleteOwnershipMigrationMetadataAsync(
                 db,
                 relocation,
@@ -83,11 +102,14 @@ public sealed partial class RootFolderRelocationService
                 .SingleAsync(
                     candidate => candidate.Id == relocationId,
                     CancellationToken.None);
-            persistedRelocation.Status =
-                RootFolderRelocationStatus.Failed;
+            var transient = IsTransientMetadataOnlyFilesystemException(exception);
+            persistedRelocation.Status = transient
+                ? RootFolderRelocationStatus.Pending
+                : RootFolderRelocationStatus.Failed;
             persistedRelocation.CompletedAt = null;
-            persistedRelocation.Error =
-                $"{MetadataOnlyRecoveryAttentionPrefix}{exception.Message}";
+            persistedRelocation.Error = transient
+                ? $"Metadata-only root repair recovery is temporarily unavailable and will be retried: {exception.Message}"
+                : $"{MetadataOnlyRecoveryAttentionPrefix}{exception.Message}";
             persistedRelocation.UpdatedAt =
                 timeProvider.GetUtcNow().UtcDateTime;
             await db.SaveChangesAsync(CancellationToken.None);

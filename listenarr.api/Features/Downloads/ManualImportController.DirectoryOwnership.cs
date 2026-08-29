@@ -4,8 +4,8 @@ namespace Listenarr.Api.Features.Downloads;
 
 public partial class ManualImportController
 {
-    private async Task<IAudiobookFileRegistrationLease?> PrepareOwnedManualImportActionForRegistrationAsync(
-        FileAction action,
+    private async Task<FilePublicationPreparationResult> PrepareOwnedManualImportActionForRegistrationAsync(
+        FilePublicationPlan publicationPlan,
         string source,
         string destination,
         Audiobook audiobook,
@@ -14,6 +14,7 @@ public partial class ManualImportController
         string fallbackBoundary,
         Guid operationId,
         string? expectedRegisteredPhysicalObjectIdentity,
+        FilePublicationSourceProof expectedSourceProof,
         CancellationToken cancellationToken)
     {
         var destinationDirectory = Path.GetDirectoryName(destination)
@@ -30,32 +31,68 @@ public partial class ManualImportController
                 "The manual import destination has no managed ownership boundary.");
         }
 
-        await _directoryOwnershipStore.EnsureCreatedHierarchyAsync(
-            destinationDirectory,
-            boundary,
-            semantics,
-            "manual-import",
-            operationId,
-            audiobook.Id,
-            cancellationToken);
+        expectedSourceProof.Validate();
 
-        cancellationToken.ThrowIfCancellationRequested();
-        if (action == FileAction.HardlinkCopy
-            && !string.IsNullOrWhiteSpace(
-                expectedRegisteredPhysicalObjectIdentity))
+        if (publicationPlan.Mode is
+            FilePublicationExecutionMode.AdditiveCopyRetainSource or
+            FilePublicationExecutionMode.CompatibilityCopyVerifiedCleanup)
         {
-            return await _fileMover.PrepareActionForRegistrationAsync(
-                action,
-                source,
-                destination,
+            await _directoryOwnershipStore.EnsureAdditiveHierarchyAsync(
+                destinationDirectory,
+                boundary,
+                semantics,
+                cancellationToken);
+        }
+        else
+        {
+            await _directoryOwnershipStore.EnsureCreatedHierarchyAsync(
+                destinationDirectory,
+                boundary,
+                semantics,
+                "manual-import",
                 operationId,
-                expectedRegisteredPhysicalObjectIdentity);
+                audiobook.Id,
+                cancellationToken);
         }
 
-        return await _fileMover.PrepareActionForRegistrationAsync(
-            action,
+        cancellationToken.ThrowIfCancellationRequested();
+        if (publicationPlan.Mode == FilePublicationExecutionMode.Durable)
+        {
+            var lease = publicationPlan.EffectiveAction == FileAction.HardlinkCopy
+                && !string.IsNullOrWhiteSpace(
+                    expectedRegisteredPhysicalObjectIdentity)
+                    ? await _fileMover.PrepareActionForRegistrationAsync(
+                        publicationPlan.EffectiveAction,
+                        source,
+                        destination,
+                        operationId,
+                        expectedRegisteredPhysicalObjectIdentity,
+                        expectedSourceProof)
+                    : await _fileMover.PrepareActionForRegistrationAsync(
+                        publicationPlan.EffectiveAction,
+                        source,
+                        destination,
+                        operationId,
+                        expectedRegisteredPhysicalObjectIdentity: null,
+                        expectedSourceProof);
+            return new FilePublicationPreparationResult(
+                lease == null
+                    ? FilePublicationOutcome.Blocked
+                    : FilePublicationOutcome.Success,
+                publicationPlan.RequestedAction,
+                publicationPlan.EffectiveAction,
+                publicationPlan.SourceDisposition,
+                lease);
+        }
+
+        return await _fileMover.PrepareActionForRegistrationDetailedAsync(
+            publicationPlan,
             source,
             destination,
-            operationId);
+            operationId,
+            publicationPlan.EffectiveAction == FileAction.HardlinkCopy
+                ? expectedRegisteredPhysicalObjectIdentity
+                : null,
+            expectedSourceProof);
     }
 }

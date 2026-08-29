@@ -20,6 +20,28 @@ internal sealed partial class AudiobookContentMoveService
         CancellationToken cancellationToken) =>
         executionStore.GetEndpointObjectIdentitiesAsync(jobId, cancellationToken);
 
+    private Task<MarkerlessMoveBoundaryAuthorizationState> GetBoundaryAuthorizationsAsync(
+        Guid jobId,
+        CancellationToken cancellationToken) =>
+        executionStore.GetBoundaryAuthorizationsAsync(jobId, cancellationToken);
+
+    private async Task<AudiobookContentMoveRequest> WithBoundaryAuthorizationAsync(
+        AudiobookContentMoveRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request.BoundaryAuthorization != null)
+        {
+            return request;
+        }
+
+        return request with
+        {
+            BoundaryAuthorization = await GetBoundaryAuthorizationsAsync(
+                request.JobId,
+                cancellationToken)
+        };
+    }
+
     private Task UpdateEndpointObjectIdentitiesAsync(
         Guid jobId,
         MoveLeaseToken leaseToken,
@@ -116,6 +138,7 @@ internal sealed partial class AudiobookContentMoveService
         string relativePath,
         string sourcePhysicalObjectIdentity,
         string? sha256,
+        DateTime lastWriteTimeUtc,
         CancellationToken cancellationToken) =>
         executionStore.UpdateSourceEntryProofAsync(
             jobId,
@@ -123,6 +146,7 @@ internal sealed partial class AudiobookContentMoveService
             relativePath,
             sourcePhysicalObjectIdentity,
             sha256,
+            lastWriteTimeUtc,
             cancellationToken);
 
     private Task UpdateTargetEntryStateAsync(

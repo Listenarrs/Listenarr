@@ -216,9 +216,7 @@ internal sealed partial class PinnedDirectoryCreation
         SafeFileHandle directoryHandle,
         string fileName)
     {
-        var flags = OperatingSystem.IsMacOS()
-            ? 0x2 | 0x200 | 0x100 | 0x1000000
-            : 0x2 | 0x40 | 0x20000 | 0x80000;
+        var flags = UnixOpenFlags.OpenOrCreateReadWriteNoFollow();
         var fileDescriptor = OpenAt(
             directoryHandle.DangerousGetHandle().ToInt32(),
             fileName,

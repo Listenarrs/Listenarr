@@ -436,7 +436,7 @@ public sealed class FileMoverHardlinkTests : BaseTests
         FileAction action)
     {
         var journal = await GetJournalAsync(operationId);
-        Assert.Equal(FileMutationProtocol.MarkerlessDatabaseState, journal.ProtocolVersion);
+        Assert.Equal(FileMutationProtocol.Current, journal.ProtocolVersion);
         Assert.Equal(action, journal.Action);
         Assert.Equal(FileMutationJournalState.Completed, journal.State);
         Assert.Null(journal.AudiobookId);

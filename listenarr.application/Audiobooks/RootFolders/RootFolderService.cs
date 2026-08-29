@@ -30,6 +30,7 @@ namespace Listenarr.Application.Audiobooks.RootFolders
         private readonly IFilesystemMutationCoordinator _mutationCoordinator;
         private readonly IAudiobookOperationCoordinator _audiobookOperationCoordinator;
         private readonly IDirectoryObjectIdentityResolver? _directoryObjectIdentityResolver;
+        private readonly IFileRegistrationRecoveryProbe? _fileRegistrationRecoveryProbe;
 
         public RootFolderService(
             IRootFolderRepository repo,
@@ -39,7 +40,8 @@ namespace Listenarr.Application.Audiobooks.RootFolders
             IRootFolderRelocationService relocationService,
             IFilesystemMutationCoordinator mutationCoordinator,
             IAudiobookOperationCoordinator audiobookOperationCoordinator,
-            IDirectoryObjectIdentityResolver? directoryObjectIdentityResolver = null)
+            IDirectoryObjectIdentityResolver? directoryObjectIdentityResolver = null,
+            IFileRegistrationRecoveryProbe? fileRegistrationRecoveryProbe = null)
         {
             _repo = repo;
             _logger = logger;
@@ -50,6 +52,7 @@ namespace Listenarr.Application.Audiobooks.RootFolders
             _audiobookOperationCoordinator = audiobookOperationCoordinator
                 ?? throw new ArgumentNullException(nameof(audiobookOperationCoordinator));
             _directoryObjectIdentityResolver = directoryObjectIdentityResolver;
+            _fileRegistrationRecoveryProbe = fileRegistrationRecoveryProbe;
         }
 
         public async Task<RootFolder?> GetDefaultAsync()
@@ -122,6 +125,9 @@ namespace Listenarr.Application.Audiobooks.RootFolders
                     FileSystemCaseSensitivity.Insensitive)
                 : sourcePersistedSemantics.Semantics;
             await EnsureNoActiveMoveJobsTouchRootAsync(root.Path, sourceComparisonSemantics);
+            await EnsureNoRegistrationRecoveryTouchesRootAsync(
+                root.Path,
+                sourceComparisonSemantics);
             var hasReferenced = await _repo.HasAudiobooksUnderPathAsync(
                 root.Path,
                 sourceComparisonSemantics);
@@ -150,6 +156,9 @@ namespace Listenarr.Application.Audiobooks.RootFolders
                     : targetPersistedSemantics.Semantics;
 
                 await EnsureNoActiveMoveJobsTouchRootAsync(
+                    newRoot.Path,
+                    targetRewriteSemantics);
+                await EnsureNoRegistrationRecoveryTouchesRootAsync(
                     newRoot.Path,
                     targetRewriteSemantics);
                 var audiobookIds = await _repo.GetAllAudiobookIdsAsync();
@@ -249,6 +258,17 @@ namespace Listenarr.Application.Audiobooks.RootFolders
                     continue;
                 }
 
+                if (!FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                        existingRoot.Path,
+                        out _)
+                    && !existingRoot.Path.StartsWith("//", StringComparison.Ordinal))
+                {
+                    _logger?.LogWarning(
+                        "Skipping root folder {RootFolderId} with non-absolute stored path while checking root-folder conflicts.",
+                        existingRoot.Id);
+                    continue;
+                }
+
                 var existingSemantics = FileSystemPathIdentity.ResolveComparisonSemantics(
                     existingRoot.ResolvedCaseSensitivity,
                     requestedSemantics);
@@ -273,13 +293,34 @@ namespace Listenarr.Application.Audiobooks.RootFolders
                     {
                         return new RootFolderConflict(existingRoot, conflictType.Value);
                     }
+
+                    if (FileSystemPathIdentity.StoredPathMayTouchBoundary(
+                            existingRoot.Path,
+                            normalizedPath,
+                            requestedSemantics,
+                            storedSemantics: existingSemantics))
+                    {
+                        return new RootFolderConflict(
+                            existingRoot,
+                            RootFolderConflictType.Ambiguous);
+                    }
                 }
                 catch (ArgumentException exception)
                 {
                     _logger?.LogWarning(
                         exception,
-                        "Skipping root folder {RootFolderId} with invalid stored path while checking root-folder conflicts.",
+                        "Stored root folder {RootFolderId} could not be compared precisely while checking root-folder conflicts.",
                         existingRoot.Id);
+                    if (FileSystemPathIdentity.StoredPathMayTouchBoundary(
+                            existingRoot.Path,
+                            normalizedPath,
+                            requestedSemantics,
+                            storedSemantics: existingSemantics))
+                    {
+                        return new RootFolderConflict(
+                            existingRoot,
+                            RootFolderConflictType.Ambiguous);
+                    }
                 }
             }
 
@@ -306,6 +347,22 @@ namespace Listenarr.Application.Audiobooks.RootFolders
 
             throw new InvalidOperationException(
                 $"Root folder has unresolved move job {conflictingJob.Id}; resolve moves touching this root before deleting or reassigning it.");
+        }
+
+        private async Task EnsureNoRegistrationRecoveryTouchesRootAsync(
+            string rootPath,
+            FileSystemPathSemantics semantics)
+        {
+            if (_fileRegistrationRecoveryProbe == null
+                || !await _fileRegistrationRecoveryProbe.HasBlockingBoundaryAsync(
+                    rootPath,
+                    semantics))
+            {
+                return;
+            }
+
+            throw new InvalidOperationException(
+                "Root folder has unresolved file-registration recovery touching this path; complete that recovery before deleting or reassigning the root.");
         }
 
         private async Task<FileSystemSemanticsResolution> ResolveSemanticsAsync(

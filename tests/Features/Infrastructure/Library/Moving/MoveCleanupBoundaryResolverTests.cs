@@ -26,6 +26,49 @@ public sealed class MoveCleanupBoundaryResolverTests : BaseTests
     }
 
     [Fact]
+    public async Task ResolveAsync_ExplicitConfiguredRootMode_DoesNotRequireAutoSourceProbe()
+    {
+        var root = FileService.GetTempDirectory("move-boundary-explicit-root-mode");
+        var source = Path.Join(root, "Author", "Old Title", "test");
+        var target = Path.Join(root, "Author", "New Title", "test");
+        var explicitMode = OperatingSystem.IsWindows()
+            ? FileSystemCaseSensitivityMode.Insensitive
+            : FileSystemCaseSensitivityMode.Sensitive;
+        var explicitSensitivity = explicitMode == FileSystemCaseSensitivityMode.Insensitive
+            ? FileSystemCaseSensitivity.Insensitive
+            : FileSystemCaseSensitivity.Sensitive;
+        var resolver = CreateResolver((path, mode) =>
+            mode == FileSystemCaseSensitivityMode.Auto
+                ? new FileSystemSemanticsResolution(
+                    new FileSystemPathSemantics(
+                        FileSystemPathSemantics.CurrentHostDefault.Syntax,
+                        FileSystemCaseSensitivity.Unknown),
+                    PathIdentityState.Unavailable,
+                    path,
+                    "Injected Auto probe failure.")
+                : new FileSystemSemanticsResolution(
+                    new FileSystemPathSemantics(
+                        FileSystemPathSemantics.CurrentHostDefault.Syntax,
+                        explicitSensitivity),
+                    PathIdentityState.Valid,
+                    root));
+
+        var result = await resolver.ResolveAsync(
+            source,
+            target,
+            [new RootFolder
+            {
+                Name = "Explicit Root",
+                Path = root,
+                CaseSensitivityMode = explicitMode
+            }]);
+
+        Assert.True(result.IsAvailable, result.Reason);
+        Assert.Equal(MoveCleanupBoundaryKind.ConfiguredRoot, result.Kind);
+        Assert.Equal(Path.GetFullPath(root), result.Boundary);
+    }
+
+    [Fact]
     public async Task ResolveAsync_CustomSiblingMove_UsesCommonSeriesAncestor()
     {
         var customRoot = FileService.GetTempDirectory("move-boundary-custom-root");
@@ -349,6 +392,103 @@ public sealed class MoveCleanupBoundaryResolverTests : BaseTests
         Assert.Equal(MoveCleanupBoundaryKind.ConfiguredRoot, result.Kind);
         Assert.Equal(physicalRoot, result.Boundary);
         Assert.NotEqual(configuredRoot, result.Boundary);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_AutoConfiguredRootThatResolvesSensitive_DoesNotClaimCaseDistinctSource()
+    {
+        var configuredRoot = FileService.GetTempDirectory("move-boundary-auto-sensitive-root");
+        var caseDistinctRoot = configuredRoot.ToUpperInvariant();
+        Assert.NotEqual(configuredRoot, caseDistinctRoot);
+        var source = Path.Join(caseDistinctRoot, "Author", "Book", "test");
+        var target = Path.Join(
+            FileService.GetTempPath(),
+            $"move-boundary-auto-sensitive-target-{Guid.NewGuid():N}");
+        var resolver = CreateResolver((path, mode) =>
+            string.Equals(path, configuredRoot, StringComparison.Ordinal)
+                ? new FileSystemSemanticsResolution(
+                    new FileSystemPathSemantics(
+                        FileSystemPathSemantics.CurrentHostDefault.Syntax,
+                        FileSystemCaseSensitivity.Sensitive),
+                    PathIdentityState.Valid,
+                    configuredRoot)
+                : new FileSystemSemanticsResolution(
+                    FileSystemPathSemantics.CurrentHostDefault,
+                    PathIdentityState.Valid,
+                    Path.GetPathRoot(path) ?? path));
+
+        var result = await resolver.ResolveAsync(
+            source,
+            target,
+            [new RootFolder
+            {
+                Name = "Auto Root",
+                Path = configuredRoot,
+                CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto
+            }]);
+
+        Assert.NotEqual(MoveCleanupBoundaryKind.ConfiguredRoot, result.Kind);
+        Assert.NotEqual(configuredRoot, result.Boundary);
+    }
+
+    [LinuxFact]
+    public async Task ResolveAsync_AmbiguousConfiguredRootThatMayContainSource_FailsClosed()
+    {
+        var root = FileService.GetTempDirectory("move-boundary-ambiguous-root");
+        var ambiguousRoot = "/" + root;
+        Assert.False(FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+            ambiguousRoot,
+            out _));
+        var source = Path.Join(root, "Author", "Book", "test");
+        var target = Path.Join(
+            FileService.GetTempPath(),
+            $"move-boundary-ambiguous-target-{Guid.NewGuid():N}");
+        var resolver = CreateResolver((path, mode) => new FileSystemSemanticsResolution(
+            new FileSystemPathSemantics(
+                FileSystemPathSyntax.Unix,
+                FileSystemCaseSensitivity.Sensitive),
+            PathIdentityState.Valid,
+            Path.GetPathRoot(path) ?? path));
+
+        var result = await resolver.ResolveAsync(
+            source,
+            target,
+            [new RootFolder
+            {
+                Name = "Legacy Ambiguous Root",
+                Path = ambiguousRoot,
+                CaseSensitivityMode = FileSystemCaseSensitivityMode.Insensitive
+            }]);
+
+        Assert.False(result.IsAvailable);
+        Assert.Equal(MoveCleanupBoundaryKind.Unavailable, result.Kind);
+        Assert.Contains("ambiguous", result.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [WindowsFact]
+    public async Task ResolveAsync_DeviceAliasConfiguredRootThatContainsSource_FailsClosed()
+    {
+        var root = FileService.GetTempDirectory("move-boundary-device-root");
+        var source = Path.Join(root, "Author", "Book", "test");
+        var target = Path.Join(
+            FileService.GetTempPath(),
+            $"move-boundary-device-target-{Guid.NewGuid():N}");
+        var deviceAliasRoot = @"\\?\" + root;
+        var resolver = CreateResolver();
+
+        var result = await resolver.ResolveAsync(
+            source,
+            target,
+            [new RootFolder
+            {
+                Name = "Legacy Device Root",
+                Path = deviceAliasRoot,
+                CaseSensitivityMode = FileSystemCaseSensitivityMode.Insensitive
+            }]);
+
+        Assert.False(result.IsAvailable);
+        Assert.Equal(MoveCleanupBoundaryKind.Unavailable, result.Kind);
+        Assert.Contains("configured source root", result.Reason, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

@@ -36,6 +36,24 @@ public sealed class OperationalOptionsValidatorTests
     }
 
     [Fact]
+    public void FileMoverOptions_UnknownWeakPublicationMode_FailsValidation()
+    {
+        var result = new FileMoverOptionsValidator().Validate(
+            null,
+            new FileMoverOptions
+            {
+                WeakPublicationMode = (WeakPublicationMode)999
+            });
+
+        Assert.False(result.Succeeded);
+        Assert.Contains(
+            result.Failures,
+            failure => failure.Contains(
+                "WeakPublicationMode",
+                StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void ExternalRequestOptions_InvalidTimeoutAndRetries_FailValidation()
     {
         var result = new ExternalRequestOptionsValidator().Validate(

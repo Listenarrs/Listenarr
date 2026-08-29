@@ -58,15 +58,10 @@ public sealed partial class RootFolderRelocationService
                 cancellationToken);
             return target;
         }
-        catch (Exception exception) when (exception is
-            IOException or UnauthorizedAccessException
-                or InvalidOperationException or NotSupportedException
-                or System.ComponentModel.Win32Exception)
+        catch
         {
             target?.Dispose();
-            throw new InvalidOperationException(
-                "The relocation target no longer identifies its authorized physical directory generation.",
-                exception);
+            throw;
         }
     }
 
@@ -79,16 +74,37 @@ public sealed partial class RootFolderRelocationService
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (!string.IsNullOrWhiteSpace(unavailableReason)
-            || !ManagedDirectoryIdentity.MatchesNativeIdentity(
+            || !target.MatchesManagedDirectoryIdentity(
                 expectedVersion,
-                expectedValue,
-                target.GetDirectoryObjectIdentity())
-            || !target.VisiblePathMatches())
+                expectedValue))
+        {
+            throw new InvalidOperationException(
+                "The managed directory no longer identifies its authorized physical generation.");
+        }
+
+        var visibility = target.ProbeVisiblePathMatch();
+        if (visibility == RegistrationPublicationMatchOutcome.Unavailable)
+        {
+            throw new IOException(
+                "The managed directory is temporarily unavailable while its authorized physical generation is being verified.");
+        }
+        if (visibility != RegistrationPublicationMatchOutcome.Match)
         {
             throw new InvalidOperationException(
                 "The managed directory no longer identifies its authorized physical generation.");
         }
     }
+
+    private static void RevalidatePinnedTargetDirectoryGeneration(
+        PinnedDirectoryCreation.PinnedDirectoryAnchor target,
+        RootFolderRelocation relocation,
+        CancellationToken cancellationToken) =>
+        RevalidatePinnedTargetDirectoryGeneration(
+            target,
+            relocation.TargetDirectoryObjectIdentityVersion,
+            relocation.TargetDirectoryObjectIdentity,
+            relocation.TargetDirectoryObjectIdentityUnavailableReason,
+            cancellationToken);
 
     private static Task RequireTargetDirectoryGenerationAsync(
         string targetPath,
@@ -179,14 +195,12 @@ public sealed partial class RootFolderRelocationService
         {
             using var anchor = PinnedDirectoryCreation.OpenPinnedBoundary(path);
             cancellationToken.ThrowIfCancellationRequested();
-            var nativeIdentity = anchor.GetDirectoryObjectIdentity();
             if (expectedVersion.HasValue && expectedValue != null)
             {
                 return Task.FromResult(
-                    ManagedDirectoryIdentity.MatchesNativeIdentity(
+                    anchor.MatchesManagedDirectoryIdentity(
                         expectedVersion,
-                        expectedValue,
-                        nativeIdentity)
+                        expectedValue)
                         ? new DirectoryObjectIdentityResolution(
                             expectedVersion,
                             expectedValue,
@@ -204,9 +218,37 @@ public sealed partial class RootFolderRelocationService
         {
             return Task.FromResult(
                 DirectoryObjectIdentityResolution.Unavailable(
-                    exception.Message));
+                    exception.Message,
+                    ClassifyMarkerlessDirectoryIdentityFailure(exception)));
         }
     }
+
+    private static DirectoryObjectIdentityFailureKind
+        ClassifyMarkerlessDirectoryIdentityFailure(Exception exception) =>
+        exception switch
+        {
+            DirectoryNotFoundException or FileNotFoundException =>
+                DirectoryObjectIdentityFailureKind.Missing,
+            UnauthorizedAccessException =>
+                DirectoryObjectIdentityFailureKind.AccessDenied,
+            System.ComponentModel.Win32Exception native when OperatingSystem.IsWindows()
+                && native.NativeErrorCode is 2 or 3 =>
+                DirectoryObjectIdentityFailureKind.Missing,
+            System.ComponentModel.Win32Exception native when !OperatingSystem.IsWindows()
+                && native.NativeErrorCode == 2 =>
+                DirectoryObjectIdentityFailureKind.Missing,
+            System.ComponentModel.Win32Exception native when OperatingSystem.IsWindows()
+                && native.NativeErrorCode == 5 =>
+                DirectoryObjectIdentityFailureKind.AccessDenied,
+            System.ComponentModel.Win32Exception native when !OperatingSystem.IsWindows()
+                && native.NativeErrorCode is 1 or 13 =>
+                DirectoryObjectIdentityFailureKind.AccessDenied,
+            PlatformNotSupportedException =>
+                DirectoryObjectIdentityFailureKind.IdentityUnsupported,
+            InvalidOperationException =>
+                DirectoryObjectIdentityFailureKind.IdentityUnstable,
+            _ => DirectoryObjectIdentityFailureKind.Unknown
+        };
 
     private static DirectoryObjectIdentityResolution CreateMarkerlessIdentity(
         PinnedDirectoryCreation.PinnedDirectoryAnchor anchor)

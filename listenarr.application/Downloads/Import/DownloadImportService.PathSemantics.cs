@@ -34,8 +34,17 @@ public partial class DownloadImportService
         FileSystemSemanticsResolution destinationResolution,
         CancellationToken cancellationToken)
     {
+        if (!FileSystemPathIdentity.TryDetectAbsoluteSyntaxForHost(
+                basePath,
+                out var basePathSyntax))
+        {
+            throw new InvalidOperationException(
+                "The destination ownership path does not have a valid host filesystem identity.");
+        }
+
         string? bestBoundary = null;
         var bestLength = -1;
+        var unavailableRootLength = -1;
         foreach (var root in await rootFolderService.GetAllAsync())
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -44,6 +53,25 @@ public partial class DownloadImportService
                     out var canonicalRoot,
                     out _))
             {
+                if (FileSystemPathIdentity.StoredBoundaryMayContainPath(
+                        root.Path,
+                        basePath,
+                        basePathSyntax,
+                        root.CaseSensitivityMode))
+                {
+                    unavailableRootLength = Math.Max(
+                        unavailableRootLength,
+                        root.Path.Length);
+                }
+
+                continue;
+            }
+            if (!FileSystemPathIdentity.StoredBoundaryMayContainPath(
+                    canonicalRoot,
+                    basePath,
+                    basePathSyntax,
+                    root.CaseSensitivityMode))
+            {
                 continue;
             }
 
@@ -51,8 +79,14 @@ public partial class DownloadImportService
                 canonicalRoot,
                 root.CaseSensitivityMode,
                 cancellationToken);
-            if (rootResolution.State != PathIdentityState.Valid
-                || rootResolution.Semantics != destinationResolution.Semantics
+            if (rootResolution.State != PathIdentityState.Valid)
+            {
+                unavailableRootLength = Math.Max(
+                    unavailableRootLength,
+                    canonicalRoot.Length);
+                continue;
+            }
+            if (rootResolution.Semantics != destinationResolution.Semantics
                 || !FileSystemPathIdentity.IsSameOrInside(
                     basePath,
                     canonicalRoot,
@@ -73,6 +107,13 @@ public partial class DownloadImportService
             }
         }
 
+        if (unavailableRootLength >= bestLength
+            && unavailableRootLength >= 0)
+        {
+            throw new InvalidOperationException(
+                "A configured root that may contain this download-import destination has unavailable or ambiguous persisted filesystem identity. Repair or change that root before importing here.");
+        }
+
         var boundary = bestBoundary ?? destinationResolution.BoundaryPath;
         if (string.IsNullOrWhiteSpace(boundary))
         {
@@ -89,8 +130,17 @@ public partial class DownloadImportService
         string basePath,
         CancellationToken cancellationToken)
     {
+        if (!FileSystemPathIdentity.TryDetectAbsoluteSyntaxForHost(
+                basePath,
+                out var basePathSyntax))
+        {
+            throw new InvalidOperationException(
+                "The download-import destination does not have a valid host filesystem identity.");
+        }
+
         RootFolder? bestRoot = null;
         var bestRootLength = -1;
+        var unavailableRootLength = -1;
         foreach (var root in await rootFolderService.GetAllAsync())
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -99,6 +149,25 @@ public partial class DownloadImportService
                     out var canonicalRoot,
                     out _))
             {
+                if (FileSystemPathIdentity.StoredBoundaryMayContainPath(
+                        root.Path,
+                        basePath,
+                        basePathSyntax,
+                        root.CaseSensitivityMode))
+                {
+                    unavailableRootLength = Math.Max(
+                        unavailableRootLength,
+                        root.Path.Length);
+                }
+
+                continue;
+            }
+            if (!FileSystemPathIdentity.StoredBoundaryMayContainPath(
+                    canonicalRoot,
+                    basePath,
+                    basePathSyntax,
+                    root.CaseSensitivityMode))
+            {
                 continue;
             }
 
@@ -106,8 +175,14 @@ public partial class DownloadImportService
                 canonicalRoot,
                 root.CaseSensitivityMode,
                 cancellationToken);
-            if (resolution.State != PathIdentityState.Valid
-                || !FileSystemPathIdentity.IsSameOrInside(
+            if (resolution.State != PathIdentityState.Valid)
+            {
+                unavailableRootLength = Math.Max(
+                    unavailableRootLength,
+                    canonicalRoot.Length);
+                continue;
+            }
+            if (!FileSystemPathIdentity.IsSameOrInside(
                     basePath,
                     canonicalRoot,
                     resolution.Semantics))
@@ -122,6 +197,13 @@ public partial class DownloadImportService
             }
         }
 
+        if (unavailableRootLength >= bestRootLength
+            && unavailableRootLength >= 0)
+        {
+            throw new InvalidOperationException(
+                "A configured root that may contain this download-import destination has unavailable or ambiguous persisted filesystem identity. Repair or change that root before importing here.");
+        }
+
         return bestRoot?.CaseSensitivityMode ?? FileSystemCaseSensitivityMode.Auto;
     }
 
@@ -132,7 +214,8 @@ public partial class DownloadImportService
     {
         var resolution = await semanticsResolver.ResolveAsync(
             path,
-            cancellationToken: cancellationToken);
+            FileSystemCaseSensitivityMode.Auto,
+            cancellationToken);
         return resolution.State == PathIdentityState.Valid
             ? resolution.Semantics
             : throw new InvalidOperationException(resolution.Reason ?? defaultReason);

@@ -4,7 +4,8 @@ internal sealed partial class AudiobookContentMoveService
 {
     public async Task VerifyFinalizedMoveAsync(
         AudiobookContentMoveRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        MarkerlessTargetVerificationLease? targetVerificationLease = null)
     {
         ArgumentNullException.ThrowIfNull(request);
         await EnsureLeaseOwnedAsync(
@@ -22,6 +23,7 @@ internal sealed partial class AudiobookContentMoveService
             request.TargetSemantics,
             request.LeaseToken,
             cancellationToken);
+        request = await WithBoundaryAuthorizationAsync(request, cancellationToken);
         request = await WithValidatedTargetDirectoryOwnershipAsync(
             request,
             cancellationToken);
@@ -38,7 +40,8 @@ internal sealed partial class AudiobookContentMoveService
             request,
             request.Target,
             manifest,
-            cancellationToken);
+            cancellationToken,
+            targetVerificationLease: targetVerificationLease);
         VerifySourceCleanupState(
             request,
             request.Source,

@@ -8,18 +8,12 @@ internal sealed partial class PinnedDirectoryCreation
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(parentPath);
         ValidateLeafName(childName);
-        ExclusiveDirectoryCreator.InvokeBeforeOpenParentHook(parentPath);
-
-        var parentHandle = OperatingSystem.IsWindows()
-            ? OpenDirectoryWindows(parentPath, openReparsePoint: true)
-            : OpenDirectoryUnix(parentPath, noFollow: true);
+        using var parentAnchor = OpenPinnedHierarchyNoFollow(
+            parentPath,
+            createMissing: false);
+        var parentHandle = parentAnchor.DuplicateHandleForOperation();
         try
         {
-            if (OperatingSystem.IsWindows())
-            {
-                EnsureWindowsParentIsNotReparsePoint(parentHandle, parentPath);
-            }
-
             var childPath = Path.Join(parentPath, childName);
             var directoryHandle = OperatingSystem.IsWindows()
                 ? OpenRelativeDirectoryWindows(
@@ -35,12 +29,18 @@ internal sealed partial class PinnedDirectoryCreation
                 childName,
                 created: true,
                 parentFollowsVisibleFinalLink: false);
-            if (publication.VisiblePathMatches())
+            var publicationVisibility = publication.ProbeVisiblePathMatch();
+            if (publicationVisibility == RegistrationPublicationMatchOutcome.Match)
             {
                 return publication;
             }
 
             publication.Dispose();
+            if (publicationVisibility == RegistrationPublicationMatchOutcome.Unavailable)
+            {
+                throw new IOException(
+                    "The existing directory is temporarily unavailable while being pinned for publication.");
+            }
             throw new InvalidOperationException(
                 "The existing directory changed while it was being pinned for publication.");
         }
@@ -79,12 +79,33 @@ internal sealed partial class PinnedDirectoryCreation
         }
 
         var currentPath = Path.Join(_parentPath, currentName);
+        using var parentAnchor = new PinnedDirectoryAnchor(
+            DuplicateSafeHandle(_parentHandle),
+            _parentPath,
+            _parentFollowsVisibleFinalLink);
+        var parentVisibility = parentAnchor.ProbeVisiblePathMatch();
+        if (parentVisibility == RegistrationPublicationMatchOutcome.Unavailable)
+        {
+            throw new IOException(
+                "The directory parent is temporarily unavailable before pinned deletion.");
+        }
+        if (parentVisibility != RegistrationPublicationMatchOutcome.Match)
+        {
+            throw new InvalidOperationException(
+                "The directory parent changed before pinned deletion.");
+        }
         using (var currentAnchor = new PinnedDirectoryAnchor(
             DuplicateSafeHandle(_directoryHandle),
             currentPath,
             followVisibleFinalLink: false))
         {
-            if (!currentAnchor.VisiblePathMatches())
+            var currentVisibility = currentAnchor.ProbeVisiblePathMatch();
+            if (currentVisibility == RegistrationPublicationMatchOutcome.Unavailable)
+            {
+                throw new IOException(
+                    "The directory is temporarily unavailable before pinned deletion.");
+            }
+            if (currentVisibility != RegistrationPublicationMatchOutcome.Match)
             {
                 throw new InvalidOperationException(
                     "The directory changed before pinned deletion.");
@@ -121,7 +142,7 @@ internal sealed partial class PinnedDirectoryCreation
                     allowLegacyFallback: false);
             }
 
-            if (Directory.Exists(currentPath))
+            try
             {
                 using var visible = OpenRelativeDirectoryWindows(
                     _parentHandle,
@@ -133,8 +154,26 @@ internal sealed partial class PinnedDirectoryCreation
                         145,
                         "The verified empty directory remained visible after immediate deletion.");
                 }
+                // A different generation may have been created at the pathname after
+                // the verified directory was removed. It is not owned by this deletion.
+            }
+            catch (System.ComponentModel.Win32Exception exception) when (
+                exception.NativeErrorCode is 2 or 3)
+            {
+                // The parent-relative reopen is the namespace disappearance proof.
             }
 
+            var postDeleteParentVisibility = parentAnchor.ProbeVisiblePathMatch();
+            if (postDeleteParentVisibility == RegistrationPublicationMatchOutcome.Unavailable)
+            {
+                throw new IOException(
+                    "The directory parent became temporarily unavailable after pinned deletion.");
+            }
+            if (postDeleteParentVisibility != RegistrationPublicationMatchOutcome.Match)
+            {
+                throw new InvalidOperationException(
+                    "The directory parent changed while pinned deletion was completing.");
+            }
             return;
         }
 
@@ -157,6 +196,17 @@ internal sealed partial class PinnedDirectoryCreation
                 System.Runtime.InteropServices.Marshal.GetLastWin32Error(),
                 "Could not remove the verified empty directory.");
         }
+        var unixPostDeleteParentVisibility = parentAnchor.ProbeVisiblePathMatch();
+        if (unixPostDeleteParentVisibility == RegistrationPublicationMatchOutcome.Unavailable)
+        {
+            throw new IOException(
+                "The directory parent became temporarily unavailable after pinned deletion.");
+        }
+        if (unixPostDeleteParentVisibility != RegistrationPublicationMatchOutcome.Match)
+        {
+            throw new InvalidOperationException(
+                "The directory parent changed while pinned deletion was completing.");
+        }
     }
 
     internal PinnedDirectoryAnchor PublishCreatedDirectoryTo(
@@ -171,12 +221,24 @@ internal sealed partial class PinnedDirectoryCreation
             throw new InvalidOperationException(
                 "A pinned directory handle is required for publication.");
         }
-        if (!VisiblePathMatches())
+        var sourceVisibility = ProbeVisiblePathMatch();
+        if (sourceVisibility == RegistrationPublicationMatchOutcome.Unavailable)
+        {
+            throw new IOException(
+                "The prepared directory is temporarily unavailable before publication.");
+        }
+        if (sourceVisibility != RegistrationPublicationMatchOutcome.Match)
         {
             throw new InvalidOperationException(
                 "The prepared directory changed before publication.");
         }
-        if (!destinationParent.VisiblePathMatches())
+        var destinationVisibility = destinationParent.ProbeVisiblePathMatch();
+        if (destinationVisibility == RegistrationPublicationMatchOutcome.Unavailable)
+        {
+            throw new IOException(
+                "The destination parent is temporarily unavailable before directory publication.");
+        }
+        if (destinationVisibility != RegistrationPublicationMatchOutcome.Match)
         {
             throw new InvalidOperationException(
                 "The destination parent changed before directory publication.");
@@ -194,12 +256,18 @@ internal sealed partial class PinnedDirectoryCreation
             DuplicateSafeHandle(_directoryHandle),
             publishedPath,
             followVisibleFinalLink: false);
-        if (publishedAnchor.VisiblePathMatches())
+        var publishedVisibility = publishedAnchor.ProbeVisiblePathMatch();
+        if (publishedVisibility == RegistrationPublicationMatchOutcome.Match)
         {
             return publishedAnchor;
         }
 
         publishedAnchor.Dispose();
+        if (publishedVisibility == RegistrationPublicationMatchOutcome.Unavailable)
+        {
+            throw new IOException(
+                "The published directory is temporarily unavailable after publication.");
+        }
         throw new InvalidOperationException(
             "The published directory does not identify the prepared pinned directory.");
     }

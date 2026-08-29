@@ -18,6 +18,28 @@
 
 namespace Listenarr.Application.Downloads.Contracts
 {
+    public enum FilePublicationOutcome
+    {
+        Success,
+        Skipped,
+        Blocked,
+        Failed
+    }
+
+    public sealed record FilePublicationPreparationResult(
+        FilePublicationOutcome Outcome,
+        FileAction RequestedAction,
+        FileAction EffectiveAction,
+        FilePublicationSourceDisposition SourceDisposition,
+        IAudiobookFileRegistrationLease? RegistrationLease = null,
+        string? ReasonCode = null,
+        string? Message = null)
+    {
+        public bool IsSuccess =>
+            Outcome == FilePublicationOutcome.Success
+            && RegistrationLease != null;
+    }
+
     /// <summary>
     /// Handles file manipulation within a destination hierarchy that has already
     /// been established by the caller. Implementations must not create missing
@@ -59,8 +81,24 @@ namespace Listenarr.Application.Downloads.Contracts
             string source,
             string? destination,
             Guid operationId,
+            FilePublicationSourceProof expectedSourceProof);
+
+        Task<bool> PerformActionOn(
+            FileAction action,
+            string source,
+            string? destination,
+            Guid operationId,
             int audiobookId,
             int audiobookFileId);
+
+        Task<bool> PerformActionOn(
+            FileAction action,
+            string source,
+            string? destination,
+            Guid operationId,
+            int audiobookId,
+            int audiobookFileId,
+            FilePublicationSourceProof expectedSourceProof);
 
         /// <summary>
         /// Publishes the requested copy or hardlink destination and returns a lease
@@ -83,6 +121,33 @@ namespace Listenarr.Application.Downloads.Contracts
             string destination,
             Guid operationId,
             string expectedRegisteredPhysicalObjectIdentity);
+
+        /// <summary>
+        /// Publishes a registration candidate only when the source still matches
+        /// the exact generation and content proof used to derive the durable operation ID.
+        /// </summary>
+        Task<IAudiobookFileRegistrationLease?> PrepareActionForRegistrationAsync(
+            FileAction action,
+            string source,
+            string destination,
+            Guid operationId,
+            string? expectedRegisteredPhysicalObjectIdentity,
+            FilePublicationSourceProof expectedSourceProof);
+
+        /// <summary>
+        /// Publishes through the explicitly selected durable or additive-only
+        /// execution mode and reports the effective action and source disposition.
+        /// </summary>
+        Task<FilePublicationPreparationResult>
+            PrepareActionForRegistrationDetailedAsync(
+                FilePublicationPlan plan,
+                string source,
+                string destination,
+                Guid operationId,
+                string? expectedRegisteredPhysicalObjectIdentity,
+                FilePublicationSourceProof expectedSourceProof,
+                bool isCompanionFile = false,
+                int? companionAudiobookId = null);
 
         /// <summary>
         /// Completes a staged move by retiring only the verified source generation

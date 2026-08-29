@@ -11,6 +11,12 @@ public sealed class RootFolderObjectIdentityReconciler(
     ILogger<RootFolderObjectIdentityReconciler> logger)
     : IRootFolderObjectIdentityReconciler
 {
+    internal Action<RootFolder>? AfterRootAuthoritySavedForTest
+    {
+        get;
+        set;
+    }
+
     public Task ReconcileAsync(CancellationToken cancellationToken = default) =>
         mutationCoordinator.ExecuteExclusiveAsync(
             ReconcileCoreAsync,
@@ -32,6 +38,7 @@ public sealed class RootFolderObjectIdentityReconciler(
                 logger.LogWarning(
                     "Root folder {RootFolderId} path is unavailable on this host; destructive ownership cleanup is disabled.",
                     root.Id);
+                await db.SaveChangesAsync(cancellationToken);
                 continue;
             }
 
@@ -46,6 +53,7 @@ public sealed class RootFolderObjectIdentityReconciler(
                 logger.LogWarning(
                     "Root folder {RootFolderId} has no authorized physical directory; filesystem mutation remains disabled until the folder is explicitly confirmed or the root path is changed.",
                     root.Id);
+                await db.SaveChangesAsync(cancellationToken);
                 continue;
             }
 
@@ -60,15 +68,69 @@ public sealed class RootFolderObjectIdentityReconciler(
                     current.UnavailableReason
                     ?? "The live directory no longer matches its enrolled identity.";
                 logger.LogWarning(
-                    "Root folder {RootFolderId} enrolled identity is unavailable or mismatched; destructive ownership cleanup is disabled.",
-                    root.Id);
+                    "Root folder {RootFolderId} enrolled identity is unavailable or mismatched; destructive ownership cleanup is disabled. Reason: {Reason}",
+                    root.Id,
+                    root.DirectoryObjectIdentityUnavailableReason);
+                await db.SaveChangesAsync(cancellationToken);
                 continue;
             }
 
-            root.DirectoryObjectIdentityUnavailableReason = null;
-        }
+            try
+            {
+                using var pinnedRoot = PinnedDirectoryCreation.OpenPinnedBoundary(
+                    canonicalRootPath);
+                var initialVisibility = pinnedRoot.ProbeVisiblePathMatch();
+                if (!pinnedRoot.MatchesManagedDirectoryIdentity(
+                        root.DirectoryObjectIdentityVersion,
+                        root.DirectoryObjectIdentity)
+                    || initialVisibility != RegistrationPublicationMatchOutcome.Match)
+                {
+                    root.DirectoryObjectIdentityUnavailableReason =
+                        initialVisibility == RegistrationPublicationMatchOutcome.Unavailable
+                            ? "The root folder is temporarily unavailable while its authorized physical generation is being verified."
+                            : "The live root directory no longer matches its enrolled physical identity.";
+                    await db.SaveChangesAsync(cancellationToken);
+                    continue;
+                }
 
-        await db.SaveChangesAsync(cancellationToken);
+                await using var authorityTransaction = db.Database.IsRelational()
+                    ? await db.Database.BeginTransactionAsync(cancellationToken)
+                    : null;
+                root.DirectoryObjectIdentityUnavailableReason = null;
+                await db.SaveChangesAsync(cancellationToken);
+                AfterRootAuthoritySavedForTest?.Invoke(root);
+                cancellationToken.ThrowIfCancellationRequested();
+                var commitVisibility = pinnedRoot.ProbeVisiblePathMatch();
+                if (!pinnedRoot.MatchesManagedDirectoryIdentity(
+                        root.DirectoryObjectIdentityVersion,
+                        root.DirectoryObjectIdentity)
+                    || commitVisibility != RegistrationPublicationMatchOutcome.Match)
+                {
+                    throw commitVisibility == RegistrationPublicationMatchOutcome.Unavailable
+                        ? new IOException(
+                            "The root folder became temporarily unavailable before reconciled filesystem authority committed.")
+                        : new InvalidOperationException(
+                            "The root folder changed physical generation before reconciled filesystem authority committed.");
+                }
+
+                if (authorityTransaction != null)
+                {
+                    await authorityTransaction.CommitAsync(CancellationToken.None);
+                }
+            }
+            catch (Exception exception) when (exception is
+                IOException or UnauthorizedAccessException
+                    or InvalidOperationException
+                    or System.ComponentModel.Win32Exception)
+            {
+                root.DirectoryObjectIdentityUnavailableReason = exception.Message;
+                await db.SaveChangesAsync(CancellationToken.None);
+                logger.LogWarning(
+                    exception,
+                    "Root folder {RootFolderId} could not restore reconciled filesystem authority safely.",
+                    root.Id);
+            }
+        }
     }
 
 }

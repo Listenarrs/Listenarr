@@ -63,6 +63,10 @@ public sealed partial class RootFolderRelocationService
             var plans = RehydrateOwnershipMigrationPlans(relocation);
             try
             {
+                await EnsureMetadataRecoveryHasNoExternalOwnerAsync(
+                    db,
+                    relocation.Id,
+                    cancellationToken);
                 await CompleteOwnershipMigrationMetadataAsync(
                     db,
                     relocation,

@@ -65,6 +65,65 @@ public sealed class ReadOnlyBindMountFactAttribute : FactAttribute
     }
 }
 
+public sealed class CrossVolumeFactAttribute : FactAttribute
+{
+    public const string DestinationPathEnvironmentVariable =
+        "LISTENARR_CROSS_VOLUME_DESTINATION_PATH";
+
+    public CrossVolumeFactAttribute()
+    {
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                DestinationPathEnvironmentVariable)))
+        {
+            Skip = "The native test runner did not provide a destination on another filesystem or volume.";
+        }
+    }
+}
+
+public sealed class NetworkStorageTheoryAttribute : TheoryAttribute
+{
+    public const string PathEnvironmentVariable =
+        "LISTENARR_NETWORK_STORAGE_PATH";
+
+    public NetworkStorageTheoryAttribute()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Skip = "This test requires a native Linux network filesystem mount.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                PathEnvironmentVariable)))
+        {
+            Skip = "The native test runner did not provide a network filesystem mount.";
+        }
+    }
+}
+
+public sealed class ForeignOwnedNetworkStorageFactAttribute : FactAttribute
+{
+    public const string SourcePathEnvironmentVariable =
+        "LISTENARR_NETWORK_FOREIGN_SOURCE_PATH";
+
+    public ForeignOwnedNetworkStorageFactAttribute()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Skip = "This test requires a native Linux network filesystem mount.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                NetworkStorageTheoryAttribute.PathEnvironmentVariable))
+            || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                SourcePathEnvironmentVariable)))
+        {
+            Skip = "The native test runner did not provide a network mount and foreign-owned source.";
+        }
+    }
+}
+
 public sealed class DirectoryLinkFactAttribute : FactAttribute
 {
     public DirectoryLinkFactAttribute()

@@ -285,8 +285,16 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
                 return null;
             }
 
+            if (!FileSystemPathIdentity.TryDetectAbsoluteSyntaxForHost(
+                    canonicalPath,
+                    out var pathSyntax))
+            {
+                return null;
+            }
+
             FileSystemPathSemantics? bestSemantics = null;
             var bestRootLength = -1;
+            var unavailableRootLength = -1;
             foreach (var root in await rootFolderService.GetAllAsync())
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -295,6 +303,26 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
                         out var canonicalRoot,
                         out _))
                 {
+                    if (FileSystemPathIdentity.AmbiguousStoredBoundaryMayContainPath(
+                            root.Path,
+                            canonicalPath,
+                            pathSyntax,
+                            root.CaseSensitivityMode))
+                    {
+                        unavailableRootLength = Math.Max(
+                            unavailableRootLength,
+                            root.Path.Length);
+                    }
+
+                    continue;
+                }
+
+                if (!FileSystemPathIdentity.StoredBoundaryMayContainPath(
+                        canonicalRoot,
+                        canonicalPath,
+                        pathSyntax,
+                        root.CaseSensitivityMode))
+                {
                     continue;
                 }
 
@@ -302,8 +330,14 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
                     canonicalRoot,
                     root.CaseSensitivityMode,
                     cancellationToken);
-                if (rootResolution.State != PathIdentityState.Valid
-                    || !FileSystemPathIdentity.IsSameOrInside(
+                if (rootResolution.State != PathIdentityState.Valid)
+                {
+                    unavailableRootLength = Math.Max(
+                        unavailableRootLength,
+                        canonicalRoot.Length);
+                    continue;
+                }
+                if (!FileSystemPathIdentity.IsSameOrInside(
                         canonicalPath,
                         canonicalRoot,
                         rootResolution.Semantics))
@@ -318,6 +352,12 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
                 }
             }
 
+            if (unavailableRootLength >= bestRootLength
+                && unavailableRootLength >= 0)
+            {
+                return null;
+            }
+
             if (bestSemantics.HasValue)
             {
                 return bestSemantics.Value;
@@ -325,7 +365,8 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
 
             var resolution = await semanticsResolver.ResolveAsync(
                 canonicalPath,
-                cancellationToken: cancellationToken);
+                FileSystemCaseSensitivityMode.Auto,
+                cancellationToken);
             return resolution.State == PathIdentityState.Valid ? resolution.Semantics : null;
         }
     }

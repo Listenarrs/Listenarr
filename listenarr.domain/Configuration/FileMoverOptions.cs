@@ -17,6 +17,12 @@
  */
 namespace Listenarr.Domain.Configuration
 {
+    public enum WeakPublicationMode
+    {
+        CopyAndRetainSource = 0,
+        Disabled = 1
+    }
+
     public class FileMoverOptions
     {
         // Enable or disable using robocopy as a fallback on Windows
@@ -31,5 +37,8 @@ namespace Listenarr.Domain.Configuration
         // Backoff (ms) initial and maximum
         public int MinBackoffMs { get; set; } = 1000;
         public int MaxBackoffMs { get; set; } = 8000;
+
+        public WeakPublicationMode WeakPublicationMode { get; set; } =
+            WeakPublicationMode.CopyAndRetainSource;
     }
 }

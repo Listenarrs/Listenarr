@@ -9,6 +9,8 @@ internal sealed record FileMutationJournalClaim(
     FileAction Action,
     string SourcePath,
     string DestinationPath,
+    string SourceParentDirectoryObjectIdentity,
+    string DestinationParentDirectoryObjectIdentity,
     string SourcePhysicalObjectIdentity,
     long SourceLength,
     string? SourceSha256,
@@ -42,12 +44,29 @@ internal interface IFileMutationJournalStore
         string? error,
         CancellationToken cancellationToken);
 
+    Task<RegistrationPublicationMatchOutcome> AdvanceWithCommitValidationAsync(
+        Guid operationId,
+        FileMutationJournalState state,
+        string? targetPhysicalObjectIdentity,
+        int? audiobookId,
+        string? error,
+        Func<CancellationToken, Task<RegistrationPublicationMatchOutcome>> validateAsync,
+        CancellationToken cancellationToken);
+
     FileMutationJournal Advance(
         Guid operationId,
         FileMutationJournalState state,
         string? targetPhysicalObjectIdentity,
         int? audiobookId,
         string? error);
+
+    RegistrationPublicationMatchOutcome AdvanceWithCommitValidation(
+        Guid operationId,
+        FileMutationJournalState state,
+        string? targetPhysicalObjectIdentity,
+        int? audiobookId,
+        string? error,
+        Func<RegistrationPublicationMatchOutcome> validate);
 }
 
 internal sealed partial class EfFileMutationJournalStore(
@@ -88,10 +107,14 @@ internal sealed partial class EfFileMutationJournalStore(
         var journal = new FileMutationJournal
         {
             OperationId = claim.OperationId,
-            ProtocolVersion = FileMutationProtocol.MarkerlessDatabaseState,
+            ProtocolVersion = FileMutationProtocol.Current,
             Action = claim.Action,
             SourcePath = canonicalSource,
             DestinationPath = canonicalDestination,
+            SourceParentDirectoryObjectIdentity =
+                claim.SourceParentDirectoryObjectIdentity,
+            DestinationParentDirectoryObjectIdentity =
+                claim.DestinationParentDirectoryObjectIdentity,
             SourcePhysicalObjectIdentity = claim.SourcePhysicalObjectIdentity,
             SourceLength = claim.SourceLength,
             SourceSha256 = claim.SourceSha256,
@@ -209,6 +232,111 @@ internal sealed partial class EfFileMutationJournalStore(
             "The file-mutation journal changed concurrently too many times.");
     }
 
+    public async Task<RegistrationPublicationMatchOutcome>
+        AdvanceWithCommitValidationAsync(
+            Guid operationId,
+            FileMutationJournalState state,
+            string? targetPhysicalObjectIdentity,
+            int? audiobookId,
+            string? error,
+            Func<CancellationToken, Task<RegistrationPublicationMatchOutcome>> validateAsync,
+            CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(validateAsync);
+        ValidateAdvanceRequest(
+            operationId,
+            state,
+            targetPhysicalObjectIdentity,
+            audiobookId);
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            await using var db =
+                await dbContextFactory.CreateDbContextAsync(cancellationToken);
+            await using var transaction = db.Database.IsRelational()
+                ? await db.Database.BeginTransactionAsync(cancellationToken)
+                : null;
+            var journal = await db.FileMutationJournals
+                .AsNoTracking()
+                .SingleOrDefaultAsync(
+                    candidate => candidate.OperationId == operationId,
+                    cancellationToken)
+                ?? throw new InvalidOperationException(
+                    "The durable file-mutation journal does not exist.");
+            var expected = CaptureMutableState(journal);
+            ApplyAdvance(
+                journal,
+                state,
+                targetPhysicalObjectIdentity,
+                audiobookId,
+                error);
+            if (AfterAdvanceLoadedForTestAsync != null)
+            {
+                await AfterAdvanceLoadedForTestAsync();
+            }
+
+            if (!await TryPersistAdvanceAsync(
+                    db,
+                    journal,
+                    expected,
+                    cancellationToken))
+            {
+                if (transaction != null)
+                {
+                    await transaction.RollbackAsync(CancellationToken.None);
+                }
+                continue;
+            }
+
+            RegistrationPublicationMatchOutcome validation;
+            try
+            {
+                validation = await validateAsync(CancellationToken.None);
+            }
+            catch
+            {
+                if (transaction != null)
+                {
+                    await transaction.RollbackAsync(CancellationToken.None);
+                }
+                else
+                {
+                    await RestoreMutableStateAsync(
+                        db,
+                        operationId,
+                        expected,
+                        CancellationToken.None);
+                }
+                throw;
+            }
+
+            if (validation != RegistrationPublicationMatchOutcome.Match)
+            {
+                if (transaction != null)
+                {
+                    await transaction.RollbackAsync(CancellationToken.None);
+                }
+                else
+                {
+                    await RestoreMutableStateAsync(
+                        db,
+                        operationId,
+                        expected,
+                        CancellationToken.None);
+                }
+                return validation;
+            }
+
+            if (transaction != null)
+            {
+                await transaction.CommitAsync(CancellationToken.None);
+            }
+            return RegistrationPublicationMatchOutcome.Match;
+        }
+
+        throw new InvalidOperationException(
+            "The file-mutation journal changed concurrently too many times.");
+    }
+
     public FileMutationJournal Advance(
         Guid operationId,
         FileMutationJournalState state,
@@ -246,186 +374,81 @@ internal sealed partial class EfFileMutationJournalStore(
             "The file-mutation journal changed concurrently too many times.");
     }
 
-    private static FileMutationJournalMutableState CaptureMutableState(
-        FileMutationJournal journal) =>
-        new(
-            journal.State,
-            journal.TargetPhysicalObjectIdentity,
-            journal.AudiobookId,
-            journal.Error);
-
-    private static async Task<bool> TryPersistAdvanceAsync(
-        ListenArrDbContext db,
-        FileMutationJournal journal,
-        FileMutationJournalMutableState expected,
-        CancellationToken cancellationToken)
-    {
-        if (!db.Database.IsRelational())
-        {
-            db.FileMutationJournals.Update(journal);
-            return await db.SaveChangesAsync(cancellationToken) == 1;
-        }
-
-        var affected = await db.FileMutationJournals
-            .Where(candidate => candidate.OperationId == journal.OperationId
-                && candidate.State == expected.State
-                && candidate.TargetPhysicalObjectIdentity
-                    == expected.TargetPhysicalObjectIdentity
-                && candidate.AudiobookId == expected.AudiobookId
-                && candidate.Error == expected.Error)
-            .ExecuteUpdateAsync(
-                setters => setters
-                    .SetProperty(
-                        candidate => candidate.State,
-                        journal.State)
-                    .SetProperty(
-                        candidate => candidate.TargetPhysicalObjectIdentity,
-                        journal.TargetPhysicalObjectIdentity)
-                    .SetProperty(
-                        candidate => candidate.AudiobookId,
-                        journal.AudiobookId)
-                    .SetProperty(
-                        candidate => candidate.Error,
-                        journal.Error)
-                    .SetProperty(
-                        candidate => candidate.UpdatedAt,
-                        journal.UpdatedAt),
-                cancellationToken);
-        return affected == 1;
-    }
-
-    private static bool TryPersistAdvance(
-        ListenArrDbContext db,
-        FileMutationJournal journal,
-        FileMutationJournalMutableState expected)
-    {
-        if (!db.Database.IsRelational())
-        {
-            db.FileMutationJournals.Update(journal);
-            return db.SaveChanges() == 1;
-        }
-
-        var affected = db.FileMutationJournals
-            .Where(candidate => candidate.OperationId == journal.OperationId
-                && candidate.State == expected.State
-                && candidate.TargetPhysicalObjectIdentity
-                    == expected.TargetPhysicalObjectIdentity
-                && candidate.AudiobookId == expected.AudiobookId
-                && candidate.Error == expected.Error)
-            .ExecuteUpdate(setters => setters
-                .SetProperty(
-                    candidate => candidate.State,
-                    journal.State)
-                .SetProperty(
-                    candidate => candidate.TargetPhysicalObjectIdentity,
-                    journal.TargetPhysicalObjectIdentity)
-                .SetProperty(
-                    candidate => candidate.AudiobookId,
-                    journal.AudiobookId)
-                .SetProperty(
-                    candidate => candidate.Error,
-                    journal.Error)
-                .SetProperty(
-                    candidate => candidate.UpdatedAt,
-                    journal.UpdatedAt));
-        return affected == 1;
-    }
-
-    private sealed record FileMutationJournalMutableState(
-        FileMutationJournalState State,
-        string? TargetPhysicalObjectIdentity,
-        int? AudiobookId,
-        string? Error);
-
-    private static void ValidateAdvanceRequest(
+    public RegistrationPublicationMatchOutcome AdvanceWithCommitValidation(
         Guid operationId,
         FileMutationJournalState state,
         string? targetPhysicalObjectIdentity,
-        int? audiobookId)
-    {
-        if (operationId == Guid.Empty)
-        {
-            throw new ArgumentException(
-                "A file-mutation operation ID must not be empty.",
-                nameof(operationId));
-        }
-        if (state == FileMutationJournalState.OwnerMetadataReconciled)
-        {
-            throw new InvalidOperationException(
-                "Owner metadata reconciliation must be committed atomically with the owning audiobook metadata, not through the filesystem journal store.");
-        }
-        if (state >= FileMutationJournalState.TargetIdentityPersisted
-            && state != FileMutationJournalState.NeedsAttention
-            && string.IsNullOrWhiteSpace(targetPhysicalObjectIdentity))
-        {
-            throw new ArgumentException(
-                "A persisted target generation is required for this file-mutation state.",
-                nameof(targetPhysicalObjectIdentity));
-        }
-        if (audiobookId <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(audiobookId));
-        }
-    }
-
-    private void ApplyAdvance(
-        FileMutationJournal journal,
-        FileMutationJournalState state,
-        string? targetPhysicalObjectIdentity,
         int? audiobookId,
-        string? error)
+        string? error,
+        Func<RegistrationPublicationMatchOutcome> validate)
     {
-        if (journal.ProtocolVersion
-            != FileMutationProtocol.MarkerlessDatabaseState)
+        ArgumentNullException.ThrowIfNull(validate);
+        ValidateAdvanceRequest(
+            operationId,
+            state,
+            targetPhysicalObjectIdentity,
+            audiobookId);
+        for (var attempt = 0; attempt < 3; attempt++)
         {
-            throw new InvalidOperationException(
-                "The durable file-mutation journal uses an unsupported protocol.");
-        }
-        if (journal.State == FileMutationJournalState.OwnerMetadataReconciled)
-        {
-            throw new InvalidOperationException(
-                "A file mutation whose owner metadata is reconciled is terminal and cannot be advanced.");
-        }
-        if (journal.State == FileMutationJournalState.NeedsAttention
-            && state != FileMutationJournalState.NeedsAttention)
-        {
-            throw new InvalidOperationException(
-                "A file mutation requiring attention cannot resume automatically.");
-        }
-        if (state != FileMutationJournalState.NeedsAttention
-            && state < journal.State)
-        {
-            throw new InvalidOperationException(
-                "A file-mutation state transition would regress durable state.");
-        }
-        if (!string.IsNullOrWhiteSpace(journal.TargetPhysicalObjectIdentity)
-            && !string.IsNullOrWhiteSpace(targetPhysicalObjectIdentity)
-            && !string.Equals(
-                journal.TargetPhysicalObjectIdentity,
+            using var db = dbContextFactory.CreateDbContext();
+            using var transaction = db.Database.IsRelational()
+                ? db.Database.BeginTransaction()
+                : null;
+            var journal = db.FileMutationJournals
+                .AsNoTracking()
+                .SingleOrDefault(candidate => candidate.OperationId == operationId)
+                ?? throw new InvalidOperationException(
+                    "The durable file-mutation journal does not exist.");
+            var expected = CaptureMutableState(journal);
+            ApplyAdvance(
+                journal,
+                state,
                 targetPhysicalObjectIdentity,
-                StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(
-                "The file-mutation target changed physical generation.");
-        }
-        if (journal.AudiobookId.HasValue
-            && audiobookId.HasValue
-            && journal.AudiobookId != audiobookId)
-        {
-            throw new InvalidOperationException(
-                "The file-mutation registration owner changed.");
+                audiobookId,
+                error);
+            if (!TryPersistAdvance(db, journal, expected))
+            {
+                transaction?.Rollback();
+                continue;
+            }
+
+            RegistrationPublicationMatchOutcome validation;
+            try
+            {
+                validation = validate();
+            }
+            catch
+            {
+                if (transaction != null)
+                {
+                    transaction.Rollback();
+                }
+                else
+                {
+                    RestoreMutableState(db, operationId, expected);
+                }
+                throw;
+            }
+
+            if (validation != RegistrationPublicationMatchOutcome.Match)
+            {
+                if (transaction != null)
+                {
+                    transaction.Rollback();
+                }
+                else
+                {
+                    RestoreMutableState(db, operationId, expected);
+                }
+                return validation;
+            }
+
+            transaction?.Commit();
+            return RegistrationPublicationMatchOutcome.Match;
         }
 
-        journal.TargetPhysicalObjectIdentity ??=
-            targetPhysicalObjectIdentity;
-        journal.AudiobookId ??= audiobookId;
-        if (state > journal.State
-            || state == FileMutationJournalState.NeedsAttention)
-        {
-            journal.State = state;
-        }
-        journal.Error = error;
-        journal.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
+        throw new InvalidOperationException(
+            "The file-mutation journal changed concurrently too many times.");
     }
 
 }

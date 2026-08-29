@@ -121,20 +121,34 @@
             </label>
           </div>
 
-          <div class="checkbox-row" v-if="moveFiles && effectiveAllowMoveFiles">
+          <div
+            class="checkbox-row"
+            v-if="moveFiles && effectiveAllowMoveFiles && !effectiveSourceIsManagedRoot"
+          >
             <label class="checkbox-wrapper checkbox-label">
               <input
                 type="checkbox"
                 class="checkbox-input"
                 :checked="deleteEmpty"
                 @change="onToggleDeleteEmpty($event)"
-                aria-label="Clean up empty folders"
+                aria-label="Remove empty source folder"
               />
               <div class="checkbox-content">
-                <span class="checkbox-title">Clean up empty folders</span>
-                <small>Delete the original folder if it becomes empty after moving</small>
+                <span class="checkbox-title">Remove empty source folder after move</span>
+                <small>Deletes the audiobook's old folder after its files move successfully</small>
               </div>
             </label>
+          </div>
+
+          <div class="cleanup-summary" v-if="!rootFolderChange && moveFiles">
+            <div>
+              <strong>Source files</strong>
+              <span>{{ sourceFileDisposition }}</span>
+            </div>
+            <div v-if="effectiveSourceIsManagedRoot">
+              <strong>Managed root folder</strong>
+              <span>{{ sourcePathLabel }} will remain.</span>
+            </div>
           </div>
 
           <p class="confirm-note" v-if="rootFolderChange">
@@ -185,6 +199,7 @@ const props = withDefaults(
     rootFolderName?: string | null
     showMoveOption?: boolean
     allowMoveFiles?: boolean
+    allowDeleteEmpty?: boolean
     moveFiles?: boolean
     deleteEmpty?: boolean
     icon?: Component | undefined
@@ -200,6 +215,7 @@ const props = withDefaults(
     rootFolderName: null,
     showMoveOption: true,
     allowMoveFiles: true,
+    allowDeleteEmpty: true,
     moveFiles: true,
     deleteEmpty: true,
     icon: undefined,
@@ -218,8 +234,13 @@ const volumeCheckResult = ref<{
   sourceVolume?: string
   destVolume?: string
   message?: string
+  verifiedSourceDeletionEnabled?: boolean
+  forceCopyAndRetainSource?: boolean
+  sourceIsManagedRoot?: boolean
+  sourceCleanupMessage?: string
 } | null>(null)
 const showHardlinkWarning = ref(false)
+let volumeCheckGeneration = 0
 
 // Path-length warning for the destination
 const moveDestinationPath = computed(
@@ -235,9 +256,12 @@ watch(
     props.currentRootPath,
     props.pendingRootPath,
     props.visible,
+    props.moveFiles,
     effectiveAllowMoveFiles.value,
   ],
   async () => {
+    const generation = ++volumeCheckGeneration
+    volumeCheckResult.value = null
     if (!props.visible || !props.moveFiles || !effectiveAllowMoveFiles.value) {
       showHardlinkWarning.value = false
       return
@@ -249,9 +273,11 @@ watch(
     if (source && dest) {
       try {
         const result = await apiService.checkVolume(source, dest)
+        if (generation !== volumeCheckGeneration) return
         volumeCheckResult.value = result
         showHardlinkWarning.value = result.willBreakHardlinks
       } catch (error) {
+        if (generation !== volumeCheckGeneration) return
         console.error('Failed to check volume:', error)
         showHardlinkWarning.value = false
       }
@@ -266,8 +292,28 @@ function onToggleMoveFiles(e: Event) {
 }
 function onToggleDeleteEmpty(e: Event) {
   const t = e.target as HTMLInputElement | null
-  emit('update:deleteEmpty', Boolean(t && t.checked))
+  emit('update:deleteEmpty', Boolean(!effectiveSourceIsManagedRoot.value && t && t.checked))
 }
+
+const effectiveSourceIsManagedRoot = computed(() =>
+  Boolean(volumeCheckResult.value?.sourceIsManagedRoot || !props.allowDeleteEmpty),
+)
+const sourcePathLabel = computed(() => props.pendingMove?.original || 'The managed root folder')
+const sourceFileDisposition = computed(() => {
+  if (volumeCheckResult.value?.forceCopyAndRetainSource) {
+    return 'Source files will be retained because this storage cannot safely remove them.'
+  }
+  if (volumeCheckResult.value?.sameVolume) {
+    return 'Source files will be moved into the new location.'
+  }
+  if (volumeCheckResult.value?.verifiedSourceDeletionEnabled) {
+    return 'Source files will be removed after every copied file is verified.'
+  }
+  if (volumeCheckResult.value?.sourceCleanupMessage) {
+    return volumeCheckResult.value.sourceCleanupMessage
+  }
+  return 'Source files will be retained unless verified source deletion is authorized for both root folders.'
+})
 
 const buttonLabel = computed(() => {
   if (props.rootFolderRepair) return 'Confirm Folder'
@@ -282,7 +328,7 @@ const buttonLabel = computed(() => {
 function onSubmit() {
   emit('confirm', {
     moveFiles: Boolean(props.moveFiles && effectiveAllowMoveFiles.value),
-    deleteEmpty: Boolean(props.deleteEmpty),
+    deleteEmpty: Boolean(props.deleteEmpty && !effectiveSourceIsManagedRoot.value),
   })
 }
 </script>
@@ -346,6 +392,28 @@ function onSubmit() {
   color: #bfc8cc;
   font-size: 0.9rem;
   margin-top: 0.75rem;
+}
+.cleanup-summary {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 0.85rem;
+  padding: 0.75rem;
+  border: 1px solid #3b3b3b;
+  border-radius: 6px;
+  background: #252526;
+}
+.cleanup-summary > div {
+  display: grid;
+  gap: 0.2rem;
+}
+.cleanup-summary strong {
+  color: #e6eef8;
+  font-size: 0.9rem;
+}
+.cleanup-summary span {
+  color: #bfc8cc;
+  font-size: 0.85rem;
+  line-height: 1.4;
 }
 
 /* Path length warning */

@@ -10,6 +10,8 @@ internal sealed partial class MoveSourceManifestService(
     IAudiobookRepository? audiobookRepository = null)
     : IMoveSourceManifestService, IMoveSourcePlanService
 {
+    internal Action<string>? AfterTrackedFileContentObservedForTest { get; set; }
+
     private async Task<MoveSourceManifest> BuildCoreAsync(
         int audiobookId,
         string? audiobookBasePath,
@@ -138,17 +140,30 @@ internal sealed partial class MoveSourceManifestService(
         return canonical;
     }
 
-    private static async Task<ValidatedTrackedFile> ValidateFileAsync(
+    private async Task<ValidatedTrackedFile> ValidateFileAsync(
         int audiobookFileId,
         string path,
         string? expectedPhysicalObjectIdentity,
         bool includeContentHash,
         CancellationToken cancellationToken)
     {
-        if (!File.Exists(path))
+        try
+        {
+            _ = File.GetAttributes(path);
+        }
+        catch (Exception exception) when (
+            FileSystemSafety.IsProvenMissingPathException(exception))
         {
             throw Conflict(
                 $"Tracked file {audiobookFileId} is missing from disk and cannot be moved safely.");
+        }
+        catch (Exception exception) when (exception is
+            IOException or UnauthorizedAccessException
+                or System.ComponentModel.Win32Exception)
+        {
+            throw Unavailable(
+                $"Tracked file {audiobookFileId} is temporarily unavailable while its persisted physical identity is being verified.",
+                exception);
         }
 
         if (string.IsNullOrWhiteSpace(expectedPhysicalObjectIdentity))
@@ -167,10 +182,7 @@ internal sealed partial class MoveSourceManifestService(
                 createMissing: false);
             using var file = parent.OpenExistingFileForStableRead(
                 Path.GetFileName(path));
-            if (!string.Equals(
-                    file.GetObjectIdentity(),
-                    expectedPhysicalObjectIdentity,
-                    StringComparison.Ordinal))
+            if (!file.MatchesObjectIdentity(expectedPhysicalObjectIdentity))
             {
                 throw Conflict(
                     $"Tracked file {audiobookFileId} identifies a different physical file generation and must be rescanned before moving.");
@@ -180,18 +192,25 @@ internal sealed partial class MoveSourceManifestService(
                 bufferSize: 128 * 1024,
                 asynchronous: false);
             var length = stream.Length;
-            var lastWriteTimeUtc = File.GetLastWriteTimeUtc(path);
+            var lastWriteTimeUtc = file.GetLastWriteTimeUtc();
             var hash = includeContentHash
                 ? Convert.ToHexString(
                     await SHA256.HashDataAsync(stream, cancellationToken))
                 : null;
-            if (!file.VisiblePathMatches()
-                || !string.Equals(
-                    file.GetObjectIdentity(),
-                    expectedPhysicalObjectIdentity,
-                    StringComparison.Ordinal)
+            AfterTrackedFileContentObservedForTest?.Invoke(path);
+            var fileVisibility = file.ProbeVisiblePathMatch();
+            var parentVisibility = parent.ProbeVisiblePathMatch();
+            if (fileVisibility == RegistrationPublicationMatchOutcome.Unavailable
+                || parentVisibility == RegistrationPublicationMatchOutcome.Unavailable)
+            {
+                throw new IOException(
+                    $"Tracked file {audiobookFileId} is temporarily unavailable while its move manifest is being verified.");
+            }
+            if (fileVisibility != RegistrationPublicationMatchOutcome.Match
+                || parentVisibility != RegistrationPublicationMatchOutcome.Match
+                || !file.MatchesObjectIdentity(expectedPhysicalObjectIdentity)
                 || stream.Length != length
-                || File.GetLastWriteTimeUtc(path) != lastWriteTimeUtc)
+                || file.GetLastWriteTimeUtc() != lastWriteTimeUtc)
             {
                 throw Conflict(
                     $"Tracked file {audiobookFileId} changed while its move manifest was being created.");
@@ -208,11 +227,23 @@ internal sealed partial class MoveSourceManifestService(
         {
             throw;
         }
+        catch (Exception exception) when (
+            FileSystemSafety.IsProvenMissingPathException(exception))
+        {
+            throw Conflict(
+                $"Tracked file {audiobookFileId} is missing from disk and cannot be moved safely.");
+        }
         catch (Exception exception) when (exception is
             IOException or UnauthorizedAccessException
-                or ArgumentException or InvalidOperationException
-                or NotSupportedException or PathTooLongException
                 or System.ComponentModel.Win32Exception)
+        {
+            throw Unavailable(
+                $"Tracked file {audiobookFileId} is temporarily unavailable while its persisted physical identity is being verified.",
+                exception);
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or InvalidOperationException
+                or NotSupportedException or PathTooLongException)
         {
             throw Conflict(
                 $"Tracked file {audiobookFileId} could not be pinned to its persisted physical identity: {exception.Message}");
@@ -246,13 +277,26 @@ internal sealed partial class MoveSourceManifestService(
 
     private static void ValidateSourceRoot(string sourceRoot)
     {
-        if (!Directory.Exists(sourceRoot))
+        FileAttributes attributes;
+        try
+        {
+            attributes = File.GetAttributes(sourceRoot);
+        }
+        catch (Exception exception) when (
+            FileSystemSafety.IsProvenMissingPathException(exception))
         {
             throw Conflict(
                 "The computed tracked-file source root does not exist.");
         }
+        catch (Exception exception) when (exception is
+            IOException or UnauthorizedAccessException
+                or System.ComponentModel.Win32Exception)
+        {
+            throw Unavailable(
+                "The computed tracked-file source root is temporarily unavailable.",
+                exception);
+        }
 
-        var attributes = File.GetAttributes(sourceRoot);
         if ((attributes & FileAttributes.ReparsePoint) != 0
             || (attributes & FileAttributes.Directory) == 0)
         {
@@ -410,77 +454,4 @@ internal sealed partial class MoveSourceManifestService(
             .ToList();
     }
 
-    private static IReadOnlyList<MoveSourceManifestEntry> MergeEntries(
-        IReadOnlyList<MoveSourceManifestEntry> trackedEntries,
-        IReadOnlyList<MoveSourceManifestEntry> companionEntries,
-        FileSystemPathSemantics semantics)
-    {
-        var merged = new Dictionary<string, MoveSourceManifestEntry>(
-            semantics.Comparer);
-        foreach (var entry in trackedEntries.Concat(companionEntries))
-        {
-            if (merged.TryGetValue(entry.RelativePath, out var existing))
-            {
-                if (existing.EntryType != entry.EntryType)
-                {
-                    throw Conflict(
-                        $"Move manifest path changed type while companion files were being captured: {entry.RelativePath}");
-                }
-
-                continue;
-            }
-
-            merged.Add(entry.RelativePath, entry);
-        }
-
-        return merged.Values
-            .OrderBy(entry => entry.EntryType == MoveJobEntryType.Directory ? 0 : 1)
-            .ThenBy(entry => entry.RelativePath, semantics.Comparer)
-            .ToList();
-    }
-
-    private static bool HasSameFilesystemAuthority(
-        PathIdentitySnapshot left,
-        PathIdentitySnapshot right) =>
-        left.Syntax == right.Syntax
-        && left.CaseSensitivity == right.CaseSensitivity
-        && left.RequestedMode == right.RequestedMode
-        && FileSystemPathIdentity.AreEquivalent(
-            left.BoundaryPath,
-            right.BoundaryPath,
-            left.Semantics);
-
-    private static bool IsFilesystemRoot(
-        string path,
-        FileSystemPathSemantics semantics)
-    {
-        var root = Path.GetPathRoot(path);
-        return !string.IsNullOrWhiteSpace(root)
-            && FileSystemPathIdentity.AreEquivalent(path, root, semantics);
-    }
-
-    private static async Task<string> ComputeSha256Async(
-        string path,
-        CancellationToken cancellationToken)
-    {
-        await using var stream = new FileStream(
-            path,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.Read,
-            bufferSize: 128 * 1024,
-            FileOptions.Asynchronous | FileOptions.SequentialScan);
-        var hash = await SHA256.HashDataAsync(stream, cancellationToken);
-        return Convert.ToHexString(hash);
-    }
-
-    private static ApplicationConflictException Conflict(string message) =>
-        new("move_source_unverified", message);
-
-    private sealed record ValidatedTrackedFile(
-        int AudiobookFileId,
-        string Path,
-        long Length,
-        DateTime LastWriteTimeUtc,
-        string? Sha256);
 }

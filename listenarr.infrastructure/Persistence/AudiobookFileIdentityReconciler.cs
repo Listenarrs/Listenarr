@@ -50,38 +50,46 @@ public sealed class AudiobookFileIdentityReconciler(
                     file.Path,
                     cancellationToken);
                 var livePhysicalObjectIdentity = identity.State == PathIdentityState.Valid
-                    ? TryResolvePhysicalObjectIdentity(identity)
+                    ? TryResolvePhysicalObjectIdentity(
+                        identity,
+                        file.PhysicalObjectIdentity)
                     : null;
-                if (!string.IsNullOrWhiteSpace(file.PhysicalObjectIdentity))
+                var physicalDisposition = PhysicalGenerationDisposition.None;
+                if (identity.State == PathIdentityState.Valid)
                 {
                     if (string.IsNullOrWhiteSpace(livePhysicalObjectIdentity))
                     {
-                        plans.Add(ReconciliationPlan.Unavailable(
-                            file,
-                            "The tracked audiobook file physical generation is unavailable at its stored path."));
-                        continue;
+                        physicalDisposition = PhysicalGenerationDisposition.Unavailable;
                     }
-                    if (!string.Equals(
+                    else if (!string.IsNullOrWhiteSpace(file.PhysicalObjectIdentity)
+                        && !string.Equals(
                             file.PhysicalObjectIdentity,
                             livePhysicalObjectIdentity,
                             StringComparison.Ordinal))
                     {
-                        plans.Add(ReconciliationPlan.Unavailable(
-                            file,
-                            "The tracked audiobook file path now identifies a different physical generation."));
-                        continue;
+                        physicalDisposition = PhysicalGenerationDisposition.Mismatch;
+                    }
+                    else
+                    {
+                        physicalDisposition = PhysicalGenerationDisposition.Verified;
                     }
                 }
 
+                // A physical-generation mismatch must not erase pathname ownership.
+                // The persisted physical token remains stale on purpose so destructive
+                // workflows continue to fail closed when they compare it with the live
+                // generation, while the path lookup/ownership keys still fence claims.
                 plans.Add(new ReconciliationPlan(
                     file.Id,
                     file.Path,
                     file.PathOwnershipKey,
                     identity,
                     physicalObjectIdentity: string.IsNullOrWhiteSpace(
-                        file.PhysicalObjectIdentity)
-                        ? livePhysicalObjectIdentity
-                        : null));
+                            file.PhysicalObjectIdentity)
+                        && physicalDisposition == PhysicalGenerationDisposition.Verified
+                            ? livePhysicalObjectIdentity
+                            : null,
+                    physicalDisposition: physicalDisposition));
             }
             catch (Exception exception) when (exception is
                 ArgumentException or
@@ -107,12 +115,21 @@ public sealed class AudiobookFileIdentityReconciler(
         var valid = plans.Count(plan => plan.Identity?.State == PathIdentityState.Valid);
         var conflicted = plans.Count(plan => plan.Identity?.State == PathIdentityState.Conflict);
         var unavailable = plans.Count - valid - conflicted;
+        var physicalVerified = plans.Count(
+            plan => plan.PhysicalDisposition == PhysicalGenerationDisposition.Verified);
+        var physicalUnavailable = plans.Count(
+            plan => plan.PhysicalDisposition == PhysicalGenerationDisposition.Unavailable);
+        var physicalMismatch = plans.Count(
+            plan => plan.PhysicalDisposition == PhysicalGenerationDisposition.Mismatch);
         logger.LogInformation(
-            "Reconciled {Processed} audiobook file identities: {Valid} valid, {Conflicted} conflicted, {Unavailable} unavailable",
+            "Reconciled {Processed} audiobook file path identities: {Valid} valid, {Conflicted} conflicted, {Unavailable} unavailable; physical generations: {PhysicalVerified} verified, {PhysicalUnavailable} unavailable, {PhysicalMismatch} mismatched",
             plans.Count,
             valid,
             conflicted,
-            unavailable);
+            unavailable,
+            physicalVerified,
+            physicalUnavailable,
+            physicalMismatch);
         return new AudiobookFileIdentityReconciliationResult(
             plans.Count,
             valid,
@@ -209,7 +226,8 @@ public sealed class AudiobookFileIdentityReconciler(
     }
 
     private string? TryResolvePhysicalObjectIdentity(
-        AudiobookFilePathIdentity identity)
+        AudiobookFilePathIdentity identity,
+        string? expectedPhysicalObjectIdentity)
     {
         var pathIdentity = new PathIdentitySnapshot(
             identity.Syntax,
@@ -241,10 +259,17 @@ public sealed class AudiobookFileIdentityReconciler(
             AfterPhysicalIdentityParentPinnedForTest?.Invoke(parentPath);
             using var file = parent.OpenExistingFileForStableRead(
                 Path.GetFileName(canonicalPath));
-            return parent.VisiblePathMatches()
-                && file.VisiblePathMatches()
-                    ? file.GetObjectIdentity()
-                    : null;
+            if (!parent.VisiblePathMatches() || !file.VisiblePathMatches())
+            {
+                return null;
+            }
+            if (!string.IsNullOrWhiteSpace(expectedPhysicalObjectIdentity)
+                && file.MatchesObjectIdentity(expectedPhysicalObjectIdentity))
+            {
+                return expectedPhysicalObjectIdentity;
+            }
+
+            return file.GetObjectIdentity();
         }
         catch (Exception exception) when (exception is
             IOException or UnauthorizedAccessException
@@ -265,7 +290,8 @@ public sealed class AudiobookFileIdentityReconciler(
         string? currentOwnershipKey,
         AudiobookFilePathIdentity? identity,
         string? unavailableReason = null,
-        string? physicalObjectIdentity = null)
+        string? physicalObjectIdentity = null,
+        PhysicalGenerationDisposition physicalDisposition = PhysicalGenerationDisposition.None)
     {
         public int FileId { get; } = fileId;
         public string? StoredPath { get; } = storedPath;
@@ -273,6 +299,7 @@ public sealed class AudiobookFileIdentityReconciler(
         public AudiobookFilePathIdentity? Identity { get; set; } = identity;
         public string? UnavailableReason { get; } = unavailableReason;
         public string? PhysicalObjectIdentity { get; } = physicalObjectIdentity;
+        public PhysicalGenerationDisposition PhysicalDisposition { get; } = physicalDisposition;
 
         public static ReconciliationPlan Unavailable(
             AudiobookFile file,
@@ -283,5 +310,13 @@ public sealed class AudiobookFileIdentityReconciler(
                 file.PathOwnershipKey,
                 null,
                 reason);
+    }
+
+    private enum PhysicalGenerationDisposition
+    {
+        None,
+        Verified,
+        Unavailable,
+        Mismatch
     }
 }

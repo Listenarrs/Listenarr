@@ -12,6 +12,18 @@ public sealed class LibraryDirectoryOwnershipReconciler(
     ILogger<LibraryDirectoryOwnershipReconciler> logger)
     : ILibraryDirectoryOwnershipReconciler
 {
+    internal Action<LibraryDirectoryOwnership>? AfterRemovingDirectoryObservedMissingForTest
+    {
+        get;
+        set;
+    }
+
+    internal Action<LibraryDirectoryOwnership>? AfterOwnershipAuthoritySavedForTest
+    {
+        get;
+        set;
+    }
+
     public Task ReconcileAsync(CancellationToken cancellationToken = default) =>
         mutationCoordinator.ExecuteExclusiveAsync(
             ReconcileCoreAsync,
@@ -45,28 +57,6 @@ public sealed class LibraryDirectoryOwnershipReconciler(
                     throw new InvalidOperationException(pathReason);
                 }
 
-                if (ownership.State == LibraryDirectoryOwnershipState.Removing
-                    && !Directory.Exists(ownership.CanonicalPath))
-                {
-                    using var missingAuthorization =
-                        ownership.ManagedRootFolderId.HasValue
-                            ? await authorizer.AuthorizeOwnershipAsync(
-                                ownership,
-                                cancellationToken)
-                            : await authorizer.AuthorizeContainingRootAsync(
-                                ownership.CanonicalPath,
-                                ownership.GetIdentity().Semantics,
-                                cancellationToken);
-                    var now = DateTime.UtcNow;
-                    ownership.State = LibraryDirectoryOwnershipState.Removed;
-                    ownership.PathOwnershipKey = null;
-                    ownership.ManagedRootFolderId = null;
-                    ownership.StateReason = null;
-                    ownership.UpdatedAt = now;
-                    await db.SaveChangesAsync(cancellationToken);
-                    continue;
-                }
-
                 using var authorization = ownership.ManagedRootFolderId.HasValue
                     ? await authorizer.AuthorizeOwnershipAsync(
                         ownership,
@@ -78,23 +68,46 @@ public sealed class LibraryDirectoryOwnershipReconciler(
                 var directoryName = Path.GetFileName(ownership.CanonicalPath);
                 using var publication =
                     authorization.ParentAnchor.TryOpenExistingChildForPublication(
-                        directoryName)
-                    ?? throw new InvalidOperationException(
-                        "The owned directory is missing.");
+                        directoryName);
+                if (publication == null)
+                {
+                    if (ownership.State != LibraryDirectoryOwnershipState.Removing)
+                    {
+                        throw new InvalidOperationException(
+                            "The owned directory is missing.");
+                    }
+
+                    AfterRemovingDirectoryObservedMissingForTest?.Invoke(ownership);
+                    if (!authorization.ParentAnchor.VisiblePathMatches())
+                    {
+                        throw new IOException(
+                            "The owned directory parent changed while physical removal was being proved.");
+                    }
+
+                    var now = DateTime.UtcNow;
+                    ownership.State = LibraryDirectoryOwnershipState.Removed;
+                    ownership.PathOwnershipKey = null;
+                    ownership.ManagedRootFolderId = null;
+                    ownership.StateReason = null;
+                    ownership.UpdatedAt = now;
+                    await db.SaveChangesAsync(cancellationToken);
+                    continue;
+                }
                 using var directory = publication.OpenCreatedDirectoryAnchor();
-                var liveIdentity = directory.GetDirectoryObjectIdentity();
                 if (ownership.DirectoryObjectIdentityVersion
                     != ManagedDirectoryIdentity.CurrentVersion
-                    || !ManagedDirectoryIdentity.Matches(
+                    || !directory.MatchesManagedDirectoryOwnershipIdentity(
                         ownership.DirectoryObjectIdentityVersion,
                         ownership.DirectoryObjectIdentity,
-                        ownership.OwnershipToken,
-                        liveIdentity))
+                        ownership.OwnershipToken))
                 {
                     throw new InvalidOperationException(
                         "The persisted directory ownership identity is not the current supported generation.");
                 }
 
+                await using var authorityTransaction = db.Database.IsRelational()
+                    ? await db.Database.BeginTransactionAsync(cancellationToken)
+                    : null;
                 ownership.ManagedRootFolderId = authorization.RootFolderId;
                 ownership.DirectoryObjectIdentityUnavailableReason = null;
                 ownership.StateReason = null;
@@ -104,6 +117,22 @@ public sealed class LibraryDirectoryOwnershipReconciler(
                 }
                 ownership.UpdatedAt = DateTime.UtcNow;
                 await db.SaveChangesAsync(cancellationToken);
+                AfterOwnershipAuthoritySavedForTest?.Invoke(ownership);
+                if (!directory.MatchesManagedDirectoryOwnershipIdentity(
+                        ownership.DirectoryObjectIdentityVersion,
+                        ownership.DirectoryObjectIdentity,
+                        ownership.OwnershipToken)
+                    || !directory.VisiblePathMatches()
+                    || !authorization.ParentAnchor.VisiblePathMatches())
+                {
+                    throw new InvalidOperationException(
+                        "The directory ownership generation changed before reconciled destructive authority committed.");
+                }
+                if (authorityTransaction != null)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await authorityTransaction.CommitAsync(CancellationToken.None);
+                }
             }
             catch (Exception exception) when (exception is not (
                 OperationCanceledException or OutOfMemoryException

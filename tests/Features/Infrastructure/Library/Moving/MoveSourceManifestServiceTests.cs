@@ -155,6 +155,68 @@ public sealed class MoveSourceManifestServiceTests : BaseTests
             string.Equals(entry.RelativePath, "untracked-bonus.m4b", StringComparison.Ordinal));
     }
 
+    [LinuxFact]
+    [System.Runtime.Versioning.SupportedOSPlatform("linux")]
+    public async Task BuildAsync_CompanionAuthorizationRootTemporarilyUnavailable_DoesNotSilentlyOmitCompanion()
+    {
+        var wrapper = FileService.GetTempDirectory("move-manifest-companion-auth-wrapper");
+        var root = Path.Join(wrapper, "Library");
+        var book = Path.Join(root, "Author", "Book");
+        Directory.CreateDirectory(book);
+        await AddAuthorizedRootAsync(root);
+        var trackedAudio = await FileService.GetFileAsync(
+            book,
+            "Book.m4b",
+            "tracked audio");
+        _ = await FileService.GetFileAsync(book, "cover.jpg", "cover image");
+        var audiobook = await _audiobookRepository.AddAsync(
+            new AudiobookBuilder()
+                .WithTitle("Book")
+                .WithBasePath(book)
+                .Build());
+        await AddTrackedFileAsync(audiobook, trackedAudio, book);
+
+        var wrapperMode = File.GetUnixFileMode(wrapper);
+        var hookRan = false;
+        using var hook = ExclusiveDirectoryCreator.PushBeforeOpenParentHook(path =>
+        {
+            if (hookRan
+                || !string.Equals(
+                    Path.GetFullPath(path),
+                    Path.GetFullPath(root),
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            hookRan = true;
+            File.SetUnixFileMode(wrapper, UnixFileMode.None);
+        });
+        try
+        {
+            var exception = await Assert.ThrowsAsync<ApplicationUnavailableException>(() =>
+                _provider.GetRequiredService<IMoveSourceManifestService>()
+                    .BuildAsync(audiobook));
+
+            Assert.True(hookRan);
+            Assert.Equal("move_source_temporarily_unavailable", exception.Code);
+            Assert.Contains(
+                "temporarily unavailable",
+                exception.SafeDetail,
+                StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            File.SetUnixFileMode(wrapper, wrapperMode);
+        }
+
+        var recovered = await _provider
+            .GetRequiredService<IMoveSourceManifestService>()
+            .BuildAsync(audiobook);
+        Assert.Contains(recovered.Entries, entry =>
+            string.Equals(entry.RelativePath, "cover.jpg", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task BuildAsync_AudiobookAtConfiguredRoot_DoesNotClaimRootCompanion()
     {
@@ -462,6 +524,102 @@ public sealed class MoveSourceManifestServiceTests : BaseTests
 
         Assert.Equal("move_source_unverified", exception.Code);
         Assert.Contains("missing from disk", exception.Message);
+    }
+
+    [LinuxFact]
+    [System.Runtime.Versioning.SupportedOSPlatform("linux")]
+    public async Task BuildAsync_TrackedFileParentReplacedDuringHashing_FailsClosed()
+    {
+        var root = FileService.GetTempDirectory("move-manifest-parent-replaced");
+        var book = Path.Join(root, "Book");
+        var displaced = Path.Join(root, "Book.original");
+        Directory.CreateDirectory(book);
+        var path = await FileService.GetFileAsync(book, "Book.m4b", "audio");
+        var audiobook = await _audiobookRepository.AddAsync(
+            new AudiobookBuilder()
+                .WithTitle("Parent Replacement")
+                .WithBasePath(book)
+                .Build());
+        await AddTrackedFileAsync(audiobook, path, root);
+        var service = _provider.GetRequiredService<MoveSourceManifestService>();
+        var hookRan = false;
+        service.AfterTrackedFileContentObservedForTest = observedPath =>
+        {
+            if (hookRan || !string.Equals(observedPath, path, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            hookRan = true;
+            Directory.Move(book, displaced);
+            Directory.CreateDirectory(book);
+            File.WriteAllText(path, "replacement");
+        };
+
+        var exception = await Assert.ThrowsAsync<ApplicationConflictException>(() =>
+            service.BuildAsync(audiobook));
+
+        Assert.True(hookRan);
+        Assert.Equal("move_source_unverified", exception.Code);
+        Assert.Contains("changed", exception.SafeDetail, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("audio", await File.ReadAllTextAsync(Path.Join(displaced, "Book.m4b")));
+        Assert.Equal("replacement", await File.ReadAllTextAsync(path));
+    }
+
+    [LinuxFact]
+    [System.Runtime.Versioning.SupportedOSPlatform("linux")]
+    public async Task BuildPlanAsync_InaccessibleTrackedFile_IsTemporarilyUnavailable()
+    {
+        var root = FileService.GetTempDirectory("move-manifest-inaccessible");
+        var protectedDirectory = Path.Join(root, "protected");
+        Directory.CreateDirectory(protectedDirectory);
+        var path = await FileService.GetFileAsync(
+            protectedDirectory,
+            "Book.m4b",
+            "audio");
+        var audiobook = await _audiobookRepository.AddAsync(
+            new AudiobookBuilder()
+                .WithTitle("Temporarily Unavailable")
+                .WithBasePath(protectedDirectory)
+                .Build());
+        await AddTrackedFileAsync(audiobook, path, root);
+
+        var originalMode = File.GetUnixFileMode(protectedDirectory);
+        File.SetUnixFileMode(protectedDirectory, UnixFileMode.None);
+        try
+        {
+            // Root can bypass Unix permission checks. The unprivileged Linux
+            // validation environment exercises the access-denied path.
+            if (!File.Exists(path))
+            {
+                var exception = await Assert.ThrowsAsync<ApplicationUnavailableException>(() =>
+                    _provider.GetRequiredService<IMoveSourcePlanService>()
+                        .BuildPlanAsync(new AudiobookPathReferenceSnapshot(
+                            audiobook.Id,
+                            audiobook.BasePath,
+                            audiobook.FilePath)));
+
+                Assert.Equal("move_source_temporarily_unavailable", exception.Code);
+                Assert.Contains(
+                    "temporarily unavailable",
+                    exception.SafeDetail,
+                    StringComparison.OrdinalIgnoreCase);
+            }
+        }
+        finally
+        {
+            File.SetUnixFileMode(protectedDirectory, originalMode);
+        }
+
+        Assert.True(File.Exists(path));
+        var recovered = await _provider.GetRequiredService<IMoveSourcePlanService>()
+            .BuildPlanAsync(new AudiobookPathReferenceSnapshot(
+                audiobook.Id,
+                audiobook.BasePath,
+                audiobook.FilePath));
+        Assert.Single(
+            recovered.Entries,
+            entry => entry.EntryType == MoveJobEntryType.File);
     }
 
     private async Task AddTrackedFileAsync(

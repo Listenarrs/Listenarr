@@ -10,14 +10,19 @@ public partial class LibraryAddService
         LibraryAddOperationRequest request,
         CancellationToken cancellationToken)
     {
-        var settings = await _configurationService.GetApplicationSettingsAsync();
-        cancellationToken.ThrowIfCancellationRequested();
         var configuredRootFolders = await _rootFolderService.GetAllAsync();
         cancellationToken.ThrowIfCancellationRequested();
+        ApplicationSettings? settings = null;
+        if (configuredRootFolders.Count == 0
+            || string.IsNullOrWhiteSpace(request.DestinationPath))
+        {
+            settings = await _configurationService.GetApplicationSettingsAsync();
+            cancellationToken.ThrowIfCancellationRequested();
+        }
         var allowedDestinationRoots = FileUtils.GetValidMutationRootsForCurrentOs(
-            configuredRootFolders
-                .Select(root => root.Path)
-                .Append(settings.OutputPath));
+            configuredRootFolders.Count > 0
+                ? configuredRootFolders.Select(root => root.Path)
+                : [settings!.OutputPath]);
 
         var requestedBaseDirectory = request.DestinationPath;
         if (!string.IsNullOrWhiteSpace(requestedBaseDirectory))
@@ -61,10 +66,10 @@ public partial class LibraryAddService
         {
             var rootFolder = await _rootFolderService.GetDefaultAsync();
             cancellationToken.ThrowIfCancellationRequested();
-            var baseDirectory = rootFolder != null ? rootFolder.Path : settings.OutputPath;
+            var baseDirectory = rootFolder != null ? rootFolder.Path : settings!.OutputPath;
             var generatedBasePath = Path.Join(
                 baseDirectory,
-                _fileNamingService.ApplyNamingPattern(settings.FolderNamingPattern, metadata));
+                _fileNamingService.ApplyNamingPattern(settings!.FolderNamingPattern, metadata));
             if (!FileUtils.TryNormalizeUserProvidedDirectoryPathForCurrentOs(
                 generatedBasePath,
                 out var normalizedGeneratedBasePath,
@@ -94,6 +99,28 @@ public partial class LibraryAddService
         }
 
         cancellationToken.ThrowIfCancellationRequested();
+        var existingDestinationOwner = await FindExistingDestinationOwnerAsync(
+            audiobook.BasePath!,
+            configuredRootFolders,
+            cancellationToken);
+        if (existingDestinationOwner != null)
+        {
+            if (RepresentsSameDestinationAudiobook(
+                    existingDestinationOwner,
+                    audiobook))
+            {
+                // Repeating the same add against its already-committed destination is
+                // idempotent. No filesystem mutation will occur, so relocation/mutation
+                // blockers do not need to authorize that existing library location.
+                return AlreadyExists(existingDestinationOwner);
+            }
+
+            return ValidationFailure(
+                "destination_path_blocked",
+                "Destination is already assigned to another audiobook in the library.",
+                audiobook.BasePath);
+        }
+
         var destinationBlockingReason = await _destinationMutationGuard.GetBlockingReasonAsync(
             audiobook.BasePath!,
             cancellationToken);

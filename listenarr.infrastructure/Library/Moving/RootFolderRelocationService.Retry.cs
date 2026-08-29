@@ -46,13 +46,14 @@ public sealed partial class RootFolderRelocationService
                     "Root folder relocation not found");
             var retryableAttention =
                 state.Status == RootFolderRelocationStatus.NeedsAttention;
-            var retryableMetadataFailure =
+            var retryableMetadataRepair =
                 state.Mode == RootFolderRelocationMode.MetadataOnly
-                && state.Status == RootFolderRelocationStatus.Failed;
-            if (!retryableAttention && !retryableMetadataFailure)
+                && state.Status is RootFolderRelocationStatus.Pending
+                    or RootFolderRelocationStatus.Failed;
+            if (!retryableAttention && !retryableMetadataRepair)
             {
                 throw new InvalidOperationException(
-                    "Only relocations needing attention or failed metadata repairs can be retried.");
+                    "Only relocations needing attention or pending/failed metadata repairs can be retried.");
             }
 
             if (state.Mode == RootFolderRelocationMode.MetadataOnly)
@@ -68,7 +69,52 @@ public sealed partial class RootFolderRelocationService
             requiresMetadataCompletionRecovery =
                 state.Mode == RootFolderRelocationMode.MetadataOnly
                 && !hasOwnershipMigration
-                && state.Status == RootFolderRelocationStatus.Failed;
+                && state.Status is RootFolderRelocationStatus.Pending
+                    or RootFolderRelocationStatus.Failed;
+
+            var retryAudiobookIds = (await preflight.MoveJobs
+                    .AsNoTracking()
+                    .Where(job => job.RelocationId == relocationId
+                        && (job.Status == MoveJobStatus.NeedsAttention
+                            || job.Status == MoveJobStatus.Failed))
+                    .Select(job => job.AudiobookId)
+                    .ToListAsync(cancellationToken))
+                .Concat(await preflight.RootFolderRelocationSkippedItems
+                    .AsNoTracking()
+                    .Where(item => item.RelocationId == relocationId)
+                    .Select(item => item.AudiobookId)
+                    .ToListAsync(cancellationToken))
+                .Concat(await preflight.LibraryDirectoryOwnershipPathMigrations
+                    .AsNoTracking()
+                    .Where(item => item.RelocationId == relocationId
+                        && item.Ownership.AudiobookId != null)
+                    .Select(item => item.Ownership.AudiobookId!.Value)
+                    .ToListAsync(cancellationToken))
+                .ToHashSet();
+            if (state.Mode == RootFolderRelocationMode.MetadataOnly)
+            {
+                retryAudiobookIds.UnionWith(
+                    await FindMetadataRecoveryAudiobookIdsAsync(
+                        preflight,
+                        relocationId,
+                        cancellationToken));
+            }
+
+            var externalRecoveryConflict = await FindExternalRecoveryConflictAsync(
+                preflight,
+                retryAudiobookIds,
+                cancellationToken);
+            externalRecoveryConflict ??=
+                await FindRegistrationBoundaryRecoveryConflictAsync(
+                    preflight,
+                    relocationId,
+                    cancellationToken);
+            if (externalRecoveryConflict != null)
+            {
+                throw new ApplicationConflictException(
+                    externalRecoveryConflict.Code,
+                    externalRecoveryConflict.PublicMessage);
+            }
         }
 
         if (requiresMetadataCompletionRecovery)
@@ -205,6 +251,17 @@ public sealed partial class RootFolderRelocationService
                 continue;
             }
 
+            if (!MoveExecutionProtocol.IsCurrent(job.ExecutionProtocolVersion))
+            {
+                job.Status = MoveJobStatus.NeedsAttention;
+                job.Error =
+                    "The move job does not use the current durable database execution protocol and cannot be retried safely.";
+                job.FailureKind = MoveFailureKind.Verification;
+                job.ActiveDeduplicationKey = null;
+                unsafeRetryJobs++;
+                continue;
+            }
+
             string? sourceIdentityError = null;
             if (string.IsNullOrWhiteSpace(job.SourcePath)
                 || !job.TryGetSourceIdentity(out var sourceIdentity)
@@ -216,6 +273,23 @@ public sealed partial class RootFolderRelocationService
                 job.Status = MoveJobStatus.NeedsAttention;
                 job.Error = sourceIdentityError
                     ?? "The move job has no authoritative source filesystem identity.";
+                job.FailureKind = MoveFailureKind.Verification;
+                job.ActiveDeduplicationKey = null;
+                unsafeRetryJobs++;
+                continue;
+            }
+
+            if (!MoveBoundaryAuthorization.TryResolveSourceBoundary(
+                    job.SourcePath,
+                    sourceIdentity,
+                    job.SourceCleanupBoundary,
+                    job.DeleteEmptySource,
+                    out _,
+                    out var sourceBoundaryReason))
+            {
+                job.Status = MoveJobStatus.NeedsAttention;
+                job.Error =
+                    $"The move job source mutation boundary cannot be retried safely: {sourceBoundaryReason}";
                 job.FailureKind = MoveFailureKind.Verification;
                 job.ActiveDeduplicationKey = null;
                 unsafeRetryJobs++;
@@ -249,13 +323,19 @@ public sealed partial class RootFolderRelocationService
                 unsafeRetryJobs++;
                 continue;
             }
-            if (!MoveManifestIdentity.TryGetTargetBoundaryAuthorization(
+            if (!MoveManifestIdentity.TryGetSourceBoundaryAuthorization(
                     job.Entries,
+                    out _,
+                    out _,
+                    out _)
+                || !MoveManifestIdentity.TryGetTargetBoundaryAuthorization(
+                    job.Entries,
+                    out _,
                     out _,
                     out _))
             {
                 job.Status = MoveJobStatus.NeedsAttention;
-                job.Error = "The move job has no durable target-boundary physical-generation authorization and cannot be retried safely.";
+                job.Error = "The move job has no valid durable source- or target-boundary physical-generation authorization and cannot be retried safely.";
                 job.FailureKind = MoveFailureKind.Verification;
                 job.ActiveDeduplicationKey = null;
                 unsafeRetryJobs++;
@@ -293,134 +373,120 @@ public sealed partial class RootFolderRelocationService
                 cancellationToken);
         }
 
-        var remainingSkippedItems = relocation.SkippedItems.Count;
-        if (remainingSkippedItems > 0
-            || skippedSupersededJobs > 0
-            || unsafeRetryJobs > 0)
+        PinnedDirectoryCreation.PinnedDirectoryAnchor? finalizationTargetLease = null;
+        try
         {
-            relocation.Status = RootFolderRelocationStatus.NeedsAttention;
-            var retryError = BuildRetryAttentionError(
-                remainingSkippedItems,
-                skippedSupersededJobs);
-            var unsafeError = unsafeRetryJobs > 0
-                ? $"{unsafeRetryJobs} job(s) lacked authoritative source identity or tracked-file manifest evidence and were not retried."
-                : string.Empty;
-            relocation.Error = string.Join(
-                ' ',
-                new[] { retryError, unsafeError }
-                    .Where(message => !string.IsNullOrWhiteSpace(message)));
-        }
-        else if (relocation.MoveJobs.Count == 0)
-        {
-            if (relocation.Mode == RootFolderRelocationMode.Relocate
-                && relocation.TotalJobs > 0)
+            var remainingSkippedItems = relocation.SkippedItems.Count;
+            if (remainingSkippedItems > 0
+                || skippedSupersededJobs > 0
+                || unsafeRetryJobs > 0)
             {
-                throw new InvalidOperationException(
-                    "The relocation was interrupted before its persisted move jobs were published and cannot be retried automatically.");
+                relocation.Status = RootFolderRelocationStatus.NeedsAttention;
+                var retryError = BuildRetryAttentionError(
+                    remainingSkippedItems,
+                    skippedSupersededJobs);
+                var unsafeError = unsafeRetryJobs > 0
+                    ? $"{unsafeRetryJobs} job(s) lacked authoritative source identity or tracked-file manifest evidence and were not retried."
+                    : string.Empty;
+                relocation.Error = string.Join(
+                    ' ',
+                    new[] { retryError, unsafeError }
+                        .Where(message => !string.IsNullOrWhiteSpace(message)));
             }
-            if (relocation.RootFolderId is not int emptyRootFolderId)
+            else if (relocation.MoveJobs.Count == 0)
             {
-                throw new InvalidOperationException(
-                    "The root folder no longer exists; this relocation cannot be retried.");
+                if (relocation.Mode == RootFolderRelocationMode.Relocate
+                    && relocation.TotalJobs > 0)
+                {
+                    throw new InvalidOperationException(
+                        "The relocation was interrupted before its persisted move jobs were published and cannot be retried automatically.");
+                }
+                if (relocation.RootFolderId is not int emptyRootFolderId)
+                {
+                    throw new InvalidOperationException(
+                        "The root folder no longer exists; this relocation cannot be retried.");
+                }
+                var emptyRoot = await db.RootFolders.SingleOrDefaultAsync(
+                    candidate => candidate.Id == emptyRootFolderId,
+                    cancellationToken)
+                    ?? throw new InvalidOperationException(
+                        "The root folder no longer exists; this relocation cannot be retried.");
+                if (relocation.Mode == RootFolderRelocationMode.Relocate)
+                {
+                    finalizationTargetLease = await FinalizeCompletedRelocationAsync(
+                        db,
+                        relocation,
+                        emptyRoot,
+                        now,
+                        cancellationToken);
+                }
+                else
+                {
+                    relocation.Status =
+                        RootFolderRelocationStatus.Completed;
+                    relocation.ActiveRootFolderId = null;
+                    relocation.CompletedAt = now;
+                    relocation.Error = null;
+                }
+                relocation.CompletedJobs = relocation.TotalJobs;
+                relocation.TargetIdentityEnrollmentState =
+                    TargetIdentityEnrollmentState.NotRequired;
             }
-            var emptyRoot = await db.RootFolders.SingleOrDefaultAsync(
-                candidate => candidate.Id == emptyRootFolderId,
-                cancellationToken)
-                ?? throw new InvalidOperationException(
-                    "The root folder no longer exists; this relocation cannot be retried.");
-            if (relocation.Mode == RootFolderRelocationMode.Relocate)
+            else if (relocation.MoveJobs.All(job => job.Status == MoveJobStatus.Completed))
             {
-                await FinalizeCompletedRelocationAsync(
+                if (relocation.RootFolderId is not int rootFolderId)
+                {
+                    throw new InvalidOperationException(
+                        "The root folder no longer exists; this relocation cannot be retried.");
+                }
+
+                var root = await db.RootFolders.SingleOrDefaultAsync(
+                    candidate => candidate.Id == rootFolderId,
+                    cancellationToken)
+                    ?? throw new InvalidOperationException(
+                        "The root folder no longer exists; this relocation cannot be retried.");
+                finalizationTargetLease = await FinalizeCompletedRelocationAsync(
                     db,
                     relocation,
-                    emptyRoot,
+                    root,
                     now,
                     cancellationToken);
+                relocation.CompletedJobs = relocation.TotalJobs;
             }
             else
             {
-                relocation.Status =
-                    RootFolderRelocationStatus.Completed;
-                relocation.ActiveRootFolderId = null;
-                relocation.CompletedAt = now;
+                relocation.Status = RootFolderRelocationStatus.Running;
                 relocation.Error = null;
             }
-            relocation.CompletedJobs = relocation.TotalJobs;
-            relocation.TargetIdentityEnrollmentState =
-                TargetIdentityEnrollmentState.NotRequired;
-        }
-        else if (relocation.MoveJobs.All(job => job.Status == MoveJobStatus.Completed))
-        {
-            if (relocation.RootFolderId is not int rootFolderId)
+
+            relocation.UpdatedAt = now;
+            await db.SaveChangesAsync(cancellationToken);
+            BeforeCompletedRelocationAtomicCommitForTest?.Invoke(relocation.Id);
+            if (finalizationTargetLease != null)
             {
-                throw new InvalidOperationException(
-                    "The root folder no longer exists; this relocation cannot be retried.");
+                RevalidatePinnedTargetDirectoryGeneration(
+                    finalizationTargetLease,
+                    relocation,
+                    CancellationToken.None);
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            await transaction.CommitAsync(CancellationToken.None);
+            var resultFallbackPath = ResolveCurrentPathFallback(relocation);
+            string? rootPath = null;
+            if (relocation.RootFolderId is int resultRootFolderId)
+            {
+                rootPath = await db.RootFolders
+                    .Where(root => root.Id == resultRootFolderId)
+                    .Select(root => root.Path)
+                    .SingleOrDefaultAsync(CancellationToken.None);
             }
 
-            var root = await db.RootFolders.SingleOrDefaultAsync(
-                candidate => candidate.Id == rootFolderId,
-                cancellationToken)
-                ?? throw new InvalidOperationException(
-                    "The root folder no longer exists; this relocation cannot be retried.");
-            await FinalizeCompletedRelocationAsync(
-                db,
-                relocation,
-                root,
-                now,
-                cancellationToken);
-            relocation.CompletedJobs = relocation.TotalJobs;
+            var result = Map(relocation, rootPath ?? resultFallbackPath);
+            return result;
         }
-        else
+        finally
         {
-            relocation.Status = RootFolderRelocationStatus.Running;
-            relocation.Error = null;
-        }
-
-        relocation.UpdatedAt = now;
-        await db.SaveChangesAsync(cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
-        await transaction.CommitAsync(CancellationToken.None);
-        var resultFallbackPath = ResolveCurrentPathFallback(relocation);
-        string? rootPath = null;
-        if (relocation.RootFolderId is int resultRootFolderId)
-        {
-            rootPath = await db.RootFolders
-                .Where(root => root.Id == resultRootFolderId)
-                .Select(root => root.Path)
-                .SingleOrDefaultAsync(CancellationToken.None);
-        }
-
-        var result = Map(relocation, rootPath ?? resultFallbackPath);
-        return result;
-    }
-
-    private static bool TryValidateRetryIdentity(
-        PathIdentitySnapshot identity,
-        string path,
-        out string? error)
-    {
-        try
-        {
-            if (!FileSystemPathIdentity.TryCanonicalizeStoredPathWithIdentityForHost(
-                    path,
-                    identity,
-                    out _,
-                    out var reason))
-            {
-                error = $"The move job has an invalid persisted filesystem identity: {reason}";
-                return false;
-            }
-
-            error = null;
-            return true;
-        }
-        catch (Exception exception) when (exception is
-            ArgumentException or InvalidOperationException
-            or NotSupportedException or PathTooLongException
-            or System.Security.SecurityException)
-        {
-            error = $"The move job has an invalid persisted filesystem identity: {exception.Message}";
-            return false;
+            finalizationTargetLease?.Dispose();
         }
     }
 }

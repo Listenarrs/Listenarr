@@ -122,6 +122,13 @@ internal sealed class RootFolderStorageConfirmationService(
                 "The root folder path changed before the folder could be confirmed.");
         }
 
+        await EnsureNoExternalRecoveryOwnerTouchesRootAsync(
+            db,
+            rootFolderId,
+            canonicalRootPath,
+            semantics.Semantics,
+            cancellationToken);
+
         var blockingJobs = await moveQueueService.GetFilesystemBlockingJobsAsync(
             cancellationToken);
         if (blockingJobs.Any(job =>
@@ -155,12 +162,20 @@ internal sealed class RootFolderStorageConfirmationService(
                 "The root folder changed after it was displayed for confirmation. Refresh and review the current folder before confirming it.");
         }
 
+        var preservesAuthorizedGeneration = hasAuthorizedIdentity
+            && root.DirectoryObjectIdentityVersion
+                == ManagedDirectoryIdentity.CurrentVersion
+            && pinned.MatchesManagedDirectoryIdentity(
+                root.DirectoryObjectIdentityVersion,
+                root.DirectoryObjectIdentity);
+        var committedIdentity = preservesAuthorizedGeneration
+            ? new DirectoryObjectIdentityResolution(
+                root.DirectoryObjectIdentityVersion,
+                root.DirectoryObjectIdentity,
+                null)
+            : observedIdentity;
         var replacesAuthorizedGeneration = hasAuthorizedIdentity
-            && (root.DirectoryObjectIdentityVersion != observedIdentity.Version
-                || !string.Equals(
-                    root.DirectoryObjectIdentity,
-                    observedIdentity.Value,
-                    StringComparison.Ordinal));
+            && !preservesAuthorizedGeneration;
         var committed = false;
         try
         {
@@ -176,8 +191,8 @@ internal sealed class RootFolderStorageConfirmationService(
                     cancellationToken);
             }
 
-            root.DirectoryObjectIdentityVersion = observedIdentity.Version;
-            root.DirectoryObjectIdentity = observedIdentity.Value;
+            root.DirectoryObjectIdentityVersion = committedIdentity.Version;
+            root.DirectoryObjectIdentity = committedIdentity.Value;
             root.DirectoryObjectIdentityUnavailableReason = null;
             root.ResolvedCaseSensitivity = semantics.Semantics.CaseSensitivity;
             root.PathIdentityState = PathIdentityState.Valid;
@@ -185,11 +200,12 @@ internal sealed class RootFolderStorageConfirmationService(
                 "root",
                 root.Path,
                 semantics.Semantics);
+            root.StorageContractRevision = checked(root.StorageContractRevision + 1);
             root.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(cancellationToken);
 
             BeforeCommitForTest?.Invoke();
-            RevalidatePinnedGeneration(pinned, observedIdentity, cancellationToken);
+            RevalidatePinnedGeneration(pinned, committedIdentity, cancellationToken);
             await RevalidateFilesystemSemanticsAsync(
                 canonicalRootPath,
                 root.CaseSensitivityMode,
@@ -207,7 +223,7 @@ internal sealed class RootFolderStorageConfirmationService(
             AfterCommitForTest?.Invoke();
             RevalidatePinnedGeneration(
                 pinned,
-                observedIdentity,
+                committedIdentity,
                 CancellationToken.None);
             await RevalidateFilesystemSemanticsAsync(
                 canonicalRootPath,
@@ -223,12 +239,90 @@ internal sealed class RootFolderStorageConfirmationService(
             {
                 await MarkPostCommitConfirmationUnstableAsync(
                     rootFolderId,
-                    observedIdentity,
+                    committedIdentity,
                     exception);
             }
 
             throw;
         }
+    }
+
+    private static async Task EnsureNoExternalRecoveryOwnerTouchesRootAsync(
+        ListenArrDbContext db,
+        int rootFolderId,
+        string canonicalRootPath,
+        FileSystemPathSemantics semantics,
+        CancellationToken cancellationToken)
+    {
+        var audiobooks = await db.Audiobooks
+            .AsNoTracking()
+            .AsSplitQuery()
+            .Include(audiobook => audiobook.Files)
+            .ToListAsync(cancellationToken);
+        var audiobookIds = audiobooks
+            .Where(audiobook =>
+                PathTouchesConfirmedRoot(audiobook.BasePath, canonicalRootPath, semantics)
+                || PathTouchesConfirmedRoot(audiobook.FilePath, canonicalRootPath, semantics)
+                || (audiobook.Files?.Any(file =>
+                    PathTouchesConfirmedRoot(file.Path, canonicalRootPath, semantics)) ?? false))
+            .Select(audiobook => audiobook.Id)
+            .ToHashSet();
+        audiobookIds.UnionWith(await db.LibraryDirectoryOwnerships
+            .AsNoTracking()
+            .Where(ownership => ownership.ManagedRootFolderId == rootFolderId
+                && ownership.AudiobookId != null
+                && ownership.State != LibraryDirectoryOwnershipState.Removed)
+            .Select(ownership => ownership.AudiobookId!.Value)
+            .ToListAsync(cancellationToken));
+        var activeMutationJournals = await db.FileMutationJournals
+            .AsNoTracking()
+            .Where(journal =>
+                (journal.AudiobookFileId == null
+                    && journal.State != FileMutationJournalState.Completed)
+                || (journal.AudiobookId != null
+                    && journal.AudiobookFileId != null
+                    && (journal.AudiobookFileId == FileMutationOwner.CompanionFile
+                        || journal.AudiobookFileId
+                            == FileMutationOwner.RegistrationCompanionFile
+                        ? journal.State != FileMutationJournalState.Completed
+                        : journal.State != FileMutationJournalState.OwnerMetadataReconciled)))
+            .ToListAsync(cancellationToken);
+        if (activeMutationJournals.Any(journal =>
+                (journal.AudiobookId.HasValue
+                    && audiobookIds.Contains(journal.AudiobookId.Value))
+                || PathTouchesConfirmedRoot(journal.SourcePath, canonicalRootPath, semantics)
+                || PathTouchesConfirmedRoot(journal.DestinationPath, canonicalRootPath, semantics)))
+        {
+            throw new InvalidOperationException(
+                "Resolve active file import or organize recovery under this root before confirming its storage folder.");
+        }
+
+        if (audiobookIds.Count > 0
+            && await db.AudiobookDeletionIntents
+                .AsNoTracking()
+                .AnyAsync(intent => audiobookIds.Contains(intent.AudiobookId)
+                    && intent.State != AudiobookDeletionIntentState.Completed,
+                    cancellationToken))
+        {
+            throw new InvalidOperationException(
+                "Resolve active audiobook deletion recovery under this root before confirming its storage folder.");
+        }
+    }
+
+    private static bool PathTouchesConfirmedRoot(
+        string? path,
+        string canonicalRootPath,
+        FileSystemPathSemantics semantics)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        return FileSystemPathIdentity.StoredPathMayTouchBoundary(
+            path,
+            canonicalRootPath,
+            semantics);
     }
 
     private static DirectoryObjectIdentityResolution CreateObservedIdentity(
@@ -300,10 +394,9 @@ internal sealed class RootFolderStorageConfirmationService(
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!ManagedDirectoryIdentity.MatchesNativeIdentity(
+        if (!pinned.MatchesManagedDirectoryIdentity(
                 expectedIdentity.Version,
-                expectedIdentity.Value,
-                pinned.GetDirectoryObjectIdentity())
+                expectedIdentity.Value)
             || !pinned.VisiblePathMatches())
         {
             throw new InvalidOperationException(

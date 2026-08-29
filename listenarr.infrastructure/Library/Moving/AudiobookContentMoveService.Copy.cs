@@ -5,18 +5,28 @@ namespace Listenarr.Infrastructure.Library.Moving;
 internal sealed partial class AudiobookContentMoveService
 {
     private void ValidateExistingDestinationContents(
+        AudiobookContentMoveRequest request,
         string source,
         string destinationRoot,
         IReadOnlyCollection<MoveJobEntry> manifest,
         FileSystemPathSemantics targetSemantics,
         LibraryDirectoryOwnership? targetDirectoryOwnership = null)
     {
-        if (!Directory.Exists(destinationRoot))
+        var destinationExists = TryGetMarkerlessPathAttributes(
+            destinationRoot,
+            out var destinationAttributes);
+        if (!destinationExists)
         {
             return;
         }
+        if ((destinationAttributes & FileAttributes.Directory) == 0
+            || (destinationAttributes & FileAttributes.ReparsePoint) != 0)
+        {
+            throw new MoveNeedsAttentionException(
+                "The move destination changed type or became linked before content validation.");
+        }
 
-        RevalidateTargetDirectoryOwnership(targetDirectoryOwnership);
+        RevalidateTargetDirectoryOwnership(request, targetDirectoryOwnership);
         if (!FileSystemSafety.TryEnumerateTreeWithoutLinks(
                 destinationRoot,
                 out var files,

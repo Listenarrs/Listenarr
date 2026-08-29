@@ -5,11 +5,15 @@ namespace Listenarr.Infrastructure.FileSystem;
 
 internal sealed class DirectoryObjectIdentityResolver(
     Func<PinnedDirectoryCreation.PinnedDirectoryAnchor, string>?
-        nativeIdentityResolver = null) : IDirectoryObjectIdentityResolver
+        nativeIdentityResolver = null,
+    Func<PinnedDirectoryCreation.PinnedDirectoryAnchor, IReadOnlyList<string>>?
+        nativeIdentityCandidatesResolver = null) : IDirectoryObjectIdentityResolver
 {
-    private readonly Func<PinnedDirectoryCreation.PinnedDirectoryAnchor, string>
-        _nativeIdentityResolver = nativeIdentityResolver
-        ?? (static anchor => anchor.GetDirectoryObjectIdentity());
+    private readonly Func<PinnedDirectoryCreation.PinnedDirectoryAnchor, IReadOnlyList<string>>
+        _nativeIdentityCandidatesResolver = nativeIdentityCandidatesResolver
+            ?? (nativeIdentityResolver == null
+                ? static anchor => anchor.GetDirectoryObjectIdentityCandidates()
+                : anchor => [nativeIdentityResolver(anchor)]);
 
     public Task<DirectoryObjectIdentityResolution> ResolveAsync(
         string path,
@@ -17,9 +21,9 @@ internal sealed class DirectoryObjectIdentityResolver(
         ResolvePinnedAsync(
             path,
             cancellationToken,
-            nativeIdentity => new DirectoryObjectIdentityResolution(
+            nativeIdentities => new DirectoryObjectIdentityResolution(
                 ManagedDirectoryIdentity.CurrentVersion,
-                ManagedDirectoryIdentity.CreateMarkerless(nativeIdentity),
+                ManagedDirectoryIdentity.CreateMarkerless(nativeIdentities[0]),
                 null));
 
     public Task<DirectoryObjectIdentityResolution> ResolveExistingAsync(
@@ -40,23 +44,40 @@ internal sealed class DirectoryObjectIdentityResolver(
         return ResolvePinnedAsync(
             path,
             cancellationToken,
-            nativeIdentity => ManagedDirectoryIdentity.MatchesNativeIdentity(
-                    expectedVersion,
-                    expectedValue,
-                    nativeIdentity)
-                ? new DirectoryObjectIdentityResolution(
-                    expectedVersion,
-                    expectedValue,
-                    null)
-                : DirectoryObjectIdentityResolution.Unavailable(
+            nativeIdentities =>
+            {
+                if (nativeIdentities.Any(nativeIdentity =>
+                        ManagedDirectoryIdentity.MatchesNativeIdentity(
+                            expectedVersion,
+                            expectedValue,
+                            nativeIdentity)))
+                {
+                    return new DirectoryObjectIdentityResolution(
+                        expectedVersion,
+                        expectedValue,
+                        null);
+                }
+
+                if (MatchesLegacyLinuxBirthTimeIdentity(
+                        expectedVersion,
+                        expectedValue,
+                        nativeIdentities))
+                {
+                    return DirectoryObjectIdentityResolution.Unavailable(
+                        "The persisted Linux directory identity uses birth-time-only evidence that is no longer sufficient for destructive filesystem authority.",
+                        DirectoryObjectIdentityFailureKind.LegacyWeakIdentity);
+                }
+
+                return DirectoryObjectIdentityResolution.Unavailable(
                     "The live directory no longer matches its persisted physical identity.",
-                    DirectoryObjectIdentityFailureKind.IdentityMismatch));
+                    DirectoryObjectIdentityFailureKind.IdentityMismatch);
+            });
     }
 
     private Task<DirectoryObjectIdentityResolution> ResolvePinnedAsync(
         string path,
         CancellationToken cancellationToken,
-        Func<string, DirectoryObjectIdentityResolution> resolve)
+        Func<IReadOnlyList<string>, DirectoryObjectIdentityResolution> resolve)
     {
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -76,7 +97,12 @@ internal sealed class DirectoryObjectIdentityResolver(
         try
         {
             using var anchor = PinnedDirectoryCreation.OpenPinnedBoundary(canonicalPath);
-            var nativeIdentity = _nativeIdentityResolver(anchor);
+            var nativeIdentities = _nativeIdentityCandidatesResolver(anchor);
+            if (nativeIdentities.Count == 0)
+            {
+                throw new PlatformNotSupportedException(
+                    "The filesystem did not expose a durable directory identity candidate.");
+            }
             if (!anchor.VisiblePathMatches())
             {
                 return Task.FromResult(
@@ -85,7 +111,7 @@ internal sealed class DirectoryObjectIdentityResolver(
                         DirectoryObjectIdentityFailureKind.IdentityUnstable));
             }
 
-            return Task.FromResult(resolve(nativeIdentity));
+            return Task.FromResult(resolve(nativeIdentities));
         }
         catch (Exception exception) when (exception is
             IOException or UnauthorizedAccessException or Win32Exception
@@ -98,6 +124,33 @@ internal sealed class DirectoryObjectIdentityResolver(
         }
     }
 
+    private static bool MatchesLegacyLinuxBirthTimeIdentity(
+        int expectedVersion,
+        string expectedValue,
+        IReadOnlyList<string> nativeIdentities)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return false;
+        }
+
+        foreach (var nativeIdentity in nativeIdentities)
+        {
+            if (PinnedDirectoryCreation.TryGetLinuxBirthTimeIdentityPrefix(
+                    nativeIdentity,
+                    out var birthTimeIdentity)
+                && ManagedDirectoryIdentity.MatchesNativeIdentity(
+                    expectedVersion,
+                    expectedValue,
+                    birthTimeIdentity))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static DirectoryObjectIdentityFailureKind ClassifyFailure(Exception exception)
     {
         return exception switch
@@ -105,10 +158,21 @@ internal sealed class DirectoryObjectIdentityResolver(
             DirectoryNotFoundException or FileNotFoundException =>
                 DirectoryObjectIdentityFailureKind.Missing,
             UnauthorizedAccessException => DirectoryObjectIdentityFailureKind.AccessDenied,
-            Win32Exception win32 when win32.NativeErrorCode is 2 or 3 =>
+            Win32Exception win32 when OperatingSystem.IsWindows()
+                && win32.NativeErrorCode is 2 or 3 =>
                 DirectoryObjectIdentityFailureKind.Missing,
-            Win32Exception win32 when win32.NativeErrorCode == 5 =>
+            Win32Exception win32 when !OperatingSystem.IsWindows()
+                && win32.NativeErrorCode == 2 =>
+                DirectoryObjectIdentityFailureKind.Missing,
+            Win32Exception win32 when OperatingSystem.IsWindows()
+                && win32.NativeErrorCode == 5 =>
                 DirectoryObjectIdentityFailureKind.AccessDenied,
+            Win32Exception win32 when !OperatingSystem.IsWindows()
+                && win32.NativeErrorCode is 1 or 13 =>
+                DirectoryObjectIdentityFailureKind.AccessDenied,
+            Win32Exception win32 when OperatingSystem.IsLinux()
+                && win32.NativeErrorCode is 38 or 95 =>
+                DirectoryObjectIdentityFailureKind.IdentityUnsupported,
             PlatformNotSupportedException => DirectoryObjectIdentityFailureKind.IdentityUnsupported,
             InvalidOperationException => DirectoryObjectIdentityFailureKind.IdentityUnstable,
             _ => DirectoryObjectIdentityFailureKind.Unknown

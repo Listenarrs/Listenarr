@@ -45,7 +45,8 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
         private async Task<AudiobookFile> AddTrackedGenerationAsync(
             Audiobook audiobook,
-            string storedPath)
+            string storedPath,
+            Func<string, string>? physicalIdentityTransform = null)
         {
             var identity = await _provider
                 .GetRequiredService<IAudiobookFilePathIdentityResolver>()
@@ -58,7 +59,8 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 identity.CanonicalPath))
             {
                 file.ApplyPhysicalObjectIdentity(
-                    lease.PhysicalObjectIdentity,
+                    physicalIdentityTransform?.Invoke(lease.PhysicalObjectIdentity)
+                        ?? lease.PhysicalObjectIdentity,
                     DateTime.UtcNow);
             }
 
@@ -96,6 +98,286 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 move.Id,
                 (await _provider.GetRequiredService<IMoveQueueService>()
                     .GetRecoveryStateForAudiobookAsync(audiobook.Id)).JobId);
+        }
+
+        [Fact]
+        public async Task DeleteAudiobook_ReadOnlyManagedRoot_BlocksBeforeDeletionIntent()
+        {
+            var storageHealth = new Mock<IRootFolderStorageHealthResolver>(MockBehavior.Strict);
+            storageHealth.Setup(service => service.ResolveAsync(
+                    It.IsAny<RootFolder>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new RootFolderStorageObservation(
+                    RootFolderStorageState.Limited,
+                    RootFolderStorageReason.ReadOnlyFilesystem,
+                    "This storage is mounted read-only.",
+                    CanConfirmCurrentFolder: false,
+                    CanChangePath: true,
+                    CanMutateFilesystem: false,
+                    ConfirmationToken: null));
+            Init(services => services.WithSingleton(storageHealth.Object));
+
+            var rootPath = FileService.GetTempDirectory(
+                "listenarr-delete-readonly-root");
+            var root = new RootFolderBuilder()
+                .WithName("Read-only Root")
+                .WithPath(rootPath)
+                .WithIsDefault()
+                .Build();
+            await AddAuthorizedRootAsync(root);
+            var bookFolder = Path.Join(rootPath, "Author", "Book");
+            Directory.CreateDirectory(bookFolder);
+            var filePath = await FileService.GetFileAsync(
+                bookFolder,
+                "book.m4b",
+                "audio");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Read-only delete")
+                .WithBasePath(bookFolder)
+                .WithFilePath(filePath)
+                .Build());
+            await AddTrackedGenerationAsync(audiobook, filePath);
+
+            var result = await _provider.GetRequiredService<LibraryController>()
+                .DeleteAudiobook(
+                    audiobook.Id,
+                    deleteFiles: true,
+                    deleteFolder: true);
+
+            var conflict = Assert.IsType<ConflictObjectResult>(result);
+            var payload = System.Text.Json.JsonSerializer.Serialize(conflict.Value);
+            Assert.Contains("filesystem_mutation_unavailable", payload, StringComparison.Ordinal);
+            Assert.True(File.Exists(filePath));
+            Assert.NotNull(await _audiobookRepository.GetByIdAsync(audiobook.Id));
+            await using var db = await _provider
+                .GetRequiredService<IDbContextFactory<ListenArrDbContext>>()
+                .CreateDbContextAsync();
+            Assert.DoesNotContain(
+                db.AudiobookDeletionIntents,
+                intent => intent.AudiobookId == audiobook.Id);
+            storageHealth.VerifyAll();
+        }
+
+        [Fact]
+        public async Task DeleteAudiobook_UnverifiedTrackedGeneration_BlocksBeforeDeletionIntent()
+        {
+            var rootPath = FileService.GetTempDirectory(
+                "listenarr-delete-unverified-root");
+            var root = new RootFolderBuilder()
+                .WithName("Verified Delete Root")
+                .WithPath(rootPath)
+                .WithIsDefault()
+                .Build();
+            await AddAuthorizedRootAsync(root);
+            var bookFolder = Path.Join(rootPath, "Author", "Book");
+            Directory.CreateDirectory(bookFolder);
+            var filePath = await FileService.GetFileAsync(
+                bookFolder,
+                "book.m4b",
+                "audio");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Unverified delete")
+                .WithBasePath(bookFolder)
+                .WithFilePath(filePath)
+                .Build());
+            var identity = await _provider
+                .GetRequiredService<IAudiobookFilePathIdentityResolver>()
+                .ResolveAsync(audiobook, filePath);
+            Assert.Equal(PathIdentityState.Valid, identity.State);
+            var trackedFile = AudiobookFile.CreateUnresolved(filePath);
+            trackedFile.AudiobookId = audiobook.Id;
+            trackedFile.ApplyPathIdentity(filePath, identity);
+            await _audiobookFileRepository.AddAsync(trackedFile);
+
+            var result = await _provider.GetRequiredService<LibraryController>()
+                .DeleteAudiobook(
+                    audiobook.Id,
+                    deleteFiles: true,
+                    deleteFolder: true);
+
+            var conflict = Assert.IsType<ConflictObjectResult>(result);
+            var payload = System.Text.Json.JsonSerializer.Serialize(conflict.Value);
+            Assert.Contains("delete_source_unverified", payload, StringComparison.Ordinal);
+            Assert.True(File.Exists(filePath));
+            Assert.NotNull(await _audiobookRepository.GetByIdAsync(audiobook.Id));
+            await using var db = await _provider
+                .GetRequiredService<IDbContextFactory<ListenArrDbContext>>()
+                .CreateDbContextAsync();
+            Assert.DoesNotContain(
+                db.AudiobookDeletionIntents,
+                intent => intent.AudiobookId == audiobook.Id);
+        }
+
+        [Fact]
+        public async Task DeleteAudiobook_ExistingPlannedIntentWithUnverifiedTrackedGeneration_ReconcilesAndResumes()
+        {
+            var rootPath = FileService.GetTempDirectory(
+                "listenarr-delete-existing-intent-unverified-root");
+            var root = new RootFolderBuilder()
+                .WithName("Recovery Delete Root")
+                .WithPath(rootPath)
+                .WithIsDefault()
+                .Build();
+            await AddAuthorizedRootAsync(root);
+            var bookFolder = Path.Join(rootPath, "Author", "Book");
+            Directory.CreateDirectory(bookFolder);
+            var filePath = await FileService.GetFileAsync(
+                bookFolder,
+                "book.m4b",
+                "audio");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Recovery delete")
+                .WithBasePath(bookFolder)
+                .WithFilePath(filePath)
+                .Build());
+            var identity = await _provider
+                .GetRequiredService<IAudiobookFilePathIdentityResolver>()
+                .ResolveAsync(audiobook, filePath);
+            Assert.Equal(PathIdentityState.Valid, identity.State);
+            var trackedFile = AudiobookFile.CreateUnresolved(filePath);
+            trackedFile.AudiobookId = audiobook.Id;
+            trackedFile.ApplyPathIdentity(filePath, identity);
+            await _audiobookFileRepository.AddAsync(trackedFile);
+
+            var intentStore = _provider.GetRequiredService<IAudiobookDeletionIntentStore>();
+            var intent = await intentStore.GetOrCreateAsync(
+                audiobook.Id,
+                deleteFolder: false);
+            Assert.Equal(AudiobookDeletionIntentState.Planned, intent.State);
+
+            var result = await _provider.GetRequiredService<LibraryController>()
+                .DeleteAudiobook(
+                    audiobook.Id,
+                    deleteFiles: true,
+                    deleteFolder: false);
+
+            Assert.IsType<OkObjectResult>(result);
+            Assert.False(File.Exists(filePath));
+            Assert.Null(await _audiobookRepository.GetByIdAsync(audiobook.Id));
+            await using var db = await _provider
+                .GetRequiredService<IDbContextFactory<ListenArrDbContext>>()
+                .CreateDbContextAsync();
+            Assert.Equal(
+                AudiobookDeletionIntentState.Completed,
+                (await db.AudiobookDeletionIntents
+                    .AsNoTracking()
+                    .SingleAsync(candidate => candidate.Id == intent.Id)).State);
+        }
+
+        [Fact]
+        public async Task DeleteAudiobook_NeedsAttentionIntent_TakesPrecedenceOverUnverifiedSourceRepair()
+        {
+            var rootPath = FileService.GetTempDirectory(
+                "listenarr-delete-needs-attention-root");
+            var root = new RootFolderBuilder()
+                .WithName("Needs Attention Delete Root")
+                .WithPath(rootPath)
+                .WithIsDefault()
+                .Build();
+            await AddAuthorizedRootAsync(root);
+            var bookFolder = Path.Join(rootPath, "Author", "Book");
+            Directory.CreateDirectory(bookFolder);
+            var filePath = await FileService.GetFileAsync(
+                bookFolder,
+                "book.m4b",
+                "audio");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Needs attention delete")
+                .WithBasePath(bookFolder)
+                .WithFilePath(filePath)
+                .Build());
+            var identity = await _provider
+                .GetRequiredService<IAudiobookFilePathIdentityResolver>()
+                .ResolveAsync(audiobook, filePath);
+            Assert.Equal(PathIdentityState.Valid, identity.State);
+            var trackedFile = AudiobookFile.CreateUnresolved(filePath);
+            trackedFile.AudiobookId = audiobook.Id;
+            trackedFile.ApplyPathIdentity(filePath, identity);
+            await _audiobookFileRepository.AddAsync(trackedFile);
+
+            var intentStore = _provider.GetRequiredService<IAudiobookDeletionIntentStore>();
+            var intent = await intentStore.GetOrCreateAsync(
+                audiobook.Id,
+                deleteFolder: false);
+            await intentStore.MarkNeedsAttentionAsync(
+                intent.Id,
+                "Operator repair is required for this deletion.");
+
+            var result = await _provider.GetRequiredService<LibraryController>()
+                .DeleteAudiobook(
+                    audiobook.Id,
+                    deleteFiles: true,
+                    deleteFolder: false);
+
+            var conflict = Assert.IsType<ConflictObjectResult>(result);
+            var payload = System.Text.Json.JsonSerializer.Serialize(conflict.Value);
+            Assert.Contains("delete_repair_required", payload, StringComparison.Ordinal);
+            Assert.Contains("Operator repair is required", payload, StringComparison.Ordinal);
+            Assert.True(File.Exists(filePath));
+            Assert.NotNull(await _audiobookRepository.GetByIdAsync(audiobook.Id));
+            var persistedFile = await _audiobookFileRepository.GetByIdAsync(trackedFile.Id);
+            Assert.NotNull(persistedFile);
+            Assert.Null(persistedFile!.PhysicalObjectIdentity);
+        }
+
+        [Fact]
+        public async Task DeleteAudiobook_FilesystemCleanupCompleted_SkipsStorageAndIdentityPreflights()
+        {
+            var storageHealth = new Mock<IRootFolderStorageHealthResolver>(MockBehavior.Strict);
+            Init(services => services.WithSingleton(storageHealth.Object));
+
+            var rootPath = FileService.GetTempDirectory(
+                "listenarr-delete-cleanup-completed-root");
+            var root = new RootFolderBuilder()
+                .WithName("Completed Cleanup Root")
+                .WithPath(rootPath)
+                .WithIsDefault()
+                .Build();
+            await AddAuthorizedRootAsync(root);
+            var bookFolder = Path.Join(rootPath, "Author", "Book");
+            Directory.CreateDirectory(bookFolder);
+            var filePath = await FileService.GetFileAsync(
+                bookFolder,
+                "book.m4b",
+                "audio");
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Cleanup completed delete")
+                .WithBasePath(bookFolder)
+                .WithFilePath(filePath)
+                .Build());
+            var identity = await _provider
+                .GetRequiredService<IAudiobookFilePathIdentityResolver>()
+                .ResolveAsync(audiobook, filePath);
+            Assert.Equal(PathIdentityState.Valid, identity.State);
+            var trackedFile = AudiobookFile.CreateUnresolved(filePath);
+            trackedFile.AudiobookId = audiobook.Id;
+            trackedFile.ApplyPathIdentity(filePath, identity);
+            await _audiobookFileRepository.AddAsync(trackedFile);
+
+            var intentStore = _provider.GetRequiredService<IAudiobookDeletionIntentStore>();
+            var intent = await intentStore.GetOrCreateAsync(
+                audiobook.Id,
+                deleteFolder: true);
+            await intentStore.MarkFilesystemCleanupCompletedAsync(intent.Id);
+            File.Delete(filePath);
+
+            var result = await _provider.GetRequiredService<LibraryController>()
+                .DeleteAudiobook(
+                    audiobook.Id,
+                    deleteFiles: true,
+                    deleteFolder: true);
+
+            Assert.IsType<OkObjectResult>(result);
+            Assert.Null(await _audiobookRepository.GetByIdAsync(audiobook.Id));
+            await using var db = await _provider
+                .GetRequiredService<IDbContextFactory<ListenArrDbContext>>()
+                .CreateDbContextAsync();
+            Assert.Equal(
+                AudiobookDeletionIntentState.Completed,
+                (await db.AudiobookDeletionIntents
+                    .AsNoTracking()
+                    .SingleAsync(candidate => candidate.Id == intent.Id)).State);
+            storageHealth.VerifyNoOtherCalls();
         }
 
         [Fact]
@@ -670,6 +952,52 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                     StringComparison.Ordinal));
         }
 
+        [LinuxFact]
+        public async Task DeleteAudiobook_AmbiguousConfiguredRoot_DoesNotBorrowSensitiveAutoSemanticsForTrackedFallback()
+        {
+            var tempRoot = FileService.GetTempDirectory("listenarr-delete-ambiguous-root-semantics");
+            var bookFolder = Path.Join(tempRoot, "Book");
+            var audioPath = Path.Join(bookFolder, "track.m4b");
+            Directory.CreateDirectory(bookFolder);
+            await File.WriteAllTextAsync(audioPath, "audio");
+            await AddAuthorizedRootAsync(new RootFolderBuilder()
+                .WithId(510)
+                .WithPath(tempRoot)
+                .Build());
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithId(510)
+                .WithTitle("Ambiguous Root Semantics")
+                .WithBasePath(bookFolder)
+                .WithFilePath(audioPath)
+                .Build());
+            await AddTrackedGenerationAsync(audiobook, audioPath);
+            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
+                .WithAudiobook(audiobook)
+                .WithPath(@"C:\foreign\unresolved.m4b")
+                .Build());
+
+            var ambiguousRoot = "/" + tempRoot;
+            Assert.False(FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                ambiguousRoot,
+                out _));
+            await _rootFolderRepository.AddAsync(new RootFolderBuilder()
+                .WithId(511)
+                .WithPath(ambiguousRoot)
+                .Build());
+            var persistedAmbiguousRoot = await _rootFolderRepository.GetByIdAsync(511);
+            Assert.NotNull(persistedAmbiguousRoot);
+            persistedAmbiguousRoot!.CaseSensitivityMode = FileSystemCaseSensitivityMode.Insensitive;
+            await _rootFolderRepository.UpdateAsync(persistedAmbiguousRoot);
+
+            _ = await _provider.GetRequiredService<LibraryController>()
+                .DeleteAudiobook(
+                    audiobook.Id,
+                    deleteFiles: true,
+                    deleteFolder: false);
+
+            Assert.True(File.Exists(audioPath));
+        }
+
         [WindowsFact]
         public async Task DeleteAudiobook_ForeignConfiguredOutputPath_DoesNotProtectWindowsAliasFolder()
         {
@@ -964,6 +1292,78 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             Assert.False(Directory.Exists(bookFolder));
             Assert.True(Directory.Exists(tempRoot));
             Assert.True(deletedFolder ?? false);
+        }
+
+        [LinuxFact]
+        public async Task DeleteFilesystem_CompatibleMergedV1TrackedGeneration_RemainsIncompleteWhileFileExists()
+        {
+            var folder = FileService.GetTempDirectory(
+                "delete-compatible-v1-cleanup-proof");
+            var audioPath = Path.Join(folder, "book.m4b");
+            await File.WriteAllTextAsync(audioPath, "audio");
+            string persistedIdentity;
+            using (var lease = PinnedAudiobookFileRegistrationLease.Open(audioPath))
+            {
+                Assert.StartsWith(
+                    "linux-generation:",
+                    lease.PhysicalObjectIdentity,
+                    StringComparison.Ordinal);
+                persistedIdentity =
+                    LinuxIdentityTestHelper.ToMergedV1AugmentedIdentity(
+                        lease.PhysicalObjectIdentity);
+            }
+
+            Assert.False(
+                AudiobookFilesystemDeleteService.VerifyTrackedFileCleanupComplete(
+                    new Dictionary<string, string>
+                    {
+                        [audioPath] = persistedIdentity
+                    }));
+            Assert.True(File.Exists(audioPath));
+        }
+
+        [LinuxFact]
+        public async Task DeleteFilesystem_CompatibleMergedV1TrackedGeneration_DoesNotFalseBlockUnownedRecursiveDelete()
+        {
+            var tempRoot = FileService.GetTempDirectory(
+                "delete-compatible-v1-unowned-folder");
+            var bookFolder = Path.Join(tempRoot, "Book");
+            var audioPath = Path.Join(bookFolder, "book.m4b");
+            Directory.CreateDirectory(bookFolder);
+            await File.WriteAllTextAsync(audioPath, "audio");
+            await AddAuthorizedRootAsync(new RootFolder
+            {
+                Name = "Library",
+                Path = tempRoot,
+                IsDefault = true
+            });
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Compatible V1 Delete")
+                .WithBasePath(bookFolder)
+                .WithFilePath(audioPath)
+                .Build());
+            await AddTrackedGenerationAsync(
+                audiobook,
+                audioPath,
+                identity =>
+                {
+                    Assert.StartsWith(
+                        "linux-generation:",
+                        identity,
+                        StringComparison.Ordinal);
+                    return LinuxIdentityTestHelper.ToMergedV1AugmentedIdentity(identity);
+                });
+
+            var result = await _provider
+                .GetRequiredService<IAudiobookFilesystemDeleteService>()
+                .DeleteAsync(
+                    audiobook,
+                    deleteFolder: true,
+                    CancellationToken.None);
+
+            Assert.True(result.TrackedFileCleanupComplete);
+            Assert.False(File.Exists(audioPath));
+            Assert.False(Directory.Exists(bookFolder));
         }
 
         [Fact]
@@ -1978,6 +2378,85 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 .SingleAsync(candidate => candidate.Id == authorOwnership.Id);
             Assert.Equal(LibraryDirectoryOwnershipState.Removed, recoveredAuthor.State);
             Assert.Null(recoveredAuthor.PathOwnershipKey);
+        }
+
+        [Fact]
+        public async Task FilesystemDelete_MissingOwnedParentWithTransientOwnershipProof_PropagatesTransientFailure()
+        {
+            var tempRoot = FileService.GetTempDirectory("listenarr-delete-transient-owned-parent");
+            var authorFolder = Path.Join(tempRoot, "Author");
+            var bookFolder = Path.Join(authorFolder, "Book");
+            var audioPath = Path.Join(bookFolder, "book.mp3");
+            Directory.CreateDirectory(bookFolder);
+            await File.WriteAllTextAsync(audioPath, "audio");
+            await AddAuthorizedRootAsync(new RootFolder
+            {
+                Name = "Library",
+                Path = tempRoot,
+                IsDefault = true
+            });
+            var ownershipStore = _provider.GetRequiredService<ILibraryDirectoryOwnershipStore>();
+            var authorOwnership = await ownershipStore.RecordCreatedAsync(
+                new LibraryDirectoryOwnershipClaim(
+                    authorFolder,
+                    FileSystemPathSemantics.CurrentHostDefault,
+                    "test-fixture"));
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithId(909)
+                .WithTitle("Transient Parent Ownership")
+                .WithAuthor("Author")
+                .WithBasePath(bookFolder)
+                .WithFilePath(audioPath)
+                .Build());
+            await AddTrackedGenerationAsync(audiobook, audioPath);
+            await ownershipStore.BeginRemovalAsync(
+                authorOwnership.Id,
+                authorOwnership.PathOwnershipKey!);
+            Directory.Delete(authorFolder, recursive: true);
+
+            var transientStore = new Mock<ILibraryDirectoryOwnershipStore>(MockBehavior.Strict);
+            transientStore.Setup(store => store.GetOwnedWithinAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<FileSystemPathSemantics>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns((string path, FileSystemPathSemantics semantics, CancellationToken token) =>
+                    ownershipStore.GetOwnedWithinAsync(path, semantics, token));
+            transientStore.Setup(store => store.ResolveOwnedAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<FileSystemPathSemantics>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns((string path, FileSystemPathSemantics semantics, CancellationToken token) =>
+                    string.Equals(
+                        Path.GetFullPath(path),
+                        Path.GetFullPath(authorFolder),
+                        StringComparison.Ordinal)
+                        ? Task.FromResult(new LibraryDirectoryOwnershipResolution(
+                            LibraryDirectoryOwnershipResolutionState.Unavailable,
+                            Reason: "Injected transient ownership outage.",
+                            IsTransient: true))
+                        : ownershipStore.ResolveOwnedAsync(path, semantics, token));
+
+            var service = new AudiobookFilesystemDeleteService(
+                _provider.GetRequiredService<IAudiobookRepository>(),
+                _provider.GetRequiredService<IAudiobookFileRepository>(),
+                _provider.GetRequiredService<IRootFolderService>(),
+                _provider.GetRequiredService<IConfigurationService>(),
+                _provider.GetRequiredService<IFileSystemSemanticsResolver>(),
+                transientStore.Object,
+                _provider.GetRequiredService<ILogger<AudiobookFilesystemDeleteService>>(),
+                _provider.GetRequiredService<LibraryDirectoryOwnershipBoundaryAuthorizer>());
+
+            var exception = await Assert.ThrowsAsync<IOException>(() =>
+                service.DeleteAsync(audiobook, deleteFolder: true));
+
+            Assert.Contains("Injected transient ownership outage", exception.Message, StringComparison.Ordinal);
+            var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+            await using var db = await factory.CreateDbContextAsync();
+            var persistedAuthor = await db.LibraryDirectoryOwnerships.AsNoTracking()
+                .SingleAsync(candidate => candidate.Id == authorOwnership.Id);
+            Assert.Equal(LibraryDirectoryOwnershipState.Removing, persistedAuthor.State);
+            Assert.NotNull(persistedAuthor.PathOwnershipKey);
+            transientStore.VerifyAll();
         }
 
         [Fact]

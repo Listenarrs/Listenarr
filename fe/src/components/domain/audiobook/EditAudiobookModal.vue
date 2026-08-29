@@ -761,6 +761,7 @@
   <MoveAudiobookModal
     :visible="showMoveConfirm"
     :pendingMove="pendingMove"
+    :allowDeleteEmpty="!sourceIsManagedRoot"
     v-model:moveFiles="modalMoveFiles"
     v-model:deleteEmpty="modalDeleteEmpty"
     @cancel="cancelMoveConfirm"
@@ -809,6 +810,12 @@ import { useRootFoldersStore } from '@/stores/rootFolders'
 import { useMoveJobsStore, type MoveRecoveryState } from '@/stores/moveJobs'
 import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import { usePathLengthCheck } from '@/composables/usePathLengthCheck'
+import {
+  confirmDetectedMutationSemantics,
+  confirmMutationSemanticsForBlockedOperation,
+  findMutationSemanticsRoot,
+  refreshAudiobookFileIdentity,
+} from '@/composables/useMutationSemanticsConfirmation'
 
 // Diagnostic: surface undefined imports that can cause `Invalid vnode type` warnings
 if (typeof window !== 'undefined') {
@@ -1200,7 +1207,7 @@ let moveConfirmResolver:
 
 function askMoveConfirmation(original: string, combined: string) {
   modalMoveFiles.value = true
-  modalDeleteEmpty.value = true
+  modalDeleteEmpty.value = !sourceIsManagedRoot.value
   pendingMove.value = { original, combined }
   showMoveConfirm.value = true
   return new Promise<{ proceed: boolean; moveFiles: boolean; deleteEmptySource: boolean }>(
@@ -1231,7 +1238,7 @@ function confirmMove() {
     moveConfirmResolver({
       proceed: true,
       moveFiles: Boolean(modalMoveFiles.value),
-      deleteEmptySource: Boolean(modalDeleteEmpty.value),
+      deleteEmptySource: Boolean(modalDeleteEmpty.value && !sourceIsManagedRoot.value),
     })
 
   moveConfirmResolver = null
@@ -1495,6 +1502,20 @@ function destinationBasePathChanged(): boolean {
   )
 }
 
+const sourceIsManagedRoot = computed(() => {
+  const source = baselineAudiobook.value?.basePath
+  if (!source) return false
+
+  return rootStore.folders.some((folder) =>
+    pathsEqual(
+      source,
+      folder.path,
+      rootFolderPathKind(folder),
+      folder.resolvedCaseSensitivity ?? 'Unknown',
+    ),
+  )
+})
+
 function combinedBasePath(): string | null {
   const r = resolveSelectedRootPath() || ''
   const rel = formData.value.relativePath || ''
@@ -1639,6 +1660,70 @@ function finishEditingDestination() {
   }
 }
 
+async function confirmKnownMoveStorageSemantics(
+  sourcePath: string,
+  destinationPath: string,
+): Promise<{ proceed: boolean; confirmedStorageSemantics: boolean }> {
+  await rootStore.load()
+  const candidates = [
+    findMutationSemanticsRoot(rootStore.folders, destinationPath),
+    findMutationSemanticsRoot(rootStore.folders, sourcePath),
+  ].filter((root): root is NonNullable<typeof root> => root != null)
+  const uniqueRoots = [...new Map(candidates.map((root) => [root.id, root])).values()]
+  let confirmedStorageSemantics = false
+
+  for (const root of uniqueRoots) {
+    const outcome = await confirmDetectedMutationSemantics(root, 'the move')
+    if (outcome === 'cancelled') {
+      return { proceed: false, confirmedStorageSemantics }
+    }
+    if (outcome === 'retry') {
+      confirmedStorageSemantics = true
+    }
+  }
+  return { proceed: true, confirmedStorageSemantics }
+}
+
+async function moveAudiobookWithStorageConfirmation(
+  audiobookId: number,
+  destinationPath: string,
+  options: { sourcePath?: string; moveFiles?: boolean; deleteEmptySource?: boolean },
+) {
+  let confirmedRetries = 0
+  let identityRefreshAttempted = false
+  while (true) {
+    try {
+      return await apiService.moveAudiobook(audiobookId, destinationPath, options)
+    } catch (error: unknown) {
+      if (options.moveFiles !== true) throw error
+
+      const validationError = getApiValidationError(error)
+      if (validationError?.code === 'move_source_unverified') {
+        if (identityRefreshAttempted) throw error
+        await refreshAudiobookFileIdentity(audiobookId)
+        identityRefreshAttempted = true
+        continue
+      }
+      if (confirmedRetries >= 2) throw error
+
+      const affectedPath =
+        validationError?.code === 'source_filesystem_mutation_unavailable'
+          ? options.sourcePath
+          : destinationPath
+      const confirmation = await confirmMutationSemanticsForBlockedOperation(error, {
+        path: affectedPath,
+        operationLabel: 'the move',
+      })
+      if (confirmation === 'cancelled') return null
+      if (confirmation !== 'retry') throw error
+
+      await refreshAudiobookFileIdentity(audiobookId)
+      identityRefreshAttempted = true
+      confirmedRetries += 1
+    }
+  }
+}
+
 async function handleSave() {
   const audiobook = baselineAudiobook.value
   if (!audiobook || !hasChanges.value) return
@@ -1697,6 +1782,24 @@ async function handleSave() {
     if (!choice || !choice.proceed) return
     userWantsMove = Boolean(choice.moveFiles)
     userWantsDeleteEmpty = Boolean(choice.deleteEmptySource)
+  }
+
+  if (basePathChanged && userWantsMove) {
+    const storageConfirmation = await confirmKnownMoveStorageSemantics(originalBase, combined || '')
+    if (!storageConfirmation.proceed) return
+    if (storageConfirmation.confirmedStorageSemantics) {
+      try {
+        await refreshAudiobookFileIdentity(audiobook.id)
+      } catch (error: unknown) {
+        toast.error(
+          'Move preparation failed',
+          error instanceof Error
+            ? error.message
+            : 'Listenarr could not refresh the audiobook file identity before moving.',
+        )
+        return
+      }
+    }
   }
 
   saving.value = true
@@ -1842,11 +1945,15 @@ async function handleSave() {
 
     if (basePathChanged) {
       try {
-        const res = await apiService.moveAudiobook(audiobook.id, combined ?? '', {
+        const res = await moveAudiobookWithStorageConfirmation(audiobook.id, combined ?? '', {
           sourcePath: originalBase || undefined,
           moveFiles: userWantsMove,
           deleteEmptySource: userWantsMove ? userWantsDeleteEmpty : false,
         })
+
+        if (res == null) {
+          return
+        }
 
         if (userWantsMove) {
           const jobId = typeof res.jobId === 'string' ? res.jobId.trim() : ''
@@ -1884,7 +1991,8 @@ async function handleSave() {
           moveError?.code === 'move_recovery_required' ||
           moveError?.code === 'move_repair_required' ||
           moveError?.code === 'move_recovery_ambiguous' ||
-          moveError?.code === 'move_already_active'
+          moveError?.code === 'move_already_active' ||
+          moveError?.code === 'move_active_options_conflict'
         ) {
           await refreshMoveRecoveryState(audiobook.id)
           toast.error(

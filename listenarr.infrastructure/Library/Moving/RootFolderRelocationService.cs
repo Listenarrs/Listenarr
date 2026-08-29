@@ -14,18 +14,9 @@ public sealed partial class RootFolderRelocationService(
     IAudiobookOperationCoordinator audiobookOperationCoordinator,
     IServiceScopeFactory manifestScopeFactory,
     ILibraryFilesystemReadiness filesystemReadiness,
-    IDirectoryObjectIdentityResolver? directoryObjectIdentityResolver = null) : IRootFolderRelocationService
+    IDirectoryObjectIdentityResolver? directoryObjectIdentityResolver = null,
+    IFileRegistrationRecoveryProbe? fileRegistrationRecoveryProbe = null) : IRootFolderRelocationService
 {
-    private readonly SemaphoreSlim _rootIdentityGate = new(1, 1);
-    private readonly IFilesystemMutationCoordinator _mutationCoordinator =
-        mutationCoordinator ?? throw new ArgumentNullException(nameof(mutationCoordinator));
-    private readonly IAudiobookOperationCoordinator _audiobookOperationCoordinator =
-        audiobookOperationCoordinator ?? throw new ArgumentNullException(nameof(audiobookOperationCoordinator));
-    private readonly IServiceScopeFactory _manifestScopeFactory =
-        manifestScopeFactory ?? throw new ArgumentNullException(nameof(manifestScopeFactory));
-    private readonly IDirectoryObjectIdentityResolver? _directoryObjectIdentityResolver =
-        directoryObjectIdentityResolver;
-    private bool _rootIdentitiesReconciled;
     private async Task<StartOutcome> StartCoreAsync(
         int rootFolderId,
         RootFolderPathChangeCommand command,
@@ -54,6 +45,11 @@ public sealed partial class RootFolderRelocationService(
                 "Listenarr cannot verify the new root folder path. Make sure the destination is mounted and accessible, or choose an explicit filesystem case-sensitivity setting, then try again.",
                 targetResolution.Reason ?? "Target filesystem semantics are unavailable; select an explicit override.");
         }
+        EnsureRelocationTargetMutationSemanticsAuthority(
+            command.Mode,
+            command.TargetCaseSensitivityMode,
+            targetResolution);
+        EnsureRelocationTargetMutationCapability(command.Mode, targetPath);
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var root = await db.RootFolders.SingleOrDefaultAsync(
@@ -61,6 +57,7 @@ public sealed partial class RootFolderRelocationService(
             cancellationToken)
             ?? throw new KeyNotFoundException("Root folder not found");
         ValidateExpectedCurrentPath(command, root);
+        EnsureRelocationSourceMutationCapability(command.Mode, root);
 
         if (await db.RootFolderRelocations.AnyAsync(
             relocation => relocation.ActiveRootFolderId == rootFolderId,
@@ -105,6 +102,10 @@ public sealed partial class RootFolderRelocationService(
                 "Listenarr cannot access or verify the current root folder, so its files cannot be moved safely. Restore access to the current folder, or change the path without moving files to repair the stored location.",
                 "The current root folder path is invalid or unavailable; use metadata-only path change to repair it before relocating files.");
         }
+        EnsureRelocationSourceMutationSemanticsAuthority(
+            command.Mode,
+            root.CaseSensitivityMode,
+            sourceResolution);
 
         var sourcePathSemantics = ResolveStartSourcePathSemantics(
             root,
@@ -125,86 +126,33 @@ public sealed partial class RootFolderRelocationService(
                 nameof(command));
         }
 
+        var targetIdentityKey = await ValidateStartRecoveryBoundariesAsync(
+            db,
+            rootFolderId,
+            root,
+            sourcePathSemantics,
+            targetPath,
+            targetResolution,
+            cancellationToken);
+
+        var sourceObjectIdentity =
+            await ResolveRelocationSourceObjectIdentityAsync(
+                root,
+                command,
+                cancellationToken);
+
         var storedSourcePathSemantics = sourcePathSemantics.StoredSourcePathSemantics;
         var metadataSourcePathSemantics = sourcePathSemantics.MetadataSourcePathSemantics;
         var allowContextualAmbiguousMetadataSyntax =
             sourcePathSemantics.AllowContextualAmbiguousMetadataSyntax;
         var sourceCaseSensitivityMode = sourcePathSemantics.SourceCaseSensitivityMode;
 
-        var targetIdentityKey = FileSystemPathIdentity.CreateKey(
-            "root",
-            targetPath,
-            targetResolution.Semantics);
-        var otherRoots = await db.RootFolders
-            .Where(candidate => candidate.Id != rootFolderId)
-            .AsNoTracking()
-            .ToListAsync(cancellationToken);
-        var activeBoundaries = await db.RootFolderRelocations
-            .Where(relocation => relocation.ActiveRootFolderId != null)
-            .AsNoTracking()
-            .Select(relocation => new
-            {
-                relocation.Mode,
-                relocation.SourcePath,
-                relocation.SourceCaseSensitivityMode,
-                relocation.TargetPath,
-                relocation.TargetCaseSensitivityMode
-            })
-            .ToListAsync(cancellationToken);
-        var targetConflict = otherRoots.Any(candidate =>
-            RootBoundaryConflictsWithTarget(candidate, targetPath, targetIdentityKey, targetResolution.Semantics));
-        foreach (var boundary in activeBoundaries)
-        {
-            var sourceSyntaxHint = TryResolveMetadataSourceSyntaxHint(
-                boundary.Mode,
-                boundary.TargetPath);
-            targetConflict = targetConflict
-                || await ActiveBoundaryConflictsWithTargetAsync(
-                    targetPath,
-                    targetResolution.Semantics,
-                    boundary.SourcePath,
-                    boundary.SourceCaseSensitivityMode,
-                    cancellationToken,
-                    sourceSyntaxHint)
-                || await ActiveBoundaryConflictsWithTargetAsync(
-                    targetPath,
-                    targetResolution.Semantics,
-                    boundary.TargetPath,
-                    boundary.TargetCaseSensitivityMode,
-                    cancellationToken);
-            if (targetConflict)
-            {
-                break;
-            }
-        }
-        if (targetConflict)
-        {
-            throw new RootFolderPathChangeRejectedException(
-                "root_folder_target_conflict",
-                "The selected destination overlaps another root folder or an active root-folder path change. Choose a different destination and try again.",
-                "A root folder with that filesystem identity already exists.");
-        }
-
-        var audiobookRows = await db.Audiobooks
-            .Where(audiobook => audiobook.BasePath != null)
-            .Select(audiobook => new
-            {
-                Audiobook = audiobook,
-                StoredBasePath = EF.Property<string>(audiobook, nameof(Audiobook.BasePath))!
-            })
-            .ToListAsync(cancellationToken);
-        await db.AudiobookFiles.LoadAsync(cancellationToken);
-        var audiobooks = audiobookRows
-            .Select(row => new AudiobookPathCandidate(row.Audiobook, row.StoredBasePath))
-            .ToList();
-        var (affected, invalidStoredBasePaths) = metadataSourcePathSemantics == null
-            ? (new List<AudiobookPathCandidate>(), new List<AudiobookPathCandidate>())
-            : DiscoverAffectedAudiobooks(
-                audiobooks,
-                root.Path,
-                metadataSourcePathSemantics.Value.Semantics,
-                metadataSourcePathSemantics.Value.DetectAmbiguousCaseMatches,
-                allowContextualAmbiguousMetadataSyntax);
+        var (affected, invalidStoredBasePaths) = await LoadAffectedAudiobooksAsync(
+            db,
+            root.Path,
+            metadataSourcePathSemantics,
+            allowContextualAmbiguousMetadataSyntax,
+            cancellationToken);
 
         if (command.Mode != RootFolderRelocationMode.MetadataOnly && invalidStoredBasePaths.Count > 0)
         {
@@ -214,7 +162,10 @@ public sealed partial class RootFolderRelocationService(
                 "One or more audiobook base paths are invalid; use metadata-only path change to repair stored metadata before relocating files.");
         }
 
-        var affectedAudiobookIds = affected.Select(candidate => candidate.Audiobook.Id).ToHashSet();
+        var affectedAudiobookIds = affected
+            .Concat(invalidStoredBasePaths)
+            .Select(candidate => candidate.Audiobook.Id)
+            .ToHashSet();
         await EnsureNoUnresolvedMoveConflictsAsync(
             db,
             affectedAudiobookIds,
@@ -223,6 +174,17 @@ public sealed partial class RootFolderRelocationService(
             targetPath,
             targetResolution.Semantics,
             cancellationToken);
+        var externalRecoveryConflict = await FindExternalRecoveryConflictAsync(
+            db,
+            affectedAudiobookIds,
+            cancellationToken);
+        if (externalRecoveryConflict != null)
+        {
+            throw new RootFolderPathChangeRejectedException(
+                externalRecoveryConflict.Code,
+                externalRecoveryConflict.PublicMessage,
+                externalRecoveryConflict.Detail);
+        }
 
         var movePlans = new List<RelocationMovePlan>();
         if (sourceResolution != null
@@ -240,6 +202,19 @@ public sealed partial class RootFolderRelocationService(
                 {
                     throw new InvalidOperationException(
                         "A tracked audiobook move source escaped the relocating root folder.");
+                }
+                if (manifest.SourceIdentity.Syntax != sourceOperationSemantics.Value.Syntax
+                    || !FileSystemPathIdentity.IsSameOrInside(
+                        manifest.SourceIdentity.BoundaryPath,
+                        root.Path,
+                        sourceOperationSemantics.Value)
+                    || !FileSystemPathIdentity.IsSameOrInside(
+                        manifest.SourceIdentity.BoundaryPath,
+                        root.Path,
+                        manifest.SourceIdentity.Semantics))
+                {
+                    throw new InvalidOperationException(
+                        "A tracked audiobook move source is not authorized by the relocating root folder boundary.");
                 }
 
                 var requestedPath = MapTargetPath(
@@ -281,9 +256,22 @@ public sealed partial class RootFolderRelocationService(
                 targetPath,
                 cancellationToken);
 
+        if (command.Mode == RootFolderRelocationMode.Relocate
+            && !targetObjectIdentity.IsAvailable
+            && targetObjectIdentity.FailureKind
+                != DirectoryObjectIdentityFailureKind.Missing)
+        {
+            throw new RootFolderPathChangeRejectedException(
+                "root_folder_target_unavailable",
+                "Listenarr cannot verify the new root folder's physical directory identity. Make sure the destination is mounted and accessible, then try again.",
+                targetObjectIdentity.UnavailableReason
+                    ?? "Target physical directory identity is unavailable.");
+        }
+
         RootFolderRelocation? relocation = null;
         var relocationWasPrecommitted = false;
         var precommittedContinuationCommitted = false;
+        PinnedDirectoryCreation.PinnedDirectoryAnchor? relocationCommitTargetLease = null;
         try
         {
             if (command.Mode == RootFolderRelocationMode.Relocate
@@ -394,10 +382,12 @@ public sealed partial class RootFolderRelocationService(
             foreach (var plan in movePlans)
             {
                 var audiobook = plan.Candidate.Audiobook;
-                if (!targetObjectIdentity.IsAvailable)
+                if (sourceObjectIdentity == null
+                    || !sourceObjectIdentity.IsAvailable
+                    || !targetObjectIdentity.IsAvailable)
                 {
                     throw new InvalidOperationException(
-                        "Relocation move jobs require durable target-boundary generation authorization.");
+                        "Relocation move jobs require durable source- and target-boundary generation authorization.");
                 }
 
                 var entries = plan.Manifest.Entries
@@ -412,6 +402,10 @@ public sealed partial class RootFolderRelocationService(
                         CleanupState = MoveJobEntryCleanupState.Pending
                     })
                     .ToList();
+                entries.Add(
+                    MoveManifestIdentity.CreateSourceBoundaryAuthorization(
+                        sourceObjectIdentity.Version!.Value,
+                        sourceObjectIdentity.Value!));
                 entries.Add(
                     MoveManifestIdentity.CreateTargetBoundaryAuthorization(
                         targetObjectIdentity.Version!.Value,
@@ -446,29 +440,29 @@ public sealed partial class RootFolderRelocationService(
             await db.SaveChangesAsync(cancellationToken);
             if (affected.Count == 0)
             {
-                await RequireTargetDirectoryGenerationAsync(
-                    targetPath,
-                    targetObjectIdentity,
-                    cancellationToken);
-                ApplyRootMetadata(root, command, targetPath, targetResolution, targetIdentityKey);
-                ApplyRootDirectoryObjectIdentity(root, targetObjectIdentity);
-                if (command.DesiredIsDefault)
-                {
-                    await ClearOtherDefaultsAsync(db, rootFolderId, cancellationToken);
-                }
-
-                relocation.Status = RootFolderRelocationStatus.Completed;
-                relocation.ActiveRootFolderId = null;
-                relocation.CompletedAt = nowUtc;
-                relocation.TargetIdentityEnrollmentState =
-                    TargetIdentityEnrollmentState.NotRequired;
-                await FinalizeRelocationTargetReservationsAsync(
+                relocationCommitTargetLease = await CompleteEmptyRelocationAsync(
                     db,
-                    relocation.Id,
+                    root,
+                    relocation,
+                    command,
+                    targetPath,
+                    targetResolution,
+                    targetObjectIdentity,
+                    targetIdentityKey,
+                    rootFolderId,
+                    nowUtc,
                     cancellationToken);
-                await db.SaveChangesAsync(cancellationToken);
             }
 
+            if (relocationCommitTargetLease != null)
+            {
+                RevalidatePinnedTargetDirectoryGeneration(
+                    relocationCommitTargetLease,
+                    targetObjectIdentity.Version,
+                    targetObjectIdentity.Value,
+                    targetObjectIdentity.UnavailableReason,
+                    CancellationToken.None);
+            }
             cancellationToken.ThrowIfCancellationRequested();
             if (continuationTransaction != null)
             {
@@ -495,6 +489,10 @@ public sealed partial class RootFolderRelocationService(
                 exception,
                 CancellationToken.None);
             throw;
+        }
+        finally
+        {
+            relocationCommitTargetLease?.Dispose();
         }
     }
 }

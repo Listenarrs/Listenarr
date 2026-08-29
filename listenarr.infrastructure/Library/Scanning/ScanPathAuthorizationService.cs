@@ -3,10 +3,11 @@ using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Library.Scanning;
 
-internal sealed class ScanPathAuthorizationService(
+internal sealed partial class ScanPathAuthorizationService(
     IConfigurationService configurationService,
     IRootFolderService rootFolderService,
     IFileSystemSemanticsResolver semanticsResolver,
+    IDirectoryObjectIdentityResolver directoryObjectIdentityResolver,
     ILogger<ScanPathAuthorizationService> logger) : IScanPathAuthorizationService
 {
     public async Task<ScanPathAuthorizationResult> AuthorizeAsync(
@@ -20,10 +21,10 @@ internal sealed class ScanPathAuthorizationService(
                 "The scan path is invalid.");
         }
 
-        IReadOnlyList<AuthorizedRoot> roots;
+        AuthorizedRootSet rootSet;
         try
         {
-            roots = await LoadAuthorizedRootsAsync(cancellationToken);
+            rootSet = await LoadAuthorizedRootsAsync(cancellationToken);
         }
         catch (Exception exception) when (WorkerExceptionClassifier.IsNonFatal(exception))
         {
@@ -36,22 +37,48 @@ internal sealed class ScanPathAuthorizationService(
                 "Configured scan roots could not be loaded safely.");
         }
 
-        if (roots.Count == 0)
+        if (!FileSystemPathIdentity.TryDetectAbsoluteSyntaxForHost(
+                fullPath,
+                out var pathSyntax))
         {
             return ScanPathAuthorizationResult.Rejected(
-                ScanPathAuthorizationFailure.NoConfiguredRoots,
-                "No configured scan roots are available.");
+                ScanPathAuthorizationFailure.InvalidPath,
+                "The scan path does not have a valid host filesystem identity.");
         }
 
-        var boundary = roots
+        var boundary = rootSet.Roots
             .Where(root => FileSystemPathIdentity.IsSameOrInside(
                 fullPath,
                 root.Path,
                 root.Semantics))
             .OrderByDescending(root => root.Path.Length)
             .FirstOrDefault();
+        var unavailableRootLength = rootSet.UnavailableRoots
+            .Where(root => FileSystemPathIdentity.StoredBoundaryMayContainPath(
+                root.Path,
+                fullPath,
+                pathSyntax,
+                root.RequestedMode))
+            .Select(root => root.Path.Length)
+            .DefaultIfEmpty(-1)
+            .Max();
+        var boundaryLength = boundary?.Path.Length ?? -1;
+        if (unavailableRootLength >= boundaryLength
+            && unavailableRootLength >= 0)
+        {
+            return ScanPathAuthorizationResult.Rejected(
+                ScanPathAuthorizationFailure.ConfigurationUnavailable,
+                "A configured root that may contain the scan path has unavailable or ambiguous filesystem identity.");
+        }
         if (boundary == null)
         {
+            if (rootSet.Roots.Count == 0)
+            {
+                return ScanPathAuthorizationResult.Rejected(
+                    ScanPathAuthorizationFailure.NoConfiguredRoots,
+                    "No configured scan roots are available.");
+            }
+
             return ScanPathAuthorizationResult.Rejected(
                 ScanPathAuthorizationFailure.OutsideConfiguredRoots,
                 "The scan path is not within a configured root folder.");
@@ -96,6 +123,33 @@ internal sealed class ScanPathAuthorizationService(
             return await AuthorizeAsync(storedPreferredPath, cancellationToken);
         }
 
+        RootFolder? defaultRoot;
+        try
+        {
+            defaultRoot = await rootFolderService.GetDefaultAsync();
+        }
+        catch (Exception exception) when (WorkerExceptionClassifier.IsNonFatal(exception))
+        {
+            logger.LogWarning(
+                exception,
+                "Unable to load the configured default root for a default scan");
+            return ScanPathAuthorizationResult.Rejected(
+                ScanPathAuthorizationFailure.ConfigurationUnavailable,
+                "The configured default scan root could not be loaded safely.");
+        }
+
+        if (defaultRoot != null)
+        {
+            if (!TryGetStoredFullPath(defaultRoot.Path, out var storedDefaultRoot))
+            {
+                return ScanPathAuthorizationResult.Rejected(
+                    ScanPathAuthorizationFailure.InvalidPath,
+                    "The configured default root is unavailable on this host.");
+            }
+
+            return await AuthorizeAsync(storedDefaultRoot, cancellationToken);
+        }
+
         ApplicationSettings? settings;
         try
         {
@@ -105,10 +159,10 @@ internal sealed class ScanPathAuthorizationService(
         {
             logger.LogWarning(
                 exception,
-                "Unable to load the configured output path for a default scan");
+                "Unable to load the legacy configured output path for a default scan");
             return ScanPathAuthorizationResult.Rejected(
                 ScanPathAuthorizationFailure.ConfigurationUnavailable,
-                "The configured output path could not be loaded safely.");
+                "The legacy configured output path could not be loaded safely.");
         }
 
         if (string.IsNullOrWhiteSpace(settings?.OutputPath))
@@ -128,147 +182,7 @@ internal sealed class ScanPathAuthorizationService(
         return await AuthorizeAsync(storedOutputPath, cancellationToken);
     }
 
-    private async Task<IReadOnlyList<AuthorizedRoot>> LoadAuthorizedRootsAsync(
-        CancellationToken cancellationToken)
-    {
-        var configuredRoots = await rootFolderService.GetAllAsync();
-        var settings = await configurationService.GetApplicationSettingsAsync();
-        var candidates = configuredRoots
-            .Select(root => new RootCandidate(
-                root.Path,
-                root.CaseSensitivityMode,
-                RequiresEnrollment: true,
-                RootFolderPathSemantics.ResolvePersisted(root),
-                root.DirectoryObjectIdentityVersion,
-                root.DirectoryObjectIdentity,
-                root.DirectoryObjectIdentityUnavailableReason))
-            .ToList();
-        if (!string.IsNullOrWhiteSpace(settings?.OutputPath))
-        {
-            candidates.Add(new RootCandidate(
-                settings.OutputPath,
-                FileSystemCaseSensitivityMode.Auto,
-                RequiresEnrollment: false,
-                PersistedSemantics: null,
-                DirectoryObjectIdentityVersion: null,
-                DirectoryObjectIdentity: null,
-                DirectoryObjectIdentityUnavailableReason: null));
-        }
-
-        var roots = new List<AuthorizedRoot>();
-        foreach (var candidate in candidates)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (!TryGetStoredFullPath(candidate.Path, out var fullPath))
-            {
-                LogUnavailableCandidate(
-                    candidate,
-                    "Ignoring invalid configured scan root {Path}");
-                continue;
-            }
-
-            var resolution = await semanticsResolver.ResolveAsync(
-                fullPath,
-                candidate.RequestedMode,
-                cancellationToken);
-            if (resolution.State != PathIdentityState.Valid)
-            {
-                LogUnavailableCandidate(
-                    candidate,
-                    "Ignoring configured scan root {Path}: {Reason}",
-                    resolution.Reason);
-                continue;
-            }
-            if (candidate.RequiresEnrollment
-                && (!candidate.PersistedSemantics.HasValue
-                    || candidate.PersistedSemantics.Value.DetectAmbiguousCaseMatches
-                    || candidate.PersistedSemantics.Value.Semantics.Syntax
-                        != resolution.Semantics.Syntax
-                    || candidate.PersistedSemantics.Value.Semantics.CaseSensitivity
-                        != resolution.Semantics.CaseSensitivity))
-            {
-                LogUnavailableCandidate(
-                    candidate,
-                    "Ignoring configured scan root {Path}: live filesystem semantics do not match its persisted root semantics.");
-                continue;
-            }
-
-            var canonical = FileSystemPathIdentity.Canonicalize(
-                fullPath,
-                resolution.Semantics.Syntax);
-            if (IsFilesystemRoot(canonical, resolution.Semantics))
-            {
-                LogUnavailableCandidate(
-                    candidate,
-                    "Ignoring unsafe filesystem-root scan boundary {Path}");
-                continue;
-            }
-
-            var duplicate = roots.FirstOrDefault(existing =>
-                existing.Semantics.Syntax == resolution.Semantics.Syntax
-                && FileSystemPathIdentity.AreEquivalent(
-                    existing.Path,
-                    canonical,
-                    existing.Semantics)
-                && FileSystemPathIdentity.AreEquivalent(
-                    existing.Path,
-                    canonical,
-                    resolution.Semantics));
-            if (duplicate != null)
-            {
-                if (duplicate.Semantics.CaseSensitivity
-                    != resolution.Semantics.CaseSensitivity)
-                {
-                    throw new InvalidOperationException(
-                        $"Configured scan root '{fullPath}' has conflicting filesystem semantics.");
-                }
-
-                continue;
-            }
-
-            roots.Add(new AuthorizedRoot(
-                canonical,
-                resolution.Semantics,
-                candidate.RequestedMode,
-                candidate.RequiresEnrollment,
-                candidate.DirectoryObjectIdentityVersion,
-                candidate.DirectoryObjectIdentity,
-                candidate.DirectoryObjectIdentityUnavailableReason));
-        }
-
-        return roots;
-    }
-
-    private void LogUnavailableCandidate(
-        RootCandidate candidate,
-        string message,
-        string? reason = null)
-    {
-        var sanitizedPath = LogRedaction.SanitizeFilePath(candidate.Path);
-        if (candidate.RequiresEnrollment)
-        {
-            if (reason == null)
-            {
-                logger.LogWarning(message, sanitizedPath);
-            }
-            else
-            {
-                logger.LogWarning(message, sanitizedPath, reason);
-            }
-            return;
-        }
-
-        if (reason == null)
-        {
-            logger.LogDebug(message, sanitizedPath);
-        }
-        else
-        {
-            logger.LogDebug(message, sanitizedPath, reason);
-        }
-    }
-
-    private static async Task<PhysicalIdentityCapture> TryCapturePhysicalIdentityAsync(
+    private async Task<PhysicalIdentityCapture> TryCapturePhysicalIdentityAsync(
         AuthorizedRoot authorizedRoot,
         string scanPath,
         CancellationToken cancellationToken)
@@ -281,19 +195,112 @@ internal sealed class ScanPathAuthorizationService(
             var canonicalScanPath = FileSystemPathIdentity.Canonicalize(
                 scanPath,
                 authorizedRoot.Semantics.Syntax);
+
+            var limitedBoundary = false;
+            DirectoryObjectIdentityResolution? verifiedBoundaryIdentity = null;
+            if (authorizedRoot.RequiresEnrollment
+                && authorizedRoot.DirectoryObjectIdentityVersion.HasValue
+                && !string.IsNullOrWhiteSpace(authorizedRoot.DirectoryObjectIdentity))
+            {
+                var enrolled = await directoryObjectIdentityResolver.ResolveExistingAsync(
+                    canonicalBoundary,
+                    authorizedRoot.DirectoryObjectIdentityVersion.Value,
+                    authorizedRoot.DirectoryObjectIdentity,
+                    cancellationToken);
+                if (enrolled.IsAvailable)
+                {
+                    verifiedBoundaryIdentity = enrolled;
+                }
+                else
+                {
+                    var liveBoundary = await directoryObjectIdentityResolver.ResolveAsync(
+                        canonicalBoundary,
+                        cancellationToken);
+                    if (enrolled.FailureKind
+                        == DirectoryObjectIdentityFailureKind.LegacyWeakIdentity)
+                    {
+                        if (!liveBoundary.IsAvailable)
+                        {
+                            return PhysicalIdentityCapture.Failed(
+                                liveBoundary.UnavailableReason
+                                    ?? enrolled.UnavailableReason
+                                    ?? "The configured scan root physical identity cannot be verified.");
+                        }
+
+                        verifiedBoundaryIdentity = liveBoundary;
+                        limitedBoundary = true;
+                    }
+                    else if (enrolled.FailureKind
+                        == DirectoryObjectIdentityFailureKind.IdentityUnsupported)
+                    {
+                        // Distinguish an unsupported historical identity version from a
+                        // live filesystem that genuinely lacks durable generation support.
+                        if (liveBoundary.IsAvailable
+                            || liveBoundary.FailureKind
+                                != DirectoryObjectIdentityFailureKind.IdentityUnsupported)
+                        {
+                            return PhysicalIdentityCapture.Failed(
+                                enrolled.UnavailableReason
+                                    ?? "The configured scan root physical identity cannot be verified.");
+                        }
+
+                        limitedBoundary = true;
+                    }
+                    else
+                    {
+                        return PhysicalIdentityCapture.Failed(
+                            enrolled.UnavailableReason
+                                ?? "The configured scan root no longer identifies its enrolled physical generation.");
+                    }
+                }
+            }
+            else if (authorizedRoot.RequiresEnrollment)
+            {
+                var liveBoundary = await directoryObjectIdentityResolver.ResolveAsync(
+                    canonicalBoundary,
+                    cancellationToken);
+                if (liveBoundary.IsAvailable)
+                {
+                    return PhysicalIdentityCapture.Failed(
+                        "The configured scan root has not been enrolled with its available physical generation.");
+                }
+                if (liveBoundary.FailureKind
+                    != DirectoryObjectIdentityFailureKind.IdentityUnsupported)
+                {
+                    return PhysicalIdentityCapture.Failed(
+                        liveBoundary.UnavailableReason
+                            ?? "The configured scan root physical identity is unavailable.");
+                }
+
+                limitedBoundary = true;
+            }
+
+            var scanRootResolution = await directoryObjectIdentityResolver.ResolveAsync(
+                canonicalScanPath,
+                cancellationToken);
+            if (!scanRootResolution.IsAvailable
+                && scanRootResolution.FailureKind
+                    != DirectoryObjectIdentityFailureKind.IdentityUnsupported)
+            {
+                return PhysicalIdentityCapture.Failed(
+                    scanRootResolution.UnavailableReason
+                        ?? "The scan root physical identity is unavailable.");
+            }
+            var limitedScan = limitedBoundary || !scanRootResolution.IsAvailable;
+
             using var boundary = PinnedDirectoryCreation.OpenPinnedBoundary(
                 canonicalBoundary);
             cancellationToken.ThrowIfCancellationRequested();
-            var boundaryIdentity = boundary.GetDirectoryObjectIdentity();
-            if (authorizedRoot.RequiresEnrollment
-                && !ManagedDirectoryIdentity.MatchesNativeIdentity(
-                    authorizedRoot.DirectoryObjectIdentityVersion,
-                    authorizedRoot.DirectoryObjectIdentity,
-                    boundaryIdentity))
+            if (!boundary.VisiblePathMatches()
+                || (verifiedBoundaryIdentity?.IsAvailable == true
+                    && !boundary.MatchesManagedDirectoryIdentity(
+                        verifiedBoundaryIdentity.Version,
+                        verifiedBoundaryIdentity.Value)))
             {
-                throw new InvalidOperationException(
-                    "The configured scan root no longer identifies its authorized physical generation.");
+                return PhysicalIdentityCapture.Failed(
+                    "The configured scan boundary changed after its enrolled physical identity was verified.");
             }
+
             using var scanRoot = OpenRelativeScanRoot(
                 boundary,
                 canonicalBoundary,
@@ -305,10 +312,27 @@ internal sealed class ScanPathAuthorizationService(
                     "The configured scan boundary changed while its physical identity was being captured.");
             }
 
+            if (limitedScan)
+            {
+                // Operation-local pinned path authority never authorizes destructive
+                // reconciliation or filesystem mutation.
+                return PhysicalIdentityCapture.Captured(
+                    ScanPathPhysicalIdentity.PinnedPathOnly());
+            }
+
+            var boundaryIdentity = boundary.GetDirectoryObjectIdentity();
+            var scanRootIdentity = scanRoot.GetDirectoryObjectIdentity();
+            if (!boundary.VisiblePathMatches()
+                || !scanRoot.VisiblePathMatches())
+            {
+                return PhysicalIdentityCapture.Failed(
+                    "The configured scan boundary changed while its physical identity was being captured.");
+            }
+
             return PhysicalIdentityCapture.Captured(
                 new ScanPathPhysicalIdentity(
                     boundaryIdentity,
-                    scanRoot.GetDirectoryObjectIdentity()));
+                    scanRootIdentity));
         }
         catch (Exception exception) when (exception is not (
             OperationCanceledException or OutOfMemoryException or StackOverflowException))
@@ -322,45 +346,6 @@ internal sealed class ScanPathAuthorizationService(
                 _ =>
                     "The scan path contains a linked, replaced, or unavailable directory component."
             });
-        }
-    }
-
-    private static PinnedDirectoryCreation.PinnedDirectoryAnchor
-        OpenRelativeScanRoot(
-            PinnedDirectoryCreation.PinnedDirectoryAnchor boundary,
-            string boundaryPath,
-            string scanPath)
-    {
-        var current = boundary.Duplicate();
-        try
-        {
-            var relative = Path.GetRelativePath(boundaryPath, scanPath);
-            if (relative == ".")
-            {
-                return current;
-            }
-
-            foreach (var segment in relative.Split(
-                [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
-                StringSplitOptions.RemoveEmptyEntries))
-            {
-                if (segment is "." or "..")
-                {
-                    throw new InvalidOperationException(
-                        "The scan path contains navigation segments outside its configured root.");
-                }
-
-                var next = current.OpenExistingChild(segment);
-                current.Dispose();
-                current = next;
-            }
-
-            return current;
-        }
-        catch
-        {
-            current.Dispose();
-            throw;
         }
     }
 
@@ -405,6 +390,14 @@ internal sealed class ScanPathAuthorizationService(
         int? DirectoryObjectIdentityVersion,
         string? DirectoryObjectIdentity,
         string? DirectoryObjectIdentityUnavailableReason);
+
+    private sealed record AuthorizedRootSet(
+        IReadOnlyList<AuthorizedRoot> Roots,
+        IReadOnlyList<UnavailableAuthorizedRoot> UnavailableRoots);
+
+    private sealed record UnavailableAuthorizedRoot(
+        string Path,
+        FileSystemCaseSensitivityMode RequestedMode);
 
     private sealed record AuthorizedRoot(
         string Path,

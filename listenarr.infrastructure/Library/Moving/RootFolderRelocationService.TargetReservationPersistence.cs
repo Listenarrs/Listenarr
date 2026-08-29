@@ -77,12 +77,13 @@ public sealed partial class RootFolderRelocationService
         if (reservation.State is not (
                 RootFolderRelocationCreatedDirectoryState.Created
                     or RootFolderRelocationCreatedDirectoryState.Retained)
-            || !ManagedDirectoryIdentity.Matches(
+            || !directory.MatchesManagedDirectoryOwnershipIdentity(
                 reservation.DirectoryObjectIdentityVersion,
                 reservation.DirectoryObjectIdentity,
-                reservation.OwnershipToken,
-                directory.GetDirectoryObjectIdentity())
-            || !directory.VisiblePathMatches())
+                reservation.OwnershipToken)
+            || !ReservationPathMatchesOrThrowUnavailable(
+                directory,
+                "The relocation directory reservation is temporarily unavailable during identity validation."))
         {
             throw new InvalidOperationException(
                 "A relocation directory reservation lacks matching physical identity.");

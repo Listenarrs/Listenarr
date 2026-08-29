@@ -70,6 +70,20 @@ internal static class MoveJobTestFactory
             FileSystemCaseSensitivityMode.Auto,
             sourceResolution.BoundaryPath,
             sourcePath);
+        var sourceAuthorizationBoundary = !string.IsNullOrWhiteSpace(sourceCleanupBoundary)
+            ? Path.GetFullPath(sourceCleanupBoundary)
+            : deleteEmptySource
+                ? Path.GetDirectoryName(Path.GetFullPath(sourcePath))
+                    ?? sourceResolution.BoundaryPath
+                : sourceIdentity.BoundaryPath;
+        if (!FileSystemPathIdentity.IsSameOrInside(
+                sourcePath,
+                sourceAuthorizationBoundary,
+                sourceResolution.Semantics))
+        {
+            throw new InvalidOperationException(
+                "Move test source escaped its cleanup/authorization boundary.");
+        }
         var targetBoundary = FindTargetBoundary(
             sourcePath,
             targetPath,
@@ -81,6 +95,14 @@ internal static class MoveJobTestFactory
             targetPath);
         var directoryIdentityResolver =
             services.GetRequiredService<IDirectoryObjectIdentityResolver>();
+        var sourceDirectoryIdentity = await directoryIdentityResolver.ResolveAsync(
+            sourceAuthorizationBoundary);
+        if (!sourceDirectoryIdentity.IsAvailable)
+        {
+            throw new InvalidOperationException(
+                sourceDirectoryIdentity.UnavailableReason
+                    ?? "Move test source boundary identity is unavailable.");
+        }
         var targetDirectoryIdentity = await directoryIdentityResolver.ResolveAsync(
             targetBoundary);
         if (!targetDirectoryIdentity.IsAvailable)
@@ -103,10 +125,14 @@ internal static class MoveJobTestFactory
             manifest,
             targetPath,
             targetIdentity,
+            sourceDirectoryIdentity.Version!.Value,
+            sourceDirectoryIdentity.Value!,
             targetDirectoryIdentity.Version!.Value,
             targetDirectoryIdentity.Value!,
             deleteEmptySource,
-            sourceCleanupBoundary);
+            deleteEmptySource
+                ? sourceAuthorizationBoundary
+                : sourceCleanupBoundary);
     }
 
     private static string FindTargetBoundary(

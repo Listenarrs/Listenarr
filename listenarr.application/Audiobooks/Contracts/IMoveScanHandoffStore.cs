@@ -10,7 +10,8 @@ public sealed record MoveCompletionCommit(
     string? AudiobookTitle,
     string Source,
     string Target,
-    DateTimeOffset Now);
+    DateTimeOffset Now,
+    bool SourceRetained = false);
 
 public sealed record MoveCompletionCommitResult(
     MoveScanHandoff Handoff,
@@ -63,6 +64,12 @@ public interface IMoveScanHandoffStore
 {
     Task<MoveCompletionCommitResult> CommitMoveCompletionAsync(
         MoveCompletionCommit command,
+        CancellationToken cancellationToken = default);
+
+    Task<MoveCompletionCommitResult> CommitMoveCompletionAsync(
+        MoveCompletionCommit command,
+        Func<CancellationToken, Task<RegistrationPublicationMatchOutcome>>
+            commitValidation,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<Guid>> GetClaimableIdsAsync(

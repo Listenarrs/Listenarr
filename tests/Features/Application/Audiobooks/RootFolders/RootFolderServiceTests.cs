@@ -581,6 +581,46 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
                 svc.CreateAsync(new RootFolder { Name = "B", Path = rootPath }));
         }
 
+        [WindowsFact]
+        public async Task Create_RejectsRequestedRootInsideDeviceAliasExistingRoot()
+        {
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+            var physicalExisting = Path.Join(
+                Path.GetTempPath(),
+                $"root-device-conflict-{Guid.NewGuid():N}");
+            var existingAlias = @"\\?\" + physicalExisting;
+            var requestedPath = Path.Join(physicalExisting, "Nested");
+            Directory.CreateDirectory(requestedPath);
+            await using (var db = new ListenArrDbContext(options))
+            {
+                db.RootFolders.Add(new RootFolder
+                {
+                    Name = "Existing Device Alias",
+                    Path = existingAlias,
+                    CaseSensitivityMode = FileSystemCaseSensitivityMode.Insensitive,
+                    ResolvedCaseSensitivity = FileSystemCaseSensitivity.Insensitive,
+                    PathIdentityState = PathIdentityState.Unavailable
+                });
+                await db.SaveChangesAsync();
+            }
+            var repo = new EfRootFolderRepository(
+                new TestDbFactory(options),
+                Mock.Of<ILogger<EfRootFolderRepository>>());
+            var service = new RootFolderService(repo, null!);
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.CreateAsync(new RootFolder
+                {
+                    Name = "Nested",
+                    Path = requestedPath,
+                    CaseSensitivityMode = FileSystemCaseSensitivityMode.Insensitive
+                }));
+
+            Assert.Contains("ambiguous", exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
         [Fact]
         public async Task Create_Throws_WhenNestedInsideExistingRoot()
         {
@@ -845,6 +885,57 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
             semanticsResolver.VerifyNoOtherCalls();
         }
 
+        [WindowsFact]
+        public async Task Delete_DeviceAliasAudiobookUnderRoot_RequiresReassignment()
+        {
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+            var physicalRoot = Path.Join(
+                Path.GetTempPath(),
+                $"delete-device-alias-root-{Guid.NewGuid():N}");
+            var physicalBookPath = Path.Join(physicalRoot, "Author", "Title");
+            Directory.CreateDirectory(physicalBookPath);
+            var deviceAliasBookPath = @"\\?\" + physicalBookPath;
+            var semantics = new FileSystemPathSemantics(
+                FileSystemPathSyntax.Windows,
+                FileSystemCaseSensitivity.Insensitive);
+
+            await using (var db = new ListenArrDbContext(options))
+            {
+                db.RootFolders.Add(new RootFolder
+                {
+                    Id = 1,
+                    Name = "Library",
+                    Path = physicalRoot,
+                    CaseSensitivityMode = FileSystemCaseSensitivityMode.Insensitive,
+                    ResolvedCaseSensitivity = FileSystemCaseSensitivity.Insensitive,
+                    PathIdentityState = PathIdentityState.Valid,
+                    PathIdentityKey = FileSystemPathIdentity.CreateKey(
+                        "root",
+                        physicalRoot,
+                        semantics)
+                });
+                db.Audiobooks.Add(new Audiobook
+                {
+                    Title = "Device Alias Book",
+                    BasePath = deviceAliasBookPath
+                });
+                await db.SaveChangesAsync();
+            }
+
+            var repo = new EfRootFolderRepository(
+                new TestDbFactory(options),
+                Mock.Of<ILogger<EfRootFolderRepository>>());
+            var service = new RootFolderService(repo, null!);
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.DeleteAsync(1));
+
+            Assert.Contains("in use", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.NotNull(await repo.GetByIdAsync(1));
+        }
+
         [Fact]
         public async Task Delete_Throws_WhenFilesystemRootHasChildAudiobookWithoutReassign()
         {
@@ -865,6 +956,86 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
             var service = new RootFolderService(repo, null!);
 
             await Assert.ThrowsAsync<InvalidOperationException>(() => service.DeleteAsync(root.Id));
+        }
+
+        [WindowsFact]
+        public async Task DeleteWithReassignment_DeviceAliasAudiobook_RequiresPathRepair()
+        {
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+            var physicalRoot = Path.Join(
+                Path.GetTempPath(),
+                $"reassign-device-alias-root-{Guid.NewGuid():N}");
+            var targetRootPath = Path.Join(
+                Path.GetTempPath(),
+                $"reassign-device-alias-target-{Guid.NewGuid():N}");
+            var physicalBookPath = Path.Join(physicalRoot, "Author", "Title");
+            Directory.CreateDirectory(physicalBookPath);
+            Directory.CreateDirectory(targetRootPath);
+            var deviceAliasBookPath = @"\\?\" + physicalBookPath;
+            var semantics = new FileSystemPathSemantics(
+                FileSystemPathSyntax.Windows,
+                FileSystemCaseSensitivity.Insensitive);
+            int sourceRootId;
+            int targetRootId;
+            int audiobookId;
+
+            await using (var db = new ListenArrDbContext(options))
+            {
+                var sourceRoot = new RootFolder
+                {
+                    Name = "Source",
+                    Path = physicalRoot,
+                    CaseSensitivityMode = FileSystemCaseSensitivityMode.Insensitive,
+                    ResolvedCaseSensitivity = FileSystemCaseSensitivity.Insensitive,
+                    PathIdentityState = PathIdentityState.Valid,
+                    PathIdentityKey = FileSystemPathIdentity.CreateKey(
+                        "root",
+                        physicalRoot,
+                        semantics)
+                };
+                var targetRoot = new RootFolder
+                {
+                    Name = "Target",
+                    Path = targetRootPath,
+                    CaseSensitivityMode = FileSystemCaseSensitivityMode.Insensitive,
+                    ResolvedCaseSensitivity = FileSystemCaseSensitivity.Insensitive,
+                    PathIdentityState = PathIdentityState.Valid,
+                    PathIdentityKey = FileSystemPathIdentity.CreateKey(
+                        "root",
+                        targetRootPath,
+                        semantics)
+                };
+                var audiobook = new Audiobook
+                {
+                    Title = "Device Alias Book",
+                    BasePath = deviceAliasBookPath
+                };
+                db.RootFolders.AddRange(sourceRoot, targetRoot);
+                db.Audiobooks.Add(audiobook);
+                await db.SaveChangesAsync();
+                sourceRootId = sourceRoot.Id;
+                targetRootId = targetRoot.Id;
+                audiobookId = audiobook.Id;
+            }
+
+            var repo = new EfRootFolderRepository(
+                new TestDbFactory(options),
+                Mock.Of<ILogger<EfRootFolderRepository>>());
+            var service = new RootFolderService(repo, null!);
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.DeleteAsync(sourceRootId, targetRootId));
+
+            Assert.Contains("repair", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.NotNull(await repo.GetByIdAsync(sourceRootId));
+            Assert.NotNull(await repo.GetByIdAsync(targetRootId));
+            await using var verification = new ListenArrDbContext(options);
+            Assert.Equal(
+                deviceAliasBookPath,
+                (await verification.Audiobooks
+                    .SingleAsync(candidate => candidate.Id == audiobookId)).BasePath);
         }
 
         [Fact]
@@ -1109,6 +1280,44 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
                 service.DeleteAsync(root.Id));
 
             Assert.Contains("unresolved move job", exception.Message, StringComparison.OrdinalIgnoreCase);
+            await using var verification = new ListenArrDbContext(options);
+            Assert.Single(verification.RootFolders);
+        }
+
+        [Fact]
+        public async Task Delete_AnonymousRegistrationRecoveryTouchesRoot_BlocksRemoval()
+        {
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+            var db = new ListenArrDbContext(options);
+            var root = new RootFolder { Name = "R", Path = rootPath };
+            db.RootFolders.Add(root);
+            await db.SaveChangesAsync();
+            var repo = new EfRootFolderRepository(
+                new TestDbFactory(options),
+                Mock.Of<ILogger<EfRootFolderRepository>>());
+            var moveQueue = new Mock<IMoveQueueService>();
+            moveQueue.Setup(queue => queue.GetFilesystemBlockingJobsAsync(
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync([]);
+            var registrationRecovery = new Mock<IFileRegistrationRecoveryProbe>();
+            registrationRecovery
+                .Setup(probe => probe.HasBlockingBoundaryAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<FileSystemPathSemantics>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
+            var service = new RootFolderService(
+                repo,
+                null!,
+                moveQueue.Object,
+                fileRegistrationRecoveryProbe: registrationRecovery.Object);
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.DeleteAsync(root.Id));
+
+            Assert.Contains("file-registration recovery", exception.Message, StringComparison.OrdinalIgnoreCase);
             await using var verification = new ListenArrDbContext(options);
             Assert.Single(verification.RootFolders);
         }
@@ -1412,7 +1621,8 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
             IRootFolderRelocationService? relocationService = null,
             IFilesystemMutationCoordinator? mutationCoordinator = null,
             IAudiobookOperationCoordinator? audiobookOperationCoordinator = null,
-            IDirectoryObjectIdentityResolver? directoryObjectIdentityResolver = null)
+            IDirectoryObjectIdentityResolver? directoryObjectIdentityResolver = null,
+            IFileRegistrationRecoveryProbe? fileRegistrationRecoveryProbe = null)
             : base(
                 repo,
                 logger,
@@ -1421,7 +1631,8 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
                 relocationService ?? Mock.Of<IRootFolderRelocationService>(),
                 mutationCoordinator ?? new FilesystemMutationCoordinator(),
                 audiobookOperationCoordinator ?? new AudiobookOperationCoordinator(),
-                directoryObjectIdentityResolver)
+                directoryObjectIdentityResolver,
+                fileRegistrationRecoveryProbe)
         {
         }
 

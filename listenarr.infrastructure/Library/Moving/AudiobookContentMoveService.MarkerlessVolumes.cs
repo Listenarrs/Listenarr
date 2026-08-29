@@ -1,8 +1,10 @@
+using Microsoft.Extensions.Logging;
+
 namespace Listenarr.Infrastructure.Library.Moving;
 
 internal sealed partial class AudiobookContentMoveService
 {
-    private void ValidateUnixMarkerlessMoveVolumes(
+    private bool IsUnixCrossVolumeMove(
         AudiobookContentMoveRequest request,
         string source,
         string target,
@@ -10,7 +12,7 @@ internal sealed partial class AudiobookContentMoveService
     {
         if (OperatingSystem.IsWindows())
         {
-            return;
+            return false;
         }
 
         foreach (var entry in files)
@@ -34,10 +36,16 @@ internal sealed partial class AudiobookContentMoveService
             var targetVolumeAnchor = FindNearestExistingTargetAncestor(
                 targetParentPath);
 
-            using var sourceParent = PinnedDirectoryCreation.OpenPinnedBoundary(
-                sourceParentPath);
-            using var targetParent = PinnedDirectoryCreation.OpenPinnedBoundary(
-                targetVolumeAnchor);
+            using var sourceParent = OpenPinnedMoveBoundaryDescendant(
+                request,
+                sourceParentPath,
+                request.SourceSemantics,
+                sourceBoundary: true);
+            using var targetParent = OpenPinnedMoveBoundaryDescendant(
+                request,
+                targetVolumeAnchor,
+                request.TargetSemantics,
+                sourceBoundary: false);
             using var sourceEntry = sourceParent.TryOpenExistingFile(
                 Path.GetFileName(sourcePath),
                 requireDeleteAccess: false);
@@ -45,21 +53,64 @@ internal sealed partial class AudiobookContentMoveService
                 && (faultInjector?.ForceCrossVolumeForTest == true
                     || !sourceEntry.IsOnSameVolume(targetParent)))
             {
-                throw new MoveNeedsAttentionException(
-                    "Unix cross-volume library moves are blocked because exact source-generation retirement would require a library-side namespace claim.");
+                return true;
             }
         }
+
+        return false;
+    }
+
+    private async Task<bool> CanDeleteVerifiedCrossVolumeSourceAsync(
+        AudiobookContentMoveRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request.SourceCleanupMode
+                != MoveSourceCleanupMode.DeleteAfterVerifiedCopy
+            || sourceCleanupPolicyResolver == null)
+        {
+            return false;
+        }
+
+        var authorization = new MoveSourceCleanupAuthorization(
+            request.SourceCleanupMode,
+            request.SourceRootFolderId,
+            request.SourcePolicyRevision,
+            request.TargetRootFolderId,
+            request.TargetPolicyRevision,
+            SourceIsManagedRoot: false,
+            Message: string.Empty,
+            SourceStorageContractRevision: request.SourceStorageContractRevision,
+            TargetStorageContractRevision: request.TargetStorageContractRevision);
+        var isCurrent = await sourceCleanupPolicyResolver.IsCurrentAsync(
+            authorization,
+            cancellationToken);
+        if (!isCurrent)
+        {
+            logger.LogInformation(
+                "Retaining source for move job {JobId} because its verified source-deletion policy authorization is no longer current",
+                request.JobId);
+        }
+        return isCurrent;
     }
 
     private static string FindNearestExistingTargetAncestor(string targetParentPath)
     {
         var current = Path.GetFullPath(targetParentPath);
-        while (!Directory.Exists(current))
+        while (true)
         {
-            if (File.Exists(current))
+            if (TryGetMarkerlessPathAttributes(current, out var attributes))
             {
-                throw new MoveNeedsAttentionException(
-                    "A markerless target ancestor is occupied by a file.");
+                if ((attributes & FileAttributes.Directory) == 0)
+                {
+                    throw new MoveNeedsAttentionException(
+                        "A markerless target ancestor is occupied by a file.");
+                }
+                if ((attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    throw new MoveNeedsAttentionException(
+                        "A markerless target ancestor became a link.");
+                }
+                break;
             }
 
             current = Path.GetDirectoryName(current)

@@ -58,6 +58,13 @@ namespace Listenarr.Infrastructure.Library.Files
             {
                 return Task.CompletedTask;
             }
+            if (!registrationLease.HasDurablePhysicalObjectIdentity)
+            {
+                _logger.LogDebug(
+                    "Skipped ASIN tag write for scan-only file {File} because the registration lease has no durable physical identity.",
+                    LogRedaction.SanitizeFilePath(registrationLease.PublicPath));
+                return Task.CompletedTask;
+            }
 
             try
             {

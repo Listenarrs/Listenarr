@@ -43,6 +43,48 @@ public sealed class MoveRecoveryPolicyTests : BaseTests
     }
 
     [Fact]
+    public void HasFilesystemExecutionEvidence_PlannedScaffoldingIsNotEvidence()
+    {
+        var job = CreateJob(
+            MoveJobStatus.Failed,
+            MoveJobPhase.Planned,
+            MoveFailureKind.Transient,
+            MoveJobEntryCopyState.Pending,
+            MoveJobEntryCleanupState.Pending);
+        job.CreatedDirectories =
+        [
+            new MoveJobCreatedDirectory
+            {
+                Path = job.RequestedPath!,
+                State = MoveCreatedDirectoryState.Planned
+            }
+        ];
+
+        Assert.False(MoveRecoveryPolicy.HasFilesystemExecutionEvidence(job));
+    }
+
+    [Fact]
+    public void HasFilesystemExecutionEvidence_RemovedScaffoldingIsEvidence()
+    {
+        var job = CreateJob(
+            MoveJobStatus.Failed,
+            MoveJobPhase.Planned,
+            MoveFailureKind.Transient,
+            MoveJobEntryCopyState.Pending,
+            MoveJobEntryCleanupState.Pending);
+        job.CreatedDirectories =
+        [
+            new MoveJobCreatedDirectory
+            {
+                Path = job.RequestedPath!,
+                State = MoveCreatedDirectoryState.Removed
+            }
+        ];
+
+        Assert.True(MoveRecoveryPolicy.HasFilesystemExecutionEvidence(job));
+    }
+
+    [Fact]
     public void ClassifyAudiobookJobs_MarkerlessNeedsAttentionUnknownWithCompletedRecoveryEvidence_IsRetryable()
     {
         var job = CreateJob(

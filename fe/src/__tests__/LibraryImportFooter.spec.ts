@@ -25,9 +25,10 @@ import type { SearchResult, RootFolder } from '@/types'
 
 const success = vi.fn()
 const error = vi.fn()
+const warning = vi.fn()
 
 vi.mock('@/services/toastService', () => ({
-  useToast: () => ({ success, error }),
+  useToast: () => ({ success, error, warning }),
 }))
 
 describe('LibraryImportFooter', () => {
@@ -160,5 +161,40 @@ describe('LibraryImportFooter', () => {
     expect(importButton.attributes('title')).toContain('filesystem initialization')
     await importButton.trigger('click')
     expect(importSelected).not.toHaveBeenCalled()
+  })
+
+  it('discloses copy-and-retain policy before a move from weak storage', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useLibraryImportStore()
+    store.action = 'move'
+
+    const wrapper = mount(LibraryImportFooter, {
+      props: {
+        folders: [
+          {
+            id: 1,
+            path: 'D:\\library',
+            canPublishNewFiles: true,
+            canMutateFilesystem: true,
+          },
+        ] as unknown as RootFolder[],
+        sourceFolder: {
+          id: 2,
+          path: '\\\\nas\\audiobooks',
+          canPublishNewFiles: true,
+          canMutateFilesystem: false,
+        } as unknown as RootFolder,
+      },
+      global: { plugins: [pinia] },
+    })
+
+    const policy = wrapper.get('[data-testid="move-policy-warning"]')
+    expect(policy.text()).toContain('Move will copy the selected files and retain the source')
+    expect(policy.text()).toContain('will not attempt source cleanup')
+
+    store.action = 'hardlink/copy'
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="move-policy-warning"]').exists()).toBe(false)
   })
 })

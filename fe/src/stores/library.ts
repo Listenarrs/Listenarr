@@ -80,12 +80,32 @@ export const useLibraryStore = defineStore('library', () => {
 
   async function removeFromLibrary(
     id: number,
-    options?: { deleteFiles?: boolean; deleteFolder?: boolean },
+    options?: {
+      deleteFiles?: boolean
+      deleteFolder?: boolean
+      retryAfterBlockedMutation?: (error: unknown) => Promise<boolean | 'cancel'>
+    },
   ) {
     const title = audiobooks.value.find((book) => book.id === id)?.title || `Audiobook ${id}`
     const operationId = deleteOperationsStore.beginSingle(id, title)
     try {
-      await apiService.removeFromLibrary(id, options)
+      const apiOptions = {
+        deleteFiles: options?.deleteFiles,
+        deleteFolder: options?.deleteFolder,
+      }
+      try {
+        await apiService.removeFromLibrary(id, apiOptions)
+      } catch (initialError: unknown) {
+        const retryDecision = options?.retryAfterBlockedMutation
+          ? await options.retryAfterBlockedMutation(initialError)
+          : false
+        if (retryDecision === 'cancel') {
+          deleteOperationsStore.cancelSingle(operationId)
+          return null
+        }
+        if (retryDecision !== true) throw initialError
+        await apiService.removeFromLibrary(id, apiOptions)
+      }
       deleteOperationsStore.completeSingle(operationId)
       // Remove from local state
       audiobooks.value = audiobooks.value.filter((book) => book.id !== id)

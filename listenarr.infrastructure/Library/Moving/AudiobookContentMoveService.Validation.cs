@@ -15,6 +15,7 @@ namespace Listenarr.Infrastructure.Library.Moving;
 internal sealed partial class AudiobookContentMoveService
 {
     private static void EnsureTargetCanReceiveContents(
+        AudiobookContentMoveRequest request,
         string source,
         string target,
         bool sourceInsideTarget,
@@ -27,7 +28,7 @@ internal sealed partial class AudiobookContentMoveService
             return;
         }
 
-        RevalidateTargetDirectoryOwnership(targetDirectoryOwnership);
+        RevalidateTargetDirectoryOwnership(request, targetDirectoryOwnership);
         // When moving a child folder back into its parent, the target necessarily contains
         // the source subtree. That subtree is not a collision because it is the content being moved.
         var targetHasBlockingContent = Directory

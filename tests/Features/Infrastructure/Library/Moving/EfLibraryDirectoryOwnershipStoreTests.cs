@@ -67,6 +67,46 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
         await base.DisposeAsync();
     }
 
+    [LinuxFact]
+    public async Task BoundaryAuthorizer_AmbiguousNestedConfiguredRoot_DoesNotFallBackToBroaderRootAuthority()
+    {
+        var innerRoot = Path.Join(_root, "Managed Inner");
+        var ownedPath = Path.Join(innerRoot, "Author");
+        Directory.CreateDirectory(ownedPath);
+        var ambiguousInnerRoot = "/" + innerRoot;
+        Assert.False(FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+            ambiguousInnerRoot,
+            out _));
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            db.RootFolders.Add(new RootFolder
+            {
+                Name = "Ambiguous nested root",
+                Path = ambiguousInnerRoot,
+                CaseSensitivityMode = FileSystemCaseSensitivityMode.Insensitive,
+                PathIdentityState = PathIdentityState.Unavailable,
+                DirectoryObjectIdentityUnavailableReason =
+                    "The nested root has ambiguous persisted filesystem identity."
+            });
+            await db.SaveChangesAsync();
+        }
+        var authorizer = new LibraryDirectoryOwnershipBoundaryAuthorizer(_factory);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            using var authorization = await authorizer.AuthorizeContainingRootAsync(
+                ownedPath,
+                FileSystemPathSemantics.CurrentHostDefault,
+                CancellationToken.None);
+        });
+
+        using var optionalAuthorization = await authorizer.TryAuthorizeContainingRootAsync(
+            ownedPath,
+            FileSystemPathSemantics.CurrentHostDefault,
+            CancellationToken.None);
+        Assert.Null(optionalAuthorization);
+    }
+
     [Fact]
     public async Task BoundaryAuthorizer_AuthorizedRootWithChangedFilesystemSemantics_IsRejectedUntilRepaired()
     {
@@ -92,6 +132,54 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
                 _root,
                 persisted,
                 CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ResolveOwnedAsync_TemporarilyUnavailableRootSemantics_PreservesTransientDisposition()
+    {
+        var directory = Path.Join(_root, "TransientSemantics");
+        Directory.CreateDirectory(directory);
+        var ownership = await _store.RecordCreatedAsync(
+            new LibraryDirectoryOwnershipClaim(
+                directory,
+                FileSystemPathSemantics.CurrentHostDefault,
+                "test"));
+        Assert.NotEqual(0, ownership.Id);
+
+        var semanticsResolver = new Mock<IFileSystemSemanticsResolver>(MockBehavior.Strict);
+        semanticsResolver.Setup(service => service.ResolveAsync(
+                _root,
+                It.IsAny<FileSystemCaseSensitivityMode>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(ValueTask.FromResult(new FileSystemSemanticsResolution(
+                new FileSystemPathSemantics(
+                    FileSystemPathSemantics.CurrentHostDefault.Syntax,
+                    FileSystemCaseSensitivity.Unknown),
+                PathIdentityState.Unavailable,
+                _root,
+                "Injected transient root semantics outage.",
+                _root)));
+        var authorizer = new LibraryDirectoryOwnershipBoundaryAuthorizer(
+            _factory,
+            semanticsResolver.Object);
+        var store = new EfLibraryDirectoryOwnershipStore(
+            _factory,
+            TimeProvider.System,
+            authorizer);
+
+        var resolution = await store.ResolveOwnedAsync(
+            directory,
+            FileSystemPathSemantics.CurrentHostDefault);
+
+        Assert.Equal(
+            LibraryDirectoryOwnershipResolutionState.Unavailable,
+            resolution.State);
+        Assert.True(resolution.IsTransient);
+        Assert.Contains(
+            "temporarily unavailable",
+            resolution.Reason,
+            StringComparison.OrdinalIgnoreCase);
+        semanticsResolver.VerifyAll();
     }
 
     [Fact]
@@ -262,6 +350,80 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
         Assert.Empty(Directory.EnumerateFileSystemEntries(directory));
         await using var db = await _factory.CreateDbContextAsync();
         Assert.Empty(await db.LibraryDirectoryOwnerships.ToListAsync());
+    }
+
+    [LinuxFact]
+    public async Task RecordCreatedAsync_PathReplacedAfterSaveBeforeCommit_DoesNotCommitOwnedAuthority()
+    {
+        var directory = Path.Join(_root, "ReplacedBeforeAtomicCommit");
+        var displaced = directory + ".original";
+        Directory.CreateDirectory(directory);
+        _store.BeforeOwnershipAtomicCommitForTest = () =>
+        {
+            Directory.Move(directory, displaced);
+            Directory.CreateDirectory(directory);
+        };
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _store.RecordCreatedAsync(
+                new LibraryDirectoryOwnershipClaim(
+                    directory,
+                    FileSystemPathSemantics.CurrentHostDefault,
+                    "test",
+                    Guid.NewGuid(),
+                    AudiobookId: 15)));
+
+        Assert.Contains(
+            "physical identity",
+            exception.Message,
+            StringComparison.OrdinalIgnoreCase);
+        await using var db = await _factory.CreateDbContextAsync();
+        Assert.Empty(await db.LibraryDirectoryOwnerships.ToListAsync());
+        Assert.True(Directory.Exists(displaced));
+        Assert.True(Directory.Exists(directory));
+    }
+
+    [LinuxFact]
+    public async Task RecordCreatedAsync_ReactivationPathReplacedAfterSave_RollsBackToUnavailable()
+    {
+        var directory = Path.Join(_root, "ReactivationReplacedBeforeCommit");
+        var displaced = directory + ".original";
+        Directory.CreateDirectory(directory);
+        var claim = new LibraryDirectoryOwnershipClaim(
+            directory,
+            FileSystemPathSemantics.CurrentHostDefault,
+            "test",
+            Guid.NewGuid(),
+            AudiobookId: 16);
+        var ownership = await _store.RecordCreatedAsync(claim);
+        var ownershipKey = Assert.IsType<string>(ownership.PathOwnershipKey);
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var persisted = await db.LibraryDirectoryOwnerships.SingleAsync(
+                candidate => candidate.Id == ownership.Id);
+            persisted.State = LibraryDirectoryOwnershipState.Unavailable;
+            persisted.DirectoryObjectIdentityUnavailableReason =
+                "Injected transient ownership outage.";
+            persisted.StateReason = "Injected transient ownership outage.";
+            await db.SaveChangesAsync();
+        }
+        _store.BeforeOwnershipAtomicCommitForTest = () =>
+        {
+            Directory.Move(directory, displaced);
+            Directory.CreateDirectory(directory);
+        };
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _store.RecordCreatedAsync(claim));
+
+        await using var verification = await _factory.CreateDbContextAsync();
+        var after = await verification.LibraryDirectoryOwnerships
+            .SingleAsync(candidate => candidate.Id == ownership.Id);
+        Assert.Equal(LibraryDirectoryOwnershipState.Unavailable, after.State);
+        Assert.Equal(ownershipKey, after.PathOwnershipKey);
+        Assert.NotNull(after.DirectoryObjectIdentityUnavailableReason);
+        Assert.True(Directory.Exists(displaced));
+        Assert.True(Directory.Exists(directory));
     }
 
     [Fact]
@@ -906,6 +1068,156 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
         Assert.True(Directory.Exists(displacedReplacement));
     }
 
+    [LinuxFact]
+    [System.Runtime.Versioning.SupportedOSPlatform("linux")]
+    public async Task MarkerlessReplacement_EquivalentPersistedLinuxIdentity_RetiresStaleOwnership()
+    {
+        var directory = Path.Join(_root, "MarkerlessReplacementEquivalentLinuxIdentity");
+        var displacedStale = directory + ".stale";
+        Directory.CreateDirectory(directory);
+        var stale = await _store.RecordCreatedAsync(
+            new LibraryDirectoryOwnershipClaim(
+                directory,
+                FileSystemPathSemantics.CurrentHostDefault,
+                "test-stale"));
+        Directory.Move(directory, displacedStale);
+        Directory.CreateDirectory(directory);
+
+        string replacementIdentity;
+        string persistedEquivalentIdentity;
+        using (var replacement = PinnedDirectoryCreation.OpenPinnedBoundary(directory))
+        {
+            replacementIdentity = replacement.GetDirectoryObjectIdentity();
+            persistedEquivalentIdentity = replacement
+                .GetDirectoryObjectIdentityCandidates()
+                .First(candidate =>
+                    !string.Equals(candidate, replacementIdentity, StringComparison.Ordinal)
+                    && PinnedDirectoryCreation.ArePersistedObjectIdentitiesDurablyEquivalent(
+                        candidate,
+                        replacementIdentity));
+        }
+
+        Guid moveJobId;
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var audiobook = new Audiobook
+            {
+                Title = "Markerless replacement compatible Linux identity",
+                BasePath = displacedStale
+            };
+            db.Audiobooks.Add(audiobook);
+            await db.SaveChangesAsync();
+            var move = new MoveJob
+            {
+                Id = Guid.NewGuid(),
+                AudiobookId = audiobook.Id,
+                SourcePath = displacedStale,
+                RequestedPath = directory,
+                ExecutionProtocolVersion = MoveExecutionProtocol.Current,
+                Status = MoveJobStatus.Running,
+                TargetDirectoryObjectIdentity = persistedEquivalentIdentity
+            };
+            move.CreatedDirectories.Add(new MoveJobCreatedDirectory
+            {
+                Path = directory,
+                State = MoveCreatedDirectoryState.Created,
+                DirectoryObjectIdentity = persistedEquivalentIdentity
+            });
+            db.MoveJobs.Add(move);
+            await db.SaveChangesAsync();
+            moveJobId = move.Id;
+        }
+
+        Assert.True(await _store.TryRetireReplacedByMarkerlessMoveAsync(
+            directory,
+            FileSystemPathSemantics.CurrentHostDefault,
+            moveJobId,
+            replacementIdentity));
+
+        await using var verification = await _factory.CreateDbContextAsync();
+        var retired = await verification.LibraryDirectoryOwnerships
+            .SingleAsync(candidate => candidate.Id == stale.Id);
+        Assert.Equal(LibraryDirectoryOwnershipState.Removed, retired.State);
+        Assert.Null(retired.PathOwnershipKey);
+        Assert.Null(retired.ManagedRootFolderId);
+    }
+
+    [LinuxFact]
+    [System.Runtime.Versioning.SupportedOSPlatform("linux")]
+    public async Task MarkerlessReplacement_PostCommitTemporaryOutage_PreservesCommittedRetirement()
+    {
+        var directory = Path.Join(_root, "MarkerlessReplacementPostCommitOutage");
+        var displacedStale = directory + ".stale";
+        Directory.CreateDirectory(directory);
+        var stale = await _store.RecordCreatedAsync(
+            new LibraryDirectoryOwnershipClaim(
+                directory,
+                FileSystemPathSemantics.CurrentHostDefault,
+                "test-stale"));
+        Directory.Move(directory, displacedStale);
+        Directory.CreateDirectory(directory);
+        string replacementIdentity;
+        using (var replacement = PinnedDirectoryCreation.OpenPinnedBoundary(directory))
+        {
+            replacementIdentity = replacement.GetDirectoryObjectIdentity();
+        }
+
+        Guid moveJobId;
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var audiobook = new Audiobook
+            {
+                Title = "Markerless replacement post-commit outage",
+                BasePath = displacedStale
+            };
+            db.Audiobooks.Add(audiobook);
+            await db.SaveChangesAsync();
+            var move = new MoveJob
+            {
+                Id = Guid.NewGuid(),
+                AudiobookId = audiobook.Id,
+                SourcePath = displacedStale,
+                RequestedPath = directory,
+                ExecutionProtocolVersion = MoveExecutionProtocol.Current,
+                Status = MoveJobStatus.Running,
+                TargetDirectoryObjectIdentity = replacementIdentity
+            };
+            move.CreatedDirectories.Add(new MoveJobCreatedDirectory
+            {
+                Path = directory,
+                State = MoveCreatedDirectoryState.Created,
+                DirectoryObjectIdentity = replacementIdentity
+            });
+            db.MoveJobs.Add(move);
+            await db.SaveChangesAsync();
+            moveJobId = move.Id;
+        }
+
+        var originalMode = File.GetUnixFileMode(_root);
+        _store.AfterMarkerlessReplacementCommitForTest = () =>
+            File.SetUnixFileMode(_root, UnixFileMode.None);
+        try
+        {
+            Assert.True(await _store.TryRetireReplacedByMarkerlessMoveAsync(
+                directory,
+                FileSystemPathSemantics.CurrentHostDefault,
+                moveJobId,
+                replacementIdentity));
+        }
+        finally
+        {
+            File.SetUnixFileMode(_root, originalMode);
+        }
+
+        await using var verification = await _factory.CreateDbContextAsync();
+        var retired = await verification.LibraryDirectoryOwnerships
+            .SingleAsync(candidate => candidate.Id == stale.Id);
+        Assert.Equal(LibraryDirectoryOwnershipState.Removed, retired.State);
+        Assert.Null(retired.PathOwnershipKey);
+        Assert.Null(retired.ManagedRootFolderId);
+        Assert.Null(retired.DirectoryObjectIdentityUnavailableReason);
+    }
+
     [Fact]
     public async Task MarkerlessReplacement_UnknownFutureProtocol_CannotRetireOwnership()
     {
@@ -1011,6 +1323,114 @@ public sealed class EfLibraryDirectoryOwnershipStoreTests : BaseTests
         Assert.Equal(ownershipKey, recovered.PathOwnershipKey);
         Assert.Null(recovered.DirectoryObjectIdentityUnavailableReason);
         Assert.Null(recovered.StateReason);
+    }
+
+    [LinuxFact]
+    public async Task Reconciler_UnavailableOwnershipReplacedAfterSave_DoesNotRestoreOwnedAuthority()
+    {
+        var directory = Path.Join(_root, "UnavailableAuthorityRace");
+        var displaced = directory + ".displaced";
+        Directory.CreateDirectory(directory);
+        var ownership = await _store.RecordCreatedAsync(
+            new LibraryDirectoryOwnershipClaim(
+                directory,
+                FileSystemPathSemantics.CurrentHostDefault,
+                "test"));
+        var ownershipKey = Assert.IsType<string>(ownership.PathOwnershipKey);
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var persisted = await db.LibraryDirectoryOwnerships
+                .SingleAsync(candidate => candidate.Id == ownership.Id);
+            persisted.State = LibraryDirectoryOwnershipState.Unavailable;
+            persisted.DirectoryObjectIdentityUnavailableReason =
+                "Injected unavailable ownership state.";
+            persisted.StateReason = "Injected unavailable ownership state.";
+            await db.SaveChangesAsync();
+        }
+
+        var hookRan = false;
+        var reconciler = new LibraryDirectoryOwnershipReconciler(
+            _factory,
+            new LibraryDirectoryOwnershipBoundaryAuthorizer(_factory),
+            new FilesystemMutationCoordinator(),
+            NullLogger<LibraryDirectoryOwnershipReconciler>.Instance)
+        {
+            AfterOwnershipAuthoritySavedForTest = _ =>
+            {
+                hookRan = true;
+                Directory.Move(directory, displaced);
+                Directory.CreateDirectory(directory);
+            }
+        };
+
+        await reconciler.ReconcileAsync();
+
+        Assert.True(hookRan);
+        Assert.True(Directory.Exists(displaced));
+        Assert.True(Directory.Exists(directory));
+        await using var verification = await _factory.CreateDbContextAsync();
+        var result = await verification.LibraryDirectoryOwnerships
+            .SingleAsync(candidate => candidate.Id == ownership.Id);
+        Assert.Equal(LibraryDirectoryOwnershipState.Unavailable, result.State);
+        Assert.Equal(ownershipKey, result.PathOwnershipKey);
+        Assert.False(string.IsNullOrWhiteSpace(
+            result.DirectoryObjectIdentityUnavailableReason));
+    }
+
+    [LinuxFact]
+    public async Task Reconciler_RemovingDirectoryParentReplacedAfterMissingObservation_DoesNotMarkRemoved()
+    {
+        var directory = Path.Join(_root, "ParentReplacementRemoval");
+        Directory.CreateDirectory(directory);
+        var ownership = await _store.RecordCreatedAsync(
+            new LibraryDirectoryOwnershipClaim(
+                directory,
+                FileSystemPathSemantics.CurrentHostDefault,
+                "test"));
+        var ownershipKey = Assert.IsType<string>(ownership.PathOwnershipKey);
+        await _store.BeginRemovalAsync(ownership.Id, ownershipKey);
+        Directory.Delete(directory);
+        var displacedRoot = _root + ".displaced";
+        var hookRan = false;
+        var reconciler = new LibraryDirectoryOwnershipReconciler(
+            _factory,
+            new LibraryDirectoryOwnershipBoundaryAuthorizer(_factory),
+            new FilesystemMutationCoordinator(),
+            NullLogger<LibraryDirectoryOwnershipReconciler>.Instance)
+        {
+            AfterRemovingDirectoryObservedMissingForTest = _ =>
+            {
+                hookRan = true;
+                Directory.Move(_root, displacedRoot);
+                Directory.CreateDirectory(_root);
+                Directory.CreateDirectory(directory);
+            }
+        };
+
+        try
+        {
+            await reconciler.ReconcileAsync();
+
+            Assert.True(hookRan);
+            Assert.True(Directory.Exists(directory));
+            await using var verification = await _factory.CreateDbContextAsync();
+            var persisted = await verification.LibraryDirectoryOwnerships.SingleAsync();
+            Assert.Equal(LibraryDirectoryOwnershipState.Removing, persisted.State);
+            Assert.Equal(ownershipKey, persisted.PathOwnershipKey);
+            Assert.False(string.IsNullOrWhiteSpace(
+                persisted.DirectoryObjectIdentityUnavailableReason));
+        }
+        finally
+        {
+            if (Directory.Exists(_root))
+            {
+                Directory.Delete(_root, recursive: true);
+            }
+            if (Directory.Exists(displacedRoot))
+            {
+                Directory.Move(displacedRoot, _root);
+            }
+        }
     }
 
     [Fact]

@@ -18,6 +18,12 @@ internal sealed partial class EfMoveExecutionStore
             boundaryPath,
             requestedMode,
             cancellationToken);
+        if (resolution.State == PathIdentityState.Unavailable)
+        {
+            throw new IOException(
+                resolution.Reason
+                    ?? $"The move {description} filesystem semantics are temporarily unavailable.");
+        }
         if (resolution.State != PathIdentityState.Valid
             || resolution.Semantics.Syntax != expectedSemantics.Syntax
             || resolution.Semantics.CaseSensitivity != expectedSemantics.CaseSensitivity)
@@ -118,20 +124,31 @@ internal sealed partial class EfMoveExecutionStore
             cancellationToken.ThrowIfCancellationRequested();
             if (!string.IsNullOrWhiteSpace(
                     relocation.TargetDirectoryObjectIdentityUnavailableReason)
-                || !ManagedDirectoryIdentity.MatchesNativeIdentity(
+                || !root.MatchesManagedDirectoryIdentity(
                     relocation.TargetDirectoryObjectIdentityVersion,
-                    relocation.TargetDirectoryObjectIdentity,
-                    root.GetDirectoryObjectIdentity())
-                || !root.VisiblePathMatches())
+                    relocation.TargetDirectoryObjectIdentity)
+                || !BoundaryVisibilityMatchesOrThrowUnavailable(
+                    root,
+                    "The relocation target is temporarily unavailable while its authorized physical generation is being verified."))
             {
                 throw new InvalidOperationException(
                     "The relocation target no longer identifies its authorized physical generation.");
             }
         }
+        catch (Exception exception) when (
+            FileSystemSafety.IsProvenMissingPathException(exception))
+        {
+            throw new MoveNeedsAttentionException(
+                $"The relocation target physical generation is no longer authorized: {exception.Message}");
+        }
         catch (Exception exception) when (exception is
             IOException or UnauthorizedAccessException
-                or InvalidOperationException or NotSupportedException
                 or System.ComponentModel.Win32Exception)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is
+            InvalidOperationException or NotSupportedException)
         {
             throw new MoveNeedsAttentionException(
                 $"The relocation target physical generation is no longer authorized: {exception.Message}");
@@ -173,30 +190,36 @@ internal sealed partial class EfMoveExecutionStore
             using var boundary = PinnedDirectoryCreation.OpenPinnedBoundary(
                 targetBoundary);
             cancellationToken.ThrowIfCancellationRequested();
-            var nativeIdentity = boundary.GetDirectoryObjectIdentity();
+            var nativeIdentities = boundary.GetDirectoryObjectIdentityCandidates();
             var currentVersion = (int)authorizationEntries[0].Length;
-            var currentValue = ManagedDirectoryIdentity.CreateMarkerless(nativeIdentity);
-            var currentDigest = MoveManifestIdentity.ComputeTargetBoundaryAuthorizationDigest(
-                currentVersion,
-                currentValue);
-            if (!string.Equals(
-                    currentDigest,
-                    expectedDigest,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                currentDigest = await TryResolveConfiguredRootBoundaryDigestAsync(
-                        db,
-                        targetBoundary,
-                        nativeIdentity,
+            var currentDigests = nativeIdentities
+                .Select(nativeIdentity =>
+                    MoveManifestIdentity.ComputeTargetBoundaryAuthorizationDigest(
                         currentVersion,
-                        cancellationToken)
-                    ?? currentDigest;
-            }
-            if (!string.Equals(
+                        ManagedDirectoryIdentity.CreateMarkerless(nativeIdentity)))
+                .ToArray();
+            var matchesCurrentIdentity = currentDigests.Any(currentDigest =>
+                string.Equals(
                     currentDigest,
                     expectedDigest,
-                    StringComparison.OrdinalIgnoreCase)
-                || !boundary.VisiblePathMatches())
+                    StringComparison.OrdinalIgnoreCase));
+            if (!matchesCurrentIdentity)
+            {
+                var configuredRootDigest = await TryResolveConfiguredRootBoundaryDigestAsync(
+                    db,
+                    targetBoundary,
+                    nativeIdentities,
+                    currentVersion,
+                    cancellationToken);
+                matchesCurrentIdentity = string.Equals(
+                    configuredRootDigest,
+                    expectedDigest,
+                    StringComparison.OrdinalIgnoreCase);
+            }
+            if (!matchesCurrentIdentity
+                || !BoundaryVisibilityMatchesOrThrowUnavailable(
+                    boundary,
+                    "The move target boundary is temporarily unavailable while its authorized physical generation is being verified."))
             {
                 throw new MoveNeedsAttentionException(
                     "The move target boundary no longer identifies its authorized physical generation.");
@@ -206,20 +229,43 @@ internal sealed partial class EfMoveExecutionStore
         {
             throw;
         }
+        catch (Exception exception) when (
+            FileSystemSafety.IsProvenMissingPathException(exception))
+        {
+            throw new MoveNeedsAttentionException(
+                $"The move target boundary physical generation is unavailable: {exception.Message}");
+        }
         catch (Exception exception) when (exception is
             IOException or UnauthorizedAccessException
-                or InvalidOperationException or NotSupportedException
                 or System.ComponentModel.Win32Exception)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is
+            InvalidOperationException or NotSupportedException)
         {
             throw new MoveNeedsAttentionException(
                 $"The move target boundary physical generation is unavailable: {exception.Message}");
         }
     }
 
+    private static bool BoundaryVisibilityMatchesOrThrowUnavailable(
+        PinnedDirectoryCreation.PinnedDirectoryAnchor boundary,
+        string unavailableMessage)
+    {
+        var visibility = boundary.ProbeVisiblePathMatch();
+        if (visibility == RegistrationPublicationMatchOutcome.Unavailable)
+        {
+            throw new IOException(unavailableMessage);
+        }
+
+        return visibility == RegistrationPublicationMatchOutcome.Match;
+    }
+
     private static async Task<string?> TryResolveConfiguredRootBoundaryDigestAsync(
         ListenArrDbContext db,
         string targetBoundary,
-        string nativeIdentity,
+        IReadOnlyList<string> nativeIdentities,
         int expectedVersion,
         CancellationToken cancellationToken)
     {
@@ -232,10 +278,11 @@ internal sealed partial class EfMoveExecutionStore
             if (persisted == null
                 || root.DirectoryObjectIdentityVersion != expectedVersion
                 || string.IsNullOrWhiteSpace(root.DirectoryObjectIdentity)
-                || !ManagedDirectoryIdentity.MatchesNativeIdentity(
-                    root.DirectoryObjectIdentityVersion,
-                    root.DirectoryObjectIdentity,
-                    nativeIdentity))
+                || !nativeIdentities.Any(nativeIdentity =>
+                    ManagedDirectoryIdentity.MatchesNativeIdentity(
+                        root.DirectoryObjectIdentityVersion,
+                        root.DirectoryObjectIdentity,
+                        nativeIdentity)))
             {
                 continue;
             }

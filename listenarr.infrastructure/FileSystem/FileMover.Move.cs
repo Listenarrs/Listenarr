@@ -95,6 +95,14 @@ namespace Listenarr.Infrastructure.FileSystem
                     return false;
                 }
             }
+            if (await IsNewMutationBlockedByCapabilityAsync(
+                    FileAction.Move,
+                    source,
+                    destination,
+                    operationId))
+            {
+                return false;
+            }
 
             var markerlessResult =
                 await TryMoveFilePreservingPhysicalIdentityMarkerlessAsync(
@@ -123,7 +131,8 @@ namespace Listenarr.Infrastructure.FileSystem
             string destFile,
             Guid operationId,
             int? audiobookId = null,
-            int? audiobookFileId = null)
+            int? audiobookFileId = null,
+            FilePublicationSourceProof? expectedSourceProof = null)
         {
             if (operationId == Guid.Empty)
             {
@@ -142,13 +151,22 @@ namespace Listenarr.Infrastructure.FileSystem
             {
                 return true;
             }
+            if (await IsNewMutationBlockedByCapabilityAsync(
+                    FileAction.Move,
+                    sourceFile,
+                    destFile,
+                    operationId))
+            {
+                return false;
+            }
 
             var markerlessResult = await TryMoveFileMarkerlessAsync(
                 sourceFile,
                 destFile,
                 operationId,
                 audiobookId,
-                audiobookFileId);
+                audiobookFileId,
+                expectedSourceProof);
             if (markerlessResult.HasValue)
             {
                 return markerlessResult.Value;

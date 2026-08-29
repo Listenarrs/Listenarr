@@ -230,6 +230,27 @@ public sealed class BackendArchitectureTests : BaseTests
     }
 
     [Fact]
+    public void FileSystemSemanticsResolverContract_RequiresExplicitCaseSensitivityMode()
+    {
+        foreach (var contractType in new[]
+        {
+            typeof(IFileSystemSemanticsResolver),
+            typeof(FileSystemSemanticsResolver)
+        })
+        {
+            var methods = contractType.GetMethods()
+                .Where(method => method.Name == nameof(IFileSystemSemanticsResolver.ResolveAsync))
+                .ToArray();
+            var method = Assert.Single(methods);
+            var parameters = method.GetParameters();
+            Assert.Equal(3, parameters.Length);
+            Assert.Equal(typeof(FileSystemCaseSensitivityMode), parameters[1].ParameterType);
+            Assert.False(parameters[1].IsOptional);
+            Assert.False(parameters[1].HasDefaultValue);
+        }
+    }
+
+    [Fact]
     public void RootFolderController_DoesNotUseGenericEnumParsingForPublicRequestValues()
     {
         var controllerPath = Path.Join(
@@ -1062,7 +1083,7 @@ public sealed class BackendArchitectureTests : BaseTests
     }
 
     [Fact]
-    public void LibraryFilesystem_HasNoListenarrScratchNamespaceProtocol()
+    public void LibraryFilesystem_OnlyUsesAuditedCompatibilityQuarantineNamespace()
     {
         var productionRoots = new[]
         {
@@ -1077,6 +1098,11 @@ public sealed class BackendArchitectureTests : BaseTests
             "entry.claim"
         };
 
+        var allowedQuarantineFiles = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "listenarr.infrastructure/FileSystem/CompatibilitySourceCleanupCoordinator.cs",
+            "listenarr.infrastructure/Library/Scanning/ScanFileDiscovery.Enumeration.cs"
+        };
         var violations = productionRoots
             .SelectMany(root => Directory.EnumerateFiles(
                 root,
@@ -1089,7 +1115,12 @@ public sealed class BackendArchitectureTests : BaseTests
                 Source = File.ReadAllText(file)
             })
             .SelectMany(candidate => forbidden
-                .Where(token => candidate.Source.Contains(token, StringComparison.Ordinal))
+                .Where(token => candidate.Source.Contains(token, StringComparison.Ordinal)
+                    && !(token == ".listenarr-"
+                        && allowedQuarantineFiles.Contains(candidate.File)
+                        && candidate.Source.Contains(
+                            ".listenarr-quarantine-",
+                            StringComparison.Ordinal)))
                 .Select(token => $"{candidate.File}: {token}"))
             .ToList();
 

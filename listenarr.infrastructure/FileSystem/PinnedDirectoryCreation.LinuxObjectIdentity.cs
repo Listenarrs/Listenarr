@@ -8,6 +8,8 @@ internal sealed partial class PinnedDirectoryCreation
 {
     private const int LinuxAtHandleFid = 0x0200;
     private const int LinuxAtEmptyPath = 0x1000;
+    private const int LinuxOperationNotPermitted = 1;
+    private const int LinuxPermissionDenied = 13;
     private const int LinuxInvalidArgument = 22;
     private const int LinuxNotTy = 25;
     private const int LinuxFunctionNotImplemented = 38;
@@ -19,24 +21,35 @@ internal sealed partial class PinnedDirectoryCreation
     private const ulong LinuxFsIocGetVersion64 = 0x80087601;
     private const ulong LinuxFsIocGetVersion32 = 0x80047601;
 
-    private static string? TryGetLinuxGenerationIdentity(
+    private static IReadOnlyList<string> GetLinuxGenerationIdentityCandidates(
         SafeFileHandle handle)
     {
+        var candidates = new List<string>(2);
         var fileHandle = TryGetLinuxFileHandleIdentity(
             handle,
             LinuxAtEmptyPath | LinuxAtHandleFid,
             retryWithoutHandleFid: true);
         if (!string.IsNullOrWhiteSpace(fileHandle))
         {
-            return $"fh:{fileHandle}";
+            candidates.Add($"fh:{fileHandle}");
         }
 
-        if (TryGetLinuxInodeGeneration(handle, out var generation))
+        try
         {
-            return FormattableString.Invariant($"gen:{generation:x8}");
+            if (TryGetLinuxInodeGeneration(handle, out var generation))
+            {
+                candidates.Add(FormattableString.Invariant($"gen:{generation:x8}"));
+            }
+        }
+        catch (Win32Exception) when (candidates.Count > 0)
+        {
+            // A second, supplementary capability failing unexpectedly must not
+            // invalidate a strong identity already obtained from this pinned
+            // object. Persisted identities that require the failed scheme will
+            // still fail closed because their candidate will be absent.
         }
 
-        return null;
+        return candidates;
     }
 
     private static string? TryGetLinuxFileHandleIdentity(
@@ -98,11 +111,8 @@ internal sealed partial class PinnedDirectoryCreation
                         retryWithoutHandleFid: false);
                 }
 
-                if (error is LinuxInvalidArgument
-                    or LinuxNotTy
-                    or LinuxFunctionNotImplemented
-                    or LinuxOverflow
-                    or LinuxOperationNotSupported)
+                if (IsUnavailableLinuxGenerationProbeError(error)
+                    || error == LinuxOverflow)
                 {
                     return null;
                 }
@@ -123,29 +133,49 @@ internal sealed partial class PinnedDirectoryCreation
         out uint generation)
     {
         generation = 0;
-        var request = IntPtr.Size == sizeof(long)
-            ? LinuxFsIocGetVersion64
-            : LinuxFsIocGetVersion32;
-        if (IoctlGetVersion(
-                handle.DangerousGetHandle().ToInt32(),
-                request,
-                out var rawGeneration) == 0)
+        var fileDescriptor = handle.DangerousGetHandle().ToInt32();
+        int result;
+        if (IntPtr.Size == sizeof(long))
         {
-            generation = unchecked((uint)rawGeneration);
-            return true;
+            result = IoctlGetVersion64(
+                fileDescriptor,
+                LinuxFsIocGetVersion64,
+                out var rawGeneration);
+            if (result == 0)
+            {
+                generation = unchecked((uint)rawGeneration);
+                return true;
+            }
+        }
+        else
+        {
+            result = IoctlGetVersion32(
+                fileDescriptor,
+                LinuxFsIocGetVersion32,
+                out var rawGeneration);
+            if (result == 0)
+            {
+                generation = unchecked((uint)rawGeneration);
+                return true;
+            }
         }
 
         var error = Marshal.GetLastWin32Error();
-        if (error is LinuxInvalidArgument
-            or LinuxNotTy
-            or LinuxFunctionNotImplemented
-            or LinuxOperationNotSupported)
+        if (IsUnavailableLinuxGenerationProbeError(error))
         {
             return false;
         }
 
         throw new Win32Exception(error);
     }
+
+    internal static bool IsUnavailableLinuxGenerationProbeError(int error) =>
+        error is LinuxOperationNotPermitted
+            or LinuxPermissionDenied
+            or LinuxInvalidArgument
+            or LinuxNotTy
+            or LinuxFunctionNotImplemented
+            or LinuxOperationNotSupported;
 
     [DllImport("libc", EntryPoint = "name_to_handle_at", SetLastError = true)]
     private static extern int NameToHandleAt(
@@ -156,7 +186,13 @@ internal sealed partial class PinnedDirectoryCreation
         int flags);
 
     [DllImport("libc", EntryPoint = "ioctl", SetLastError = true)]
-    private static extern int IoctlGetVersion(
+    private static extern int IoctlGetVersion64(
+        int fileDescriptor,
+        ulong request,
+        out long version);
+
+    [DllImport("libc", EntryPoint = "ioctl", SetLastError = true)]
+    private static extern int IoctlGetVersion32(
         int fileDescriptor,
         ulong request,
         out int version);

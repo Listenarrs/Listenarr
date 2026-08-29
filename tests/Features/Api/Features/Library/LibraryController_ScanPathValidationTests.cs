@@ -397,11 +397,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             var tempRoot = FileService.GetTempDirectory("listenarr-queued-scan-root");
             var outside = FileService.GetTempDirectory("listenarr-queued-scan-outside");
             var controller = _provider.GetRequiredService<LibraryController>();
-            await _rootFolderRepository.AddAsync(new RootFolder
-            {
-                Name = "root",
-                Path = tempRoot
-            });
+            await AddAuthorizedRootAsync(tempRoot, "root");
             await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
                 .WithOutputPath(tempRoot)
                 .Build());
@@ -457,11 +453,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             var bookRoot = FileService.GetTempDirectory("listenarr-scan-existing-book");
             var outside = FileService.GetTempDirectory("listenarr-scan-existing-outside");
             var controller = _provider.GetRequiredService<LibraryController>();
-            await _rootFolderRepository.AddAsync(new RootFolder
-            {
-                Name = "root",
-                Path = tempRoot
-            });
+            await AddAuthorizedRootAsync(tempRoot, "root");
             await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
                 .WithOutputPath(tempRoot)
                 .Build());
@@ -487,7 +479,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             var other = FileService.GetTempDirectory("listenarr-other");
             Init(services => services.Without<IScanQueueService>());
             var controller = _provider.GetRequiredService<LibraryController>();
-            await _rootFolderRepository.AddAsync(new RootFolder { Name = "root", Path = tempRoot });
+            await AddAuthorizedRootAsync(tempRoot, "root");
             await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder().WithOutputPath(Path.Join(FileService.GetTempPath(), "different-root")).Build());
             var ab = await _audiobookRepository.AddAsync(new AudiobookBuilder().WithTitle("Test").Build());
             var result = await controller.ScanAudiobookFiles(ab.Id, new LibraryController.ScanRequest { Path = other });

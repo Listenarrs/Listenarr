@@ -176,7 +176,7 @@ public sealed class MoveScanHandoffRecoveryServiceTests : BaseTests
             .SingleAsync(candidate => candidate.Id == handoff.Id);
         Assert.Equal(MoveScanHandoffStatus.Pending, persisted.Status);
         Assert.Contains(
-            "physical generation",
+            "physical identity",
             persisted.LastError ?? string.Empty,
             StringComparison.OrdinalIgnoreCase);
         Assert.Equal(

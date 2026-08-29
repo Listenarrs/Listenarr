@@ -9,6 +9,10 @@ public sealed class FileMutationJournalConfiguration :
     public void Configure(EntityTypeBuilder<FileMutationJournal> builder)
     {
         builder.ToTable("FileMutationJournals");
+        // Keep the database fallback at protocol v1. Application-created journals
+        // explicitly carry FileMutationProtocol.Current via the entity initializer;
+        // a raw/legacy insert must not acquire parent-generation authority merely
+        // because it omitted the protocol column.
         builder.Property(journal => journal.ProtocolVersion)
             .HasDefaultValue(FileMutationProtocol.MarkerlessDatabaseState);
         builder.Property(journal => journal.Action)
@@ -19,6 +23,10 @@ public sealed class FileMutationJournalConfiguration :
             .HasMaxLength(32);
         builder.Property(journal => journal.SourcePath).HasMaxLength(4096);
         builder.Property(journal => journal.DestinationPath).HasMaxLength(4096);
+        builder.Property(journal => journal.SourceParentDirectoryObjectIdentity)
+            .HasMaxLength(512);
+        builder.Property(journal => journal.DestinationParentDirectoryObjectIdentity)
+            .HasMaxLength(512);
         builder.Property(journal => journal.SourcePhysicalObjectIdentity)
             .HasMaxLength(512);
         builder.Property(journal => journal.TargetPhysicalObjectIdentity)

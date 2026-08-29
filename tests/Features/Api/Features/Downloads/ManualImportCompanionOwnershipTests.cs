@@ -69,6 +69,17 @@ public sealed class ManualImportCompanionOwnershipTests : BaseTests
         }
 
         var mover = new Mock<IFileMover>(MockBehavior.Strict);
+        var sourceCapability = new Mock<IFilePublicationSourceCapability>(MockBehavior.Strict);
+        sourceCapability
+            .Setup(service => service.CheckAsync(
+                companionSource,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(
+                FilePublicationSourceCapabilityResult.SupportedForProof(
+                    new FilePublicationSourceProof(
+                        "test-source-generation",
+                        1,
+                        new string('A', 64))));
         var ownershipStore = new Mock<ILibraryDirectoryOwnershipStore>(MockBehavior.Strict);
         ownershipStore
             .Setup(store => store.EnsureCreatedHierarchyAsync(
@@ -85,15 +96,17 @@ public sealed class ManualImportCompanionOwnershipTests : BaseTests
         var importer = new ManualImportCompanionImporter(
             metadataService.Object,
             mover.Object,
+            sourceCapability.Object,
             new LocalFileSystem(),
-            semanticsResolver,
             ownershipStore.Object,
             NullLogger<ManualImportCompanionImporter>.Instance,
             fileService);
         var tracker = new ManualImportDestinationTracker(
             new LocalFileSystem(),
-            semanticsResolver);
+            Mock.Of<IFilePublicationSourceCapability>());
         var sourceResolution = await semanticsResolver.ResolveAsync(sourceDirectory);
+        var destinationResolution = await semanticsResolver.ResolveAsync(
+            Path.GetDirectoryName(selectedDestination)!);
         var selectedProfiles = new[]
         {
             FileUtils.CreateAudioMatchProfile(selectedSource, metadata)
@@ -125,17 +138,25 @@ public sealed class ManualImportCompanionOwnershipTests : BaseTests
             selectedProfiles,
             tracker,
             sourceResolution.Semantics,
+            new Dictionary<int, FileSystemSemanticsResolution>
+            {
+                [targetAudiobook.Id] = destinationResolution
+            },
             importBlacklist: []);
 
         Assert.Equal(0, imported);
         Assert.True(File.Exists(companionSource));
         Assert.False(File.Exists(companionDestination));
         mover.Verify(
-            service => service.PerformActionOn(
-                It.IsAny<FileAction>(),
+            service => service.PrepareActionForRegistrationDetailedAsync(
+                It.IsAny<FilePublicationPlan>(),
                 It.IsAny<string>(),
                 It.IsAny<string>(),
-                It.IsAny<Guid>()),
+                It.IsAny<Guid>(),
+                It.IsAny<string?>(),
+                It.IsAny<FilePublicationSourceProof>(),
+                It.IsAny<bool>(),
+                It.IsAny<int?>()),
             Times.Never);
     }
 }

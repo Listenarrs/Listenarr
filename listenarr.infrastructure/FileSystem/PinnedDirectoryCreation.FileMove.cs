@@ -1,6 +1,4 @@
 using System.ComponentModel;
-using System.Runtime.InteropServices;
-using System.Security.Cryptography;
 
 namespace Listenarr.Infrastructure.FileSystem;
 
@@ -25,12 +23,18 @@ internal sealed partial class PinnedDirectoryCreation
                 handle,
                 fullPath,
                 followVisibleFinalLink: false);
-            if (anchor.VisiblePathMatches())
+            var visibility = anchor.ProbeVisiblePathMatch();
+            if (visibility == RegistrationPublicationMatchOutcome.Match)
             {
                 return anchor;
             }
 
             anchor.Dispose();
+            if (visibility == RegistrationPublicationMatchOutcome.Unavailable)
+            {
+                throw new IOException(
+                    "The directory is temporarily unavailable while it is being pinned without following links.");
+            }
             throw new InvalidOperationException(
                 "The directory changed while it was being pinned without following links.");
         }
@@ -65,12 +69,18 @@ internal sealed partial class PinnedDirectoryCreation
                 FullPath,
                 fileName,
                 _followVisibleFinalLink);
-            if (entry.VisiblePathMatches())
+            var visibility = entry.ProbeVisiblePathMatch();
+            if (visibility == RegistrationPublicationMatchOutcome.Match)
             {
                 return entry;
             }
 
             entry.Dispose();
+            if (visibility == RegistrationPublicationMatchOutcome.Unavailable)
+            {
+                throw new IOException(
+                    "The file is temporarily unavailable while it is being opened beneath its pinned parent.");
+            }
             throw new InvalidOperationException(
                 "The file changed while it was being opened beneath its pinned parent.");
         }
@@ -95,12 +105,18 @@ internal sealed partial class PinnedDirectoryCreation
                 FullPath,
                 fileName,
                 _followVisibleFinalLink);
-            if (entry.VisiblePathMatches())
+            var visibility = entry.ProbeVisiblePathMatch();
+            if (visibility == RegistrationPublicationMatchOutcome.Match)
             {
                 return entry;
             }
 
             entry.Dispose();
+            if (visibility == RegistrationPublicationMatchOutcome.Unavailable)
+            {
+                throw new IOException(
+                    "The file is temporarily unavailable while it is being opened for stable metadata extraction.");
+            }
             throw new InvalidOperationException(
                 "The file changed while it was being opened for stable metadata extraction.");
         }
@@ -125,12 +141,18 @@ internal sealed partial class PinnedDirectoryCreation
                 FullPath,
                 fileName,
                 _followVisibleFinalLink);
-            if (entry.VisiblePathMatches())
+            var visibility = entry.ProbeVisiblePathMatch();
+            if (visibility == RegistrationPublicationMatchOutcome.Match)
             {
                 return entry;
             }
 
             entry.Dispose();
+            if (visibility == RegistrationPublicationMatchOutcome.Unavailable)
+            {
+                throw new IOException(
+                    "The file is temporarily unavailable while it is being opened for stable retirement.");
+            }
             throw new InvalidOperationException(
                 "The file changed while it was being opened for stable retirement.");
         }
@@ -144,7 +166,7 @@ internal sealed partial class PinnedDirectoryCreation
                 return OpenExistingFile(fileName, requireDeleteAccess);
             }
             catch (Win32Exception exception) when (
-                exception.NativeErrorCode is 2 or 3 or 32)
+                exception.NativeErrorCode is 2 or 3)
             {
                 return null;
             }
@@ -166,12 +188,18 @@ internal sealed partial class PinnedDirectoryCreation
                 FullPath,
                 fileName,
                 _followVisibleFinalLink);
-            if (entry.VisiblePathMatches())
+            var visibility = entry.ProbeVisiblePathMatch();
+            if (visibility == RegistrationPublicationMatchOutcome.Match)
             {
                 return entry;
             }
 
             entry.Dispose();
+            if (visibility == RegistrationPublicationMatchOutcome.Unavailable)
+            {
+                throw new IOException(
+                    "The newly created file is temporarily unavailable beneath its pinned parent.");
+            }
             throw new InvalidOperationException(
                 "The newly created file changed beneath its pinned parent.");
         }
@@ -215,7 +243,10 @@ internal sealed partial class PinnedDirectoryCreation
                 asynchronous);
         }
 
-        internal bool VisiblePathMatches()
+        internal bool VisiblePathMatches() =>
+            ProbeVisiblePathMatch() == RegistrationPublicationMatchOutcome.Match;
+
+        internal RegistrationPublicationMatchOutcome ProbeVisiblePathMatch()
         {
             ThrowIfDisposed();
             try
@@ -227,13 +258,30 @@ internal sealed partial class PinnedDirectoryCreation
                         FullPath,
                         requireDeleteAccess: false)
                     : OpenRelativeFileUnix(_parentHandle, _fileName, FullPath);
-                return HandlesIdentifySameDirectory(_fileHandle, visible);
+                return HandlesIdentifySameDirectory(_fileHandle, visible)
+                    ? RegistrationPublicationMatchOutcome.Match
+                    : RegistrationPublicationMatchOutcome.Mismatch;
+            }
+            catch (FileNotFoundException)
+            {
+                return RegistrationPublicationMatchOutcome.Mismatch;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return RegistrationPublicationMatchOutcome.Mismatch;
+            }
+            catch (Win32Exception exception) when (
+                OperatingSystem.IsWindows()
+                    ? exception.NativeErrorCode is 2 or 3
+                    : exception.NativeErrorCode == 2)
+            {
+                return RegistrationPublicationMatchOutcome.Mismatch;
             }
             catch (Exception exception) when (exception is
                 IOException or UnauthorizedAccessException or Win32Exception
                     or PlatformNotSupportedException)
             {
-                return false;
+                return RegistrationPublicationMatchOutcome.Unavailable;
             }
         }
 
@@ -251,6 +299,26 @@ internal sealed partial class PinnedDirectoryCreation
             return GetDirectoryObjectIdentity(_fileHandle);
         }
 
+        internal IReadOnlyList<string> GetObjectIdentityCandidates()
+        {
+            ThrowIfDisposed();
+            return OperatingSystem.IsLinux()
+                ? GetLinuxObjectIdentityCandidates(_fileHandle)
+                : [GetDirectoryObjectIdentity(_fileHandle)];
+        }
+
+        internal bool MatchesObjectIdentity(string expectedIdentity)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(expectedIdentity);
+            var candidates = GetObjectIdentityCandidates();
+            return candidates.Contains(expectedIdentity, StringComparer.Ordinal)
+                || (OperatingSystem.IsLinux()
+                    && candidates.Any(candidate =>
+                        PinnedDirectoryCreation.ArePersistedObjectIdentitiesDurablyEquivalent(
+                            expectedIdentity,
+                            candidate)));
+        }
+
         internal bool IsOnSameVolume(PinnedDirectoryAnchor directory)
         {
             ThrowIfDisposed();
@@ -265,182 +333,6 @@ internal sealed partial class PinnedDirectoryCreation
             return PinnedDirectoryCreation.HasUnsupportedCrossVolumeMetadata(
                 _fileHandle,
                 requireSingleLink: true);
-        }
-
-        internal PinnedFileEntry CreateHardLinkTo(
-            PinnedDirectoryAnchor destinationParent,
-            string destinationName,
-            Action? afterLinkCreatedForTest = null)
-        {
-            ThrowIfDisposed();
-            ArgumentNullException.ThrowIfNull(destinationParent);
-            ValidateLeafName(destinationName);
-            if (!VisiblePathMatches() || !destinationParent.VisiblePathMatches())
-            {
-                throw new InvalidOperationException(
-                    "A pinned hardlink endpoint changed before link creation.");
-            }
-
-            using var destinationHandle =
-                destinationParent.DuplicateHandleForOperation();
-            if (OperatingSystem.IsWindows())
-            {
-                CreateRelativeHardLinkWindows(
-                    _fileHandle,
-                    destinationHandle,
-                    destinationName);
-            }
-            else if (LinkAt(
-                    _parentHandle.DangerousGetHandle().ToInt32(),
-                    _fileName,
-                    destinationHandle.DangerousGetHandle().ToInt32(),
-                    destinationName,
-                    flags: 0) != 0)
-            {
-                throw new Win32Exception(
-                    Marshal.GetLastWin32Error(),
-                    "Could not create a hardlink between pinned filesystem endpoints.");
-            }
-
-            afterLinkCreatedForTest?.Invoke();
-
-            PinnedFileEntry? linked = null;
-            try
-            {
-                linked = destinationParent.OpenExistingFile(
-                    destinationName,
-                    requireDeleteAccess: true);
-                if (!linked.VisiblePathMatches() || !IdentifiesSameEntry(linked))
-                {
-                    throw new InvalidOperationException(
-                        "The created hardlink does not identify the pinned source generation.");
-                }
-
-                return linked;
-            }
-            catch
-            {
-                if (linked != null
-                    && linked.VisiblePathMatches()
-                    && IdentifiesSameEntry(linked))
-                {
-                    linked.Delete(immediateWindows: true);
-                }
-                linked?.Dispose();
-                throw;
-            }
-        }
-
-        internal async Task<bool> MatchesAsync(
-            long expectedLength,
-            string? expectedSha256,
-            CancellationToken cancellationToken)
-        {
-            ThrowIfDisposed();
-            if (string.IsNullOrWhiteSpace(expectedSha256))
-            {
-                return false;
-            }
-
-            await using var stream = OpenReadStream(
-                bufferSize: 128 * 1024,
-                asynchronous: false);
-            if (stream.Length != expectedLength)
-            {
-                return false;
-            }
-
-            stream.Position = 0;
-            var hash = await SHA256.HashDataAsync(stream, cancellationToken);
-            return string.Equals(
-                Convert.ToHexString(hash),
-                expectedSha256,
-                StringComparison.Ordinal);
-        }
-
-        internal void MoveTo(
-            PinnedDirectoryAnchor destinationParent,
-            string destinationName)
-        {
-            ThrowIfDisposed();
-            ArgumentNullException.ThrowIfNull(destinationParent);
-            ValidateLeafName(destinationName);
-            if (!VisiblePathMatches())
-            {
-                throw new InvalidOperationException(
-                    "The source file changed before its pinned rename.");
-            }
-            if (!destinationParent.VisiblePathMatches())
-            {
-                throw new InvalidOperationException(
-                    "The destination directory changed before its pinned rename.");
-            }
-
-            using var destinationHandle = destinationParent.DuplicateHandleForOperation();
-            RenameRelativeEntry(
-                _parentHandle,
-                _fileHandle,
-                _fileName,
-                destinationHandle,
-                destinationName);
-            using var published = OperatingSystem.IsWindows()
-                ? OpenRelativeFileWindows(
-                    destinationHandle,
-                    destinationName,
-                    Path.Join(destinationParent.FullPath, destinationName),
-                    requireDeleteAccess: false)
-                : OpenRelativeFileUnix(
-                    destinationHandle,
-                    destinationName,
-                    Path.Join(destinationParent.FullPath, destinationName));
-            if (!HandlesIdentifySameDirectory(_fileHandle, published))
-            {
-                throw new InvalidOperationException(
-                    "The published quarantine file does not identify the opened source file.");
-            }
-
-            var newParentHandle = DuplicateSafeHandle(destinationHandle);
-            _parentHandle.Dispose();
-            _parentHandle = newParentHandle;
-            _parentPath = destinationParent.FullPath;
-            _fileName = destinationName;
-            _parentFollowsVisibleFinalLink =
-                destinationParent.FollowsVisibleFinalLink;
-        }
-
-        internal void MoveWithinParent(string destinationName)
-        {
-            ThrowIfDisposed();
-            ValidateLeafName(destinationName);
-            if (!VisiblePathMatches())
-            {
-                throw new InvalidOperationException(
-                    "The source file changed before its pinned publication.");
-            }
-
-            RenameRelativeEntry(
-                _parentHandle,
-                _fileHandle,
-                _fileName,
-                _parentHandle,
-                destinationName);
-            using var published = OperatingSystem.IsWindows()
-                ? OpenRelativeFileWindows(
-                    _parentHandle,
-                    destinationName,
-                    Path.Join(_parentPath, destinationName),
-                    requireDeleteAccess: false)
-                : OpenRelativeFileUnix(
-                    _parentHandle,
-                    destinationName,
-                    Path.Join(_parentPath, destinationName));
-            if (!HandlesIdentifySameDirectory(_fileHandle, published))
-            {
-                throw new InvalidOperationException(
-                    "The published file does not identify the opened partial file.");
-            }
-
-            _fileName = destinationName;
         }
 
         public void Dispose()

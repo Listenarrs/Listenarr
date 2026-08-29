@@ -15,6 +15,10 @@ internal sealed partial class EfFileMutationJournalStore
         ArgumentException.ThrowIfNullOrWhiteSpace(claim.SourcePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(claim.DestinationPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(
+            claim.SourceParentDirectoryObjectIdentity);
+        ArgumentException.ThrowIfNullOrWhiteSpace(
+            claim.DestinationParentDirectoryObjectIdentity);
+        ArgumentException.ThrowIfNullOrWhiteSpace(
             claim.SourcePhysicalObjectIdentity);
         if (claim.SourceLength < 0)
         {
@@ -28,7 +32,8 @@ internal sealed partial class EfFileMutationJournalStore
         {
             throw new ArgumentOutOfRangeException(nameof(claim));
         }
-        if (claim.AudiobookFileId is < 0)
+        if (claim.AudiobookFileId is < 0
+            && !FileMutationOwner.IsCompanionFile(claim.AudiobookFileId))
         {
             throw new ArgumentOutOfRangeException(nameof(claim));
         }
@@ -55,11 +60,16 @@ internal sealed partial class EfFileMutationJournalStore
             journal.DestinationPath,
             canonicalDestination,
             cancellationToken);
-        if (journal.ProtocolVersion
-                != FileMutationProtocol.MarkerlessDatabaseState
+        if (journal.ProtocolVersion != FileMutationProtocol.Current
             || journal.Action != claim.Action
             || !sourcePathsMatch
             || !destinationPathsMatch
+            || !PinnedDirectoryCreation.ArePersistedObjectIdentitiesDurablyEquivalent(
+                journal.SourceParentDirectoryObjectIdentity,
+                claim.SourceParentDirectoryObjectIdentity)
+            || !PinnedDirectoryCreation.ArePersistedObjectIdentitiesDurablyEquivalent(
+                journal.DestinationParentDirectoryObjectIdentity,
+                claim.DestinationParentDirectoryObjectIdentity)
             || !string.Equals(
                 journal.SourcePhysicalObjectIdentity,
                 claim.SourcePhysicalObjectIdentity,
@@ -84,7 +94,8 @@ internal sealed partial class EfFileMutationJournalStore
     {
         var resolution = await _semanticsResolver.ResolveAsync(
             requestedPath,
-            cancellationToken: cancellationToken);
+            FileSystemCaseSensitivityMode.Auto,
+            cancellationToken);
         return resolution.State == PathIdentityState.Valid
             && FileSystemPathIdentity.AreEquivalent(
                 persistedPath,

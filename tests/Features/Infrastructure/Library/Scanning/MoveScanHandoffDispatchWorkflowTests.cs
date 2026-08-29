@@ -199,11 +199,13 @@ public sealed class MoveScanHandoffDispatchWorkflowTests : BaseTests
             "audio");
         var originalLastWriteTimeUtc = File.GetLastWriteTimeUtc(filePath);
         string originalIdentity;
+        string boundaryIdentity;
         using (var targetAnchor = PinnedDirectoryCreation.OpenPinnedBoundary(target))
         using (var file = targetAnchor.OpenExistingFile(
             Path.GetFileName(filePath),
             requireDeleteAccess: false))
         {
+            boundaryIdentity = targetAnchor.GetDirectoryObjectIdentity();
             originalIdentity = file.GetObjectIdentity();
         }
 
@@ -236,6 +238,8 @@ public sealed class MoveScanHandoffDispatchWorkflowTests : BaseTests
                 target,
                 [entry],
                 FileSystemPathSemantics.CurrentHostDefault,
+                target,
+                boundaryIdentity,
                 CancellationToken.None));
 
         Assert.Contains("generation", exception.Message, StringComparison.OrdinalIgnoreCase);
@@ -250,12 +254,14 @@ public sealed class MoveScanHandoffDispatchWorkflowTests : BaseTests
             "book.mp3",
             "audio");
         string fileIdentity;
+        string boundaryIdentity;
         var lastWriteTimeUtc = File.GetLastWriteTimeUtc(filePath);
         using (var targetAnchor = PinnedDirectoryCreation.OpenPinnedBoundary(target))
         using (var file = targetAnchor.OpenExistingFile(
             Path.GetFileName(filePath),
             requireDeleteAccess: false))
         {
+            boundaryIdentity = targetAnchor.GetDirectoryObjectIdentity();
             fileIdentity = file.GetObjectIdentity();
         }
 
@@ -305,8 +311,8 @@ public sealed class MoveScanHandoffDispatchWorkflowTests : BaseTests
                 target,
                 FilePath: null));
         var physicalIdentity = new ScanPathPhysicalIdentity(
-            "boundary-generation",
-            "scan-root-generation");
+            boundaryIdentity,
+            boundaryIdentity);
         var authorizationResult = ScanPathAuthorizationResult.Authorized(
             target,
             identity,

@@ -15,7 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using System.Text.RegularExpressions;
 using Listenarr.Domain.Common;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -50,35 +49,13 @@ namespace Listenarr.Infrastructure.Library.Scanning
                         metrics.Increment("worker.unmatchedscanbackgroundservice.job.skipped");
                         throw;
                     }
-                    catch (IOException ex)
+                    catch (OperationCanceledException ex)
                     {
                         await HandleJobFailureAsync(job.Id, ex, stoppingToken);
                     }
-                    catch (UnauthorizedAccessException ex)
+                    catch (Exception ex) when (WorkerExceptionClassifier.IsNonFatal(ex))
                     {
                         await HandleJobFailureAsync(job.Id, ex, stoppingToken);
-                    }
-                    catch (ArgumentException ex)
-                    {
-                        await HandleJobFailureAsync(job.Id, ex, stoppingToken);
-                    }
-                    catch (RegexMatchTimeoutException ex)
-                    {
-                        await HandleJobFailureAsync(job.Id, ex, stoppingToken);
-                    }
-                    catch (PersistenceException ex)
-                    {
-                        await HandleJobFailureAsync(job.Id, ex, stoppingToken);
-                    }
-                    catch (HubException ex)
-                    {
-                        await HandleJobFailureAsync(job.Id, ex, stoppingToken);
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                    {
-                        metrics.Increment("worker.unmatchedscanbackgroundservice.job.failed");
-                        logger.LogError(ex, "Unexpected unmatched scan job {JobId} failure", job.Id);
-                        throw;
                     }
                 }
             }
@@ -90,19 +67,98 @@ namespace Listenarr.Infrastructure.Library.Scanning
 
         private async Task HandleJobFailureAsync(Guid jobId, Exception ex, CancellationToken stoppingToken)
         {
+            if (TryGetTerminalJobStatus(jobId, out var terminalStatus)
+                && string.Equals(terminalStatus, "Completed", StringComparison.Ordinal))
+            {
+                // The processor commits results before publishing its SignalR notification.
+                // A post-completion notification failure must never downgrade a successful scan.
+                metrics.Increment("worker.unmatchedscanbackgroundservice.job.completed");
+                logger.LogWarning(
+                    ex,
+                    "Unmatched scan job {JobId} completed, but a post-completion side effect failed",
+                    jobId);
+                return;
+            }
+
             metrics.Increment("worker.unmatchedscanbackgroundservice.job.failed");
             logger.LogError(ex, "Unmatched scan job {JobId} failed", jobId);
-            queue.UpdateJob(jobId, "Failed", error: ex.Message);
-
-            await hubContext.Clients.All.SendAsync(
-                "UnmatchedScanComplete",
-                new
+            if (!string.Equals(terminalStatus, "Failed", StringComparison.Ordinal))
+            {
+                try
                 {
-                    jobId = jobId.ToString(),
-                    count = 0,
-                    error = UnmatchedScanPublicError.FromInternal(ex.Message)
-                },
-                stoppingToken);
+                    queue.UpdateJob(jobId, "Failed", error: ex.Message);
+                }
+                catch (OperationCanceledException statusException) when (
+                    !stoppingToken.IsCancellationRequested)
+                {
+                    logger.LogWarning(
+                        statusException,
+                        "Unmatched scan job {JobId} failed, but its failed status update was canceled internally",
+                        jobId);
+                }
+                catch (Exception statusException) when (
+                    WorkerExceptionClassifier.IsNonFatal(statusException))
+                {
+                    logger.LogWarning(
+                        statusException,
+                        "Unmatched scan job {JobId} failed, but its failed status could not be recorded",
+                        jobId);
+                }
+            }
+
+            try
+            {
+                await hubContext.Clients.All.SendAsync(
+                    "UnmatchedScanComplete",
+                    new
+                    {
+                        jobId = jobId.ToString(),
+                        count = 0,
+                        error = UnmatchedScanPublicError.FromInternal(ex.Message)
+                    },
+                    stoppingToken);
+            }
+            catch (OperationCanceledException notificationException) when (
+                !stoppingToken.IsCancellationRequested)
+            {
+                logger.LogWarning(
+                    notificationException,
+                    "Unmatched scan job {JobId} failed, but its completion notification was canceled internally",
+                    jobId);
+            }
+            catch (Exception notificationException) when (
+                WorkerExceptionClassifier.IsNonFatal(notificationException))
+            {
+                logger.LogWarning(
+                    notificationException,
+                    "Unmatched scan job {JobId} failed, but its completion notification could not be published",
+                    jobId);
+            }
+        }
+
+        private bool TryGetTerminalJobStatus(Guid jobId, out string? terminalStatus)
+        {
+            terminalStatus = null;
+            try
+            {
+                if (!queue.TryGetJob(jobId, out var current)
+                    || current?.Status is not ("Completed" or "Failed"))
+                {
+                    return false;
+                }
+
+                terminalStatus = current.Status;
+                return true;
+            }
+            catch (Exception statusException) when (
+                WorkerExceptionClassifier.IsNonFatal(statusException))
+            {
+                logger.LogWarning(
+                    statusException,
+                    "Could not inspect terminal state for unmatched scan job {JobId}",
+                    jobId);
+                return false;
+            }
         }
 
         internal static List<List<string>> BuildGroupedFilesForFolder(
@@ -188,6 +244,8 @@ namespace Listenarr.Infrastructure.Library.Scanning
 
             var canonicalRootFolderPath = authorization.Path;
             var semantics = authorization.Identity.Value.Semantics;
+            var hasDurableGenerationProof =
+                authorization.PhysicalIdentity.Value.HasDurableGenerationProof;
 
             // Load all tracked file paths (normalized) from DB.
             // Check BOTH AudiobookFiles (multi-file imports) AND Audiobook.FilePath (single-file imports)
@@ -210,10 +268,9 @@ namespace Listenarr.Infrastructure.Library.Scanning
             using var pinnedRoot = PinnedDirectoryCreation.OpenPinnedBoundary(
                 canonicalRootFolderPath);
             if (!pinnedRoot.VisiblePathMatches()
-                || !string.Equals(
-                    pinnedRoot.GetDirectoryObjectIdentity(),
-                    authorization.PhysicalIdentity.Value.ScanRootObjectIdentity,
-                    StringComparison.Ordinal))
+                || (authorization.PhysicalIdentity.Value.HasDurableGenerationProof
+                    && !pinnedRoot.MatchesDirectoryObjectIdentity(
+                        authorization.PhysicalIdentity.Value.ScanRootObjectIdentity!)))
             {
                 throw new InvalidOperationException(
                     "The unmatched scan root changed after authorization.");
@@ -224,7 +281,8 @@ namespace Listenarr.Infrastructure.Library.Scanning
                 jobId: Guid.Empty,
                 _logger,
                 semantics,
-                pinnedRoot);
+                pinnedRoot,
+                authorization.PhysicalIdentity.Value.HasDurableGenerationProof);
             if (enumeration.Issues.Any(issue => issue.Kind is
                     ScanDiscoveryIssueKind.DirectoryGenerationChanged
                     or ScanDiscoveryIssueKind.EnumerationFailure))
@@ -253,7 +311,12 @@ namespace Listenarr.Infrastructure.Library.Scanning
                 .ToList();
 
             // Resolve ffprobe path once for the whole scan (null = not available)
-            var ffprobePath = await _ffmpegService.GetFfprobePathAsync();
+            var ffprobePath = hasDurableGenerationProof
+                && (OperatingSystem.IsWindows()
+                    || OperatingSystem.IsLinux()
+                    || OperatingSystem.IsMacOS())
+                    ? await _ffmpegService.GetFfprobePathAsync()
+                    : null;
 
             var results = new System.Collections.Concurrent.ConcurrentBag<UnmatchedFileResult>();
 
@@ -273,6 +336,7 @@ namespace Listenarr.Infrastructure.Library.Scanning
                             folderFiles,
                             ffprobePath,
                             semantics,
+                            enumeration.FileObjectIdentities,
                             token);
                         groupedFiles = BuildGroupedFilesForFolder(
                             folderFiles,
@@ -288,10 +352,19 @@ namespace Listenarr.Infrastructure.Library.Scanning
                             semantics.Comparer);
                         var orderedFiles = plans.Select(p => p.FullPath).ToList();
                         var representative = orderedFiles.First();
-                        var parsed = PathMetadataParser.Parse(
+                        var parsed = PathMetadataParser.ParsePathOnly(
                             representative,
                             rootFolderPath,
                             semantics);
+                        if (hasDurableGenerationProof)
+                        {
+                            await ApplyPinnedFolderMetadataAsync(
+                                parsed,
+                                parsed.BookFolderPath ?? string.Empty,
+                                enumeration,
+                                semantics,
+                                token);
+                        }
 
                         PathParsedMetadata? tags = null;
                         if (embeddedTagsByFile != null && embeddedTagsByFile.TryGetValue(representative, out var cachedTags))
@@ -300,7 +373,29 @@ namespace Listenarr.Infrastructure.Library.Scanning
                         }
                         else if (!string.IsNullOrEmpty(ffprobePath))
                         {
-                            tags = await PathMetadataParser.ReadEmbeddedTagsAsync(representative, ffprobePath, token);
+                            var canonicalRepresentative = FileSystemPathIdentity.Canonicalize(
+                                representative,
+                                semantics.Syntax);
+                            if (!enumeration.FileObjectIdentities.TryGetValue(
+                                    canonicalRepresentative,
+                                    out var expectedPhysicalObjectIdentity))
+                            {
+                                throw new InvalidOperationException(
+                                    "The unmatched metadata candidate lacks its enumerated physical generation.");
+                            }
+
+                            using var lease = PinnedAudiobookFileRegistrationLease.Open(
+                                representative,
+                                expectedPhysicalObjectIdentity);
+                            tags = await PathMetadataParser.ReadEmbeddedTagsAsync(
+                                lease.MetadataPath,
+                                ffprobePath,
+                                token);
+                            if (!lease.MatchesCurrentPublication())
+                            {
+                                throw new InvalidOperationException(
+                                    "The unmatched metadata candidate changed during embedded-tag extraction.");
+                            }
                         }
 
                         if (tags != null)
@@ -312,10 +407,10 @@ namespace Listenarr.Infrastructure.Library.Scanning
                             ? bookFolder[(rootFolderPath.Length)..].TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
                             : bookFolder;
 
-                        var totalSize = files.Sum(f =>
-                        {
-                            try { return new FileInfo(f).Length; } catch (Exception ex) when (ex is not OutOfMemoryException && ex is not StackOverflowException) { return 0L; }
-                        });
+                        var totalSize = files.Sum(file =>
+                            enumeration.FileLengths.TryGetValue(file, out var length)
+                                ? length
+                                : 0L);
 
                         results.Add(new UnmatchedFileResult
                         {

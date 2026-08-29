@@ -42,6 +42,11 @@ public partial class AudiobookFileService
     {
         ArgumentNullException.ThrowIfNull(audiobook);
         ArgumentNullException.ThrowIfNull(registrationLease);
+        if (!registrationLease.HasDurablePhysicalObjectIdentity)
+        {
+            throw new InvalidOperationException(
+                "Physical-generation refresh requires durable physical identity evidence.");
+        }
         ArgumentException.ThrowIfNullOrWhiteSpace(registrationLease.PublicPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(registrationLease.MetadataPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(
@@ -196,10 +201,8 @@ public partial class AudiobookFileService
             source,
             replaceMetadata: !string.IsNullOrWhiteSpace(
                     expectedPhysicalObjectIdentity)
-                && !string.Equals(
-                    expectedPhysicalObjectIdentity,
-                    registrationLease.PhysicalObjectIdentity,
-                    StringComparison.Ordinal));
+                && !registrationLease.MatchesPhysicalObjectIdentity(
+                    expectedPhysicalObjectIdentity));
         var predecessor = ClonePhysicalGeneration(currentFile);
 
         if (!registrationLease.MatchesCurrentPublication())
@@ -228,8 +231,11 @@ public partial class AudiobookFileService
             return false;
         }
 
-        if (registrationLease.MatchesCurrentPublication())
+        var postCommitPublication = ProbeCurrentPublication(registrationLease);
+        if (postCommitPublication != RegistrationPublicationMatchOutcome.Mismatch)
         {
+            // The generation row is already committed. Temporary storage
+            // unavailability is not evidence that the published namespace changed.
             return true;
         }
 
@@ -319,12 +325,10 @@ public partial class AudiobookFileService
         AudiobookBasePathMutation? basePathMutation)
     {
         ArgumentNullException.ThrowIfNull(createdFile);
-        if (createdFile.Id <= 0
-            || string.IsNullOrWhiteSpace(
-                createdFile.PhysicalObjectIdentity))
+        if (createdFile.Id <= 0)
         {
             throw new InvalidOperationException(
-                "A persisted physical-generation claim is required for rollback.");
+                "A persisted audiobook file claim is required for rollback.");
         }
 
         if (!await DeletePhysicalGenerationClaimCoreAsync(
@@ -343,7 +347,7 @@ public partial class AudiobookFileService
         int fileId,
         int audiobookId,
         string? expectedPath,
-        string expectedPhysicalObjectIdentity,
+        string? expectedPhysicalObjectIdentity,
         AudiobookBasePathMutation? basePathMutation)
     {
         const int maxAttempts = 3;

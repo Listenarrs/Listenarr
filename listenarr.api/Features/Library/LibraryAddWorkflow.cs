@@ -23,7 +23,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Features.Library
 {
-    public sealed class LibraryAddWorkflow
+    public sealed partial class LibraryAddWorkflow
     {
         private readonly IAudiobookRepository _repo;
         private readonly IImageCacheService _imageCacheService;
@@ -172,17 +172,21 @@ namespace Listenarr.Api.Features.Library
                 }
 
                 using var destinationScope = _scopeFactory.CreateScope();
-                var configurationService = destinationScope.ServiceProvider
-                    .GetRequiredService<IConfigurationService>();
                 var rootFolderService = destinationScope.ServiceProvider
                     .GetRequiredService<IRootFolderService>();
                 var fileSystem = destinationScope.ServiceProvider.GetRequiredService<IFileSystem>();
-                var settings = await configurationService.GetApplicationSettingsAsync();
                 var rootFolders = await rootFolderService.GetAllAsync();
+                ApplicationSettings? settings = null;
+                if (rootFolders.Count == 0)
+                {
+                    var configurationService = destinationScope.ServiceProvider
+                        .GetRequiredService<IConfigurationService>();
+                    settings = await configurationService.GetApplicationSettingsAsync();
+                }
                 var allowedDestinationRoots = FileUtils.GetValidMutationRootsForCurrentOs(
-                    rootFolders
-                        .Select(root => root.Path)
-                        .Append(settings.OutputPath));
+                    rootFolders.Count > 0
+                        ? rootFolders.Select(root => root.Path)
+                        : [settings!.OutputPath]);
                 if (allowedDestinationRoots.Count == 0
                     || !fileSystem.TryValidateMutationTarget(
                         normalizedDestinationPath,
@@ -434,44 +438,6 @@ namespace Listenarr.Api.Features.Library
             {
                 _logger.LogWarning(ex, "Error resolving author ASINs for audiobook '{Title}'", LogRedaction.SanitizeText(audiobook.Title));
             }
-        }
-
-        private async Task SendAddedNotificationAsync(Audiobook audiobook)
-        {
-            if (_notificationService == null)
-            {
-                return;
-            }
-
-            using var scope = _scopeFactory.CreateScope();
-            var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
-            var settings = await configService.GetApplicationSettingsAsync();
-            var data = new
-            {
-                id = audiobook.Id,
-                title = audiobook.Title ?? "Unknown Title",
-                authors = audiobook.Authors,
-                narrators = audiobook.Narrators,
-                description = audiobook.Description,
-                asin = audiobook.Asin,
-                publisher = audiobook.Publisher,
-                year = audiobook.PublishYear,
-                imageUrl = audiobook.ImageUrl
-            };
-            await _notificationService.SendNotificationAsync("book-added", data, settings.WebhookUrl, settings.EnabledNotificationTriggers);
-        }
-
-        private async Task AddHistoryAsync(Audiobook audiobook)
-        {
-            await _historyRepository.AddAsync(new History
-            {
-                AudiobookId = audiobook.Id,
-                AudiobookTitle = audiobook.Title ?? "Unknown Title",
-                EventType = "Added",
-                Message = $"Audiobook '{audiobook.Title}' added to library from Add New page",
-                Source = "AddNew",
-                Timestamp = DateTime.UtcNow
-            });
         }
 
         private static string ComputeShortHash(string? input)

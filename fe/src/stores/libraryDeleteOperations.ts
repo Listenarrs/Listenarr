@@ -114,6 +114,15 @@ export const useLibraryDeleteOperationsStore = defineStore('libraryDeleteOperati
     operation.error = error
   }
 
+  function cancelSingle(operationId: string): void {
+    operations.value = operations.value.filter(
+      (operation) =>
+        operation.id !== operationId ||
+        operation.kind !== 'single' ||
+        operation.status !== 'deleting',
+    )
+  }
+
   function setBulkCurrentItem(operationId: string, currentTitle: string): void {
     const operation = find(operationId)
     if (!operation || operation.kind !== 'bulk' || operation.status !== 'deleting') return
@@ -168,6 +177,7 @@ export const useLibraryDeleteOperationsStore = defineStore('libraryDeleteOperati
     beginBulk,
     completeSingle,
     failSingle,
+    cancelSingle,
     setBulkCurrentItem,
     updateBulkItem,
     finishBulk,

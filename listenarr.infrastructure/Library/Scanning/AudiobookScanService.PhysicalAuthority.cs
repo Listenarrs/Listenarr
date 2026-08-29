@@ -18,7 +18,11 @@ internal sealed partial class AudiobookScanService
         try
         {
             current = PinnedDirectoryCreation.OpenPinnedBoundary(boundaryPath);
-            anchors.Add(PinnedDirectoryState.Capture(current));
+            var requireDurableGenerationProof =
+                command.ScanPhysicalIdentity.HasDurableGenerationProof;
+            anchors.Add(PinnedDirectoryState.Capture(
+                current,
+                requireDurableGenerationProof));
             var relative = Path.GetRelativePath(boundaryPath, scanRoot);
             if (relative != ".")
             {
@@ -34,7 +38,9 @@ internal sealed partial class AudiobookScanService
 
                     var next = current.OpenExistingChild(segment);
                     current = next;
-                    anchors.Add(PinnedDirectoryState.Capture(next));
+                    anchors.Add(PinnedDirectoryState.Capture(
+                        next,
+                        requireDurableGenerationProof));
                 }
             }
 
@@ -179,6 +185,31 @@ internal sealed partial class AudiobookScanService
                 "The metadata candidate was not part of the pinned file snapshot.");
         }
 
+        return OpenPinnedRegistrationFile(
+            command,
+            authority,
+            canonicalPath,
+            expectedIdentity);
+    }
+
+    private static IAudiobookFileRegistrationLease OpenPinnedRegistrationFile(
+        AudiobookScanCommand command,
+        PinnedScanAuthority authority,
+        string path,
+        string? expectedIdentity = null)
+    {
+        var canonicalPath = FileSystemPathIdentity.Canonicalize(
+            path,
+            command.ScanIdentity.Syntax);
+        if (!FileSystemPathIdentity.IsSameOrInside(
+                canonicalPath,
+                command.ScanRoot,
+                command.ScanIdentity.Semantics))
+        {
+            throw new InvalidOperationException(
+                "The registration candidate is outside the authorized scan root.");
+        }
+
         var relative = Path.GetRelativePath(command.ScanRoot, canonicalPath);
         var segments = relative.Split(
             [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
@@ -186,7 +217,7 @@ internal sealed partial class AudiobookScanService
         if (segments.Length == 0 || segments.Any(segment => segment is "." or ".."))
         {
             throw new InvalidOperationException(
-                "The metadata candidate contains invalid navigation segments.");
+                "The registration candidate contains invalid navigation segments.");
         }
 
         var current = authority.Root.Duplicate();
@@ -200,15 +231,26 @@ internal sealed partial class AudiobookScanService
             }
 
             var file = current.OpenExistingFileForStableRead(segments[^1]);
-            if (!file.VisiblePathMatches()
-                || !string.Equals(
-                    file.GetObjectIdentity(),
-                    expectedIdentity,
-                    StringComparison.Ordinal))
+            if (!file.VisiblePathMatches() || !file.IsRegularFile())
             {
                 file.Dispose();
                 throw new InvalidOperationException(
-                    "The metadata candidate changed before stable extraction.");
+                    "The registration candidate changed or is no longer a regular file before stable extraction.");
+            }
+
+            if (!command.ScanPhysicalIdentity.HasDurableGenerationProof)
+            {
+                return PinnedAudiobookFileRegistrationLease.CreatePinnedPathOnly(
+                    file,
+                    canonicalPath);
+            }
+
+            if (!string.IsNullOrWhiteSpace(expectedIdentity)
+                && !file.MatchesObjectIdentity(expectedIdentity))
+            {
+                file.Dispose();
+                throw new InvalidOperationException(
+                    "The registration candidate changed before stable extraction.");
             }
 
             return PinnedAudiobookFileRegistrationLease.Create(
@@ -264,10 +306,8 @@ internal sealed partial class AudiobookScanService
                 return outcome == PinnedFileOpenOutcome.Opened
                     && opened != null
                     && opened.VisiblePathMatches()
-                    && string.Equals(
-                        opened.GetObjectIdentity(),
-                        expectedIdentity,
-                        StringComparison.Ordinal);
+                    && (!command.ScanPhysicalIdentity.HasDurableGenerationProof
+                        || opened.MatchesObjectIdentity(expectedIdentity));
             }
         }
         catch (Exception exception) when (exception is
@@ -362,10 +402,9 @@ internal sealed partial class AudiobookScanService
             directory,
             command.ScanIdentity.Semantics);
         if (!current.VisiblePathMatches()
-            || !string.Equals(
-                current.GetDirectoryObjectIdentity(),
-                expectedObjectIdentity,
-                StringComparison.Ordinal))
+            || (command.ScanPhysicalIdentity.HasDurableGenerationProof
+                && !current.MatchesDirectoryObjectIdentity(
+                    expectedObjectIdentity)))
         {
             throw new InvalidOperationException(
                 "A directory generation changed after scan discovery.");

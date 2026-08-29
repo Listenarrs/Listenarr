@@ -166,6 +166,80 @@ public sealed class ScanFileDiscoveryTests : BaseTests, IDisposable
     }
 
     [Fact]
+    public void Discover_DirectoryNamespaceChangesDuringEnumeration_BlocksReconciliation()
+    {
+        var audioPath = CreateAudioFile("Book.m4b");
+        var local = new LocalFileSystem();
+        var fileSystem = new Mock<IFileSystem>(MockBehavior.Strict);
+        fileSystem.Setup(candidate => candidate.EnumerateFiles(_root))
+            .Returns(() => local.EnumerateFiles(_root));
+        fileSystem.Setup(candidate => candidate.EnumerateDirectories(_root))
+            .Returns(() =>
+            {
+                var transientPath = Path.Join(_root, "transient-entry.txt");
+                File.WriteAllText(transientPath, "transient");
+                File.Delete(transientPath);
+                return local.EnumerateDirectories(_root);
+            });
+        fileSystem.Setup(candidate => candidate.IsReparsePoint(It.IsAny<string>()))
+            .Returns((string path) => local.IsReparsePoint(path));
+        var audiobook = new AudiobookBuilder()
+            .WithTitle("Book")
+            .Build();
+
+        var discovery = ScanFileDiscovery.Discover(
+            fileSystem.Object,
+            _root,
+            audiobook,
+            Guid.NewGuid(),
+            NullLogger.Instance,
+            FileSystemPathSemantics.CurrentHostDefault);
+
+        Assert.False(discovery.CanReconcile);
+        Assert.DoesNotContain(audioPath, discovery.Candidates);
+        Assert.Contains(discovery.Issues, issue =>
+            issue.Kind == ScanDiscoveryIssueKind.DirectoryGenerationChanged
+            && issue.Path == _root);
+        fileSystem.VerifyAll();
+    }
+
+    [LinuxFact]
+    public void Discover_NamedPipeWithAudioExtension_IsSkippedWithoutBlocking()
+    {
+        var pipePath = Path.Join(_root, "pipe.m4b");
+        var startInfo = new System.Diagnostics.ProcessStartInfo("mkfifo")
+        {
+            UseShellExecute = false,
+            RedirectStandardError = true
+        };
+        startInfo.ArgumentList.Add(pipePath);
+        using (var process = System.Diagnostics.Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Could not start mkfifo."))
+        {
+            process.WaitForExit();
+            Assert.Equal(0, process.ExitCode);
+        }
+        var audiobook = new AudiobookBuilder()
+            .WithTitle("pipe")
+            .Build();
+
+        var discovery = ScanFileDiscovery.Discover(
+            new LocalFileSystem(),
+            _root,
+            audiobook,
+            Guid.NewGuid(),
+            NullLogger.Instance,
+            FileSystemPathSemantics.CurrentHostDefault,
+            requireDurableGenerationProof: false);
+
+        Assert.DoesNotContain(pipePath, discovery.Candidates);
+        Assert.Contains(discovery.Issues, issue =>
+            issue.Kind == ScanDiscoveryIssueKind.LinkSkipped
+            && issue.Path == pipePath
+            && issue.Message.Contains("Non-regular", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Discover_EnumerationFailure_DoesNotExposeExceptionMessage()
     {
         const string secret = "secret-volume-path";

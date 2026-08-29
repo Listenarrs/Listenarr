@@ -1,6 +1,3 @@
-using System.Buffers;
-using Microsoft.Extensions.Logging;
-
 namespace Listenarr.Infrastructure.Library.Moving;
 
 internal sealed partial class AudiobookContentMoveService
@@ -10,9 +7,20 @@ internal sealed partial class AudiobookContentMoveService
         string source,
         string target,
         IReadOnlyCollection<MoveJobEntry> manifest,
+        bool retainSource,
         MarkerlessTargetVerificationLease targetVerificationLease,
         CancellationToken cancellationToken)
     {
+        var endpoints = await GetEndpointObjectIdentitiesAsync(
+            request.JobId,
+            cancellationToken);
+        if (string.IsNullOrWhiteSpace(endpoints.SourceDirectoryObjectIdentity)
+            || string.IsNullOrWhiteSpace(endpoints.TargetDirectoryObjectIdentity))
+        {
+            throw new MoveNeedsAttentionException(
+                "Markerless copy requires persisted source and target endpoint generations.");
+        }
+
         var files = manifest
             .Where(candidate => candidate.EntryType == MoveJobEntryType.File)
             .Where(IsPhysicalManifestEntry)
@@ -42,10 +50,20 @@ internal sealed partial class AudiobookContentMoveService
                 ?? throw new MoveNeedsAttentionException(
                     "A markerless target file has no parent.");
 
-            using var sourceParent = PinnedDirectoryCreation.OpenPinnedBoundary(
-                sourceParentPath);
-            using var targetParent = PinnedDirectoryCreation.OpenPinnedBoundary(
-                targetParentPath);
+            using var sourceParent = OpenPinnedMoveDescendant(
+                request,
+                source,
+                sourceParentPath,
+                request.SourceSemantics,
+                endpoints.SourceDirectoryObjectIdentity,
+                sourceEndpoint: true);
+            using var targetParent = OpenPinnedMoveDescendant(
+                request,
+                target,
+                targetParentPath,
+                request.TargetSemantics,
+                endpoints.TargetDirectoryObjectIdentity,
+                sourceEndpoint: false);
             using var existingTarget = targetParent.TryOpenExistingFile(
                 Path.GetFileName(targetPath),
                 requireDeleteAccess: false);
@@ -55,6 +73,11 @@ internal sealed partial class AudiobookContentMoveService
 
             if (sourceEntry == null)
             {
+                if (retainSource)
+                {
+                    throw new MoveNeedsAttentionException(
+                        $"A source file disappeared during copy-and-retain publication: {entry.RelativePath}");
+                }
                 var wasVerified = entry.CopyState == MoveJobEntryCopyState.Verified;
                 if (existingTarget == null
                     || !await TryRecoverMarkerlessNativeRenameAsync(
@@ -98,16 +121,63 @@ internal sealed partial class AudiobookContentMoveService
                 continue;
             }
 
-            if (existingTarget == null
+            PinnedDirectoryCreation.PinnedFileEntry? stableRenameEntry = null;
+            if (!retainSource
+                && existingTarget == null
                 && entry.CopyState == MoveJobEntryCopyState.Pending
                 && string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity))
             {
-                var stableRenameEntry = TryOpenMarkerlessStableNativeRenameSource(
+                stableRenameEntry = TryOpenMarkerlessStableNativeRenameSource(
                     entry,
                     sourceParent,
                     sourceEntry,
                     targetParent);
-                try
+            }
+
+            try
+            {
+                var observedProof = await ComputeMarkerlessSourceProofHashAsync(
+                    request,
+                    entry,
+                    sourcePath,
+                    sourceParent,
+                    sourceEntry,
+                    completedWorkUnits,
+                    totalWorkUnits,
+                    cancellationToken);
+                if (!string.IsNullOrWhiteSpace(entry.Sha256)
+                    && !string.Equals(
+                        entry.Sha256,
+                        observedProof.Sha256,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new MoveNeedsAttentionException(
+                        $"Source file changed before markerless publication: {entry.RelativePath}");
+                }
+
+                await UpdateSourceEntryProofAsync(
+                    request.JobId,
+                    request.LeaseToken,
+                    entry.RelativePath,
+                    entry.SourcePhysicalObjectIdentity
+                        ?? sourceEntry.GetObjectIdentity(),
+                    observedProof.Sha256,
+                    observedProof.LastWriteTimeUtc,
+                    cancellationToken);
+                entry.Sha256 ??= observedProof.Sha256;
+                entry.LastWriteTimeUtc = observedProof.LastWriteTimeUtc;
+                completedWorkUnits += GetProgressUnits(entry);
+                await ReportProgressAsync(
+                    request,
+                    CalculateWeightedProgress(
+                        5,
+                        65,
+                        completedWorkUnits,
+                        totalWorkUnits),
+                    "Verifying source",
+                    cancellationToken);
+
+                if (stableRenameEntry != null)
                 {
                     var nativeRename = await TryPublishMarkerlessNativeRenameAsync(
                         request,
@@ -127,7 +197,7 @@ internal sealed partial class AudiobookContentMoveService
                                 entry.RelativePath,
                                 nativeRename.VerificationLease);
                         }
-                        completedWorkUnits += checked(GetProgressUnits(entry) * 2);
+                        completedWorkUnits += GetProgressUnits(entry);
                         await ReportProgressAsync(
                             request,
                             CalculateWeightedProgress(
@@ -140,50 +210,11 @@ internal sealed partial class AudiobookContentMoveService
                         continue;
                     }
                 }
-                finally
-                {
-                    stableRenameEntry?.Dispose();
-                }
             }
-
-            var observedHash = await ComputeMarkerlessSourceProofHashAsync(
-                request,
-                entry,
-                sourcePath,
-                sourceEntry,
-                completedWorkUnits,
-                totalWorkUnits,
-                cancellationToken);
-            if (!string.IsNullOrWhiteSpace(entry.Sha256)
-                && !string.Equals(
-                    entry.Sha256,
-                    observedHash,
-                    StringComparison.OrdinalIgnoreCase))
+            finally
             {
-                throw new MoveNeedsAttentionException(
-                    $"Source file changed before markerless publication: {entry.RelativePath}");
+                stableRenameEntry?.Dispose();
             }
-            if (string.IsNullOrWhiteSpace(entry.Sha256))
-            {
-                await UpdateSourceEntryProofAsync(
-                    request.JobId,
-                    request.LeaseToken,
-                    entry.RelativePath,
-                    sourceEntry.GetObjectIdentity(),
-                    observedHash,
-                    cancellationToken);
-                entry.Sha256 = observedHash;
-            }
-            completedWorkUnits += GetProgressUnits(entry);
-            await ReportProgressAsync(
-                request,
-                CalculateWeightedProgress(
-                    5,
-                    65,
-                    completedWorkUnits,
-                    totalWorkUnits),
-                "Verifying source",
-                cancellationToken);
 
             if (existingTarget != null)
             {
@@ -224,9 +255,27 @@ internal sealed partial class AudiobookContentMoveService
                 source,
                 target,
                 cancellationToken);
+            // Native rename may have just been observed as unsupported. Re-prove the
+            // visible source generation immediately before beginning copy publication;
+            // the pinned read handle alone is not authority to publish a source whose
+            // namespace entry was replaced after the rename observation.
+            ValidateMarkerlessSourceEntry(request, entry, sourceEntry);
             using var created = targetParent.CreateNewFile(
                 Path.GetFileName(targetPath));
             var targetIdentity = created.GetObjectIdentity();
+            try
+            {
+                // The final-name entry must be namespace-durable before its physical
+                // generation is committed to SQLite. This is especially important
+                // for copy fallback on remote filesystems where file-data fsync alone
+                // does not prove the parent directory entry survived a crash.
+                targetParent.FlushDirectoryEntry();
+            }
+            catch
+            {
+                TryRetireUncommittedMarkerlessFile(created);
+                throw;
+            }
             faultInjector?.OnCopyMutation(
                 request.JobId,
                 CopyMutationFaultPoint
@@ -273,210 +322,4 @@ internal sealed partial class AudiobookContentMoveService
         }
     }
 
-    private async Task HandleExistingMarkerlessTargetAsync(
-        AudiobookContentMoveRequest request,
-        MoveJobEntry entry,
-        PinnedDirectoryCreation.PinnedFileEntry sourceEntry,
-        PinnedDirectoryCreation.PinnedFileEntry targetEntry,
-        long completedUnitsBeforeFile,
-        long totalUnits,
-        CancellationToken cancellationToken)
-    {
-        var currentIdentity = targetEntry.GetObjectIdentity();
-        if (string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity))
-        {
-            if (entry.CopyState != MoveJobEntryCopyState.Pending
-                || !await PinnedFileMatchesManifestAsync(
-                    targetEntry,
-                    entry,
-                    cancellationToken))
-            {
-                throw new MoveNeedsAttentionException(
-                    $"An existing final target file has no persisted markerless ownership proof: {entry.RelativePath}");
-            }
-
-            await UpdateTargetEntryStateAsync(
-                request.JobId,
-                request.LeaseToken,
-                entry.RelativePath,
-                MoveJobEntryCopyState.Verified,
-                currentIdentity,
-                cancellationToken);
-            entry.CopyState = MoveJobEntryCopyState.Verified;
-            entry.TargetPhysicalObjectIdentity = currentIdentity;
-            return;
-        }
-
-        ValidateMarkerlessTargetEntry(entry, targetEntry);
-        if (entry.CopyState == MoveJobEntryCopyState.Verified)
-        {
-            if (!await PinnedFileMatchesManifestAsync(
-                    targetEntry,
-                    entry,
-                    cancellationToken))
-            {
-                throw new MoveNeedsAttentionException(
-                    $"A verified markerless target file changed: {entry.RelativePath}");
-            }
-            return;
-        }
-
-        if (entry.CopyState is not (
-            MoveJobEntryCopyState.Staged or MoveJobEntryCopyState.Published))
-        {
-            throw new MoveNeedsAttentionException(
-                $"The persisted markerless target-file state is inconsistent: {entry.RelativePath}");
-        }
-
-        await WriteMarkerlessTargetAsync(
-            request,
-            entry,
-            sourceEntry,
-            targetEntry,
-            completedUnitsBeforeFile,
-            totalUnits,
-            cancellationToken);
-    }
-
-    private async Task WriteMarkerlessTargetAsync(
-        AudiobookContentMoveRequest request,
-        MoveJobEntry entry,
-        PinnedDirectoryCreation.PinnedFileEntry sourceEntry,
-        PinnedDirectoryCreation.PinnedFileEntry targetEntry,
-        long completedWorkUnitsBeforeFile,
-        long totalWorkUnits,
-        CancellationToken cancellationToken)
-    {
-        ValidateMarkerlessSourceEntry(request, entry, sourceEntry);
-        ValidateMarkerlessTargetEntry(entry, targetEntry);
-        await using (var sourceStream = sourceEntry.OpenReadStream(
-            bufferSize: 1024 * 1024,
-            asynchronous: false))
-        await using (var targetStream = targetEntry.OpenWriteStream(
-            bufferSize: 1024 * 1024,
-            asynchronous: false))
-        {
-            targetStream.SetLength(0);
-            var buffer = ArrayPool<byte>.Shared.Rent(1024 * 1024);
-            try
-            {
-                long copied = 0;
-                long lastReported = 0;
-                var reportInterval = Math.Max(
-                    16L * 1024 * 1024,
-                    Math.Max(totalWorkUnits / 100, 1));
-                while (true)
-                {
-                    var read = await sourceStream.ReadAsync(
-                        buffer.AsMemory(0, buffer.Length),
-                        cancellationToken);
-                    if (read == 0)
-                    {
-                        break;
-                    }
-
-                    await targetStream.WriteAsync(
-                        buffer.AsMemory(0, read),
-                        cancellationToken);
-                    copied += read;
-                    if (copied - lastReported >= reportInterval)
-                    {
-                        lastReported = copied;
-                        await ReportProgressAsync(
-                            request,
-                            CalculateWeightedProgress(
-                                5,
-                                65,
-                                completedWorkUnitsBeforeFile + copied,
-                                totalWorkUnits),
-                            "Copying",
-                            cancellationToken);
-                    }
-                }
-
-                if (copied != entry.Length)
-                {
-                    throw new IOException(
-                        $"Markerless source length changed while copying: {entry.RelativePath}");
-                }
-
-                await targetStream.FlushAsync(cancellationToken);
-                targetStream.Flush(flushToDisk: true);
-            }
-            finally
-            {
-                ArrayPool<byte>.Shared.Return(buffer);
-            }
-        }
-        // The independently opened write stream is identity-verified against the
-        // pinned entry and Flush(true) is the durability barrier. The observation
-        // handle may be read-only during recovery and must not be flushed again.
-        faultInjector?.OnCopyMutation(
-            request.JobId,
-            CopyMutationFaultPoint
-                .AfterMarkerlessFileWriteBeforePublishedState);
-        try
-        {
-            faultInjector?.OnCopyMutation(
-                request.JobId,
-                CopyMutationFaultPoint.BeforeMarkerlessMetadataPreservation);
-            sourceEntry.PreserveMarkerlessMetadataTo(targetEntry);
-        }
-        catch (Exception exception) when (
-            WorkerExceptionClassifier.IsNonFatal(exception))
-        {
-            // Metadata preservation is best-effort, but only while the pinned file
-            // still owns the visible destination pathname. A replacement race must
-            // remain a hard failure instead of being treated as a metadata warning.
-            ValidateMarkerlessTargetEntry(entry, targetEntry);
-            logger.LogDebug(
-                exception,
-                "Non-fatal: failed to preserve markerless file metadata for {File}",
-                LogRedaction.SanitizeFilePath(targetEntry.FullPath));
-        }
-        await UpdateTargetEntryStateAsync(
-            request.JobId,
-            request.LeaseToken,
-            entry.RelativePath,
-            MoveJobEntryCopyState.Published,
-            entry.TargetPhysicalObjectIdentity,
-            cancellationToken);
-        entry.CopyState = MoveJobEntryCopyState.Published;
-
-        ValidateMarkerlessTargetEntry(entry, targetEntry);
-        if (!await PinnedFileMatchesManifestAsync(
-                targetEntry,
-                entry,
-                cancellationToken))
-        {
-            throw new IOException(
-                $"Markerless target verification failed: {entry.RelativePath}");
-        }
-
-        await UpdateTargetEntryStateAsync(
-            request.JobId,
-            request.LeaseToken,
-            entry.RelativePath,
-            MoveJobEntryCopyState.Verified,
-            entry.TargetPhysicalObjectIdentity,
-            cancellationToken);
-        entry.CopyState = MoveJobEntryCopyState.Verified;
-    }
-
-    private static void TryRetireUncommittedMarkerlessFile(
-        PinnedDirectoryCreation.PinnedFileEntry file)
-    {
-        try
-        {
-            if (file.VisiblePathMatches())
-            {
-                file.Delete();
-            }
-        }
-        catch
-        {
-            // If persistence failed after final-name creation, preserve anything that
-            // cannot still be proven to be this exact newly-created file.
-        }
-    }
 }

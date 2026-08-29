@@ -40,6 +40,48 @@ internal sealed partial class PinnedDirectoryCreation
 
         internal string FileName => _fileName;
 
+        internal RegistrationPublicationMatchOutcome ProbePublicPathMatch()
+        {
+            ThrowIfDisposed();
+            try
+            {
+                using var visibleParent = OperatingSystem.IsWindows()
+                    ? OpenDirectoryWindows(
+                        _parentPath,
+                        openReparsePoint: !_parentFollowsVisibleFinalLink)
+                    : OpenDirectoryUnix(
+                        _parentPath,
+                        noFollow: !_parentFollowsVisibleFinalLink);
+                if (!HandlesIdentifySameDirectory(_parentHandle, visibleParent))
+                {
+                    return RegistrationPublicationMatchOutcome.Mismatch;
+                }
+
+                return ProbeVisiblePathMatch();
+            }
+            catch (FileNotFoundException)
+            {
+                return RegistrationPublicationMatchOutcome.Mismatch;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return RegistrationPublicationMatchOutcome.Mismatch;
+            }
+            catch (Win32Exception exception) when (
+                OperatingSystem.IsWindows()
+                    ? exception.NativeErrorCode is 2 or 3
+                    : exception.NativeErrorCode == 2)
+            {
+                return RegistrationPublicationMatchOutcome.Mismatch;
+            }
+            catch (Exception exception) when (exception is
+                IOException or UnauthorizedAccessException or Win32Exception
+                    or PlatformNotSupportedException)
+            {
+                return RegistrationPublicationMatchOutcome.Unavailable;
+            }
+        }
+
         internal SafeFileHandle DuplicateHandleForOperation()
         {
             ThrowIfDisposed();

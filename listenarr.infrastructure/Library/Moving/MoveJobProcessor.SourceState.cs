@@ -52,7 +52,7 @@ internal partial class MoveJobProcessor
                 job.Id);
             return true;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (IsTransientFilesystemException(exception))
         {
             await ScheduleTransientRetryAsync(
                 job,
@@ -117,35 +117,61 @@ internal partial class MoveJobProcessor
         var matchesTarget = !string.IsNullOrWhiteSpace(currentPath)
             && PathsMatch(currentPath, target, targetIdentity.Semantics);
         var hasVerifiedRecovery = recoveredMove != null;
-        var hasRecoveryEvidence = hasVerifiedRecovery || hasFilesystemExecutionEvidence;
+        var hasDurableExecutionEvidence = hasFilesystemExecutionEvidence
+            || MoveRecoveryPolicy.HasFilesystemExecutionEvidence(job);
+        var hasRecoveryEvidence = hasVerifiedRecovery || hasDurableExecutionEvidence;
         var hasAdvancedDurablePhase = job.Phase > MoveJobPhase.Planned;
 
         if (matchesSource)
         {
-            if ((hasAdvancedDurablePhase || hasFilesystemExecutionEvidence)
-                && !hasVerifiedRecovery)
+            // Once this job has durable filesystem execution evidence, its persisted
+            // markerless journal is the authoritative description of expected source
+            // drift. Rebuilding the pre-move source plan here would reject legitimate
+            // partial copies, native renames, and source-cleanup recovery. The content
+            // mover revalidates that journal, endpoint generations, and target proof
+            // before performing or resuming any mutation.
+            if (!hasRecoveryEvidence)
             {
-                await MarkSourceStateNeedsAttentionAsync(
-                    job,
-                    "The move has durable execution evidence but recovery could not be verified.",
-                    cancellationToken);
-                return null;
-            }
+                bool currentManifestMatches;
+                try
+                {
+                    currentManifestMatches = await CurrentTrackedManifestMatchesAsync(
+                        scope.ServiceProvider,
+                        currentAudiobook,
+                        job,
+                        source,
+                        sourceIdentity,
+                        cancellationToken);
+                }
+                catch (ApplicationUnavailableException exception)
+                {
+                    await ScheduleTransientRetryAsync(
+                        job,
+                        $"Move source ownership verification will be retried: {exception.SafeDetail}",
+                        exception,
+                        "Move job {JobId} could not inspect its tracked source manifest",
+                        cancellationToken);
+                    return null;
+                }
+                catch (Exception exception) when (IsTransientFilesystemException(exception))
+                {
+                    await ScheduleTransientRetryAsync(
+                        job,
+                        $"Move source ownership verification will be retried: {exception.Message}",
+                        exception,
+                        "Move job {JobId} could not inspect its tracked source manifest",
+                        cancellationToken);
+                    return null;
+                }
 
-            if (!hasRecoveryEvidence
-                && !await CurrentTrackedManifestMatchesAsync(
-                    scope.ServiceProvider,
-                    currentAudiobook,
-                    job,
-                    source,
-                    sourceIdentity,
-                    cancellationToken))
-            {
-                await MarkSourceStateNeedsAttentionAsync(
-                    job,
-                    "The audiobook's current tracked-file ownership no longer matches the queued move source manifest.",
-                    cancellationToken);
-                return null;
+                if (!currentManifestMatches)
+                {
+                    await MarkSourceStateNeedsAttentionAsync(
+                        job,
+                        "The audiobook's current tracked-file ownership no longer matches the queued move source manifest.",
+                        cancellationToken);
+                    return null;
+                }
             }
 
             return currentAudiobook;
@@ -156,15 +182,27 @@ internal partial class MoveJobProcessor
             return currentAudiobook;
         }
 
-        if (matchesTarget
-            && !hasRecoveryEvidence
-            && !Directory.Exists(target))
+        if (matchesTarget && !hasRecoveryEvidence)
         {
-            await MarkSourceStateNeedsAttentionAsync(
-                job,
-                "The audiobook points at the requested target, but the target does not exist and no move execution evidence is available.",
-                cancellationToken);
-            return null;
+            var targetPresence = ProbeDirectoryPresence(target);
+            if (targetPresence == DirectoryPresence.Unavailable)
+            {
+                await ScheduleTransientRetryAsync(
+                    job,
+                    "Move target presence verification will be retried because the target is temporarily unavailable.",
+                    new IOException("The move target directory could not be inspected safely."),
+                    "Move job {JobId} could not verify whether its requested target exists",
+                    cancellationToken);
+                return null;
+            }
+            if (targetPresence == DirectoryPresence.Missing)
+            {
+                await MarkSourceStateNeedsAttentionAsync(
+                    job,
+                    "The audiobook points at the requested target, but the target does not exist and no move execution evidence is available.",
+                    cancellationToken);
+                return null;
+            }
         }
 
         if (hasRecoveryEvidence || hasAdvancedDurablePhase)
@@ -220,7 +258,7 @@ internal partial class MoveJobProcessor
         {
             return true;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (IsTransientFilesystemException(exception))
         {
             await ScheduleTransientRetryAsync(
                 job,
@@ -230,6 +268,47 @@ internal partial class MoveJobProcessor
                 cancellationToken);
             return null;
         }
+    }
+
+    private static DirectoryPresence ProbeDirectoryPresence(string path)
+    {
+        try
+        {
+            var attributes = File.GetAttributes(path);
+            return (attributes & FileAttributes.Directory) != 0
+                && (attributes & FileAttributes.ReparsePoint) == 0
+                    ? DirectoryPresence.Present
+                    : DirectoryPresence.Missing;
+        }
+        catch (Exception exception) when (exception is
+            FileNotFoundException or DirectoryNotFoundException)
+        {
+            return DirectoryPresence.Missing;
+        }
+        catch (System.ComponentModel.Win32Exception exception) when (
+            OperatingSystem.IsWindows()
+                ? exception.NativeErrorCode is 2 or 3
+                : exception.NativeErrorCode == 2)
+        {
+            return DirectoryPresence.Missing;
+        }
+        catch (Exception exception) when (IsTransientFilesystemException(exception))
+        {
+            return DirectoryPresence.Unavailable;
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or InvalidOperationException
+                or NotSupportedException or PathTooLongException)
+        {
+            return DirectoryPresence.Missing;
+        }
+    }
+
+    private enum DirectoryPresence
+    {
+        Present,
+        Missing,
+        Unavailable
     }
 
     private static bool IsSourceInsideMetadataBasePath(
@@ -287,8 +366,7 @@ internal partial class MoveJobProcessor
         catch (Exception exception) when (exception is
             ApplicationConflictException or ArgumentException
             or InvalidOperationException or NotSupportedException
-            or PathTooLongException or IOException
-            or UnauthorizedAccessException)
+            or PathTooLongException)
         {
             return false;
         }

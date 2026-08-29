@@ -33,6 +33,12 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore(
         set;
     }
 
+    internal Action? BeforeOwnershipAtomicCommitForTest
+    {
+        get;
+        set;
+    }
+
     public async Task<LibraryDirectoryOwnership> RecordCreatedAsync(
         LibraryDirectoryOwnershipClaim claim,
         CancellationToken cancellationToken = default)
@@ -183,7 +189,7 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore(
             EnsureAuthorizedPhysicalIdentity(
                 existing,
                 managedRootFolderId,
-                directoryObjectIdentity);
+                claimedDirectory.GetDirectoryObjectIdentityCandidates());
             cancellationToken.ThrowIfCancellationRequested();
             ValidatePinnedOwnership(existing, markerCreation);
             existing.State = LibraryDirectoryOwnershipState.Owned;
@@ -191,6 +197,8 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore(
             existing.DirectoryObjectIdentityUnavailableReason = null;
             existing.UpdatedAt = now;
             await db.SaveChangesAsync(CancellationToken.None);
+            BeforeOwnershipAtomicCommitForTest?.Invoke();
+            ValidatePinnedOwnership(existing, markerCreation);
             if (transaction != null)
             {
                 await transaction.CommitAsync(CancellationToken.None);
@@ -249,6 +257,8 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore(
         {
             await db.SaveChangesAsync(cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
+            BeforeOwnershipAtomicCommitForTest?.Invoke();
+            ValidatePinnedOwnership(ownership, markerCreation);
             if (transaction != null)
             {
                 await transaction.CommitAsync(CancellationToken.None);
@@ -271,6 +281,9 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore(
             }
 
             await using var retryDb = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+            await using var retryTransaction = retryDb.Database.IsRelational()
+                ? await retryDb.Database.BeginTransactionAsync(cancellationToken)
+                : null;
             var concurrent = await retryDb.LibraryDirectoryOwnerships
                 .SingleOrDefaultAsync(
                     candidate => candidate.PathOwnershipKey == ownershipKey,
@@ -281,7 +294,7 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore(
                 EnsureAuthorizedPhysicalIdentity(
                     concurrent,
                     managedRootFolderId,
-                    directoryObjectIdentity);
+                    claimedDirectory.GetDirectoryObjectIdentityCandidates());
                 cancellationToken.ThrowIfCancellationRequested();
                 ValidatePinnedOwnership(concurrent, markerCreation);
                 concurrent.State = LibraryDirectoryOwnershipState.Owned;
@@ -289,6 +302,12 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore(
                 concurrent.DirectoryObjectIdentityUnavailableReason = null;
                 concurrent.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
                 await retryDb.SaveChangesAsync(CancellationToken.None);
+                BeforeOwnershipAtomicCommitForTest?.Invoke();
+                ValidatePinnedOwnership(concurrent, markerCreation);
+                if (retryTransaction != null)
+                {
+                    await retryTransaction.CommitAsync(CancellationToken.None);
+                }
                 await RevalidateCommittedOwnershipAsync(
                     concurrent,
                     markerCreation,

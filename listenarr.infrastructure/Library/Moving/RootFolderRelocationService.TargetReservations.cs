@@ -90,8 +90,12 @@ public sealed partial class RootFolderRelocationService
             }
 
             if (Directory.EnumerateFileSystemEntries(canonicalPath).Any()
-                || !directory.VisiblePathMatches()
-                || !parent.VisiblePathMatches())
+                || !ReservationPathMatchesOrThrowUnavailable(
+                    directory,
+                    "The reserved relocation directory is temporarily unavailable during cleanup.")
+                || !ReservationPathMatchesOrThrowUnavailable(
+                    parent,
+                    "The reserved relocation directory parent is temporarily unavailable during cleanup."))
             {
                 reservation.State =
                     RootFolderRelocationCreatedDirectoryState.Retained;
@@ -152,8 +156,12 @@ public sealed partial class RootFolderRelocationService
             ValidateReservationDirectoryIdentity(
                 reservation,
                 directory);
-            if (!directory.VisiblePathMatches()
-                || !parent.VisiblePathMatches())
+            if (!ReservationPathMatchesOrThrowUnavailable(
+                    directory,
+                    "The relocation target directory is temporarily unavailable during finalization.")
+                || !ReservationPathMatchesOrThrowUnavailable(
+                    parent,
+                    "The relocation target directory parent is temporarily unavailable during finalization."))
             {
                 throw new InvalidOperationException(
                     "A relocation target directory changed during finalization.");
@@ -271,8 +279,12 @@ public sealed partial class RootFolderRelocationService
                         }
                     }
 
-                    if (!next.VisiblePathMatches()
-                        || !current.VisiblePathMatches())
+                    if (!ReservationPathMatchesOrThrowUnavailable(
+                            next,
+                            "The relocation target reservation is temporarily unavailable before use.")
+                        || !ReservationPathMatchesOrThrowUnavailable(
+                            current,
+                            "The relocation target reservation parent is temporarily unavailable before use."))
                     {
                         throw new InvalidOperationException(
                             "A relocation target reservation changed before use.");
@@ -288,7 +300,9 @@ public sealed partial class RootFolderRelocationService
                 }
             }
 
-            if (!current.VisiblePathMatches())
+            if (!ReservationPathMatchesOrThrowUnavailable(
+                    current,
+                    "The reserved relocation target is temporarily unavailable before use."))
             {
                 throw new InvalidOperationException(
                     "The reserved relocation target changed before use.");

@@ -24,23 +24,30 @@ public sealed partial class LibraryMoveWorkflow
         try
         {
             using var scope = _scopeFactory.CreateScope();
-            var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
             var rootFolderService = scope.ServiceProvider.GetRequiredService<IRootFolderService>();
-            var settings = await configService.GetApplicationSettingsAsync();
             var rootFolders = await rootFolderService.GetAllAsync();
+            ApplicationSettings? settings = null;
+            if (rootFolders.Count == 0)
+            {
+                var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+                settings = await configService.GetApplicationSettingsAsync();
+            }
             var directoryIdentityResolver = scope.ServiceProvider
                 .GetRequiredService<IDirectoryObjectIdentityResolver>();
+            var storageHealthResolver = scope.ServiceProvider
+                .GetRequiredService<IRootFolderStorageHealthResolver>();
             cancellationToken.ThrowIfCancellationRequested();
 
             var allowedMoveRoots = new List<MoveRootBoundary>();
+            var unavailableManagedRoots = new List<UnavailableManagedMoveRoot>();
             // RootFolders are the authoritative managed-storage boundaries. OutputPath is
             // retained only as a legacy fallback for databases that have not configured
             // any root folders yet; otherwise stale cross-host OutputPath values must not
             // grant independent filesystem mutation authority.
             var normalizedOutputPath = rootFolders.Count == 0
-                ? TryNormalizeMoveRoot(settings.OutputPath, "legacy configured output path")
+                ? TryNormalizeMoveRoot(settings?.OutputPath, "legacy configured output path")
                 : null;
-            await AddAllowedMoveRootAsync(
+            _ = await AddAllowedMoveRootAsync(
                 allowedMoveRoots,
                 normalizedOutputPath,
                 FileSystemCaseSensitivityMode.Auto,
@@ -55,10 +62,13 @@ public sealed partial class LibraryMoveWorkflow
                     $"root folder {rootFolder.Id}");
                 if (normalizedRootPath == null)
                 {
+                    unavailableManagedRoots.Add(new UnavailableManagedMoveRoot(
+                        rootFolder,
+                        CanonicalPath: null));
                     continue;
                 }
 
-                await AddAllowedMoveRootAsync(
+                var rootAvailable = await AddAllowedMoveRootAsync(
                     allowedMoveRoots,
                     normalizedRootPath,
                     rootFolder.CaseSensitivityMode,
@@ -68,7 +78,15 @@ public sealed partial class LibraryMoveWorkflow
                     rootFolder.DirectoryObjectIdentity,
                     rootFolder.DirectoryObjectIdentityUnavailableReason,
                     RootFolderPathSemantics.ResolvePersisted(rootFolder),
-                    isManagedRoot: true);
+                    isManagedRoot: true,
+                    managedRootFolderId: rootFolder.Id);
+                if (!rootAvailable)
+                {
+                    unavailableManagedRoots.Add(new UnavailableManagedMoveRoot(
+                        rootFolder,
+                        normalizedRootPath));
+                    continue;
+                }
                 if (rootFolder.IsDefault && defaultRootPath == null)
                 {
                     defaultRootPath = normalizedRootPath;
@@ -127,7 +145,11 @@ public sealed partial class LibraryMoveWorkflow
 
             var targetBoundary = FindAllowedMoveRoot(final, allowedMoveRoots);
 
-            if (targetBoundary == null)
+            if (targetBoundary == null
+                || UnavailableManagedRootOutranksTargetBoundary(
+                    final,
+                    targetBoundary,
+                    unavailableManagedRoots))
             {
                 return DestinationValidationResult(
                     "destination_filesystem_identity_unavailable",
@@ -140,6 +162,21 @@ public sealed partial class LibraryMoveWorkflow
                     "destination_physical_identity_unavailable",
                     "Destination root physical identity is unavailable or changed.",
                     final);
+            }
+            if (targetBoundary.ManagedRootFolderId is int targetRootFolderId)
+            {
+                var targetRootFolder = rootFolders.First(root => root.Id == targetRootFolderId);
+                var targetStorage = await storageHealthResolver.ResolveAsync(
+                    targetRootFolder,
+                    cancellationToken);
+                if (!targetStorage.CanPublishAdditively)
+                {
+                    return DestinationValidationResult(
+                        "destination_file_publication_unavailable",
+                        targetStorage.Message
+                            ?? "Destination root does not currently allow new file publication.",
+                        final);
+                }
             }
 
             var targetParent = Path.GetDirectoryName(final);
@@ -202,6 +239,47 @@ public sealed partial class LibraryMoveWorkflow
                     var manifest = await manifestService.BuildPlanAsync(
                         currentAudiobook,
                         lockedToken);
+                    var configuredManagedSourceRoot = FindConfiguredManagedSourceRoot(
+                        manifest.SourceRoot,
+                        manifest.SourceIdentity,
+                        rootFolders);
+                    if (UnavailableManagedRootOutranksSourceBoundary(
+                            manifest.SourceRoot,
+                            manifest.SourceIdentity,
+                            configuredManagedSourceRoot,
+                            unavailableManagedRoots))
+                    {
+                        throw new ApplicationValidationException(
+                            "source_physical_identity_unavailable",
+                            "Source root physical identity is unavailable or changed.");
+                    }
+
+                    var sourceManagedBoundary = configuredManagedSourceRoot == null
+                        ? null
+                        : FindExactManagedMoveRoot(
+                            configuredManagedSourceRoot,
+                            allowedMoveRoots);
+                    if (configuredManagedSourceRoot != null
+                        && (sourceManagedBoundary == null
+                            || !sourceManagedBoundary.DirectoryIdentity.IsAvailable
+                            || sourceManagedBoundary.Semantics.Syntax
+                                != manifest.SourceIdentity.Syntax
+                            || sourceManagedBoundary.Semantics.CaseSensitivity
+                                != manifest.SourceIdentity.CaseSensitivity
+                            || !FileSystemPathIdentity.IsSameOrInside(
+                                manifest.SourceIdentity.BoundaryPath,
+                                sourceManagedBoundary.Path,
+                                sourceManagedBoundary.Semantics)))
+                    {
+                        throw new ApplicationValidationException(
+                            "source_physical_identity_unavailable",
+                            "Source root physical identity is unavailable or changed.");
+                    }
+                    var sourceStorage = await ResolveReadableSourceStorageAsync(
+                        sourceManagedBoundary,
+                        rootFolders,
+                        storageHealthResolver,
+                        lockedToken);
 
                     if (!string.IsNullOrWhiteSpace(request.SourcePath))
                     {
@@ -239,31 +317,110 @@ public sealed partial class LibraryMoveWorkflow
                             "Source and target paths are identical; nothing to move.");
                     }
 
-                    string? sourceCleanupBoundary = null;
-                    if (deleteEmptySource)
-                    {
-                        var cleanupBoundary = await _cleanupBoundaryResolver.ResolveAsync(
+                    var effectiveDeleteEmptySource = deleteEmptySource;
+                    if (effectiveDeleteEmptySource
+                        && sourceManagedBoundary != null
+                        && FileSystemPathIdentity.AreEquivalent(
                             manifest.SourceRoot,
-                            final,
-                            rootFolders,
-                            cancellationToken: lockedToken);
-                        sourceCleanupBoundary = cleanupBoundary.Boundary;
-                        if (!cleanupBoundary.IsAvailable)
+                            sourceManagedBoundary.Path,
+                            sourceManagedBoundary.Semantics))
+                    {
+                        effectiveDeleteEmptySource = false;
+                        _logger.LogInformation(
+                            "Disabled empty-source deletion for audiobook {AudiobookId} because the source is the managed library root {SourceRoot}",
+                            id,
+                            LogRedaction.SanitizeFilePath(sourceManagedBoundary.Path));
+                    }
+
+                    string? sourceCleanupBoundary = null;
+                    if (effectiveDeleteEmptySource)
+                    {
+                        if (sourceManagedBoundary != null)
                         {
-                            _logger.LogWarning(
-                                "Move for audiobook {AudiobookId} has no safe source cleanup boundary: {Reason}",
-                                id,
-                                cleanupBoundary.Reason ?? "boundary unavailable");
+                            sourceCleanupBoundary = sourceManagedBoundary.Path;
                         }
                         else
                         {
-                            _logger.LogInformation(
-                                "Resolved {BoundaryKind} source cleanup boundary {Boundary} for audiobook {AudiobookId}",
-                                cleanupBoundary.Kind,
-                                LogRedaction.SanitizeFilePath(sourceCleanupBoundary),
-                                id);
+                            var cleanupBoundary = await _cleanupBoundaryResolver.ResolveAsync(
+                                manifest.SourceRoot,
+                                final,
+                                rootFolders,
+                                cancellationToken: lockedToken);
+                            sourceCleanupBoundary = cleanupBoundary.Boundary;
+                            if (!cleanupBoundary.IsAvailable)
+                            {
+                                sourceCleanupBoundary = Path.GetDirectoryName(
+                                    manifest.SourceRoot);
+                                _logger.LogWarning(
+                                    "Move for audiobook {AudiobookId} has no broader safe source cleanup boundary: {Reason}. Falling back to the source parent boundary.",
+                                    id,
+                                    cleanupBoundary.Reason ?? "boundary unavailable");
+                            }
+                            else
+                            {
+                                _logger.LogInformation(
+                                    "Resolved {BoundaryKind} source cleanup boundary {Boundary} for audiobook {AudiobookId}",
+                                    cleanupBoundary.Kind,
+                                    LogRedaction.SanitizeFilePath(sourceCleanupBoundary),
+                                    id);
+                            }
                         }
                     }
+
+                    var sourceAuthorizationBoundary = sourceCleanupBoundary
+                        ?? sourceManagedBoundary?.Path
+                        ?? manifest.SourceIdentity.BoundaryPath;
+                    DirectoryObjectIdentityResolution sourceDirectoryIdentity;
+                    if (sourceManagedBoundary != null
+                        && FileSystemPathIdentity.AreEquivalent(
+                            sourceAuthorizationBoundary,
+                            sourceManagedBoundary.Path,
+                            sourceManagedBoundary.Semantics))
+                    {
+                        sourceDirectoryIdentity = sourceManagedBoundary.DirectoryIdentity;
+                    }
+                    else
+                    {
+                        sourceDirectoryIdentity = await directoryIdentityResolver.ResolveAsync(
+                            sourceAuthorizationBoundary,
+                            lockedToken);
+                    }
+                    if (!sourceDirectoryIdentity.IsAvailable)
+                    {
+                        throw new ApplicationValidationException(
+                            "source_physical_identity_unavailable",
+                            "Source root physical identity is unavailable or changed.");
+                    }
+
+                    // MoveJob.SourceCleanupBoundary also persists the path paired with the
+                    // source boundary-generation authorization. Keep the managed root path
+                    // even when ancestor cleanup is disabled; DeleteEmptySource remains the
+                    // independent switch that authorizes directory retirement.
+                    var persistedSourceBoundary = sourceCleanupBoundary
+                        ?? sourceManagedBoundary?.Path;
+
+                    var sourceCleanupAuthorization = _sourceCleanupPolicyResolver == null
+                        ? new MoveSourceCleanupAuthorization(
+                            MoveSourceCleanupMode.RetainSource,
+                            sourceManagedBoundary?.ManagedRootFolderId,
+                            null,
+                            targetBoundary.ManagedRootFolderId,
+                            null,
+                            sourceManagedBoundary != null
+                                && FileSystemPathIdentity.AreEquivalent(
+                                    manifest.SourceRoot,
+                                    sourceManagedBoundary.Path,
+                                    sourceManagedBoundary.Semantics),
+                            "Source files will be retained because verified cleanup policy resolution is unavailable.")
+                        : await _sourceCleanupPolicyResolver.ResolveAsync(
+                            manifest.SourceRoot,
+                            final,
+                            lockedToken);
+                    (sourceCleanupAuthorization, var forceCopyAndRetainSource, effectiveDeleteEmptySource) =
+                        ApplySourceStorageCapabilities(
+                            sourceCleanupAuthorization,
+                            sourceStorage,
+                            effectiveDeleteEmptySource);
 
                     return await _moveQueueService!.EnqueueMoveAsync(
                         new MoveEnqueueCommand(
@@ -273,10 +430,20 @@ public sealed partial class LibraryMoveWorkflow
                             manifest.Entries,
                             final,
                             targetIdentity,
+                            sourceDirectoryIdentity.Version!.Value,
+                            sourceDirectoryIdentity.Value!,
                             targetBoundary.DirectoryIdentity.Version!.Value,
                             targetBoundary.DirectoryIdentity.Value!,
-                            deleteEmptySource,
-                            sourceCleanupBoundary),
+                            effectiveDeleteEmptySource,
+                            persistedSourceBoundary,
+                            SourceCleanupMode: sourceCleanupAuthorization.Mode,
+                            SourceRootFolderId: sourceCleanupAuthorization.SourceRootFolderId,
+                            SourcePolicyRevision: sourceCleanupAuthorization.SourcePolicyRevision,
+                            TargetRootFolderId: sourceCleanupAuthorization.TargetRootFolderId,
+                            TargetPolicyRevision: sourceCleanupAuthorization.TargetPolicyRevision,
+                            SourceStorageContractRevision: sourceCleanupAuthorization.SourceStorageContractRevision,
+                            TargetStorageContractRevision: sourceCleanupAuthorization.TargetStorageContractRevision,
+                            ForceCopyAndRetainSource: forceCopyAndRetainSource),
                         lockedToken);
                 },
                 cancellationToken);

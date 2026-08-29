@@ -8,6 +8,7 @@ internal sealed partial class AudiobookContentMoveService
         string target,
         bool targetInsideSource,
         MoveJobEntry entry,
+        string sourceEndpointIdentity,
         CancellationToken cancellationToken)
     {
         var sourcePath = ResolveManifestPath(
@@ -15,17 +16,22 @@ internal sealed partial class AudiobookContentMoveService
             entry,
             request.SourceSemantics,
             "source");
-        if (File.Exists(sourcePath))
+        var sourceExists = TryGetMarkerlessPathAttributes(
+            sourcePath,
+            out var sourceAttributes);
+        if (sourceExists
+            && ((sourceAttributes & FileAttributes.Directory) == 0
+                || (sourceAttributes & FileAttributes.ReparsePoint) != 0))
         {
             throw new MoveNeedsAttentionException(
-                $"A source directory changed into a file: {entry.RelativePath}");
+                $"A source directory changed type or became a link: {entry.RelativePath}");
         }
 
         var ownership = await ResolveMarkerlessSourceDirectoryOwnershipAsync(
             sourcePath,
             request.SourceSemantics,
             cancellationToken);
-        if (!Directory.Exists(sourcePath))
+        if (!sourceExists)
         {
             if (entry.CleanupState is
                 MoveJobEntryCleanupState.DeleteAuthorized
@@ -93,7 +99,13 @@ internal sealed partial class AudiobookContentMoveService
         var parentPath = Path.GetDirectoryName(sourcePath)
             ?? throw new MoveNeedsAttentionException(
                 "A markerless source directory has no parent.");
-        using (var parent = PinnedDirectoryCreation.OpenPinnedBoundary(parentPath))
+        using (var parent = OpenPinnedMoveDescendant(
+            request,
+            source,
+            parentPath,
+            request.SourceSemantics,
+            sourceEndpointIdentity,
+            sourceEndpoint: true))
         using (var publication = parent.OpenExistingChildForPublication(
             Path.GetFileName(sourcePath)))
         using (var directory = publication.OpenCreatedDirectoryAnchor())
@@ -196,7 +208,17 @@ internal sealed partial class AudiobookContentMoveService
             return;
         }
 
-        if (!Directory.Exists(source))
+        var sourceExists = TryGetMarkerlessPathAttributes(
+            source,
+            out var sourceAttributes);
+        if (sourceExists
+            && ((sourceAttributes & FileAttributes.Directory) == 0
+                || (sourceAttributes & FileAttributes.ReparsePoint) != 0))
+        {
+            throw new MoveNeedsAttentionException(
+                "The markerless source root changed type or became a link before deletion.");
+        }
+        if (!sourceExists)
         {
             if (endpoints.SourceDirectoryCleanupState is
                 MoveJobEntryCleanupState.DeleteAuthorized
@@ -256,17 +278,21 @@ internal sealed partial class AudiobookContentMoveService
         var parentPath = Path.GetDirectoryName(source)
             ?? throw new MoveNeedsAttentionException(
                 "The markerless source directory has no parent.");
-        using (var parent = PinnedDirectoryCreation.OpenPinnedBoundary(parentPath))
+        using (var parent = OpenPinnedMoveBoundaryDescendant(
+            request,
+            parentPath,
+            request.SourceSemantics,
+            sourceBoundary: true))
         using (var publication = parent.OpenExistingChildForPublication(
             Path.GetFileName(source)))
         using (var directory = publication.OpenCreatedDirectoryAnchor())
         {
             if (string.IsNullOrWhiteSpace(endpoints.SourceDirectoryObjectIdentity)
-                || !string.Equals(
-                    endpoints.SourceDirectoryObjectIdentity,
-                    directory.GetDirectoryObjectIdentity(),
-                    StringComparison.Ordinal)
-                || !directory.VisiblePathMatches())
+                || !directory.MatchesDirectoryObjectIdentity(
+                    endpoints.SourceDirectoryObjectIdentity)
+                || !PinnedDirectoryVisibleOrThrowUnavailable(
+                    directory,
+                    "The markerless source root is temporarily unavailable before deletion."))
             {
                 throw new MoveNeedsAttentionException(
                     "The markerless source root changed physical generation before deletion.");
@@ -288,8 +314,18 @@ internal sealed partial class AudiobookContentMoveService
                     source,
                     target,
                     cancellationToken);
-                if (Directory.EnumerateFileSystemEntries(source).Any()
-                    || !directory.VisiblePathMatches())
+                if (Directory.EnumerateFileSystemEntries(source).Any())
+                {
+                    await UpdateSourceDirectoryCleanupStateAsync(
+                        request.JobId,
+                        request.LeaseToken,
+                        MoveJobEntryCleanupState.Retained,
+                        cancellationToken);
+                    return;
+                }
+                if (!PinnedDirectoryVisibleOrThrowUnavailable(
+                        directory,
+                        "The markerless source root is temporarily unavailable immediately before deletion."))
                 {
                     await UpdateSourceDirectoryCleanupStateAsync(
                         request.JobId,

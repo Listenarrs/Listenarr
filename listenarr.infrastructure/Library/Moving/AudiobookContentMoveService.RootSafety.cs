@@ -9,14 +9,7 @@ internal sealed partial class AudiobookContentMoveService
 
     private static void ValidateMoveTargetRoot(string target)
     {
-        var fullTarget = Path.GetFullPath(target);
-        if (File.Exists(fullTarget) && !Directory.Exists(fullTarget))
-        {
-            throw new MoveNeedsAttentionException(
-                "The move target path is occupied by a file.");
-        }
-
-        ValidateMoveRootPath(fullTarget, mustExist: false, "target");
+        ValidateMoveRootPath(target, mustExist: false, "target");
     }
 
     private static void ValidateExistingMoveDirectory(string directory, string purpose)
@@ -30,20 +23,25 @@ internal sealed partial class AudiobookContentMoveService
         string purpose)
     {
         var fullPath = Path.GetFullPath(path);
-        if (File.Exists(fullPath) && !Directory.Exists(fullPath))
+        var fullPathExists = TryGetMarkerlessPathAttributes(
+            fullPath,
+            out var fullPathAttributes);
+        if (fullPathExists
+            && (fullPathAttributes & FileAttributes.Directory) == 0)
         {
             throw new MoveNeedsAttentionException(
                 $"The move {purpose} path is occupied by a file.");
         }
 
-        if (mustExist && !Directory.Exists(fullPath))
+        if (mustExist && !fullPathExists)
         {
             throw new MoveNeedsAttentionException(
                 $"The move {purpose} directory does not exist.");
         }
 
         var nearestExistingPath = fullPath;
-        while (!Directory.Exists(nearestExistingPath))
+        var nearestExistingAttributes = fullPathAttributes;
+        while (!fullPathExists)
         {
             var parent = Path.GetDirectoryName(nearestExistingPath);
             if (string.IsNullOrWhiteSpace(parent)
@@ -54,15 +52,34 @@ internal sealed partial class AudiobookContentMoveService
             }
 
             nearestExistingPath = parent;
+            fullPathExists = TryGetMarkerlessPathAttributes(
+                nearestExistingPath,
+                out nearestExistingAttributes);
+        }
+
+        if ((nearestExistingAttributes & FileAttributes.Directory) == 0)
+        {
+            throw new MoveNeedsAttentionException(
+                $"The move {purpose} path is blocked by a file ancestor.");
         }
 
         var current = nearestExistingPath;
         while (!string.IsNullOrWhiteSpace(current))
         {
-            if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+            if (!TryGetMarkerlessPathAttributes(current, out var attributes))
+            {
+                throw new MoveNeedsAttentionException(
+                    $"The move {purpose} path changed while its ancestor chain was being validated.");
+            }
+            if ((attributes & FileAttributes.ReparsePoint) != 0)
             {
                 throw new MoveNeedsAttentionException(
                     $"The move {purpose} path traverses a symbolic link or reparse point.");
+            }
+            if ((attributes & FileAttributes.Directory) == 0)
+            {
+                throw new MoveNeedsAttentionException(
+                    $"The move {purpose} path is blocked by a file ancestor.");
             }
 
             var parent = Path.GetDirectoryName(current);

@@ -14,6 +14,11 @@ namespace Listenarr.Infrastructure.Library.Moving
 {
     internal partial class MoveJobProcessor
     {
+        private static bool IsTransientFilesystemException(Exception exception) =>
+            exception is IOException or UnauthorizedAccessException
+            || exception is System.ComponentModel.Win32Exception native
+                && native.NativeErrorCode is 5 or 13 or 16 or 30 or 32 or 33;
+
         private async Task<PathIdentitySnapshot> GetRequiredIdentityAsync(
             MoveJob job,
             string path,
@@ -46,6 +51,12 @@ namespace Listenarr.Infrastructure.Library.Moving
                     identity.BoundaryPath,
                     FileSystemCaseSensitivityMode.Auto,
                     cancellationToken);
+                if (current.State == PathIdentityState.Unavailable)
+                {
+                    throw new IOException(
+                        current.Reason
+                            ?? $"The {(target ? "target" : "source")} filesystem semantics are temporarily unavailable.");
+                }
                 if (current.State != PathIdentityState.Valid
                     || current.Semantics.Syntax != identity.Syntax
                     || current.Semantics.CaseSensitivity != identity.CaseSensitivity)
@@ -53,9 +64,36 @@ namespace Listenarr.Infrastructure.Library.Moving
                     throw new MoveNeedsAttentionException(
                         $"The {(target ? "target" : "source")} filesystem identity changed after the move was queued.");
                 }
+                var sourceIsCopyAndRetainOnly = !target
+                    && job.ForceCopyAndRetainSource
+                    && job.SourceCleanupMode == MoveSourceCleanupMode.RetainSource;
+                if (!current.HasDurableMutationSemanticsAuthority
+                    && !sourceIsCopyAndRetainOnly)
+                {
+                    throw new MoveNeedsAttentionException(
+                        $"The {(target ? "target" : "source")} filesystem case semantics are available only through a behavioral lookup probe. Select Sensitive or Insensitive explicitly for the root, then start a new move.");
+                }
             }
 
             return identity;
+        }
+
+        private static MoveCleanupBoundaryResolution GetPersistedCleanupBoundary(
+            MoveJob job)
+        {
+            if (string.IsNullOrWhiteSpace(job.SourceCleanupBoundary))
+            {
+                return new MoveCleanupBoundaryResolution(
+                    Boundary: null,
+                    MoveCleanupBoundaryKind.Unavailable,
+                    job.DeleteEmptySource
+                        ? "The current move protocol has no persisted source cleanup boundary."
+                        : "Source ancestor cleanup is disabled for this move.");
+            }
+
+            return new MoveCleanupBoundaryResolution(
+                job.SourceCleanupBoundary,
+                MoveCleanupBoundaryKind.Persisted);
         }
 
         private static MoveLeaseToken CreateLeaseToken(MoveJob job)
@@ -117,115 +155,89 @@ namespace Listenarr.Infrastructure.Library.Moving
                 return FinalizedMoveRecoveryOutcome.NotAttempted;
             }
 
-            var finalizedRequest = new AudiobookContentMoveRequest(
+            var finalizedRequest = CreateContentMoveRequest(
+                job,
                 source,
                 target,
-                job.Id,
-                job.DeleteEmptySource,
                 sourceSemantics.Value,
                 targetSemantics,
-                CreateLeaseToken(job),
                 cleanupBoundaryResolution?.Boundary);
+            MarkerlessTargetVerificationLease? targetVerificationLease =
+                new(targetSemantics);
             try
             {
-                await contentMoveService.VerifyFinalizedMoveAsync(
-                    finalizedRequest,
-                    cancellationToken);
-            }
-            catch (MoveNeedsAttentionException exception)
-            {
-                await UpdateJobStatusAsync(
-                    job,
-                    MoveJobStatus.NeedsAttention,
-                    exception.Message,
-                    cancellationToken);
-                metrics.Increment("worker.move.job.needs_attention");
-                logger.LogWarning(
-                    exception,
-                    "Move job {JobId} could not prove markerless completion",
-                    job.Id);
-                return FinalizedMoveRecoveryOutcome.HandledFailure;
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                await ScheduleTransientRetryAsync(
-                    job,
-                    $"Finalized move verification will be retried: {exception.Message}",
-                    exception,
-                    "Move job {JobId} could not verify its published target",
-                    cancellationToken);
-                return FinalizedMoveRecoveryOutcome.HandledFailure;
-            }
+                try
+                {
+                    await contentMoveService.VerifyFinalizedMoveAsync(
+                        finalizedRequest,
+                        cancellationToken,
+                        targetVerificationLease);
+                }
+                catch (MoveNeedsAttentionException exception)
+                {
+                    await UpdateJobStatusAsync(
+                        job,
+                        MoveJobStatus.NeedsAttention,
+                        exception.Message,
+                        cancellationToken);
+                    metrics.Increment("worker.move.job.needs_attention");
+                    logger.LogWarning(
+                        exception,
+                        "Move job {JobId} could not prove markerless completion",
+                        job.Id);
+                    return FinalizedMoveRecoveryOutcome.HandledFailure;
+                }
+                catch (Exception exception) when (IsTransientFilesystemException(exception))
+                {
+                    await ScheduleTransientRetryAsync(
+                        job,
+                        $"Finalized move verification will be retried: {exception.Message}",
+                        exception,
+                        "Move job {JobId} could not verify its published target",
+                        cancellationToken);
+                    return FinalizedMoveRecoveryOutcome.HandledFailure;
+                }
 
-            var targetInsideSource = FileSystemPathIdentity.IsSameOrInside(
-                target,
-                source,
-                sourceSemantics.Value);
-            var sourceInsideTarget = FileSystemPathIdentity.IsSameOrInside(
-                source,
-                target,
-                targetSemantics);
-            var targetPhysicalObjectIdentities =
-                await contentMoveService.CapturePublishedTargetPhysicalIdentitiesAsync(
-                    job.Id,
+                var targetInsideSource = FileSystemPathIdentity.IsSameOrInside(
                     target,
-                    targetSemantics,
-                    cancellationToken);
-            return new FinalizedMoveRecoveryOutcome(
-                Handled: false,
-                new AudiobookContentMoveResult(
+                    source,
+                    sourceSemantics.Value);
+                var sourceInsideTarget = FileSystemPathIdentity.IsSameOrInside(
+                    source,
+                    target,
+                    targetSemantics);
+                var targetPhysicalObjectIdentities =
+                    await contentMoveService.CapturePublishedTargetPhysicalIdentitiesAsync(
+                        job.Id,
+                        target,
+                        targetSemantics,
+                        cancellationToken);
+                var persistedJob = await moveQueueService.GetJobAsync(
+                    job.Id,
+                    cancellationToken)
+                    ?? throw new MoveLeaseLostException(
+                        job.Id,
+                        job.LeaseGeneration);
+                var sourceRetained = MoveJobPublicProjection.IsSourceRetained(
+                    persistedJob);
+                var result = new AudiobookContentMoveResult(
                     source,
                     target,
                     targetInsideSource,
                     sourceInsideTarget,
                     SourceCleanupCompleted: true,
-                    targetPhysicalObjectIdentities));
-        }
-
-        private static bool HasFinalizedMoveEvidence(
-            MoveJob job,
-            Audiobook audiobook,
-            string target,
-            FileSystemPathSemantics targetSemantics)
-        {
-            if (job.Phase >= MoveJobPhase.Published)
-            {
-                return true;
+                    SourceRetained: sourceRetained,
+                    targetPhysicalObjectIdentities,
+                    targetVerificationLease);
+                targetVerificationLease = null;
+                return new FinalizedMoveRecoveryOutcome(
+                    Handled: false,
+                    result);
             }
-
-            if (string.IsNullOrWhiteSpace(audiobook.BasePath))
+            finally
             {
-                return false;
+                targetVerificationLease?.Dispose();
             }
-
-            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
-                    audiobook.BasePath,
-                    out var currentBasePath,
-                    out _))
-            {
-                return false;
-            }
-
-            try
-            {
-                return FileSystemPathIdentity.AreEquivalent(
-                    currentBasePath,
-                    target,
-                    targetSemantics);
-            }
-            catch (Exception exception) when (exception is
-                ArgumentException or NotSupportedException or PathTooLongException or System.Security.SecurityException)
-            {
-                return false;
-            }
-        }
-
-        private sealed record FinalizedMoveRecoveryOutcome(
-            bool Handled,
-            AudiobookContentMoveResult? MoveResult)
-        {
-            public static FinalizedMoveRecoveryOutcome NotAttempted { get; } = new(false, null);
-            public static FinalizedMoveRecoveryOutcome HandledFailure { get; } = new(true, null);
         }
 
         private async Task<bool> TryFinalizeMoveAsync(
@@ -248,7 +260,7 @@ namespace Listenarr.Infrastructure.Library.Moving
             {
                 throw;
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            catch (Exception exception) when (IsTransientFilesystemException(exception))
             {
                 await ScheduleTransientRetryAsync(
                     job,
@@ -282,7 +294,7 @@ namespace Listenarr.Infrastructure.Library.Moving
             {
                 throw;
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            catch (Exception exception) when (IsTransientFilesystemException(exception))
             {
                 await ScheduleTransientRetryAsync(
                     job,
@@ -303,6 +315,8 @@ namespace Listenarr.Infrastructure.Library.Moving
             string target,
             AudiobookContentMoveService contentMoveService,
             AudiobookContentMoveRequest moveRequest,
+            MarkerlessTargetVerificationLease? targetVerificationLease,
+            bool sourceRetained,
             Action<MovePostCommitContext> registerPostCommit,
             CancellationToken cancellationToken)
         {
@@ -315,6 +329,8 @@ namespace Listenarr.Infrastructure.Library.Moving
                     target,
                     contentMoveService,
                     moveRequest,
+                    targetVerificationLease,
+                    sourceRetained,
                     registerPostCommit,
                     cancellationToken);
                 return true;

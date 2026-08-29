@@ -176,9 +176,11 @@ internal sealed partial class MoveCleanupBoundaryResolver
     private sealed record ConfiguredRootCandidate(
         int CanonicalLength,
         string? Boundary,
+        FileSystemPathSemantics? Semantics,
         string? UnavailableReason);
 
     private readonly record struct ConfiguredBoundaryResolution(
         string? Boundary,
+        FileSystemPathSemantics? Semantics,
         string? UnavailableReason);
 }

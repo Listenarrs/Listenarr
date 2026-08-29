@@ -134,7 +134,7 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
 
         var loaded = Assert.IsType<MoveJob>(persisted);
         Assert.Single(loaded.CreatedDirectories);
-        Assert.Equal(2, loaded.Entries.Count);
+        Assert.Equal(3, loaded.Entries.Count);
         Assert.Equal(
             MoveRecoveryDisposition.RetryAvailable,
             MoveRecoveryPolicy.GetDisposition(loaded));
@@ -156,6 +156,7 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
                     Status = MoveJobStatus.Queued,
                     Phase = MoveJobPhase.Planned,
                     IdentityKeyVersion = MoveManifestIdentity.Version,
+                    DeleteEmptySource = false,
                     ActiveDeduplicationKey = "stale:first",
                     Entries = CreateAuthorizedManifestEntries()
                 },
@@ -167,6 +168,7 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
                     Status = MoveJobStatus.Running,
                     Phase = MoveJobPhase.Published,
                     IdentityKeyVersion = MoveManifestIdentity.Version,
+                    DeleteEmptySource = false,
                     ActiveDeduplicationKey = "stale:second",
                     Entries = CreateAuthorizedManifestEntries()
                 });
@@ -185,11 +187,12 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
         Assert.True(
             jobs[1].Status == MoveJobStatus.Running,
             jobs[1].Error ?? $"Unexpected status: {jobs[1].Status}");
-        Assert.StartsWith("v1:move-source:42:", jobs[1].ActiveDeduplicationKey);
+        Assert.StartsWith("v2:move-source:42:", jobs[1].ActiveDeduplicationKey);
     }
 
     [Theory]
     [InlineData(MoveExecutionProtocol.PreDurableReleased)]
+    [InlineData(MoveExecutionProtocol.TargetBoundaryMarkerlessDatabaseState)]
     [InlineData(99)]
     public async Task ReconcileIdentityKeys_UnsupportedExecutionProtocol_RequiresAttention(
         int executionProtocolVersion)
@@ -220,7 +223,60 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
         Assert.Equal(MoveFailureKind.Verification, persisted.FailureKind);
         Assert.Null(persisted.ActiveDeduplicationKey);
         Assert.Contains(
-            "predates the durable database execution protocol",
+            "does not use the current durable database execution protocol",
+            persisted.Error ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ReconcileIdentityKeys_SourceMutationBoundaryOutsideSourceParent_RequiresAttention()
+    {
+        var tempRoot = Path.GetFullPath(Path.Join(
+            Path.GetTempPath(),
+            $"listenarr-reconcile-boundary-{Guid.NewGuid():N}"));
+        var sourcePath = Path.Join(tempRoot, "source", "Title");
+        var targetPath = Path.Join(tempRoot, "target", "Title");
+        var invalidBoundary = Path.Join(tempRoot, "unrelated");
+        var semantics = new FileSystemPathSemantics(
+            FileSystemPathSemantics.CurrentHostDefault.Syntax,
+            FileSystemCaseSensitivity.Sensitive);
+        var sourceIdentity = new PathIdentitySnapshot(
+            semantics.Syntax,
+            semantics.CaseSensitivity,
+            FileSystemCaseSensitivityMode.Auto,
+            tempRoot);
+        var targetIdentity = sourceIdentity;
+        var job = new MoveJob
+        {
+            AudiobookId = 42,
+            SourcePath = sourcePath,
+            RequestedPath = targetPath,
+            SourceCleanupBoundary = invalidBoundary,
+            DeleteEmptySource = true,
+            Status = MoveJobStatus.Queued,
+            Phase = MoveJobPhase.Planned,
+            IdentityKeyVersion = MoveManifestIdentity.Version,
+            ActiveDeduplicationKey = $"stale:{Guid.NewGuid():N}",
+            Entries = CreateAuthorizedManifestEntries()
+        };
+        job.SetSourceIdentity(sourceIdentity);
+        job.SetTargetIdentity(targetIdentity);
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            db.MoveJobs.Add(job);
+            await db.SaveChangesAsync();
+        }
+
+        await CreatePersistence().ReconcileIdentityKeysAsync();
+
+        await using var verification = await _factory.CreateDbContextAsync();
+        var persisted = await verification.MoveJobs.AsNoTracking()
+            .SingleAsync(candidate => candidate.Id == job.Id);
+        Assert.Equal(MoveJobStatus.NeedsAttention, persisted.Status);
+        Assert.Equal(MoveFailureKind.Verification, persisted.FailureKind);
+        Assert.Null(persisted.ActiveDeduplicationKey);
+        Assert.Contains(
+            "source mutation boundary",
             persisted.Error ?? string.Empty,
             StringComparison.OrdinalIgnoreCase);
     }
@@ -241,6 +297,7 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
             AudiobookId = 42,
             SourcePath = sourcePath,
             RequestedPath = targetPath,
+            DeleteEmptySource = false,
             Status = MoveJobStatus.Queued,
             Phase = MoveJobPhase.Planned,
             IdentityKeyVersion = MoveManifestIdentity.Version,
@@ -283,6 +340,7 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
             AudiobookId = 42,
             SourcePath = sourcePath,
             RequestedPath = targetPath,
+            DeleteEmptySource = false,
             Status = MoveJobStatus.Queued,
             Phase = MoveJobPhase.Planned,
             IdentityKeyVersion = MoveManifestIdentity.Version,
@@ -347,8 +405,18 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
             ],
             targetPath,
             targetIdentity,
+            SourceBoundaryDirectoryObjectIdentityVersion: ManagedDirectoryIdentity.CurrentVersion,
+            SourceBoundaryDirectoryObjectIdentity: "new-authorized-source-generation",
             TargetBoundaryDirectoryObjectIdentityVersion: ManagedDirectoryIdentity.CurrentVersion,
-            TargetBoundaryDirectoryObjectIdentity: "new-authorized-target-generation"));
+            TargetBoundaryDirectoryObjectIdentity: "new-authorized-target-generation",
+            DeleteEmptySource: false,
+            SourceCleanupMode: MoveSourceCleanupMode.DeleteAfterVerifiedCopy,
+            SourceRootFolderId: 11,
+            SourcePolicyRevision: 2,
+            TargetRootFolderId: 12,
+            TargetPolicyRevision: 4,
+            SourceStorageContractRevision: 6,
+            TargetStorageContractRevision: 8));
 
         Assert.NotEqual(active.Id, returnedId);
         await using var verification = await _factory.CreateDbContextAsync();
@@ -361,8 +429,23 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
         var authorized = jobs.Single(job => job.Id == returnedId);
         Assert.Equal(MoveManifestIdentity.Version, authorized.IdentityKeyVersion);
         Assert.NotNull(authorized.ActiveDeduplicationKey);
+        Assert.Equal(
+            MoveSourceCleanupMode.DeleteAfterVerifiedCopy,
+            authorized.SourceCleanupMode);
+        Assert.Equal(11, authorized.SourceRootFolderId);
+        Assert.Equal(2, authorized.SourcePolicyRevision);
+        Assert.Equal(12, authorized.TargetRootFolderId);
+        Assert.Equal(4, authorized.TargetPolicyRevision);
+        Assert.Equal(6, authorized.SourceStorageContractRevision);
+        Assert.Equal(8, authorized.TargetStorageContractRevision);
+        Assert.True(MoveManifestIdentity.TryGetSourceBoundaryAuthorization(
+            authorized.Entries,
+            out _,
+            out _,
+            out _));
         Assert.True(MoveManifestIdentity.TryGetTargetBoundaryAuthorization(
             authorized.Entries,
+            out _,
             out _,
             out _));
     }
@@ -387,6 +470,7 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
             Status = MoveJobStatus.Queued,
             Phase = MoveJobPhase.Planned,
             IdentityKeyVersion = MoveManifestIdentity.Version,
+            DeleteEmptySource = false,
             ActiveDeduplicationKey = originalKey,
             Entries = CreateAuthorizedManifestEntries()
         };
@@ -398,7 +482,7 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
                 """
                 CREATE TRIGGER fail_current_identity_key
                 BEFORE UPDATE OF ActiveDeduplicationKey ON MoveJobs
-                WHEN NEW.ActiveDeduplicationKey LIKE 'v1:%'
+                WHEN NEW.ActiveDeduplicationKey LIKE 'v2:%'
                 BEGIN
                     SELECT RAISE(ABORT, 'simulated current identity-key write failure');
                 END;
@@ -429,6 +513,7 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
                 AudiobookId = 42,
                 RequestedPath = target,
                 SourcePath = target + "-source-a",
+                DeleteEmptySource = false,
                 Status = MoveJobStatus.Running,
                 Phase = MoveJobPhase.Copying,
                 IdentityKeyVersion = 1,
@@ -442,6 +527,7 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
                 AudiobookId = 42,
                 RequestedPath = target,
                 SourcePath = target + "-source-b",
+                DeleteEmptySource = false,
                 Status = MoveJobStatus.RetryScheduled,
                 Phase = MoveJobPhase.Copying,
                 IdentityKeyVersion = 1,
@@ -465,7 +551,9 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
                     Length = 1,
                     Sha256 = new string('b', 64)
                 },
+                CreateSourceAuthorizationEntry(first.Id),
                 CreateTargetAuthorizationEntry(first.Id),
+                CreateSourceAuthorizationEntry(second.Id),
                 CreateTargetAuthorizationEntry(second.Id));
             await db.SaveChangesAsync();
         }
@@ -506,6 +594,7 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
                     Status = MoveJobStatus.Queued,
                     Phase = MoveJobPhase.Planned,
                     IdentityKeyVersion = 1,
+                    DeleteEmptySource = false,
                     ActiveDeduplicationKey = "legacy:no-evidence-first",
                     Entries = CreateAuthorizedManifestEntries()
                 },
@@ -517,6 +606,7 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
                     Status = MoveJobStatus.RetryScheduled,
                     Phase = MoveJobPhase.Planned,
                     IdentityKeyVersion = 1,
+                    DeleteEmptySource = false,
                     ActiveDeduplicationKey = "legacy:no-evidence-second",
                     Entries = CreateAuthorizedManifestEntries()
                 });
@@ -536,6 +626,67 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
                 job.Error,
                 StringComparison.OrdinalIgnoreCase);
             Assert.Null(job.ActiveDeduplicationKey);
+        });
+    }
+
+    [Fact]
+    public async Task ReconcileIdentityKeysAsync_SamePhysicalIdentityWithDifferentExecutionAuthority_RequiresAttention()
+    {
+        var source = Path.Join(
+            Path.GetTempPath(),
+            "listenarr-tests",
+            $"move-reconcile-options-source-{Guid.NewGuid():N}");
+        var target = Path.Join(
+            Path.GetTempPath(),
+            "listenarr-tests",
+            $"move-reconcile-options-target-{Guid.NewGuid():N}");
+        var cleanupBoundary = Path.GetDirectoryName(source)
+            ?? throw new InvalidOperationException("Test source parent is unavailable.");
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            db.MoveJobs.AddRange(
+                new MoveJob
+                {
+                    AudiobookId = 42,
+                    SourcePath = source,
+                    RequestedPath = target,
+                    Status = MoveJobStatus.Queued,
+                    Phase = MoveJobPhase.Planned,
+                    IdentityKeyVersion = 1,
+                    DeleteEmptySource = false,
+                    ActiveDeduplicationKey = "legacy:options-first",
+                    Entries = CreateAuthorizedManifestEntries()
+                },
+                new MoveJob
+                {
+                    AudiobookId = 42,
+                    SourcePath = source,
+                    RequestedPath = target,
+                    Status = MoveJobStatus.RetryScheduled,
+                    Phase = MoveJobPhase.Planned,
+                    IdentityKeyVersion = 1,
+                    DeleteEmptySource = true,
+                    SourceCleanupBoundary = cleanupBoundary,
+                    ActiveDeduplicationKey = "legacy:options-second",
+                    Entries = CreateAuthorizedManifestEntries()
+                });
+            await db.SaveChangesAsync();
+        }
+
+        await CreatePersistence().ReconcileIdentityKeysAsync();
+
+        await using var verification = await _factory.CreateDbContextAsync();
+        var jobs = await verification.MoveJobs.AsNoTracking().ToListAsync();
+        Assert.Equal(2, jobs.Count);
+        Assert.All(jobs, job =>
+        {
+            Assert.Equal(MoveJobStatus.NeedsAttention, job.Status);
+            Assert.Contains(
+                "disagree on execution authority",
+                job.Error,
+                StringComparison.OrdinalIgnoreCase);
+            Assert.Null(job.ActiveDeduplicationKey);
+            Assert.Equal(MoveManifestIdentity.Version, job.IdentityKeyVersion);
         });
     }
 
@@ -564,6 +715,7 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
                     Status = MoveJobStatus.Queued,
                     Phase = MoveJobPhase.Planned,
                     IdentityKeyVersion = 1,
+                    DeleteEmptySource = false,
                     ActiveDeduplicationKey = "legacy:auth-state-first",
                     Entries = firstEntries
                 },
@@ -575,6 +727,7 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
                     Status = MoveJobStatus.RetryScheduled,
                     Phase = MoveJobPhase.Planned,
                     IdentityKeyVersion = 1,
+                    DeleteEmptySource = false,
                     ActiveDeduplicationKey = "legacy:auth-state-second",
                     Entries = CreateAuthorizedManifestEntries()
                 });
@@ -618,6 +771,7 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
                 Status = MoveJobStatus.Running,
                 Phase = MoveJobPhase.Copying,
                 IdentityKeyVersion = 1,
+                DeleteEmptySource = false,
                 ActiveDeduplicationKey = "legacy:executed-first",
                 Entries = CreateAuthorizedManifestEntries(
                     copyState: MoveJobEntryCopyState.Staged)
@@ -630,6 +784,7 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
                 Status = MoveJobStatus.RetryScheduled,
                 Phase = MoveJobPhase.Copying,
                 IdentityKeyVersion = 1,
+                DeleteEmptySource = false,
                 ActiveDeduplicationKey = "legacy:executed-second",
                 Entries = CreateAuthorizedManifestEntries(
                     copyState: MoveJobEntryCopyState.Staged)
@@ -655,6 +810,149 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ReconcileIdentityKeysAsync_PlannedScaffoldDoesNotCompeteWithCreatedEvidence()
+    {
+        var source = Path.Join(
+            Path.GetTempPath(),
+            "listenarr-tests",
+            $"move-reconcile-planned-scaffold-source-{Guid.NewGuid():N}");
+        var target = Path.Join(
+            Path.GetTempPath(),
+            "listenarr-tests",
+            $"move-reconcile-planned-scaffold-target-{Guid.NewGuid():N}");
+        var planned = new MoveJob
+        {
+            AudiobookId = 42,
+            SourcePath = source,
+            RequestedPath = target,
+            Status = MoveJobStatus.Queued,
+            Phase = MoveJobPhase.Planned,
+            IdentityKeyVersion = 1,
+            DeleteEmptySource = false,
+            ActiveDeduplicationKey = "legacy:planned-scaffold",
+            Entries = CreateAuthorizedManifestEntries(),
+            CreatedDirectories =
+            [
+                new MoveJobCreatedDirectory
+                {
+                    Path = target,
+                    State = MoveCreatedDirectoryState.Planned
+                }
+            ]
+        };
+        var created = new MoveJob
+        {
+            AudiobookId = 42,
+            SourcePath = source,
+            RequestedPath = target,
+            Status = MoveJobStatus.RetryScheduled,
+            Phase = MoveJobPhase.Planned,
+            IdentityKeyVersion = 1,
+            DeleteEmptySource = false,
+            ActiveDeduplicationKey = "legacy:created-scaffold",
+            Entries = CreateAuthorizedManifestEntries(),
+            CreatedDirectories =
+            [
+                new MoveJobCreatedDirectory
+                {
+                    Path = target,
+                    State = MoveCreatedDirectoryState.Created,
+                    DirectoryObjectIdentity = "target-generation"
+                }
+            ]
+        };
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            db.MoveJobs.AddRange(planned, created);
+            await db.SaveChangesAsync();
+        }
+
+        await CreatePersistence().ReconcileIdentityKeysAsync();
+
+        await using var verification = await _factory.CreateDbContextAsync();
+        var jobs = await verification.MoveJobs.AsNoTracking().ToListAsync();
+        var reconciledPlanned = jobs.Single(job => job.Id == planned.Id);
+        var reconciledCreated = jobs.Single(job => job.Id == created.Id);
+        Assert.Equal(MoveJobStatus.Superseded, reconciledPlanned.Status);
+        Assert.Null(reconciledPlanned.ActiveDeduplicationKey);
+        Assert.Equal(MoveJobStatus.RetryScheduled, reconciledCreated.Status);
+        Assert.NotNull(reconciledCreated.ActiveDeduplicationKey);
+        Assert.Equal(MoveFailureKind.None, reconciledCreated.FailureKind);
+    }
+
+    [Fact]
+    public async Task ReconcileIdentityKeysAsync_TemporarilyUnavailableAutoSemantics_PreservesActiveV2Job()
+    {
+        var sourcePath = Path.GetFullPath(Path.Join(
+            Path.GetTempPath(),
+            "downloads",
+            $"temporary-semantics-{Guid.NewGuid():N}"));
+        var targetPath = Path.GetFullPath(Path.Join(
+            Path.GetTempPath(),
+            "library",
+            $"temporary-semantics-{Guid.NewGuid():N}"));
+        var semantics = new FileSystemPathSemantics(
+            FileSystemPathSemantics.CurrentHostDefault.Syntax,
+            FileSystemCaseSensitivity.Sensitive);
+        var sourceIdentity = new PathIdentitySnapshot(
+            semantics.Syntax,
+            semantics.CaseSensitivity,
+            FileSystemCaseSensitivityMode.Auto,
+            Path.GetDirectoryName(sourcePath)!);
+        var targetIdentity = new PathIdentitySnapshot(
+            semantics.Syntax,
+            semantics.CaseSensitivity,
+            FileSystemCaseSensitivityMode.Auto,
+            Path.GetDirectoryName(targetPath)!);
+        var job = new MoveJob
+        {
+            AudiobookId = 46,
+            SourcePath = sourcePath,
+            RequestedPath = targetPath,
+            Status = MoveJobStatus.Queued,
+            Phase = MoveJobPhase.None,
+            IdentityKeyVersion = MoveManifestIdentity.Version,
+            ExecutionProtocolVersion = MoveExecutionProtocol.Current,
+            DeleteEmptySource = false,
+            ActiveDeduplicationKey = "v2:previous-active-key",
+            Entries = CreateAuthorizedManifestEntries()
+        };
+        job.SetSourceIdentity(sourceIdentity);
+        job.SetTargetIdentity(targetIdentity);
+        await CreatePersistence().AddAsync(job);
+
+        var resolver = new Mock<IFileSystemSemanticsResolver>(MockBehavior.Strict);
+        resolver.Setup(service => service.ResolveAsync(
+                It.IsAny<string>(),
+                FileSystemCaseSensitivityMode.Auto,
+                It.IsAny<CancellationToken>()))
+            .Returns<string, FileSystemCaseSensitivityMode, CancellationToken>((path, _, _) =>
+                ValueTask.FromResult(new FileSystemSemanticsResolution(
+                    new FileSystemPathSemantics(
+                        semantics.Syntax,
+                        FileSystemCaseSensitivity.Unknown),
+                    PathIdentityState.Unavailable,
+                    path,
+                    "Injected temporary filesystem semantics outage.",
+                    path)));
+
+        await CreatePersistence(resolver.Object).ReconcileIdentityKeysAsync();
+
+        await using var verification = await _factory.CreateDbContextAsync();
+        var persisted = await verification.MoveJobs.AsNoTracking()
+            .SingleAsync(candidate => candidate.Id == job.Id);
+        Assert.Equal(MoveJobStatus.Queued, persisted.Status);
+        Assert.Equal(MoveManifestIdentity.Version, persisted.IdentityKeyVersion);
+        Assert.NotNull(persisted.ActiveDeduplicationKey);
+        Assert.StartsWith(
+            $"v2:move-source:{job.AudiobookId}:",
+            persisted.ActiveDeduplicationKey,
+            StringComparison.Ordinal);
+        Assert.Null(persisted.Error);
+        resolver.VerifyAll();
+    }
+
+    [Fact]
     public async Task ReconcileIdentityKeysAsync_MalformedCurrentJobMarksNeedsAttentionAndContinues()
     {
         var throwingPath = Path.GetFullPath("/library/bad-book");
@@ -669,6 +967,7 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
                     Status = MoveJobStatus.Queued,
                     Phase = MoveJobPhase.None,
                     IdentityKeyVersion = 1,
+                    DeleteEmptySource = false,
                     ActiveDeduplicationKey = "legacy:bad",
                     Entries = CreateAuthorizedManifestEntries()
                 },
@@ -680,6 +979,7 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
                     Status = MoveJobStatus.Queued,
                     Phase = MoveJobPhase.None,
                     IdentityKeyVersion = 1,
+                    DeleteEmptySource = false,
                     ActiveDeduplicationKey = "legacy:good",
                     Entries = CreateAuthorizedManifestEntries()
                 });
@@ -702,7 +1002,7 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
         Assert.Contains("Move path identity could not be reconciled", bad.Error, StringComparison.Ordinal);
         Assert.Null(bad.ActiveDeduplicationKey);
         Assert.Equal(MoveJobStatus.Queued, good.Status);
-        Assert.StartsWith("v1:move-source:43:", good.ActiveDeduplicationKey);
+        Assert.StartsWith("v2:move-source:43:", good.ActiveDeduplicationKey);
     }
 
     [Fact]
@@ -1381,6 +1681,46 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RequeueAsync_RemovedTargetScaffolding_IsReplannedButRetainedEvidenceIsPreserved()
+    {
+        var persistence = CreatePersistence();
+        var job = CreateJob("v1:move:42:s:requeue-removed-scaffold");
+        job.Status = MoveJobStatus.NeedsAttention;
+        job.ActiveDeduplicationKey = null;
+        job.CreatedDirectories =
+        [
+            new MoveJobCreatedDirectory
+            {
+                Path = "/library/book",
+                State = MoveCreatedDirectoryState.Removed,
+                DirectoryObjectIdentity = "removed-generation"
+            },
+            new MoveJobCreatedDirectory
+            {
+                Path = "/library/book/retained",
+                State = MoveCreatedDirectoryState.Retained,
+                DirectoryObjectIdentity = "retained-generation"
+            }
+        ];
+        await persistence.AddAsync(job);
+
+        var result = await persistence.RequeueAsync(CreateRequeueCommand(
+            job,
+            "v1:move:42:s:requeue-removed-scaffold-new"));
+
+        Assert.Equal(MoveRequeueOutcome.Requeued, result.Outcome);
+        var persisted = Assert.IsType<MoveJob>(await persistence.GetByIdAsync(job.Id));
+        var removed = Assert.Single(persisted.CreatedDirectories, directory =>
+            directory.Path == "/library/book");
+        Assert.Equal(MoveCreatedDirectoryState.Planned, removed.State);
+        Assert.Null(removed.DirectoryObjectIdentity);
+        var retained = Assert.Single(persisted.CreatedDirectories, directory =>
+            directory.Path == "/library/book/retained");
+        Assert.Equal(MoveCreatedDirectoryState.Retained, retained.State);
+        Assert.Equal("retained-generation", retained.DirectoryObjectIdentity);
+    }
+
+    [Fact]
     public async Task RequeueAsync_ProcessRestartRecoversCommittedRepairBeforePublication()
     {
         var persistence = CreatePersistence();
@@ -1642,10 +1982,24 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
         MoveJobEntryCleanupState cleanupState = MoveJobEntryCleanupState.Pending) =>
         [
             CreateManifestEntry(hashCharacter, copyState, cleanupState),
+            MoveManifestIdentity.CreateSourceBoundaryAuthorization(
+                ManagedDirectoryIdentity.CurrentVersion,
+                "test-source-generation"),
             MoveManifestIdentity.CreateTargetBoundaryAuthorization(
                 ManagedDirectoryIdentity.CurrentVersion,
                 "test-target-generation")
         ];
+
+    private static MoveJobEntry CreateSourceAuthorizationEntry(
+        Guid jobId,
+        string sourceGeneration = "test-source-generation")
+    {
+        var entry = MoveManifestIdentity.CreateSourceBoundaryAuthorization(
+            ManagedDirectoryIdentity.CurrentVersion,
+            sourceGeneration);
+        entry.MoveJobId = jobId;
+        return entry;
+    }
 
     private static MoveJobEntry CreateTargetAuthorizationEntry(
         Guid jobId,
@@ -1662,11 +2016,15 @@ public sealed class EfMoveQueuePersistenceTests : IAsyncLifetime
     {
         AudiobookId = 42,
         RequestedPath = "/library/book",
+        DeleteEmptySource = false,
         Status = MoveJobStatus.Queued,
         ActiveDeduplicationKey = key,
         Entries =
         [
             CreateManifestEntry(),
+            MoveManifestIdentity.CreateSourceBoundaryAuthorization(
+                ManagedDirectoryIdentity.CurrentVersion,
+                "test-source-generation"),
             MoveManifestIdentity.CreateTargetBoundaryAuthorization(
                 ManagedDirectoryIdentity.CurrentVersion,
                 "test-target-generation")

@@ -28,8 +28,17 @@ internal sealed partial class AudiobookContentMoveService
         string targetPath,
         IReadOnlyCollection<MoveJobEntry> manifest)
     {
+        if (request.ForceCopyAndRetainSource
+            && manifest
+                .Where(IsPhysicalManifestEntry)
+                .Any(entry => IsDestructiveCleanupState(entry.CleanupState)))
+        {
+            throw new MoveNeedsAttentionException(
+                "Forced source retention has contradictory destructive cleanup evidence.");
+        }
+
         var source = Path.GetFullPath(sourcePath);
-        if (!Directory.Exists(source))
+        if (!AuthorizedSourceDirectoryExists(request, source))
         {
             return;
         }
@@ -41,8 +50,19 @@ internal sealed partial class AudiobookContentMoveService
                 out var remainingDirectories,
                 out var reason))
         {
-            throw new MoveNeedsAttentionException(
-                $"The completed move source could not be verified safely: {reason}");
+            if (!AuthorizedSourceDirectoryExists(request, source))
+            {
+                return;
+            }
+            if (reason.Contains("link", StringComparison.OrdinalIgnoreCase)
+                || reason.Contains("reparse", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new MoveNeedsAttentionException(
+                    $"The completed move source could not be verified safely: {reason}");
+            }
+
+            throw new IOException(
+                $"The completed move source could not be enumerated safely: {reason}");
         }
 
         foreach (var entry in manifest.Where(entry => !IsRootManifestEntry(entry)))
@@ -59,7 +79,18 @@ internal sealed partial class AudiobookContentMoveService
 
             if (entry.EntryType == MoveJobEntryType.File)
             {
-                if (File.Exists(sourceEntry) || Directory.Exists(sourceEntry))
+                if (entry.CleanupState == MoveJobEntryCleanupState.Retained)
+                {
+                    if (!TryGetExistingPathAttributes(sourceEntry, out var retainedAttributes)
+                        || (retainedAttributes & FileAttributes.Directory) != 0
+                        || (retainedAttributes & FileAttributes.ReparsePoint) != 0)
+                    {
+                        throw new MoveNeedsAttentionException(
+                            $"A retained source file is missing or changed type: {entry.RelativePath}");
+                    }
+                    continue;
+                }
+                if (TryGetExistingPathAttributes(sourceEntry, out _))
                 {
                     throw new MoveNeedsAttentionException(
                         $"The completed move source contains a recreated or uncleared owned file path: {entry.RelativePath}");
@@ -73,17 +104,35 @@ internal sealed partial class AudiobookContentMoveService
                     "The persisted source manifest contains an unsupported entry type.");
             }
 
-            if (File.Exists(sourceEntry))
+            if (entry.CleanupState == MoveJobEntryCleanupState.Retained)
             {
-                throw new MoveNeedsAttentionException(
-                    $"The completed move source directory changed into a file: {entry.RelativePath}");
+                if (!TryGetExistingPathAttributes(sourceEntry, out var retainedAttributes)
+                    || (retainedAttributes & FileAttributes.Directory) == 0
+                    || (retainedAttributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    throw new MoveNeedsAttentionException(
+                        $"A retained source directory is missing or changed type: {entry.RelativePath}");
+                }
+                continue;
             }
 
-            if (Directory.Exists(sourceEntry)
-                && !Directory.EnumerateFileSystemEntries(sourceEntry).Any())
+            if (TryGetExistingPathAttributes(sourceEntry, out var attributes))
             {
-                throw new MoveNeedsAttentionException(
-                    $"The completed move source contains an uncleared empty owned directory: {entry.RelativePath}");
+                if ((attributes & FileAttributes.Directory) == 0)
+                {
+                    throw new MoveNeedsAttentionException(
+                        $"The completed move source directory changed into a file: {entry.RelativePath}");
+                }
+                if ((attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    throw new MoveNeedsAttentionException(
+                        $"The completed move source directory changed into a link or reparse point: {entry.RelativePath}");
+                }
+                if (!Directory.EnumerateFileSystemEntries(sourceEntry).Any())
+                {
+                    throw new MoveNeedsAttentionException(
+                        $"The completed move source contains an uncleared empty owned directory: {entry.RelativePath}");
+                }
             }
         }
 
@@ -109,6 +158,100 @@ internal sealed partial class AudiobookContentMoveService
         {
             throw new MoveNeedsAttentionException(
                 "The completed move source directory was recreated after cleanup.");
+        }
+    }
+
+    private static bool AuthorizedSourceDirectoryExists(
+        AudiobookContentMoveRequest request,
+        string source)
+    {
+        var authorization = request.BoundaryAuthorization
+            ?? throw new MoveNeedsAttentionException(
+                "The move lacks loaded source-boundary authorization during cleanup verification.");
+        var boundary = authorization.SourceBoundaryPath;
+        if (!FileSystemPathIdentity.TryGetRelativePathWithinBase(
+                boundary,
+                source,
+                request.SourceSemantics,
+                out var relativePath))
+        {
+            throw new MoveNeedsAttentionException(
+                "The source cleanup verification path escaped its authorized boundary.");
+        }
+
+        var current = PinnedDirectoryCreation.OpenPinnedBoundary(boundary);
+        try
+        {
+            if (!current.MatchesManagedDirectoryIdentity(
+                    authorization.SourceDirectoryObjectIdentityVersion,
+                    authorization.SourceDirectoryObjectIdentity)
+                || !PinnedDirectoryVisibleOrThrowUnavailable(
+                    current,
+                    "The source boundary is temporarily unavailable during cleanup verification."))
+            {
+                throw new MoveNeedsAttentionException(
+                    "The source boundary changed physical generation during cleanup verification.");
+            }
+
+            foreach (var segment in SplitMovePathSegments(relativePath, request.SourceSemantics))
+            {
+                PinnedDirectoryCreation.PinnedDirectoryAnchor next;
+                try
+                {
+                    next = current.OpenExistingChild(segment);
+                }
+                catch (System.ComponentModel.Win32Exception exception) when (
+                    IsMissingDirectoryComponent(exception))
+                {
+                    return false;
+                }
+                catch (Exception exception) when (exception is
+                    InvalidOperationException or NotSupportedException)
+                {
+                    throw new MoveNeedsAttentionException(
+                        $"A source cleanup path component changed type or physical generation: {exception.Message}");
+                }
+
+                current.Dispose();
+                current = next;
+            }
+
+            if (!PinnedDirectoryVisibleOrThrowUnavailable(
+                    current,
+                    "The source cleanup path is temporarily unavailable during final verification."))
+            {
+                throw new MoveNeedsAttentionException(
+                    "The source cleanup path changed physical generation during final verification.");
+            }
+
+            return true;
+        }
+        finally
+        {
+            current.Dispose();
+        }
+    }
+
+    private static bool IsMissingDirectoryComponent(
+        System.ComponentModel.Win32Exception exception) =>
+        OperatingSystem.IsWindows()
+            ? exception.NativeErrorCode is 2 or 3
+            : exception.NativeErrorCode == 2;
+
+    private static bool TryGetExistingPathAttributes(
+        string path,
+        out FileAttributes attributes)
+    {
+        try
+        {
+            attributes = File.GetAttributes(path);
+            return true;
+        }
+        catch (Exception exception) when (exception is
+            FileNotFoundException or DirectoryNotFoundException)
+        {
+            attributes = default;
+            return false;
         }
     }
 }

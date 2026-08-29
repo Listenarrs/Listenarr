@@ -33,9 +33,17 @@ namespace Listenarr.Api.Features.Library
         string StorageState,
         string StorageReason,
         string? StorageMessage,
+        string? StorageDetail,
         bool CanConfirmCurrentFolder,
         bool CanChangePath,
+        bool CanReadFilesystem,
+        bool CanScanFilesystem,
+        bool CanPublishNewFiles,
         bool CanMutateFilesystem,
+        bool CanRetireWithDurableIdentity,
+        bool CanRetireAfterVerifiedCopy,
+        string WeakStorageSourceCleanupPolicy,
+        int WeakStoragePolicyRevision,
         string? ConfirmationToken,
         DateTime CreatedAt,
         DateTime? UpdatedAt,
@@ -59,6 +67,10 @@ namespace Listenarr.Api.Features.Library
         string ExpectedCurrentPath,
         string ConfirmationToken);
 
+    public sealed record RootFolderWeakStoragePolicyRequest(
+        WeakStorageSourceCleanupPolicy Policy,
+        int ExpectedRevision);
+
     [ApiController]
     [Route("api/v{version:apiVersion}/rootfolders")]
     [Tags("Root Folders")]
@@ -75,6 +87,7 @@ namespace Listenarr.Api.Features.Library
         private readonly IRootFolderStorageConfirmationService _storageConfirmationService;
         private readonly ILibraryFilesystemReadiness _filesystemReadiness;
         private readonly ILibraryFilesystemMutationGate _filesystemMutationGate;
+        private readonly IRootFolderWeakStoragePolicyService _weakStoragePolicyService;
 
         public RootFoldersController(
             IRootFolderService service,
@@ -87,7 +100,8 @@ namespace Listenarr.Api.Features.Library
             IRootFolderStorageHealthResolver storageHealthResolver,
             IRootFolderStorageConfirmationService storageConfirmationService,
             ILibraryFilesystemReadiness filesystemReadiness,
-            ILibraryFilesystemMutationGate filesystemMutationGate)
+            ILibraryFilesystemMutationGate filesystemMutationGate,
+            IRootFolderWeakStoragePolicyService weakStoragePolicyService)
         {
             _service = service;
             _unmatchedQueue = unmatchedQueue;
@@ -102,6 +116,8 @@ namespace Listenarr.Api.Features.Library
                 ?? throw new ArgumentNullException(nameof(filesystemReadiness));
             _filesystemMutationGate = filesystemMutationGate
                 ?? throw new ArgumentNullException(nameof(filesystemMutationGate));
+            _weakStoragePolicyService = weakStoragePolicyService
+                ?? throw new ArgumentNullException(nameof(weakStoragePolicyService));
         }
 
         /// <summary>
@@ -376,6 +392,17 @@ namespace Listenarr.Api.Features.Library
 
             var folder = await _service.GetByIdAsync(id);
             if (folder == null) return NotFound(new { message = "Root folder not found" });
+
+            var storage = await _storageHealthResolver.ResolveAsync(folder);
+            if (!storage.CanScanFilesystem)
+            {
+                return Conflict(new
+                {
+                    message = storage.Message
+                        ?? "The root folder cannot be scanned in its current storage state.",
+                    code = "root_folder_scan_unavailable"
+                });
+            }
 
             var jobId = await _unmatchedQueue.EnqueueAsync(folder.Path);
             return Ok(new { jobId = jobId.ToString() });

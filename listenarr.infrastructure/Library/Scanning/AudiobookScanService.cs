@@ -12,7 +12,9 @@ internal sealed partial class AudiobookScanService(
     IFileSystem fileSystem,
     IFileSystemSemanticsResolver semanticsResolver,
     IScanPathAuthorizationService pathAuthorizationService,
-    ILogger<AudiobookScanService> logger) : IAudiobookScanService
+    ILogger<AudiobookScanService> logger,
+    IWeakStorageScanCandidateStore? weakStorageScanCandidateStore = null)
+    : IAudiobookScanService
 {
     public async Task<AudiobookScanResult> ScanAsync(
         AudiobookScanCommand command,
@@ -58,7 +60,8 @@ internal sealed partial class AudiobookScanService(
             semantics,
             resolvedExistingPaths.Values,
             ownershipMap,
-            pinnedAuthority.Root);
+            pinnedAuthority.Root,
+            command.ScanPhysicalIdentity.HasDurableGenerationProof);
         discovery = await EnrichWithMetadataAsync(
             command,
             pinnedAuthority,
@@ -170,6 +173,7 @@ internal sealed partial class AudiobookScanService(
             discovery.IsComplete,
             command.AllowReconciliation
                 && command.IsAuthoritativeScope
+                && command.ScanPhysicalIdentity.HasDurableGenerationProof
                 && discovery.CanReconcile,
             diagnostics);
     }
@@ -272,11 +276,13 @@ internal sealed partial class AudiobookScanService(
                     pinnedAuthority,
                     discovery,
                     filePath);
-                if (await fileService.EnsureAudiobookFileAsync(
-                        audiobook,
-                        registrationLease,
-                        source,
-                        cancellationToken))
+                var createdFile = await fileService.EnsureAudiobookFileAsync(
+                    audiobook,
+                    registrationLease,
+                    source,
+                    cancellationToken);
+
+                if (createdFile)
                 {
                     created++;
                 }

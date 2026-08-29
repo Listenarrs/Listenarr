@@ -265,7 +265,11 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                 .Where(a => a.BasePath != null)
                 .Select(a => a.BasePath!)
                 .ToListAsync(ct);
-            return basePaths.Any(path => FileSystemPathIdentity.IsSameOrInside(path, rootPath, semantics));
+            return basePaths.Any(path =>
+                FileSystemPathIdentity.StoredPathMayTouchBoundary(
+                    path,
+                    rootPath,
+                    semantics));
         }
 
         public async Task<List<Audiobook>> GetAudiobooksUnderPathAsync(
@@ -278,7 +282,10 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                 .Where(a => a.BasePath != null)
                 .ToListAsync(ct);
             return audiobooks
-                .Where(a => FileSystemPathIdentity.IsSameOrInside(a.BasePath!, rootPath, semantics))
+                .Where(a => FileSystemPathIdentity.StoredPathMayTouchBoundary(
+                    a.BasePath!,
+                    rootPath,
+                    semantics))
                 .ToList();
         }
 
@@ -357,14 +364,33 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                 .Include(audiobook => audiobook.Files)
                 .ToListAsync(ct);
             var plannedRewrites = new List<(Audiobook Audiobook, string SourceBasePath, string TargetBasePath)>();
-            foreach (var audiobook in audiobooks.Where(audiobook =>
-                !string.IsNullOrWhiteSpace(audiobook.BasePath)
-                && FileSystemPathIdentity.IsSameOrInside(
-                    audiobook.BasePath!,
-                    sourceRoot.Path,
-                    sourceSemantics)))
+            foreach (var audiobook in audiobooks)
             {
-                var sourceBasePath = audiobook.BasePath!;
+                if (string.IsNullOrWhiteSpace(audiobook.BasePath)
+                    || !FileSystemPathIdentity.StoredPathMayTouchBoundary(
+                        audiobook.BasePath,
+                        sourceRoot.Path,
+                        sourceSemantics))
+                {
+                    continue;
+                }
+
+                if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                        audiobook.BasePath,
+                        out var sourceBasePath,
+                        out var sourcePathReason,
+                        sourceSemantics.Syntax)
+                    || !FileSystemPathIdentity.IsSameOrInside(
+                        sourceBasePath,
+                        sourceRoot.Path,
+                        sourceSemantics))
+                {
+                    throw new InvalidOperationException(
+                        "An audiobook may belong to the source root but its persisted path cannot be reassigned safely. Repair the audiobook path before deleting or reassigning the root."
+                        + (string.IsNullOrWhiteSpace(sourcePathReason)
+                            ? string.Empty
+                            : $" {sourcePathReason}"));
+                }
                 if (!FileSystemPathIdentity.TryGetRelativePathWithinBase(
                     sourceRoot.Path,
                     sourceBasePath,

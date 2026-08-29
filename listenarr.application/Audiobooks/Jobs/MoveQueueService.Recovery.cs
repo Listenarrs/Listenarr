@@ -66,7 +66,52 @@ public partial class MoveQueueService
             return;
         }
 
-        throw recovery.Disposition switch
+        throw CreateMoveRecoveryConflict(recovery);
+    }
+
+    private async Task EnsureMoveEnqueueRecoveryAllowsPublicationAsync(
+        int audiobookId,
+        Guid? matchingActiveJobId,
+        CancellationToken cancellationToken)
+    {
+        var candidates = await _persistence.GetRecoveryCandidatesByAudiobookAsync(
+            audiobookId,
+            cancellationToken);
+        var blocking = candidates
+            .Where(job => job.Id != matchingActiveJobId)
+            .Where(BlocksFreshMoveEnqueue)
+            .ToList();
+        if (blocking.Count == 0)
+        {
+            return;
+        }
+
+        throw CreateMoveRecoveryConflict(
+            MoveRecoveryPolicy.ClassifyAudiobookJobs(blocking));
+    }
+
+    private static bool BlocksFreshMoveEnqueue(MoveJob job)
+    {
+        if (!MoveExecutionProtocol.IsCurrent(job.ExecutionProtocolVersion))
+        {
+            return true;
+        }
+
+        if (MoveRecoveryPolicy.HasFilesystemExecutionEvidence(job))
+        {
+            return true;
+        }
+
+        // A live/stale Running owner must finish or be recovered before another
+        // move can publish. Queued/RetryScheduled jobs without execution evidence
+        // may coexist as distinct future requests; the processor's source-state
+        // fence will supersede stale requests after an earlier move completes.
+        return job.Status == MoveJobStatus.Running;
+    }
+
+    private static ApplicationConflictException CreateMoveRecoveryConflict(
+        MoveRecoveryState recovery) =>
+        recovery.Disposition switch
         {
             MoveRecoveryDisposition.InProgress => new ApplicationConflictException(
                 "move_already_active",
@@ -84,7 +129,6 @@ public partial class MoveQueueService
                 "move_recovery_required",
                 "An unresolved move must be completed before changing this audiobook's files.")
         };
-    }
 
     private async Task EnsureExternalRecoveryAllowsMutationAsync(
         int audiobookId,
@@ -98,6 +142,27 @@ public partial class MoveQueueService
             throw new ApplicationConflictException(
                 "root_folder_relocation_active",
                 "An active root-folder path repair still owns this audiobook's path state. Resolve or retry that repair before changing the audiobook's files.");
+        }
+
+        await EnsureNonRelocationRecoveryAllowsMutationAsync(
+            audiobookId,
+            allowActiveDeletionIntent,
+            cancellationToken);
+    }
+
+    private async Task EnsureNonRelocationRecoveryAllowsMutationAsync(
+        int audiobookId,
+        bool allowActiveDeletionIntent,
+        CancellationToken cancellationToken)
+    {
+        if (_fileRegistrationRecoveryProbe != null
+            && await _fileRegistrationRecoveryProbe.HasBlockingAsync(
+                audiobookId,
+                cancellationToken))
+        {
+            throw new ApplicationConflictException(
+                "registration_recovery_pending",
+                "A committed file import still owns source-cleanup state for this audiobook. Complete that recovery before changing its files.");
         }
 
         if (_fileRenameRecoveryProbe != null

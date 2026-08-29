@@ -1,3 +1,5 @@
+using Listenarr.Domain.Common;
+
 namespace Listenarr.Infrastructure.Library.Moving;
 
 internal sealed partial class AudiobookContentMoveService
@@ -23,13 +25,23 @@ internal sealed partial class AudiobookContentMoveService
         }
 
         internal static PinnedMoveDirectoryPath OpenExisting(
+            string boundaryPath,
             string root,
+            FileSystemPathSemantics semantics,
+            int boundaryIdentityVersion,
+            string boundaryIdentity,
             IReadOnlyList<string> segments)
         {
             var anchors = new List<PinnedDirectoryCreation.PinnedDirectoryAnchor>();
             try
             {
-                var current = PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(root);
+                var current = OpenPinnedMoveBoundaryDescendant(
+                    boundaryPath,
+                    root,
+                    semantics,
+                    boundaryIdentityVersion,
+                    boundaryIdentity,
+                    "target boundary");
                 anchors.Add(current);
                 foreach (var segment in segments)
                 {
@@ -51,10 +63,19 @@ internal sealed partial class AudiobookContentMoveService
         internal void EnsureVisibleHierarchy()
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_anchors.Any(anchor => !anchor.VisiblePathMatches()))
+            foreach (var anchor in _anchors)
             {
-                throw new MoveNeedsAttentionException(
-                    "A pinned move directory hierarchy changed during mutation.");
+                var visibility = anchor.ProbeVisiblePathMatch();
+                if (visibility == RegistrationPublicationMatchOutcome.Unavailable)
+                {
+                    throw new IOException(
+                        "A pinned move directory hierarchy is temporarily unavailable during mutation.");
+                }
+                if (visibility != RegistrationPublicationMatchOutcome.Match)
+                {
+                    throw new MoveNeedsAttentionException(
+                        "A pinned move directory hierarchy changed during mutation.");
+                }
             }
         }
 

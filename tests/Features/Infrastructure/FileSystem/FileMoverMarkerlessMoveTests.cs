@@ -53,6 +53,35 @@ public sealed class FileMoverMarkerlessMoveTests : BaseTests
         AssertNoLibraryArtifacts(scenario.Root);
     }
 
+    [Fact]
+    public async Task MoveFileAsync_CopyFallback_WithExpectedSourceGeneration_RemainsSupported()
+    {
+        var scenario = await CreateScenarioAsync();
+        var mover = CreateMover(disableNativeRename: true);
+        var sourceCapability = Assert.IsAssignableFrom<IFilePublicationSourceCapability>(mover);
+        var capability = await sourceCapability.CheckAsync(scenario.Source);
+        Assert.True(capability.IsSupported, capability.Reason);
+        Assert.True(capability.SourceProof.HasValue);
+
+        Assert.True(await mover.MoveFileAsync(
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId,
+            expectedSourceProof: capability.SourceProof.Value));
+
+        Assert.False(File.Exists(scenario.Source));
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Destination));
+        var factory = _provider.GetRequiredService<
+            IDbContextFactory<ListenArrDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var journal = await db.FileMutationJournals
+            .AsNoTracking()
+            .SingleAsync(candidate => candidate.OperationId == scenario.OperationId);
+        Assert.Equal(FileMutationJournalState.Completed, journal.State);
+        Assert.Equal(scenario.SourceIdentity, journal.SourcePhysicalObjectIdentity);
+        Assert.Matches("^[0-9A-F]{64}$", journal.SourceSha256 ?? string.Empty);
+    }
+
     [LinuxFact]
     public async Task MoveFileAsync_ForcedCrossVolumeRejectsBeforePublicationOrJournalCreation()
     {
@@ -129,6 +158,67 @@ public sealed class FileMoverMarkerlessMoveTests : BaseTests
             scenario.OperationId,
             FileMutationJournalState.Completed,
             scenario.SourceIdentity);
+        AssertNoLibraryArtifacts(scenario.Root);
+    }
+
+    [LinuxFact]
+    public async Task MoveFileAsync_CompatiblePersistedSourceToken_NativeRenameCrashRecoveryPreservesDurableToken()
+    {
+        var scenario = await CreateScenarioAsync();
+        Assert.StartsWith(
+            "linux-generation:",
+            scenario.SourceIdentity,
+            StringComparison.Ordinal);
+        var durableSourceIdentity =
+            LinuxIdentityTestHelper.ToMergedV1AugmentedIdentity(
+                scenario.SourceIdentity);
+        var planned = CreateMover(
+            afterJournalPlanned: () =>
+                throw new IOException("Injected crash after markerless move journal creation."));
+        await Assert.ThrowsAsync<IOException>(() => planned.MoveFileAsync(
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId));
+        var factory = _provider.GetRequiredService<
+            IDbContextFactory<ListenArrDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var journal = await db.FileMutationJournals.SingleAsync(
+                candidate => candidate.OperationId == scenario.OperationId);
+            journal.SourcePhysicalObjectIdentity = durableSourceIdentity;
+            await db.SaveChangesAsync();
+        }
+
+        var published = CreateMover(
+            afterPublishedBeforeTargetState: () =>
+                throw new IOException("Injected crash after markerless native rename."));
+        await Assert.ThrowsAsync<IOException>(() => published.MoveFileAsync(
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId));
+        Assert.False(File.Exists(scenario.Source));
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Destination));
+        await AssertJournalStateAsync(
+            scenario.OperationId,
+            FileMutationJournalState.Planned,
+            targetIdentity: null);
+
+        Assert.True(await CreateMover().MoveFileAsync(
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId));
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var journal = await db.FileMutationJournals
+                .AsNoTracking()
+                .SingleAsync(candidate => candidate.OperationId == scenario.OperationId);
+            Assert.Equal(FileMutationJournalState.Completed, journal.State);
+            Assert.Equal(durableSourceIdentity, journal.SourcePhysicalObjectIdentity);
+            Assert.Equal(durableSourceIdentity, journal.TargetPhysicalObjectIdentity);
+        }
+        Assert.False(File.Exists(scenario.Source));
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Destination));
         AssertNoLibraryArtifacts(scenario.Root);
     }
 
@@ -273,6 +363,52 @@ public sealed class FileMoverMarkerlessMoveTests : BaseTests
 
         Assert.False(File.Exists(scenario.Source));
         Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Destination));
+        await AssertJournalStateAsync(
+            scenario.OperationId,
+            FileMutationJournalState.Completed,
+            targetIdentity);
+        AssertNoLibraryArtifacts(scenario.Root);
+    }
+
+    [WindowsFact]
+    public async Task MoveFileAsync_SourceSharingViolationDoesNotAdvanceDeletionState()
+    {
+        var scenario = await CreateScenarioAsync();
+        var interrupted = CreateMover(
+            disableNativeRename: true,
+            afterTargetWrittenBeforeVerifiedState: () =>
+                throw new IOException("Injected crash after markerless target write."));
+
+        await Assert.ThrowsAsync<IOException>(() => interrupted.MoveFileAsync(
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId));
+        var targetIdentity = GetFileIdentity(scenario.Destination);
+
+        await using (var sourceLock = new FileStream(
+            scenario.Source,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read))
+        {
+            Assert.False(await CreateMover(disableNativeRename: true).MoveFileAsync(
+                scenario.Source,
+                scenario.Destination,
+                scenario.OperationId));
+
+            Assert.True(File.Exists(scenario.Source));
+            Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Destination));
+            await AssertJournalStateAsync(
+                scenario.OperationId,
+                FileMutationJournalState.SourceDeletionAuthorized,
+                targetIdentity);
+        }
+
+        Assert.True(await CreateMover(disableNativeRename: true).MoveFileAsync(
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId));
+        Assert.False(File.Exists(scenario.Source));
         await AssertJournalStateAsync(
             scenario.OperationId,
             FileMutationJournalState.Completed,
@@ -457,6 +593,279 @@ public sealed class FileMoverMarkerlessMoveTests : BaseTests
         AssertNoLibraryArtifacts(scenario.Root);
     }
 
+    [Fact]
+    public async Task MoveFileAsync_SourceRecreatedAfterSourceDeletedState_DoesNotComplete()
+    {
+        var scenario = await CreateScenarioAsync();
+        var mover = CreateMover(
+            disableNativeRename: true,
+            afterSourceDeletedState: () =>
+            {
+                File.WriteAllText(scenario.Source, "replacement");
+                return Task.CompletedTask;
+            });
+
+        Assert.False(await mover.MoveFileAsync(
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId));
+
+        Assert.Equal("replacement", await File.ReadAllTextAsync(scenario.Source));
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Destination));
+        await AssertJournalStateAsync(
+            scenario.OperationId,
+            FileMutationJournalState.NeedsAttention,
+            GetFileIdentity(scenario.Destination));
+        AssertNoLibraryArtifacts(scenario.Root);
+    }
+
+    [Fact]
+    public async Task MoveFileAsync_TargetReplacedAfterSourceDeletedState_DoesNotComplete()
+    {
+        var scenario = await CreateScenarioAsync();
+        string? originalTargetIdentity = null;
+        var mover = CreateMover(
+            disableNativeRename: true,
+            afterSourceDeletedState: () =>
+            {
+                originalTargetIdentity = GetFileIdentity(scenario.Destination);
+                File.Delete(scenario.Destination);
+                File.WriteAllText(scenario.Destination, "foreign-target");
+                return Task.CompletedTask;
+            });
+
+        Assert.False(await mover.MoveFileAsync(
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId));
+
+        Assert.NotNull(originalTargetIdentity);
+        Assert.False(File.Exists(scenario.Source));
+        Assert.Equal("foreign-target", await File.ReadAllTextAsync(scenario.Destination));
+        await AssertJournalStateAsync(
+            scenario.OperationId,
+            FileMutationJournalState.NeedsAttention,
+            originalTargetIdentity);
+        AssertNoLibraryArtifacts(scenario.Root);
+    }
+
+    [LinuxFact]
+    public async Task MoveFileAsync_TargetReplacedAfterFinalProbeBeforeCompletedCommit_DoesNotComplete()
+    {
+        var scenario = await CreateScenarioAsync();
+        string? originalTargetIdentity = null;
+        var mover = CreateMover(
+            disableNativeRename: true,
+            beforeCompletedJournalCommit: () =>
+            {
+                originalTargetIdentity = GetFileIdentity(scenario.Destination);
+                File.Delete(scenario.Destination);
+                File.WriteAllText(scenario.Destination, "foreign-target");
+                return Task.CompletedTask;
+            });
+
+        Assert.False(await mover.MoveFileAsync(
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId));
+
+        Assert.NotNull(originalTargetIdentity);
+        Assert.False(File.Exists(scenario.Source));
+        Assert.Equal("foreign-target", await File.ReadAllTextAsync(scenario.Destination));
+        await AssertJournalStateAsync(
+            scenario.OperationId,
+            FileMutationJournalState.NeedsAttention,
+            originalTargetIdentity);
+        AssertNoLibraryArtifacts(scenario.Root);
+    }
+
+    [LinuxFact]
+    public async Task MoveFileAsync_SourceParentReplacedAfterSourceDeletedState_DoesNotComplete()
+    {
+        var sourceParent = FileService.GetTempDirectory(
+            "file-mover-markerless-parent-replaced-after-state-source");
+        var displacedSourceParent = sourceParent + "-displaced";
+        var destinationParent = FileService.GetTempDirectory(
+            "file-mover-markerless-parent-replaced-after-state-destination");
+        var source = Path.Join(sourceParent, "source.m4b");
+        var destination = Path.Join(destinationParent, "moved.m4b");
+        await File.WriteAllTextAsync(source, "audio");
+        var operationId = Guid.NewGuid();
+
+        var mover = CreateMover(
+            disableNativeRename: true,
+            afterSourceDeletedState: async () =>
+            {
+                Directory.Move(sourceParent, displacedSourceParent);
+                Directory.CreateDirectory(sourceParent);
+                await File.WriteAllTextAsync(source, "replacement");
+            });
+
+        Assert.False(await mover.MoveFileAsync(source, destination, operationId));
+
+        Assert.Equal("replacement", await File.ReadAllTextAsync(source));
+        Assert.Equal("audio", await File.ReadAllTextAsync(destination));
+        await AssertJournalStateAsync(
+            operationId,
+            FileMutationJournalState.NeedsAttention,
+            GetFileIdentity(destination));
+        AssertNoLibraryArtifacts(sourceParent);
+        AssertNoLibraryArtifacts(displacedSourceParent);
+        AssertNoLibraryArtifacts(destinationParent);
+    }
+
+    [Fact]
+    public async Task MoveFileAsync_RetryAfterSourceDeletedState_SourceParentReplacedWhileStopped_DoesNotComplete()
+    {
+        var sourceParent = FileService.GetTempDirectory(
+            "file-mover-markerless-parent-replaced-after-restart-source");
+        var displacedSourceParent = sourceParent + "-displaced";
+        var destinationParent = FileService.GetTempDirectory(
+            "file-mover-markerless-parent-replaced-after-restart-destination");
+        var source = Path.Join(sourceParent, "source.m4b");
+        var destination = Path.Join(destinationParent, "moved.m4b");
+        await File.WriteAllTextAsync(source, "audio");
+        var operationId = Guid.NewGuid();
+
+        var interruptedMover = CreateMover(
+            disableNativeRename: true,
+            afterSourceDeletedState: () =>
+                throw new IOException("Simulated process interruption."));
+
+        await Assert.ThrowsAsync<IOException>(() =>
+            interruptedMover.MoveFileAsync(source, destination, operationId));
+
+        Assert.False(File.Exists(source));
+        Assert.Equal("audio", await File.ReadAllTextAsync(destination));
+        await AssertJournalStateAsync(
+            operationId,
+            FileMutationJournalState.SourceDeleted,
+            GetFileIdentity(destination));
+        await using (var db = await _provider
+            .GetRequiredService<IDbContextFactory<ListenArrDbContext>>()
+            .CreateDbContextAsync())
+        {
+            var journal = await db.FileMutationJournals
+                .AsNoTracking()
+                .SingleAsync(candidate => candidate.OperationId == operationId);
+            Assert.False(string.IsNullOrWhiteSpace(
+                journal.SourceParentDirectoryObjectIdentity));
+            Assert.False(string.IsNullOrWhiteSpace(
+                journal.DestinationParentDirectoryObjectIdentity));
+        }
+
+        Directory.Move(sourceParent, displacedSourceParent);
+        Directory.CreateDirectory(sourceParent);
+
+        var recoveredMover = CreateMover(disableNativeRename: true);
+        Assert.False(await recoveredMover.MoveFileAsync(
+            source,
+            destination,
+            operationId));
+
+        await AssertJournalStateAsync(
+            operationId,
+            FileMutationJournalState.NeedsAttention,
+            GetFileIdentity(destination));
+        AssertNoLibraryArtifacts(sourceParent);
+        AssertNoLibraryArtifacts(displacedSourceParent);
+        AssertNoLibraryArtifacts(destinationParent);
+    }
+
+    [Fact]
+    public async Task MoveFileAsync_RetryAfterSourceDeletedState_DestinationParentReplacedWhileStopped_DoesNotComplete()
+    {
+        var sourceParent = FileService.GetTempDirectory(
+            "file-mover-markerless-destination-parent-replaced-after-restart-source");
+        var destinationParent = FileService.GetTempDirectory(
+            "file-mover-markerless-destination-parent-replaced-after-restart-destination");
+        var displacedDestinationParent = destinationParent + "-displaced";
+        var source = Path.Join(sourceParent, "source.m4b");
+        var destination = Path.Join(destinationParent, "moved.m4b");
+        await File.WriteAllTextAsync(source, "audio");
+        var operationId = Guid.NewGuid();
+
+        var interruptedMover = CreateMover(
+            disableNativeRename: true,
+            afterSourceDeletedState: () =>
+                throw new IOException("Simulated process interruption."));
+
+        await Assert.ThrowsAsync<IOException>(() =>
+            interruptedMover.MoveFileAsync(source, destination, operationId));
+
+        Assert.False(File.Exists(source));
+        var targetIdentity = GetFileIdentity(destination);
+        Directory.Move(destinationParent, displacedDestinationParent);
+        Directory.CreateDirectory(destinationParent);
+        File.Move(
+            Path.Join(displacedDestinationParent, "moved.m4b"),
+            destination);
+        Assert.Equal(targetIdentity, GetFileIdentity(destination));
+
+        var recoveredMover = CreateMover(disableNativeRename: true);
+        Assert.False(await recoveredMover.MoveFileAsync(
+            source,
+            destination,
+            operationId));
+
+        Assert.Equal("audio", await File.ReadAllTextAsync(destination));
+        await AssertJournalStateAsync(
+            operationId,
+            FileMutationJournalState.NeedsAttention,
+            targetIdentity);
+        AssertNoLibraryArtifacts(sourceParent);
+        AssertNoLibraryArtifacts(destinationParent);
+        AssertNoLibraryArtifacts(displacedDestinationParent);
+    }
+
+    [LinuxFact]
+    public async Task MoveFileAsync_SourceParentReplacedAfterDeleteBeforeState_DoesNotComplete()
+    {
+        var sourceParent = FileService.GetTempDirectory(
+            "file-mover-markerless-parent-replaced-source");
+        var displacedSourceParent = sourceParent + "-displaced";
+        var destinationParent = FileService.GetTempDirectory(
+            "file-mover-markerless-parent-replaced-destination");
+        var source = Path.Join(sourceParent, "source.m4b");
+        var destination = Path.Join(destinationParent, "moved.m4b");
+        await File.WriteAllTextAsync(source, "audio");
+        var operationId = Guid.NewGuid();
+        var replacementAttempted = false;
+        Exception? replacementFailure = null;
+
+        var mover = CreateMover(
+            disableNativeRename: true,
+            afterSourceDeletedBeforeState: async () =>
+            {
+                replacementAttempted = true;
+                try
+                {
+                    Directory.Move(sourceParent, displacedSourceParent);
+                    Directory.CreateDirectory(sourceParent);
+                    await File.WriteAllTextAsync(source, "replacement");
+                }
+                catch (Exception exception)
+                {
+                    replacementFailure = exception;
+                    throw;
+                }
+            });
+
+        Assert.False(await mover.MoveFileAsync(source, destination, operationId));
+
+        Assert.True(replacementAttempted);
+        Assert.Null(replacementFailure);
+        Assert.Equal("replacement", await File.ReadAllTextAsync(source));
+        Assert.Equal("audio", await File.ReadAllTextAsync(destination));
+        await AssertJournalStateAsync(
+            operationId,
+            FileMutationJournalState.NeedsAttention,
+            GetFileIdentity(destination));
+        AssertNoLibraryArtifacts(sourceParent);
+        AssertNoLibraryArtifacts(displacedSourceParent);
+        AssertNoLibraryArtifacts(destinationParent);
+    }
+
     private FileMover CreateMover(
         bool disableNativeRename = false,
         bool forceCrossVolume = false,
@@ -465,7 +874,9 @@ public sealed class FileMoverMarkerlessMoveTests : BaseTests
         Func<Task>? afterTargetCreatedBeforeState = null,
         Func<Task>? afterTargetState = null,
         Func<Task>? afterTargetWrittenBeforeVerifiedState = null,
-        Func<Task>? afterSourceDeletedBeforeState = null)
+        Func<Task>? afterSourceDeletedBeforeState = null,
+        Func<Task>? afterSourceDeletedState = null,
+        Func<Task>? beforeCompletedJournalCommit = null)
     {
         var factory = _provider.GetRequiredService<
             IDbContextFactory<ListenArrDbContext>>();
@@ -487,7 +898,11 @@ public sealed class FileMoverMarkerlessMoveTests : BaseTests
             AfterMarkerlessMoveTargetWrittenBeforeVerifiedStateForTestAsync =
                 afterTargetWrittenBeforeVerifiedState,
             AfterMarkerlessMoveSourceDeletedBeforeStateForTestAsync =
-                afterSourceDeletedBeforeState
+                afterSourceDeletedBeforeState,
+            AfterMarkerlessMoveSourceDeletedStateForTestAsync =
+                afterSourceDeletedState,
+            BeforeMarkerlessCompletedJournalCommitForTestAsync =
+                beforeCompletedJournalCommit
         };
     }
 

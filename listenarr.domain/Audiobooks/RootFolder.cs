@@ -20,6 +20,12 @@ using Listenarr.Domain.Common;
 
 namespace Listenarr.Domain.Audiobooks
 {
+    public enum WeakStorageSourceCleanupPolicy
+    {
+        RetainSource = 0,
+        DeleteSourceAfterVerifiedCopy = 1
+    }
+
     public class RootFolder
     {
         [Key]
@@ -55,6 +61,13 @@ namespace Listenarr.Domain.Audiobooks
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         public DateTime? UpdatedAt { get; set; }
+
+        public WeakStorageSourceCleanupPolicy WeakStorageSourceCleanupPolicy { get; set; } =
+            WeakStorageSourceCleanupPolicy.RetainSource;
+
+        public int WeakStoragePolicyRevision { get; set; }
+
+        public int StorageContractRevision { get; set; }
 
         public ICollection<RootFolderRelocation> Relocations { get; set; } = new List<RootFolderRelocation>();
     }

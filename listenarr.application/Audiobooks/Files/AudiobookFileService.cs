@@ -340,7 +340,7 @@ namespace Listenarr.Application.Audiobooks.Files
                 fileRecord.Bitrate = meta?.BitRate;
                 fileRecord.SampleRate = meta?.SampleRate;
                 fileRecord.Channels = meta?.Channels;
-                if (registrationLease != null)
+                if (registrationLease?.HasDurablePhysicalObjectIdentity == true)
                 {
                     fileRecord.ApplyPhysicalObjectIdentity(
                         registrationLease.PhysicalObjectIdentity,
@@ -375,7 +375,8 @@ namespace Listenarr.Application.Audiobooks.Files
                         }
 
                         if (registrationLease != null
-                            && !registrationLease.MatchesCurrentPublication())
+                            && ProbeCurrentPublication(registrationLease)
+                                == RegistrationPublicationMatchOutcome.Mismatch)
                         {
                             await DeleteCreatedPhysicalGenerationAsync(
                                 fileRecord,

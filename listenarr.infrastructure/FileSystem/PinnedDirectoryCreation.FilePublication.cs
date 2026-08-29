@@ -11,6 +11,27 @@ internal sealed partial class PinnedDirectoryCreation
     {
     }
 
+    private static int TryRenameRelativeEntryNoReplaceLinux(
+        SafeFileHandle sourceDirectoryHandle,
+        string sourceName,
+        SafeFileHandle destinationDirectoryHandle,
+        string finalName)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            throw new PlatformNotSupportedException(
+                "The non-throwing no-replace rename probe is Linux-specific.");
+        }
+
+        var result = RenameAtNoReplaceLinux(
+            sourceDirectoryHandle.DangerousGetHandle().ToInt32(),
+            sourceName,
+            destinationDirectoryHandle.DangerousGetHandle().ToInt32(),
+            finalName,
+            RenameNoReplace);
+        return result == 0 ? 0 : Marshal.GetLastWin32Error();
+    }
+
     private static void RenameRelativeEntry(
         SafeFileHandle sourceDirectoryHandle,
         SafeFileHandle entryHandle,

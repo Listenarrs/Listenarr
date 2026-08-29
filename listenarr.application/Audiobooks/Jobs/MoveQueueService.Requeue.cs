@@ -38,6 +38,11 @@ public partial class MoveQueueService
                 return null;
             }
 
+            await EnsureNonRelocationRecoveryAllowsMutationAsync(
+                job.AudiobookId,
+                allowActiveDeletionIntent: false,
+                cancellationToken);
+
             if (string.IsNullOrWhiteSpace(job.SourcePath)
                 || string.IsNullOrWhiteSpace(job.RequestedPath))
             {
@@ -154,25 +159,49 @@ public partial class MoveQueueService
                 jobToNotify = job;
                 return null;
             }
-            if (!MoveManifestIdentity.TryGetTargetBoundaryAuthorization(
-                    job.Entries,
-                    out _,
-                    out _))
-            {
-                await MarkUnsafeStoredPathNeedsAttentionAsync(
-                    job,
-                    "The move job has no durable target-boundary physical-generation authorization and cannot be requeued safely.",
-                    cancellationToken);
-                jobToNotify = job;
-                return null;
-            }
-
             if (job.Status != MoveJobStatus.Queued
                 && MoveRecoveryPolicy.GetDisposition(job) != MoveRecoveryDisposition.RetryAvailable)
             {
                 _logger.LogInformation(
                     "Move job {JobId} requires operator repair and cannot be manually requeued",
                     jobId);
+                return null;
+            }
+
+            if (!MoveBoundaryAuthorization.TryResolveSourceBoundary(
+                    sourcePath,
+                    sourceIdentity,
+                    job.SourceCleanupBoundary,
+                    job.DeleteEmptySource,
+                    out _,
+                    out var sourceBoundaryReason))
+            {
+                if (await MarkUnsafeStoredPathNeedsAttentionAsync(
+                        job,
+                        $"Move source mutation boundary cannot be requeued safely: {sourceBoundaryReason}",
+                        cancellationToken))
+                {
+                    jobToNotify = job;
+                }
+                return null;
+            }
+
+            if (!MoveManifestIdentity.TryGetSourceBoundaryAuthorization(
+                    job.Entries,
+                    out _,
+                    out _,
+                    out _)
+                || !MoveManifestIdentity.TryGetTargetBoundaryAuthorization(
+                    job.Entries,
+                    out _,
+                    out _,
+                    out _))
+            {
+                await MarkUnsafeStoredPathNeedsAttentionAsync(
+                    job,
+                    "The move job has no durable source- or target-boundary physical-generation authorization and cannot be requeued safely.",
+                    cancellationToken);
+                jobToNotify = job;
                 return null;
             }
 
@@ -206,8 +235,31 @@ public partial class MoveQueueService
                         job.AudiobookId);
                     return requeue.Job?.Id;
                 case MoveRequeueOutcome.ConflictingActiveJob:
+                    if (requeue.Job == null
+                        || !ActiveExecutionOptionsMatch(
+                            requeue.Job,
+                            sourceIdentity,
+                            targetIdentity,
+                            job.DeleteEmptySource,
+                            job.RelocationId,
+                            job.SourceCleanupBoundary,
+                            job.SourceCleanupMode,
+                            job.SourceRootFolderId,
+                            job.SourcePolicyRevision,
+                            job.TargetRootFolderId,
+                            job.TargetPolicyRevision,
+                            job.SourceStorageContractRevision,
+                            job.TargetStorageContractRevision,
+                            job.ForceCopyAndRetainSource))
+                    {
+                        _logger.LogWarning(
+                            "Move job {JobId} cannot be requeued because the conflicting active job uses different execution options",
+                            job.Id);
+                        return null;
+                    }
+
                     jobToSchedule = requeue.Job;
-                    return requeue.Job?.Id;
+                    return requeue.Job.Id;
                 case MoveRequeueOutcome.StaleState:
                     _logger.LogInformation(
                         "Move job {JobId} changed state while it was being requeued",

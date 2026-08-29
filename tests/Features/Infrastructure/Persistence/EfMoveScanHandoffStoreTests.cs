@@ -1,3 +1,4 @@
+using Listenarr.Infrastructure.Persistence.Repositories;
 using Listenarr.Tests.Common;
 using Microsoft.EntityFrameworkCore;
 
@@ -41,6 +42,74 @@ public sealed class EfMoveScanHandoffStoreTests : BaseTests
         Assert.Single(await db.History.AsNoTracking()
             .Where(history => history.IdempotencyKey == $"move:{job.Id:N}:moved")
             .ToListAsync());
+    }
+
+    [Fact]
+    public async Task CommitMoveCompletionAsync_ValidationMismatchRollsBackCompletionRecords()
+    {
+        var databasePath = Path.Join(
+            FileService.GetTempPath(),
+            $"move-completion-validation-{Guid.NewGuid():N}.db");
+        var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+            .UseSqlite($"Data Source={databasePath};Pooling=False")
+            .Options;
+        var factory = new TestDbContextFactory(options);
+        MoveJob job;
+        Audiobook audiobook;
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            await db.Database.EnsureCreatedAsync();
+            audiobook = new Audiobook
+            {
+                Title = "Validated Completion",
+                BasePath = FileService.GetTempDirectory(
+                    "validated-completion-audiobook")
+            };
+            db.Audiobooks.Add(audiobook);
+            await db.SaveChangesAsync();
+            job = new MoveJob
+            {
+                AudiobookId = audiobook.Id,
+                SourcePath = audiobook.BasePath + "-source",
+                RequestedPath = audiobook.BasePath,
+                Status = MoveJobStatus.Running,
+                Phase = MoveJobPhase.RecordingCompletion,
+                LeaseOwner = "completion-worker",
+                LeaseGeneration = 1,
+                LeaseExpiresAt = DateTime.UtcNow.AddMinutes(5),
+                ActiveDeduplicationKey = $"validated:{Guid.NewGuid():N}"
+            };
+            SetPathIdentities(job);
+            db.MoveJobs.Add(job);
+            await db.SaveChangesAsync();
+        }
+        var store = new EfMoveScanHandoffStore(factory);
+
+        await Assert.ThrowsAsync<MoveNeedsAttentionException>(() =>
+            store.CommitMoveCompletionAsync(
+                new MoveCompletionCommit(
+                    job.Id,
+                    job.LeaseOwner!,
+                    job.LeaseGeneration,
+                    audiobook.Id,
+                    audiobook.Title,
+                    job.SourcePath!,
+                    job.RequestedPath!,
+                    DateTimeOffset.UtcNow),
+                _ => Task.FromResult(
+                    RegistrationPublicationMatchOutcome.Mismatch),
+                CancellationToken.None));
+
+        await using var verification = await factory.CreateDbContextAsync();
+        var persistedJob = await verification.MoveJobs.AsNoTracking()
+            .SingleAsync(candidate => candidate.Id == job.Id);
+        Assert.Equal(MoveJobStatus.Running, persistedJob.Status);
+        Assert.Equal("completion-worker", persistedJob.LeaseOwner);
+        Assert.False(await verification.MoveScanHandoffs.AsNoTracking()
+            .AnyAsync(candidate => candidate.MoveJobId == job.Id));
+        Assert.False(await verification.History.AsNoTracking()
+            .AnyAsync(history => history.IdempotencyKey
+                == $"move:{job.Id:N}:moved"));
     }
 
     [Fact]
@@ -745,6 +814,17 @@ public sealed class EfMoveScanHandoffStoreTests : BaseTests
         db.MoveScanHandoffs.Add(handoff);
         await db.SaveChangesAsync();
         return handoff;
+    }
+
+    private sealed class TestDbContextFactory(
+        DbContextOptions<ListenArrDbContext> options) :
+        IDbContextFactory<ListenArrDbContext>
+    {
+        public ListenArrDbContext CreateDbContext() => new(options);
+
+        public Task<ListenArrDbContext> CreateDbContextAsync(
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(CreateDbContext());
     }
 
     private static void SetPathIdentities(MoveJob job)

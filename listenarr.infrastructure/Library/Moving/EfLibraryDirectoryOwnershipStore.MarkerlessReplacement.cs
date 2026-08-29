@@ -93,10 +93,9 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
                 canonicalPath,
                 move.RequestedPath,
                 semantics)
-            || !string.Equals(
+            || !PersistedDirectoryObjectIdentitiesEquivalent(
                 move.TargetDirectoryObjectIdentity,
-                replacementDirectoryObjectIdentity,
-                StringComparison.Ordinal))
+                replacementDirectoryObjectIdentity))
         {
             return false;
         }
@@ -109,10 +108,9 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
             .ToList();
         if (creationEvidence.Count != 1
             || creationEvidence[0].State != MoveCreatedDirectoryState.Created
-            || !string.Equals(
+            || !PersistedDirectoryObjectIdentitiesEquivalent(
                 creationEvidence[0].DirectoryObjectIdentity,
-                replacementDirectoryObjectIdentity,
-                StringComparison.Ordinal))
+                replacementDirectoryObjectIdentity))
         {
             return false;
         }
@@ -123,27 +121,31 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
             cancellationToken);
         using var liveDirectory = authorization.ParentAnchor.OpenExistingChild(
             Path.GetFileName(canonicalPath));
-        var liveIdentity = liveDirectory.GetDirectoryObjectIdentity();
-        if (!string.Equals(
-                liveIdentity,
-                replacementDirectoryObjectIdentity,
-                StringComparison.Ordinal)
-            || !liveDirectory.VisiblePathMatches()
-            || !authorization.ParentAnchor.VisiblePathMatches())
+        if (!liveDirectory.MatchesDirectoryObjectIdentity(
+                replacementDirectoryObjectIdentity)
+            || !DirectoryVisibilityMatchesOrThrowUnavailable(
+                liveDirectory,
+                "The markerless replacement directory is temporarily unavailable while its move generation is being verified.")
+            || !DirectoryVisibilityMatchesOrThrowUnavailable(
+                authorization.ParentAnchor,
+                "The markerless replacement directory parent is temporarily unavailable while its move generation is being verified."))
         {
             throw new InvalidOperationException(
                 "The markerless replacement directory no longer matches its persisted move generation.");
         }
-        if (ManagedDirectoryIdentity.Matches(
+        if (liveDirectory.MatchesManagedDirectoryOwnershipIdentity(
                 stale.DirectoryObjectIdentityVersion,
                 stale.DirectoryObjectIdentity,
-                stale.OwnershipToken,
-                liveIdentity))
+                stale.OwnershipToken))
         {
             return false;
         }
-        if (!liveDirectory.VisiblePathMatches()
-            || !authorization.ParentAnchor.VisiblePathMatches())
+        if (!DirectoryVisibilityMatchesOrThrowUnavailable(
+                liveDirectory,
+                "The markerless replacement directory is temporarily unavailable before stale ownership retirement.")
+            || !DirectoryVisibilityMatchesOrThrowUnavailable(
+                authorization.ParentAnchor,
+                "The markerless replacement directory parent is temporarily unavailable before stale ownership retirement."))
         {
             throw new InvalidOperationException(
                 "The markerless replacement directory changed before stale ownership retirement.");
@@ -166,12 +168,12 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
         }
 
         AfterMarkerlessReplacementCommitForTest?.Invoke();
-        if (!string.Equals(
-                liveDirectory.GetDirectoryObjectIdentity(),
-                replacementDirectoryObjectIdentity,
-                StringComparison.Ordinal)
-            || !liveDirectory.VisiblePathMatches()
-            || !authorization.ParentAnchor.VisiblePathMatches())
+        var postCommitDirectoryVisibility = liveDirectory.ProbeVisiblePathMatch();
+        var postCommitParentVisibility = authorization.ParentAnchor.ProbeVisiblePathMatch();
+        if (!liveDirectory.MatchesDirectoryObjectIdentity(
+                replacementDirectoryObjectIdentity)
+            || postCommitDirectoryVisibility == RegistrationPublicationMatchOutcome.Mismatch
+            || postCommitParentVisibility == RegistrationPublicationMatchOutcome.Mismatch)
         {
             var reason =
                 "The markerless replacement directory changed physical generation immediately after stale ownership retirement committed.";
@@ -198,4 +200,13 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
 
         return true;
     }
+
+    private static bool PersistedDirectoryObjectIdentitiesEquivalent(
+        string? left,
+        string right) =>
+        !string.IsNullOrWhiteSpace(left)
+        && (string.Equals(left, right, StringComparison.Ordinal)
+            || PinnedDirectoryCreation.ArePersistedObjectIdentitiesDurablyEquivalent(
+                left,
+                right));
 }

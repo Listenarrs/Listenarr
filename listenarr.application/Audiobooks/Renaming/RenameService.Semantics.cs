@@ -29,7 +29,16 @@ public partial class RenameService
             throw new InvalidOperationException(boundaryReason);
         }
 
+        if (!FileSystemPathIdentity.TryDetectAbsoluteSyntaxForHost(
+                boundaryPath,
+                out var boundarySyntax))
+        {
+            throw new InvalidOperationException(
+                "The organize path does not have a valid host filesystem identity.");
+        }
+
         RenamePathResolution? bestMatch = null;
+        var unavailableRootLength = -1;
         foreach (var root in rootFolders.Where(root => !string.IsNullOrWhiteSpace(root.Path)))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -37,6 +46,26 @@ public partial class RenameService
                     root.Path,
                     out var canonicalRoot,
                     out _))
+            {
+                if (FileSystemPathIdentity.StoredBoundaryMayContainPath(
+                        root.Path,
+                        boundaryPath,
+                        boundarySyntax,
+                        root.CaseSensitivityMode))
+                {
+                    unavailableRootLength = Math.Max(
+                        unavailableRootLength,
+                        root.Path.Length);
+                }
+
+                continue;
+            }
+
+            if (!FileSystemPathIdentity.StoredBoundaryMayContainPath(
+                    canonicalRoot,
+                    boundaryPath,
+                    boundarySyntax,
+                    root.CaseSensitivityMode))
             {
                 continue;
             }
@@ -46,8 +75,14 @@ public partial class RenameService
                 root.CaseSensitivityMode,
                 cancellationToken);
             if (rootResolution.State != PathIdentityState.Valid
-                || rootResolution.Semantics.CaseSensitivity == FileSystemCaseSensitivity.Unknown
-                || !FileSystemPathIdentity.IsSameOrInside(
+                || rootResolution.Semantics.CaseSensitivity == FileSystemCaseSensitivity.Unknown)
+            {
+                unavailableRootLength = Math.Max(
+                    unavailableRootLength,
+                    canonicalRoot.Length);
+                continue;
+            }
+            if (!FileSystemPathIdentity.IsSameOrInside(
                     boundaryPath,
                     canonicalRoot,
                     rootResolution.Semantics))
@@ -66,6 +101,13 @@ public partial class RenameService
             }
         }
 
+        var bestRootLength = bestMatch?.BoundaryPath.Length ?? -1;
+        if (unavailableRootLength >= bestRootLength
+            && unavailableRootLength >= 0)
+        {
+            throw new InvalidOperationException(
+                "A configured root that may contain this organize path has unavailable or ambiguous persisted filesystem identity. Repair or change that root before organizing files here.");
+        }
         if (bestMatch != null)
         {
             return bestMatch;
@@ -73,7 +115,8 @@ public partial class RenameService
 
         var resolution = await _semanticsResolver.ResolveAsync(
             boundaryPath,
-            cancellationToken: cancellationToken);
+            FileSystemCaseSensitivityMode.Auto,
+            cancellationToken);
         if (resolution.State != PathIdentityState.Valid
             || resolution.Semantics.CaseSensitivity == FileSystemCaseSensitivity.Unknown)
         {

@@ -33,10 +33,22 @@ public sealed class AudiobookFilePathIdentityResolver(
                 $"The persisted path uses {syntax} filesystem syntax, which cannot be validated on the current {hostSyntax} host.");
         }
 
-        var rootMatch = await FindAuthoritativeRootAsync(
+        var rootSearch = await FindAuthoritativeRootAsync(
             canonicalPath,
             syntax,
             cancellationToken);
+        if (rootSearch.UnavailableRoot != null)
+        {
+            return AudiobookFilePathIdentity.CreateUnavailable(
+                canonicalPath,
+                syntax,
+                rootSearch.UnavailableRoot.CaseSensitivityMode,
+                canonicalPath,
+                rootSearch.UnavailableReason
+                    ?? "A configured root that may contain this audiobook file has unavailable persisted filesystem identity.");
+        }
+
+        var rootMatch = rootSearch.Match;
         var requestedMode = rootMatch?.Root.CaseSensitivityMode
             ?? FileSystemCaseSensitivityMode.Auto;
         var resolution = rootMatch?.Resolution
@@ -82,24 +94,51 @@ public sealed class AudiobookFilePathIdentityResolver(
             snapshot.BoundaryPath);
     }
 
-    private async Task<RootMatch?> FindAuthoritativeRootAsync(
+    private async Task<RootSearchResult> FindAuthoritativeRootAsync(
         string canonicalPath,
         FileSystemPathSyntax syntax,
         CancellationToken cancellationToken)
     {
         var roots = await GetRootFoldersAsync();
         RootMatch? best = null;
+        UnavailableRootMatch? deepestUnavailable = null;
         foreach (var root in roots.Where(candidate => !string.IsNullOrWhiteSpace(candidate.Path)))
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
                     root.Path,
                     out var canonicalRoot,
-                    out _)
-                || !FileSystemPathIdentity.TryDetectAbsoluteSyntax(
+                    out _))
+            {
+                if (FileSystemPathIdentity.StoredBoundaryMayContainPath(
+                        root.Path,
+                        canonicalPath,
+                        syntax,
+                        root.CaseSensitivityMode)
+                    && (deepestUnavailable == null
+                        || root.Path.Length > deepestUnavailable.CanonicalRootLength))
+                {
+                    deepestUnavailable = new UnavailableRootMatch(
+                        root,
+                        root.Path.Length,
+                        "A configured root that may contain this audiobook file has ambiguous persisted filesystem identity. Repair or change that root before persisting file path identity here.");
+                }
+
+                continue;
+            }
+            if (!FileSystemPathIdentity.TryDetectAbsoluteSyntax(
                     canonicalRoot,
                     out var rootSyntax)
                 || rootSyntax != syntax)
+            {
+                continue;
+            }
+
+            if (!FileSystemPathIdentity.StoredBoundaryMayContainPath(
+                    canonicalRoot,
+                    canonicalPath,
+                    syntax,
+                    root.CaseSensitivityMode))
             {
                 continue;
             }
@@ -122,8 +161,20 @@ public sealed class AudiobookFilePathIdentityResolver(
             }
 
             if (resolution.State != PathIdentityState.Valid
-                || resolution.Semantics.Syntax != syntax
-                || !FileSystemPathIdentity.IsSameOrInside(
+                || resolution.Semantics.Syntax != syntax)
+            {
+                if (deepestUnavailable == null
+                    || canonicalRoot.Length > deepestUnavailable.CanonicalRootLength)
+                {
+                    deepestUnavailable = new UnavailableRootMatch(
+                        root,
+                        canonicalRoot.Length,
+                        resolution.Reason
+                            ?? "A configured root that may contain this audiobook file has unavailable filesystem semantics.");
+                }
+                continue;
+            }
+            if (!FileSystemPathIdentity.IsSameOrInside(
                     canonicalPath,
                     canonicalRoot,
                     resolution.Semantics))
@@ -137,7 +188,17 @@ public sealed class AudiobookFilePathIdentityResolver(
             }
         }
 
-        return best;
+        if (deepestUnavailable != null
+            && deepestUnavailable.CanonicalRootLength
+                >= (best?.CanonicalRootLength ?? -1))
+        {
+            return new RootSearchResult(
+                Match: null,
+                deepestUnavailable.Root,
+                deepestUnavailable.Reason);
+        }
+
+        return new RootSearchResult(best, UnavailableRoot: null, UnavailableReason: null);
     }
 
     private Task<List<RootFolder>> GetRootFoldersAsync()
@@ -225,6 +286,16 @@ public sealed class AudiobookFilePathIdentityResolver(
 
         return canonicalPath;
     }
+
+    private sealed record RootSearchResult(
+        RootMatch? Match,
+        RootFolder? UnavailableRoot,
+        string? UnavailableReason);
+
+    private sealed record UnavailableRootMatch(
+        RootFolder Root,
+        int CanonicalRootLength,
+        string Reason);
 
     private sealed record RootMatch(
         RootFolder Root,

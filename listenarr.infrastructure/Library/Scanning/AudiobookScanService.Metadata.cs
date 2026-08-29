@@ -16,6 +16,15 @@ internal sealed partial class AudiobookScanService
         ICollection<AudiobookScanDiagnostic> diagnostics,
         CancellationToken cancellationToken)
     {
+        if (!command.ScanPhysicalIdentity.HasDurableGenerationProof)
+        {
+            diagnostics.Add(new AudiobookScanDiagnostic(
+                "MetadataEnrichmentSkippedLimitedStorage",
+                scanRoot,
+                "Embedded-metadata attribution was skipped because this storage does not expose durable file-generation identity."));
+            return discovery;
+        }
+
         var attributed = new HashSet<string>(
             discovery.AttributedFiles,
             semantics.Comparer);

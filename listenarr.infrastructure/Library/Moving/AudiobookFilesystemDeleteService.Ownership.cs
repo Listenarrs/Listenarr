@@ -39,11 +39,10 @@ public sealed partial class AudiobookFilesystemDeleteService
                 if (exactOwnership != null
                     && (!string.IsNullOrWhiteSpace(
                             exactOwnership.DirectoryObjectIdentityUnavailableReason)
-                        || !ManagedDirectoryIdentity.Matches(
+                        || !target.MatchesManagedDirectoryOwnershipIdentity(
                             exactOwnership.DirectoryObjectIdentityVersion,
                             exactOwnership.DirectoryObjectIdentity,
-                            exactOwnership.OwnershipToken,
-                            target.GetDirectoryObjectIdentity())))
+                            exactOwnership.OwnershipToken)))
                 {
                     throw new InvalidOperationException(
                         "The audiobook folder differs from its durable ownership identity.");
@@ -196,6 +195,13 @@ public sealed partial class AudiobookFilesystemDeleteService
         if (resolution.State == LibraryDirectoryOwnershipResolutionState.Unowned)
         {
             return;
+        }
+        if (resolution.State == LibraryDirectoryOwnershipResolutionState.Unavailable
+            && resolution.IsTransient)
+        {
+            throw new IOException(
+                resolution.Reason
+                    ?? $"The missing {directoryKind} directory ownership proof is temporarily unavailable.");
         }
         if (resolution.State != LibraryDirectoryOwnershipResolutionState.Owned
             || resolution.Ownership == null)

@@ -163,10 +163,10 @@ namespace Listenarr.Api.Features.Library
 
                     asinLookupAttempts++;
 
-                    object? rawResult;
+                    AudiobookMetadataEnvelope? metadataEnvelope;
                     try
                     {
-                        rawResult = await _metadataService.GetMetadataAsync(normalizedAsin, regionValue, cache: false);
+                        metadataEnvelope = await _metadataService.GetMetadataAsync(normalizedAsin, regionValue, cache: false);
                         cancellationToken.ThrowIfCancellationRequested();
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
@@ -181,15 +181,16 @@ namespace Listenarr.Api.Features.Library
                         continue;
                     }
 
-                    if (!TryExtractMetadataLookupResult(rawResult, out var extractedMetadata, out var extractedSource) ||
-                        extractedMetadata == null)
+                    if (metadataEnvelope == null)
                     {
                         continue;
                     }
 
-                    providerMetadata = extractedMetadata;
-                    providerSource = extractedSource;
-                    resolvedAsin = string.IsNullOrWhiteSpace(extractedMetadata.Asin) ? normalizedAsin : extractedMetadata.Asin;
+                    providerMetadata = metadataEnvelope.Metadata;
+                    providerSource = metadataEnvelope.Source;
+                    resolvedAsin = string.IsNullOrWhiteSpace(metadataEnvelope.Metadata.Asin)
+                        ? normalizedAsin
+                        : metadataEnvelope.Metadata.Asin;
                     resolvedRegion = regionValue;
                     return true;
                 }

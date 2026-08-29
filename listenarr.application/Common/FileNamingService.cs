@@ -172,7 +172,9 @@ namespace Listenarr.Application.Common
         {
             if (_semanticsResolver != null)
             {
-                var resolution = await _semanticsResolver.ResolveAsync(configuredRoot);
+                var resolution = await _semanticsResolver.ResolveAsync(
+                    configuredRoot,
+                    FileSystemCaseSensitivityMode.Auto);
                 if (resolution.State == PathIdentityState.Valid)
                 {
                     return FileSystemPathIdentity.AreEquivalent(

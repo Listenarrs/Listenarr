@@ -49,6 +49,19 @@ public sealed class AudiobookDeletionIntentReconciler(
                 {
                     throw;
                 }
+                catch (Exception exception) when (
+                    IsTransientRecoveryFilesystemException(exception))
+                {
+                    await intentStore.RecordErrorAsync(
+                        intent.Id,
+                        "Filesystem cleanup is temporarily unavailable during durable audiobook deletion recovery.",
+                        CancellationToken.None);
+                    logger.LogWarning(
+                        exception,
+                        "Audiobook deletion intent {IntentId} remains pending because filesystem cleanup is temporarily unavailable",
+                        intent.Id);
+                    continue;
+                }
                 catch (Exception exception) when (exception is not (
                     OutOfMemoryException or StackOverflowException))
                 {
@@ -72,10 +85,12 @@ public sealed class AudiobookDeletionIntentReconciler(
                 {
                     await intentStore.RecordErrorAsync(
                         intent.Id,
-                        "One or more tracked audiobook file generations remain unresolved after filesystem cleanup recovery.",
+                        "One or more tracked audiobook file generations remain pending after filesystem cleanup recovery.",
                         CancellationToken.None);
-                    throw new InvalidOperationException(
-                        "Durable audiobook deletion recovery could not prove tracked-file cleanup complete.");
+                    logger.LogWarning(
+                        "Audiobook deletion intent {IntentId} remains pending because tracked-file cleanup is not yet complete",
+                        intent.Id);
+                    continue;
                 }
                 await intentStore.MarkFilesystemCleanupCompletedAsync(
                     intent.Id,
@@ -100,5 +115,20 @@ public sealed class AudiobookDeletionIntentReconciler(
                 intent.Id,
                 intent.AudiobookId);
         }
+    }
+
+    private static bool IsTransientRecoveryFilesystemException(Exception exception)
+    {
+        if (exception is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
+        if (exception is System.ComponentModel.Win32Exception native)
+        {
+            return native.NativeErrorCode is 5 or 13 or 16 or 30 or 32 or 33;
+        }
+
+        return exception is InvalidOperationException { InnerException: not null }
+            && IsTransientRecoveryFilesystemException(exception.InnerException);
     }
 }

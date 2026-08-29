@@ -19,12 +19,18 @@ internal sealed partial class PinnedDirectoryCreation
             handle,
             boundaryPath,
             followVisibleFinalLink: true);
-        if (anchor.VisiblePathMatches())
+        var visibility = anchor.ProbeVisiblePathMatch();
+        if (visibility == RegistrationPublicationMatchOutcome.Match)
         {
             return anchor;
         }
 
         anchor.Dispose();
+        if (visibility == RegistrationPublicationMatchOutcome.Unavailable)
+        {
+            throw new IOException(
+                "The managed directory boundary is temporarily unavailable while it is being pinned.");
+        }
         throw new InvalidOperationException(
             "The managed directory boundary changed while it was being pinned.");
     }
@@ -135,6 +141,60 @@ internal sealed partial class PinnedDirectoryCreation
             return PinnedDirectoryCreation.GetDirectoryObjectIdentity(_handle);
         }
 
+        internal string GetNamespaceChangeToken()
+        {
+            ThrowIfDisposed();
+            return PinnedDirectoryCreation.GetDirectoryNamespaceChangeToken(_handle);
+        }
+
+        internal IReadOnlyList<string> GetDirectoryObjectIdentityCandidates()
+        {
+            ThrowIfDisposed();
+            return OperatingSystem.IsLinux()
+                ? PinnedDirectoryCreation.GetLinuxObjectIdentityCandidates(_handle)
+                : [PinnedDirectoryCreation.GetDirectoryObjectIdentity(_handle)];
+        }
+
+        internal bool MatchesManagedDirectoryIdentity(
+            int? expectedVersion,
+            string? expectedValue)
+        {
+            ThrowIfDisposed();
+            return GetDirectoryObjectIdentityCandidates().Any(nativeIdentity =>
+                ManagedDirectoryIdentity.MatchesNativeIdentity(
+                    expectedVersion,
+                    expectedValue,
+                    nativeIdentity));
+        }
+
+        internal bool MatchesDirectoryObjectIdentity(string expectedIdentity)
+        {
+            ThrowIfDisposed();
+            ArgumentException.ThrowIfNullOrWhiteSpace(expectedIdentity);
+            var candidates = GetDirectoryObjectIdentityCandidates();
+            return candidates.Contains(expectedIdentity, StringComparer.Ordinal)
+                || (OperatingSystem.IsLinux()
+                    && candidates.Any(candidate =>
+                        PinnedDirectoryCreation.ArePersistedObjectIdentitiesDurablyEquivalent(
+                            expectedIdentity,
+                            candidate)));
+        }
+
+        internal bool MatchesManagedDirectoryOwnershipIdentity(
+            int? expectedVersion,
+            string? expectedValue,
+            string ownershipToken)
+        {
+            ThrowIfDisposed();
+            ArgumentException.ThrowIfNullOrWhiteSpace(ownershipToken);
+            return GetDirectoryObjectIdentityCandidates().Any(nativeIdentity =>
+                ManagedDirectoryIdentity.Matches(
+                    expectedVersion,
+                    expectedValue,
+                    ownershipToken,
+                    nativeIdentity));
+        }
+
         internal SafeFileHandle DuplicateHandleForOperation()
         {
             ThrowIfDisposed();
@@ -176,9 +236,18 @@ internal sealed partial class PinnedDirectoryCreation
         }
 
         internal bool VisiblePathMatches() =>
-            VisiblePathMatches(FullPath, _followVisibleFinalLink);
+            ProbeVisiblePathMatch() == RegistrationPublicationMatchOutcome.Match;
+
+        internal RegistrationPublicationMatchOutcome ProbeVisiblePathMatch() =>
+            ProbeVisiblePathMatch(FullPath, _followVisibleFinalLink);
 
         internal bool VisiblePathMatches(
+            string visiblePath,
+            bool followVisibleFinalLink = false) =>
+            ProbeVisiblePathMatch(visiblePath, followVisibleFinalLink)
+                == RegistrationPublicationMatchOutcome.Match;
+
+        internal RegistrationPublicationMatchOutcome ProbeVisiblePathMatch(
             string visiblePath,
             bool followVisibleFinalLink = false)
         {
@@ -193,13 +262,30 @@ internal sealed partial class PinnedDirectoryCreation
                     : OpenDirectoryUnix(
                         visiblePath,
                         noFollow: !followVisibleFinalLink);
-                return HandlesIdentifySameDirectory(_handle, visible);
+                return HandlesIdentifySameDirectory(_handle, visible)
+                    ? RegistrationPublicationMatchOutcome.Match
+                    : RegistrationPublicationMatchOutcome.Mismatch;
+            }
+            catch (FileNotFoundException)
+            {
+                return RegistrationPublicationMatchOutcome.Mismatch;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return RegistrationPublicationMatchOutcome.Mismatch;
+            }
+            catch (Win32Exception exception) when (
+                OperatingSystem.IsWindows()
+                    ? exception.NativeErrorCode is 2 or 3
+                    : exception.NativeErrorCode == 2)
+            {
+                return RegistrationPublicationMatchOutcome.Mismatch;
             }
             catch (Exception exception) when (exception is
                 IOException or UnauthorizedAccessException or Win32Exception
                     or PlatformNotSupportedException)
             {
-                return false;
+                return RegistrationPublicationMatchOutcome.Unavailable;
             }
         }
 
@@ -218,12 +304,18 @@ internal sealed partial class PinnedDirectoryCreation
                 childHandle,
                 childPath,
                 followVisibleFinalLink: false);
-            if (child.VisiblePathMatches())
+            var childVisibility = child.ProbeVisiblePathMatch();
+            if (childVisibility == RegistrationPublicationMatchOutcome.Match)
             {
                 return child;
             }
 
             child.Dispose();
+            if (childVisibility == RegistrationPublicationMatchOutcome.Unavailable)
+            {
+                throw new IOException(
+                    "The visible directory child is temporarily unavailable while it is being pinned.");
+            }
             throw new InvalidOperationException(
                 "The visible directory hierarchy changed while opening an existing child.");
         }
@@ -308,7 +400,13 @@ internal sealed partial class PinnedDirectoryCreation
 
         private void EnsureVisiblePathMatches()
         {
-            if (!VisiblePathMatches())
+            var visibility = ProbeVisiblePathMatch();
+            if (visibility == RegistrationPublicationMatchOutcome.Unavailable)
+            {
+                throw new IOException(
+                    "The visible directory hierarchy is temporarily unavailable after its parent was pinned.");
+            }
+            if (visibility != RegistrationPublicationMatchOutcome.Match)
             {
                 throw new InvalidOperationException(
                     "The visible directory hierarchy changed after its parent was pinned.");

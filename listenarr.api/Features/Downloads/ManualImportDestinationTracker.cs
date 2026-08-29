@@ -14,7 +14,7 @@ namespace Listenarr.Api.Features.Downloads;
 
 public sealed class ManualImportDestinationTracker(
     IFileSystem fileSystem,
-    IFileSystemSemanticsResolver semanticsResolver)
+    IFilePublicationSourceCapability filePublicationSourceCapability)
 {
     private readonly Dictionary<string, HashSet<string>> _usedDestinationsByBoundary = new(StringComparer.Ordinal);
 
@@ -22,22 +22,26 @@ public sealed class ManualImportDestinationTracker(
 
     public Task<ManualImportDestinationReservation> PlanUniqueAsync(
         string desiredDestination,
+        FileSystemSemanticsResolution destinationResolution,
         CancellationToken cancellationToken = default) =>
         PlanAsync(
-            sourcePath: null,
+            sourceProof: null,
             desiredDestination,
+            destinationResolution,
             allowExistingEquivalent: false,
             cancellationToken);
 
     public Task<ManualImportDestinationReservation> PlanIdempotentOrUniqueAsync(
-        string sourcePath,
+        FilePublicationSourceProof sourceProof,
         string desiredDestination,
+        FileSystemSemanticsResolution destinationResolution,
         CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
+        sourceProof.Validate();
         return PlanAsync(
-            sourcePath,
+            sourceProof,
             desiredDestination,
+            destinationResolution,
             allowExistingEquivalent: true,
             cancellationToken);
     }
@@ -52,9 +56,44 @@ public sealed class ManualImportDestinationTracker(
         usedDestinations.Add(reservation.Path);
     }
 
+    public void CommitRecovered(
+        string destinationPath,
+        FileSystemSemanticsResolution destinationResolution)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
+        if (destinationResolution.State != PathIdentityState.Valid
+            || string.IsNullOrWhiteSpace(destinationResolution.BoundaryPath))
+        {
+            throw new InvalidOperationException(
+                destinationResolution.Reason
+                    ?? "Recovered destination filesystem identity is unavailable.");
+        }
+        if (!FileSystemPathIdentity.IsSameOrInside(
+                destinationPath,
+                destinationResolution.BoundaryPath,
+                destinationResolution.Semantics))
+        {
+            throw new InvalidOperationException(
+                "Recovered destination escaped its authorized filesystem boundary.");
+        }
+
+        var boundaryKey = FileSystemPathIdentity.CreateKey(
+            "manual-import-boundary",
+            destinationResolution.BoundaryPath,
+            destinationResolution.Semantics);
+        if (!_usedDestinationsByBoundary.TryGetValue(boundaryKey, out var usedDestinations))
+        {
+            usedDestinations = new HashSet<string>(destinationResolution.Semantics.Comparer);
+            _usedDestinationsByBoundary[boundaryKey] = usedDestinations;
+        }
+
+        usedDestinations.Add(destinationPath);
+    }
+
     private async Task<ManualImportDestinationReservation> PlanAsync(
-        string? sourcePath,
+        FilePublicationSourceProof? sourceProof,
         string desiredDestination,
+        FileSystemSemanticsResolution destinationResolution,
         bool allowExistingEquivalent,
         CancellationToken cancellationToken)
     {
@@ -63,37 +102,44 @@ public sealed class ManualImportDestinationTracker(
             throw new ArgumentException("Destination path is required.", nameof(desiredDestination));
         }
 
-        var resolution = await semanticsResolver.ResolveAsync(
-            Path.GetDirectoryName(desiredDestination) ?? desiredDestination,
-            cancellationToken: cancellationToken);
-        if (resolution.State != PathIdentityState.Valid)
+        if (destinationResolution.State != PathIdentityState.Valid
+            || string.IsNullOrWhiteSpace(destinationResolution.BoundaryPath))
         {
             throw new InvalidOperationException(
-                resolution.Reason ?? "Destination filesystem identity is unavailable.");
+                destinationResolution.Reason
+                    ?? "Destination filesystem identity is unavailable.");
+        }
+        if (!FileSystemPathIdentity.IsSameOrInside(
+                desiredDestination,
+                destinationResolution.BoundaryPath,
+                destinationResolution.Semantics))
+        {
+            throw new InvalidOperationException(
+                "Destination reservation escaped its authorized filesystem boundary.");
         }
 
         var boundaryKey = FileSystemPathIdentity.CreateKey(
             "manual-import-boundary",
-            resolution.BoundaryPath,
-            resolution.Semantics);
+            destinationResolution.BoundaryPath,
+            destinationResolution.Semantics);
         if (!_usedDestinationsByBoundary.TryGetValue(boundaryKey, out var usedDestinations))
         {
-            usedDestinations = new HashSet<string>(resolution.Semantics.Comparer);
+            usedDestinations = new HashSet<string>(destinationResolution.Semantics.Comparer);
             _usedDestinationsByBoundary[boundaryKey] = usedDestinations;
         }
 
         if (allowExistingEquivalent
-            && sourcePath != null
+            && sourceProof.HasValue
             && !usedDestinations.Contains(desiredDestination)
-            && fileSystem.FileExists(desiredDestination)
-            && await fileSystem.FilesHaveSameContentAsync(
-                sourcePath,
+            && await ExistingMatchesSourceProofAsync(
                 desiredDestination,
+                sourceProof.Value,
                 cancellationToken))
         {
             return new ManualImportDestinationReservation(
                 desiredDestination,
-                boundaryKey);
+                boundaryKey,
+                ReusesExistingFile: true);
         }
 
         // Use the destination volume's case rules for both in-memory batch collisions
@@ -105,6 +151,36 @@ public sealed class ManualImportDestinationTracker(
             usedDestinations);
         return new ManualImportDestinationReservation(uniqueDestination, boundaryKey);
     }
+
+    private async Task<bool> ExistingMatchesSourceProofAsync(
+        string destination,
+        FilePublicationSourceProof sourceProof,
+        CancellationToken cancellationToken)
+    {
+        if (!fileSystem.FileExists(destination))
+        {
+            return false;
+        }
+
+        var destinationCapability = await filePublicationSourceCapability.CheckAsync(
+            destination,
+            cancellationToken);
+        if (!destinationCapability.IsSupported
+            || !destinationCapability.SourceProof.HasValue)
+        {
+            return false;
+        }
+
+        var destinationProof = destinationCapability.SourceProof.Value;
+        return destinationProof.Length == sourceProof.Length
+            && string.Equals(
+                destinationProof.Sha256,
+                sourceProof.Sha256,
+                StringComparison.OrdinalIgnoreCase);
+    }
 }
 
-public sealed record ManualImportDestinationReservation(string Path, string BoundaryKey);
+public sealed record ManualImportDestinationReservation(
+    string Path,
+    string BoundaryKey,
+    bool ReusesExistingFile = false);

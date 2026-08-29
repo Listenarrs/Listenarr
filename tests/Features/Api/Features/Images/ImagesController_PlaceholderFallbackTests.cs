@@ -37,7 +37,7 @@ namespace Listenarr.Tests.Features.Api.Features.Images
                 .ReturnsAsync((AudibleBookResponse?)null);
             metadataService
                 .Setup(m => m.GetMetadataAsync(identifier, It.IsAny<string>(), It.IsAny<bool>()))
-                .ReturnsAsync((object?)null);
+                .ReturnsAsync((AudiobookMetadataEnvelope?)null);
 
             using var httpClientForAudible = new System.Net.Http.HttpClient();
             var audible = new Mock<AudibleService>(httpClientForAudible, Mock.Of<ILogger<AudibleService>>());

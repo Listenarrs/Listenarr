@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Mocks;
@@ -233,6 +234,85 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Processing
                 It.Is<List<string>>(files => files.Contains(archivePath)),
                 It.IsAny<CancellationToken>(),
                 It.Is<DownloadImportOptions>(options => options.ForceArchiveExtraction)), Times.Once);
+        }
+
+        [Fact]
+        public async Task Import_FailedPublication_PersistsFailureContractInHistory()
+        {
+            var importService = new Mock<IDownloadImportService>();
+            var sourceDirectory = FileService.GetTempDirectory("failed-publication-source");
+            var sourcePath = await FileService.GetFileAsync(sourceDirectory, "book.m4b");
+            var finalPath = Path.Join(FileService.GetTempDirectory("failed-publication-destination"), "book.m4b");
+            const string warningCode = "weak-storage-copy-retained";
+            const string message = "Move was reduced to copy and the source was retained";
+            importService
+                .Setup(service => service.ImportDownloadFilesAsync(
+                    It.IsAny<Audiobook>(),
+                    It.IsAny<List<string>>(),
+                    It.IsAny<CancellationToken>(),
+                    It.IsAny<DownloadImportOptions?>()))
+                .ReturnsAsync([
+                    new ImportResult
+                    {
+                        Success = false,
+                        Action = FileAction.Copy,
+                        RequestedAction = FileAction.Move,
+                        EffectiveAction = FileAction.Copy,
+                        SourceDisposition = ImportSourceDisposition.Retained,
+                        WarningCode = warningCode,
+                        SourcePath = sourcePath,
+                        FinalPath = finalPath,
+                        Message = message
+                    }
+                ]);
+            Init(builder => builder.WithSingleton<IDownloadImportService>(importService.Object));
+            var audiobook = await CreateAudiobook();
+            var download = await _downloadRepository.AddAsync(new Download
+            {
+                Id = $"ddl-{Guid.NewGuid():N}",
+                AudiobookId = audiobook.Id,
+                Title = "Failed Publication Book",
+                Artist = "DDL Author",
+                Album = "Failed Publication Book",
+                DownloadClientId = DirectDownloadMetadataKeys.ClientId,
+                Status = DownloadStatus.Completed,
+                StartedAt = DateTime.UtcNow.AddMinutes(-5),
+                CompletedAt = DateTime.UtcNow,
+                DownloadPath = sourcePath,
+                Metadata = new Dictionary<string, object>
+                {
+                    [DirectDownloadMetadataKeys.DownloadType] = DirectDownloadMetadataKeys.ClientId
+                }
+            });
+            var job = await _downloadProcessingJobRepository.AddAsync(new DownloadProcessingJobBuilder()
+                .WithDownload(download)
+                .Build());
+
+            await _provider.GetRequiredService<DownloadProcessingJobProcessor>()
+                .ProcessQueueAsync(CancellationToken.None);
+
+            job = (await _downloadProcessingJobRepository.GetByIdAsync(job.Id))!;
+            Assert.Equal(ProcessingJobStatus.Failed, job.Status);
+            var page = await _historyRepository.QueryAsync(new HistoryQuery
+            {
+                DownloadId = download.Id.ToUpperInvariant(),
+                Limit = 100
+            });
+            var failedImport = Assert.Single(page.Records, history =>
+                history.EventType == HistoryEvents.ImportFailed);
+            using var details = JsonDocument.Parse(failedImport.Data!);
+            var failedResult = Assert.Single(details.RootElement
+                .GetProperty("FailedResults")
+                .EnumerateArray());
+            Assert.Equal((int)FileAction.Copy, failedResult.GetProperty("Action").GetInt32());
+            Assert.Equal((int)FileAction.Move, failedResult.GetProperty("RequestedAction").GetInt32());
+            Assert.Equal((int)FileAction.Copy, failedResult.GetProperty("EffectiveAction").GetInt32());
+            Assert.Equal((int)ImportSourceDisposition.Retained,
+                failedResult.GetProperty("SourceDisposition").GetInt32());
+            Assert.Equal(warningCode, failedResult.GetProperty("WarningCode").GetString());
+            Assert.Equal(sourcePath, failedResult.GetProperty("SourcePath").GetString());
+            Assert.Equal(finalPath, failedResult.GetProperty("FinalPath").GetString());
+            Assert.Equal(message, failedResult.GetProperty("Message").GetString());
         }
 
         [Fact]

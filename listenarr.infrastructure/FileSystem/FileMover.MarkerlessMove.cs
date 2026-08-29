@@ -1,5 +1,4 @@
 using Listenarr.Domain.Audiobooks.Enumerations;
-using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.FileSystem;
 
@@ -10,7 +9,8 @@ public partial class FileMover
         string destination,
         Guid operationId,
         int? audiobookId = null,
-        int? audiobookFileId = null)
+        int? audiobookFileId = null,
+        FilePublicationSourceProof? expectedSourceProof = null)
     {
         if (_fileMutationJournalStore == null)
         {
@@ -47,7 +47,10 @@ public partial class FileMover
                     requireDeleteAccess: false);
             if (initialSource == null
                 || initialDestination != null
-                || !initialSource.VisiblePathMatches())
+                || !initialSource.VisiblePathMatches()
+                || (expectedSourceProof.HasValue
+                    && !initialSource.MatchesObjectIdentity(
+                        expectedSourceProof.Value.PhysicalObjectIdentity)))
             {
                 return false;
             }
@@ -68,13 +71,22 @@ public partial class FileMover
             var proof = await CaptureMarkerlessSourceProofAsync(
                 initialSource,
                 cancellationToken,
-                includeSha256: false);
+                includeSha256: expectedSourceProof.HasValue);
+            if (expectedSourceProof.HasValue
+                && !MatchesExpectedSourceProof(
+                    proof,
+                    expectedSourceProof.Value))
+            {
+                return false;
+            }
             journal = await _fileMutationJournalStore.GetOrCreateAsync(
                 new FileMutationJournalClaim(
                     operationId,
                     FileAction.Move,
                     pathLock.SourcePath,
                     pathLock.DestinationPath,
+                    pathLock.SourceParent.GetDirectoryObjectIdentity(),
+                    pathLock.DestinationParent.GetDirectoryObjectIdentity(),
                     proof.PhysicalObjectIdentity,
                     proof.Length,
                     proof.Sha256,
@@ -93,6 +105,22 @@ public partial class FileMover
                 pathLock,
                 audiobookId,
                 audiobookFileId);
+            if (!JournalParentGenerationsMatchGate(journal, pathLock))
+            {
+                await MarkMarkerlessMoveNeedsAttentionAsync(
+                    journal,
+                    "A markerless move parent directory changed physical generation while the operation was interrupted.",
+                    cancellationToken);
+                return false;
+            }
+            if (expectedSourceProof.HasValue
+                && !JournalMatchesExpectedSourceProof(
+                    journal,
+                    expectedSourceProof.Value))
+            {
+                throw new InvalidOperationException(
+                    "The durable file-move operation is bound to another source generation or content proof.");
+            }
         }
 
         if (journal.State == FileMutationJournalState.NeedsAttention)
@@ -133,11 +161,11 @@ public partial class FileMover
                 if (observedSource == null)
                 {
                     if (observedTarget == null
-                        || !observedTarget.VisiblePathMatches()
-                        || !string.Equals(
-                            observedTarget.GetObjectIdentity(),
-                            journal.SourcePhysicalObjectIdentity,
-                            StringComparison.Ordinal)
+                        || !VisiblePathMatchesOrThrowUnavailable(
+                            observedTarget,
+                            "The markerless destination is temporarily unavailable while interrupted publication is being verified.")
+                        || !observedTarget.MatchesObjectIdentity(
+                            journal.SourcePhysicalObjectIdentity)
                         || !await MatchesMarkerlessTargetContentAsync(
                             observedTarget,
                             journal,
@@ -153,7 +181,7 @@ public partial class FileMover
                     journal = await _fileMutationJournalStore.AdvanceAsync(
                         journal.OperationId,
                         FileMutationJournalState.TargetIdentityPersisted,
-                        observedTarget.GetObjectIdentity(),
+                        journal.SourcePhysicalObjectIdentity,
                         audiobookId: null,
                         error: null,
                         cancellationToken);
@@ -208,16 +236,14 @@ public partial class FileMover
                 {
                     pathLock.DestinationParent.FlushDirectoryEntry();
                 }
-                targetIdentity = sourceEntry.GetObjectIdentity();
                 if (!sourceEntry.VisiblePathMatches()
-                    || !string.Equals(
-                        targetIdentity,
-                        journal.SourcePhysicalObjectIdentity,
-                        StringComparison.Ordinal))
+                    || !sourceEntry.MatchesObjectIdentity(
+                        journal.SourcePhysicalObjectIdentity))
                 {
                     throw new IOException(
                         "The markerless native move target could not be verified.");
                 }
+                targetIdentity = journal.SourcePhysicalObjectIdentity;
                 if (AfterMarkerlessMovePublishedBeforeTargetStateForTestAsync != null)
                 {
                     await AfterMarkerlessMovePublishedBeforeTargetStateForTestAsync();
@@ -336,17 +362,24 @@ public partial class FileMover
 
         if (journal.State >= FileMutationJournalState.SourceDeleted)
         {
-            using var recreatedSource =
-                pathLock.SourceParent.TryOpenExistingFile(
-                    pathLock.SourceName,
-                    requireDeleteAccess: false);
-            if (recreatedSource != null)
+            var sourceOpenOutcome = pathLock.SourceParent.TryOpenExistingFileWithOutcome(
+                pathLock.SourceName,
+                requireDeleteAccess: false,
+                out var recreatedSource);
+            using (recreatedSource)
             {
-                await MarkMarkerlessMoveNeedsAttentionAsync(
-                    journal,
-                    "A source path was recreated after markerless deletion completed.",
-                    cancellationToken);
-                return false;
+                if (sourceOpenOutcome == PinnedFileOpenOutcome.Unavailable)
+                {
+                    return false;
+                }
+                if (sourceOpenOutcome == PinnedFileOpenOutcome.Opened)
+                {
+                    await MarkMarkerlessMoveNeedsAttentionAsync(
+                        journal,
+                        "A source path was recreated after markerless deletion completed.",
+                        cancellationToken);
+                    return false;
+                }
             }
         }
 
@@ -363,29 +396,48 @@ public partial class FileMover
 
         if (journal.State == FileMutationJournalState.SourceDeletionAuthorized)
         {
-            using var sourceEntry = pathLock.SourceParent.TryOpenExistingFile(
-                pathLock.SourceName,
-                requireDeleteAccess: true);
-            if (sourceEntry != null)
+            var sourceOpenOutcome =
+                pathLock.SourceParent.TryOpenExistingFileForStableDeleteWithOutcome(
+                    pathLock.SourceName,
+                    out var sourceEntry);
+            using (sourceEntry)
             {
-                if (!await MatchesMarkerlessSourceProofAsync(
-                        sourceEntry,
-                        journal,
-                        cancellationToken))
+                if (sourceOpenOutcome == PinnedFileOpenOutcome.Unavailable)
                 {
-                    await MarkMarkerlessMoveNeedsAttentionAsync(
-                        journal,
-                        "The markerless source was replaced before authorized deletion.",
-                        cancellationToken);
                     return false;
                 }
-
-                sourceEntry.Delete(immediateWindows: true);
-                pathLock.SourceParent.FlushDirectoryEntry();
-                if (AfterMarkerlessMoveSourceDeletedBeforeStateForTestAsync != null)
+                if (sourceOpenOutcome == PinnedFileOpenOutcome.Opened)
                 {
-                    await AfterMarkerlessMoveSourceDeletedBeforeStateForTestAsync();
+                    if (!await MatchesMarkerlessSourceProofAsync(
+                            sourceEntry!,
+                            journal,
+                            cancellationToken))
+                    {
+                        await MarkMarkerlessMoveNeedsAttentionAsync(
+                            journal,
+                            "The markerless source was replaced before authorized deletion.",
+                            cancellationToken);
+                        return false;
+                    }
+
+                    sourceEntry!.Delete(immediateWindows: true);
+                    pathLock.SourceParent.FlushDirectoryEntry();
+                    if (AfterMarkerlessMoveSourceDeletedBeforeStateForTestAsync != null)
+                    {
+                        await AfterMarkerlessMoveSourceDeletedBeforeStateForTestAsync();
+                    }
                 }
+            }
+
+            if (!VisiblePathMatchesOrThrowUnavailable(
+                    pathLock.SourceParent,
+                    "The markerless source parent is temporarily unavailable before deletion can be recorded durably."))
+            {
+                await MarkMarkerlessMoveNeedsAttentionAsync(
+                    journal,
+                    "The markerless source parent changed before deletion could be recorded durably.",
+                    cancellationToken);
+                return false;
             }
 
             journal = await _fileMutationJournalStore.AdvanceAsync(
@@ -395,15 +447,44 @@ public partial class FileMover
                 audiobookId: null,
                 error: null,
                 cancellationToken);
+            if (AfterMarkerlessMoveSourceDeletedStateForTestAsync != null)
+            {
+                await AfterMarkerlessMoveSourceDeletedStateForTestAsync();
+            }
         }
 
-        _ = await _fileMutationJournalStore.AdvanceAsync(
-            journal.OperationId,
-            FileMutationJournalState.Completed,
-            journal.TargetPhysicalObjectIdentity,
-            audiobookId: null,
-            error: null,
-            cancellationToken);
+        var completionValidation =
+            await _fileMutationJournalStore.AdvanceWithCommitValidationAsync(
+                journal.OperationId,
+                FileMutationJournalState.Completed,
+                journal.TargetPhysicalObjectIdentity,
+                audiobookId: null,
+                error: null,
+                async validationToken =>
+                {
+                    if (BeforeMarkerlessCompletedJournalCommitForTestAsync != null)
+                    {
+                        await BeforeMarkerlessCompletedJournalCommitForTestAsync();
+                    }
+
+                    return await ProbeMarkerlessMoveCompletionAsync(
+                        pathLock,
+                        journal,
+                        validationToken);
+                },
+                cancellationToken);
+        if (completionValidation == RegistrationPublicationMatchOutcome.Unavailable)
+        {
+            return false;
+        }
+        if (completionValidation != RegistrationPublicationMatchOutcome.Match)
+        {
+            await MarkMarkerlessMoveNeedsAttentionAsync(
+                journal,
+                "The markerless move source, destination, or parent generation changed before completion could be committed.",
+                cancellationToken);
+            return false;
+        }
         LogMutation(
             FileMutationOutcome.Success,
             FileAction.Move,
@@ -411,41 +492,5 @@ public partial class FileMover
             destination,
             "Markerless database-backed file move");
         return true;
-    }
-
-    private async Task ValidateMarkerlessMoveJournalAsync(
-        FileMutationJournal journal,
-        FileMoveGateLease pathLock,
-        int? audiobookId,
-        int? audiobookFileId)
-    {
-        if (journal.ProtocolVersion
-                != FileMutationProtocol.MarkerlessDatabaseState
-            || journal.Action != FileAction.Move
-            || journal.AudiobookId != audiobookId
-            || journal.AudiobookFileId != audiobookFileId
-            || !await JournalPathsMatchGateAsync(journal, pathLock))
-        {
-            throw new InvalidOperationException(
-                "The durable markerless move identity does not match the requested operation.");
-        }
-    }
-
-    private async Task MarkMarkerlessMoveNeedsAttentionAsync(
-        FileMutationJournal journal,
-        string reason,
-        CancellationToken cancellationToken)
-    {
-        _ = await _fileMutationJournalStore!.AdvanceAsync(
-            journal.OperationId,
-            FileMutationJournalState.NeedsAttention,
-            journal.TargetPhysicalObjectIdentity,
-            journal.AudiobookId,
-            reason,
-            cancellationToken);
-        _logger.LogWarning(
-            "Markerless file move {OperationId} requires attention: {Reason}",
-            journal.OperationId,
-            reason);
     }
 }

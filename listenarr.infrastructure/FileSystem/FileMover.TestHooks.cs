@@ -41,6 +41,11 @@ public partial class FileMover
         get;
         init;
     }
+    internal Func<Task>? AfterMarkerlessRenameSourceDeletedStateForTestAsync
+    {
+        get;
+        init;
+    }
     internal Func<Task>? AfterMarkerlessMoveJournalPlannedForTestAsync
     {
         get;
@@ -68,13 +73,36 @@ public partial class FileMover
         get;
         init;
     }
+    internal Func<Task>? BeforeMarkerlessRegistrationSourceDeleteForTestAsync
+    {
+        get;
+        init;
+    }
     internal Func<Task>? AfterMarkerlessMoveSourceDeletedBeforeStateForTestAsync
+    {
+        get;
+        init;
+    }
+    internal Func<Task>? AfterMarkerlessMoveSourceDeletedStateForTestAsync
+    {
+        get;
+        init;
+    }
+    internal Func<Task>? BeforeMarkerlessCompletedJournalCommitForTestAsync
+    {
+        get;
+        init;
+    }
+    internal Func<
+        IAudiobookFileRegistrationLease,
+        RegistrationPublicationMatchOutcome>? RegistrationPublicationProbeForTest
     {
         get;
         init;
     }
     internal bool DisableNativeFileRenameForTest { get; init; }
     internal bool ForceCrossVolumeForTest { get; init; }
+    internal bool ForceContentOnlySourceProofForTest { get; init; }
     internal Action<string>? BeforeFileMoveDurabilityBarrierForTest { get; init; }
     internal string? FileMoveLockDirectoryForTest { get; init; }
 }

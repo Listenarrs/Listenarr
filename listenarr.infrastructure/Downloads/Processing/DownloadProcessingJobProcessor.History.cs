@@ -51,9 +51,31 @@ namespace Listenarr.Infrastructure.Downloads.Processing
             Audiobook audiobook,
             string correlationId,
             string reason,
-            CancellationToken ct)
+            CancellationToken ct,
+            IReadOnlyCollection<ImportResult>? failedResults = null)
         {
             await jobService.UpdateJobAsync(job.MarkAsFailed(reason));
+            var details = new Dictionary<string, object>
+            {
+                ["JobId"] = job.Id,
+                ["RetryCount"] = job.RetryCount
+            };
+            if (failedResults is { Count: > 0 })
+            {
+                details["FailedResults"] = failedResults.Select(result => new
+                {
+                    result.Action,
+                    result.RequestedAction,
+                    result.EffectiveAction,
+                    result.SourceDisposition,
+                    result.WarningCode,
+                    result.SourcePath,
+                    result.FinalPath,
+                    result.Message,
+                    result.WasRegisteredToAudiobook
+                }).ToArray();
+            }
+
             await RecordHistoryAsync(
                 historyRepository,
                 download,
@@ -62,11 +84,7 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                 HistoryOutcome.Failed,
                 correlationId,
                 reason,
-                new Dictionary<string, object>
-                {
-                    ["JobId"] = job.Id,
-                    ["RetryCount"] = job.RetryCount
-                },
+                details,
                 ct);
         }
 
