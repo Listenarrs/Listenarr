@@ -441,7 +441,8 @@ namespace Listenarr.Application.Downloads.Queue
             allKnownClientItemIds.Add(originalClientId);
 
             if (string.Equals(client.Type, "qbittorrent", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(client.Type, "transmission", StringComparison.OrdinalIgnoreCase))
+                string.Equals(client.Type, "transmission", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(client.Type, "deluge", StringComparison.OrdinalIgnoreCase))
             {
                 var existingTorrentHash = DownloadQueueMetadataMatcher.GetMetadataString(matchedDownload.Metadata, "TorrentHash");
                 if (!string.Equals(existingTorrentHash, originalClientId, StringComparison.OrdinalIgnoreCase))

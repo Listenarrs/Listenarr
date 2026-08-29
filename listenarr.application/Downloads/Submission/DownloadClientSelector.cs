@@ -37,7 +37,8 @@ namespace Listenarr.Application.Downloads.Submission
             if (isTorrent)
             {
                 var client = enabledClients.FirstOrDefault(c => c.Type.Equals("qbittorrent", StringComparison.OrdinalIgnoreCase))
-                          ?? enabledClients.FirstOrDefault(c => c.Type.Equals("transmission", StringComparison.OrdinalIgnoreCase));
+                          ?? enabledClients.FirstOrDefault(c => c.Type.Equals("transmission", StringComparison.OrdinalIgnoreCase))
+                          ?? enabledClients.FirstOrDefault(c => c.Type.Equals("deluge", StringComparison.OrdinalIgnoreCase));
 
                 if (client != null)
                 {
@@ -45,7 +46,7 @@ namespace Listenarr.Application.Downloads.Submission
                 }
                 else
                 {
-                    logger.LogWarning("No torrent client (qBittorrent or Transmission) found among enabled clients");
+                    logger.LogWarning("No torrent client (qBittorrent, Transmission, or Deluge) found among enabled clients");
                 }
 
                 return client?.Id;

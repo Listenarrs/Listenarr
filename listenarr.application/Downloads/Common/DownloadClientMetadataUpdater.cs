@@ -29,7 +29,8 @@ namespace Listenarr.Application.Downloads.Common
             download.Metadata["ClientDownloadId"] = clientSpecificId;
 
             if (downloadClient.Type.Equals("qbittorrent", StringComparison.OrdinalIgnoreCase) ||
-                downloadClient.Type.Equals("transmission", StringComparison.OrdinalIgnoreCase))
+                downloadClient.Type.Equals("transmission", StringComparison.OrdinalIgnoreCase) ||
+                downloadClient.Type.Equals("deluge", StringComparison.OrdinalIgnoreCase))
             {
                 download.Metadata["TorrentHash"] = clientSpecificId;
             }

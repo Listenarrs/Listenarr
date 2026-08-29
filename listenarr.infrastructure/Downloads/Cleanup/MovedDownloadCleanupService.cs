@@ -230,7 +230,7 @@ namespace Listenarr.Infrastructure.Downloads.Cleanup
                     if (!removed && !string.IsNullOrEmpty(torrentHash))
                     {
                         var torrentClientTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                            { "qbittorrent", "transmission" };
+                            { "qbittorrent", "transmission", "deluge" };
                         var otherTorrentClients = allEnabledClients
                             .Where(c => torrentClientTypes.Contains(c.Type ?? "") &&
                                         c.Id != download.DownloadClientId)

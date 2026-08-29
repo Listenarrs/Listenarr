@@ -16,5 +16,6 @@ namespace Listenarr.Infrastructure.DownloadClients.Common
         public const string Transmission = "transmission";
         public const string Sabnzbd = "sabnzbd";
         public const string Nzbget = "nzbget";
+        public const string Deluge = "deluge";
     }
 }
