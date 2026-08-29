@@ -430,6 +430,7 @@ namespace Listenarr.Api.Features.Library
                 jobId = job.Id.ToString(),
                 status = job.Status,
                 error = UnmatchedScanPublicError.FromInternal(job.Error),
+                warnings = job.Warnings,
                 items = job.Results ?? new List<UnmatchedFileResult>()
             });
         }
@@ -476,11 +477,17 @@ namespace Listenarr.Api.Features.Library
                 return Ok(new
                 {
                     lastScannedAt = job.CompletedAt,
+                    warnings = job.Warnings,
                     items = filtered
                 });
             }
 
-            return Ok(new { lastScannedAt = (DateTime?)null, items = new List<UnmatchedFileResult>() });
+            return Ok(new
+            {
+                lastScannedAt = (DateTime?)null,
+                warnings = new List<string>(),
+                items = new List<UnmatchedFileResult>()
+            });
         }
 
     }

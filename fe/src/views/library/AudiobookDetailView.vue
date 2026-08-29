@@ -1260,9 +1260,6 @@ onMounted(async () => {
     if (!audiobook.value) return
     if (String(job.audiobookId) !== String(audiobook.value.id)) return
     scanNotificationsStore.applyUpdate(job)
-    if (job.status.toLowerCase() === 'completed') {
-      void loadWeakStorageMissingFiles()
-    }
   })
 
   // subscribe to AudiobookUpdate messages and merge detail when this audiobook is updated (e.g., after a move)
@@ -1325,6 +1322,54 @@ watch(
     syncActiveTabFromRoute()
   },
 )
+
+let lastHandledTerminalScanJobId: string | null = null
+watch(
+  () =>
+    [
+      trackedScanJob.value?.jobId,
+      trackedScanJob.value?.status,
+      trackedScanJob.value?.error,
+    ] as const,
+  async ([jobId, status, scanError]) => {
+    if (!jobId || !status) return
+    const normalizedStatus = status.toLowerCase()
+    if (normalizedStatus !== 'completed' && normalizedStatus !== 'failed') return
+    if (lastHandledTerminalScanJobId === jobId) return
+    lastHandledTerminalScanJobId = jobId
+
+    if (normalizedStatus === 'completed') {
+      await refreshAudiobookAfterScan()
+      return
+    }
+
+    const toast = useToast()
+    toast.error('Scan failed', scanError || 'The audiobook scan did not complete successfully.')
+  },
+  { flush: 'post' },
+)
+
+async function refreshAudiobookAfterScan() {
+  const id = audiobook.value?.id ?? parseInt(route.params.id as string)
+  try {
+    let refreshed: Audiobook | null = null
+    if (typeof apiService.getAudiobook === 'function') {
+      refreshed = await apiService.getAudiobook(id)
+    } else {
+      await libraryStore.fetchLibrary()
+      refreshed = libraryStore.audiobooks.find((candidate) => candidate.id === id) ?? null
+    }
+
+    if (refreshed) {
+      audiobook.value = refreshed
+      await afterLoad()
+    }
+  } catch (err) {
+    logger.debug('Unable to refresh audiobook after scan completion', err)
+  }
+
+  await loadWeakStorageMissingFiles()
+}
 
 async function loadAudiobook() {
   loading.value = true

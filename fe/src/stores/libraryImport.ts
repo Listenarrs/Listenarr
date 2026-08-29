@@ -138,6 +138,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   const rootFolderId = ref<number | null>(null)
   const scanStatus = ref<'idle' | 'scanning' | 'done' | 'error'>('idle')
   const scanError = ref<string | null>(null)
+  const scanWarnings = ref<string[]>([])
   const lastScannedAt = ref<string | null>(null)
   const action = ref<'none' | 'move' | 'hardlink/copy'>('none')
   const monitor = ref<'none' | 'all'>('all')
@@ -157,9 +158,11 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   async function initFromRootFolder(id: number) {
     rootFolderId.value = id
     scanStatus.value = 'idle'
+    scanWarnings.value = []
     try {
       const saved = await apiService.getSavedUnmatchedFiles(id)
       if (saved.lastScannedAt) lastScannedAt.value = saved.lastScannedAt
+      scanWarnings.value = saved.warnings ?? []
       const persisted = _loadPersistedMatches(id)
       const newItems: Record<string, LibraryImportItem> = {}
       for (const item of saved.items) {
@@ -196,6 +199,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     rootFolderId.value = id
     scanStatus.value = 'scanning'
     scanError.value = null
+    scanWarnings.value = []
     try {
       localStorage.removeItem(_storageKey(id))
     } catch {
@@ -222,6 +226,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
       try {
         const response = await apiService.getUnmatchedResults(completedJobId)
         _populateFromItems(response.items)
+        scanWarnings.value = response.warnings ?? []
         _persistMatches()
         lastScannedAt.value = new Date().toISOString()
         scanStatus.value = 'done'
@@ -585,6 +590,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     rootFolderId,
     scanStatus,
     scanError,
+    scanWarnings,
     lastScannedAt,
     action,
     monitor,

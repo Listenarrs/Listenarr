@@ -44,7 +44,14 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 job = LastJob;
                 return job != null && job.Id == id;
             }
-            public void UpdateJob(Guid id, string status, List<UnmatchedFileResult>? results = null, string? error = null) { }
+            public void UpdateJob(
+                Guid id,
+                string status,
+                List<UnmatchedFileResult>? results = null,
+                string? error = null,
+                List<string>? warnings = null)
+            {
+            }
             public bool TryGetLastJobForPath(string rootFolderPath, out UnmatchedScanJob? job)
             {
                 job = LastJob;
@@ -446,6 +453,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                     RootFolderPath = "C:\\private\\library",
                     Status = "Failed",
                     Error = "C:\\private\\library failed with worker secret",
+                    Warnings = ["One path could not be read and was skipped."],
                     Results =
                     [
                         new UnmatchedFileResult
@@ -470,6 +478,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             var json = JsonSerializer.Serialize(ok.Value);
             Assert.Contains("The unmatched scan failed", json, StringComparison.Ordinal);
             Assert.Contains("book.m4b", json, StringComparison.Ordinal);
+            Assert.Contains("One path could not be read and was skipped.", json, StringComparison.Ordinal);
             Assert.DoesNotContain("worker secret", json, StringComparison.OrdinalIgnoreCase);
         }
 

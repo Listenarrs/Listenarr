@@ -348,8 +348,10 @@ describe('library import store', () => {
     getUnmatchedResults.mockImplementation(async (jobId: string) => {
       expect(jobId).toBe('own-job')
       return {
+        jobId,
         status: 'Completed',
         error: null,
+        warnings: ['One path could not be read and was skipped.'],
         items: [
           {
             fullPath: 'C:\\incoming\\Book A.mp3',
@@ -373,6 +375,7 @@ describe('library import store', () => {
     expect(getUnmatchedResults).toHaveBeenCalledWith('own-job')
     expect(Object.keys(store.items)).toEqual(['C:\\incoming\\Book A.mp3'])
     expect(store.scanStatus).toBe('done')
+    expect(store.scanWarnings).toEqual(['One path could not be read and was skipped.'])
   })
 
   it('prefers detected title and author for automatic matching before folder fallback', async () => {

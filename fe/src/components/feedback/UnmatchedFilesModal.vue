@@ -49,6 +49,12 @@
 
         <!-- Results -->
         <div v-else-if="phase === 'results'">
+          <div v-if="scanWarnings.length" class="scan-warnings" role="status">
+            <div v-for="warning in scanWarnings" :key="warning" class="scan-warning">
+              <PhWarning :size="14" />
+              <span>{{ warning }}</span>
+            </div>
+          </div>
           <div v-if="items.length === 0" class="empty-state">
             <PhCheckCircle class="empty-icon" />
             <h4>All files are in your library</h4>
@@ -231,6 +237,7 @@ type Phase = 'empty' | 'scanning' | 'results' | 'error'
 const phase = ref<Phase>('empty')
 const items = ref<UnmatchedFileItem[]>([])
 const errorMessage = ref('')
+const scanWarnings = ref<string[]>([])
 const lastScannedAt = ref<string | null>(null)
 const addingItem = ref<UnmatchedFileItem | null>(null)
 const bulkAdding = ref(false)
@@ -274,6 +281,16 @@ const fileActionLabel = computed(() =>
 
 let jobId = ''
 let offSignalR: (() => void) | null = null
+let pollInterval: ReturnType<typeof setInterval> | null = null
+
+function stopScanTracking() {
+  offSignalR?.()
+  offSignalR = null
+  if (pollInterval) {
+    clearInterval(pollInterval)
+    pollInterval = null
+  }
+}
 
 // On open: load cached results — no auto-scan
 watch(
@@ -288,7 +305,8 @@ watch(
 
     try {
       const saved = await apiService.getSavedUnmatchedFiles(props.rootFolder.id)
-      if (saved.items.length > 0) {
+      scanWarnings.value = saved.warnings ?? []
+      if (saved.items.length > 0 || saved.lastScannedAt) {
         items.value = saved.items
         lastScannedAt.value = saved.lastScannedAt ?? null
         phase.value = 'results'
@@ -311,10 +329,26 @@ async function startScan() {
   phase.value = 'scanning'
   items.value = []
   errorMessage.value = ''
+  scanWarnings.value = []
   jobId = ''
 
+  stopScanTracking()
+
+  function applyCompletedScan(
+    response: Awaited<ReturnType<typeof apiService.getUnmatchedResults>>,
+  ) {
+    items.value = response.items
+    scanWarnings.value = response.warnings ?? []
+    lastScannedAt.value = new Date().toISOString()
+    phase.value = 'results'
+    stopScanTracking()
+  }
+
+  async function completeScan(completedJobId: string) {
+    applyCompletedScan(await apiService.getUnmatchedResults(completedJobId))
+  }
+
   // Subscribe to SignalR before triggering the scan
-  offSignalR?.()
   offSignalR = signalRService.onUnmatchedScanComplete(async (payload) => {
     if (payload.jobId !== jobId) return
     if (payload.error) {
@@ -323,13 +357,11 @@ async function startScan() {
       return
     }
     try {
-      const response = await apiService.getUnmatchedResults(payload.jobId)
-      items.value = response.items
-      lastScannedAt.value = new Date().toISOString()
-      phase.value = 'results'
+      await completeScan(payload.jobId)
     } catch (e) {
       phase.value = 'error'
       errorMessage.value = (e as Error)?.message || 'Failed to fetch results'
+      stopScanTracking()
     }
   })
 
@@ -339,29 +371,41 @@ async function startScan() {
     // Poll once immediately — handles fast scans that complete before SignalR fires
     const check = await apiService.getUnmatchedResults(jobId)
     if (check.status === 'Completed') {
-      items.value = check.items
-      lastScannedAt.value = new Date().toISOString()
-      phase.value = 'results'
+      applyCompletedScan(check)
     } else if (check.status === 'Failed') {
       phase.value = 'error'
       errorMessage.value = check.error || 'Scan failed'
+      stopScanTracking()
+    } else {
+      pollInterval = setInterval(async () => {
+        if (!jobId || phase.value !== 'scanning') return
+        try {
+          const poll = await apiService.getUnmatchedResults(jobId)
+          if (poll.status === 'Completed') {
+            applyCompletedScan(poll)
+          } else if (poll.status === 'Failed') {
+            phase.value = 'error'
+            errorMessage.value = poll.error || 'Scan failed'
+            stopScanTracking()
+          }
+        } catch {
+          // Ignore transient polling errors; SignalR or a later poll can still complete the scan.
+        }
+      }, 2500)
     }
-    // Otherwise SignalR will deliver the completion event
   } catch (e) {
     phase.value = 'error'
     errorMessage.value = (e as Error)?.message || 'Failed to start scan'
-    offSignalR?.()
-    offSignalR = null
+    stopScanTracking()
   }
 }
 
 onUnmounted(() => {
-  offSignalR?.()
+  stopScanTracking()
 })
 
 function close() {
-  offSignalR?.()
-  offSignalR = null
+  stopScanTracking()
   emit('close')
 }
 
@@ -561,6 +605,21 @@ async function addAllWithAsin() {
 
 .scan-status.error {
   color: #f03e3e;
+}
+
+.scan-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+}
+
+.scan-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.35rem;
+  color: #f59e0b;
+  font-size: 0.85rem;
 }
 
 .error-icon {
