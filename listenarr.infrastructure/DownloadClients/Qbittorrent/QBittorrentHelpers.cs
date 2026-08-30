@@ -97,9 +97,12 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 {
                     // A pasted full URL (e.g. "https://seedbox.example.com/qbittorrent") would
                     // otherwise be concatenated onto the authority as-is, producing a broken URL
-                    // instead of a clear error. Reject anything that parses as an absolute URI -
-                    // this field only accepts a path.
-                    if (Uri.TryCreate(trimmed, UriKind.Absolute, out _))
+                    // instead of a clear error. Reject only a genuine http/https absolute URI -
+                    // Uri.TryCreate(trimmed, UriKind.Absolute, out _) alone would also match an
+                    // ordinary leading-slash path like "/qbittorrent" as an absolute "file:" URI
+                    // on Unix (though not on Windows), rejecting the placeholder value from this
+                    // field's own help text.
+                    if (DownloadClientUriBuilder.TryParseHttpOrHttpsAbsoluteUri(trimmed, out _))
                     {
                         throw new QbittorrentException(
                             $"qBittorrent URL Base must be a path (e.g. \"/qbittorrent\"), not a full URL. " +
