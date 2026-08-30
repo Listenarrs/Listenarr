@@ -28,7 +28,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 throw new DownloadClientSubmissionException("qBittorrent requires a prepared torrent submission.");
             }
 
-            var baseUrl = DownloadClientUriBuilder.BuildAuthority(client);
+            var baseUrl = QBittorrentHelpers.BuildBaseUrl(client);
             using var httpClient = httpClientFactory.CreateClient(clientType);
 
             try

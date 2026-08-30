@@ -116,15 +116,22 @@
               </Checkbox>
             </div>
 
-            <div class="form-group" v-if="formData.type === 'transmission'">
+            <div class="form-group" v-if="showUrlBase">
               <label for="urlBase">URL Base</label>
               <input
                 id="urlBase"
                 v-model="formData.urlBase"
                 type="text"
-                placeholder="/transmission/rpc"
+                :placeholder="getUrlBasePlaceholder()"
               />
-              <small
+              <small v-if="formData.type === 'qbittorrent'"
+                >Path prefix for qBittorrent instances behind a reverse proxy (e.g.
+                <code>/qbittorrent</code>). Must match the prefix your reverse proxy strips before
+                forwarding to qBittorrent's own root-relative API - qBittorrent itself has no
+                built-in base path setting. Leave blank if qBittorrent is reachable directly at the
+                host/port above.</small
+              >
+              <small v-else
                 >RPC path for the Transmission endpoint. Default is <code>/transmission/rpc</code>.
                 Some seedbox providers use a custom path (e.g. <code>/rpc</code>).</small
               >
@@ -496,6 +503,14 @@ const getPortHelpText = () => {
   return hints[formData.value.type] || 'Port the download client is listening on.'
 }
 
+const showUrlBase = computed(() => {
+  return formData.value.type === 'transmission' || formData.value.type === 'qbittorrent'
+})
+
+const getUrlBasePlaceholder = () => {
+  return formData.value.type === 'qbittorrent' ? '/qbittorrent' : '/transmission/rpc'
+}
+
 const getCategoryHelp = () => {
   if (isUsenet.value) {
     return 'Adding a category specific to Listenarr avoids conflicts with unrelated non-Listenarr downloads. Using a category is optional, but strongly recommended.'
@@ -593,9 +608,7 @@ const testConnection = async () => {
         ...(formData.value.type === 'sabnzbd' && formData.value.apiKey
           ? { apiKey: formData.value.apiKey }
           : {}),
-        ...(formData.value.type === 'transmission' && formData.value.urlBase
-          ? { urlBase: formData.value.urlBase }
-          : {}),
+        ...(showUrlBase.value && formData.value.urlBase ? { urlBase: formData.value.urlBase } : {}),
         ...(formData.value.category && { category: formData.value.category }),
         ...(formData.value.tags && { tags: formData.value.tags }),
         recentPriority: formData.value.recentPriority,
@@ -653,9 +666,7 @@ const handleSubmit = async () => {
         ...(formData.value.type === 'sabnzbd' && formData.value.apiKey
           ? { apiKey: formData.value.apiKey }
           : {}),
-        ...(formData.value.type === 'transmission' && formData.value.urlBase
-          ? { urlBase: formData.value.urlBase }
-          : {}),
+        ...(showUrlBase.value && formData.value.urlBase ? { urlBase: formData.value.urlBase } : {}),
         ...(formData.value.category && { category: formData.value.category }),
         ...(formData.value.tags && { tags: formData.value.tags }),
         recentPriority: formData.value.recentPriority,

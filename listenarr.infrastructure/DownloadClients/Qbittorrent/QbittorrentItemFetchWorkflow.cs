@@ -26,7 +26,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
             var items = new List<DownloadClientItem>();
             if (client == null) return items;
 
-            var baseUrl = DownloadClientUriBuilder.BuildAuthority(client);
+            var baseUrl = QBittorrentHelpers.BuildBaseUrl(client);
             var categoryFilter = QBittorrentHelpers.BuildCategoryParameter(client.Settings, "&");
 
             try

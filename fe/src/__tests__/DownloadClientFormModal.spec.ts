@@ -172,4 +172,47 @@ describe('DownloadClientFormModal', () => {
     expect(calledWith.password).toBe('')
     expect(calledWith.id).toBe('4')
   })
+
+  it('renders URL Base field for qbittorrent and includes it in the test payload when set', async () => {
+    const api = await import('@/services/api')
+    ;(api.testDownloadClient as unknown) = vi.fn(async (config: unknown) => ({
+      success: true,
+      message: 'ok',
+      client: config,
+    }))
+
+    const wrapper = mount(DownloadClientFormModal, {
+      global: { plugins: [createPinia()] },
+      props: { visible: true, editingClient: null },
+    })
+
+    await wrapper.setProps({
+      editingClient: {
+        id: '5',
+        name: 'qbt',
+        type: 'qbittorrent',
+        host: 'qbittorrent.local',
+        port: 8080,
+        isEnabled: true,
+        useSSL: false,
+        downloadPath: '',
+        username: '',
+        password: '',
+        settings: {},
+      },
+    })
+    await wrapper.vm.$nextTick()
+
+    const urlBaseInput = wrapper.find('input[id="urlBase"]')
+    expect(urlBaseInput.exists()).toBe(true)
+
+    await urlBaseInput.setValue('/qbittorrent')
+
+    const testButton = wrapper.find('button.btn-info')
+    await testButton.trigger('click')
+
+    expect(api.testDownloadClient as unknown).toHaveBeenCalled()
+    const calledWith = (api.testDownloadClient as unknown).mock.calls[0][0]
+    expect(calledWith.settings.urlBase).toBe('/qbittorrent')
+  })
 })

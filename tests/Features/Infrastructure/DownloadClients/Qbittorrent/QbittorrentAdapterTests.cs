@@ -99,6 +99,55 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
         }
 
         [Fact]
+        public async Task TestConnection_WithUrlBase_PrefixesApiPath()
+        {
+            var mock = _provider.GetRequiredService<QbittorrentApiMock>();
+
+            var client = await _downloadClientConfigurationRepository.SaveAsync(new DownloadClientConfigurationBuilder()
+                .WithHost("192.168.50.111")
+                .WithPort(8080)
+                .WithoutSsl()
+                .WithType("qbittorrent")
+                .WithUsername("admin")
+                .WithPassword("admin")
+                .WithUrlBase("/qbittorrent")
+                .Build());
+
+            var adapter = _provider.GetRequiredService<IDownloadClientGateway>();
+            var (success, message) = await adapter.TestConnectionAsync(client);
+
+            Assert.True(success);
+            Assert.Contains("Successfully connected to qBittorrent", message, StringComparison.OrdinalIgnoreCase);
+            Assert.NotNull(mock.GetLastRequest());
+
+            var uri = mock.GetLastRequest().RequestUri;
+            // Unlike Transmission's urlBase (which replaces the whole RPC path to match Transmission's
+            // own --rpc-url-base setting), qBittorrent has no equivalent server-side base path setting,
+            // so urlBase is a plain prefix: the fixed "/api/v2/..." routes must still follow it.
+            Assert.Equal("/qbittorrent/api/v2/app/version", uri.AbsolutePath);
+        }
+
+        [Fact]
+        public async Task TestConnection_WithFullUrlAsUrlBase_ReturnsClearError()
+        {
+            var client = await _downloadClientConfigurationRepository.SaveAsync(new DownloadClientConfigurationBuilder()
+                .WithHost("192.168.50.111")
+                .WithPort(8080)
+                .WithoutSsl()
+                .WithType("qbittorrent")
+                .WithUsername("admin")
+                .WithPassword("admin")
+                .WithUrlBase("https://seedbox.example.com/qbittorrent")
+                .Build());
+
+            var adapter = _provider.GetRequiredService<IDownloadClientGateway>();
+            var (success, message) = await adapter.TestConnectionAsync(client);
+
+            Assert.False(success);
+            Assert.Contains("URL Base must be a path", message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
         public async Task AddAsync_WhenMagnetAndTorrentUrlAreProvided_UsesVerifiedMagnetHashWithoutDownloading()
         {
             var downloader = new Mock<ITorrentFileDownloader>(MockBehavior.Strict);

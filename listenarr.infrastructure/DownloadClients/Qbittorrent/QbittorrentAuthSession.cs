@@ -24,7 +24,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
 
         public async Task<bool> LoginAsync(HttpClient httpClient, DownloadClientConfiguration client, CancellationToken cancellationToken = default)
         {
-            var baseUrl = DownloadClientUriBuilder.BuildAuthority(client);
+            var baseUrl = QBittorrentHelpers.BuildBaseUrl(client);
 
             using var loginData = new FormUrlEncodedContent(
             [
