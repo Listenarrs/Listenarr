@@ -989,6 +989,94 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Files
         }
 
         [Fact]
+        public async Task RefreshPhysicalGenerationAsync_SqlitePersistedFile_SnapshotsPredecessorWithoutUtcKindViolation()
+        {
+            // Regression: ClonePhysicalGeneration re-applies the persisted
+            // PhysicalIdentityObservedAtUtc of the database-loaded current file.
+            // SQLite materializes DateTime as Unspecified, so without the
+            // materialization conversion this refresh threw
+            // "Physical identity observation time must be UTC". EF InMemory
+            // preserves DateTimeKind and cannot reproduce this, hence the
+            // SQLite-backed provider and the separate registration/refresh
+            // resolutions (a shared tracked entity would also hide the defect).
+            await using var connection =
+                new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
+            await connection.OpenAsync();
+
+            var metadataMock = new Mock<IMetadataService>();
+            metadataMock.Setup(m => m.ExtractFileMetadataAsync(
+                    It.IsAny<MetadataFileSource>()))
+                .ReturnsAsync(new AudioMetadata
+                {
+                    Duration = TimeSpan.FromSeconds(1234),
+                    Format = "m4b"
+                });
+            var services = new ServiceCollectionBuilder()
+                .WithContentRootPath(FileService.GetTempPath())
+                .WithSqliteDatabase(connection)
+                .WithSingleton(metadataMock.Object)
+                .Build();
+            await using var provider = services.BuildServiceProvider();
+            await using (var schemaContext = await provider
+                .GetRequiredService<IDbContextFactory<ListenArrDbContext>>()
+                .CreateDbContextAsync())
+            {
+                await schemaContext.Database.EnsureCreatedAsync();
+            }
+
+            var testFile = await FileService.GetTempFileAsync(
+                $"sqlite-utc-refresh-{Guid.NewGuid():N}.m4b");
+            var audiobook = new AudiobookBuilder()
+                .WithTitle("Sqlite persisted book")
+                .WithAuthor("Round Trip")
+                .Build();
+            audiobook.BasePath = Path.GetDirectoryName(testFile);
+            var audiobookRepository =
+                provider.GetRequiredService<IAudiobookRepository>();
+            await audiobookRepository.AddAsync(audiobook);
+
+            using (var scope = provider.CreateScope())
+            {
+                using var initialLease = new SequencedRegistrationLease(
+                    testFile,
+                    "sqlite-initial-physical-identity",
+                    Enumerable.Repeat(true, 8));
+                Assert.True(await scope.ServiceProvider
+                    .GetRequiredService<IAudiobookFileService>()
+                    .EnsureAudiobookFileAsync(audiobook, initialLease, "initial"));
+            }
+
+            var fileRepository =
+                provider.GetRequiredService<IAudiobookFileRepository>();
+            var predecessor = Assert.Single(
+                await fileRepository.GetByAudiobookIdAsync(audiobook.Id));
+            Assert.Equal(
+                "sqlite-initial-physical-identity",
+                predecessor.PhysicalObjectIdentity);
+
+            using var scope2 = provider.CreateScope();
+            using var replacementLease = new SequencedRegistrationLease(
+                testFile,
+                "sqlite-replacement-physical-identity",
+                Enumerable.Repeat(true, 8));
+            var refreshed = await scope2.ServiceProvider
+                .GetRequiredService<IAudiobookFileService>()
+                .RefreshPhysicalGenerationAsync(
+                    audiobook,
+                    predecessor.Id,
+                    "sqlite-initial-physical-identity",
+                    replacementLease,
+                    "replacement");
+
+            Assert.True(refreshed);
+            var persisted = Assert.Single(
+                await fileRepository.GetByAudiobookIdAsync(audiobook.Id));
+            Assert.Equal(
+                "sqlite-replacement-physical-identity",
+                persisted.PhysicalObjectIdentity);
+        }
+
+        [Fact]
         public async Task EnsureAudiobookFileAsync_PersistsMetadataFromMetadataService()
         {
             var testFile = await FileService.GetTempFileAsync($"meta-int-{Guid.NewGuid()}.m4b");
