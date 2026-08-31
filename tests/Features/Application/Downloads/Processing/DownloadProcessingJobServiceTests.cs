@@ -367,5 +367,110 @@ namespace Listenarr.Tests.Features.Application.Downloads.Processing
             download = await _downloadRepository.GetByIdAsync(download.Id);
             Assert.Equal(DownloadStatus.Moved, download.Status);
         }
+
+        [Fact]
+        [Trait("Method", "RequeueAsync")]
+        [Trait("Scenario", "A job that gave up is put back on the queue and keeps its log")]
+        public async Task RequeueAsync_FailedJob_IsQueuedAgainAndKeepsItsLog()
+        {
+            var download = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithId("d-requeue-failed")
+                .WithStatus(DownloadStatus.ImportPending)
+                .Build());
+
+            var failed = new DownloadProcessingJobBuilder()
+                .WithId("job-requeue-failed")
+                .WithDownload(download)
+                .WithFailed(at: DateTime.UtcNow)
+                .Build();
+            failed.RetryCount = 3;
+            failed.ErrorMessage = "Unable to move the file";
+            failed.AddLogEntry("Job failed: Unable to move the file");
+            await _downloadProcessingJobRepository.AddAsync(failed);
+
+            var service = _provider.GetRequiredService<IDownloadProcessingJobService>();
+            var jobId = await service.RequeueAsync(download);
+
+            Assert.Equal("job-requeue-failed", jobId);
+
+            var requeued = await _downloadProcessingJobRepository.GetByIdAsync(jobId);
+            Assert.NotNull(requeued);
+            Assert.Equal(ProcessingJobStatus.Pending, requeued!.Status);
+            Assert.Equal(0, requeued.RetryCount);
+            Assert.Null(requeued.NextRetryAt);
+            Assert.Null(requeued.CompletedAt);
+            Assert.Null(requeued.ErrorMessage);
+
+            // Why the earlier attempt failed is the only reason to keep the row rather than
+            // creating a fresh job, so losing it would defeat the point.
+            Assert.Contains(requeued.ProcessingLog, entry => entry.Contains("Unable to move the file", StringComparison.Ordinal));
+
+            // Pending is an active status, so the queue must consider it queued again.
+            var active = await _downloadProcessingJobRepository.GetActiveByDownloadIdAsync(download.Id);
+            Assert.NotNull(active);
+            Assert.Equal(jobId, active!.Id);
+        }
+
+        [Fact]
+        [Trait("Method", "RequeueAsync")]
+        [Trait("Scenario", "A download whose job was cleaned up gets a fresh one")]
+        public async Task RequeueAsync_NoSurvivingJob_CreatesOne()
+        {
+            var download = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithId("d-requeue-nojob")
+                .WithStatus(DownloadStatus.ImportPending)
+                .Build());
+
+            Assert.Empty(await _downloadProcessingJobRepository.GetByDownloadIdAsync(download.Id));
+
+            var service = _provider.GetRequiredService<IDownloadProcessingJobService>();
+            var jobId = await service.RequeueAsync(download);
+
+            var created = await _downloadProcessingJobRepository.GetByIdAsync(jobId);
+            Assert.NotNull(created);
+            Assert.Equal(ProcessingJobStatus.Pending, created!.Status);
+            Assert.Equal(download.Id, created.DownloadId);
+            Assert.Equal(ProcessingJobType.MoveOrCopyFile, created.JobType);
+        }
+
+        [Fact]
+        [Trait("Method", "RequeueAsync")]
+        [Trait("Scenario", "An already queued download is not queued twice")]
+        public async Task RequeueAsync_ActiveJobExists_ReturnsItWithoutDuplicating()
+        {
+            var download = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithId("d-requeue-active")
+                .WithStatus(DownloadStatus.ImportPending)
+                .Build());
+
+            await _downloadProcessingJobRepository.AddAsync(new DownloadProcessingJobBuilder()
+                .WithId("job-requeue-active")
+                .WithDownload(download)
+                .WithPending(at: DateTime.UtcNow)
+                .Build());
+
+            var service = _provider.GetRequiredService<IDownloadProcessingJobService>();
+            var jobId = await service.RequeueAsync(download);
+
+            Assert.Equal("job-requeue-active", jobId);
+            Assert.Single(await _downloadProcessingJobRepository.GetByDownloadIdAsync(download.Id));
+        }
+
+        [Fact]
+        [Trait("Method", "RequeueAsync")]
+        [Trait("Scenario", "A download that is not awaiting importation is refused")]
+        public async Task RequeueAsync_DownloadNotAwaitingImportation_Throws()
+        {
+            // The control. The processor throws on a download it cannot import, so accepting one
+            // here would queue a job that can only fail, and the caller would be told it worked.
+            var download = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithId("d-requeue-downloading")
+                .WithStatus(DownloadStatus.Downloading)
+                .Build());
+
+            var service = _provider.GetRequiredService<IDownloadProcessingJobService>();
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.RequeueAsync(download));
+            Assert.Empty(await _downloadProcessingJobRepository.GetByDownloadIdAsync(download.Id));
+        }
     }
 }

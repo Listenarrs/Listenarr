@@ -56,19 +56,7 @@ namespace Listenarr.Application.Downloads.Processing
                 throw new InvalidOperationException($"Trying to enqueue an import job for download {download.Id} with status {download.Status}: Status should be Completed");
             }
 
-            var job = new DownloadProcessingJob
-            {
-                DownloadId = download.Id,
-                JobType = ProcessingJobType.MoveOrCopyFile,
-                SourcePath = download.DownloadPath,
-                DownloadClientId = download.DownloadClientId,
-                Priority = 5,
-                Status = ProcessingJobStatus.Pending,
-                JobData = new Dictionary<string, object>
-                {
-                    ["CorrelationId"] = download.Id.ToUpperInvariant()
-                }
-            };
+            var job = NewJobFor(download);
 
             try
             {
@@ -91,6 +79,54 @@ namespace Listenarr.Application.Downloads.Processing
             logger.LogInformation("Queued download {DownloadId} for post-processing: {JobId}", download.Id, job.Id);
             return job.Id;
         }
+
+        public async Task<string> RequeueAsync(Download download)
+        {
+            if (!download.AwaitsImportation())
+            {
+                throw new InvalidOperationException($"Trying to requeue an import job for download {download.Id} with status {download.Status}: Status should be Completed or ImportPending");
+            }
+
+            var existingActive = await jobRepository.GetActiveByDownloadIdAsync(download.Id);
+            if (existingActive != null)
+            {
+                logger.LogInformation("Download {DownloadId} already has active job {JobId}; no requeue needed", download.Id, existingActive.Id);
+                return existingActive.Id;
+            }
+
+            // The newest job, whatever state it ended in. The download still awaits importation, so
+            // its most recent job did not finish the work regardless of what it recorded, and its
+            // processing log is the only record of why. The recent-completion cooldown that
+            // EnqueueAsync applies is deliberately not applied here: this is someone asking for a
+            // retry, and silently doing nothing is the behaviour being fixed.
+            var previous = (await jobRepository.GetByDownloadIdAsync(download.Id)).LastOrDefault();
+            if (previous != null)
+            {
+                await jobRepository.UpdateAsync(previous.Requeue("Requeued by request after the import was blocked"));
+                logger.LogInformation("Requeued download {DownloadId} for post-processing: {JobId}", download.Id, previous.Id);
+                return previous.Id;
+            }
+
+            // No job survives. Job retention deletes terminal jobs after a week, so a download
+            // blocked longer than that has nothing left to reuse and needs a fresh one.
+            var job = await jobRepository.AddAsync(NewJobFor(download));
+            logger.LogInformation("Queued download {DownloadId} for post-processing with a new job: {JobId}", download.Id, job.Id);
+            return job.Id;
+        }
+
+        private static DownloadProcessingJob NewJobFor(Download download) => new()
+        {
+            DownloadId = download.Id,
+            JobType = ProcessingJobType.MoveOrCopyFile,
+            SourcePath = download.DownloadPath,
+            DownloadClientId = download.DownloadClientId,
+            Priority = 5,
+            Status = ProcessingJobStatus.Pending,
+            JobData = new Dictionary<string, object>
+            {
+                ["CorrelationId"] = download.Id.ToUpperInvariant()
+            }
+        };
 
         public async Task<DownloadProcessingJob?> GetNextJobAsync()
         {
@@ -120,6 +156,9 @@ namespace Listenarr.Application.Downloads.Processing
 
         public async Task<List<DownloadProcessingJob>> GetJobsForDownloadAsync(string downloadId)
             => await jobRepository.GetByDownloadIdAsync(downloadId);
+
+        public async Task<DownloadProcessingJob?> GetActiveJobAsync(string downloadId)
+            => await jobRepository.GetActiveByDownloadIdAsync(downloadId);
 
         public async Task<QueueStats> GetStatsAsync()
             => await jobRepository.GetStatsAsync();

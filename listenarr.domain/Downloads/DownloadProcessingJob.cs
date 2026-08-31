@@ -191,6 +191,27 @@ namespace Listenarr.Domain.Downloads
         }
 
         /// <summary>
+        /// Put a terminal job back on the queue at the operator's request.
+        ///
+        /// Distinct from <see cref="UnStuck"/>, which recovers a job abandoned mid-flight and so
+        /// leaves the retry bookkeeping alone. This is someone asking for another attempt after the
+        /// job already gave up, usually because they have changed something the job depends on, so
+        /// the retry budget is reset rather than continued. The processing log is kept: it is the
+        /// only record of why the earlier attempts failed.
+        /// </summary>
+        public DownloadProcessingJob Requeue(string message = "")
+        {
+            Status = ProcessingJobStatus.Pending;
+            RetryCount = 0;
+            NextRetryAt = null;
+            CompletedAt = null;
+            StartedAt = null;
+            ErrorMessage = null;
+            AddLogEntry(string.IsNullOrEmpty(message) ? "Requeued for another import attempt" : message);
+            return this;
+        }
+
+        /// <summary>
         /// Indicates a job has started
         /// </summary>
         public DownloadProcessingJob MarkAsProcessing()
