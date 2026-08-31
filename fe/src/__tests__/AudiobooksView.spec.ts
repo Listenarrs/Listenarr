@@ -318,6 +318,90 @@ describe('AudiobooksView Grouping', () => {
     expect((vm as unknown).sortOrder).toBe('asc')
   })
 
+  const mountGroupedView = async () => {
+    if (
+      typeof (globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver === 'undefined'
+    ) {
+      ;(globalThis as unknown as Record<string, unknown>).ResizeObserver = class {
+        observe() {}
+        disconnect() {}
+      }
+    }
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: { template: '<div />' } },
+        { path: '/audiobooks', name: 'audiobooks', component: AudiobooksView },
+      ],
+    })
+    await router.push('/audiobooks')
+    await router.isReady().catch(() => {})
+
+    const store = useLibraryStore()
+    store.audiobooks = [
+      { id: 1, title: 'Book 1', authors: ['Author A'], imageUrl: 'c1.jpg', files: [] },
+      { id: 2, title: 'Book 2', authors: ['Author A'], imageUrl: 'c2.jpg', files: [] },
+      { id: 3, title: 'Book 3', authors: ['Author B'], imageUrl: 'c3.jpg', files: [] },
+    ] as unknown as import('@/types').Audiobook[]
+    store.fetchLibrary = vi.fn(async () => undefined)
+
+    const wrapper = mount(AudiobooksView, {
+      global: {
+        plugins: [pinia, router],
+        stubs: [
+          'BulkEditModal',
+          'EditAudiobookModal',
+          'CustomFilterModal',
+          'FiltersDropdown',
+          'CustomSelect',
+        ],
+      },
+    })
+    await new Promise((r) => setTimeout(r, 0))
+    await getVm(wrapper).setGroupBy?.('authors')
+    await wrapper.vm.$nextTick()
+    return wrapper
+  }
+
+  it('renders authors as list rows when the view mode is list', async () => {
+    const wrapper = await mountGroupedView()
+
+    ;(wrapper.vm as unknown as { viewMode: string }).viewMode = 'list'
+    await wrapper.vm.$nextTick()
+
+    const rows = wrapper.findAll('.collection-list-item')
+    expect(rows).toHaveLength(2)
+    expect(rows.map((row) => row.text())).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('Author A'),
+        expect.stringContaining('Author B'),
+      ]),
+    )
+    expect(wrapper.find('.collection-list-item').text()).toContain('book')
+
+    // The grid must be gone, or the toggle has added a second layout rather than switching.
+    expect(wrapper.findAll('.collection-card')).toHaveLength(0)
+
+    wrapper.unmount()
+  })
+
+  it('renders authors as cards when the view mode is grid', async () => {
+    // The control. Without it, a test asserting the list rows would also pass against a
+    // component that ignored viewMode and always rendered the list.
+    const wrapper = await mountGroupedView()
+
+    ;(wrapper.vm as unknown as { viewMode: string }).viewMode = 'grid'
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.findAll('.collection-card')).toHaveLength(2)
+    expect(wrapper.findAll('.collection-list-item')).toHaveLength(0)
+
+    wrapper.unmount()
+  })
+
   it('groups audiobooks by series when groupBy is series', async () => {
     if (
       typeof (globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver === 'undefined'
