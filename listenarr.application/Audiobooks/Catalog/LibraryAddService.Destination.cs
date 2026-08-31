@@ -165,8 +165,27 @@ public partial class LibraryAddService
 
     private static bool IsExactlyAllowedDestinationRoot(
         string normalizedDestination,
-        IReadOnlyCollection<string> allowedDestinationRoots) =>
-        allowedDestinationRoots.Any(root =>
-            FileUtils.IsPathSameOrInside(normalizedDestination, root)
-            && !FileUtils.IsPathInsideOf(normalizedDestination, root));
+        IReadOnlyCollection<string> allowedDestinationRoots)
+    {
+        // Exact canonical spelling is the conservative test here: the root
+        // selection this rewrites always arrives as the root's stored path. A
+        // case-alias spelling of a root simply skips subfolder planning and
+        // falls through to the destination guard, exactly as before.
+        var canonicalDestination = FileSystemPathIdentity
+            .TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                normalizedDestination,
+                out var normalized,
+                out _)
+            ? normalized
+            : normalizedDestination;
+        return allowedDestinationRoots.Any(root => string.Equals(
+            FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                root,
+                out var canonicalRoot,
+                out _)
+                ? canonicalRoot
+                : root,
+            canonicalDestination,
+            StringComparison.Ordinal));
+    }
 }
