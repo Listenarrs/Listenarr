@@ -225,9 +225,15 @@ namespace Listenarr.Domain.Downloads
         }
 
         /// <summary>
-        /// Schedule job for retry with exponential backoff
+        /// Schedule job for retry with exponential backoff.
         /// </summary>
-        public DownloadProcessingJob ScheduleRetry(string errorMessage = "")
+        /// <param name="errorMessage">Why the attempt failed, recorded on the job.</param>
+        /// <param name="initialDelaySeconds">
+        /// The wait before the first retry. Later retries double it, so 30 gives 30s, 1m, 2m.
+        /// Comes from ApplicationSettings.MissingSourceRetryInitialDelaySeconds; the default here
+        /// matches that property's own default so a caller that does not supply it is unchanged.
+        /// </param>
+        public DownloadProcessingJob ScheduleRetry(string errorMessage = "", int initialDelaySeconds = 30)
         {
             if (!string.IsNullOrEmpty(errorMessage))
             {
@@ -244,9 +250,12 @@ namespace Listenarr.Domain.Downloads
             RetryCount++;
             Status = ProcessingJobStatus.Pending;
 
-            // Exponential backoff: 30s, 2m, 8m, etc.
-            var backoffMinutes = Math.Pow(2, RetryCount) * 0.5; // 0.5, 1, 2, 4, 8 minutes
-            NextRetryAt = DateTime.UtcNow.AddMinutes(backoffMinutes);
+            // RetryCount was just incremented, so the first retry raises the delay to the power of
+            // zero and waits exactly initialDelaySeconds. The old expression squared it a step
+            // early: it read the incremented count, so the first retry waited a minute while both
+            // comments above it claimed thirty seconds.
+            var delay = Math.Max(1, initialDelaySeconds) * Math.Pow(2, RetryCount - 1);
+            NextRetryAt = DateTime.UtcNow.AddSeconds(delay);
 
             AddLogEntry($"Scheduled for retry #{RetryCount} at {NextRetryAt}");
             return this;

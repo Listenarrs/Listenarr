@@ -110,6 +110,43 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Processing
             Assert.DoesNotContain(download.ImportBlockMessages, m => m.Contains("{job.Id}", StringComparison.OrdinalIgnoreCase));
         }
 
+        [Theory]
+        [InlineData(0, ProcessingJobStatus.Failed)]
+        [InlineData(3, ProcessingJobStatus.Pending)]
+        [Trait("Scenario", "The configured retry budget decides whether a first failure is terminal")]
+        public async Task MissingSource_RespectsTheConfiguredRetryBudget(int maxRetries, ProcessingJobStatus expected)
+        {
+            // Settings > Download exposes this as Missing-source Max Retries. With a budget of zero
+            // the first failure is terminal; with the default of three it schedules a retry. The
+            // second case is the control: without it this would also pass against an implementation
+            // that always failed immediately.
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithMissingSourceMaxRetries(maxRetries)
+                .Build());
+
+            var sourceDirectory = FileService.GetTempDirectory("budget-source");
+            var missing = Path.Join(sourceDirectory, "notThere");
+
+            var download = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithAudiobook(await CreateAudiobook())
+                .WithDownloadClientConfiguration(await CreateDownloadClientConfiguration())
+                .WithPath(missing)
+                .WithCompletedStatus(at: DateTime.UtcNow)
+                .Build());
+
+            var job = await _downloadProcessingJobRepository.AddAsync(new DownloadProcessingJobBuilder()
+                .WithDownload(download)
+                .Build());
+
+            await _provider.GetRequiredService<DownloadProcessingJobProcessor>()
+                .ProcessQueueAsync(CancellationToken.None);
+
+            job = await _downloadProcessingJobRepository.GetByIdAsync(job.Id);
+            Assert.NotNull(job);
+            Assert.Equal(maxRetries, job!.MaxRetries);
+            Assert.Equal(expected, job.Status);
+        }
+
         [Fact]
         [Trait("Scenario", "ExternalImportResolverRecoversStaleDownloadPath")]
         public async Task Import_ExternalClientStaleDownloadPath_UsesResolvedSourceFiles()
