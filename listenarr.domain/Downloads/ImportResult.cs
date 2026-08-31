@@ -107,9 +107,35 @@ namespace Listenarr.Domain.Downloads
             return new ImportResult
             {
                 Success = false,
-                Message = exception.Message,
+                Message = DescribeWithCauses(exception),
                 SourcePath = sourcePath
             };
+        }
+
+        /// <summary>
+        /// The message plus the chain of inner causes.
+        ///
+        /// A file mutation failure arrives here already wrapped, so the outer message names the
+        /// operation and not the reason. This row outlives the application log, and it is what an
+        /// operator reads when a download is blocked, so the reason has to survive into it.
+        /// </summary>
+        private static string DescribeWithCauses(Exception exception)
+        {
+            var parts = new List<string>();
+            var current = exception;
+            var guard = 0;
+            while (current != null && guard++ < 8)
+            {
+                var text = $"{current.GetType().Name}: {current.Message}";
+                if (!parts.Contains(text))
+                {
+                    parts.Add(text);
+                }
+
+                current = current.InnerException;
+            }
+
+            return string.Join(" -> ", parts);
         }
 
         public static ImportResult Skipped(
