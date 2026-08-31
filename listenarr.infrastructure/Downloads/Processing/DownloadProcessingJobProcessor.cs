@@ -17,6 +17,8 @@
  */
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace Listenarr.Infrastructure.Downloads.Processing
@@ -277,12 +279,12 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                 try
                 {
                     var downloadImportService = scope.ServiceProvider.GetRequiredService<IDownloadImportService>();
-                    var importOptions = isDirectDownload && string.Equals(
-                        download.GetMetadataString(DirectDownloadMetadataKeys.RequiresArchiveExtraction),
-                        bool.TrueString,
-                        StringComparison.OrdinalIgnoreCase)
-                        ? new DownloadImportOptions(ForceArchiveExtraction: true)
-                        : null;
+                    var importOptions = new DownloadImportOptions(
+                        ForceArchiveExtraction: isDirectDownload && string.Equals(
+                            download.GetMetadataString(DirectDownloadMetadataKeys.RequiresArchiveExtraction),
+                            bool.TrueString,
+                            StringComparison.OrdinalIgnoreCase),
+                        CompatibilityBatchId: ResolveCompatibilityBatchId(job.Id));
                     results = await downloadImportService.ImportDownloadFilesAsync(
                         audiobook,
                         files,
@@ -452,6 +454,18 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                 await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
                     correlationId, $"Unable to commit import finalization: {exception.Message}", cancellationToken);
             }
+        }
+
+        private static Guid ResolveCompatibilityBatchId(string jobId)
+        {
+            if (Guid.TryParse(jobId, out var parsed))
+            {
+                return parsed;
+            }
+
+            var hash = SHA256.HashData(
+                Encoding.UTF8.GetBytes("download-import:" + jobId));
+            return new Guid(hash.AsSpan(0, 16));
         }
     }
 }

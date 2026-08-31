@@ -28,7 +28,8 @@ public partial class DownloadImportService
                         token)
                         ?? throw new InvalidOperationException(
                             $"Audiobook {audiobook.Id} no longer exists");
-                    var compatibilityBatchId = Guid.NewGuid();
+                    var compatibilityBatchId = options?.CompatibilityBatchId
+                        ?? Guid.NewGuid();
                     var results = await ImportDownloadFilesCoreAsync(
                         currentAudiobook,
                         files,

@@ -30,9 +30,24 @@ public sealed record FilePublicationPlan(
     int? DestinationRootFolderId = null,
     int? DestinationPolicyRevision = null,
     int? SourceStorageContractRevision = null,
-    int? DestinationStorageContractRevision = null)
+    int? DestinationStorageContractRevision = null,
+    int? ExpectedBatchMemberCount = null,
+    string? ExpectedBatchSourceManifestSha256 = null)
 {
     public bool IsAllowed => Mode != FilePublicationExecutionMode.Blocked;
+
+    public FilePublicationPlan WithCompatibilityBatchManifest(
+        CompatibilityBatchManifest manifest)
+    {
+        manifest.Validate();
+        return Mode == FilePublicationExecutionMode.CompatibilityCopyVerifiedCleanup
+            ? this with
+            {
+                ExpectedBatchMemberCount = manifest.ExpectedMemberCount,
+                ExpectedBatchSourceManifestSha256 = manifest.SourceManifestSha256
+            }
+            : this;
+    }
 
     public static FilePublicationPlan Durable(FileAction action) =>
         new(

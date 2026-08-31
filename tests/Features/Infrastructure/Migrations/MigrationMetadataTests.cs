@@ -26,6 +26,13 @@ public class MigrationMetadataTests
     }
 
     [Fact]
+    public void AddCompatibilityBatchManifestMigration_IsDiscoverableByEf()
+    {
+        AssertMigrationId<AddCompatibilityBatchManifest>(
+            "20260830025709_AddCompatibilityBatchManifest");
+    }
+
+    [Fact]
     public void AddImportBlacklistExtensionsMigration_IsDiscoverableByEf()
     {
         AssertMigrationId<AddImportBlacklistExtensionsToApplicationSettings>(

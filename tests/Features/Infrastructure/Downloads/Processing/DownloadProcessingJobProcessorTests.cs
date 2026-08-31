@@ -220,9 +220,10 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Processing
                     [DirectDownloadMetadataKeys.RequiresArchiveExtraction] = true
                 }
             });
-            await _downloadProcessingJobRepository.AddAsync(new DownloadProcessingJobBuilder()
-                .WithDownload(download)
-                .Build());
+            var job = await _downloadProcessingJobRepository.AddAsync(
+                new DownloadProcessingJobBuilder()
+                    .WithDownload(download)
+                    .Build());
 
             // When
             await _provider.GetRequiredService<DownloadProcessingJobProcessor>()
@@ -233,7 +234,142 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Processing
                 It.Is<Audiobook>(item => item.Id == audiobook.Id),
                 It.Is<List<string>>(files => files.Contains(archivePath)),
                 It.IsAny<CancellationToken>(),
-                It.Is<DownloadImportOptions>(options => options.ForceArchiveExtraction)), Times.Once);
+                It.Is<DownloadImportOptions>(options =>
+                    options.ForceArchiveExtraction
+                    && options.CompatibilityBatchId == Guid.Parse(job.Id))), Times.Once);
+        }
+
+        [Fact]
+        public async Task Import_DeferredCompatibilityCleanup_PersistsSourceRetainedFalseAndStableBatchId()
+        {
+            var importService = new Mock<IDownloadImportService>(MockBehavior.Strict);
+            Init(builder => builder.WithSingleton<IDownloadImportService>(importService.Object));
+            var sourceDirectory = FileService.GetTempDirectory(
+                "deferred-cleanup-processing-source");
+            var sourcePath = await FileService.GetFileAsync(
+                sourceDirectory,
+                "book.m4b",
+                "audio");
+            downloadClientGatewayMock.SourceFiles = [sourcePath];
+            var audiobook = await CreateAudiobook();
+            var finalPath = Path.Join(audiobook.BasePath, "book.m4b");
+            await File.WriteAllTextAsync(finalPath, "audio");
+            importService
+                .Setup(service => service.ImportDownloadFilesAsync(
+                    It.Is<Audiobook>(candidate => candidate.Id == audiobook.Id),
+                    It.Is<List<string>>(files => files.SequenceEqual(new[] { sourcePath })),
+                    It.IsAny<CancellationToken>(),
+                    It.IsAny<DownloadImportOptions>()))
+                .ReturnsAsync((
+                    Audiobook _,
+                    List<string> _,
+                    CancellationToken _,
+                    DownloadImportOptions _) =>
+                    [ImportResult.ImportSuccess(
+                        FileAction.Move,
+                        FileAction.Copy,
+                        ImportSourceDisposition.Retired,
+                        sourcePath,
+                        finalPath,
+                        wasRegisteredToAudiobook: true,
+                        warningCode: "source_cleanup_deferred_to_download_client",
+                        message: "Destination verified; source cleanup is deferred to the download client.")]);
+            var download = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithCompletedStatus(at: DateTime.UtcNow)
+                .WithDownloadClientConfiguration(await CreateDownloadClientConfiguration())
+                .WithAudiobook(audiobook)
+                .WithPath(sourceDirectory)
+                .Build());
+            var job = await _downloadProcessingJobRepository.AddAsync(
+                new DownloadProcessingJobBuilder()
+                    .WithDownload(download)
+                    .Build());
+
+            await _provider.GetRequiredService<DownloadProcessingJobProcessor>()
+                .ProcessQueueAsync(CancellationToken.None);
+
+            job = (await _downloadProcessingJobRepository.GetByIdAsync(job.Id))!;
+            Assert.True(
+                job.Status == ProcessingJobStatus.Completed,
+                $"Expected Completed, got {job.Status}: {job.ErrorMessage}; log: {string.Join(" | ", job.ProcessingLog)}");
+            Assert.True(job.TryGetJobDataString(
+                Download.SourceRetainedMetadataKey,
+                out var sourceRetained));
+            Assert.Equal(bool.FalseString, sourceRetained);
+            var persistedDownload = (await _downloadRepository.GetByIdAsync(download.Id))!;
+            Assert.Equal(DownloadStatus.Moved, persistedDownload.Status);
+            Assert.Equal(
+                bool.FalseString,
+                persistedDownload.GetMetadataString(
+                    Download.SourceRetainedMetadataKey));
+            importService.Verify(service => service.ImportDownloadFilesAsync(
+                It.IsAny<Audiobook>(),
+                It.IsAny<List<string>>(),
+                It.IsAny<CancellationToken>(),
+                It.Is<DownloadImportOptions>(options =>
+                    options.CompatibilityBatchId == Guid.Parse(job.Id))),
+                Times.Once);
+        }
+
+        [Fact]
+        public async Task Import_AllCandidatesSkipped_PersistsSourceRetainedTrue()
+        {
+            var importService = new Mock<IDownloadImportService>(MockBehavior.Strict);
+            Init(builder => builder.WithSingleton<IDownloadImportService>(importService.Object));
+            var sourceDirectory = FileService.GetTempDirectory(
+                "all-skipped-processing-source");
+            var sourcePath = await FileService.GetFileAsync(
+                sourceDirectory,
+                "candidate.m4b",
+                "candidate");
+            downloadClientGatewayMock.SourceFiles = [sourcePath];
+            var audiobook = await CreateAudiobook();
+            var existingPath = await FileService.GetFileAsync(
+                audiobook.BasePath,
+                "existing.m4b",
+                "existing");
+            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
+                .WithAudiobook(audiobook)
+                .WithPath(existingPath)
+                .WithFormat("m4b")
+                .Build());
+            importService
+                .Setup(service => service.ImportDownloadFilesAsync(
+                    It.Is<Audiobook>(candidate => candidate.Id == audiobook.Id),
+                    It.Is<List<string>>(files => files.SequenceEqual(new[] { sourcePath })),
+                    It.IsAny<CancellationToken>(),
+                    It.IsAny<DownloadImportOptions>()))
+                .ReturnsAsync([
+                    ImportResult.Skipped(
+                        "candidate quality is not better than existing",
+                        sourcePath)
+                ]);
+            var download = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithCompletedStatus(at: DateTime.UtcNow)
+                .WithDownloadClientConfiguration(await CreateDownloadClientConfiguration())
+                .WithAudiobook(audiobook)
+                .WithPath(sourceDirectory)
+                .Build());
+            var job = await _downloadProcessingJobRepository.AddAsync(
+                new DownloadProcessingJobBuilder()
+                    .WithDownload(download)
+                    .Build());
+
+            await _provider.GetRequiredService<DownloadProcessingJobProcessor>()
+                .ProcessQueueAsync(CancellationToken.None);
+
+            job = (await _downloadProcessingJobRepository.GetByIdAsync(job.Id))!;
+            Assert.Equal(ProcessingJobStatus.Completed, job.Status);
+            Assert.True(job.TryGetJobDataString(
+                Download.SourceRetainedMetadataKey,
+                out var sourceRetained));
+            Assert.Equal(bool.TrueString, sourceRetained);
+            var persistedDownload = (await _downloadRepository.GetByIdAsync(download.Id))!;
+            Assert.Equal(
+                bool.TrueString,
+                persistedDownload.GetMetadataString(
+                    Download.SourceRetainedMetadataKey));
+            Assert.True(File.Exists(sourcePath));
         }
 
         [Fact]

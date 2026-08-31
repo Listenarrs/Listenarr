@@ -1450,6 +1450,394 @@ namespace Listenarr.Tests.Features.Application.Downloads.Import
                 CompatibilitySourceDisposition.DeferredToDownloadClient,
                 journal.SourceDisposition);
             Assert.Equal(CompatibilityCleanupOwner.DownloadClient, journal.CleanupOwner);
+            var manifest = CompatibilityBatchManifest.Create([source]);
+            Assert.Equal(manifest.ExpectedMemberCount, journal.ExpectedBatchMemberCount);
+            Assert.Equal(
+                manifest.SourceManifestSha256,
+                journal.ExpectedBatchSourceManifestSha256);
+            publicationResolver.VerifyAll();
+        }
+
+        [Fact]
+        public async Task ImportDownloadFilesAsync_VerifiedCleanup_RetryWithStableBatchIdRemainsDeferred()
+        {
+            RootFolder? authorizedRoot = null;
+            var publicationResolver = new Mock<IFilePublicationCapabilityResolver>(
+                MockBehavior.Strict);
+            publicationResolver.Setup(resolver => resolver.ResolveAsync(
+                    FileAction.Move,
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<FilePublicationSourceProof>(),
+                    It.IsAny<CancellationToken>(),
+                    It.IsAny<Guid?>(),
+                    CompatibilityCleanupOwner.DownloadClient))
+                .Returns<FileAction, string, string, FilePublicationSourceProof, CancellationToken, Guid?, CompatibilityCleanupOwner>((
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    batchId,
+                    cleanupOwner) =>
+                {
+                    Assert.True(batchId.HasValue);
+                    var root = Assert.IsType<RootFolder>(authorizedRoot);
+                    return Task.FromResult(FilePublicationPlan.VerifiedCleanup(
+                        batchId.Value,
+                        cleanupOwner,
+                        sourceRootFolderId: null,
+                        sourcePolicyRevision: null,
+                        root.Id,
+                        root.WeakStoragePolicyRevision,
+                        sourceStorageContractRevision: null,
+                        root.StorageContractRevision));
+                });
+            Init(builder => builder
+                .WithSingleton<IFilePublicationCapabilityResolver>(
+                    publicationResolver.Object)
+                .WithScoped<ICompatibilitySourceCleanupCoordinator,
+                    CompatibilitySourceCleanupCoordinator>());
+
+            var outputDirectory = FileService.GetTempDirectory(
+                "download-import-verified-retry-dst");
+            authorizedRoot = await AddAuthorizedRootAsync(outputDirectory);
+            authorizedRoot.WeakStorageSourceCleanupPolicy =
+                WeakStorageSourceCleanupPolicy.DeleteSourceAfterVerifiedCopy;
+            authorizedRoot.WeakStoragePolicyRevision = 8;
+            authorizedRoot.StorageContractRevision = 13;
+            await _rootFolderRepository.UpdateAsync(authorizedRoot);
+
+            var sourceDirectory = FileService.GetTempDirectory(
+                "download-import-verified-retry-src");
+            var source = await FileService.GetFileAsync(
+                sourceDirectory,
+                "retry.mp3",
+                "audio");
+            var audiobook = await _audiobookRepository.AddAsync(
+                new AudiobookBuilder()
+                    .WithTitle("Verified Retry")
+                    .WithBasePath(outputDirectory)
+                    .Build());
+            await _applicationSettingsRepository.SaveAsync(
+                new ApplicationSettingsBuilder()
+                    .WithOutputPath(outputDirectory)
+                    .WithMoveFileOnCompleted()
+                    .WithoutMetadataProcessing()
+                    .WithFolderNamingPattern("")
+                    .WithFileNamingPattern("{Title}")
+                    .WithMultiFileNamingPattern("{Title}")
+                    .Build());
+            var batchId = Guid.NewGuid();
+            var options = new DownloadImportOptions(
+                CompatibilityBatchId: batchId);
+            var service = _provider.GetRequiredService<IDownloadImportService>();
+
+            var first = Assert.Single(await service.ImportDownloadFilesAsync(
+                audiobook,
+                [source],
+                options: options));
+            var second = Assert.Single(await service.ImportDownloadFilesAsync(
+                audiobook,
+                [source],
+                options: options));
+
+            Assert.True(first.Success, first.Message);
+            Assert.True(second.Success, second.Message);
+            Assert.Equal(ImportSourceDisposition.Retired, first.SourceDisposition);
+            Assert.Equal(ImportSourceDisposition.Retired, second.SourceDisposition);
+            Assert.Equal(
+                "source_cleanup_deferred_to_download_client",
+                first.WarningCode);
+            Assert.Equal(
+                "source_cleanup_deferred_to_download_client",
+                second.WarningCode);
+            Assert.True(File.Exists(source));
+
+            var factory = _provider.GetRequiredService<
+                IDbContextFactory<ListenArrDbContext>>();
+            await using var db = await factory.CreateDbContextAsync();
+            var journal = await db.CompatibilityFilePublicationJournals
+                .SingleAsync();
+            Assert.Equal(batchId, journal.BatchId);
+            Assert.Equal(
+                CompatibilityFilePublicationState.Completed,
+                journal.State);
+            Assert.Equal(
+                CompatibilitySourceDisposition.DeferredToDownloadClient,
+                journal.SourceDisposition);
+            publicationResolver.VerifyAll();
+        }
+
+        [Fact]
+        public async Task ImportDownloadFilesAsync_VerifiedCleanup_MultiFileAndCompanionPersistSameManifest()
+        {
+            RootFolder? authorizedRoot = null;
+            var publicationResolver = new Mock<IFilePublicationCapabilityResolver>(
+                MockBehavior.Strict);
+            publicationResolver.Setup(resolver => resolver.ResolveAsync(
+                    FileAction.Move,
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<FilePublicationSourceProof>(),
+                    It.IsAny<CancellationToken>(),
+                    It.IsAny<Guid?>(),
+                    CompatibilityCleanupOwner.DownloadClient))
+                .Returns<FileAction, string, string, FilePublicationSourceProof, CancellationToken, Guid?, CompatibilityCleanupOwner>((
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    batchId,
+                    cleanupOwner) =>
+                {
+                    Assert.True(batchId.HasValue);
+                    var root = Assert.IsType<RootFolder>(authorizedRoot);
+                    return Task.FromResult(FilePublicationPlan.VerifiedCleanup(
+                        batchId.Value,
+                        cleanupOwner,
+                        sourceRootFolderId: null,
+                        sourcePolicyRevision: null,
+                        root.Id,
+                        root.WeakStoragePolicyRevision,
+                        sourceStorageContractRevision: null,
+                        root.StorageContractRevision));
+                });
+            Init(builder => builder
+                .WithSingleton<IFilePublicationCapabilityResolver>(
+                    publicationResolver.Object)
+                .WithScoped<ICompatibilitySourceCleanupCoordinator,
+                    CompatibilitySourceCleanupCoordinator>());
+
+            var outputDirectory = FileService.GetTempDirectory(
+                "download-import-verified-manifest-dst");
+            authorizedRoot = await AddAuthorizedRootAsync(outputDirectory);
+            authorizedRoot.WeakStorageSourceCleanupPolicy =
+                WeakStorageSourceCleanupPolicy.DeleteSourceAfterVerifiedCopy;
+            authorizedRoot.WeakStoragePolicyRevision = 4;
+            authorizedRoot.StorageContractRevision = 6;
+            await _rootFolderRepository.UpdateAsync(authorizedRoot);
+
+            var sourceDirectory = FileService.GetTempDirectory(
+                "download-import-verified-manifest-src");
+            var part1 = await FileService.GetFileAsync(
+                sourceDirectory,
+                "Part 1.mp3",
+                "one");
+            var part2 = await FileService.GetFileAsync(
+                sourceDirectory,
+                "Part 2.mp3",
+                "two");
+            var companion = await FileService.GetFileAsync(
+                sourceDirectory,
+                "cover.jpg",
+                "cover");
+            var audiobook = await _audiobookRepository.AddAsync(
+                new AudiobookBuilder()
+                    .WithTitle("Manifested Book")
+                    .WithBasePath(outputDirectory)
+                    .Build());
+            await _applicationSettingsRepository.SaveAsync(
+                new ApplicationSettingsBuilder()
+                    .WithOutputPath(outputDirectory)
+                    .WithMoveFileOnCompleted()
+                    .WithoutMetadataProcessing()
+                    .WithFolderNamingPattern("")
+                    .WithFileNamingPattern("{Title}")
+                    .WithMultiFileNamingPattern("{Title}-{DiskNumber:00}")
+                    .Build());
+
+            var results = await _provider
+                .GetRequiredService<IDownloadImportService>()
+                .ImportDownloadFilesAsync(
+                    audiobook,
+                    [part1, part2, companion]);
+
+            Assert.Equal(3, results.Count);
+            Assert.All(results, result => Assert.True(result.Success, result.Message));
+            Assert.All(results, result =>
+                Assert.Equal(ImportSourceDisposition.Retired, result.SourceDisposition));
+            Assert.All(results, result =>
+                Assert.Equal(
+                    "source_cleanup_deferred_to_download_client",
+                    result.WarningCode));
+            Assert.True(File.Exists(part1));
+            Assert.True(File.Exists(part2));
+            Assert.True(File.Exists(companion));
+
+            var factory = _provider.GetRequiredService<
+                IDbContextFactory<ListenArrDbContext>>();
+            await using var db = await factory.CreateDbContextAsync();
+            var journals = await db.CompatibilityFilePublicationJournals
+                .OrderBy(journal => journal.SourcePath)
+                .ToListAsync();
+            Assert.Equal(3, journals.Count);
+            var batchId = Assert.Single(journals
+                .Select(journal => journal.BatchId)
+                .Distinct());
+            Assert.True(batchId.HasValue);
+            var manifest = CompatibilityBatchManifest.Create(
+                [part1, part2, companion]);
+            Assert.All(journals, journal =>
+            {
+                Assert.Equal(
+                    CompatibilityFilePublicationState.Completed,
+                    journal.State);
+                Assert.Equal(
+                    CompatibilitySourceDisposition.DeferredToDownloadClient,
+                    journal.SourceDisposition);
+                Assert.Equal(
+                    manifest.ExpectedMemberCount,
+                    journal.ExpectedBatchMemberCount);
+                Assert.Equal(
+                    manifest.SourceManifestSha256,
+                    journal.ExpectedBatchSourceManifestSha256);
+            });
+            publicationResolver.VerifyAll();
+        }
+
+        [Fact]
+        public async Task ImportDownloadFilesAsync_VerifiedCleanup_SkippedCandidateRetainsPublishedSource()
+        {
+            RootFolder? authorizedRoot = null;
+            var publicationResolver = new Mock<IFilePublicationCapabilityResolver>(
+                MockBehavior.Strict);
+            publicationResolver.Setup(resolver => resolver.ResolveAsync(
+                    FileAction.Move,
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<FilePublicationSourceProof>(),
+                    It.IsAny<CancellationToken>(),
+                    It.IsAny<Guid?>(),
+                    CompatibilityCleanupOwner.DownloadClient))
+                .Returns<FileAction, string, string, FilePublicationSourceProof, CancellationToken, Guid?, CompatibilityCleanupOwner>((
+                    _,
+                    _,
+                    _,
+                    _,
+                    _,
+                    batchId,
+                    cleanupOwner) =>
+                {
+                    Assert.True(batchId.HasValue);
+                    var root = Assert.IsType<RootFolder>(authorizedRoot);
+                    return Task.FromResult(FilePublicationPlan.VerifiedCleanup(
+                        batchId.Value,
+                        cleanupOwner,
+                        sourceRootFolderId: null,
+                        sourcePolicyRevision: null,
+                        root.Id,
+                        root.WeakStoragePolicyRevision,
+                        sourceStorageContractRevision: null,
+                        root.StorageContractRevision));
+                });
+            Init(builder => builder
+                .WithSingleton<IFilePublicationCapabilityResolver>(
+                    publicationResolver.Object)
+                .WithScoped<ICompatibilitySourceCleanupCoordinator,
+                    CompatibilitySourceCleanupCoordinator>());
+
+            var outputDirectory = FileService.GetTempDirectory(
+                "download-import-verified-skip-dst");
+            authorizedRoot = await AddAuthorizedRootAsync(outputDirectory);
+            authorizedRoot.WeakStorageSourceCleanupPolicy =
+                WeakStorageSourceCleanupPolicy.DeleteSourceAfterVerifiedCopy;
+            authorizedRoot.WeakStoragePolicyRevision = 5;
+            authorizedRoot.StorageContractRevision = 7;
+            await _rootFolderRepository.UpdateAsync(authorizedRoot);
+
+            var profile = await _qualityProfileRepository.AddAsync(
+                new QualityProfileBuilder().Build());
+            var audiobook = await _audiobookRepository.AddAsync(
+                new AudiobookBuilder()
+                    .WithTitle("Manifest Skip")
+                    .WithBasePath(outputDirectory)
+                    .WithQualityProfile(profile)
+                    .Build());
+            var existing = await FileService.GetFileAsync(
+                outputDirectory,
+                "existing.mp3",
+                "existing");
+            await _audiobookFileRepository.AddAsync(
+                new AudiobookFileBuilder()
+                    .WithAudiobook(audiobook)
+                    .WithPath(existing)
+                    .WithFormat("mp3")
+                    .WithBitrate(192000)
+                    .Build());
+
+            var sourceDirectory = FileService.GetTempDirectory(
+                "download-import-verified-skip-src");
+            var high = await FileService.GetFileAsync(
+                sourceDirectory,
+                "high-source.mp3",
+                "high");
+            var low = await FileService.GetFileAsync(
+                sourceDirectory,
+                "low-source.mp3",
+                "low");
+            metadataServiceMock.AddMetadata(
+                "high-source",
+                new AudioMetadata
+                {
+                    Title = "High Candidate",
+                    BitRate = 320000
+                });
+            metadataServiceMock.AddMetadata(
+                "low-source",
+                new AudioMetadata
+                {
+                    Title = "Low Candidate",
+                    BitRate = 128000
+                });
+            await _applicationSettingsRepository.SaveAsync(
+                new ApplicationSettingsBuilder()
+                    .WithOutputPath(outputDirectory)
+                    .WithMoveFileOnCompleted()
+                    .WithMetadataProcessing()
+                    .WithFolderNamingPattern("")
+                    .WithFileNamingPattern("{Title}")
+                    .WithMultiFileNamingPattern("{Title}-{DiskNumber:00}")
+                    .Build());
+
+            var results = await _provider
+                .GetRequiredService<IDownloadImportService>()
+                .ImportDownloadFilesAsync(audiobook, [high, low]);
+
+            Assert.Equal(2, results.Count);
+            var imported = Assert.Single(results, result =>
+                string.Equals(result.SourcePath, high, StringComparison.Ordinal));
+            Assert.True(imported.Success, imported.Message);
+            Assert.Equal(ImportSourceDisposition.Retained, imported.SourceDisposition);
+            Assert.Equal("source_retained", imported.WarningCode);
+            Assert.Contains(results, result =>
+                result.Success
+                && string.Equals(result.SourcePath, low, StringComparison.Ordinal)
+                && result.SourceDisposition == ImportSourceDisposition.Retained
+                && result.Message != null
+                && result.Message.Contains(
+                    "not better",
+                    StringComparison.OrdinalIgnoreCase));
+            Assert.True(File.Exists(high));
+            Assert.True(File.Exists(low));
+
+            var factory = _provider.GetRequiredService<
+                IDbContextFactory<ListenArrDbContext>>();
+            await using var db = await factory.CreateDbContextAsync();
+            var journal = await db.CompatibilityFilePublicationJournals
+                .SingleAsync();
+            var manifest = CompatibilityBatchManifest.Create([high, low]);
+            Assert.Equal(manifest.ExpectedMemberCount, journal.ExpectedBatchMemberCount);
+            Assert.Equal(
+                manifest.SourceManifestSha256,
+                journal.ExpectedBatchSourceManifestSha256);
+            Assert.Equal(
+                CompatibilityFilePublicationState.Completed,
+                journal.State);
+            Assert.Equal(
+                CompatibilitySourceDisposition.Retained,
+                journal.SourceDisposition);
             publicationResolver.VerifyAll();
         }
 

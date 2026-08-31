@@ -61,6 +61,9 @@ public sealed class CompatibilityFilePublicationJournal
     public int? DestinationRootFolderId { get; set; }
     public int? DestinationPolicyRevision { get; set; }
     public int? DestinationStorageContractRevision { get; set; }
+    public int? ExpectedBatchMemberCount { get; set; }
+    [MaxLength(64)]
+    public string? ExpectedBatchSourceManifestSha256 { get; set; }
     [Required, MaxLength(4096)]
     public string SourcePath { get; set; } = string.Empty;
     [Required, MaxLength(4096)]

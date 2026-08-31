@@ -42,6 +42,8 @@ public class SqliteMigrationSchemaTests : BaseTests
         "20260821141235_AddCompatibilityFilePublication";
     private const string WeakStorageVerifiedCleanupMigrationId =
         "20260825021432_AddWeakStorageVerifiedCleanup";
+    private const string CompatibilityBatchManifestMigrationId =
+        "20260830025709_AddCompatibilityBatchManifest";
 
     private static (SqliteConnection Connection, ListenArrDbContext Context)
         CreateMigratedSqliteContext()
@@ -173,6 +175,14 @@ public class SqliteMigrationSchemaTests : BaseTests
             connection,
             "CompatibilityFilePublicationJournals",
             "DestinationStorageContractRevision"));
+        Assert.True(await ColumnExistsAsync(
+            connection,
+            "CompatibilityFilePublicationJournals",
+            "ExpectedBatchMemberCount"));
+        Assert.True(await ColumnExistsAsync(
+            connection,
+            "CompatibilityFilePublicationJournals",
+            "ExpectedBatchSourceManifestSha256"));
         Assert.Equal(
             "'RetainSource'",
             await ColumnDefaultAsync(connection, "MoveJobs", "SourceCleanupMode"));
@@ -199,7 +209,8 @@ public class SqliteMigrationSchemaTests : BaseTests
                 MoveJobRelocationForeignKeyMigrationId,
                 FileMutationParentGenerationProofsMigrationId,
                 CompatibilityFilePublicationMigrationId,
-                WeakStorageVerifiedCleanupMigrationId
+                WeakStorageVerifiedCleanupMigrationId,
+                CompatibilityBatchManifestMigrationId
             ],
             postCanary);
         Assert.Contains("20251124102000_AddMoveJobSourcePath", applied);
