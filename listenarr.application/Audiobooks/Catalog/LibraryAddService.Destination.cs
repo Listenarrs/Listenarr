@@ -60,6 +60,37 @@ public partial class LibraryAddService
                     normalizedRequestedBaseDirectory);
             }
 
+            if (IsExactlyAllowedDestinationRoot(
+                    normalizedRequestedBaseDirectory,
+                    allowedDestinationRoots))
+            {
+                // A destination that IS a root folder is a root selection, not
+                // the audiobook's folder. No audiobook may claim a root as its
+                // own BasePath: the destination guard rejects every later add
+                // aimed at that root, and imports would land files loose at the
+                // library root. Plan the book's folder under the chosen root
+                // exactly as an omitted destination plans it under the default.
+                settings ??= await _configurationService.GetApplicationSettingsAsync();
+                var plannedBasePath = Path.Join(
+                    normalizedRequestedBaseDirectory,
+                    _fileNamingService.ApplyNamingPattern(
+                        settings.FolderNamingPattern,
+                        metadata));
+                if (!FileUtils.TryNormalizeUserProvidedDirectoryPathForCurrentOs(
+                    plannedBasePath,
+                    out var normalizedPlannedBasePath,
+                    out var plannedValidationReason,
+                    rejectParentTraversal: true))
+                {
+                    return ValidationFailure(
+                        "destination_path_invalid",
+                        $"Generated library destination is invalid: {plannedValidationReason}",
+                        plannedBasePath);
+                }
+
+                normalizedRequestedBaseDirectory = normalizedPlannedBasePath;
+            }
+
             audiobook.BasePath = normalizedRequestedBaseDirectory;
         }
         else
@@ -131,4 +162,11 @@ public partial class LibraryAddService
                 destinationBlockingReason,
                 audiobook.BasePath);
     }
+
+    private static bool IsExactlyAllowedDestinationRoot(
+        string normalizedDestination,
+        IReadOnlyCollection<string> allowedDestinationRoots) =>
+        allowedDestinationRoots.Any(root =>
+            FileUtils.IsPathSameOrInside(normalizedDestination, root)
+            && !FileUtils.IsPathInsideOf(normalizedDestination, root));
 }
