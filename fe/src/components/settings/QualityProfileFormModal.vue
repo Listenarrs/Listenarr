@@ -475,8 +475,13 @@
               description="Give bonus points to more recent releases (torrent upload date)"
             />
 
+            <!--
+              Maximum Age is not part of the checkbox above. It is a hard reject applied by
+              SearchResultScorer whenever it is greater than zero, and the scorer never reads
+              PreferNewerReleases. Hiding this input therefore hid a filter that stayed on, and
+              the only way back to it was to tick a box that claims to do something else.
+            -->
             <FormRow
-              v-if="formData.preferNewerReleases"
               label="Maximum Age (Days)"
               labelFor="maximumAge"
               help="Reject releases older than this many days (0 = no limit)"
@@ -895,7 +900,11 @@ watch(
 /**
  * Initialize quality items from profile
  */
-const initializeQualitiesFromProfile = (profile: QualityProfile) => {
+// A function declaration, not a const arrow. The watch above runs with `immediate: true`,
+// so it calls this during setup, before a const at this point in the file has been
+// initialised. As an arrow it threw ReferenceError on every mount that had a profile,
+// Vue caught it, and the qualities were silently left empty.
+function initializeQualitiesFromProfile(profile: QualityProfile) {
   // Clear existing
   qualityItems.value = []
   enabledCodecs.value = new Set()
@@ -947,7 +956,7 @@ const initializeQualitiesFromProfile = (profile: QualityProfile) => {
 /**
  * Parse a quality string into structured data
  */
-const parseQualityString = (qualityStr: string): QualityItem | null => {
+function parseQualityString(qualityStr: string): QualityItem | null {
   // FLAC
   if (qualityStr === 'FLAC') {
     return {
