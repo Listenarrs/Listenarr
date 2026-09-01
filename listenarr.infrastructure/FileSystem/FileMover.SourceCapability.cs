@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.FileSystem;
 
@@ -106,9 +107,60 @@ public partial class FileMover : IFilePublicationSourceCapability
                 or InvalidOperationException or NotSupportedException
                 or PathTooLongException or System.Security.SecurityException)
         {
+            // Seven exception types reach here and used to leave through one sentence that named
+            // none of them. A locked file, a permissions problem and an unreadable mount were
+            // indistinguishable afterwards, and this is the gate that refuses the import, so the
+            // one line an operator gets is the only thing they have to go on.
+            var linkedAncestor = FindSymlinkedAncestor(sourcePath);
+            var detail = linkedAncestor == null
+                ? $"{exception.GetType().Name}: {exception.Message}"
+                : $"the path is reached through a symbolic link at '{linkedAncestor}', which cannot be pinned; "
+                  + $"configure the real path instead ({exception.GetType().Name}: {exception.Message})";
+
+            _logger.LogWarning(
+                exception,
+                "Source publication capability unavailable for {Source}: {Detail} (native error {NativeError})",
+                LogRedaction.SanitizeText(sourcePath),
+                detail,
+                (exception as Win32Exception)?.NativeErrorCode ?? 0);
+
             return FilePublicationSourceCapabilityResult.Unsupported(
-                "The source file cannot be pinned to a durable physical generation and content proof.",
+                $"The source file cannot be pinned to a durable physical generation and content proof: {detail}",
                 FilePublicationSourceCapabilityFailureKind.Unavailable);
         }
+    }
+
+    /// <summary>
+    /// The first directory in the path that is a symbolic link, or null if there is none.
+    /// </summary>
+    /// <remarks>
+    /// Refusing a linked ancestor is deliberate and covered by
+    /// CheckPublicationSource_LinkedAncestor_ReturnsUnsupported, so this does not change the
+    /// answer. It only says which segment caused it, because the raw failure is an ENOTDIR from
+    /// openat and gives an operator nothing to act on.
+    /// </remarks>
+    private static string? FindSymlinkedAncestor(string sourcePath)
+    {
+        try
+        {
+            var current = Path.GetDirectoryName(Path.GetFullPath(sourcePath));
+            while (!string.IsNullOrEmpty(current))
+            {
+                if (Directory.Exists(current)
+                    && Directory.ResolveLinkTarget(current, returnFinalTarget: false) != null)
+                {
+                    return current;
+                }
+                current = Path.GetDirectoryName(current);
+            }
+        }
+        catch (Exception exception) when (exception is
+            IOException or UnauthorizedAccessException or NotSupportedException
+                or System.Security.SecurityException)
+        {
+            // Best effort only. The caller still reports the original failure.
+        }
+
+        return null;
     }
 }
