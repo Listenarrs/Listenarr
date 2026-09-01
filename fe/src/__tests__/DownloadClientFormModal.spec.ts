@@ -172,4 +172,67 @@ describe('DownloadClientFormModal', () => {
     expect(calledWith.password).toBe('')
     expect(calledWith.id).toBe('4')
   })
+
+  it('offers only priority values the usenet planners accept', async () => {
+    // The values here have to stay in step with DownloadClientPriorityTests on the backend.
+    // They were not: the form offered default, last and first, none of which match an arm of
+    // the switch in NzbgetRequestPlanner or SabnzbdAddRequestPlanner, so every choice but
+    // Default resolved to normal and the control did nothing.
+    const wrapper = mount(DownloadClientFormModal, {
+      global: { plugins: [createPinia()] },
+      props: { visible: true, editingClient: null },
+    })
+
+    await wrapper.setProps({
+      editingClient: {
+        id: '1',
+        name: 'sab',
+        type: 'sabnzbd',
+        host: 'sabnzbd.local',
+        port: 8080,
+        isEnabled: true,
+        useSSL: false,
+      } as unknown as import('@/types').DownloadClientConfiguration,
+    })
+    await nextTick()
+
+    const options = wrapper
+      .findAll('#recentPriority option')
+      .map((option) => option.attributes('value'))
+
+    expect(options).toEqual(['default', 'low', 'normal', 'high', 'force'])
+    expect(options).not.toContain('first')
+    expect(options).not.toContain('last')
+
+    wrapper.unmount()
+  })
+
+  it('no longer renders the superseded legacy removal checkboxes', async () => {
+    // Remove Completed (Legacy) and Remove Failed (Legacy) had no backend reader at all, and
+    // the Completed Download Action dropdown above them already covers removing and deleting.
+    const wrapper = mount(DownloadClientFormModal, {
+      global: { plugins: [createPinia()] },
+      props: { visible: true, editingClient: null },
+    })
+
+    await wrapper.setProps({
+      editingClient: {
+        id: '1',
+        name: 'sab',
+        type: 'sabnzbd',
+        host: 'sabnzbd.local',
+        port: 8080,
+        isEnabled: true,
+        useSSL: false,
+      } as unknown as import('@/types').DownloadClientConfiguration,
+    })
+    await nextTick()
+
+    expect(wrapper.text()).not.toContain('Remove Completed (Legacy)')
+    expect(wrapper.text()).not.toContain('Remove Failed (Legacy)')
+    // The control: the section that replaced them is still there.
+    expect(wrapper.find('#removeCompletedDownloads').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
 })

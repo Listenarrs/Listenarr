@@ -207,27 +207,26 @@
           </FormSection>
 
           <!-- Priority -->
-          <FormSection title="Priority" :icon="PhSortAscending">
+          <FormSection title="Priority" :icon="PhSortAscending" v-if="isUsenet">
             <div class="form-group">
-              <label for="recentPriority">Recent Priority</label>
+              <label for="recentPriority">Priority</label>
+              <!--
+                These values are the ones the planners actually accept. The list used to offer
+                Default, Last and First, which intersect with nothing the switch statements in
+                NzbgetRequestPlanner and SabnzbdAddRequestPlanner match, so every choice other
+                than Default fell through to normal.
+              -->
               <select id="recentPriority" v-model="formData.recentPriority">
                 <option value="default">Default</option>
-                <option value="last">Last</option>
-                <option value="first">First</option>
+                <option value="low">Low</option>
+                <option value="normal">Normal</option>
+                <option value="high">High</option>
+                <option value="force">Force</option>
               </select>
               <small
-                >Priority to use when grabbing episodes that aired within the last 14 days</small
+                >Priority to give a download when it is sent to the client. Default leaves it to the
+                client's own category setting.</small
               >
-            </div>
-
-            <div class="form-group">
-              <label for="olderPriority">Older Priority</label>
-              <select id="olderPriority" v-model="formData.olderPriority">
-                <option value="default">Default</option>
-                <option value="last">Last</option>
-                <option value="first">First</option>
-              </select>
-              <small>Priority to use when grabbing episodes that aired over 14 days ago</small>
             </div>
           </FormSection>
 
@@ -246,20 +245,6 @@
                 >Action to take after a download is successfully imported. "Remove and Delete" will
                 delete the downloaded files from the download client after import.</small
               >
-            </div>
-
-            <div class="checkbox-group" v-if="isUsenet">
-              <Checkbox v-model="formData.removeCompleted">
-                <strong>Remove Completed (Legacy)</strong>
-                <small>Remove imported downloads from download client history</small>
-              </Checkbox>
-            </div>
-
-            <div class="checkbox-group" v-if="isUsenet">
-              <Checkbox v-model="formData.removeFailed">
-                <strong>Remove Failed (Legacy)</strong>
-                <small>Remove failed downloads from download client history</small>
-              </Checkbox>
             </div>
           </FormSection>
 
@@ -416,9 +401,6 @@ const defaultFormData = {
   category: '',
   tags: '',
   recentPriority: 'default',
-  olderPriority: 'default',
-  removeCompleted: false,
-  removeFailed: false,
   removeCompletedDownloads: 'none',
   initialState: 'default',
   sequentialOrder: false,
@@ -541,9 +523,6 @@ watch(
         category: (settings?.category as string) || '',
         tags: (settings?.tags as string) || '',
         recentPriority: (settings?.recentPriority as string) || 'default',
-        olderPriority: (settings?.olderPriority as string) || 'default',
-        removeCompleted: (settings?.removeCompleted as boolean) || false,
-        removeFailed: (settings?.removeFailed as boolean) || false,
         removeCompletedDownloads:
           newClient.removeCompletedDownloads ||
           (settings?.removeCompletedDownloads as string) ||
@@ -599,9 +578,6 @@ const testConnection = async () => {
         ...(formData.value.category && { category: formData.value.category }),
         ...(formData.value.tags && { tags: formData.value.tags }),
         recentPriority: formData.value.recentPriority,
-        olderPriority: formData.value.olderPriority,
-        removeCompleted: formData.value.removeCompleted,
-        removeFailed: formData.value.removeFailed,
         initialState: formData.value.initialState,
         sequentialOrder: formData.value.sequentialOrder,
         firstAndLastFirst: formData.value.firstAndLastFirst,
@@ -659,9 +635,6 @@ const handleSubmit = async () => {
         ...(formData.value.category && { category: formData.value.category }),
         ...(formData.value.tags && { tags: formData.value.tags }),
         recentPriority: formData.value.recentPriority,
-        olderPriority: formData.value.olderPriority,
-        removeCompleted: formData.value.removeCompleted,
-        removeFailed: formData.value.removeFailed,
         initialState: formData.value.initialState,
         sequentialOrder: formData.value.sequentialOrder,
         firstAndLastFirst: formData.value.firstAndLastFirst,

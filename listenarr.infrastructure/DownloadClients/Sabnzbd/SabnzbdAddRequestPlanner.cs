@@ -65,13 +65,22 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
             if (client.Settings != null &&
                 client.Settings.TryGetValue("recentPriority", out var priorityValue))
             {
-                queryParams["priority"] = priorityValue?.ToString()?.ToLowerInvariant() switch
+                // Default means "leave it to the client", so the parameter is omitted rather than
+                // sent as 0. Sending 0 overrides whatever priority the SABnzbd category carries,
+                // which is not what choosing Default asks for. BuildQueryParams above already
+                // skipped it; this path, the one AddAsync actually uses, did not.
+                var priority = priorityValue?.ToString()?.ToLowerInvariant();
+                if (!string.IsNullOrWhiteSpace(priority) && priority != "default")
                 {
-                    "force" => "2",
-                    "high" => "1",
-                    "low" => "-1",
-                    _ => "0"
-                };
+                    queryParams["priority"] = priority switch
+                    {
+                        "force" => "2",
+                        "high" => "1",
+                        "normal" => "0",
+                        "low" => "-1",
+                        _ => "0"
+                    };
+                }
             }
 
             return queryParams;
