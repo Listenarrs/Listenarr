@@ -17,6 +17,8 @@
  */
 using Microsoft.Extensions.Logging;
 
+using System.Globalization;
+
 namespace Listenarr.Application.Search.Scoring
 {
     public class SearchResultScorer
@@ -89,6 +91,43 @@ namespace Listenarr.Application.Search.Scoring
             // Detect NZB/Usenet more broadly
             var isNzb = IsNzbResult(searchResult);
 
+            // The indexer is read before the size and age gates because all three depend on it.
+            // It also corrects isNzb from the indexer's own type, and that correction used to
+            // happen after the size gate had already run, so a Usenet result recognised only by
+            // its indexer type was size-checked despite the exemption just below.
+            int indexerRetention = 0;
+            int indexerMaximumSizeMb = 0;
+            int indexerMinimumAgeMinutes = 0;
+            if (searchResult.IndexerId.HasValue && _indexerRepository != null)
+            {
+                try
+                {
+                    var idx = await _indexerRepository.GetByIdAsync(searchResult.IndexerId.Value);
+                    if (idx != null)
+                    {
+                        indexerRetention = idx.Retention;
+                        indexerMaximumSizeMb = idx.MaximumSize;
+                        indexerMinimumAgeMinutes = idx.MinimumAge;
+                        if (!isNzb && !string.IsNullOrWhiteSpace(idx.Type) && string.Equals(idx.Type, "Usenet", StringComparison.OrdinalIgnoreCase))
+                        {
+                            isNzb = true;
+                            _logger.LogDebug("Indexer {IndexerId} type '{Type}' detected as Usenet; applying NZB/Usenet exemptions", searchResult.IndexerId.Value, idx.Type);
+                        }
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                {
+                    _logger.LogDebug(ex, "Failed to fetch indexer settings for IndexerId {Id}", searchResult.IndexerId.Value);
+                }
+            }
+
+            if (indexerMaximumSizeMb > 0 && searchResult.Size > (long)indexerMaximumSizeMb * 1024 * 1024)
+            {
+                score.RejectionReasons.Add($"File too large for indexer (> {indexerMaximumSizeMb} MB)");
+                score.TotalScore = -1;
+                return score;
+            }
+
             // Size checks (skip for NZB)
             if (!isNzb && searchResult.Size > 0)
             {
@@ -115,33 +154,35 @@ namespace Listenarr.Application.Search.Scoring
                 return score;
             }
 
-            // Age checks and indexer retention
             double ageDays = 0;
-            int indexerRetention = 0;
-            if (searchResult.IndexerId.HasValue && _indexerRepository != null)
-            {
-                try
-                {
-                    var idx = await _indexerRepository.GetByIdAsync(searchResult.IndexerId.Value);
-                    if (idx != null)
-                    {
-                        indexerRetention = idx.Retention;
-                        if (!isNzb && !string.IsNullOrWhiteSpace(idx.Type) && string.Equals(idx.Type, "Usenet", StringComparison.OrdinalIgnoreCase))
-                        {
-                            isNzb = true;
-                            _logger.LogDebug("Indexer {IndexerId} type '{Type}' detected as Usenet; applying NZB/Usenet exemptions", searchResult.IndexerId.Value, idx.Type);
-                        }
-                    }
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    _logger.LogDebug(ex, "Failed to fetch indexer retention for IndexerId {Id}", searchResult.IndexerId.Value);
-                }
-            }
 
-            if (!string.IsNullOrEmpty(searchResult.PublishedDate) && DateTime.TryParse(searchResult.PublishedDate, out var publishDate))
+            // Parsed to UTC explicitly. A bare TryParse converts a trailing Z to the host's local
+            // time and returns Kind=Local, and this then subtracts it from DateTime.UtcNow, so
+            // every age was out by the server's UTC offset: results looked older west of UTC and
+            // newer east of it. AssumeUniversal covers indexer dates that carry no offset at all.
+            if (!string.IsNullOrEmpty(searchResult.PublishedDate)
+                && DateTime.TryParse(
+                    searchResult.PublishedDate,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal,
+                    out var publishDate))
             {
                 ageDays = (DateTime.UtcNow - publishDate).TotalDays;
+
+                // Usenet only, and the reason is propagation rather than preference: a post that
+                // has not finished propagating downloads as an incomplete or failed grab. Sonarr
+                // and Radarr expose the same per-indexer minimum for the same reason.
+                if (isNzb && indexerMinimumAgeMinutes > 0)
+                {
+                    var ageMinutes = (DateTime.UtcNow - publishDate).TotalMinutes;
+                    if (ageMinutes < indexerMinimumAgeMinutes)
+                    {
+                        score.RejectionReasons.Add($"Too new ({(int)ageMinutes} minutes < indexer minimum age {indexerMinimumAgeMinutes} minutes)");
+                        score.TotalScore = -1;
+                        return score;
+                    }
+                }
+
                 if (isNzb)
                 {
                     if (indexerRetention > 0 && ageDays > indexerRetention)
