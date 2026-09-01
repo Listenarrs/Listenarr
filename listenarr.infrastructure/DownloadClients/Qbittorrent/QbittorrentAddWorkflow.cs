@@ -59,6 +59,34 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
 
             await Task.Delay(1000, ct);
 
+            // Force start cannot be asked for on the add call. Sending forceStart there is
+            // accepted and ignored, so it takes a second request once the torrent exists.
+            // Verified against qBittorrent 5.2.3, Web API 2.15.1.
+            if (addPlan.ForceStart)
+            {
+                try
+                {
+                    using var forceContent = new FormUrlEncodedContent(
+                    [
+                        new KeyValuePair<string, string>("hashes", addPlan.Hash),
+                        new KeyValuePair<string, string>("value", "true")
+                    ]);
+                    using var forceResponse = await httpClient.PostAsync($"{baseUrl}/api/v2/torrents/setForceStart", forceContent, ct);
+                    if (!forceResponse.IsSuccessStatusCode)
+                    {
+                        logger.LogWarning(
+                            "qBittorrent accepted the torrent but refused force start with HTTP {StatusCode}; it will download at normal priority",
+                            (int)forceResponse.StatusCode);
+                    }
+                }
+                catch (HttpRequestException exception)
+                {
+                    // The torrent is already added. Failing the whole submission because an
+                    // optional priority tweak did not apply would lose a download that is fine.
+                    logger.LogWarning(exception, "qBittorrent force start request failed; the torrent was added and will download at normal priority");
+                }
+            }
+
             // qBittorrent can accept a torrent while failing to register private tracker
             // URLs from the file. Keep this explicit fallback in the add workflow so the
             // facade adapter stays thin without hiding this client-specific behavior.
