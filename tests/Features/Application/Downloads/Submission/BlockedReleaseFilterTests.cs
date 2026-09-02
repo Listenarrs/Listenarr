@@ -18,7 +18,7 @@ public sealed class BlockedReleaseFilterTests : BaseTests
     {
         // The loop in #838: the only result is the one that already failed, so a search
         // that cannot tell must grab it again.
-        var identifier = ReleaseIdentity.For("ABCDEF1234567890ABCDEF1234567890ABCDEF12", null)!;
+        var identifier = ReleaseIdentity.For("ABCDEF1234567890ABCDEF1234567890ABCDEF12", null, null, null)!;
         var blocklist = new Mock<IBlocklistService>();
         blocklist.Setup(service => service.GetBlockedIdentifiersAsync(7))
             .ReturnsAsync([identifier]);
@@ -36,7 +36,7 @@ public sealed class BlockedReleaseFilterTests : BaseTests
         // release takes the book out of circulation permanently.
         var blocklist = new Mock<IBlocklistService>();
         blocklist.Setup(service => service.GetBlockedIdentifiersAsync(7))
-            .ReturnsAsync([ReleaseIdentity.For("0000000000000000000000000000000000000000", null)!]);
+            .ReturnsAsync([ReleaseIdentity.For("0000000000000000000000000000000000000000", null, null, null)!]);
 
         var kept = await BlockedReleaseFilter.ExcludeAsync(
             blocklist.Object, 7, [Scored(Magnet)], NullLogger.Instance);
@@ -49,7 +49,7 @@ public sealed class BlockedReleaseFilterTests : BaseTests
     {
         // Indexers hand back different URLs for the same torrent. Keying on the URL alone
         // would let the same release back in on the next search.
-        var identifier = ReleaseIdentity.For("ABCDEF1234567890ABCDEF1234567890ABCDEF12", null)!;
+        var identifier = ReleaseIdentity.For("ABCDEF1234567890ABCDEF1234567890ABCDEF12", null, null, null)!;
         var blocklist = new Mock<IBlocklistService>();
         blocklist.Setup(service => service.GetBlockedIdentifiersAsync(7))
             .ReturnsAsync([identifier]);
@@ -75,6 +75,68 @@ public sealed class BlockedReleaseFilterTests : BaseTests
 
         Assert.Equal(2, kept.Count);
         blocklist.Verify(service => service.GetBlockedIdentifiersAsync(7), Times.Once);
+    }
+
+    [Fact]
+    public async Task ExcludeAsync_DropsAUsenetReleaseWhoseDownloadLinkChangedSinceItWasBlocked()
+    {
+        // The defect this replaced, end to end. A Usenet indexer mints a new download link with a
+        // new token on every grab, so the release blocked after one failure arrived at the next
+        // search with a different URL. Keying on that URL meant the write side and the read side
+        // computed different identities and the filter never matched, which on a live install
+        // produced several hundred grabs of one dead post for a single book over half a day.
+        const string title = "Some Book Unabridged";
+        const long size = 734003200;
+
+        var blockedWhenItFailed = ReleaseIdentity.For(
+            null, "https://indexer.example.com/getnzb?id=abc&apikey=TOKEN1", title, size)!;
+
+        var blocklist = new Mock<IBlocklistService>();
+        blocklist.Setup(service => service.GetBlockedIdentifiersAsync(7))
+            .ReturnsAsync([blockedWhenItFailed]);
+
+        var comesBackWithANewLink = new QualityScore
+        {
+            TotalScore = 90,
+            SearchResult = new SearchResult
+            {
+                Title = title,
+                Size = size,
+                NzbUrl = "https://indexer.example.com/getnzb?id=abc&apikey=TOKEN2"
+            }
+        };
+
+        var kept = await BlockedReleaseFilter.ExcludeAsync(
+            blocklist.Object, 7, [comesBackWithANewLink], NullLogger.Instance);
+
+        Assert.Empty(kept);
+    }
+
+    [Fact]
+    public async Task ExcludeAsync_KeepsAUsenetReleaseOfADifferentSize()
+    {
+        // The other half: blocking one release must not ban every release sharing its title.
+        const string title = "Some Book Unabridged";
+
+        var blocklist = new Mock<IBlocklistService>();
+        blocklist.Setup(service => service.GetBlockedIdentifiersAsync(7))
+            .ReturnsAsync([ReleaseIdentity.For(null, "https://indexer.example.com/a", title, 734003200)!]);
+
+        var different = new QualityScore
+        {
+            TotalScore = 90,
+            SearchResult = new SearchResult
+            {
+                Title = title,
+                Size = 999999999,
+                NzbUrl = "https://indexer.example.com/b"
+            }
+        };
+
+        var kept = await BlockedReleaseFilter.ExcludeAsync(
+            blocklist.Object, 7, [different], NullLogger.Instance);
+
+        Assert.Single(kept);
     }
 
     private static QualityScore Scored(string magnet) => new()
