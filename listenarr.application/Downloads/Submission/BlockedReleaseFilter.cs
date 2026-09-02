@@ -63,7 +63,15 @@ namespace Listenarr.Application.Downloads.Submission
         private static bool IsBlocked(SearchResult result, HashSet<string> blockedSet)
         {
             var releaseUrl = FirstNonEmpty(result.NzbUrl, result.TorrentUrl, result.MagnetLink, result.SourceLink);
-            var identifier = ReleaseIdentity.For(TorrentHashFrom(result.MagnetLink), releaseUrl);
+            // Title and size must be passed here exactly as the blocking side passes them, or the
+            // two compute different identities and nothing ever matches. That is the whole of the
+            // defect this replaced: the identity was derived from a per-fetch URL, so the write
+            // side and the read side agreed on a value that was different every time.
+            var identifier = ReleaseIdentity.For(
+                TorrentHashFrom(result.MagnetLink),
+                releaseUrl,
+                result.Title,
+                result.Size);
             return identifier is not null && blockedSet.Contains(identifier);
         }
 
