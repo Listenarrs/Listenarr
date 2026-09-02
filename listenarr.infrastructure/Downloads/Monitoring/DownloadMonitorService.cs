@@ -398,7 +398,9 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
                 var blocklistService = scope.ServiceProvider.GetRequiredService<IBlocklistService>();
                 var identifier = ReleaseIdentity.For(
                     download.GetMetadataString("TorrentHash"),
-                    download.OriginalUrl);
+                    download.OriginalUrl,
+                    download.Title,
+                    download.TotalSize > 0 ? download.TotalSize : download.ExpectedFileSize);
                 if (identifier is not null)
                 {
                     await blocklistService.BlockAsync(
