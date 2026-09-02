@@ -65,6 +65,8 @@ public sealed class LibraryFilesystemStartupReconciliationServiceTests : BaseTes
                 order.Add("rename");
                 return Task.CompletedTask;
             });
+        var verifiedRename = new StubVerifiedRenameRecoveryService(
+            () => order.Add("verified-rename"));
         var compatibility = new StubCompatibilityRecoveryService(
             () => order.Add("compatibility"));
         var files = new Mock<IAudiobookFileIdentityReconciler>(MockBehavior.Strict);
@@ -83,7 +85,8 @@ public sealed class LibraryFilesystemStartupReconciliationServiceTests : BaseTes
             deletion.Object,
             registration.Object,
             rename.Object,
-            compatibility);
+            compatibility,
+            verifiedRename);
         var readiness = new LibraryFilesystemReadiness();
         var service = new LibraryFilesystemStartupReconciliationService(
             provider.GetRequiredService<IServiceScopeFactory>(),
@@ -111,6 +114,7 @@ public sealed class LibraryFilesystemStartupReconciliationServiceTests : BaseTes
                 "deletion",
                 "registration-recover",
                 "compatibility",
+                "verified-rename",
                 "rename",
                 "files"
             ],
@@ -219,7 +223,8 @@ public sealed class LibraryFilesystemStartupReconciliationServiceTests : BaseTes
         IAudiobookDeletionIntentReconciler? deletion = null,
         IFileRegistrationRecoveryService? registration = null,
         IFileRenameRecoveryReconciler? rename = null,
-        ICompatibilityFilePublicationRecoveryService? compatibility = null) =>
+        ICompatibilityFilePublicationRecoveryService? compatibility = null,
+        IVerifiedFileRenameRecoveryService? verifiedRename = null) =>
         new ServiceCollection()
             .AddScoped(_ => root)
             .AddScoped(_ => relocation)
@@ -233,12 +238,25 @@ public sealed class LibraryFilesystemStartupReconciliationServiceTests : BaseTes
                 service.ReconcileAsync(It.IsAny<CancellationToken>()) == Task.CompletedTask))
             .AddScoped(_ => compatibility
                 ?? new StubCompatibilityRecoveryService())
+            .AddScoped<IVerifiedFileRenameRecoveryService>(_ => verifiedRename
+                ?? new StubVerifiedRenameRecoveryService())
             .AddScoped(_ => files)
             .BuildServiceProvider(new ServiceProviderOptions
             {
                 ValidateScopes = true,
                 ValidateOnBuild = true
             });
+
+    private sealed class StubVerifiedRenameRecoveryService(Action? onRun = null)
+        : IVerifiedFileRenameRecoveryService
+    {
+        public Task ReconcileAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            onRun?.Invoke();
+            return Task.CompletedTask;
+        }
+    }
 
     private sealed class StubCompatibilityRecoveryService(Action? onRun = null)
         : ICompatibilityFilePublicationRecoveryService

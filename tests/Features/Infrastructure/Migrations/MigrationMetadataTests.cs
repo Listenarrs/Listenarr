@@ -33,6 +33,13 @@ public class MigrationMetadataTests
     }
 
     [Fact]
+    public void AddVerifiedFileRenameJournalMigration_IsDiscoverableByEf()
+    {
+        AssertMigrationId<AddVerifiedFileRenameJournal>(
+            "20260901142347_AddVerifiedFileRenameJournal");
+    }
+
+    [Fact]
     public void AddImportBlacklistExtensionsMigration_IsDiscoverableByEf()
     {
         AssertMigrationId<AddImportBlacklistExtensionsToApplicationSettings>(

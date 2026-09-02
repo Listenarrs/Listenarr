@@ -40,6 +40,8 @@ namespace Listenarr.Application.Audiobooks.Renaming
         private readonly IMoveQueueService _moveQueueService;
         private readonly ILibraryDirectoryOwnershipStore _directoryOwnershipStore;
         private readonly IFileRenameCommitStore _fileRenameCommitStore;
+        private readonly IFilePublicationSourceCapability _filePublicationSourceCapability;
+        private readonly IVerifiedFileRenameTransactionCoordinator _verifiedFileRenameTransactionCoordinator;
 
         public RenameService(
             IConfigurationService configService,
@@ -56,6 +58,8 @@ namespace Listenarr.Application.Audiobooks.Renaming
             IMoveQueueService moveQueueService,
             ILibraryDirectoryOwnershipStore directoryOwnershipStore,
             IFileRenameCommitStore fileRenameCommitStore,
+            IFilePublicationSourceCapability filePublicationSourceCapability,
+            IVerifiedFileRenameTransactionCoordinator verifiedFileRenameTransactionCoordinator,
             IRootFolderService? rootFolderService = null,
             IHistoryRepository? historyRepository = null)
         {
@@ -75,6 +79,8 @@ namespace Listenarr.Application.Audiobooks.Renaming
             _moveQueueService = moveQueueService ?? throw new ArgumentNullException(nameof(moveQueueService));
             _directoryOwnershipStore = directoryOwnershipStore ?? throw new ArgumentNullException(nameof(directoryOwnershipStore));
             _fileRenameCommitStore = fileRenameCommitStore ?? throw new ArgumentNullException(nameof(fileRenameCommitStore));
+            _filePublicationSourceCapability = filePublicationSourceCapability ?? throw new ArgumentNullException(nameof(filePublicationSourceCapability));
+            _verifiedFileRenameTransactionCoordinator = verifiedFileRenameTransactionCoordinator ?? throw new ArgumentNullException(nameof(verifiedFileRenameTransactionCoordinator));
         }
 
         public async Task<List<RenamePreview>> PreviewRenameAsync(int[] audiobookIds, CancellationToken ct = default)
@@ -265,6 +271,23 @@ namespace Listenarr.Application.Audiobooks.Renaming
                     return validationFailure;
                 }
 
+                var executionPlanning = await BuildRenameExecutionPlanAsync(
+                    audiobook,
+                    operation,
+                    semantics,
+                    ct);
+                if (executionPlanning.Plan == null)
+                {
+                    return new RenameResult
+                    {
+                        AudiobookId = audiobook.Id,
+                        Success = false,
+                        Error = executionPlanning.Error
+                            ?? "The organize source cannot be verified safely."
+                    };
+                }
+                var executionPlan = executionPlanning.Plan;
+
                 // Honor cancellation through complete preflight. Once filesystem mutation
                 // can begin, complete or roll back to a stable persisted state.
                 var mutationToken = RequestCancellationBoundary.EnterNonCancelablePhase(ct);
@@ -277,6 +300,7 @@ namespace Listenarr.Application.Audiobooks.Renaming
                         fileOperation,
                         allowedRoots,
                         semantics,
+                        executionPlan,
                         mutationToken);
                     result.RenamedFiles.Add(fileResult);
                     if (!fileResult.Success)
@@ -365,6 +389,16 @@ namespace Listenarr.Application.Audiobooks.Renaming
                         result.Error = rollbackSucceeded
                             ? "The organize operation was rolled back because its database update failed."
                             : "The organize operation partially completed and its actual filesystem state could not be fully persisted.";
+                        return result;
+                    }
+
+                    if (!await CompleteVerifiedRenameSourceRetirementAsync(
+                            result.RenamedFiles,
+                            CancellationToken.None))
+                    {
+                        result.Success = false;
+                        result.Error =
+                            "The organize operation committed its path metadata, but a verified destination changed during source retirement and requires repair.";
                         return result;
                     }
 

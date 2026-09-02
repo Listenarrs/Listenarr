@@ -16,7 +16,7 @@ public sealed class FileRenameRecoveryProbe(
         }
 
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        return await db.FileMutationJournals
+        if (await db.FileMutationJournals
             .AsNoTracking()
             .AnyAsync(journal =>
                 journal.AudiobookId == audiobookId
@@ -26,6 +26,18 @@ public sealed class FileRenameRecoveryProbe(
                         == FileMutationOwner.RegistrationCompanionFile
                     ? journal.State != FileMutationJournalState.Completed
                     : journal.State != FileMutationJournalState.OwnerMetadataReconciled),
+                cancellationToken))
+        {
+            return true;
+        }
+
+        return await db.VerifiedFileRenameJournals
+            .AsNoTracking()
+            .AnyAsync(journal =>
+                journal.AudiobookId == audiobookId
+                && journal.State != VerifiedFileRenameState.Completed
+                && journal.State != VerifiedFileRenameState.CompletedSourceRetained
+                && journal.State != VerifiedFileRenameState.RolledBack,
                 cancellationToken);
     }
 }
