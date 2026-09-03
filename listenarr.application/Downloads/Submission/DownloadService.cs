@@ -386,7 +386,6 @@ namespace Listenarr.Application.Downloads.Submission
                 }
             }
 
-            var settings = await configurationService.GetApplicationSettingsAsync();
             var notificationData = await DownloadNotificationPayloadBuilder.BuildBookDownloadingPayloadAsync(
                 audiobookRepository,
                 audiobookId,
@@ -394,7 +393,7 @@ namespace Listenarr.Application.Downloads.Submission
                 ToSearchResult(candidate, prepared),
                 downloadClient);
 
-            await notificationService.SendNotificationAsync("book-downloading", notificationData, settings.WebhookUrl, settings.EnabledNotificationTriggers);
+            await notificationService.SendNotificationAsync(NotificationTriggers.BookDownloading, notificationData);
 
             // Trigger an immediate realtime queue update so the UI shows the new download right away
             // Add a small delay to allow the download client to process and index the new download
