@@ -28,6 +28,24 @@ namespace Listenarr.Application.Downloads.Submission
             string downloadClientId,
             int? audiobookId)
         {
+            var metadata = new Dictionary<string, object>
+            {
+                ["Source"] = candidate.Source,
+                ["Seeders"] = candidate.Seeders ?? 0,
+                ["Quality"] = candidate.Quality ?? string.Empty,
+                ["Language"] = candidate.Language ?? string.Empty,
+                ["DownloadType"] = submission.Protocol.ToString()
+            };
+
+            // Stamp the blocklist key the search result was grabbed under, so the failure path can
+            // read it back instead of deriving one of its own from fields that have moved since.
+            // TotalSize below is overwritten from the download client's queue snapshot, which is
+            // how the write side and the read side ended up hashing different numbers.
+            if (!string.IsNullOrWhiteSpace(candidate.ReleaseIdentifier))
+            {
+                metadata[ReleaseIdentity.MetadataKey] = candidate.ReleaseIdentifier;
+            }
+
             return new Download
             {
                 Id = downloadId,
@@ -39,19 +57,16 @@ namespace Listenarr.Application.Downloads.Submission
                 OriginalUrl = submission.OriginalLocator,
                 Progress = 0,
                 TotalSize = candidate.Size,
+                // The size as advertised, kept apart from TotalSize because TotalSize does not
+                // survive the first queue poll. ReleaseIdentity.ForGrabbed falls back to this for
+                // downloads created before the stamp above existed.
+                ExpectedFileSize = candidate.Size,
                 DownloadedSize = 0,
                 DownloadPath = downloadClient.DownloadPath ?? string.Empty,
                 FinalPath = string.Empty,
                 StartedAt = DateTime.UtcNow,
                 DownloadClientId = downloadClientId,
-                Metadata = new Dictionary<string, object>
-                {
-                    ["Source"] = candidate.Source,
-                    ["Seeders"] = candidate.Seeders ?? 0,
-                    ["Quality"] = candidate.Quality ?? string.Empty,
-                    ["Language"] = candidate.Language ?? string.Empty,
-                    ["DownloadType"] = submission.Protocol.ToString()
-                }
+                Metadata = metadata
             };
         }
     }
