@@ -24,7 +24,7 @@ namespace Listenarr.Application.Downloads.Submission
     /// "no acceptable search results" answer, which is a terminal state the pipeline
     /// already has, rather than a new error.
     /// </summary>
-    internal static class BlockedReleaseFilter
+    public static class BlockedReleaseFilter
     {
         public static async Task<List<QualityScore>> ExcludeAsync(
             IBlocklistService blocklistService,
