@@ -75,7 +75,13 @@ public static class TrustedDownloadCandidateFactory
                 result.IndexerImplementation,
                 protocol,
                 locators,
-                result.TorrentFileName));
+                result.TorrentFileName),
+            // The one and only point at which a release identity is worked out. The search result
+            // is in hand here and is still exactly what the indexer advertised; a minute later the
+            // download record's size has been overwritten from the download client's queue
+            // snapshot and its URL has been re-minted with a fresh token, so anything deriving a
+            // key from the download instead would derive a different one.
+            ReleaseIdentity.For(result));
     }
 
     private static DownloadProtocol ResolveProtocol(SearchResult result)

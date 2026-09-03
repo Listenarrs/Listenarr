@@ -10,7 +10,6 @@
 
 using Listenarr.Application.Downloads.Contracts;
 using Listenarr.Domain.Downloads;
-using Listenarr.Domain.Audiobooks;
 using Listenarr.Domain.Search;
 using Microsoft.Extensions.Logging;
 
@@ -62,43 +61,12 @@ namespace Listenarr.Application.Downloads.Submission
 
         private static bool IsBlocked(SearchResult result, HashSet<string> blockedSet)
         {
-            var releaseUrl = FirstNonEmpty(result.NzbUrl, result.TorrentUrl, result.MagnetLink, result.SourceLink);
-            // Title and size must be passed here exactly as the blocking side passes them, or the
-            // two compute different identities and nothing ever matches. That is the whole of the
-            // defect this replaced: the identity was derived from a per-fetch URL, so the write
-            // side and the read side agreed on a value that was different every time.
-            var identifier = ReleaseIdentity.For(
-                TorrentHashFrom(result.MagnetLink),
-                releaseUrl,
-                result.Title,
-                result.Size);
+            // Deliberately no field-picking here. ReleaseIdentity owns which parts of a search
+            // result make up the key, and the grab side asks it the same question about the same
+            // object, so the two cannot answer differently. Every defect this feature has had so
+            // far came from two sides picking fields for themselves.
+            var identifier = ReleaseIdentity.For(result);
             return identifier is not null && blockedSet.Contains(identifier);
-        }
-
-        private static string? FirstNonEmpty(params string?[] candidates)
-            => candidates.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
-
-        /// <summary>
-        /// Pull the info-hash out of a magnet so a torrent is recognised as the same release
-        /// even when the indexer hands back a different URL for it than last time.
-        /// </summary>
-        private static string? TorrentHashFrom(string? magnetLink)
-        {
-            if (string.IsNullOrWhiteSpace(magnetLink))
-            {
-                return null;
-            }
-
-            const string marker = "xt=urn:btih:";
-            var index = magnetLink.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-            if (index < 0)
-            {
-                return null;
-            }
-
-            var rest = magnetLink[(index + marker.Length)..];
-            var end = rest.IndexOf('&');
-            return end < 0 ? rest : rest[..end];
         }
     }
 }
