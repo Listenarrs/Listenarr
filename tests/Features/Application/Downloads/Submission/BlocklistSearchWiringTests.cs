@@ -86,4 +86,41 @@ public sealed class BlocklistSearchWiringTests : BaseTests
             await _downloadRepository.GetAllAsync(),
             download => download.AudiobookId == audiobook.Id);
     }
+
+    [Fact]
+    [Trait("Scenario", "Every path that grabs a release consults the blocklist")]
+    public void EveryGrabPath_ConsultsTheBlocklist()
+    {
+        // The test above only covers SearchAndDownloadAsync. That is one of two paths that actually
+        // grab, and the blocklist was wired into it alone: AutomaticSearchService scores results and
+        // calls StartDownloadAsync directly, so a release could fail, be blocked, and be grabbed
+        // again by the next automatic pass a minute later. A live install looped for hours that way
+        // while every unit test here passed.
+        //
+        // This asserts the invariant rather than one instance of it: a production file that starts a
+        // download has to consult the blocklist somewhere in the same file.
+        var root = TestUtils.FindRepositoryRoot();
+        var projects = new[] { "listenarr.application", "listenarr.infrastructure", "listenarr.api" };
+
+        var offenders = projects
+            .SelectMany(project => Directory.EnumerateFiles(
+                Path.Join(root, project), "*.cs", SearchOption.AllDirectories))
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
+                        && !file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
+            .Select(file => new { File = file, Text = File.ReadAllText(file) })
+            // The call, not the declaration: a file that only defines StartDownloadAsync is not a
+            // grab path.
+            .Where(entry => entry.Text.Contains("await downloadService.StartDownloadAsync(", StringComparison.Ordinal)
+                         || entry.Text.Contains("await _downloadService.StartDownloadAsync(", StringComparison.Ordinal))
+            .Where(entry => !entry.Text.Contains("BlockedReleaseFilter", StringComparison.Ordinal)
+                         && !entry.Text.Contains("IBlocklistService", StringComparison.Ordinal))
+            .Select(entry => Path.GetRelativePath(root, entry.File))
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.True(
+            offenders.Length == 0,
+            "These start a download without consulting the blocklist:" + Environment.NewLine
+                + string.Join(Environment.NewLine, offenders));
+    }
 }
