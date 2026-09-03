@@ -396,18 +396,22 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
             if (download.AudiobookId.HasValue)
             {
                 var blocklistService = scope.ServiceProvider.GetRequiredService<IBlocklistService>();
-                var identifier = ReleaseIdentity.For(
-                    download.GetMetadataString("TorrentHash"),
-                    download.OriginalUrl,
-                    download.Title,
-                    download.TotalSize > 0 ? download.TotalSize : download.ExpectedFileSize);
+                // Read back the identity stamped on the download when it was grabbed. This method
+                // must not work one out for itself: by the time a download fails, its TotalSize
+                // has been overwritten from the client's queue snapshot and its OriginalUrl may be
+                // a spent per-fetch link, so anything derived here disagrees with what the search
+                // side derives from the indexer's listing and the row never matches. A live
+                // install wrote one correctly formatted row after the first failure and then
+                // grabbed the identical release more than a hundred times over the next eleven
+                // hours.
+                var identifier = ReleaseIdentity.ForGrabbed(download);
                 if (identifier is not null)
                 {
                     await blocklistService.BlockAsync(
                         download.AudiobookId.Value,
                         identifier,
                         download.Title ?? "Unknown",
-                        download.TotalSize > 0 ? download.TotalSize : download.ExpectedFileSize,
+                        download.ExpectedFileSize ?? (download.TotalSize > 0 ? download.TotalSize : null),
                         errorMessage);
                 }
             }

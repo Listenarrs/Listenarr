@@ -275,7 +275,7 @@ namespace Listenarr.Application.Downloads.Submission
             if (prepared is PreparedDirectDownloadSubmission directDownload)
             {
                 logger.LogInformation("Processing trusted direct download for: {Title}", candidate.Title);
-                return await directDownloadWorkflow.CreateTrackedDownloadAsync(directDownload, audiobookId);
+                return await directDownloadWorkflow.CreateTrackedDownloadAsync(directDownload, audiobookId, candidate.ReleaseIdentifier);
             }
 
             var isTorrent = prepared.Protocol == DownloadProtocol.Torrent;
