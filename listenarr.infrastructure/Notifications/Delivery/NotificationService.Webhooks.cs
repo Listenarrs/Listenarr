@@ -17,7 +17,7 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
         /// </summary>
         public async Task SendNotificationAsync(string trigger, object data, string webhookUrl, List<string> enabledTriggers)
         {
-            if (string.IsNullOrWhiteSpace(webhookUrl) || enabledTriggers == null || !enabledTriggers.Contains(trigger))
+            if (string.IsNullOrWhiteSpace(webhookUrl) || !NotificationTriggers.IsEnabled(enabledTriggers, trigger))
                 return;
             var allowPrivateWebhookTargets = AllowPrivateWebhookTargetsForCurrentRequest();
             if (!NotificationDiagnostics.TryValidateWebhookTarget(webhookUrl, out var validationReason, allowPrivateWebhookTargets))

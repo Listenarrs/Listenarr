@@ -172,27 +172,18 @@ internal partial class MoveJobProcessor
         try
         {
             using var scope = scopeFactory.CreateScope();
-            var configurationService = scope.ServiceProvider
-                .GetRequiredService<IConfigurationService>();
             var notificationService = scope.ServiceProvider
                 .GetRequiredService<INotificationService>();
-            var webhooks = await configurationService.GetWebhookConfigurationsAsync();
-            foreach (var webhook in webhooks.Where(webhook =>
-                webhook.IsEnabled && webhook.Triggers.Contains("Moved")))
-            {
-                await notificationService.SendNotificationAsync(
-                    "Moved",
-                    new
-                    {
-                        context.AudiobookTitle,
-                        Source = context.Source,
-                        Target = context.Target,
-                        context.SourceRetained,
-                        Timestamp = timeProvider.GetUtcNow().UtcDateTime
-                    },
-                    webhook.Url,
-                    webhook.Triggers);
-            }
+            await notificationService.SendNotificationAsync(
+                NotificationTriggers.LibraryMoved,
+                new
+                {
+                    context.AudiobookTitle,
+                    Source = context.Source,
+                    Target = context.Target,
+                    context.SourceRetained,
+                    Timestamp = timeProvider.GetUtcNow().UtcDateTime
+                });
 
             return true;
         }
