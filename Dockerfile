@@ -62,4 +62,11 @@ COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN sh /tmp/listenarr-runtime/prepare-entrypoint.sh \
 	&& rm -rf /tmp/listenarr-runtime
 
+# Report container health from the application's own readiness probe. The runtime
+# image ships no HTTP client - curl and gnupg are purged after the Discord bot
+# install and wget was never present - so the request is issued with the node
+# binary that the bot runtime already puts in the image.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
+	CMD ["node", "-e", "require('http').get('http://127.0.0.1:4545/api/v1/system/ready', res => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+
 ENTRYPOINT ["/docker-entrypoint.sh"]
