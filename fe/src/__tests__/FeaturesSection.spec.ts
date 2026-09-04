@@ -33,6 +33,7 @@ describe('FeaturesSection', () => {
           enableCoverArtDownload: false,
           enableNotifications: false,
           showCompletedExternalDownloads: false,
+          metadataAutoBackfillEnabled: false,
         },
       },
       global: { components: { Checkbox } },
@@ -48,5 +49,13 @@ describe('FeaturesSection', () => {
     last =
       wrapper.emitted()['update:settings']![wrapper.emitted()['update:settings']!.length - 1][0]
     expect(last.enableCoverArtDownload).toBe(true)
+
+    // Automatic metadata backfill is the last card; it is off by default and
+    // toggles independently of the other feature flags.
+    await checks[4].setValue(true)
+    last =
+      wrapper.emitted()['update:settings']![wrapper.emitted()['update:settings']!.length - 1][0]
+    expect(last.metadataAutoBackfillEnabled).toBe(true)
+    expect(last.enableNotifications).toBe(false)
   })
 })

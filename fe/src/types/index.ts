@@ -443,6 +443,9 @@ export interface ApplicationSettings {
   completedFileAction?: 'none' | 'move' | 'copy' | 'hardlink/copy'
   // Show completed external downloads (torrents/NZBs) in the Activity view
   showCompletedExternalDownloads?: boolean
+  // Background "fill missing from online": look up books that hold files but lack
+  // core metadata by their own ASIN/ISBN and fill only the blank fields.
+  metadataAutoBackfillEnabled?: boolean
   // Failed download handling
   failedDownloadHandlingEnabled?: boolean
   failedDownloadAutoSearch?: boolean
