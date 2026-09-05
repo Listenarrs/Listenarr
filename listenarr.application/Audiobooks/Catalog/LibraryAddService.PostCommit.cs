@@ -73,7 +73,6 @@ public partial class LibraryAddService
             return;
         }
 
-        var settings = await _configurationService.GetApplicationSettingsAsync();
         var data = new
         {
             id = audiobook.Id,
@@ -88,10 +87,8 @@ public partial class LibraryAddService
         };
 
         await _notificationService.SendNotificationAsync(
-            "book-added",
-            data,
-            settings.WebhookUrl,
-            settings.EnabledNotificationTriggers);
+            NotificationTriggers.BookAdded,
+            data);
     }
 
     private static History CreateHistoryEntry(

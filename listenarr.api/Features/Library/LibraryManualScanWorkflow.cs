@@ -249,10 +249,6 @@ namespace Listenarr.Api.Features.Library
 
             try
             {
-                using var notificationScope = _scopeFactory.CreateScope();
-                var configService = notificationScope.ServiceProvider
-                    .GetRequiredService<IConfigurationService>();
-                var settings = await configService.GetApplicationSettingsAsync();
                 var availableData = new
                 {
                     id = audiobook.Id,
@@ -267,10 +263,8 @@ namespace Listenarr.Api.Features.Library
                     totalFiles = updated?.Files?.Count ?? 0
                 };
                 await _notificationService.SendNotificationAsync(
-                    "book-available",
-                    availableData,
-                    settings.WebhookUrl,
-                    settings.EnabledNotificationTriggers);
+                    NotificationTriggers.BookAvailable,
+                    availableData);
             }
             catch (Exception exception) when (exception is not OperationCanceledException
                 && exception is not OutOfMemoryException

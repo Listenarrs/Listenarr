@@ -20,15 +20,13 @@ public partial class ScanJobProcessor
         {
             using var scope = _scopeFactory.CreateScope();
             var notificationService = scope.ServiceProvider.GetService<NotificationService>();
-            var configurationService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
-            var settings = await configurationService.GetApplicationSettingsAsync();
             if (notificationService == null)
             {
                 return;
             }
 
             await notificationService.SendNotificationAsync(
-                "book-available",
+                NotificationTriggers.BookAvailable,
                 new
                 {
                     id = audiobook.Id,
@@ -41,9 +39,7 @@ public partial class ScanJobProcessor
                     qualityProfileId = audiobook.QualityProfileId,
                     filesImported = createdFiles,
                     totalFiles = 0
-                },
-                settings.WebhookUrl,
-                settings.EnabledNotificationTriggers);
+                });
         }
         catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
         {

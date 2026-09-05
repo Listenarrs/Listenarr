@@ -516,9 +516,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             notifications
                 .Setup(service => service.SendNotificationAsync(
                     It.IsAny<string>(),
-                    It.IsAny<object>(),
-                    It.IsAny<string>(),
-                    It.IsAny<List<string>>()))
+                    It.IsAny<object>()))
                 .ThrowsAsync(new HttpRequestException("webhook unavailable"));
             await ReinitializeAsync(builder =>
                 builder.WithSingleton<INotificationService>(notifications.Object));
@@ -541,10 +539,8 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             Assert.Equal(audiobook.Id, history.AudiobookId);
             notifications.Verify(
                 service => service.SendNotificationAsync(
-                    "book-added",
-                    It.IsAny<object>(),
-                    It.IsAny<string>(),
-                    It.IsAny<List<string>>()),
+                    NotificationTriggers.BookAdded,
+                    It.IsAny<object>()),
                 Times.Once);
         }
 
@@ -1061,7 +1057,13 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 .ThrowsAsync(new InvalidOperationException("Injected notification settings outage."));
             await ReinitializeAsync(builder => builder
                 .WithSingleton<IConfigurationService>(configurationService.Object));
+            // The notification service reads the settings it needs, so the outage surfaces there.
             var notificationService = new Mock<INotificationService>(MockBehavior.Strict);
+            notificationService
+                .Setup(service => service.SendNotificationAsync(
+                    NotificationTriggers.BookAdded,
+                    It.IsAny<object>()))
+                .ThrowsAsync(new InvalidOperationException("Injected notification settings outage."));
             var workflow = new LibraryAddWorkflow(
                 _provider.GetRequiredService<IAudiobookRepository>(),
                 _provider.GetRequiredService<IImageCacheService>(),
@@ -1092,6 +1094,11 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             Assert.IsType<OkObjectResult>(result);
             var audiobook = Assert.Single(await _audiobookRepository.GetAllAsync());
             Assert.Single(await _historyRepository.GetByAudiobookIdAsync(audiobook.Id));
+            notificationService.Verify(
+                service => service.SendNotificationAsync(
+                    NotificationTriggers.BookAdded,
+                    It.IsAny<object>()),
+                Times.Once);
             notificationService.VerifyNoOtherCalls();
         }
 

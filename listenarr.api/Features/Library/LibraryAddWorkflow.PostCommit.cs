@@ -11,9 +11,6 @@ namespace Listenarr.Api.Features.Library
 
             try
             {
-                using var scope = _scopeFactory.CreateScope();
-                var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
-                var settings = await configService.GetApplicationSettingsAsync();
                 var data = new
                 {
                     id = audiobook.Id,
@@ -27,10 +24,8 @@ namespace Listenarr.Api.Features.Library
                     imageUrl = audiobook.ImageUrl
                 };
                 await _notificationService.SendNotificationAsync(
-                    "book-added",
-                    data,
-                    settings.WebhookUrl,
-                    settings.EnabledNotificationTriggers);
+                    NotificationTriggers.BookAdded,
+                    data);
             }
             catch (Exception ex) when (ex is not OperationCanceledException
                 && ex is not OutOfMemoryException
