@@ -26,6 +26,7 @@ const advancedSearch = vi.fn()
 const scanUnmatchedFiles = vi.fn()
 const getUnmatchedResults = vi.fn()
 const getSavedUnmatchedFiles = vi.fn()
+const getAudibleMetadata = vi.fn()
 let unmatchedScanHandler:
   | ((payload: { jobId: string; error?: string }) => void | Promise<void>)
   | null = null
@@ -36,7 +37,7 @@ vi.mock('@/services/api', () => ({
     updateAudiobook,
     startManualImport,
     advancedSearch,
-    getAudibleMetadata: vi.fn(),
+    getAudibleMetadata,
     scanUnmatchedFiles,
     getUnmatchedResults,
     getSavedUnmatchedFiles,
@@ -515,5 +516,118 @@ describe('library import store', () => {
         sortOrder: 0,
       },
     ])
+  })
+
+  it('takes the series memberships of the enriched product over the search match', async () => {
+    const { useLibraryImportStore } = await import('@/stores/libraryImport')
+    const store = useLibraryImportStore()
+
+    // The search match knows one series; the product lookup knows the book is in two.
+    getAudibleMetadata.mockResolvedValue({
+      source: 'Audible',
+      metadata: {
+        authors: [{ name: 'Author' }],
+        series: [
+          { asin: 'B01E633FQM', name: 'First Series', position: '0' },
+          { asin: 'B01F5TL5K4', name: 'Second Series', position: '7' },
+        ],
+      },
+    })
+
+    store.items = {
+      '/incoming/Enriched/Book.m4b': {
+        id: '/incoming/Enriched/Book.m4b',
+        fullPath: '/incoming/Enriched/Book.m4b',
+        sourceFiles: ['/incoming/Enriched/Book.m4b'],
+        folderPath: '/incoming/Enriched',
+        relativePath: 'Enriched',
+        folderName: 'Enriched',
+        format: 'M4B',
+        fileCount: 1,
+        selectedMatch: {
+          asin: 'B000000001',
+          title: 'Enriched Book',
+          authors: [],
+          series: [{ asin: 'B01E633FQM', name: 'First Series', position: '0' }],
+        } as unknown as SearchResult,
+        hasSearched: true,
+        isSearching: false,
+        selected: true,
+      },
+    }
+    store.action = 'none'
+
+    await store.importSelected('')
+
+    const metadata = addToLibrary.mock.calls[0][0]
+    expect(metadata.seriesMemberships).toEqual([
+      {
+        seriesName: 'First Series',
+        seriesNumber: '0',
+        seriesAsin: 'B01E633FQM',
+        isPrimary: true,
+        sortOrder: 0,
+      },
+      {
+        seriesName: 'Second Series',
+        seriesNumber: '7',
+        seriesAsin: 'B01F5TL5K4',
+        isPrimary: false,
+        sortOrder: 1,
+      },
+    ])
+    // The legacy scalars agree with the primary membership rather than the older match.
+    expect(metadata.series).toBe('First Series')
+    expect(metadata.seriesNumber).toBe('0')
+    expect(metadata.seriesAsin).toBe('B01E633FQM')
+  })
+
+  it('keeps the match series when the enriched product reports none', async () => {
+    const { useLibraryImportStore } = await import('@/stores/libraryImport')
+    const store = useLibraryImportStore()
+
+    getAudibleMetadata.mockResolvedValue({
+      source: 'Audible',
+      metadata: {
+        authors: [{ name: 'Author' }],
+      },
+    })
+
+    store.items = {
+      '/incoming/Enriched/Book.m4b': {
+        id: '/incoming/Enriched/Book.m4b',
+        fullPath: '/incoming/Enriched/Book.m4b',
+        sourceFiles: ['/incoming/Enriched/Book.m4b'],
+        folderPath: '/incoming/Enriched',
+        relativePath: 'Enriched',
+        folderName: 'Enriched',
+        format: 'M4B',
+        fileCount: 1,
+        selectedMatch: {
+          asin: 'B000000001',
+          title: 'Enriched Book',
+          authors: [],
+          series: [{ asin: 'B01E633FQM', name: 'First Series', position: '0' }],
+        } as unknown as SearchResult,
+        hasSearched: true,
+        isSearching: false,
+        selected: true,
+      },
+    }
+    store.action = 'none'
+
+    await store.importSelected('')
+
+    const metadata = addToLibrary.mock.calls[0][0]
+    expect(metadata.seriesMemberships).toEqual([
+      {
+        seriesName: 'First Series',
+        seriesNumber: '0',
+        seriesAsin: 'B01E633FQM',
+        isPrimary: true,
+        sortOrder: 0,
+      },
+    ])
+    expect(metadata.series).toBe('First Series')
   })
 })
