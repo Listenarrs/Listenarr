@@ -138,7 +138,8 @@ namespace Listenarr.Api.Features.Library
                 audiobook,
                 metadata.SeriesMemberships,
                 metadata.Series,
-                AudibleBookMetadata.ToStringOrFirst(metadata.SeriesNumber));
+                AudibleBookMetadata.ToStringOrFirst(metadata.SeriesNumber),
+                metadata.SeriesAsin);
 
             AudiobookIdentifierMapper.SyncImportedIdentifiersFromLegacyFields(audiobook);
 
