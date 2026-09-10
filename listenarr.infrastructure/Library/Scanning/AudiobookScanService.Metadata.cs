@@ -65,8 +65,15 @@ internal sealed partial class AudiobookScanService
                     pinnedAuthority,
                     discovery,
                     candidate);
+                // The lease deliberately separates stable byte access from public media
+                // identity, and the single-path overload collapses the two. On Linux the
+                // metadata path is a /proc descriptor link with no extension, so collapsing
+                // it makes the probe's audio-extension guard reject the candidate before
+                // ffprobe runs.
                 var metadata = await metadataService.ExtractFileMetadataAsync(
-                    pinnedMetadataFile.MetadataPath);
+                    new MetadataFileSource(
+                        pinnedMetadataFile.MetadataPath,
+                        candidate));
                 if (metadata != null
                     && ScanFileDiscovery.MetadataMatchesAudiobook(metadata, audiobook))
                 {

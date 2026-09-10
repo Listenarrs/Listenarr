@@ -141,11 +141,14 @@ public sealed class AudiobookScanServiceTests : BaseTests
             "unrelated.m4b",
             "Original Book");
         var displaced = Path.Join(root, "original-generation.bin");
+        var observedSources = new List<MetadataFileSource>();
         var metadata = new Mock<IMetadataService>(MockBehavior.Strict);
         metadata.Setup(service => service.ExtractFileMetadataAsync(
-                It.IsAny<string>()))
-            .Returns<string>(async extractionPath =>
+                It.IsAny<MetadataFileSource>()))
+            .Returns<MetadataFileSource>(async fileSource =>
             {
+                observedSources.Add(fileSource);
+                var extractionPath = fileSource.ReadPath;
                 var displacedOriginal = false;
                 try
                 {
@@ -190,8 +193,17 @@ public sealed class AudiobookScanServiceTests : BaseTests
             await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id));
         Assert.Equal("Original Book", await File.ReadAllTextAsync(candidate));
         metadata.Verify(
-            service => service.ExtractFileMetadataAsync(It.IsAny<string>()),
+            service => service.ExtractFileMetadataAsync(It.IsAny<MetadataFileSource>()),
             Times.Once);
+
+        // The two halves of the source do different jobs and both matter here. ReadPath is the
+        // pinned generation, which is what the assertions above prove was read even while the
+        // visible file was swapped. PublicPath is the file as a person sees it, and it has to
+        // keep its real name: on Linux ReadPath is a /proc descriptor link with no extension,
+        // so anything deriving identity from it loses the extension entirely.
+        var observed = Assert.Single(observedSources);
+        Assert.Equal(candidate, observed.PublicPath);
+        Assert.Equal(".m4b", Path.GetExtension(observed.PublicPath));
     }
 
     [Fact]
