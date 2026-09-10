@@ -188,6 +188,55 @@
   />
 </template>
 
+<script lang="ts">
+import { buildSeriesFields } from '@/utils/seriesUtils'
+import type { SeriesEntry } from '@/utils/seriesUtils'
+import type { UnmatchedFileItem, AudibleBookMetadata } from '@/types'
+
+// Minimal Audible response shape - only what we need for adding
+export interface AudiblePayload {
+  asin?: string
+  title?: string
+  subtitle?: string
+  publishDate?: string
+  releaseDate?: string
+  authors?: { name?: string }[]
+  narrators?: { name?: string }[]
+  series?: SeriesEntry[]
+  description?: string
+  imageUrl?: string
+  lengthMinutes?: number
+  language?: string
+  genres?: { name?: string }[]
+}
+
+/** Exported so the mapping can be tested without driving the bulk-add flow. */
+export function mapToAudible(
+  meta: AudiblePayload,
+  fallback: UnmatchedFileItem,
+): AudibleBookMetadata {
+  const year = (meta.publishDate || meta.releaseDate || '').split(/[-/]/)[0] || fallback.year
+  const seriesFields = buildSeriesFields(meta.series)
+  return {
+    asin: meta.asin || fallback.asin || '',
+    title: meta.title || fallback.title || '',
+    subtitle: meta.subtitle,
+    authors: (meta.authors || []).map((a) => a?.name).filter(Boolean) as string[],
+    narrators: (meta.narrators || []).map((n) => n?.name).filter(Boolean) as string[],
+    series: seriesFields.series || fallback.series,
+    seriesNumber: seriesFields.seriesNumber || fallback.seriesNumber,
+    seriesAsin: seriesFields.seriesAsin,
+    seriesMemberships: seriesFields.seriesMemberships,
+    publishYear: year || undefined,
+    description: meta.description || fallback.description,
+    imageUrl: meta.imageUrl,
+    runtime: typeof meta.lengthMinutes === 'number' ? meta.lengthMinutes * 60 : undefined,
+    language: meta.language,
+    genres: (meta.genres || []).map((g) => g?.name).filter(Boolean) as string[],
+  }
+}
+</script>
+
 <script setup lang="ts">
 import { ref, watch, computed, onUnmounted } from 'vue'
 import Modal from '@/components/feedback/Modal.vue'
@@ -210,7 +259,7 @@ import { useToast } from '@/services/toastService'
 import { useRootFoldersStore } from '@/stores/rootFolders'
 import { useConfigurationStore } from '@/stores/configuration'
 import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
-import type { UnmatchedFileItem, AudibleBookMetadata, Audiobook, RootFolder } from '@/types'
+import type { Audiobook, RootFolder } from '@/types'
 
 interface Props {
   isOpen: boolean
@@ -428,43 +477,6 @@ async function onAdded(audiobook: Audiobook) {
 
 function ignore(item: UnmatchedFileItem) {
   items.value = items.value.filter((i) => i.fullPath !== item.fullPath)
-}
-
-// Minimal Audible response shape — only what we need for adding
-interface AudiblePayload {
-  asin?: string
-  title?: string
-  subtitle?: string
-  publishDate?: string
-  releaseDate?: string
-  authors?: { name?: string }[]
-  narrators?: { name?: string }[]
-  series?: { title?: string; part?: string }[]
-  description?: string
-  imageUrl?: string
-  lengthMinutes?: number
-  language?: string
-  genres?: { name?: string }[]
-}
-
-function mapToAudible(meta: AudiblePayload, fallback: UnmatchedFileItem): AudibleBookMetadata {
-  const year = (meta.publishDate || meta.releaseDate || '').split(/[-/]/)[0] || fallback.year
-  const firstSeries = meta.series?.[0]
-  return {
-    asin: meta.asin || fallback.asin || '',
-    title: meta.title || fallback.title || '',
-    subtitle: meta.subtitle,
-    authors: (meta.authors || []).map((a) => a?.name).filter(Boolean) as string[],
-    narrators: (meta.narrators || []).map((n) => n?.name).filter(Boolean) as string[],
-    series: firstSeries?.title || fallback.series,
-    seriesNumber: firstSeries?.part || fallback.seriesNumber,
-    publishYear: year || undefined,
-    description: meta.description || fallback.description,
-    imageUrl: meta.imageUrl,
-    runtime: typeof meta.lengthMinutes === 'number' ? meta.lengthMinutes * 60 : undefined,
-    language: meta.language,
-    genres: (meta.genres || []).map((g) => g?.name).filter(Boolean) as string[],
-  }
 }
 
 async function addAllWithAsin() {

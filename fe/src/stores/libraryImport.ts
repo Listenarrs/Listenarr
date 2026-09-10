@@ -21,12 +21,9 @@ import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import { logger } from '@/utils/logger'
 import { buildLibraryImportSearchParams } from '@/utils/libraryImportSearch'
-import type {
-  SearchResult,
-  AudibleBookMetadata,
-  AudiobookSeriesMembership,
-  UnmatchedFileItem,
-} from '@/types'
+import { buildSeriesFields, looksLikeAsin } from '@/utils/seriesUtils'
+import type { SeriesEntry } from '@/utils/seriesUtils'
+import type { SearchResult, AudibleBookMetadata, UnmatchedFileItem } from '@/types'
 
 export interface LibraryImportItem {
   id: string // = fullPath (unique key)
@@ -49,8 +46,6 @@ export interface LibraryImportItem {
   // Selection
   selected: boolean
 }
-
-const ASIN_PATTERN = /^[A-Z0-9]{10}$/i
 
 function extractFolderName(relativePath: string): string {
   const parts = relativePath.replace(/\\/g, '/').split('/').filter(Boolean)
@@ -109,30 +104,13 @@ function matchToMetadata(result: SearchResult): AudibleBookMetadata {
 
   // series may come back as AudibleSeries[] from the search endpoint. A book can belong to
   // more than one series (Audnexus seriesPrimary/seriesSecondary), so every entry becomes a
-  // membership; the scalar fields below stay populated from the primary for older consumers.
+  // membership; the scalar fields stay populated from the primary for older consumers.
   const seriesRaw = result.series as unknown
-  const seriesEntries = Array.isArray(seriesRaw)
-    ? (seriesRaw as Array<{ name?: string; asin?: string; position?: string }>)
-    : []
-  const seriesMemberships: AudiobookSeriesMembership[] = seriesEntries
-    .filter((entry) => (entry?.name ?? '').trim().length > 0)
-    .map((entry, index) => {
-      const asin = entry.asin?.trim()
-      return {
-        seriesName: (entry.name ?? '').trim(),
-        seriesNumber: entry.position?.trim() || undefined,
-        // The search fallback branch fills `asin` with the series *name* when the ASIN
-        // re-fetch fails, so only keep a value that actually looks like an ASIN. Until now
-        // that bogus value was discarded anyway; a membership would persist it.
-        seriesAsin: asin && ASIN_PATTERN.test(asin) ? asin : undefined,
-        isPrimary: index === 0,
-        sortOrder: index,
-      }
-    })
-  const seriesItem = seriesEntries[0] ?? null
-  const series = seriesItem?.name ?? (typeof seriesRaw === 'string' ? seriesRaw : undefined)
-  const seriesNumber = seriesItem?.position ?? result.seriesNumber
-  const seriesAsin = seriesItem?.asin ?? result.seriesAsin
+  const seriesEntries = Array.isArray(seriesRaw) ? (seriesRaw as SeriesEntry[]) : []
+  const seriesFields = buildSeriesFields(seriesEntries)
+  const series = seriesFields.series ?? (typeof seriesRaw === 'string' ? seriesRaw : undefined)
+  const seriesNumber = seriesFields.seriesNumber ?? result.seriesNumber
+  const seriesAsin = seriesFields.seriesAsin ?? result.seriesAsin
 
   return {
     title: result.title ?? '',
@@ -142,7 +120,9 @@ function matchToMetadata(result: SearchResult): AudibleBookMetadata {
     series,
     seriesNumber,
     seriesAsin,
-    ...(seriesMemberships.length > 0 ? { seriesMemberships } : {}),
+    ...(seriesFields.seriesMemberships
+      ? { seriesMemberships: seriesFields.seriesMemberships }
+      : {}),
     description: result.description,
     publisher: result.publisher,
     language: result.language,
@@ -432,7 +412,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
 
     items.value[id] = { ...item, isSearching: true }
     try {
-      const isAsin = ASIN_PATTERN.test(query.trim())
+      const isAsin = looksLikeAsin(query)
       const results = await apiService.advancedSearch(
         isAsin ? { asin: query.trim(), cap: 5 } : { title: query, cap: 5 },
       )
@@ -491,6 +471,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
       type AudiblePayload = {
         authors?: { name?: string }[]
         narrators?: { name?: string }[]
+        series?: SeriesEntry[]
       }
       const resp = await apiService.getAudibleMetadata<
         { source?: string; metadata?: AudiblePayload } | AudiblePayload
@@ -499,10 +480,14 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
         resp && 'metadata' in resp && resp.metadata ? resp.metadata : (resp as AudiblePayload)
       const enrichedAuthors = (raw.authors ?? []).map((a) => a?.name ?? '').filter(Boolean)
       const enrichedNarrators = (raw.narrators ?? []).map((n) => n?.name ?? '').filter(Boolean)
+      // The product record is the better source of series data than the search match, and
+      // its memberships and legacy scalars have to move together.
+      const enrichedSeries = buildSeriesFields(raw.series)
       return {
         ...base,
         ...(enrichedAuthors.length > 0 ? { authors: enrichedAuthors } : {}),
         ...(enrichedNarrators.length > 0 ? { narrators: enrichedNarrators } : {}),
+        ...(enrichedSeries.seriesMemberships ? enrichedSeries : {}),
       }
     } catch {
       return base
