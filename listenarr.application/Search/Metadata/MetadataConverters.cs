@@ -20,7 +20,7 @@ public class MetadataConverters
         _requestContextAccessor = requestContextAccessor;
     }
 
-    private static List<AudiobookSeriesMembership>? BuildSeriesMemberships(IEnumerable<AudibleSeries>? series)
+    internal static List<AudiobookSeriesMembership>? BuildSeriesMemberships(IEnumerable<AudibleSeries>? series)
     {
         if (series == null)
         {
