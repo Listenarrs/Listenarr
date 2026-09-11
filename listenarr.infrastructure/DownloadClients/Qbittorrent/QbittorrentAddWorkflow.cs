@@ -61,12 +61,17 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 {
                     logger.LogInformation(
                         "qBittorrent already holds this release, so the add was refused with HTTP 409. Response: {Response}",
-                        redacted);
+                        LogRedaction.SanitizeText(redacted));
                     throw new DownloadClientRejectedReleaseException(
                         "qBittorrent already holds this release, so it refused the torrent with HTTP 409.");
                 }
 
-                logger.LogError($"Failed to add torrent to qBittorrent. Status: {addResponse.StatusCode}, Response: {redacted}");
+                // RedactText masks known secret values but leaves the rest of the body as the
+                // client sent it, newlines included. SanitizeText is what strips CR, LF and tab
+                // and caps the length, so a response body cannot forge a log line or flood the
+                // log. Both call sites get it, because fixing only the new one would leave the
+                // identical hole three lines away.
+                logger.LogError($"Failed to add torrent to qBittorrent. Status: {addResponse.StatusCode}, Response: {LogRedaction.SanitizeText(redacted)}");
                 throw new DownloadClientSubmissionException($"qBittorrent rejected the torrent with HTTP {(int)addResponse.StatusCode}.");
             }
 
