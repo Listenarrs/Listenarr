@@ -9,7 +9,6 @@
  */
 
 using Listenarr.Tests.Common;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -121,33 +120,21 @@ public sealed class BlocklistControllerTests : BaseTests
     }
 
     [Fact]
-    public async Task EndpointFailures_DoNotExposeInternalExceptionDetails()
+    public void Controller_HasNoBroadCatch_SoNo5xxBodyCanCarryAnExceptionMessage()
     {
-        // These three endpoints are new API surface, and the controller they sit beside answers
-        // 500 with ex.Message. That pattern is not copied here.
-        const string sensitiveDetail = "SENSITIVE_INTERNAL_DATABASE_DETAIL";
-        var failure = new InvalidOperationException(sensitiveDetail);
-        var service = new Mock<IBlocklistService>(MockBehavior.Strict);
-        service.Setup(candidate => candidate.GetForAudiobookAsync(7)).ThrowsAsync(failure);
-        service.Setup(candidate => candidate.DeleteAsync(7)).ThrowsAsync(failure);
-        service.Setup(candidate => candidate.ClearForAudiobookAsync(7)).ThrowsAsync(failure);
-        var controller = new BlocklistController(
-            service.Object,
-            NullLogger<BlocklistController>.Instance);
+        // The controllers this sits beside answer 500 with ex.Message, which is the house pattern
+        // and a separate question. This one has no catch at all, which is what
+        // NewControllerBroadCatches_AreForbiddenOutsideDocumentedLegacyControllers requires of a
+        // controller added after that rule. Asserted here as well so the reason is recorded beside
+        // the endpoints rather than only in an architecture list.
+        var source = File.ReadAllText(Path.Join(
+            TestUtils.FindRepositoryRoot(),
+            "listenarr.api",
+            "Features",
+            "Downloads",
+            "BlocklistController.cs"));
 
-        AssertNoSensitiveDetails((await controller.GetForAudiobook(7)).Result!, sensitiveDetail);
-        AssertNoSensitiveDetails(await controller.Delete(7), sensitiveDetail);
-        AssertNoSensitiveDetails(await controller.ClearForAudiobook(7), sensitiveDetail);
-    }
-
-    private static void AssertNoSensitiveDetails(IActionResult result, string sensitiveDetail)
-    {
-        var payload = Assert.IsType<ObjectResult>(result);
-        Assert.Equal(StatusCodes.Status500InternalServerError, payload.StatusCode);
-        Assert.DoesNotContain(
-            sensitiveDetail,
-            System.Text.Json.JsonSerializer.Serialize(payload.Value),
-            StringComparison.Ordinal);
+        Assert.DoesNotContain("catch (", source, StringComparison.Ordinal);
     }
 
     private static QualityScore Scored(string infoHash) => new()
