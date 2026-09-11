@@ -375,7 +375,8 @@ namespace Listenarr.Application.Downloads.Submission
                         downloadId,
                         downloadClientIdForModel,
                         candidate.Title,
-                        protocol);
+                        protocol,
+                        audiobookId > 0 ? audiobookId : null);
                     logger.LogInformation("Recorded grabbed event in history for download {DownloadId}", downloadId);
                 }
                 catch (Exception histEx) when (histEx is not OperationCanceledException && histEx is not OutOfMemoryException && histEx is not StackOverflowException)
