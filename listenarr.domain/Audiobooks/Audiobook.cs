@@ -104,8 +104,12 @@ namespace Listenarr.Domain.Audiobooks
                 // position of "1.5" as 15 wherever '.' is the group separator.
                 // SeriesPositionRaw keeps the original either way -- a position such as
                 // "1-4" (an omnibus) is real, but is not a decimal.
+                // NumberStyles.Float rather than Number: Number carries AllowThousands and
+                // the invariant group separator is ',', so a position written "1,5" would
+                // parse as 15 rather than failing, which is the same wrong magnitude the
+                // invariant pin exists to prevent.
                 SeriesPosition = !string.IsNullOrWhiteSpace(SeriesNumber)
-                    && decimal.TryParse(SeriesNumber, NumberStyles.Number, CultureInfo.InvariantCulture, out var sp)
+                    && decimal.TryParse(SeriesNumber, NumberStyles.Float, CultureInfo.InvariantCulture, out var sp)
                         ? sp
                         : (decimal?)null,
                 SeriesPositionRaw = !string.IsNullOrWhiteSpace(SeriesNumber) ? SeriesNumber.Trim() : null,

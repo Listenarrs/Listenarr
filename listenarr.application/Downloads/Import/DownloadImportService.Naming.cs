@@ -4,7 +4,15 @@ namespace Listenarr.Application.Downloads.Import;
 
 public partial class DownloadImportService
 {
-    private static AudioMetadata BuildNamingMetadata(
+    /// <summary>
+    /// Merges the catalogue record and the file's own tags into the metadata the naming
+    /// tokens are rendered from.
+    /// </summary>
+    /// <remarks>
+    /// Internal rather than private so the series-position precedence can be asserted against
+    /// the real method rather than a copy of it.
+    /// </remarks>
+    internal static AudioMetadata BuildNamingMetadata(
         Audiobook? audiobook,
         AudioMetadata? extractedMetadata,
         string fallbackTitle)
@@ -16,6 +24,29 @@ public partial class DownloadImportService
                 : FirstNonEmpty(
                     ChooseAuthorFromMetadata(extractedMetadata),
                     "Unknown Author");
+
+            // One source wins for BOTH series-position fields. Choosing them independently
+            // lets them describe different books: a catalogue position of "1-4" fails the
+            // decimal parse, so the decimal falls through to the file's own 3 while the raw
+            // string keeps "1-4", and the sort key then disagrees with the label.
+            //
+            // Parsed with InvariantCulture: the source value always uses '.' as the decimal
+            // separator, so parsing under the server's culture would read a position of "1.5"
+            // as 15 wherever '.' is the group separator. NumberStyles.Float rather than
+            // Number because Number carries AllowThousands and the invariant group separator
+            // is ',', so "1,5" would parse as 15 by that same route.
+            var cataloguePosition = TrimmedOrNull(audiobook.SeriesNumber);
+            var seriesPositionRaw = cataloguePosition
+                ?? TrimmedOrNull(extractedMetadata?.SeriesPositionRaw);
+            var seriesPosition = cataloguePosition != null
+                ? decimal.TryParse(
+                    cataloguePosition,
+                    NumberStyles.Float,
+                    CultureInfo.InvariantCulture,
+                    out var parsedPosition)
+                    ? parsedPosition
+                    : (decimal?)null
+                : extractedMetadata?.SeriesPosition;
 
             return new AudioMetadata
             {
@@ -52,16 +83,8 @@ public partial class DownloadImportService
                 Series = FirstNonEmpty(
                     audiobook.Series,
                     extractedMetadata?.Series),
-                // Parsed with InvariantCulture: the source value always uses '.' as the
-                // decimal separator, so parsing under the server's culture would read a
-                // position of "1.5" as 15 wherever '.' is the group separator.
-                SeriesPosition = !string.IsNullOrWhiteSpace(audiobook.SeriesNumber)
-                    && decimal.TryParse(audiobook.SeriesNumber, NumberStyles.Number, CultureInfo.InvariantCulture, out var seriesPosition)
-                        ? seriesPosition
-                        : extractedMetadata?.SeriesPosition,
-                SeriesPositionRaw = FirstNonEmpty(
-                    audiobook.SeriesNumber,
-                    extractedMetadata?.SeriesPositionRaw),
+                SeriesPosition = seriesPosition,
+                SeriesPositionRaw = seriesPositionRaw,
                 Year = !string.IsNullOrWhiteSpace(audiobook.PublishYear)
                     && int.TryParse(audiobook.PublishYear, out var year)
                         ? year
@@ -183,4 +206,11 @@ public partial class DownloadImportService
     private static string FirstNonEmpty(params string?[] candidates) =>
         candidates.FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate))
         ?? string.Empty;
+
+    /// <summary>
+    /// Null for a value that is absent or only whitespace, trimmed otherwise. Absence has one
+    /// spelling on this route, matching what Audiobook.CreateBasicAudioMetadata stores.
+    /// </summary>
+    private static string? TrimmedOrNull(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }
