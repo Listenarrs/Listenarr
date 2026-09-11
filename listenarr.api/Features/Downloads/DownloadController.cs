@@ -121,6 +121,23 @@ namespace Listenarr.Api.Features.Downloads
                     ex.IsExpired ? StatusCodes.Status410Gone : StatusCodes.Status400BadRequest,
                     new { message = "Unable to use download reference", error = ex.Message });
             }
+            catch (DownloadClientRejectedReleaseException ex)
+            {
+                // Same reasoning as search-and-download above, answered in this endpoint's own
+                // idiom. The client refused one release it already holds; nothing upstream of it
+                // is broken, so 502 Bad Gateway is the wrong thing to tell the caller. This
+                // endpoint already answers 409 a few lines up when a download for the audiobook
+                // is active, which is the same situation seen from the database side, so the
+                // refusal reuses that code rather than inventing one.
+                //
+                // This catch must stay ABOVE the DownloadClientSubmissionException catch below:
+                // the rejected-release type derives from it, and the first matching clause wins.
+                _logger.LogInformation(
+                    "Download client refused the release: {Reason}",
+                    LogRedaction.SanitizeText(ex.Message));
+
+                return Conflict(new { message = ex.Message });
+            }
             catch (DownloadClientSubmissionException ex)
             {
                 _logger.LogWarning(ex, "Download client submission failed");
