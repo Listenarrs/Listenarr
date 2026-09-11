@@ -31,6 +31,12 @@ namespace Listenarr.Tests.Builders
             return this;
         }
 
+        public ApplicationSettingsBuilder WithMissingSourceRetryInitialDelaySeconds(int value)
+        {
+            _applicationSettings.MissingSourceRetryInitialDelaySeconds = value;
+            return this;
+        }
+
         public ApplicationSettingsBuilder WithMoveFileOnCompleted()
         {
             _applicationSettings.CompletedFileAction = FileAction.Move;

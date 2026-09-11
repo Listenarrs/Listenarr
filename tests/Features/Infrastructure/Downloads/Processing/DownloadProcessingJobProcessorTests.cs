@@ -148,6 +148,44 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Processing
         }
 
         [Fact]
+        [Trait("Scenario", "The configured initial delay decides when the first retry falls due")]
+        public async Task MissingSource_RespectsTheConfiguredRetryInitialDelay()
+        {
+            // Settings > Download exposes this as Missing-source Retry Initial Delay. Nothing
+            // else asserts that the processor reads it. The domain tests hand ScheduleRetry a
+            // delay directly, so a processor that ignored the setting and let the parameter
+            // default to thirty seconds would keep every one of them green. Ten minutes is far
+            // enough from that default that the two cannot be mistaken for each other.
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithMissingSourceRetryInitialDelaySeconds(600)
+                .Build());
+
+            var sourceDirectory = FileService.GetTempDirectory("delay-source");
+            var missing = Path.Join(sourceDirectory, "notThere");
+
+            var download = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithAudiobook(await CreateAudiobook())
+                .WithDownloadClientConfiguration(await CreateDownloadClientConfiguration())
+                .WithPath(missing)
+                .WithCompletedStatus(at: DateTime.UtcNow)
+                .Build());
+
+            var job = await _downloadProcessingJobRepository.AddAsync(new DownloadProcessingJobBuilder()
+                .WithDownload(download)
+                .Build());
+
+            var before = DateTime.UtcNow;
+            await _provider.GetRequiredService<DownloadProcessingJobProcessor>()
+                .ProcessQueueAsync(CancellationToken.None);
+
+            job = await _downloadProcessingJobRepository.GetByIdAsync(job.Id);
+            Assert.NotNull(job);
+            Assert.Equal(ProcessingJobStatus.Pending, job!.Status);
+            Assert.NotNull(job.NextRetryAt);
+            Assert.InRange((job.NextRetryAt!.Value - before).TotalSeconds, 570, 660);
+        }
+
+        [Fact]
         [Trait("Scenario", "ExternalImportResolverRecoversStaleDownloadPath")]
         public async Task Import_ExternalClientStaleDownloadPath_UsesResolvedSourceFiles()
         {
