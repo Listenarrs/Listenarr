@@ -78,11 +78,11 @@ namespace Listenarr.Tests.Mocks
         }
 
         /// <summary>Records what an import asked to be written, so a test can assert on it.</summary>
-        public List<(string Asin, string? CoverArtUrl)> ImportTagWrites { get; } = [];
+        public List<(string? Asin, string? CoverArtUrl)> ImportTagWrites { get; } = [];
 
         public Task WriteImportTagsAsync(
             IAudiobookFileRegistrationLease registrationLease,
-            string asin,
+            string? asin,
             string? coverArtUrl)
         {
             ImportTagWrites.Add((asin, coverArtUrl));
