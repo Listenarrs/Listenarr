@@ -43,12 +43,24 @@ public sealed class ImportResultCauseTests : BaseTests
     }
 
     [Fact]
-    public void Exception_WithNoInnerCause_ReadsAsBefore()
+    public void Exception_WithNoInnerCause_IsTypeThenMessage()
     {
-        // The control. If every message were decorated regardless, the added text would be
-        // noise on the common case rather than signal on the failing one.
+        // The control, and a behaviour change worth naming: on canary this row read "Disk full",
+        // and it now reads "IOException: Disk full". Every persisted import failure gains the
+        // type prefix, not only the wrapped ones, so the equality here is exact on purpose.
         var message = ImportResult.Exception(new IOException("Disk full")).Message;
 
         Assert.Equal("IOException: Disk full", message);
+    }
+
+    [Fact]
+    public void Exception_RepeatedMessageInTheChain_IsNotRepeatedInTheRow()
+    {
+        // The de-duplication is the reason DescribeWithCauses keeps a list rather than appending
+        // blindly: a rethrow of the same type and text would otherwise double the row.
+        var inner = new IOException("Disk full");
+        var outer = new IOException("Disk full", inner);
+
+        Assert.Equal("IOException: Disk full", ImportResult.Exception(outer).Message);
     }
 }
