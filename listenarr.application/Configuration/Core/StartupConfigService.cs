@@ -271,8 +271,8 @@ namespace Listenarr.Application.Configuration.Core
                 SslPort = 6868,
                 UrlBase = "/",
                 // Absolute external URL used for links and images in outbound notifications.
-                // No sensible default: left unset, notifications fall back to the URL the
-                // request arrived on.
+                // No sensible default: left unset, LISTENARR_PUBLIC_URL is consulted first and
+                // notifications otherwise fall back to the URL the request arrived on.
                 ApplicationUrl = null,
                 BindAddress = "*",
                 ApiKey = apiKey, // Auto-generated on first run
