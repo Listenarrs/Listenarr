@@ -79,9 +79,42 @@ public sealed class TagLibAudioTagWriterTests : BaseTests
         Assert.Equal(["B0TESTASIN"], frame.Text);
     }
 
+    [Fact]
+    public void ApplyCoverArt_FileAlreadyCarriesACover_ReplacesItRatherThanAppending()
+    {
+        // The docstring on ApplyCoverArt makes this a product decision: a file that gains a
+        // second cover shows whichever the player picks first, which reads as a bug to
+        // whoever asked for the artwork to be corrected. Nothing asserted it.
+        var existing = new TagLib.Picture(new TagLib.ByteVector([1, 2, 3, 4]))
+        {
+            Type = TagLib.PictureType.BackCover,
+            MimeType = "image/jpeg",
+            Description = "Old"
+        };
+        var tag = new TagLib.Id3v2.Tag
+        {
+            Pictures = [existing]
+        };
+        using var file = new StubTagLibFile(
+            tag,
+            new Dictionary<TagLib.TagTypes, TagLib.Tag?>
+            {
+                [TagLib.TagTypes.Id3v2] = tag
+            });
+        var coverArt = new AudioCoverArt([9, 8, 7, 6, 5], "image/png");
+
+        var wrote = TagLibAudioTagWriter.ApplyCoverArt(file, coverArt);
+
+        Assert.True(wrote);
+        var picture = Assert.Single(file.Tag.Pictures);
+        Assert.Equal("image/png", picture.MimeType);
+        Assert.Equal(TagLib.PictureType.FrontCover, picture.Type);
+        Assert.Equal(coverArt.Data, picture.Data.Data);
+    }
+
     /// <summary>
     /// A TagLib.File that owns no bytes. It records every GetTag request and answers from a
-    /// fixed map, which is enough to drive ApplyAsinTag without a parseable container on disk.
+    /// fixed map, which is enough to drive ApplyAsinTag and ApplyCoverArt without a parseable container on disk.
     /// </summary>
     private sealed class StubTagLibFile : TagLib.File
     {
