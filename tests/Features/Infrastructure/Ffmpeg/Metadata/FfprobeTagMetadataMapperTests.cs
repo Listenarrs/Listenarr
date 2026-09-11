@@ -90,5 +90,32 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Metadata
 
             Assert.Equal("EXISTING123", metadata.Asin);
         }
+
+        [Fact]
+        public void Apply_SkipsWhitespaceOnlyAsinTag_AndFallsThroughToNextSpelling()
+        {
+            // A present-but-empty ASIN tag must not win: GetTag skips whitespace-only values and
+            // falls through to the next spelling.
+            var metadata = new AudioMetadata();
+            var tags = TagsFrom("{\"ASIN\":\"   \",\"AUDIBLE_ASIN\":\"B0078PA1OA\"}");
+
+            FfprobeTagMetadataMapper.Apply(metadata, tags);
+
+            Assert.Equal("B0078PA1OA", metadata.Asin);
+        }
+
+        [Fact]
+        public void Apply_IntraFileAsinDisagreement_TakesFirstSpellingInPrecedenceOrder()
+        {
+            // One file carrying two different ASIN spellings resolves to the first name in the
+            // lookup order ("ASIN" before "AUDIBLE_ASIN"). The cross-file unanimity guard compares
+            // across files, not within one, so intra-file precedence is what decides here.
+            var metadata = new AudioMetadata();
+            var tags = TagsFrom("{\"ASIN\":\"B000AAAAAA\",\"AUDIBLE_ASIN\":\"B111BBBBBB\"}");
+
+            FfprobeTagMetadataMapper.Apply(metadata, tags);
+
+            Assert.Equal("B000AAAAAA", metadata.Asin);
+        }
     }
 }
