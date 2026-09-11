@@ -20,5 +20,19 @@ namespace Listenarr.Application.Downloads.Contracts
         Task<IReadOnlyCollection<string>> GetBlockedIdentifiersAsync(int audiobookId);
 
         Task<IReadOnlyList<BlockedRelease>> GetForAudiobookAsync(int audiobookId);
+
+        /// <summary>
+        /// Remove one entry, so a release blocked by a failure that has since been fixed can be
+        /// grabbed again. False when no entry with that id exists.
+        /// </summary>
+        Task<bool> DeleteAsync(int id);
+
+        /// <summary>
+        /// Remove every entry for one book and answer how many rows went. This is the way out of
+        /// the case the per-entry delete is awkward for: a book that failed repeatedly while a
+        /// download client was misconfigured has an entry per release, and the operator wants all
+        /// of them gone at once rather than one at a time.
+        /// </summary>
+        Task<int> ClearForAudiobookAsync(int audiobookId);
     }
 }
