@@ -29,6 +29,11 @@ namespace Listenarr.Api.Features.Downloads;
 /// torrent the user removed by hand. Without a delete, one of those bans a release for good,
 /// so these three endpoints exist before the feature ships rather than after somebody asks
 /// for them.
+///
+/// No try/catch. NewControllerBroadCatches_AreForbiddenOutsideDocumentedLegacyControllers
+/// forbids one in a controller added after the rule, and the neighbours that have them are on
+/// its grandfathered list. An unexpected failure goes to the pipeline's exception handler,
+/// which is also why no 5xx body here can leak an exception message.
 /// </summary>
 [ApiController]
 [Route("api/v{version:apiVersion}/blocklist")]
@@ -45,15 +50,7 @@ public class BlocklistController(
     [ProducesResponseType(typeof(IReadOnlyList<BlockedRelease>), StatusCodes.Status200OK)]
     public async Task<ActionResult<IReadOnlyList<BlockedRelease>>> GetForAudiobook(int audiobookId)
     {
-        try
-        {
-            return Ok(await blocklistService.GetForAudiobookAsync(audiobookId));
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-        {
-            logger.LogError(ex, "Failed to list blocked releases for audiobook {AudiobookId}", audiobookId);
-            return StatusCode(500, new { error = "Failed to list blocked releases" });
-        }
+        return Ok(await blocklistService.GetForAudiobookAsync(audiobookId));
     }
 
     /// <summary>
@@ -65,20 +62,13 @@ public class BlocklistController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult> Delete(int id)
     {
-        try
+        if (!await blocklistService.DeleteAsync(id))
         {
-            if (!await blocklistService.DeleteAsync(id))
-            {
-                return NotFound(new { error = $"Blocklist entry with ID {id} not found" });
-            }
+            return NotFound(new { error = $"Blocklist entry with ID {id} not found" });
+        }
 
-            return NoContent();
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-        {
-            logger.LogError(ex, "Failed to remove blocklist entry {BlocklistEntryId}", id);
-            return StatusCode(500, new { error = "Failed to remove blocklist entry" });
-        }
+        logger.LogInformation("Removed blocklist entry {BlocklistEntryId} on request", id);
+        return NoContent();
     }
 
     /// <summary>
@@ -90,15 +80,11 @@ public class BlocklistController(
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult> ClearForAudiobook(int audiobookId)
     {
-        try
-        {
-            var removed = await blocklistService.ClearForAudiobookAsync(audiobookId);
-            return Ok(new { audiobookId, removed });
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-        {
-            logger.LogError(ex, "Failed to clear the blocklist for audiobook {AudiobookId}", audiobookId);
-            return StatusCode(500, new { error = "Failed to clear the blocklist" });
-        }
+        var removed = await blocklistService.ClearForAudiobookAsync(audiobookId);
+        logger.LogInformation(
+            "Cleared {RemovedCount} blocklist entries for audiobook {AudiobookId} on request",
+            removed,
+            audiobookId);
+        return Ok(new { audiobookId, removed });
     }
 }

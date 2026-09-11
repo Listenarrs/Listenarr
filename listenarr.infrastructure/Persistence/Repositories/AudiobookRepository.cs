@@ -180,25 +180,9 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
 
             // Delete the aggregate root without materializing its navigation graph.
             // Relational foreign keys own cascade cleanup for file/identifier/series rows.
-            //
-            // BlockedReleases is the exception and has to be swept by hand. The table carries an
-            // AudiobookId but no navigation property and therefore no foreign key, which was a
-            // deliberate choice: giving it one now means a second migration on top of the one that
-            // created it, and in SQLite adding a foreign key rebuilds the table. Readarr sweeps the
-            // same rows the same way, from BlocklistService.HandleAsync(AuthorDeletedEvent), rather
-            // than leaning on the database. Without this, deleting a book leaves its blocklist rows
-            // behind for good, and a book re-added later inherits bans it cannot see or clear.
-            var blockedReleases = await _db.BlockedReleases
-                .Where(entry => entry.AudiobookId == id)
-                .ToListAsync();
-            if (blockedReleases.Count > 0)
-            {
-                _db.BlockedReleases.RemoveRange(blockedReleases);
-            }
-
+            // BlockedReleases is the exception; RemoveBlocklistEntriesFor says why.
+            await RemoveBlocklistEntriesFor(id);
             _db.Audiobooks.Remove(audiobook);
-            // One SaveChangesAsync, so the sweep and the delete land in the same transaction and
-            // a failure cannot leave the rows orphaned with the book already gone.
             await _db.SaveChangesAsync();
             return true;
         }
