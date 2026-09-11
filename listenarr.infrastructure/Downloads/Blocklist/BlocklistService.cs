@@ -100,5 +100,42 @@ namespace Listenarr.Infrastructure.Downloads.Blocklist
                 .OrderByDescending(entry => entry.BlockedAt)
                 .ToListAsync();
         }
+
+        public async Task<bool> DeleteAsync(int id)
+        {
+            var entry = await _context.BlockedReleases
+                .FirstOrDefaultAsync(candidate => candidate.Id == id);
+            if (entry is null)
+            {
+                return false;
+            }
+
+            _context.BlockedReleases.Remove(entry);
+            await _context.SaveChangesAsync();
+            _logger.LogInformation(
+                "Removed blocklist entry {BlocklistEntryId} for audiobook {AudiobookId}",
+                id,
+                entry.AudiobookId);
+            return true;
+        }
+
+        public async Task<int> ClearForAudiobookAsync(int audiobookId)
+        {
+            var entries = await _context.BlockedReleases
+                .Where(entry => entry.AudiobookId == audiobookId)
+                .ToListAsync();
+            if (entries.Count == 0)
+            {
+                return 0;
+            }
+
+            _context.BlockedReleases.RemoveRange(entries);
+            await _context.SaveChangesAsync();
+            _logger.LogInformation(
+                "Cleared {RemovedCount} blocklist entries for audiobook {AudiobookId}",
+                entries.Count,
+                audiobookId);
+            return entries.Count;
+        }
     }
 }
