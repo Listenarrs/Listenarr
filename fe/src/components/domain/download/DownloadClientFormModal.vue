@@ -221,11 +221,11 @@
                 <option value="low">Low</option>
                 <option value="normal">Normal</option>
                 <option value="high">High</option>
-                <option value="force">Force</option>
+                <option value="force">Very High</option>
               </select>
               <small
-                >Priority to give a download when it is sent to the client. Default leaves it to the
-                client's own category setting.</small
+                >Priority to give a download when it is sent to the client. Default leaves the
+                priority to SABnzbd's category; NZBGet is always sent Normal.</small
               >
             </div>
           </FormSection>
