@@ -183,6 +183,56 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
         }
 
         [Fact]
+        public async Task SendToDownloadClientAsync_SanitizesTheClientMessageItWritesToHistory()
+        {
+            // The client's own error text lands in a durable row the user can read. A download
+            // client that answers with an HTML error page, or a release title carried back into
+            // the message, can put newlines and several kilobytes into it. Passing failure.Message
+            // straight through stores that verbatim, twice, and lets a newline forge log lines.
+            var rawMessage = "SABnzbd error: cannot write to\n/incomplete/downloads " + new string('x', 400);
+            var rejection = new DownloadClientSubmissionException(rawMessage);
+            var gatewayMock = new Mock<IDownloadClientGateway>(MockBehavior.Strict);
+            gatewayMock
+                .Setup(g => g.AddAsync(
+                    It.Is<DownloadClientConfiguration>(client => client.Id == "qb-1"),
+                    It.IsAny<PreparedDownloadSubmission>(),
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(rejection);
+
+            string? recordedMessage = null;
+            var historyMock = new Mock<IDownloadHistoryService>(MockBehavior.Strict);
+            historyMock
+                .Setup(h => h.RecordDownloadFailedAsync(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()))
+                .Callback<string, string, string, string?>((_, _, _, message) => recordedMessage = message)
+                .Returns(Task.CompletedTask);
+            _services.AddSingleton(gatewayMock.Object);
+            _services.AddSingleton(historyMock.Object);
+
+            Init();
+            await InitData();
+            var downloadService = _provider.GetRequiredService<DownloadService>();
+            var searchResult = new SearchResult
+            {
+                Title = "Artemis",
+                Artist = "Andy Weir",
+                DownloadType = "Torrent",
+                MagnetLink = "magnet:?xt=urn:btih:ABCDEF1234567890ABCDEF1234567890ABCDEF12",
+                Size = 123456789
+            };
+
+            await Assert.ThrowsAsync<DownloadClientSubmissionException>(
+                () => downloadService.SendToDownloadClientAsync(searchResult, _client.Id));
+
+            Assert.NotNull(recordedMessage);
+            Assert.DoesNotContain("\n", recordedMessage!);
+            Assert.DoesNotContain("\r", recordedMessage!);
+            Assert.True(recordedMessage!.Length <= 203, $"recorded message was {recordedMessage.Length} characters");
+            Assert.NotEqual(rawMessage, recordedMessage);
+            Assert.StartsWith("SABnzbd error: cannot write to", recordedMessage!);
+        }
+
+        [Fact]
         public async Task SendToDownloadClientAsync_WhenClientReturnsBlankExternalId_RemovesProvisionalDownloadAndDoesNotRecordGrab()
         {
             var gatewayMock = new Mock<IDownloadClientGateway>(MockBehavior.Strict);
