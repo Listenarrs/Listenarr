@@ -17,7 +17,6 @@
  */
 
 using Microsoft.Extensions.DependencyInjection;
-using Listenarr.Application.Downloads.Contracts;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Downloads.Monitoring

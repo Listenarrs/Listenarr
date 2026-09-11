@@ -8,7 +8,6 @@
  * (at your option) any later version.
  */
 
-using Listenarr.Domain.Downloads;
 
 namespace Listenarr.Application.Downloads.Contracts
 {
