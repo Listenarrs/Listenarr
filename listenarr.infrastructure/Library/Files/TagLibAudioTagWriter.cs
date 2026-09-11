@@ -110,7 +110,7 @@ namespace Listenarr.Infrastructure.Library.Files
         /// container reports no tag to write into, so the caller can say so rather than
         /// claim a write that did not happen.
         /// </summary>
-        private static bool ApplyCoverArt(TagLib.File file, AudioCoverArt coverArt)
+        internal static bool ApplyCoverArt(TagLib.File file, AudioCoverArt coverArt)
         {
             if (file.Tag is null)
             {
