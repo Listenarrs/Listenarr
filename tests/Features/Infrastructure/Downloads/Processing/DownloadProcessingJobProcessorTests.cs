@@ -688,5 +688,69 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Processing
             Assert.NotNull(download);
             Assert.Equal(DownloadStatus.ImportBlocked, download.Status);
         }
+
+        [Fact]
+        [Trait("Scenario", "PartialImportFailureStaysTerminal")]
+        public async Task Import_PartialFileImportFailure_BlocksOnTheFirstAttemptAndKeepsFailedResults()
+        {
+            // The other half of the change above, and the reason it is scoped to the all-failed
+            // case. Retrying a partial failure buys nothing: the retry re-enters the import block
+            // from the top, and under the Move completed-file action the file that did import is
+            // no longer in the download directory, so the count guard fails the job on a mismatch
+            // caused by the earlier success. The history entry would then carry that mismatch
+            // instead of the per-file FailedResults asserted below.
+            var source = FileService.GetTempDirectory("partial-failure-source");
+            var importedPath = await FileService.GetFileAsync(source, "one.mp3");
+            var failedPath = await FileService.GetFileAsync(source, "two.mp3");
+            downloadClientGatewayMock.SourceFiles = [importedPath, failedPath];
+
+            var importService = new Mock<IDownloadImportService>();
+            importService
+                .Setup(service => service.ImportDownloadFilesAsync(
+                    It.IsAny<Audiobook>(),
+                    It.IsAny<List<string>>(),
+                    It.IsAny<CancellationToken>(),
+                    It.IsAny<DownloadImportOptions?>()))
+                .ReturnsAsync([
+                    ImportResult.ImportSuccess(FileAction.Move, importedPath, importedPath, wasRegisteredToAudiobook: true),
+                    ImportResult.ImportFailure(FileAction.Move, failedPath, failedPath)
+                ]);
+            Init(builder => builder.WithSingleton<IDownloadImportService>(importService.Object));
+
+            var download = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithAudiobook(await CreateAudiobook())
+                .WithDownloadClientConfiguration(await CreateDownloadClientConfiguration())
+                .WithPath(source)
+                .WithCompletedStatus(at: DateTime.UtcNow)
+                .Build());
+            var job = await _downloadProcessingJobRepository.AddAsync(new DownloadProcessingJobBuilder()
+                .WithDownload(download)
+                .Build());
+
+            await _provider.GetRequiredService<DownloadProcessingJobProcessor>()
+                .ProcessQueueAsync(CancellationToken.None);
+
+            job = await _downloadProcessingJobRepository.GetByIdAsync(job.Id);
+            Assert.NotNull(job);
+            Assert.Equal(ProcessingJobStatus.Failed, job.Status);
+            Assert.Equal(0, job.RetryCount);
+
+            download = await _downloadRepository.FindAsync(download.Id);
+            Assert.NotNull(download);
+            Assert.Equal(DownloadStatus.ImportBlocked, download.Status);
+
+            var page = await _historyRepository.QueryAsync(new HistoryQuery
+            {
+                DownloadId = download.Id.ToUpperInvariant(),
+                Limit = 100
+            });
+            var failedImport = Assert.Single(page.Records, history =>
+                history.EventType == HistoryEvents.ImportFailed);
+            using var details = JsonDocument.Parse(failedImport.Data!);
+            var failedResult = Assert.Single(details.RootElement
+                .GetProperty("FailedResults")
+                .EnumerateArray());
+            Assert.Equal(failedPath, failedResult.GetProperty("SourcePath").GetString());
+        }
     }
 }
