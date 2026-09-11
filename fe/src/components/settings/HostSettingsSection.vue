@@ -17,7 +17,7 @@
 -->
 <template>
   <div class="form-section">
-    <h3><PhGlobe /> Host</h3>
+    <h3><PhGlobe aria-hidden="true" /> Host</h3>
     <div class="form-body">
       <FormRow
         label="URL Base"
@@ -32,9 +32,13 @@
           placeholder="/listenarr"
           spellcheck="false"
           autocomplete="off"
+          :aria-invalid="urlBaseError ? 'true' : undefined"
+          :aria-describedby="urlBaseError ? 'urlBaseError' : undefined"
           @change="(e) => updateUrlBase((e.target as HTMLInputElement).value)"
         />
-        <span v-if="urlBaseError" class="form-error" role="alert">{{ urlBaseError }}</span>
+        <span v-if="urlBaseError" id="urlBaseError" class="form-error" role="alert">{{
+          urlBaseError
+        }}</span>
       </FormRow>
     </div>
   </div>

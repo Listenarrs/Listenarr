@@ -88,6 +88,28 @@ describe('HostSettingsSection', () => {
     expect(wrapper.get('[role="alert"]').text()).toContain('Must be a path')
   })
 
+  it('points the input at the warning for a screen reader', async () => {
+    // role="alert" announces the message once. Without the association the field
+    // itself still reads as valid and unannotated, so someone navigating by
+    // control rather than by region never meets the warning at all.
+    const wrapper = mount(await load(), {
+      props: { startupConfig: { urlBase: 'https://example.com/listenarr' } },
+    })
+
+    const input = wrapper.get('#urlBase')
+    expect(input.attributes('aria-invalid')).toBe('true')
+    expect(input.attributes('aria-describedby')).toBe('urlBaseError')
+    expect(wrapper.get('[role="alert"]').attributes('id')).toBe('urlBaseError')
+  })
+
+  it('leaves the field unannotated when the value is fine', async () => {
+    const wrapper = mount(await load(), { props: { startupConfig: { urlBase: '/listenarr' } } })
+
+    const input = wrapper.get('#urlBase')
+    expect(input.attributes('aria-invalid')).toBeUndefined()
+    expect(input.attributes('aria-describedby')).toBeUndefined()
+  })
+
   it('does not warn about an ordinary path or an empty value', async () => {
     for (const urlBase of ['/listenarr', '']) {
       const wrapper = mount(await load(), { props: { startupConfig: { urlBase } } })
