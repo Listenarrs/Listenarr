@@ -402,7 +402,7 @@ namespace Listenarr.Tests.Features.Domain.Utils
 
             Assert.True(QualityMatcher.IsLabelBetter("AAC 320kbps", "AAC 256kbps", profile));
         }
-    
+
         // ---- real encoder bitrates, which are never exactly the nominal tier ----------------
 
         [Fact]
@@ -441,5 +441,46 @@ namespace Listenarr.Tests.Features.Domain.Utils
             Assert.True(result.IsMatch);
             Assert.Equal("AAC 64kbps", result.Rung!.Quality);
         }
-}
+
+        // The two tests above are both satisfied by the one-kbps floor alone, so neither of them
+        // says anything about the size of the tolerance. These three pin it. Without them the
+        // percentage can be set to zero and the whole suite still passes, which is the same shape
+        // of gap that let the original mismatch through.
+
+        [Theory]
+        [InlineData(122_000, "AAC 128kbps")]  // six kbps short of 128, inside the tolerance
+        [InlineData(121_000, "AAC 64kbps")]   // seven kbps short, outside it
+        public void Match_ReachesARungOnlyWithinTheTolerance(int bitsPerSecond, string expectedRung)
+        {
+            var profile = new QualityProfileBuilder()
+                .WithName("Standard")
+                .WithQuality("AAC 128kbps", 0, codec: "AAC", bitrate: 128)
+                .WithQuality("AAC 64kbps", 1, codec: "AAC", bitrate: 64)
+                .Build();
+            var file = new AudioQualityInput { Codec = "aac", BitrateBitsPerSecond = bitsPerSecond };
+
+            var result = QualityMatcher.Match(file, profile);
+
+            Assert.True(result.IsMatch);
+            Assert.Equal(expectedRung, result.Rung!.Quality);
+        }
+
+        [Theory]
+        [InlineData(15_000, "16kbps")]  // five percent of 16 rounds away, so the floor carries this
+        [InlineData(14_000, "8kbps")]   // two kbps short is outside the floor
+        public void Match_KeepsAWholeKbpsOfSlackOnASmallRung(int bitsPerSecond, string expectedRung)
+        {
+            var profile = new QualityProfileBuilder()
+                .WithName("Tiny")
+                .WithQuality("16kbps", 0, codec: "AAC", bitrate: 16)
+                .WithQuality("8kbps", 1, codec: "AAC", bitrate: 8)
+                .Build();
+            var file = new AudioQualityInput { Codec = "aac", BitrateBitsPerSecond = bitsPerSecond };
+
+            var result = QualityMatcher.Match(file, profile);
+
+            Assert.True(result.IsMatch);
+            Assert.Equal(expectedRung, result.Rung!.Quality);
+        }
+    }
 }

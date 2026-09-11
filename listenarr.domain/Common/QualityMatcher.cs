@@ -386,7 +386,6 @@ namespace Listenarr.Domain.Common
             return MapCodec(file).Overlaps(LosslessGroups);
         }
 
-        /// <summary>Convert a bitrate to kbps, guarding values already expressed in kbps.</summary>
         /// <summary>
         /// How far below a rung a file may report and still count as that rung, as a fraction.
         ///
@@ -396,9 +395,10 @@ namespace Listenarr.Domain.Common
         /// tier. Applied to a real library that misclassifies most lossy files, because the failure
         /// is systematic rather than occasional.
         ///
-        /// Five percent is far smaller than the gap between adjacent rungs in any ordinary profile,
-        /// where 64, 96, 128, 192, 256 and 320 sit at least a third apart, so this cannot promote a
-        /// file across a real tier boundary. It only absorbs encoder variance.
+        /// Five percent is far smaller than the gap between adjacent rungs in any ordinary profile.
+        /// Across 64, 96, 128, 192, 256 and 320 the narrowest gap is 256 to 320, a fifth of the
+        /// higher rung and four times this tolerance, so a constant-bitrate file cannot be promoted
+        /// across a real tier boundary. It only absorbs encoder variance.
         /// </summary>
         private const double RungBitrateTolerance = 0.05;
 
@@ -419,6 +419,7 @@ namespace Listenarr.Domain.Common
             return rungKbps - fileKbps <= slack;
         }
 
+        /// <summary>Convert a bitrate to kbps, guarding values already expressed in kbps.</summary>
         private static int? NormalizeKbps(int? bitsPerSecond)
         {
             if (bitsPerSecond is not int bps || bps <= 0)
