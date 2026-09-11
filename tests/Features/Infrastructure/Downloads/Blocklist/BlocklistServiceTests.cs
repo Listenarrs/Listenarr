@@ -9,6 +9,7 @@
  */
 
 using Listenarr.Infrastructure.Downloads.Blocklist;
+using Listenarr.Tests.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -20,33 +21,25 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Blocklist;
 /// </summary>
 [Trait("Name", "BlocklistServiceTests")]
 [Trait("Category", "Blocklist")]
-public sealed class BlocklistServiceTests : IAsyncLifetime
+public sealed class BlocklistServiceTests : BaseTests
 {
     private const string Identifier = "btih:abcdef1234567890abcdef1234567890abcdef12";
     private const string OtherIdentifier = "btih:1111111111111111111111111111111111111111";
 
-    private readonly string _databasePath =
-        Path.Join(Path.GetTempPath(), "listenarr-tests", $"blocklist-{Guid.NewGuid():N}.db");
     private DbContextOptions<ListenArrDbContext> _options = null!;
 
-    public async Task InitializeAsync()
+    // A file-backed SQLite database rather than the shared context from BaseTests, because the
+    // race these tests reproduce needs a second connection writing the rival row while the first
+    // context still holds its stale read.
+    public override async Task InitializeAsync()
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(_databasePath)!);
+        await base.InitializeAsync();
+        var databasePath = Path.Join(FileService.GetTempPath(), $"blocklist-{Guid.NewGuid():N}.db");
         _options = new DbContextOptionsBuilder<ListenArrDbContext>()
-            .UseSqlite($"Data Source={_databasePath};Pooling=False")
+            .UseSqlite($"Data Source={databasePath};Pooling=False")
             .Options;
         await using var db = new ListenArrDbContext(_options);
         await db.Database.EnsureCreatedAsync();
-    }
-
-    public Task DisposeAsync()
-    {
-        if (File.Exists(_databasePath))
-        {
-            File.Delete(_databasePath);
-        }
-
-        return Task.CompletedTask;
     }
 
     [Fact]
