@@ -89,6 +89,70 @@ namespace Listenarr.Tests.Features.Api.Features.Prowlarr
             Assert.Equal("http://prowlarr.example:9696/prowlarr/4/api", imported.Url);
         }
 
+        /// <summary>
+        /// Stands in for a Prowlarr whose discovery request is answered by a redirect to somewhere else
+        /// entirely: a hijacked DNS record, a misconfigured proxy, or a compromised instance.
+        /// </summary>
+        private sealed class CrossOriginRedirectHandler : HttpMessageHandler
+        {
+            private readonly string _elsewhere;
+
+            public CrossOriginRedirectHandler(string elsewhere) => _elsewhere = elsewhere;
+
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            {
+                var uri = request.RequestUri!;
+                if (!uri.Host.Equals(new Uri(_elsewhere).Host, StringComparison.OrdinalIgnoreCase))
+                {
+                    var redirect = new HttpResponseMessage(HttpStatusCode.TemporaryRedirect);
+                    redirect.Headers.Location = new Uri(_elsewhere + "/prowlarr" + uri.PathAndQuery);
+                    return Task.FromResult(redirect);
+                }
+
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(IndexerPayload, Encoding.UTF8, "application/json")
+                });
+            }
+        }
+
+        [Fact]
+        public async Task ImportFromProwlarr_WhenDiscoveryIsRedirectedOffTheRequestedOrigin_KeepsTheSuppliedBase()
+        {
+            var handler = new CrossOriginRedirectHandler("http://attacker.example:9696");
+            var controller = MockUtils.CreateIndexersController(_provider, handler);
+
+            var result = await controller.ImportFromProwlarr(new ProwlarrImportRequestDto
+            {
+                Url = "http://prowlarr.example:9696",
+                ApiKey = "test-key"
+            });
+
+            Assert.IsType<OkObjectResult>(result);
+
+            var imported = Assert.Single(await _indexerRepository.GetAllAsync());
+            Assert.Equal("http://prowlarr.example:9696/4/api", imported.Url);
+        }
+
+        [Theory]
+        // A URL base on the same instance is the case this resolution exists for.
+        [InlineData("http://prowlarr.example:9696", "http://prowlarr.example:9696/prowlarr/api/v1/indexer", "http://prowlarr.example:9696/prowlarr")]
+        // An http to https upgrade on the same host and port is a proxy redirecting to TLS.
+        [InlineData("http://prowlarr.example:9696", "https://prowlarr.example:9696/prowlarr/api/v1/indexer", "https://prowlarr.example:9696/prowlarr")]
+        // Everything below leaves the origin the user named and must not be adopted.
+        [InlineData("http://prowlarr.example:9696", "http://attacker.example:9696/prowlarr/api/v1/indexer", "http://prowlarr.example:9696")]
+        [InlineData("http://prowlarr.example:9696", "http://prowlarr.example:8080/prowlarr/api/v1/indexer", "http://prowlarr.example:9696")]
+        [InlineData("https://prowlarr.example:9696", "http://prowlarr.example:9696/prowlarr/api/v1/indexer", "https://prowlarr.example:9696")]
+        public void ResolveBaseUrlFromDiscovery_OnlyAdoptsABaseOnTheOriginThatWasAsked(string requested, string answered, string expected)
+        {
+            var resolved = ProwlarrImportUrlPlanner.ResolveBaseUrlFromDiscovery(
+                requested,
+                new Uri(answered),
+                "/api/v1/indexer");
+
+            Assert.Equal(expected, resolved);
+        }
+
         [Fact]
         public async Task ImportFromProwlarr_WhenDiscoveryIsNotRedirected_KeepsTheSuppliedBase()
         {
