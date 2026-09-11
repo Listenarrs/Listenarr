@@ -12,7 +12,6 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
-using Listenarr.Domain.Search;
 
 namespace Listenarr.Domain.Downloads
 {
