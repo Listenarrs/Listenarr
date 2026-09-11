@@ -15,6 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using Listenarr.Tests.Common;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Tests.Features.Api.Features.Search
@@ -24,7 +25,9 @@ namespace Listenarr.Tests.Features.Api.Features.Search
     /// GET /search/audible has to keep apart: a failed lookup and a catalogue that really
     /// holds nothing. Without the second one, a 503 on every empty result would pass.
     /// </summary>
-    public class SearchControllerAudibleUnavailableTests
+    [Trait("Name", "SearchControllerAudibleUnavailableTests")]
+    [Trait("Category", "Api")]
+    public class SearchControllerAudibleUnavailableTests : BaseTests
     {
         [Fact]
         public async Task SearchAudible_WhenTheProviderDidNotAnswer_Returns503()
