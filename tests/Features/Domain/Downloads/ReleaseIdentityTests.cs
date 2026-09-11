@@ -1,4 +1,3 @@
-using Listenarr.Domain.Downloads;
 using Listenarr.Tests.Common;
 
 namespace Listenarr.Tests.Features.Domain.Downloads;

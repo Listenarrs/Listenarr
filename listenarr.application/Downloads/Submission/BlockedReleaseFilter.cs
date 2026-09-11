@@ -8,9 +8,6 @@
  * (at your option) any later version.
  */
 
-using Listenarr.Application.Downloads.Contracts;
-using Listenarr.Domain.Downloads;
-using Listenarr.Domain.Search;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Downloads.Submission

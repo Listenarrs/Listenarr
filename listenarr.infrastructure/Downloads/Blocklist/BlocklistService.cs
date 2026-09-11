@@ -8,8 +8,6 @@
  * (at your option) any later version.
  */
 
-using Listenarr.Application.Downloads.Contracts;
-using Listenarr.Domain.Downloads;
 using Listenarr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;

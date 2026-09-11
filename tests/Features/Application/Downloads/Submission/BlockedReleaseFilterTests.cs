@@ -1,7 +1,3 @@
-using Listenarr.Application.Downloads.Contracts;
-using Listenarr.Application.Downloads.Submission;
-using Listenarr.Domain.Audiobooks;
-using Listenarr.Domain.Downloads;
 using Listenarr.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 
