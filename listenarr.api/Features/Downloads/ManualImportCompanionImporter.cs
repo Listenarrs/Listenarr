@@ -347,6 +347,7 @@ public sealed partial class ManualImportCompanionImporter
                     _logger.LogWarning(
                         "Skipping companion file {FilePath} because its destination has no managed ownership boundary",
                         companionFile);
+                    succeeded = false;
                     continue;
                 }
 
