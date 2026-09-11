@@ -98,5 +98,30 @@ namespace Listenarr.Tests.Features.Application.Metadata
             // numerically, so it goes to the end rather than to the front.
             Assert.Equal(decimal.MaxValue, AudibleSeriesWorkflow.ParseSeriesPosition(position));
         }
+
+        [Theory]
+        [InlineData("")]
+        [InlineData("en-US")]
+        [InlineData("de-DE")]
+        [InlineData("fr-FR")]
+        public void CommaFormattedPosition_FailsRatherThanChangingMagnitude(string culture)
+        {
+            // NumberStyles.Number carries AllowThousands and the invariant group separator is
+            // ',', so under Number this parses as 15 and a novella sorts after book 10: the
+            // same wrong order the invariant pin exists to prevent, reached a different way.
+            // Float rejects it, so it joins the unorderable positions at the end.
+            InCulture(culture, () =>
+            {
+                Assert.Equal(decimal.MaxValue, AudibleSeriesWorkflow.ParseSeriesPosition("1,5"));
+
+                string[] positions = ["1", "1,5", "2", "10"];
+
+                var ordered = positions
+                    .OrderBy(AudibleSeriesWorkflow.ParseSeriesPosition)
+                    .ToArray();
+
+                Assert.Equal(["1", "2", "10", "1,5"], ordered);
+            });
+        }
     }
 }
