@@ -15,8 +15,10 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Listenarr.Infrastructure.DownloadClients.Qbittorrent;
+using System.Net;
+using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
+using Listenarr.Tests.Mocks.Api;
 
 namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
 {
@@ -64,6 +66,23 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
         private static async Task<string> AddBodyAsync(DownloadClientConfiguration client)
         {
             var plan = QbittorrentTorrentAddPlanner.Create(client, Submission());
+            using var content = QbittorrentAddRequestContentBuilder.Build(plan);
+            return await content.ReadAsStringAsync();
+        }
+
+        // A .torrent file rather than a magnet, so the builder takes the multipart branch. Every
+        // other case here goes through the url-encoded one, which left the multipart line able to
+        // be deleted with the whole file still green.
+        private static PreparedTorrentSubmission FileSubmission() => Submission() with
+        {
+            TorrentBytes = [1, 2, 3],
+            MagnetUri = null,
+            FileName = "book.torrent"
+        };
+
+        private static async Task<string> AddFileBodyAsync(DownloadClientConfiguration client)
+        {
+            var plan = QbittorrentTorrentAddPlanner.Create(client, FileSubmission());
             using var content = QbittorrentAddRequestContentBuilder.Build(plan);
             return await content.ReadAsStringAsync();
         }
@@ -164,6 +183,125 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
 
             Assert.DoesNotContain("sequentialDownload", body, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("firstLastPiecePrio", body, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        [Trait("Scenario", "A torrent file carries the same options as a magnet")]
+        public async Task Build_FromTorrentFile_CarriesTheSameOptions()
+        {
+            // The multipart branch is the one used whenever the indexer hands over a .torrent
+            // rather than a magnet, which for private trackers is most of the time.
+            var body = await AddFileBodyAsync(Client(
+                ("initialState", "pause"),
+                ("sequentialOrder", true),
+                ("firstAndLastFirst", true),
+                ("contentLayout", "nosubfolder")));
+
+            Assert.Contains("name=stopped", body, StringComparison.Ordinal);
+            Assert.Contains("name=paused", body, StringComparison.Ordinal);
+            Assert.Contains("name=sequentialDownload", body, StringComparison.Ordinal);
+            Assert.Contains("name=firstLastPiecePrio", body, StringComparison.Ordinal);
+            Assert.Contains("name=contentLayout", body, StringComparison.Ordinal);
+            Assert.Contains("NoSubfolder", body, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        [Trait("Scenario", "A torrent file sends none of them when none were chosen")]
+        public async Task Build_FromTorrentFile_WithoutAdvancedSettings_SendsNoneOfThem()
+        {
+            var body = await AddFileBodyAsync(Client());
+
+            Assert.DoesNotContain("name=stopped", body, StringComparison.Ordinal);
+            Assert.DoesNotContain("name=sequentialDownload", body, StringComparison.Ordinal);
+            Assert.DoesNotContain("name=firstLastPiecePrio", body, StringComparison.Ordinal);
+            Assert.DoesNotContain("name=contentLayout", body, StringComparison.Ordinal);
+        }
+
+        private async Task<DownloadClientConfiguration> SavedClientAsync(string? initialState)
+        {
+            var builder = new DownloadClientConfigurationBuilder()
+                .WithHost("localhost")
+                .WithPort(8080)
+                .WithUsername("admin")
+                .WithPassword("admin")
+                .WithType("qbittorrent");
+
+            if (initialState != null)
+            {
+                builder = builder.WithSettings("initialState", initialState);
+            }
+
+            return await _downloadClientConfigurationRepository.SaveAsync(builder.Build());
+        }
+
+        private static PreparedTorrentSubmission MagnetSubmission() => PreparedSubmissionTestFactory.Torrent(
+            new SearchResult
+            {
+                Title = "Book",
+                MagnetLink = "magnet:?xt=urn:btih:ABCDEF1234567890ABCDEF1234567890ABCDEF12"
+            });
+
+        [Fact]
+        [Trait("Scenario", "Force start takes a second call once the torrent exists")]
+        public async Task AddAsync_WhenForceStartIsChosen_CallsSetForceStartForThatTorrent()
+        {
+            // Nothing asserted the second request was ever made. Deleting the whole force start
+            // block from the workflow left every advanced settings test green, because they all
+            // stop at the body of the add call.
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            var client = await SavedClientAsync("forceStart");
+            var gateway = _provider.GetRequiredService<IDownloadClientGateway>();
+
+            var result = await gateway.AddAsync(client, MagnetSubmission());
+
+            Assert.NotNull(apiMock.LastForceStartForm);
+            Assert.Equal("true", apiMock.LastForceStartForm!["value"]);
+            Assert.Equal(result.ExternalId, apiMock.LastForceStartForm!["hashes"]);
+        }
+
+        [Fact]
+        [Trait("Scenario", "No force start call when the user did not ask for one")]
+        public async Task AddAsync_WhenForceStartIsNotChosen_MakesNoSuchCall()
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            var client = await SavedClientAsync("start");
+            var gateway = _provider.GetRequiredService<IDownloadClientGateway>();
+
+            await gateway.AddAsync(client, MagnetSubmission());
+
+            Assert.Null(apiMock.LastForceStartForm);
+        }
+
+        [Fact]
+        [Trait("Scenario", "A refused force start does not fail a submission the client accepted")]
+        public async Task AddAsync_WhenForceStartIsRefused_StillReportsTheTorrentAsAdded()
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.ForceStartStatusCode = HttpStatusCode.InternalServerError;
+            var client = await SavedClientAsync("forceStart");
+            var gateway = _provider.GetRequiredService<IDownloadClientGateway>();
+
+            var result = await gateway.AddAsync(client, MagnetSubmission());
+
+            Assert.False(string.IsNullOrEmpty(result.ExternalId));
+        }
+
+        [Fact]
+        [Trait("Scenario", "A force start that times out does not fail a submission either")]
+        public async Task AddAsync_WhenForceStartTimesOut_StillReportsTheTorrentAsAdded()
+        {
+            // HttpClient reports its own timeout as TaskCanceledException with nothing cancelled,
+            // which is not an HttpRequestException. Letting it escape fails a submission the
+            // client has already accepted, and the caller answers that by deleting the
+            // provisional download row while the torrent carries on downloading unnoticed.
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.ForceStartTimesOut = true;
+            var client = await SavedClientAsync("forceStart");
+            var gateway = _provider.GetRequiredService<IDownloadClientGateway>();
+
+            var result = await gateway.AddAsync(client, MagnetSubmission());
+
+            Assert.False(string.IsNullOrEmpty(result.ExternalId));
         }
     }
 }
