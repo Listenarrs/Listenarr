@@ -720,6 +720,30 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
         }
 
         [Fact]
+        public void FailedHistoryWarningTracker_AfterAScopedRead_StillComparesKeysCaseInsensitively()
+        {
+            // AC: Every key path in the tracker compares case-insensitively, including the set a
+            // scoped read accumulates into. A title-derived key is the reachable case: NZBGet
+            // supplies no NZBID for some history rows, so the key is the title verbatim.
+            // Behavior: Full read, scoped read, then a full read of the same key in other casing
+            // -> no first sighting, so no second warning for an entry already reported.
+            // @category: edge-case
+            // @lane: unit
+            // @dependency: NzbgetFailedHistoryWarningTracker
+            // @complexity: low
+            var tracker = new NzbgetFailedHistoryWarningTracker();
+
+            Assert.Equal(["Interrupted Book"], FullRead(tracker, "client-e", ["Interrupted Book"]));
+
+            // The scoped branch accumulates into the stored set rather than replacing it. Built
+            // with a collection expression that set would carry the default comparer, and the
+            // re-cased read below would then be reported as new.
+            Assert.Equal(["Another Book"], ScopedRead(tracker, "client-e", ["Another Book"]));
+
+            Assert.Empty(FullRead(tracker, "client-e", ["INTERRUPTED BOOK", "another book"]));
+        }
+
+        [Fact]
         public async Task GetQueueAsync_MonitorPoll_LogsAndReturnsOnlyMonitoredFailedHistory()
         {
             // AC: Monitor polls discard unrequested history afterwards, so it must not be warned about first.

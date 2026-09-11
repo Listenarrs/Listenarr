@@ -63,13 +63,26 @@ internal sealed class NzbgetFailedHistoryWarningTracker
             //
             // The surface is part of the key because the surfaces read different slices, so
             // one surface's read must not evict what another surface saw.
-            _lastReadKeys[(surface, clientKey)] = isScopedRead && previousKeys != null
-                ? [.. previousKeys, .. currentKeys]
-                : currentKeys;
-
-            return currentKeys
+            //
+            // First sightings are computed before the stored set is touched, because the
+            // scoped branch below unions into that same set in place.
+            var firstSightings = currentKeys
                 .Where(key => previousKeys?.Contains(key) != true)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            // UnionWith rather than a collection expression: a collection expression builds a
+            // fresh HashSet with the default comparer, which would silently drop the
+            // OrdinalIgnoreCase comparison every other key path here relies on.
+            if (isScopedRead && previousKeys != null)
+            {
+                previousKeys.UnionWith(currentKeys);
+            }
+            else
+            {
+                _lastReadKeys[(surface, clientKey)] = currentKeys;
+            }
+
+            return firstSightings;
         }
     }
 
