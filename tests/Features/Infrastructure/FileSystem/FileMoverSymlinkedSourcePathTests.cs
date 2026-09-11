@@ -15,8 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Listenarr.Application.Common.Contracts;
-using Listenarr.Infrastructure.FileSystem;
 using Listenarr.Tests.Common;
 
 namespace Listenarr.Tests.Features.Infrastructure.FileSystem;
@@ -34,7 +32,7 @@ namespace Listenarr.Tests.Features.Infrastructure.FileSystem;
 [Trait("Category", "PublicationCapability")]
 public sealed class FileMoverSymlinkedSourcePathTests : BaseTests
 {
-    private (string Direct, string ViaSymlink) CreateSymlinkedLayout(string name)
+    private (string Direct, string ViaSymlink, string Link) CreateSymlinkedLayout(string name)
     {
         var root = FileService.GetTempDirectory(name);
         var real = Path.Join(root, "real-downloads", "completed");
@@ -47,7 +45,7 @@ public sealed class FileMoverSymlinkedSourcePathTests : BaseTests
         var link = Path.Join(root, "downloads");
         Directory.CreateSymbolicLink(link, Path.Join(root, "real-downloads"));
 
-        return (file, Path.Join(link, "completed", "book.m4b"));
+        return (file, Path.Join(link, "completed", "book.m4b"), link);
     }
 
     [DirectoryLinkFact]
@@ -83,5 +81,11 @@ public sealed class FileMoverSymlinkedSourcePathTests : BaseTests
         // But the reason must now be actionable rather than a fixed sentence about generations.
         Assert.Contains("symbolic link", result.Reason, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("configure the real path", result.Reason, StringComparison.OrdinalIgnoreCase);
+
+        // Both phrases above are literals in the format string, so they survive a build that
+        // captures no cause at all. These two do not: the linked segment comes from the walk and
+        // the type name comes from the caught exception, so an empty cause fails here.
+        Assert.Contains(Path.GetFileName(layout.Link), result.Reason, StringComparison.Ordinal);
+        Assert.Matches(@"\w+Exception: \S", result.Reason!);
     }
 }
