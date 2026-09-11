@@ -535,13 +535,22 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Quality
         }
 
         [Theory]
-        [InlineData(200, true)]
-        [InlineData(0, false)]
-        public async Task Indexer_MaximumSize_Rejects_Results_Over_The_Limit(int indexerMaximumSize, bool expectRejection)
+        [InlineData(200, "torrent", true)]
+        [InlineData(0, "torrent", false)]
+        [InlineData(200, "nzb", true)]
+        [InlineData(0, "nzb", false)]
+        public async Task Indexer_MaximumSize_Rejects_Results_Over_The_Limit(int indexerMaximumSize, string downloadType, bool expectRejection)
         {
             // Indexer.MaximumSize had no reader. The scorer's existing size gate reads
-            // QualityProfile.MaximumSize, which shadows it by name. The second case is the
-            // control: with the indexer limit unset, the same result has to pass.
+            // QualityProfile.MaximumSize, which shadows it by name. The rows with the indexer
+            // limit unset are the control: the same result has to pass.
+            //
+            // The nzb rows pin the deliberate difference from the profile's setting of the same
+            // name. The profile size gate is skipped for Usenet, because a Usenet grab is not
+            // sized the way a torrent is; the indexer's ceiling is a property of the indexer and
+            // applies to both protocols, which is the shape Sonarr and Radarr use for their
+            // equivalent. Without these rows nothing stops someone moving the gate inside the
+            // !isNzb block and calling it a tidy-up.
             var options = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<ListenArrDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
             using var db = new ListenArrDbContext(options);
             var indexer = new Listenarr.Domain.Search.Indexer
@@ -561,7 +570,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Quality
             {
                 Title = "Large Result",
                 PublishedDate = DateTime.UtcNow.AddDays(-1).ToString("o"),
-                DownloadType = "torrent",
+                DownloadType = downloadType,
                 Size = 300L * 1024 * 1024,
                 Seeders = 10,
                 IndexerId = indexer.Id
