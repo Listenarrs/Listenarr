@@ -116,5 +116,27 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Monitoring
             Assert.NotNull(finalized);
             Assert.Equal(DownloadStatus.Completed, finalized!.Status);
         }
+
+        [Theory]
+        [Trait("Scenario", "Only a first transition into Completed enters the window")]
+        [InlineData(DownloadStatus.Queued, true)]
+        [InlineData(DownloadStatus.Downloading, true)]
+        [InlineData(DownloadStatus.Paused, true)]
+        [InlineData(DownloadStatus.Processing, true)]
+        [InlineData(DownloadStatus.Ready, true)]
+        [InlineData(DownloadStatus.Failed, true)]
+        [InlineData(DownloadStatus.Completed, false)]
+        [InlineData(DownloadStatus.ImportPending, false)]
+        [InlineData(DownloadStatus.ImportBlocked, false)]
+        [InlineData(DownloadStatus.Moved, false)]
+        public void OnlyPreCompletionStatusesEnterTheWindow(DownloadStatus previousStatus, bool expected)
+        {
+            // The four false rows are the ones that matter. EfDownloadRepository.GetActiveAsync
+            // returns Completed, ImportPending and Moved rows on every cycle, and a guard that
+            // only asked whether the previous status was Completed pulled the other two into the
+            // window, so a row already in import had its status written back for as long as the
+            // window lasted. Nothing outside a first completion should be held.
+            Assert.Equal(expected, DownloadMonitorProcessor.IsPreCompletion(previousStatus));
+        }
     }
 }

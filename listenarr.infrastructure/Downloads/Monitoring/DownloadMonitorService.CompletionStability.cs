@@ -32,19 +32,32 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
         // When the client first reported each download complete. In memory on purpose: a restart
         // simply restarts the window, which is the safe direction, and persisting it would need a
         // column for a value that is meaningless once the transition has been let through.
+        //
+        // Entries are removed when the transition is let through and when the client stops
+        // reporting the download as complete, but not when a download vanishes from the client
+        // mid-window, so the dictionary can hold entries for downloads that no longer exist. The
+        // processor is a singleton, so those survive for the life of the process. That is
+        // accepted rather than swept: an entry is a string key and a DateTime, it can only be
+        // added for a download the client itself reported complete during this run, and the
+        // bound is therefore the number of downloads that completed and then disappeared before
+        // their window elapsed, which is a handful over an uptime rather than something that
+        // grows with the library. Sweeping it would mean either a second timer or walking the
+        // dictionary on every cycle, both of which cost more than the leak.
         internal readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _completionFirstSeen = new();
 
         /// <summary>
         /// Has this download been reported complete by the client for long enough to finalize?
         /// </summary>
         /// <remarks>
-        /// Only a transition into Completed is held. A download the client has always reported as
-        /// complete, and anything that is not a completion, passes straight through, so this can
-        /// never stall a download that is already past this point.
+        /// Only a first transition into Completed is held, which means the row's previous status
+        /// has to be one finalization has not started from. A download the client has always
+        /// reported as complete, one already in import, and anything that is not a completion all
+        /// pass straight through, so this can never stall a download that is past this point and
+        /// never changes what the monitor does to a row that has already finalized.
         /// </remarks>
         private bool HasSettledAsComplete(Download current, Download previous, TimeSpan stabilityWindow)
         {
-            if (current.Status != DownloadStatus.Completed || previous.Status == DownloadStatus.Completed)
+            if (current.Status != DownloadStatus.Completed || !IsPreCompletion(previous.Status))
             {
                 _completionFirstSeen.TryRemove(current.Id, out _);
                 return true;
@@ -70,5 +83,24 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
             _completionFirstSeen.TryRemove(current.Id, out _);
             return true;
         }
+
+        /// <summary>
+        /// Is this a status a download can still make its first transition into Completed from?
+        /// </summary>
+        /// <remarks>
+        /// The window exists to hold that first transition. Completed, ImportPending,
+        /// ImportBlocked and Moved are all past it, and the repository's active query returns
+        /// Completed, ImportPending and Moved rows on every cycle, so naming the set matters: the
+        /// guard read as "hold a completion" while meaning "hold anything that is not already
+        /// Completed", which pulled rows that are in import into the window. Those are left
+        /// exactly as the monitor handled them before the window existed.
+        /// </remarks>
+        internal static bool IsPreCompletion(DownloadStatus status) =>
+            status is DownloadStatus.Queued
+                or DownloadStatus.Downloading
+                or DownloadStatus.Paused
+                or DownloadStatus.Processing
+                or DownloadStatus.Ready
+                or DownloadStatus.Failed;
     }
 }
