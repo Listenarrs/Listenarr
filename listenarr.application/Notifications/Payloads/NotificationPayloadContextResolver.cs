@@ -22,41 +22,69 @@ namespace Listenarr.Application.Notifications.Payloads
 {
     public static class NotificationPayloadContextResolver
     {
+        /// <summary>
+        /// The environment variable the Discord bot already treats as the external URL. It is read
+        /// here for the same reason and in the same position, so the two notification paths agree.
+        /// </summary>
+        internal const string PublicUrlVariable = "LISTENARR_PUBLIC_URL";
+
         public static async Task<NotificationPayloadContext> ResolveAsync(
             IConfigurationService configurationService,
             IRequestContextAccessor? requestContextAccessor,
             ILogger logger,
-            bool validateImageBaseUrl = false)
+            bool validateImageBaseUrl = false,
+            Func<string, string?>? environmentReader = null)
         {
             var startup = await configurationService.GetStartupConfigAsync();
-            var baseUrl = startup?.ApplicationUrl;
+            var readEnvironment = environmentReader ?? Environment.GetEnvironmentVariable;
+
+            // The order is DiscordBotService.GetListenarrUrl()'s: the environment variable an
+            // operator has probably already set wins, then whatever is configured, then the
+            // request the notification is being sent from.
+            var source = PublicUrlVariable;
+            var baseUrl = TrimTrailingSlash(readEnvironment(PublicUrlVariable));
+
+            if (string.IsNullOrWhiteSpace(baseUrl))
+            {
+                source = nameof(StartupConfig.ApplicationUrl);
+                baseUrl = startup?.ApplicationUrl;
+            }
 
             if (string.IsNullOrWhiteSpace(baseUrl) && IsAbsoluteUrl(startup?.UrlBase))
             {
                 // Before ApplicationUrl existed this was the only way to get images into a
                 // notification, so keep honouring it rather than breaking those installations.
                 logger.LogWarning(
-                    "UrlBase is set to an absolute URL and is being used as the notification base. Move the value to ApplicationUrl: UrlBase is the path Listenarr is served under");
+                    "UrlBase is set to an absolute URL and is being used as the notification base. Move the value to ApplicationUrl or set {PublicUrlVariable}: UrlBase is the path Listenarr is served under",
+                    PublicUrlVariable);
+                source = nameof(StartupConfig.UrlBase);
                 baseUrl = startup?.UrlBase;
             }
 
             if (string.IsNullOrWhiteSpace(baseUrl) && requestContextAccessor?.Current != null)
             {
                 var derived = NotificationPayloadBuilder.GetBaseUrlFromRequestContext(requestContextAccessor.Current);
-                if (!string.IsNullOrWhiteSpace(derived)) baseUrl = derived;
+                if (!string.IsNullOrWhiteSpace(derived))
+                {
+                    source = "The request context";
+                    baseUrl = derived;
+                }
             }
 
             if (validateImageBaseUrl &&
                 !string.IsNullOrWhiteSpace(baseUrl) &&
                 !IsAbsoluteUrl(baseUrl))
             {
-                logger.LogWarning("ApplicationUrl is not an absolute URL: {BaseUrl} - notifications will not include images", LogRedaction.SanitizeUrl(baseUrl));
+                logger.LogWarning("{Source} is not an absolute URL: {BaseUrl} - notifications will not include images", source, LogRedaction.SanitizeUrl(baseUrl));
                 baseUrl = null;
             }
 
             var apiVersion = ApiVersionUtils.ResolveApiVersion(requestContextAccessor?.Current?.Path, startup?.ApiVersion);
             return new NotificationPayloadContext(baseUrl, apiVersion);
         }
+
+        private static string? TrimTrailingSlash(string? value) =>
+            string.IsNullOrWhiteSpace(value) ? value : value.Trim().TrimEnd('/');
 
         private static bool IsAbsoluteUrl(string? value) =>
             !string.IsNullOrWhiteSpace(value) &&
