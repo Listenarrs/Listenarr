@@ -40,6 +40,23 @@
           urlBaseError
         }}</span>
       </FormRow>
+
+      <FormRow
+        label="Application URL"
+        labelFor="applicationUrl"
+        help="This application's external URL including http(s)://, port and URL base. Used for links and images in notifications. The LISTENARR_PUBLIC_URL environment variable takes priority over this."
+      >
+        <input
+          id="applicationUrl"
+          class="url-base-input"
+          :value="applicationUrl"
+          type="text"
+          placeholder="https://listenarr.example.com"
+          spellcheck="false"
+          autocomplete="off"
+          @change="(e) => updateApplicationUrl((e.target as HTMLInputElement).value)"
+        />
+      </FormRow>
     </div>
   </div>
 </template>
@@ -81,6 +98,12 @@ const urlBaseError = computed(() => {
 
 function updateUrlBase(value: string) {
   emit('update:startupConfig', { ...(props.startupConfig || {}), urlBase: value.trim() })
+}
+
+const applicationUrl = computed(() => props.startupConfig?.applicationUrl ?? '')
+
+function updateApplicationUrl(value: string) {
+  emit('update:startupConfig', { ...(props.startupConfig || {}), applicationUrl: value.trim() })
 }
 </script>
 

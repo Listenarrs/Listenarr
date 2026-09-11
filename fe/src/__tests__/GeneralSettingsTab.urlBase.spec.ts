@@ -52,4 +52,38 @@ describe('GeneralSettingsTab, url base wiring', () => {
     expect(emitted).toBeTruthy()
     expect(emitted![0][0]).toEqual({ urlBase: '/listenarr', port: 4545 })
   })
+
+  it('passes an application url change up to the parent that saves it', async () => {
+    const { default: GeneralSettingsTab } = await import('@/views/settings/GeneralSettingsTab.vue')
+
+    const wrapper = mount(GeneralSettingsTab, {
+      props: {
+        settings: { downloadPath: '/downloads' },
+        startupConfig: { urlBase: '', port: 4545 },
+        apiKey: 'key',
+        authEnabled: false,
+      },
+      global: {
+        stubs: {
+          FileManagementSection: true,
+          DownloadSettingsSection: true,
+          FeaturesSection: true,
+          SearchSettingsSection: true,
+          AuthenticationSection: true,
+        },
+      },
+    })
+
+    const input = wrapper.get('#applicationUrl')
+    ;(input.element as HTMLInputElement).value = 'https://listenarr.example.com'
+    await input.trigger('change')
+
+    const emitted = wrapper.emitted('update:startupConfig')
+    expect(emitted).toBeTruthy()
+    expect(emitted![0][0]).toEqual({
+      urlBase: '',
+      port: 4545,
+      applicationUrl: 'https://listenarr.example.com',
+    })
+  })
 })

@@ -133,9 +133,38 @@ describe('HostSettingsSection', () => {
     expect(wrapper.emitted('update:startupConfig')).toBeUndefined()
   })
 
+  it('shows the configured application url', async () => {
+    const wrapper = mount(await load(), {
+      props: { startupConfig: { applicationUrl: 'https://listenarr.example.com' } },
+    })
+
+    expect((wrapper.get('#applicationUrl').element as HTMLInputElement).value).toBe(
+      'https://listenarr.example.com',
+    )
+  })
+
+  it('emits the application url without disturbing the url base', async () => {
+    // The two live in the same section and the save path spreads the whole config,
+    // so an emit that dropped its sibling would erase it from config.json.
+    const wrapper = mount(await load(), {
+      props: { startupConfig: { urlBase: '/listenarr', port: 4545 } },
+    })
+
+    const input = wrapper.get('#applicationUrl')
+    ;(input.element as HTMLInputElement).value = '  https://listenarr.example.com  '
+    await input.trigger('change')
+
+    expect(wrapper.emitted('update:startupConfig')![0][0]).toEqual({
+      urlBase: '/listenarr',
+      port: 4545,
+      applicationUrl: 'https://listenarr.example.com',
+    })
+  })
+
   it('tolerates a null startup config', async () => {
     const wrapper = mount(await load(), { props: { startupConfig: null } })
 
     expect((wrapper.get('#urlBase').element as HTMLInputElement).value).toBe('')
+    expect((wrapper.get('#applicationUrl').element as HTMLInputElement).value).toBe('')
   })
 })
