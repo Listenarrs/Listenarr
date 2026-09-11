@@ -495,7 +495,6 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
             Assert.Empty(items);
         }
 
-
         // A queue response whose middle torrent carries `downloaded` in the given JSON token form.
         // The torrents either side of it are well formed, so anything missing from the result is
         // attributable to that one field.
@@ -546,6 +545,48 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
             Assert.DoesNotContain(items, item => item.Id == "bbbb2222");
             Assert.Equal(2, items.Count);
         }
+
+        // The item list is the half of the guard that matters most: completion and import
+        // decisions are made from it, so a torrent lost here stops being considered for import
+        // rather than merely going missing from a view. Without a case of its own, deleting the
+        // guard in QbittorrentItemFetchWorkflow leaves every test in this file green.
+        [Theory]
+        [InlineData("600.5")]
+        [InlineData("\"600\"")]
+        [InlineData("6e2")]
+        public async Task GetItemsAsync_WhenOneTorrentIsUnreadable_DropsOnlyThatTorrent(string malformedDownloaded)
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent(malformedDownloaded);
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            var items = await adapter.GetItemsAsync(_client);
+
+            Assert.Contains(items, item => item.DownloadId == "aaaa1111");
+            Assert.Contains(items, item => item.DownloadId == "cccc3333");
+            Assert.DoesNotContain(items, item => item.DownloadId == "bbbb2222");
+            Assert.Equal(2, items.Count);
+        }
+
+        // The counterpart control for the guard above. The per-torrent files request lives inside
+        // the guarded block, so a client that stops answering after the torrent list arrives
+        // throws once per remaining torrent. If the guard swallowed those, a monitor poll would
+        // return a short queue and report success, and the monitor would neither back off nor say
+        // anything, which is a worse outcome than the truncation the guard was added to fix.
+        [Fact]
+        public async Task GetQueueAsync_WithIds_WhenTheClientStopsAnsweringMidPoll_StillFailsThePoll()
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent("500");
+            apiMock.FilesRequestFailsAtTransport = true;
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            await Assert.ThrowsAsync<DownloadClientAdapterPollingException>(
+                () => adapter.GetQueueAsync(_client, ["aaaa1111", "bbbb2222", "cccc3333"]));
+        }
+
         [Fact]
         public async Task MarkItemAsImportedAsync_SetsConfiguredPostImportCategory()
         {

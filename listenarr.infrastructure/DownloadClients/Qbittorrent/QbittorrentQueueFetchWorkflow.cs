@@ -107,6 +107,14 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                     // loop and is caught only by the handler below, so torrents N..end are dropped
                     // while the poll still reports itself as a healthy live snapshot: the queue
                     // simply appears shorter, with nothing to say a row was lost.
+                    //
+                    // HttpRequestException is excluded on purpose. The per-torrent files request
+                    // sits inside this block, and a transport failure there means the client went
+                    // away mid-poll, not that this torrent is unreadable. Swallowing it would log
+                    // one warning per remaining torrent and hand the caller a short queue that
+                    // still claims to be a healthy live snapshot, which is the failure this guard
+                    // exists to stop. An error status from that request is already handled by the
+                    // IsSuccessStatusCode check and does not reach here.
                     try
                     {
                         List<Dictionary<string, JsonElement>> files = [];
@@ -119,7 +127,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
 
                         items.Add(QbittorrentResponseMapper.MapQueueItem(torrent, client, files));
                     }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not HttpRequestException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                     {
                         logger.LogWarning(
                             ex,
