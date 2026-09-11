@@ -61,16 +61,6 @@ namespace Listenarr.Domain.Configuration
 
         public bool EnableMetadataProcessing { get; set; } = true;
         /// <summary>
-        /// Embed cover artwork into audio files as they are imported.
-        ///
-        /// This replaces EnableCoverArtDownload, which was persisted from the day the
-        /// Settings page was added and never read by anything. Reusing that column would
-        /// have inherited a stored true on every existing instance, since the value came
-        /// from a property initialiser rather than from anyone choosing it, and embedding
-        /// rewrites the audio file. A new column starts false for everyone, so the
-        /// behaviour is opt-in on upgrade rather than something an operator discovers.
-        /// </summary>
-        /// <summary>
         /// Dead flag, kept only so this change stays a single additive migration.
         ///
         /// Persisted since the Settings page was added and never read by anything. Its
@@ -81,6 +71,16 @@ namespace Listenarr.Domain.Configuration
         /// </summary>
         public bool EnableCoverArtDownload { get; set; } = true;
 
+        /// <summary>
+        /// Embed cover artwork into audio files as they are imported.
+        ///
+        /// This replaces EnableCoverArtDownload, which was persisted from the day the
+        /// Settings page was added and never read by anything. Reusing that column would
+        /// have inherited a stored true on every existing instance, since the value came
+        /// from a property initialiser rather than from anyone choosing it, and embedding
+        /// rewrites the audio file. A new column starts false for everyone, so the
+        /// behaviour is opt-in on upgrade rather than something an operator discovers.
+        /// </summary>
         public bool EmbedCoverArtInAudioFiles { get; set; } = false;
         public string AudnexusApiUrl { get; set; } = "https://api.audnex.us";
         public int MaxConcurrentDownloads { get; set; } = 3;
