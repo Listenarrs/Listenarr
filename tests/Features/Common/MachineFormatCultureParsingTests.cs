@@ -17,6 +17,7 @@
  */
 using System.Globalization;
 using System.Text.Json;
+using Listenarr.Application.Search.Indexers.Torznab;
 using Listenarr.Infrastructure.Ffmpeg.Metadata;
 using Listenarr.Tests.Common;
 
@@ -40,7 +41,9 @@ namespace Listenarr.Tests.Features.Common
     {
         // '' is the invariant culture: what a container with no LANG gets.
         // de-DE treats '.' as the group separator; fr-FR treats ',' as the decimal separator.
-        public static TheoryData<string> ServerCultures => new() { "", "en-US", "de-DE", "fr-FR" };
+        // tr-TR is here for the case folding rather than the separator: 'i' uppercases to 'I'
+        // with a dot (U+0130), so "GiB" under ToUpper() matches no binary unit arm.
+        public static TheoryData<string> ServerCultures => new() { "", "en-US", "de-DE", "fr-FR", "tr-TR" };
 
         private static void InCulture(string culture, Action body)
         {
@@ -178,6 +181,174 @@ namespace Listenarr.Tests.Features.Common
             {
                 using var document = JsonDocument.Parse("\"1.5\"");
                 Assert.Equal(1.5, SabnzbdResponseMapper.ParseJsonDouble(document.RootElement));
+            });
+        }
+
+        // --------------------------------------------------------------------------
+        // Case folding. Pinning the number parse and leaving the unit match to the
+        // ambient culture fixes half of the same function.
+        // --------------------------------------------------------------------------
+
+        // TorznabNewznabValueParser.cs:46. Under tr-TR the 'i' of "GiB" uppercases to U+0130,
+        // no binary arm of the switch matches, and the release is recorded as zero bytes:
+        // a larger error than any of the six number parses this PR pins.
+        [Theory]
+        [MemberData(nameof(ServerCultures))]
+        public void TorznabBinaryUnits_MatchUnderEveryServerCulture(string culture)
+        {
+            InCulture(culture, () =>
+            {
+                Assert.Equal(1610612736L, TorznabNewznabValueParser.ParseSize("1.5 GiB"));
+                Assert.Equal(1572864L, TorznabNewznabValueParser.ParseSize("1.5 MiB"));
+                Assert.Equal(1536L, TorznabNewznabValueParser.ParseSize("1.5 KiB"));
+                Assert.Equal(1649267441664L, TorznabNewznabValueParser.ParseSize("1.5 TiB"));
+
+                // Not zero: the failure mode being closed is the unmatched switch arm.
+                Assert.NotEqual(0L, TorznabNewznabValueParser.ParseSize("1.5 GiB"));
+            });
+        }
+
+        // TorznabResponseParser.SizeParsing.cs:32, the other Torznab size parser. Its number
+        // parse was already invariant on canary, so only the unit match was exposed; under
+        // tr-TR "1.5 GiB" fell through the switch to the (long)value default, i.e. 1 byte.
+        [Theory]
+        [MemberData(nameof(ServerCultures))]
+        public void TorznabResponseParserBinaryUnits_MatchUnderEveryServerCulture(string culture)
+        {
+            InCulture(culture, () =>
+            {
+                using var httpClient = new HttpClient();
+                var parser = new TorznabResponseParser(httpClient, Mock.Of<ILogger>());
+
+                Assert.Equal(1610612736L, parser.ParseSizeString("1.5 GiB"));
+                Assert.Equal(1572864L, parser.ParseSizeString("1.5 MiB"));
+
+                // The decimal units were never at risk and are asserted as the control.
+                Assert.Equal(1500000000L, parser.ParseSizeString("1.5 GB"));
+            });
+        }
+
+        // --------------------------------------------------------------------------
+        // NumberStyles.Float across the batch: a value that is not machine format must
+        // fail the parse rather than come back as a different number.
+        // --------------------------------------------------------------------------
+
+        // SabnzbdResponseMapper.cs:204 and :325 were pinned with NumberStyles.Any, which
+        // carries AllowThousands, AllowCurrencySymbol and AllowParentheses: under the
+        // invariant culture "1,5" reads as 15 and "(1.5)" as -1.5. Float rejects both.
+        [Theory]
+        [MemberData(nameof(ServerCultures))]
+        public void SabnzbdSpeed_RejectsAValueThatIsNotMachineFormat(string culture)
+        {
+            InCulture(culture, () =>
+            {
+                Assert.Equal(0, SabnzbdResponseMapper.ParseSpeed("1,5 M"));
+                Assert.Equal(0, SabnzbdResponseMapper.ParseSpeed("(1.5) M"));
+
+                // Control: the machine-format value still parses.
+                Assert.Equal(1.5 * 1024 * 1024, SabnzbdResponseMapper.ParseSpeed("1.5 M"));
+            });
+        }
+
+        [Theory]
+        [MemberData(nameof(ServerCultures))]
+        public void SabnzbdQueueSlotSize_RejectsAValueThatIsNotMachineFormat(string culture)
+        {
+            InCulture(culture, () =>
+            {
+                using var document = JsonDocument.Parse(
+                    """
+                    {
+                      "nzo_id": "SABnzbd_nzo_test",
+                      "filename": "Some Release",
+                      "status": "Downloading",
+                      "cat": "audiobooks",
+                      "mb": "1,5",
+                      "mbleft": "0.5",
+                      "percentage": "66.6"
+                    }
+                    """);
+
+                var item = SabnzbdResponseMapper.MapQueueSlotToQueueItem(
+                    new DownloadClientConfiguration { Name = "sab", Type = "sabnzbd" },
+                    document.RootElement,
+                    configuredCategory: string.Empty,
+                    speed: 0);
+
+                Assert.NotNull(item);
+
+                // Zero, not 15 MB. A size that cannot be read is better than one read as ten
+                // times itself, which is what NumberStyles.Any returned here.
+                Assert.Equal(0L, item!.Size);
+            });
+        }
+
+        // --------------------------------------------------------------------------
+        // MyAnonamousePublishDateParser.cs:77, :82 and :95. No damage was measured at
+        // these three: the ages seen in practice are whole numbers, which read the same
+        // under every culture. They are pinned for uniformity, and asserted so the
+        // uniformity is a property of the build rather than of the reviewer's memory.
+        // --------------------------------------------------------------------------
+
+        private static DateTime? ParsePublishDate(string json)
+        {
+            using var document = JsonDocument.Parse(json);
+            return MyAnonamousePublishDateParser.Parse(
+                document.RootElement,
+                "Some Release",
+                Mock.Of<ILogger>());
+        }
+
+        [Theory]
+        [MemberData(nameof(ServerCultures))]
+        public void MyAnonamouseAgeHours_ParsesTheSameUnderEveryServerCulture(string culture)
+        {
+            InCulture(culture, () =>
+            {
+                var withFraction = ParsePublishDate("{\"ageHours\":\"2.5\"}");
+                var whole = ParsePublishDate("{\"ageHours\":\"2\"}");
+
+                Assert.NotNull(withFraction);
+                Assert.NotNull(whole);
+
+                // Half an hour apart, not twenty five hours or nothing at all.
+                var gap = whole!.Value - withFraction!.Value;
+                Assert.InRange(gap.TotalMinutes, 29, 31);
+            });
+        }
+
+        [Theory]
+        [MemberData(nameof(ServerCultures))]
+        public void MyAnonamouseAgeMinutes_ParsesTheSameUnderEveryServerCulture(string culture)
+        {
+            InCulture(culture, () =>
+            {
+                var withFraction = ParsePublishDate("{\"ageMinutes\":\"90.5\"}");
+                var whole = ParsePublishDate("{\"ageMinutes\":\"90\"}");
+
+                Assert.NotNull(withFraction);
+                Assert.NotNull(whole);
+
+                var gap = whole!.Value - withFraction!.Value;
+                Assert.InRange(gap.TotalSeconds, 29, 31);
+            });
+        }
+
+        [Theory]
+        [MemberData(nameof(ServerCultures))]
+        public void MyAnonamouseAge_ParsesTheSameUnderEveryServerCulture(string culture)
+        {
+            InCulture(culture, () =>
+            {
+                // 1.5 is below the 48 hour threshold, so it is read as hours.
+                var withFraction = ParsePublishDate("{\"age\":\"1.5\"}");
+                var whole = ParsePublishDate("{\"age\":\"1\"}");
+
+                Assert.NotNull(withFraction);
+                Assert.NotNull(whole);
+
+                var gap = whole!.Value - withFraction!.Value;
+                Assert.InRange(gap.TotalMinutes, 29, 31);
             });
         }
     }

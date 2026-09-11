@@ -41,7 +41,9 @@ internal static class TorznabNewznabValueParser
         if (!double.TryParse(match.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var size))
             return 0;
 
-        var unit = match.Groups[2].Value.ToUpper();
+        // ToUpperInvariant, not ToUpper: under tr-TR the 'i' of "GiB" uppercases to 'I' with a
+        // dot (U+0130), no binary arm matches, and the release is recorded as zero bytes.
+        var unit = match.Groups[2].Value.ToUpperInvariant();
         return unit switch
         {
             "TIB" => (long)(size * 1024 * 1024 * 1024 * 1024),
