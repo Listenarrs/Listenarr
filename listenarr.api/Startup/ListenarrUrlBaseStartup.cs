@@ -43,9 +43,41 @@ public static class ListenarrUrlBaseStartup
         }
 
         app.Logger.LogInformation("Serving Listenarr under URL base {UrlBase}", urlBase);
-        app.UsePathBase(urlBase);
+
+        var pathBase = new PathString(urlBase);
+        app.Use(async (context, next) =>
+        {
+            ApplyUrlBase(context, pathBase);
+            await next(context);
+        });
 
         return app;
+    }
+
+    /// <summary>
+    /// Moves the configured base off the request path and onto <c>PathBase</c>.
+    /// </summary>
+    /// <remarks>
+    /// This is <c>UsePathBase</c> with one difference: it assigns <c>PathBase</c> rather than
+    /// appending to it. A proxy that sets <c>X-Forwarded-Prefix</c> and also forwards the path
+    /// un-rewritten would otherwise end up with the prefix twice, because the forwarded headers
+    /// middleware has already set <c>PathBase</c> from the header by the time this runs. Routing
+    /// survives a doubled value, since the path ends up right either way, but anything derived
+    /// from <c>PathBase</c> does not: the antiforgery cookie takes its <c>Path</c> attribute from
+    /// it when <c>AntiforgeryOptions.Cookie.Path</c> is left null, which it is.
+    /// A request that does not carry the prefix is left alone, so a direct hit on the container's
+    /// own port keeps working.
+    /// </remarks>
+    internal static void ApplyUrlBase(HttpContext context, PathString urlBase)
+    {
+        var request = context.Request;
+        if (!request.Path.StartsWithSegments(urlBase, StringComparison.OrdinalIgnoreCase, out var remaining))
+        {
+            return;
+        }
+
+        request.Path = remaining;
+        request.PathBase = urlBase;
     }
 
     /// <summary>
