@@ -241,5 +241,30 @@ namespace Listenarr.Tests.Features.Infrastructure.Configuration.Paths
 
             Assert.Equal(Path.Join(localPath, "Author", "book.m4b"), translated);
         }
+
+        [Fact]
+        [Trait("Method", "GetPathMappingByClientAsync")]
+        public async Task GetPathMappingByClientAsync_ConcurrentReads_DoNotShareOneDbContext()
+        {
+            // Regression: download polling fans out many concurrent path translations for one
+            // client. When the repository shared a single scoped DbContext, these concurrent reads
+            // tore down each other's active SQLite statement (poisoning the pooled connection for
+            // every later query, including search). The per-operation IDbContextFactory pattern
+            // makes each read independent, so a burst must complete without an EF/SQLite
+            // concurrency failure.
+            await _remotePathMappingRepository.SaveAsync(new RemotePathMappingBuilder()
+                .WithDownloadClientConfiguration(client)
+                .WithRemotePath("/downloads")
+                .WithLocalPath(FileUtils.GetAbsolutePath("remote-concurrent-imports"))
+                .Build());
+
+            var reads = Enumerable
+                .Range(0, 64)
+                .Select(_ => remotePathMappingService.GetPathMappingByClientAsync(client));
+
+            var results = await Task.WhenAll(reads);
+
+            Assert.All(results, mappings => Assert.Single(mappings));
+        }
     }
 }
