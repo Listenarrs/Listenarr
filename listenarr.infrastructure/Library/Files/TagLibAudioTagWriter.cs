@@ -88,7 +88,7 @@ namespace Listenarr.Infrastructure.Library.Files
             return Task.CompletedTask;
         }
 
-        private static void ApplyAsinTag(TagLib.File file, string asin)
+        internal static void ApplyAsinTag(TagLib.File file, string asin)
         {
             // An MPEG-4 file's Tag is a CombinedTag wrapping the Apple tag, never the AppleTag
             // itself, so a type test on file.Tag matches nothing here and the save that follows
