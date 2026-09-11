@@ -118,7 +118,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                     try
                     {
                         List<Dictionary<string, JsonElement>> files = [];
-                        using var filesResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/files?hash={hash}", ct);
+                        using var filesResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/files?hash={Uri.EscapeDataString(hash)}", ct);
                         if (filesResp.IsSuccessStatusCode)
                         {
                             var filesJson = await filesResp.Content.ReadAsStringAsync(ct);
@@ -129,7 +129,12 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException && ex is not HttpRequestException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                     {
-                        logger.LogWarning(
+                        // Debug rather than Warning. A torrent whose fields the mapper cannot read
+                        // does not heal, so this fires once per torrent on every poll for as long
+                        // as the torrent sits in the client, and the operator has nothing to act
+                        // on. TransmissionQueueFetchWorkflow logs the same condition at Debug for
+                        // the same reason. The torrent's absence from the queue stays observable.
+                        logger.LogDebug(
                             ex,
                             "Skipping unreadable qBittorrent torrent {TorrentHash} for client {ClientId}; the rest of the queue is unaffected",
                             LogRedaction.SanitizeText(hash),

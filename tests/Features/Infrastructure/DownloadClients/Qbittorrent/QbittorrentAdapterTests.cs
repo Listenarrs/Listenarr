@@ -587,6 +587,136 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
                 () => adapter.GetQueueAsync(_client, ["aaaa1111", "bbbb2222", "cccc3333"]));
         }
 
+        // The skip is a recurring condition, not an event. A torrent whose fields the mapper
+        // cannot read stays unreadable, so at the monitor's default cadence one such torrent
+        // writes a line on every poll for as long as it sits in the client. Warning would be
+        // asking the operator to act on something they cannot act on, so these two tests pin
+        // the level the way TransmissionQueueFetchWorkflow already logs the same condition.
+        [Fact]
+        public async Task GetQueueAsync_WhenOneTorrentIsUnreadable_LogsTheSkipAtDebug()
+        {
+            var logs = new RecordingLoggerProvider();
+            Init(builder => builder
+                .WithSingleton<ILoggerProvider>(logs)
+                .WithMocks(RecordingLoggerProvider.CaptureEveryLevel));
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent("\"600\"");
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            await adapter.GetQueueAsync(_client);
+
+            var skips = logs.EntriesContaining("Skipping unreadable qBittorrent torrent");
+            Assert.NotEmpty(skips);
+            Assert.All(skips, entry => Assert.Equal(LogLevel.Debug, entry.Level));
+        }
+
+        [Fact]
+        public async Task GetItemsAsync_WhenOneTorrentIsUnreadable_LogsTheSkipAtDebug()
+        {
+            var logs = new RecordingLoggerProvider();
+            Init(builder => builder
+                .WithSingleton<ILoggerProvider>(logs)
+                .WithMocks(RecordingLoggerProvider.CaptureEveryLevel));
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent("\"600\"");
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            await adapter.GetItemsAsync(_client);
+
+            var skips = logs.EntriesContaining("Skipping unreadable qBittorrent torrent");
+            Assert.NotEmpty(skips);
+            Assert.All(skips, entry => Assert.Equal(LogLevel.Debug, entry.Level));
+        }
+
+        // The hash is read out of the client's own JSON and then interpolated into the files
+        // query. The loop above now checks the token form of that value, so leaving the same
+        // value undefended one line later is the odd place to stop. With no escaping, a hash
+        // carrying an ampersand truncates at the delimiter and the client is asked about a
+        // torrent that does not exist, which returns an empty file list and no error.
+        [Fact]
+        public async Task GetQueueAsync_EscapesTheTorrentHashInTheFilesRequest()
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = """
+            [
+                {
+                    "hash": "aaaa1111&bbbb=2222", "name": "First", "progress": 0.5, "size": 1000,
+                    "downloaded": 500, "state": "downloading", "save_path": "/downloads/a"
+                }
+            ]
+            """;
+            apiMock.ResetRequestHistory();
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            await adapter.GetQueueAsync(_client);
+
+            var filesRequest = Assert.Single(apiMock.RequestHistory,
+                request => request.RequestUri.AbsolutePath.EndsWith("/api/v2/torrents/files", StringComparison.Ordinal));
+            var query = HttpUtility.ParseQueryString(filesRequest.RequestUri.Query);
+            Assert.Equal("aaaa1111&bbbb=2222", query["hash"]);
+        }
+
+        private sealed record RecordedLogEntry(LogLevel Level, string Message);
+
+        // Enough of a logger to answer "at what level was this written", which nothing else in
+        // the suite needed until now. Registered as the only ILoggerProvider, so it sees every
+        // category including the adapter's.
+        private sealed class RecordingLoggerProvider : ILoggerProvider
+        {
+            private readonly object _gate = new();
+            private readonly List<RecordedLogEntry> _entries = [];
+
+            // AddLogging() floors the factory at Information, so without this the Debug lines
+            // these tests exist to see would never reach a provider at all.
+            public static ServiceDescriptor CaptureEveryLevel { get; } =
+                ServiceDescriptor.Singleton<Microsoft.Extensions.Options.IConfigureOptions<LoggerFilterOptions>>(
+                    new Microsoft.Extensions.Options.ConfigureOptions<LoggerFilterOptions>(
+                        options => options.MinLevel = LogLevel.Trace));
+
+            public ILogger CreateLogger(string categoryName) => new RecordingLogger(this);
+
+            public IReadOnlyList<RecordedLogEntry> EntriesContaining(string fragment)
+            {
+                lock (_gate)
+                {
+                    return [.. _entries.Where(entry => entry.Message.Contains(fragment, StringComparison.Ordinal))];
+                }
+            }
+
+            public void Dispose()
+            {
+            }
+
+            private void Record(LogLevel level, string message)
+            {
+                lock (_gate)
+                {
+                    _entries.Add(new RecordedLogEntry(level, message));
+                }
+            }
+
+            private sealed class RecordingLogger(RecordingLoggerProvider owner) : ILogger
+            {
+                public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+                public bool IsEnabled(LogLevel logLevel) => true;
+
+                public void Log<TState>(
+                    LogLevel logLevel,
+                    EventId eventId,
+                    TState state,
+                    Exception? exception,
+                    Func<TState, Exception?, string> formatter)
+                {
+                    ArgumentNullException.ThrowIfNull(formatter);
+                    owner.Record(logLevel, formatter(state, exception));
+                }
+            }
+        }
+
         [Fact]
         public async Task MarkItemAsImportedAsync_SetsConfiguredPostImportCategory()
         {

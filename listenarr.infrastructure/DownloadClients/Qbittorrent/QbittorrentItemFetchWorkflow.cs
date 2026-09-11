@@ -106,7 +106,9 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                         var hash = torrent.TryGetValue("hash", out var hashEl) && hashEl.ValueKind == JsonValueKind.String
                             ? hashEl.GetString() ?? string.Empty
                             : string.Empty;
-                        logger.LogWarning(
+                        // Debug for the same reason as the queue fetch: the condition recurs on
+                        // every poll and there is no operator action it calls for.
+                        logger.LogDebug(
                             ex,
                             "Skipping unreadable qBittorrent torrent {TorrentHash} for client {ClientId}; the rest of the item list is unaffected",
                             LogRedaction.SanitizeText(hash),
