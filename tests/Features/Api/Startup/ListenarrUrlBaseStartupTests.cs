@@ -99,8 +99,9 @@ public sealed class ListenarrUrlBaseStartupTests : BaseTests
         Assert.Equal(HttpStatusCode.OK, configured.StatusCode);
         Assert.NotEqual(HttpStatusCode.OK, unconfigured.StatusCode);
 
-        // UsePathBase strips the prefix when it is present and leaves the request alone when it is
-        // not, so a direct hit on the container keeps working alongside the proxied sub-path.
+        // The url base middleware strips the prefix when it is present and leaves the request
+        // alone when it is not, so a direct hit on the container keeps working alongside the
+        // proxied sub-path.
         Assert.Equal(HttpStatusCode.OK, atSiteRoot.StatusCode);
     }
 
@@ -125,6 +126,63 @@ public sealed class ListenarrUrlBaseStartupTests : BaseTests
         middleware.ApplyForwarders(context);
 
         Assert.Equal(string.Empty, context.Request.PathBase.Value);
+    }
+
+    [Fact]
+    public void ForwardedPrefixAndAnUnrewrittenPath_DoNotDoubleThePathBase()
+    {
+        // nginx "location /example { proxy_pass ...; }" forwards the path un-rewritten, and
+        // adding "proxy_set_header X-Forwarded-Prefix /example;" beside it is something people
+        // copy from other applications' documentation. UsePathBase would append here, giving
+        // /example/example and with it a wrong antiforgery cookie path.
+        var context = new DefaultHttpContext();
+        context.Request.PathBase = "/example";
+        context.Request.Path = "/example/api/v1/system/info";
+
+        ListenarrUrlBaseStartup.ApplyUrlBase(context, new PathString("/example"));
+
+        Assert.Equal("/example", context.Request.PathBase.Value);
+        Assert.Equal("/api/v1/system/info", context.Request.Path.Value);
+    }
+
+    [Fact]
+    public void ConfiguredUrlBase_MovesThePrefixOntoPathBase_WhenNoProxyHeaderArrived()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/example/api/v1/system/info";
+
+        ListenarrUrlBaseStartup.ApplyUrlBase(context, new PathString("/example"));
+
+        Assert.Equal("/example", context.Request.PathBase.Value);
+        Assert.Equal("/api/v1/system/info", context.Request.Path.Value);
+    }
+
+    [Fact]
+    public void RequestWithoutThePrefix_KeepsThePathBaseTheProxyAlreadySet()
+    {
+        // A proxy that strips the prefix itself has already set PathBase from
+        // X-Forwarded-Prefix, and there is nothing left in the path to move.
+        var context = new DefaultHttpContext();
+        context.Request.PathBase = "/example";
+        context.Request.Path = "/api/v1/system/info";
+
+        ListenarrUrlBaseStartup.ApplyUrlBase(context, new PathString("/example"));
+
+        Assert.Equal("/example", context.Request.PathBase.Value);
+        Assert.Equal("/api/v1/system/info", context.Request.Path.Value);
+    }
+
+    [Fact]
+    public void PathThatMerelyStartsWithTheSameLetters_IsNotTreatedAsThePrefix()
+    {
+        // Segment matching, not string matching: /examples is a different route.
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/examples/api/v1/system/info";
+
+        ListenarrUrlBaseStartup.ApplyUrlBase(context, new PathString("/example"));
+
+        Assert.Equal(string.Empty, context.Request.PathBase.Value);
+        Assert.Equal("/examples/api/v1/system/info", context.Request.Path.Value);
     }
 
     private static HttpClient CreateClient(WebApplicationFactory<Program> factory)
