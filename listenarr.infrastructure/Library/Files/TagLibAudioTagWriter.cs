@@ -101,6 +101,19 @@ namespace Listenarr.Infrastructure.Library.Files
             return Task.CompletedTask;
         }
 
+        private static void ApplyAsinTag(TagLib.File file, string asin)
+        {
+            if (file.Tag is TagLib.Mpeg4.AppleTag appleTag)
+                appleTag.SetDashBox("com.apple.iTunes", "ASIN", asin);
+            else if (file.GetTag(TagLib.TagTypes.Id3v2) is TagLib.Id3v2.Tag id3Tag)
+            {
+                var frame = TagLib.Id3v2.UserTextInformationFrame.Get(id3Tag, "ASIN", true);
+                frame.Text = new[] { asin };
+            }
+            else if (file.GetTag(TagLib.TagTypes.Xiph) is TagLib.Ogg.XiphComment xiph)
+                xiph.SetField("ASIN", asin);
+        }
+
         /// <summary>
         /// Replace the file's embedded pictures with the supplied artwork.
         ///
@@ -126,19 +139,6 @@ namespace Listenarr.Infrastructure.Library.Files
 
             file.Tag.Pictures = new TagLib.IPicture[] { picture };
             return true;
-        }
-
-        private static void ApplyAsinTag(TagLib.File file, string asin)
-        {
-            if (file.Tag is TagLib.Mpeg4.AppleTag appleTag)
-                appleTag.SetDashBox("com.apple.iTunes", "ASIN", asin);
-            else if (file.GetTag(TagLib.TagTypes.Id3v2) is TagLib.Id3v2.Tag id3Tag)
-            {
-                var frame = TagLib.Id3v2.UserTextInformationFrame.Get(id3Tag, "ASIN", true);
-                frame.Text = new[] { asin };
-            }
-            else if (file.GetTag(TagLib.TagTypes.Xiph) is TagLib.Ogg.XiphComment xiph)
-                xiph.SetField("ASIN", asin);
         }
 
         private sealed class RegistrationLeaseFileAbstraction(
