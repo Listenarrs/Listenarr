@@ -25,10 +25,13 @@ namespace Listenarr.Domain.Downloads
         public int AudiobookId { get; set; }
 
         /// <summary>
-        /// Stable identity for the release. A torrent info-hash where one is known, since
-        /// that identifies the same release across indexers, otherwise a hash of the
-        /// indexer URL the release came from. Never the download client's own id, which is
-        /// per submission and would not match the same release on a later search.
+        /// Stable identity for the release, as <see cref="ReleaseIdentity"/> works it out. A
+        /// torrent info-hash where one is known, since that identifies the same release across
+        /// indexers, otherwise a hash of the release title and size together, and only a hash of
+        /// the URL when there is no usable title. Never the indexer URL on its own: a Usenet
+        /// download link carries a per-fetch token, so it differs between the grab and the next
+        /// search. Never the download client's own id either, which is per submission and would
+        /// not match the same release on a later search.
         /// </summary>
         public string ReleaseIdentifier { get; set; } = string.Empty;
 
