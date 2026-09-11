@@ -109,7 +109,31 @@ namespace Listenarr.Application.Downloads.Processing
 
             // No job survives. Job retention deletes terminal jobs after a week, so a download
             // blocked longer than that has nothing left to reuse and needs a fresh one.
-            var job = await jobRepository.AddAsync(NewJobFor(download));
+            DownloadProcessingJob job;
+            try
+            {
+                job = await jobRepository.AddAsync(NewJobFor(download));
+            }
+            catch (UniqueConstraintViolationException)
+            {
+                // Two retry requests for the same download raced here, both found nothing to
+                // reuse, and both tried to insert. The filtered unique index on
+                // ActiveDeduplicationKey lets exactly one through. EnqueueAsync handles the same
+                // race the same way; without this the loser reaches the controller's catch-all and
+                // the caller is told the retry failed when it was in fact queued.
+                existingActive = await jobRepository.GetActiveByDownloadIdAsync(download.Id);
+                if (existingActive != null)
+                {
+                    logger.LogInformation(
+                        "Concurrent requeue prevented - returning existing active job {JobId} for download {DownloadId}",
+                        existingActive.Id,
+                        download.Id);
+                    return existingActive.Id;
+                }
+
+                throw;
+            }
+
             logger.LogInformation("Queued download {DownloadId} for post-processing with a new job: {JobId}", download.Id, job.Id);
             return job.Id;
         }

@@ -472,5 +472,44 @@ namespace Listenarr.Tests.Features.Application.Downloads.Processing
             await Assert.ThrowsAsync<InvalidOperationException>(() => service.RequeueAsync(download));
             Assert.Empty(await _downloadProcessingJobRepository.GetByDownloadIdAsync(download.Id));
         }
+
+        [Fact]
+        [Trait("Method", "RequeueAsync")]
+        [Trait("Scenario", "Two retry requests racing on a download with no surviving job")]
+        public async Task RequeueAsync_ConcurrentInsertConflict_ReturnsPersistedWinner()
+        {
+            // Pressing Retry twice is the ordinary way to reach this. Both requests find no job to
+            // reuse, both insert, and the filtered unique index on ActiveDeduplicationKey rejects
+            // the second. Without the catch the loser throws out of the controller as a 500 and
+            // the caller is told the retry failed while the job is sitting on the queue.
+            var download = new DownloadBuilder()
+                .WithId("d-requeue-race")
+                .WithStatus(DownloadStatus.ImportPending)
+                .Build();
+            var winner = new DownloadProcessingJobBuilder()
+                .WithId("winning-requeue")
+                .WithDownload(download)
+                .WithPending(DateTime.UtcNow)
+                .Build();
+
+            var repository = new Mock<IDownloadProcessingJobRepository>();
+            repository.SetupSequence(repo => repo.GetActiveByDownloadIdAsync(download.Id))
+                .ReturnsAsync((DownloadProcessingJob?)null)
+                .ReturnsAsync(winner);
+            repository.Setup(repo => repo.GetByDownloadIdAsync(download.Id))
+                .ReturnsAsync([]);
+            repository.Setup(repo => repo.AddAsync(It.IsAny<DownloadProcessingJob>()))
+                .ThrowsAsync(new UniqueConstraintViolationException(
+                    "duplicate active import job",
+                    new InvalidOperationException()));
+            var service = new DownloadProcessingJobService(
+                repository.Object,
+                NullLogger<DownloadProcessingJobService>.Instance,
+                TimeProvider.System);
+
+            var jobId = await service.RequeueAsync(download);
+
+            Assert.Equal(winner.Id, jobId);
+        }
     }
 }
