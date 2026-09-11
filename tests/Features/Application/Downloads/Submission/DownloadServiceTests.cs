@@ -226,6 +226,16 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
                     It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
                     It.IsAny<DownloadProtocol>(), It.IsAny<Guid?>()),
                 Times.Never);
+            // A blank external id leaves nothing to track, so this path records a failure too.
+            // Stubbing RecordDownloadFailedAsync without asserting it would let that behaviour
+            // change silently, which is what the replaced VerifyNoOtherCalls used to prevent.
+            historyMock.Verify(
+                h => h.RecordDownloadFailedAsync(
+                    It.Is<string>(id => !string.IsNullOrWhiteSpace(id)),
+                    "qb-1",
+                    "Artemis",
+                    "The download client did not return a verified download identifier."),
+                Times.Once);
             notificationMock.VerifyNoOtherCalls();
         }
 
