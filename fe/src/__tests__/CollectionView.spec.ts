@@ -1659,8 +1659,22 @@ describe('CollectionView', () => {
     // The reported case: an author page states English in its header and then lists the German
     // editions of the same series underneath, all owned but unmonitored.
     const wrapper = await mountAuthorPageForLanguage([
-      { id: 1, title: 'English One', authors: ['Author A'], language: 'english', monitored: true, files: [] },
-      { id: 2, title: 'German One', authors: ['Author A'], language: 'german', monitored: false, files: [] },
+      {
+        id: 1,
+        title: 'English One',
+        authors: ['Author A'],
+        language: 'english',
+        monitored: true,
+        files: [],
+      },
+      {
+        id: 2,
+        title: 'German One',
+        authors: ['Author A'],
+        language: 'german',
+        monitored: false,
+        files: [],
+      },
     ])
 
     const vm = wrapper.vm as unknown as { audiobooks: { id: number }[] }
@@ -1670,7 +1684,14 @@ describe('CollectionView', () => {
   it('keeps a monitored book whatever its language', async () => {
     // Monitoring is an explicit statement of intent and outranks the language preference.
     const wrapper = await mountAuthorPageForLanguage([
-      { id: 3, title: 'German Monitored', authors: ['Author A'], language: 'german', monitored: true, files: [] },
+      {
+        id: 3,
+        title: 'German Monitored',
+        authors: ['Author A'],
+        language: 'german',
+        monitored: true,
+        files: [],
+      },
     ])
 
     const vm = wrapper.vm as unknown as { audiobooks: { id: number }[] }
@@ -1691,8 +1712,22 @@ describe('CollectionView', () => {
   it('hides nothing when the preference is All', async () => {
     const wrapper = await mountAuthorPageForLanguage(
       [
-        { id: 5, title: 'German', authors: ['Author A'], language: 'german', monitored: false, files: [] },
-        { id: 6, title: 'English', authors: ['Author A'], language: 'english', monitored: false, files: [] },
+        {
+          id: 5,
+          title: 'German',
+          authors: ['Author A'],
+          language: 'german',
+          monitored: false,
+          files: [],
+        },
+        {
+          id: 6,
+          title: 'English',
+          authors: ['Author A'],
+          language: 'english',
+          monitored: false,
+          files: [],
+        },
       ],
       'all',
     )
