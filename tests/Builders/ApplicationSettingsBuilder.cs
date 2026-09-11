@@ -102,6 +102,18 @@ namespace Listenarr.Tests.Builders
             return this;
         }
 
+        public ApplicationSettingsBuilder WithFailedDownloadHandling()
+        {
+            _applicationSettings.FailedDownloadHandlingEnabled = true;
+            return this;
+        }
+
+        public ApplicationSettingsBuilder WithoutFailedDownloadHandling()
+        {
+            _applicationSettings.FailedDownloadHandlingEnabled = false;
+            return this;
+        }
+
         public ApplicationSettings Build()
         {
             _applicationSettings.ImportBlacklistExtensions = _importBlacklistExtensions;
