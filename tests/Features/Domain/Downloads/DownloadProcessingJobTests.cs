@@ -74,5 +74,32 @@ namespace Listenarr.Tests.Features.Domain.Downloads
             Assert.NotNull(job.NextRetryAt);
             Assert.InRange((job.NextRetryAt!.Value - before).TotalSeconds, 29, 35);
         }
+
+        [Theory]
+        [Trait("Method", "ScheduleRetry")]
+        [Trait("Scenario", "The doubling stops at a one day ceiling")]
+        [InlineData(1, 30, 30)]
+        [InlineData(3, 30, 120)]
+        [InlineData(12, 30, 61440)]
+        [InlineData(13, 30, 86400)]
+        [InlineData(20, 600, 86400)]
+        public void ScheduleRetry_NeverSchedulesFurtherOutThanADay(int attempt, int initialDelaySeconds, double expectedSeconds)
+        {
+            // The first three rows are the control: below the ceiling the ladder is untouched, so
+            // a clamp that simply pinned every delay to a day would fail them. The last two are
+            // the reason the ceiling exists. Both inputs are operator settable, and the download
+            // settings screen offers 600 seconds and 20 retries, which without a ceiling puts the
+            // twentieth attempt a little over ten years out.
+            var job = new DownloadProcessingJobBuilder().Build();
+            job.MaxRetries = 25;
+            job.RetryCount = attempt - 1;
+
+            var before = DateTime.UtcNow;
+            job.ScheduleRetry("failed", initialDelaySeconds: initialDelaySeconds);
+
+            Assert.NotNull(job.NextRetryAt);
+            var waited = (job.NextRetryAt!.Value - before).TotalSeconds;
+            Assert.InRange(waited, expectedSeconds - 1, expectedSeconds + 5);
+        }
     }
 }
