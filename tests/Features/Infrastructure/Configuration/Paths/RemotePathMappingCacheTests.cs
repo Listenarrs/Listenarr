@@ -173,7 +173,7 @@ public sealed class RemotePathMappingCacheTests : IDisposable
 
         Assert.Equal(1, _repository.QueryCount);
         Assert.Equal(1, _repository.MaxConcurrentQueries);
-        Assert.All(results, result => Assert.Equal("/downloads", Assert.Single(result).RemotePath));
+        Assert.All(results, result => Assert.Equal("/media/downloads", Assert.Single(result).LocalPath));
     }
 
     // A single cache key for every client would serve one client's mappings to another, which is
@@ -186,12 +186,12 @@ public sealed class RemotePathMappingCacheTests : IDisposable
         _repository.Seed(first.Id, "/downloads/one", "/media/one");
         _repository.Seed(second.Id, "/downloads/two", "/media/two");
 
-        Assert.Equal("/downloads/one", Assert.Single(await _service.GetPathMappingByClientAsync(first)).RemotePath);
-        Assert.Equal("/downloads/two", Assert.Single(await _service.GetPathMappingByClientAsync(second)).RemotePath);
+        Assert.Equal("/media/one", Assert.Single(await _service.GetPathMappingByClientAsync(first)).LocalPath);
+        Assert.Equal("/media/two", Assert.Single(await _service.GetPathMappingByClientAsync(second)).LocalPath);
         Assert.Equal(2, _repository.QueryCount);
 
-        Assert.Equal("/downloads/one", Assert.Single(await _service.GetPathMappingByClientAsync(first)).RemotePath);
-        Assert.Equal("/downloads/two", Assert.Single(await _service.GetPathMappingByClientAsync(second)).RemotePath);
+        Assert.Equal("/media/one", Assert.Single(await _service.GetPathMappingByClientAsync(first)).LocalPath);
+        Assert.Equal("/media/two", Assert.Single(await _service.GetPathMappingByClientAsync(second)).LocalPath);
         Assert.Equal(2, _repository.QueryCount);
     }
 

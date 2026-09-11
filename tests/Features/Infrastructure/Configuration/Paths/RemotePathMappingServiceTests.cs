@@ -87,7 +87,12 @@ namespace Listenarr.Tests.Features.Infrastructure.Configuration.Paths
         {
             Assert.Equal(given, await remotePathMappingService.TranslatePathAsync(client, given));
 
-            await _remotePathMappingRepository.SaveAsync(new RemotePathMappingBuilder()
+            // Created through the service, not the repository. The first translate above populates
+            // the per-client cache with an empty set, and only the service's own writers clear it,
+            // so a mapping inserted behind the service would not be seen here. That is the cache's
+            // boundary and it is pinned by
+            // TranslatePathAsync_DoesNotSeeAMappingWrittenBehindTheService below.
+            await remotePathMappingService.CreateAsync(new RemotePathMappingBuilder()
                 .WithDownloadClientConfiguration(client)
                 .WithRemotePath(remotePath)
                 .WithLocalPath(localPath)
@@ -240,6 +245,30 @@ namespace Listenarr.Tests.Features.Infrastructure.Configuration.Paths
             var translated = await remotePathMappingService.TranslatePathAsync(client, reportedPath);
 
             Assert.Equal(Path.Join(localPath, "Author", "book.m4b"), translated);
+        }
+
+        // The cache is cleared by CreateAsync, UpdateAsync and DeleteAsync, and by nothing else. A
+        // row inserted straight into the repository, or by another process, is therefore not
+        // visible until the entry expires. Every production write goes through the service, so this
+        // is a boundary rather than a bug, but it is a real change from the previous behaviour and
+        // it should fail loudly if the invalidation is ever widened or narrowed by accident.
+        [Fact]
+        [Trait("Method", "TranslatePathAsync")]
+        public async Task TranslatePathAsync_DoesNotSeeAMappingWrittenBehindTheService()
+        {
+            var given = FileUtils.GetAbsolutePath(Path.Join("downloads", "book.m4b"));
+            var remoteRoot = FileUtils.GetAbsolutePath("downloads");
+            var localRoot = FileUtils.GetAbsolutePath("behind-the-service");
+
+            Assert.Equal(given, await remotePathMappingService.TranslatePathAsync(client, given));
+
+            await _remotePathMappingRepository.SaveAsync(new RemotePathMappingBuilder()
+                .WithDownloadClientConfiguration(client)
+                .WithRemotePath(remoteRoot)
+                .WithLocalPath(localRoot)
+                .Build());
+
+            Assert.Equal(given, await remotePathMappingService.TranslatePathAsync(client, given));
         }
 
         // The synchronous overload is the one contract the caller can get wrong, because it is the
