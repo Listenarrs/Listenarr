@@ -34,6 +34,13 @@ public sealed class DownloadClientCircuitBreakerIsolationTests : BaseTests
     // clients would also pass through the retry policy, whose backoff is 2, 4 and 8 seconds, so
     // opening a breaker that way costs about 45 seconds. The property that matters is whether two
     // clients share breaker state, and that is observable here in milliseconds.
+    //
+    // What this covers is the factory contract, that each call yields an independent breaker. It
+    // does not cover the registration wiring, that AddDownloadClientHttpClients calls the factory
+    // once per named client rather than hoisting one instance into a local and reusing it. Reading
+    // that back would mean reflecting into the private policy field of Polly's
+    // PolicyHttpMessageHandler, a Microsoft package detail that would break the suite on a package
+    // bump for a reason unrelated to Listenarr, so the wiring is covered by review instead.
     [Fact]
     public async Task CircuitBreakerPolicies_DoNotShareStateBetweenClients()
     {
