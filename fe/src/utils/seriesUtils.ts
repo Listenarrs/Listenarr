@@ -59,7 +59,10 @@ export interface SeriesFields {
   seriesAsin?: string
 }
 
-const ASIN_PATTERN = /^[A-Z0-9]{10}$/i
+// An Audible digital ASIN is the literal prefix B0 followed by eight alphanumerics. A bare
+// ten-character check is not enough: single-word series names of that length, Foundation
+// among them, pass it and then get stored as if they were identifiers.
+const ASIN_PATTERN = /^B0[A-Z0-9]{8}$/i
 
 export function looksLikeAsin(value: string | undefined | null): boolean {
   const trimmed = value?.trim()
