@@ -53,7 +53,16 @@ import FormRow from '@/components/settings/FormRow.vue'
 const props = defineProps<{ startupConfig: StartupConfig | null | undefined }>()
 const emit = defineEmits<{ 'update:startupConfig': [value: StartupConfig] }>()
 
-const urlBase = computed(() => props.startupConfig?.urlBase ?? '')
+/*
+  An existing install carries urlBase "/", because CreateDefaultConfig writes it that
+  way, and the server reads "/" as "serve at the root". Showing it would contradict the
+  help text and read as though something were configured. Display only: an untouched
+  field emits nothing, so "/" still round-trips on save.
+*/
+const urlBase = computed(() => {
+  const stored = props.startupConfig?.urlBase ?? ''
+  return stored.trim() === '/' ? '' : stored
+})
 
 /**
  * The server treats an absolute URL as unusable and serves at the site root, so

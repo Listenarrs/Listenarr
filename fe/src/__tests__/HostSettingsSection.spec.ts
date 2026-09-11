@@ -117,6 +117,22 @@ describe('HostSettingsSection', () => {
     }
   })
 
+  it('shows an empty field when the stored url base is the site root', async () => {
+    // CreateDefaultConfig writes "/", and the server reads it as "serve at the root".
+    // Rendering it would contradict the help text and read as a configured value.
+    const wrapper = mount(await load(), { props: { startupConfig: { urlBase: '/', port: 4545 } } })
+
+    expect((wrapper.get('#urlBase').element as HTMLInputElement).value).toBe('')
+  })
+
+  it('does not rewrite a stored "/" that the user never touched', async () => {
+    // Display only. The emit fires on change, so an untouched field saves nothing and
+    // the stored value survives.
+    const wrapper = mount(await load(), { props: { startupConfig: { urlBase: '/', port: 4545 } } })
+
+    expect(wrapper.emitted('update:startupConfig')).toBeUndefined()
+  })
+
   it('tolerates a null startup config', async () => {
     const wrapper = mount(await load(), { props: { startupConfig: null } })
 
