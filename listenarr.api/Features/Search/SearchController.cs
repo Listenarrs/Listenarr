@@ -350,6 +350,11 @@ namespace Listenarr.Api.Features.Search
         /// Search the Audible catalog for audiobooks.
         /// </summary>
         [HttpGet("audible")]
+        [ProducesResponseType(typeof(AudibleSearchResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         public async Task<ActionResult<AudibleSearchResponse>> SearchAudible(
             [FromQuery] string query,
             [FromQuery] string region = "us",
@@ -376,7 +381,7 @@ namespace Listenarr.Api.Features.Search
                     _logger.LogWarning(
                         "Audible did not answer for query: {Query}; reporting unavailable rather than zero matches",
                         LogRedaction.SanitizeText(query));
-                    return StatusCode(503, "The Audible catalog did not respond. This is not a confirmed zero-match; retry shortly.");
+                    return StatusCode(StatusCodes.Status503ServiceUnavailable, "The Audible catalog did not respond. This is not a confirmed zero-match; retry shortly.");
                 }
 
                 return Ok(result);
