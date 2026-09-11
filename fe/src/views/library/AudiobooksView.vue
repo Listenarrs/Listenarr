@@ -417,7 +417,11 @@
           @keydown.enter="navigateToCollection(collection)"
           @click="navigateToCollection(collection)"
         >
-          <div class="list-thumb-container">
+          <div
+            class="list-thumb-container"
+            :data-author-name="groupBy === 'authors' ? collection.name : undefined"
+            :data-author-has-cover="authorHasSpecificCoverMap[collection.name] ? '1' : ''"
+          >
             <img
               class="list-thumb"
               :src="
@@ -1570,10 +1574,9 @@ let authorCardObserver: IntersectionObserver | null = null
 
 function observeAuthorCards() {
   if (groupBy.value !== 'authors') return
+  // Both grouped layouts carry the hook, so a cover is fetched whichever one is showing.
   const cards = Array.from(
-    document.querySelectorAll<HTMLElement>(
-      '.author-collection .audiobook-poster-container[data-author-name]',
-    ),
+    document.querySelectorAll<HTMLElement>('.grouped-view [data-author-name]'),
   )
   if (cards.length === 0) return
 
@@ -1970,6 +1973,13 @@ async function initializeVirtualScroller() {
     )
   }
 
+  registerViewModeWatchers()
+}
+
+// Registered independently of the virtual scroller. The scroller bails out when there is no
+// scroll container, and there is none while the library is grouped, so leaving these in it
+// meant a view-mode switch made under a grouping was neither reacted to nor remembered.
+function registerViewModeWatchers() {
   if (!stopViewModeWatch) {
     stopViewModeWatch = watch(viewMode, async () => {
       measuredRowHeight.value = null
@@ -1977,6 +1987,10 @@ async function initializeVirtualScroller() {
       await nextTick()
       syncMeasuredRowHeight()
       updateVisibleRange()
+      // The grouped branches are v-if siblings, so a layout switch destroys the observed
+      // nodes and mounts fresh ones. Nothing else re-observes them: groupedCollections has
+      // not changed, so its watcher stays quiet.
+      observeAuthorCards()
     })
   }
 
@@ -2008,6 +2022,8 @@ onMounted(async () => {
   } catch {
     // ignore localStorage errors (e.g., privacy mode)
   }
+
+  registerViewModeWatchers()
 
   await initializeVirtualScroller()
 
@@ -2184,7 +2200,7 @@ async function waitForImagesToLoad(timeoutMs = 5000) {
       )
     }
   } else {
-    const grouped = document.querySelector('.grouped-grid')
+    const grouped = document.querySelector('.grouped-view')
     if (grouped) imgs.push(...Array.from(grouped.querySelectorAll<HTMLImageElement>('img')))
   }
 
