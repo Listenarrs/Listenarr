@@ -73,4 +73,64 @@ public sealed class FileRegistrationRecoveryProtocolTests : BaseTests
             Assert.Contains(operationId.ToString(), thrown.Message, StringComparison.OrdinalIgnoreCase);
         }
     }
+
+    // The listing is capped so the message stays readable, which puts the count an operator
+    // acts on into a branch of its own. An off-by-one there either hides a journal from the
+    // listing without admitting it, or claims a remainder that does not exist.
+    [Fact]
+    public async Task ReconcileAsync_MoreLegacyJournalsThanTheCap_ListsTenAndCountsTheRest()
+    {
+        Init();
+        var factory = _provider.GetRequiredService<
+            IDbContextFactory<ListenArrDbContext>>();
+
+        var operationIds = await SeedLegacyJournalsAsync(factory, count: 13);
+
+        var service = new FileRegistrationRecoveryService(
+            factory,
+            Mock.Of<IFileMover>(),
+            TimeProvider.System,
+            NullLogger<FileRegistrationRecoveryService>.Instance);
+
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.ReconcileAsync());
+
+        Assert.Contains("13 file-mutation journal(s)", thrown.Message, StringComparison.Ordinal);
+        Assert.Contains("and 3 more", thrown.Message, StringComparison.Ordinal);
+
+        // Ordered by CreatedAt, so the ten named are the ten oldest and the naming is stable
+        // across restarts. An operator who repairs those ten meets the next three, rather than
+        // a fresh arbitrary ten.
+        var listed = operationIds
+            .Select(operationId => thrown.Message.Contains(
+                operationId.ToString(),
+                StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        Assert.Equal(Enumerable.Repeat(true, 10).Concat(Enumerable.Repeat(false, 3)), listed);
+    }
+
+    private static async Task<IReadOnlyList<Guid>> SeedLegacyJournalsAsync(
+        IDbContextFactory<ListenArrDbContext> factory,
+        int count)
+    {
+        var operationIds = Enumerable.Range(0, count).Select(_ => Guid.NewGuid()).ToList();
+        await using var seed = await factory.CreateDbContextAsync();
+        var created = DateTime.UtcNow.AddMinutes(-30);
+        foreach (var (operationId, index) in operationIds.Select((id, i) => (id, i)))
+        {
+            seed.FileMutationJournals.Add(new FileMutationJournal
+            {
+                OperationId = operationId,
+                Action = FileAction.HardlinkCopy,
+                State = FileMutationJournalState.Planned,
+                ProtocolVersion = FileMutationProtocol.Current - 1,
+                SourcePath = $"/incoming/book-{index}.m4b",
+                DestinationPath = $"/library/book-{index}.m4b",
+                CreatedAt = created.AddSeconds(index),
+                UpdatedAt = created.AddSeconds(index)
+            });
+        }
+        await seed.SaveChangesAsync();
+        return operationIds;
+    }
 }
