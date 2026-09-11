@@ -35,7 +35,6 @@ internal sealed partial class PinnedDirectoryCreation
             "The managed directory boundary changed while it was being pinned.");
     }
 
-
     internal static PinnedDirectoryAnchor OpenPinnedHierarchyNoFollow(
         string path,
         bool createMissing)
