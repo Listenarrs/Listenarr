@@ -29,7 +29,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Quality
         // started on a context while another is in flight. Asserting on the real exception would
         // mean racing it, so this counts overlap directly: the stub records the highest number of
         // calls it ever had in flight at once. Anything above one is the condition EF refuses.
-        private sealed class OverlapRecordingIndexerRepository : IIndexerRepository
+        private sealed class OverlapRecordingIndexerRepository(int retention = 1500) : IIndexerRepository
         {
             private int _inFlight;
             public int MaxConcurrent { get; private set; }
@@ -49,7 +49,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Quality
                 await Task.Delay(20);
 
                 Interlocked.Decrement(ref _inFlight);
-                return new Indexer { Id = id, Name = $"indexer-{id}", Type = "Usenet", Retention = 1500 };
+                return new Indexer { Id = id, Name = $"indexer-{id}", Type = "Usenet", Retention = retention };
             }
 
             public Task<List<Indexer>> GetAllAsync(CancellationToken ct = default) =>
@@ -106,6 +106,55 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Quality
             Assert.Equal(1, indexerRepository.MaxConcurrent);
             // Three distinct indexers, so three lookups rather than one per result.
             Assert.Equal(3, indexerRepository.CallCount);
+        }
+
+        // The overlap assertion above passes whether or not the resolved indexers reach the
+        // scorer: a batch that looks each indexer up once and then throws the answers away makes
+        // exactly the same three non-overlapping calls. This asks the other half of the question.
+        // Retention is 10 days and the result is 100 days old, so the indexer's own retention has
+        // to be the thing that rejects it. A profile MaximumAge well beyond 100 days means nothing
+        // else in the scorer can produce that rejection, and an empty or ignored dictionary leaves
+        // retention at 0 and the result accepted.
+        [Fact]
+        public async Task ScoreSearchResults_AppliesTheResolvedIndexerRetention()
+        {
+            var indexerRepository = new OverlapRecordingIndexerRepository(retention: 10);
+            var service = new QualityProfileService(
+                Mock.Of<IQualityProfileRepository>(),
+                NullLogger<QualityProfileService>.Instance,
+                indexerRepository);
+
+            var searchResults = new List<SearchResult>
+            {
+                new()
+                {
+                    Id = "aged-result",
+                    Title = "A Book",
+                    IndexerId = 7,
+                    Format = "mp3",
+                    Language = "English",
+                    PublishedDate = DateTime.UtcNow.AddDays(-100).ToString("o")
+                }
+            };
+
+            var profile = new QualityProfile
+            {
+                MinimumSize = 0,
+                MaximumSize = 0,
+                PreferredFormats = ["mp3"],
+                PreferredWords = [],
+                MustNotContain = [],
+                MustContain = [],
+                PreferredLanguages = ["English"],
+                MinimumSeeders = 0,
+                MaximumAge = 3650
+            };
+
+            var scores = await service.ScoreSearchResults(searchResults, profile);
+
+            var score = Assert.Single(scores);
+            Assert.True(score.IsRejected);
+            Assert.Contains(score.RejectionReasons, reason => reason.Contains("indexer retention 10 days"));
         }
     }
 }
