@@ -225,13 +225,19 @@ namespace Listenarr.Domain.Downloads
         }
 
         /// <summary>
+        /// Ceiling on the exponential retry backoff, in seconds. One day.
+        /// </summary>
+        public const double MaxRetryDelaySeconds = 24 * 60 * 60;
+
+        /// <summary>
         /// Schedule job for retry with exponential backoff.
         /// </summary>
         /// <param name="errorMessage">Why the attempt failed, recorded on the job.</param>
         /// <param name="initialDelaySeconds">
-        /// The wait before the first retry. Later retries double it, so 30 gives 30s, 1m, 2m.
-        /// Comes from ApplicationSettings.MissingSourceRetryInitialDelaySeconds; the default here
-        /// matches that property's own default so a caller that does not supply it is unchanged.
+        /// The wait before the first retry. Later retries double it, so 30 gives 30s, 1m, 2m,
+        /// up to <see cref="MaxRetryDelaySeconds"/>. Comes from
+        /// ApplicationSettings.MissingSourceRetryInitialDelaySeconds; the default here matches
+        /// that property's own default so a caller that does not supply it is unchanged.
         /// </param>
         public DownloadProcessingJob ScheduleRetry(string errorMessage = "", int initialDelaySeconds = 30)
         {
@@ -255,6 +261,20 @@ namespace Listenarr.Domain.Downloads
             // early: it read the incremented count, so the first retry waited a minute while both
             // comments above it claimed thirty seconds.
             var delay = Math.Max(1, initialDelaySeconds) * Math.Pow(2, RetryCount - 1);
+
+            // The doubling has no ceiling of its own, and both of its inputs are operator
+            // settable now that MaxRetries is read from settings. The download settings screen
+            // offers up to 600 seconds and up to 20 retries, and at both maxima the twentieth
+            // retry lands a little over ten years out. Nothing throws, so the only symptom is a
+            // job that never runs again and reads as lost to whoever is looking at the queue.
+            //
+            // A day is the ceiling rather than an hour. Waiting hours for a source that needs an
+            // operator to intervene is a reasonable thing to configure, and an hour would cut the
+            // ladder short for anyone who deliberately raised the budget; a day is long enough to
+            // be a real backoff and short enough that the job is still visibly scheduled. At the
+            // shipped defaults nothing reaches it, because 30 seconds doubled over three retries
+            // is two minutes.
+            delay = Math.Min(delay, MaxRetryDelaySeconds);
             NextRetryAt = DateTime.UtcNow.AddSeconds(delay);
 
             AddLogEntry($"Scheduled for retry #{RetryCount} at {NextRetryAt}");
