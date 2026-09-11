@@ -111,18 +111,25 @@ public partial class FileMover : IFilePublicationSourceCapability
             // none of them. A locked file, a permissions problem and an unreadable mount were
             // indistinguishable afterwards, and this is the gate that refuses the import, so the
             // one line an operator gets is the only thing they have to go on.
+            // Both interpolated values are attacker-influenced: a download client writes the
+            // file name, and the file name is what most of these exception messages quote. A
+            // newline in either would let a crafted name forge a second log record, so they go
+            // through the same SanitizeText every other call site in this directory uses.
             var linkedAncestor = FindSymlinkedAncestor(sourcePath);
+            var cause = $"{exception.GetType().Name}: {LogRedaction.SanitizeText(exception.Message)}";
             var detail = linkedAncestor == null
-                ? $"{exception.GetType().Name}: {exception.Message}"
-                : $"the path is reached through a symbolic link at '{linkedAncestor}', which cannot be pinned; "
-                  + $"configure the real path instead ({exception.GetType().Name}: {exception.Message})";
+                ? cause
+                : $"the path is reached through a symbolic link at '{LogRedaction.SanitizeText(linkedAncestor)}', "
+                  + $"which cannot be pinned; configure the real path instead ({cause})";
 
             _logger.LogWarning(
                 exception,
                 "Source publication capability unavailable for {Source}: {Detail} (native error {NativeError})",
                 LogRedaction.SanitizeText(sourcePath),
                 detail,
-                (exception as Win32Exception)?.NativeErrorCode ?? 0);
+                // Nullable on purpose. Zero is a real errno meaning success, so reporting it for
+                // the six exception types that carry no native code would be a false reading.
+                (exception as Win32Exception)?.NativeErrorCode);
 
             return FilePublicationSourceCapabilityResult.Unsupported(
                 $"The source file cannot be pinned to a durable physical generation and content proof: {detail}",
