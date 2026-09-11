@@ -374,8 +374,12 @@ public partial class ManualImportController
                     };
                 }
 
+                // Artwork is worth writing for a book that has no ASIN. Anything matched
+                // outside Audible is in that state, and gating the whole call on the ASIN
+                // made the cover art setting silently inert for all of them.
                 if (registrationLease.HasDurablePhysicalObjectIdentity
-                    && !string.IsNullOrWhiteSpace(audiobook.Asin))
+                    && (!string.IsNullOrWhiteSpace(audiobook.Asin)
+                        || !string.IsNullOrWhiteSpace(audiobook.ImageUrl)))
                 {
                     try
                     {
