@@ -258,7 +258,7 @@ namespace Listenarr.Application.Metadata.Extraction
 
         public async Task WriteImportTagsAsync(
             IAudiobookFileRegistrationLease registrationLease,
-            string asin,
+            string? asin,
             string? coverArtUrl)
         {
             ArgumentNullException.ThrowIfNull(registrationLease);
