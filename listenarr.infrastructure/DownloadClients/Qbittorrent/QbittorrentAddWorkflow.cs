@@ -79,7 +79,16 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                             (int)forceResponse.StatusCode);
                     }
                 }
-                catch (HttpRequestException exception)
+                catch (TaskCanceledException exception) when (!ct.IsCancellationRequested)
+                {
+                    // An HttpClient timeout arrives as TaskCanceledException even though nothing
+                    // was cancelled, so it has to be told apart from a real cancellation the way
+                    // DownloadMonitorService already does. Letting it out would fail a submission
+                    // the client has already accepted, and the caller answers that by deleting
+                    // the provisional download row while the torrent downloads on unnoticed.
+                    logger.LogWarning(exception, "qBittorrent force start request timed out; the torrent was added and will download at normal priority");
+                }
+                catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
                 {
                     // The torrent is already added. Failing the whole submission because an
                     // optional priority tweak did not apply would lose a download that is fine.
