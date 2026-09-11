@@ -162,4 +162,38 @@ public sealed class DownloadClientGatewayPathMappingConcurrencyTests : BaseTests
         Assert.Equal(1, mappingService.MaxConcurrentLookups);
         Assert.Equal(1, mappingService.LookupCount);
     }
+
+    // An idle client returns an empty queue, and an empty queue has nothing to translate. Before
+    // the batch lookup was introduced that cost no query at all, because the lookup lived inside
+    // the per-item translation. A poll every few seconds per client on a shared scoped DbContext
+    // is exactly the pressure this change exists to reduce, so the empty case must not acquire it.
+    [Fact]
+    public async Task GetQueueAsync_DoesNotResolveMappings_WhenTheQueueIsEmpty()
+    {
+        var mappingService = new OverlapRecordingMappingService();
+        var client = new DownloadClientConfiguration
+        {
+            Id = "client-1",
+            Name = "qbittorrent",
+            Type = "qBittorrent"
+        };
+
+        var adapter = new Mock<IDownloadClientAdapter>();
+        adapter.Setup(a => a.GetQueueAsync(client, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<QueueItem>());
+        var factory = new Mock<IDownloadClientAdapterFactory>();
+        factory.Setup(f => f.GetByType(It.IsAny<string>())).Returns(adapter.Object);
+
+        var gateway = new DownloadClientGateway(
+            mappingService,
+            factory.Object,
+            new LocalFileSystem(),
+            new FileSystemSemanticsResolver(),
+            NullLogger<DownloadClientGateway>.Instance);
+
+        var queue = await gateway.GetQueueAsync(client);
+
+        Assert.Empty(queue);
+        Assert.Equal(0, mappingService.LookupCount);
+    }
 }

@@ -95,8 +95,14 @@ namespace Listenarr.Application.Downloads.Common
             var items = await adapter.GetQueueAsync(client, ct);
             // Resolved once for the batch. Translating each item used to query for the client's
             // mappings itself, inside this fan-out, against a scoped repository shared by everything
-            // else in the scope.
-            var mappings = await remotePathMappingService.GetPathMappingByClientAsync(client);
+            // else in the scope. An empty queue is the common case on an idle client and needs no
+            // lookup at all, which is what it cost before the batch lookup was introduced.
+            IReadOnlyList<RemotePathMapping> mappings = [];
+            if (items.Count > 0)
+            {
+                mappings = await remotePathMappingService.GetPathMappingByClientAsync(client);
+            }
+
             var tasks = items.Select(item => TranslateQueueItemPathsAsync(mappings, client, item));
             return [.. await Task.WhenAll(tasks)];
         }
@@ -171,7 +177,12 @@ namespace Listenarr.Application.Downloads.Common
                     ex);
             }
 
-            var mappings = await remotePathMappingService.GetPathMappingByClientAsync(client);
+            IReadOnlyList<RemotePathMapping> mappings = [];
+            if (items.Count > 0)
+            {
+                mappings = await remotePathMappingService.GetPathMappingByClientAsync(client);
+            }
+
             var tasks = items.Select(item => TranslateQueueItemPathsAsync(mappings, client, item));
             items = [.. await Task.WhenAll(tasks)];
 
