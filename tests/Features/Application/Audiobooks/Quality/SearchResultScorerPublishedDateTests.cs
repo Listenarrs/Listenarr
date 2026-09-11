@@ -15,6 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using Listenarr.Tests.Common;
 
 namespace Listenarr.Tests.Features.Application.Audiobooks.Quality
 {
@@ -29,7 +30,9 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Quality
     /// only checks the instant would pass with the fix reverted. The Kind differs on every host,
     /// which is why it is asserted here alongside the instant.
     /// </remarks>
-    public class SearchResultScorerPublishedDateTests
+    [Trait("Name", "SearchResultScorerPublishedDateTests")]
+    [Trait("Category", "Scoring")]
+    public class SearchResultScorerPublishedDateTests : BaseTests
     {
         [Theory]
         [InlineData("2026-03-01T09:00:00+09:00")]
