@@ -23,7 +23,7 @@ import AudiobooksView from '@/views/library/AudiobooksView.vue'
 import { useLibraryStore } from '@/stores/library'
 // apiService stubbed in vi.mock below if needed
 
-const { mockGetAudiobookDeleteCapabilities } = vi.hoisted(() => ({
+const { mockGetAudiobookDeleteCapabilities, mockGetAuthorLookup } = vi.hoisted(() => ({
   mockGetAudiobookDeleteCapabilities: vi.fn(async () => ({
     canRemoveFromLibrary: true,
     canDeleteTrackedFiles: true,
@@ -31,6 +31,7 @@ const { mockGetAudiobookDeleteCapabilities } = vi.hoisted(() => ({
     reason: null,
     fallbackAction: 'RemoveFromLibraryOnly' as const,
   })),
+  mockGetAuthorLookup: vi.fn(async () => null),
 }))
 
 vi.mock('@/services/api', () => ({
@@ -41,6 +42,7 @@ vi.mock('@/services/api', () => ({
     getStartupConfig: vi.fn(async () => ({})),
     getApplicationSettings: vi.fn(async () => ({})),
     getAudiobookDeleteCapabilities: mockGetAudiobookDeleteCapabilities,
+    getAuthorLookup: mockGetAuthorLookup,
   },
 }))
 
@@ -318,7 +320,18 @@ describe('AudiobooksView Grouping', () => {
     expect((vm as unknown).sortOrder).toBe('asc')
   })
 
-  const mountGroupedView = async () => {
+  const mountGroupedView = async (
+    initialViewMode: 'grid' | 'list' = 'grid',
+    attachToBody = false,
+  ) => {
+    try {
+      // Both are persisted by the component and survive between tests in this file. Left
+      // alone, an earlier test's grouping makes the grouped GRID render on mount and do the
+      // author-cover work before the mode under test is applied.
+      localStorage.setItem('listenarr.viewMode', initialViewMode)
+      localStorage.setItem('listenarr.groupBy', 'books')
+    } catch {}
+
     if (
       typeof (globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver === 'undefined'
     ) {
@@ -349,6 +362,9 @@ describe('AudiobooksView Grouping', () => {
     store.fetchLibrary = vi.fn(async () => undefined)
 
     const wrapper = mount(AudiobooksView, {
+      // observeAuthorCards reaches for the grouped nodes through `document`, so the component
+      // has to actually be in the document for those tests to say anything.
+      ...(attachToBody ? { attachTo: document.body } : {}),
       global: {
         plugins: [pinia, router],
         stubs: [
@@ -361,6 +377,14 @@ describe('AudiobooksView Grouping', () => {
       },
     })
     await new Promise((r) => setTimeout(r, 0))
+
+    // onMounted reads the stored mode behind an await, so pin it here too: otherwise the
+    // grouped GRID can render first and do the author-cover work the list is meant to do,
+    // and a test about the list would pass against a list that never asked for anything.
+    ;(wrapper.vm as unknown as { viewMode: 'grid' | 'list' }).viewMode = initialViewMode
+    await wrapper.vm.$nextTick()
+
+    mockGetAuthorLookup.mockClear()
     await getVm(wrapper).setGroupBy?.('authors')
     await wrapper.vm.$nextTick()
     return wrapper
@@ -400,6 +424,140 @@ describe('AudiobooksView Grouping', () => {
     expect(wrapper.findAll('.collection-list-item')).toHaveLength(0)
 
     wrapper.unmount()
+  })
+
+  it('fetches author covers in the grouped list view, not only in the grid', async () => {
+    // The grouped grid and the grouped list are v-if siblings, so the list is the only markup
+    // in the DOM when the list is showing. observeAuthorCards has to reach it, or grouping by
+    // author in list view shows a placeholder for every author and never asks for the real
+    // cover. jsdom has no IntersectionObserver, so the function takes its direct fallback.
+    const wrapper = await mountGroupedView('list', true)
+
+    expect(wrapper.findAll('.collection-list-item').length).toBe(2)
+    expect(mockGetAuthorLookup.mock.calls.map((call) => call[0]).sort()).toEqual([
+      'Author A',
+      'Author B',
+    ])
+
+    wrapper.unmount()
+    try {
+      localStorage.removeItem('listenarr.viewMode')
+    } catch {}
+  })
+
+  it('re-observes the grouped cards after the view mode switches back to grid', async () => {
+    // Switching layout destroys the observed nodes and mounts fresh ones. groupedCollections
+    // has not changed, so its watcher stays quiet and nothing else re-observes them.
+    const observed: HTMLElement[] = []
+    const previous = (globalThis as unknown as { IntersectionObserver?: unknown })
+      .IntersectionObserver
+    ;(globalThis as unknown as Record<string, unknown>).IntersectionObserver = class {
+      observe(element: HTMLElement) {
+        observed.push(element)
+      }
+      unobserve() {}
+      disconnect() {}
+    }
+
+    try {
+      const wrapper = await mountGroupedView('grid', true)
+      const vm = wrapper.vm as unknown as { viewMode: string }
+
+      vm.viewMode = 'list'
+      await wrapper.vm.$nextTick()
+      await wrapper.vm.$nextTick()
+
+      observed.length = 0
+
+      vm.viewMode = 'grid'
+      await wrapper.vm.$nextTick()
+      await wrapper.vm.$nextTick()
+
+      // Scope to this wrapper: an attached mount left behind by a failing earlier test would
+      // otherwise show up here and turn a cascade into a second, misleading failure.
+      const mine = observed.filter((element) => wrapper.element.contains(element))
+      expect(mine.map((element) => element.dataset.authorName).sort()).toEqual([
+        'Author A',
+        'Author B',
+      ])
+      expect(
+        mine.every((element) => element.classList.contains('audiobook-poster-container')),
+      ).toBe(true)
+
+      wrapper.unmount()
+    } finally {
+      if (previous === undefined) {
+        delete (globalThis as unknown as Record<string, unknown>).IntersectionObserver
+      } else {
+        ;(globalThis as unknown as Record<string, unknown>).IntersectionObserver = previous
+      }
+      try {
+        localStorage.removeItem('listenarr.viewMode')
+      } catch {}
+    }
+  })
+
+  it('remembers a view mode chosen while the library is already grouped', async () => {
+    // The watcher that persists viewMode was registered only by the virtual scroller, which
+    // bails out when there is no scroll container. A library that loads already grouped never
+    // has one, so the toggle worked for the session and was forgotten on the next load.
+    // This mounts straight into the grouped state rather than switching into it, because
+    // passing through Books registers the watcher and hides the problem.
+    if (
+      typeof (globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver === 'undefined'
+    ) {
+      ;(globalThis as unknown as Record<string, unknown>).ResizeObserver = class {
+        observe() {}
+        disconnect() {}
+      }
+    }
+
+    localStorage.setItem('listenarr.groupBy', 'authors')
+    localStorage.setItem('listenarr.viewMode', 'grid')
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: { template: '<div />' } },
+        { path: '/audiobooks', name: 'audiobooks', component: AudiobooksView },
+      ],
+    })
+    await router.push('/audiobooks')
+    await router.isReady().catch(() => {})
+
+    const store = useLibraryStore()
+    store.audiobooks = [
+      { id: 1, title: 'Book 1', authors: ['Author A'], imageUrl: 'c1.jpg', files: [] },
+    ] as unknown as import('@/types').Audiobook[]
+    store.fetchLibrary = vi.fn(async () => undefined)
+
+    const wrapper = mount(AudiobooksView, {
+      global: {
+        plugins: [pinia, router],
+        stubs: [
+          'BulkEditModal',
+          'EditAudiobookModal',
+          'CustomFilterModal',
+          'FiltersDropdown',
+          'CustomSelect',
+        ],
+      },
+    })
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(getVm(wrapper).groupBy).toBe('authors')
+    ;(wrapper.vm as unknown as { toggleViewMode: () => void }).toggleViewMode()
+    await wrapper.vm.$nextTick()
+
+    expect(localStorage.getItem('listenarr.viewMode')).toBe('list')
+
+    wrapper.unmount()
+    try {
+      localStorage.removeItem('listenarr.viewMode')
+      localStorage.removeItem('listenarr.groupBy')
+    } catch {}
   })
 
   it('groups audiobooks by series when groupBy is series', async () => {
