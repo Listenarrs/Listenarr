@@ -45,7 +45,7 @@ namespace Listenarr.Infrastructure.Downloads.Blocklist
                 return;
             }
 
-            _context.BlockedReleases.Add(new BlockedRelease
+            var entry = _context.BlockedReleases.Add(new BlockedRelease
             {
                 AudiobookId = audiobookId,
                 ReleaseIdentifier = releaseIdentifier,
@@ -54,7 +54,31 @@ namespace Listenarr.Infrastructure.Downloads.Blocklist
                 Reason = reason
             });
 
-            await _context.SaveChangesAsync();
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (UniqueConstraintViolationException)
+            {
+                // The AnyAsync above and this insert are not one operation, and
+                // (AudiobookId, ReleaseIdentifier) is uniquely indexed. Two failures observed for
+                // the same release in one poll cycle, or a failure racing a retry, both get past
+                // the read and the loser's insert violates the index. The row the winner wrote
+                // says exactly what this one would have said, so losing the race is the same
+                // outcome as finding the entry already there.
+                //
+                // It has to be caught rather than left to propagate. The only caller is
+                // DownloadMonitorService.OnDownloadFailed, which has more failure handling to do
+                // after this line, so an exception escaping here abandons that work partway
+                // through for what is not an error. DownloadProcessingJobService.EnqueueAsync
+                // treats its own unique index the same way.
+                entry.State = EntityState.Detached;
+                _logger.LogDebug(
+                    "Release was already blocked for audiobook {AudiobookId} by a concurrent failure",
+                    audiobookId);
+                return;
+            }
+
             _logger.LogInformation(
                 "Blocked release for audiobook {AudiobookId} so it is not grabbed again: {Reason}",
                 audiobookId,
