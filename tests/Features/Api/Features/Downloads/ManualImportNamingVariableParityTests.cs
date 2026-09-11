@@ -35,10 +35,41 @@ public sealed class ManualImportNamingVariableParityTests : BaseTests
     {
         Title = "The Wonderful Wizard of Oz",
         Authors = ["L. Frank Baum"],
-        Series = "Oz",
+        // The series name must not be a substring of the title. It was "Oz", and an assertion
+        // that the destination contains "Oz" then passed whenever the title rendered, whatever
+        // the series token did. SeriesFixture_CannotPassOnTheTitleAlone guards the property.
+        Series = "Land of Oz",
         SeriesNumber = "1",
+        Quality = "M4B 128kbps",
         Asin = "B007BR5KZA"
     };
+
+    // Split the destination into path components so an assertion names a whole segment. Asserting
+    // a substring of the whole path passes for the wrong reason as soon as some other segment
+    // happens to contain the text: a bare "1" matches a root folder id, a disk number or a
+    // sequence suffix.
+    private static string[] Segments(string destination) =>
+        destination.Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, '/', '\\'],
+            StringSplitOptions.RemoveEmptyEntries);
+
+    [Fact]
+    public void SeriesFixture_CannotPassOnTheTitleAlone()
+    {
+        var book = CreateSeriesBook();
+
+        Assert.NotNull(book.Series);
+        Assert.NotNull(book.Title);
+        Assert.NotNull(book.SeriesNumber);
+        Assert.NotNull(book.Quality);
+
+        // Every token asserted below has to be absent from the other fields, or its assertion
+        // proves nothing about the token it names.
+        Assert.DoesNotContain(book.Series, book.Title, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(book.SeriesNumber, book.Title, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(book.Quality, book.Title, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(book.Series, book.Authors[0], StringComparison.OrdinalIgnoreCase);
+    }
 
     private static async Task<string> PlanAsync(
         Audiobook audiobook,
@@ -83,9 +114,12 @@ public sealed class ManualImportNamingVariableParityTests : BaseTests
         string filePattern)
     {
         var destination = await PlanAsync(CreateSeriesBook(), folderPattern, filePattern);
+        var segments = Segments(destination);
 
-        Assert.Contains("L. Frank Baum", destination, StringComparison.Ordinal);
-        Assert.Contains("Oz", destination, StringComparison.Ordinal);
+        // Whole path components, not substrings: with a case-sensitive dictionary the lookup
+        // misses, the sentinel cleanup strips the segment, and the segment is simply gone.
+        Assert.Contains("L. Frank Baum", segments);
+        Assert.Contains("Land of Oz", segments);
     }
 
     // SeriesNumber and Quality were absent from this table entirely while being present in the
@@ -99,8 +133,46 @@ public sealed class ManualImportNamingVariableParityTests : BaseTests
             "{Author}/{Series}/{SeriesNumber}",
             "{Title}");
 
-        Assert.Contains("1", destination, StringComparison.Ordinal);
+        var segments = Segments(destination);
+
+        // Its own path component. "1" as a substring of the whole path would also match a root
+        // folder id or a disk number, so the assertion would survive the key being dropped.
+        Assert.Contains("1", segments);
         Assert.DoesNotContain("SeriesNumber", destination, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // Quality is the other key this PR adds, and it was asserted nowhere: the summary claimed two
+    // tokens and the tests covered one.
+    [Fact]
+    public async Task GeneratePathAsync_QualityToken_IsRendered()
+    {
+        var destination = await PlanAsync(
+            CreateSeriesBook(),
+            "{Author}/{Series}/{Quality}",
+            "{Title}");
+
+        var segments = Segments(destination);
+
+        Assert.Contains("M4B 128kbps", segments);
+        Assert.DoesNotContain("Quality", destination, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // Both added keys resolve through a lowercase pattern too, which is the intersection of the
+    // two defects this PR fixes: a key that is present but unreachable is no better than an
+    // absent one.
+    [Fact]
+    public async Task GeneratePathAsync_AddedTokens_ResolveInAnyCase()
+    {
+        var destination = await PlanAsync(
+            CreateSeriesBook(),
+            "{author}/{seriesnumber}/{quality}",
+            "{title}");
+
+        var segments = Segments(destination);
+
+        Assert.Contains("L. Frank Baum", segments);
+        Assert.Contains("1", segments);
+        Assert.Contains("M4B 128kbps", segments);
     }
 
     // Deliberately not asserted here: whether an absent key should instead be inserted empty.

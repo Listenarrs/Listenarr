@@ -289,10 +289,12 @@ public sealed class ManualImportPathPlanner
         variables["Title"] = !string.IsNullOrWhiteSpace(titleFull) ? titleFull : "Unknown Title";
 
         if (!string.IsNullOrWhiteSpace(audiobook.Series)) variables["Series"] = audiobook.Series;
-        // SeriesNumber and Quality were absent from this table entirely while both are present
-        // in the rename and library-add tables, so a pattern using either rendered under those
-        // and silently lost the segment here. Inserted on the same terms as their neighbours:
-        // present when known, absent when not, so the missing-variable cleanup still applies.
+        // SeriesNumber and Quality were absent from this table entirely. Rename has both with
+        // real values; library-add has SeriesNumber and carries Quality as a hard-wired empty
+        // string, so it is present in name only there. Either way a pattern using them rendered
+        // under rename and silently lost the segment here. Inserted on the same terms as their
+        // neighbours: present when known, absent when not, so the missing-variable cleanup
+        // still applies.
         if (!string.IsNullOrWhiteSpace(audiobook.SeriesNumber)) variables["SeriesNumber"] = audiobook.SeriesNumber;
         if (!string.IsNullOrWhiteSpace(audiobook.Quality)) variables["Quality"] = audiobook.Quality;
         if (!string.IsNullOrWhiteSpace(audiobook.PublishYear)) variables["Year"] = audiobook.PublishYear;
