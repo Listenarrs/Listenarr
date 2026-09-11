@@ -145,9 +145,16 @@ namespace Listenarr.Tests.Features.Api.Services
         {
             // The same convention with no title in the filename at all. Stripping the index
             // empties the stem, which is what lets the folder-name fallback gather them.
+            //
+            // The totals deliberately disagree. A rip that was renamed while it was still
+            // being produced carries a different M in each file, and that is the only shape
+            // of this case that the strip order actually decides. When every file shares one
+            // M, stripping the leading number first leaves the identical remainder "of 003"
+            // in all of them, so they group by accident whether or not this fix is present
+            // and the test proves nothing.
             var folder = @"D:\test\Jack of Shadows";
             var files = Enumerable.Range(1, 3)
-                .Select(n => Path.Join(folder, $"{n:000} of 003.mp3"))
+                .Select(n => Path.Join(folder, $"{n:000} of {497 + n:000}.mp3"))
                 .ToArray();
 
             var groups = UnmatchedScanBackgroundService.BuildGroupedFilesForFolder(
