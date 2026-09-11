@@ -384,8 +384,18 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
                 download.Title ?? "Unknown",
                 errorMessage);
 
+            if (!settings.FailedDownloadHandlingEnabled)
+            {
+                return;
+            }
+
             // Block the release before the auto-search below, so the search that follows a
             // failure cannot pick the same broken release straight back up.
+            //
+            // Below the FailedDownloadHandlingEnabled gate rather than above it. An operator who
+            // has turned failed-download handling off has said they want failures left alone, and
+            // a blocklist entry is durable state with no expiry: writing one anyway would
+            // accumulate permanent bans that the setting gives no hint exist.
             //
             // Only downloads the client accepted and then failed reach this method. A
             // release the client refused at submission never gets here, which is what keeps
@@ -413,11 +423,6 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
                         download.ExpectedFileSize ?? (download.TotalSize > 0 ? download.TotalSize : null),
                         errorMessage);
                 }
-            }
-
-            if (!settings.FailedDownloadHandlingEnabled)
-            {
-                return;
             }
 
             var clientItemId = download.GetExternalId();
