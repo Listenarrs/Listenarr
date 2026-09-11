@@ -90,11 +90,6 @@ namespace Listenarr.Application.Metadata.Contracts
                     "Generation-bound ASIN tagging is unavailable."));
 
         /// <summary>
-        /// Downloads cover art image from URL
-        /// </summary>
-        /// <param name="coverArtUrl">URL of the cover art image</param>
-        /// <returns>Image data as byte array or null if failed</returns>
-        /// <summary>
         /// Write the tags an import should leave behind: always the ASIN, and cover artwork
         /// as well when <c>EmbedCoverArtInAudioFiles</c> is on. Both go in one open and save.
         /// </summary>
@@ -103,6 +98,11 @@ namespace Listenarr.Application.Metadata.Contracts
             string asin,
             string? coverArtUrl);
 
+        /// <summary>
+        /// Downloads cover art image from URL
+        /// </summary>
+        /// <param name="coverArtUrl">URL of the cover art image</param>
+        /// <returns>Image data as byte array or null if failed</returns>
         Task<byte[]?> DownloadCoverArtAsync(string coverArtUrl);
     }
 }
