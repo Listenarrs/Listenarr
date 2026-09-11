@@ -37,10 +37,38 @@ namespace Listenarr.Infrastructure.Configuration.Paths
             return await remotePathMappingRepository.GetByIdAsync(id);
         }
 
+        // A client's mappings change only when the user edits them, and every queue poll needs the
+        // whole set for that client. Serving them from the shared memory cache keeps the
+        // steady-state poll off the repository entirely, which matters because the repository and
+        // the DbContext behind it are scoped while several clients are polled concurrently from a
+        // single scope. Readarr does the same thing in
+        // src/NzbDrone.Core/RemotePathMappings/RemotePathMappingService.cs, where All() is served
+        // from a cache with a ten second lifetime that add, update and remove clear.
+        //
+        // The three writers below already removed this key. Only the population was missing, so
+        // nothing was ever in the cache and every caller went to the database.
+        private static readonly TimeSpan ClientCacheLifetime = TimeSpan.FromSeconds(10);
+
         public async Task<List<RemotePathMapping>> GetPathMappingByClientAsync(DownloadClientConfiguration client)
         {
-            return await remotePathMappingRepository.GetByClientIdAsync(client.Id);
+            var cacheKey = ClientCacheKey(client.Id);
+
+            if (cache.TryGetValue(cacheKey, out RemotePathMapping[]? cached) && cached is not null)
+            {
+                return [.. cached];
+            }
+
+            var mappings = await remotePathMappingRepository.GetByClientIdAsync(client.Id);
+
+            // Cache a private copy and hand every caller its own list. The repository reads these
+            // untracked, so sharing the instances across scopes is safe, but sharing the list
+            // itself would let one caller's edit reach the next one.
+            cache.Set(cacheKey, mappings.ToArray(), ClientCacheLifetime);
+
+            return mappings;
         }
+
+        private static string ClientCacheKey(string downloadClientId) => $"rpm_client_{downloadClientId}";
 
         public async Task<RemotePathMapping> CreateAsync(RemotePathMapping mapping)
         {
@@ -55,7 +83,7 @@ namespace Listenarr.Infrastructure.Configuration.Paths
 
             try
             {
-                cache.Remove($"rpm_client_{saved.DownloadClientId}");
+                cache.Remove(ClientCacheKey(saved.DownloadClientId));
             }
             catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
             {
@@ -84,7 +112,7 @@ namespace Listenarr.Infrastructure.Configuration.Paths
                 "Updated remote path mapping {MappingId} for client {ClientId}: {RemotePath} -> {LocalPath}",
                 saved.Id, saved.DownloadClientId, saved.RemotePath, saved.LocalPath);
 
-            try { cache.Remove($"rpm_client_{saved.DownloadClientId}"); }
+            try { cache.Remove(ClientCacheKey(saved.DownloadClientId)); }
             catch (Exception caughtEx_2) when (caughtEx_2 is not OperationCanceledException && caughtEx_2 is not OutOfMemoryException && caughtEx_2 is not StackOverflowException)
             {
                 System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
@@ -106,7 +134,7 @@ namespace Listenarr.Infrastructure.Configuration.Paths
                     "Deleted remote path mapping {MappingId} for client {ClientId}",
                     id, existing.DownloadClientId);
 
-                try { cache.Remove($"rpm_client_{existing.DownloadClientId}"); }
+                try { cache.Remove(ClientCacheKey(existing.DownloadClientId)); }
                 catch (Exception caughtEx_3) when (caughtEx_3 is not OperationCanceledException && caughtEx_3 is not OutOfMemoryException && caughtEx_3 is not StackOverflowException)
                 {
                     System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
@@ -135,6 +163,12 @@ namespace Listenarr.Infrastructure.Configuration.Paths
             DownloadClientConfiguration client,
             string remotePath)
         {
+            // TranslatePathAsync always had the mappings in hand. This overload takes them from a
+            // caller, so the one contract it adds is that they are actually there. Failing here
+            // says which argument was wrong; without it an empty-looking translation just returns
+            // the remote path and the caller never learns that nothing was consulted.
+            ArgumentNullException.ThrowIfNull(mappings);
+
             if (string.IsNullOrEmpty(remotePath))
             {
                 return remotePath;
