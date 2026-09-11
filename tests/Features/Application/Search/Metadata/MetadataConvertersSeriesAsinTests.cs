@@ -91,5 +91,41 @@ namespace Listenarr.Tests.Features.Application.Search.Metadata
 
             Assert.Equal(2, metadata.SeriesMemberships?.Count);
         }
+
+        /// <summary>
+        /// AudnexusSeriesMapper copies the ASIN across verbatim, so a record that answers with an
+        /// empty or whitespace ASIN reaches AudiobookSeriesMembershipHelper.Normalize with it. The
+        /// membership must survive on the strength of its name, with a null identifier rather than
+        /// a blank one, so nothing downstream has to tell "" and null apart. PR 961 pins the same
+        /// rule on the monitoring path; this pins it on the converter path.
+        /// </summary>
+        [Fact]
+        public void SeriesWithBlankAsin_KeepsTheMembershipAndStoresNoIdentifier()
+        {
+            var book = SheAndAllan();
+            book.SeriesPrimary!.Asin = "   ";
+            book.SeriesSecondary = null;
+
+            var metadata = Converter().ConvertAudnexusToMetadata(book, "B00CQ5WAXW");
+
+            var membership = Assert.Single(metadata.SeriesMemberships!);
+            Assert.Equal("Ayesha", membership.SeriesName);
+            Assert.Equal("0", membership.SeriesNumber);
+            Assert.Null(membership.SeriesAsin);
+            Assert.True(membership.IsPrimary);
+        }
+
+        [Fact]
+        public void SeriesWithEmptyAsin_StoresNoIdentifier()
+        {
+            var book = SheAndAllan();
+            book.SeriesPrimary!.Asin = string.Empty;
+            book.SeriesSecondary = null;
+
+            var metadata = Converter().ConvertAudnexusToMetadata(book, "B00CQ5WAXW");
+
+            var membership = Assert.Single(metadata.SeriesMemberships!);
+            Assert.Null(membership.SeriesAsin);
+        }
     }
 }
