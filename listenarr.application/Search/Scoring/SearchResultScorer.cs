@@ -19,7 +19,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Search.Scoring
 {
-    public class SearchResultScorer
+    public partial class SearchResultScorer
     {
         private readonly IIndexerRepository? _indexerRepository;
         private readonly ILogger _logger;
@@ -89,6 +89,43 @@ namespace Listenarr.Application.Search.Scoring
             // Detect NZB/Usenet more broadly
             var isNzb = IsNzbResult(searchResult);
 
+            // The indexer is read before the size and age gates because all three depend on it.
+            // It also corrects isNzb from the indexer's own type, and that correction used to
+            // happen after the size gate had already run, so a Usenet result recognised only by
+            // its indexer type was size-checked despite the exemption just below.
+            int indexerRetention = 0;
+            int indexerMaximumSizeMb = 0;
+            int indexerMinimumAgeMinutes = 0;
+            if (searchResult.IndexerId.HasValue && _indexerRepository != null)
+            {
+                try
+                {
+                    var idx = await _indexerRepository.GetByIdAsync(searchResult.IndexerId.Value);
+                    if (idx != null)
+                    {
+                        indexerRetention = idx.Retention;
+                        indexerMaximumSizeMb = idx.MaximumSize;
+                        indexerMinimumAgeMinutes = idx.MinimumAge;
+                        if (!isNzb && !string.IsNullOrWhiteSpace(idx.Type) && string.Equals(idx.Type, "Usenet", StringComparison.OrdinalIgnoreCase))
+                        {
+                            isNzb = true;
+                            _logger.LogDebug("Indexer {IndexerId} type '{Type}' detected as Usenet; applying NZB/Usenet exemptions", searchResult.IndexerId.Value, idx.Type);
+                        }
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                {
+                    _logger.LogDebug(ex, "Failed to fetch indexer settings for IndexerId {Id}", searchResult.IndexerId.Value);
+                }
+            }
+
+            if (indexerMaximumSizeMb > 0 && searchResult.Size > (long)indexerMaximumSizeMb * 1024 * 1024)
+            {
+                score.RejectionReasons.Add($"File too large for indexer (> {indexerMaximumSizeMb} MB)");
+                score.TotalScore = -1;
+                return score;
+            }
+
             // Size checks (skip for NZB)
             if (!isNzb && searchResult.Size > 0)
             {
@@ -115,33 +152,28 @@ namespace Listenarr.Application.Search.Scoring
                 return score;
             }
 
-            // Age checks and indexer retention
             double ageDays = 0;
-            int indexerRetention = 0;
-            if (searchResult.IndexerId.HasValue && _indexerRepository != null)
-            {
-                try
-                {
-                    var idx = await _indexerRepository.GetByIdAsync(searchResult.IndexerId.Value);
-                    if (idx != null)
-                    {
-                        indexerRetention = idx.Retention;
-                        if (!isNzb && !string.IsNullOrWhiteSpace(idx.Type) && string.Equals(idx.Type, "Usenet", StringComparison.OrdinalIgnoreCase))
-                        {
-                            isNzb = true;
-                            _logger.LogDebug("Indexer {IndexerId} type '{Type}' detected as Usenet; applying NZB/Usenet exemptions", searchResult.IndexerId.Value, idx.Type);
-                        }
-                    }
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    _logger.LogDebug(ex, "Failed to fetch indexer retention for IndexerId {Id}", searchResult.IndexerId.Value);
-                }
-            }
 
-            if (!string.IsNullOrEmpty(searchResult.PublishedDate) && DateTime.TryParse(searchResult.PublishedDate, out var publishDate))
+            // Parsed to UTC explicitly, in TryParsePublishedDateUtc, so the subtraction from
+            // DateTime.UtcNow below is between two UTC instants whatever the host's offset is.
+            if (TryParsePublishedDateUtc(searchResult.PublishedDate, out var publishDate))
             {
                 ageDays = (DateTime.UtcNow - publishDate).TotalDays;
+
+                // Usenet only, and the reason is propagation rather than preference: a post that
+                // has not finished propagating downloads as an incomplete or failed grab. Sonarr
+                // and Radarr expose the same per-indexer minimum for the same reason.
+                if (isNzb && indexerMinimumAgeMinutes > 0)
+                {
+                    var ageMinutes = (DateTime.UtcNow - publishDate).TotalMinutes;
+                    if (ageMinutes < indexerMinimumAgeMinutes)
+                    {
+                        score.RejectionReasons.Add($"Too new ({(int)ageMinutes} minutes < indexer minimum age {indexerMinimumAgeMinutes} minutes)");
+                        score.TotalScore = -1;
+                        return score;
+                    }
+                }
+
                 if (isNzb)
                 {
                     if (indexerRetention > 0 && ageDays > indexerRetention)
@@ -376,82 +408,6 @@ namespace Listenarr.Application.Search.Scoring
             }
 
             return score;
-        }
-
-        // Helpers (copied/adapted from old service)
-        private static bool HasPreferredLanguages(QualityProfile profile) => profile.PreferredLanguages != null && profile.PreferredLanguages.Count > 0;
-        private static bool HasPreferredFormats(QualityProfile profile) => profile.PreferredFormats != null && profile.PreferredFormats.Count > 0;
-
-        private static string? DetectFormatFromTitle(string titleLower, List<string>? preferredFormats)
-        {
-            if (preferredFormats == null || preferredFormats.Count == 0 || string.IsNullOrEmpty(titleLower)) return null;
-            return preferredFormats
-                .Where(format => !string.IsNullOrWhiteSpace(format))
-                .Select(format => format.ToLower().Trim())
-                .FirstOrDefault(token => titleLower.Contains(token) || titleLower.Contains("[" + token + "]") || titleLower.Contains("(" + token + ")") || titleLower.Contains("." + token));
-        }
-
-        private static string? DetectLanguageFromTitle(string titleLower, List<string>? preferredLanguages)
-        {
-            if (preferredLanguages == null || preferredLanguages.Count == 0 || string.IsNullOrEmpty(titleLower)) return null;
-            foreach (var lang in preferredLanguages.Where(language => !string.IsNullOrWhiteSpace(language)))
-            {
-                var token = lang.ToLower().Trim();
-                if (titleLower.Contains(token) || titleLower.Contains("[" + token + "]") || titleLower.Contains("(" + token + ")") || titleLower.Contains(" " + token + " "))
-                {
-                    return lang;
-                }
-            }
-            var common = new Dictionary<string, string>
-            {
-                { "eng", "English" }, { "english", "English" }, { "es", "Spanish" }, { "spanish", "Spanish" },
-                { "de", "German" }, { "german", "German" }, { "fr", "French" }, { "french", "French" }
-            };
-            foreach (var (token, name) in common) if (titleLower.Contains(token)) return name;
-            return null;
-        }
-
-        private int GetQualityScore(string quality)
-        {
-            if (string.IsNullOrEmpty(quality)) return 0;
-            var lowerQuality = quality.ToLower();
-            if (lowerQuality.Contains("flac")) return 100;
-            if (lowerQuality.Contains("aax")) return 95;
-            if (lowerQuality.Contains("m4b")) return 90;
-            if (lowerQuality.Contains("opus")) return 85;
-            if (ContainsVbrPreset(lowerQuality, "v0")) return 82;
-            if (ContainsVbrPreset(lowerQuality, "v1")) return 76;
-            if (ContainsVbrPreset(lowerQuality, "v2")) return 70;
-            if (lowerQuality.Contains("aac") || lowerQuality.Contains("m4a")) return 78;
-            if (lowerQuality.Contains("320")) return 80;
-            if (lowerQuality.Contains("256")) return 74;
-            if (lowerQuality.Contains("192")) return 60;
-            if (lowerQuality.Contains("vbr") || lowerQuality.Contains("cbr")) return 65;
-            if (lowerQuality.Contains("mp3") && !ContainsAnyBitrate(lowerQuality, "64", "128", "192", "256", "320")) return 65;
-            if (lowerQuality.Contains("128")) return 50;
-            if (lowerQuality.Contains("64")) return 40;
-            return 0;
-        }
-
-        private static bool ContainsVbrPreset(string qualityLower, string preset) => qualityLower.Contains(preset) || qualityLower.Contains($"-{preset}") || qualityLower.Contains($" {preset}");
-        private static bool ContainsAnyBitrate(string qualityLower, params string[] bitrates) => bitrates.Any(b => qualityLower.Contains(b));
-
-        private static bool IsNzbResult(SearchResult r)
-        {
-            bool hasNzbUrl = !string.IsNullOrEmpty(r.NzbUrl);
-            bool isNzbType = string.Equals(r.DownloadType, "nzb", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(r.DownloadType, "usenet", StringComparison.OrdinalIgnoreCase);
-            bool indexerIndicatesNzb = !string.IsNullOrEmpty(r.IndexerImplementation)
-                && (r.IndexerImplementation.IndexOf("nzb", StringComparison.OrdinalIgnoreCase) >= 0
-                    || r.IndexerImplementation.IndexOf("usenet", StringComparison.OrdinalIgnoreCase) >= 0);
-            bool sourceIndicatesNzb = !string.IsNullOrEmpty(r.Source)
-                && r.Source.IndexOf("usenet", StringComparison.OrdinalIgnoreCase) >= 0;
-            bool urlIndicatesNzb = !string.IsNullOrEmpty(r.ResultUrl)
-                && (r.ResultUrl.EndsWith(".nzb", StringComparison.OrdinalIgnoreCase)
-                    || r.ResultUrl.IndexOf("/nzb", StringComparison.OrdinalIgnoreCase) >= 0);
-            bool torrentIndicatesNzb = !string.IsNullOrEmpty(r.TorrentUrl)
-                && r.TorrentUrl.EndsWith(".nzb", StringComparison.OrdinalIgnoreCase);
-            return hasNzbUrl || isNzbType || indexerIndicatesNzb || sourceIndicatesNzb || urlIndicatesNzb || torrentIndicatesNzb;
         }
     }
 }
