@@ -138,32 +138,7 @@ public class MetadataConverters
             Explicit = audnexusData.IsAdult ?? false
         };
 
-        var audnexusSeriesMemberships = new List<AudiobookSeriesMembership>();
-        if (audnexusData.SeriesPrimary != null)
-        {
-            audnexusSeriesMemberships.Add(new AudiobookSeriesMembership
-            {
-                SeriesName = audnexusData.SeriesPrimary.Name,
-                SeriesNumber = audnexusData.SeriesPrimary.Position,
-                IsPrimary = true,
-                SortOrder = 0
-            });
-        }
-
-        if (audnexusData.SeriesSecondary != null)
-        {
-            audnexusSeriesMemberships.Add(new AudiobookSeriesMembership
-            {
-                SeriesName = audnexusData.SeriesSecondary.Name,
-                SeriesNumber = audnexusData.SeriesSecondary.Position,
-                IsPrimary = audnexusSeriesMemberships.Count == 0,
-                SortOrder = audnexusSeriesMemberships.Count
-            });
-        }
-
-        metadata.SeriesMemberships = audnexusSeriesMemberships.Count == 0
-            ? null
-            : AudiobookSeriesMembershipHelper.Normalize(audnexusSeriesMemberships);
+        metadata.SeriesMemberships = BuildSeriesMemberships(AudnexusSeriesMapper.ToAudibleSeries(audnexusData));
         ApplyPrimarySeriesFields(metadata);
 
         if (metadata.SeriesMemberships != null && metadata.SeriesMemberships.Count > 0)
