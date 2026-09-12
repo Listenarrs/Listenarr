@@ -210,6 +210,20 @@ namespace Listenarr.Infrastructure.Downloads.Processing
             var historyRepository = scope.ServiceProvider.GetRequiredService<IHistoryRepository>();
             var correlationId = job.GetOrCreateCorrelationId();
 
+            // Settings > Download exposes this as Missing-source Retry Initial Delay. Read once
+            // per attempt rather than per failure branch, so every retry this method schedules
+            // waits the same configured amount.
+            var applicationSettings = await scope.ServiceProvider
+                .GetRequiredService<IConfigurationService>()
+                .GetApplicationSettingsAsync();
+            var retryInitialDelaySeconds = Math.Max(1, applicationSettings?.MissingSourceRetryInitialDelaySeconds ?? 30);
+
+            // Settings > Download exposes this as Missing-source Max Retries. Applied to the job on
+            // each attempt rather than baked in when it was queued, for two reasons: the budget then
+            // follows the current setting for jobs already in flight, and DownloadProcessingJobService
+            // stays clear of IConfigurationService, which a registration test deliberately pins.
+            job.MaxRetries = Math.Max(0, applicationSettings?.MissingSourceMaxRetries ?? 3);
+
             await downloadService.UpdateAsync(download.Importing());
             await downloadProcessingJobService.UpdateJobAsync(job.MarkAsProcessing());
             await RecordHistoryAsync(
@@ -230,7 +244,7 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                 {
                     metrics.Increment("processing.source_missing");
                     await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
-                        correlationId, $"Direct-download source path not found at processing time: {download.DownloadPath}", cancellationToken);
+                        correlationId, $"Direct-download source path not found at processing time: {download.DownloadPath}", cancellationToken, retryInitialDelaySeconds);
                     return;
                 }
 
@@ -248,7 +262,7 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                         await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
                             correlationId, isDirectDownload
                                 ? "Unable to resolve the local direct-download file"
-                                : "Unable to fetch the download from the download client", cancellationToken);
+                                : "Unable to fetch the download from the download client", cancellationToken, retryInitialDelaySeconds);
                         return;
                     }
 
@@ -259,7 +273,7 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                 catch (DownloadProcessingException exception)
                 {
                     await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
-                        correlationId, exception.Message, cancellationToken);
+                        correlationId, exception.Message, cancellationToken, retryInitialDelaySeconds);
                     return;
                 }
 
@@ -269,7 +283,7 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                         ? "No importable files found"
                         : "Files reported by the download client and files on disk do not match";
                     await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
-                        correlationId, reason, cancellationToken);
+                        correlationId, reason, cancellationToken, retryInitialDelaySeconds);
                     return;
                 }
 
@@ -383,7 +397,7 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                     if (!await downloadClientGateway.MarkItemAsImportedAsync(client!, download, cancellationToken))
                     {
                         await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
-                            correlationId, $"Unable to mark the item imported in client {client!.Id}", cancellationToken);
+                            correlationId, $"Unable to mark the item imported in client {client!.Id}", cancellationToken, retryInitialDelaySeconds);
                         return;
                     }
 
@@ -405,7 +419,7 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                 catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
                 {
                     await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
-                        correlationId, $"Unable to enqueue the post-import library scan: {exception.Message}", cancellationToken);
+                        correlationId, $"Unable to enqueue the post-import library scan: {exception.Message}", cancellationToken, retryInitialDelaySeconds);
                     return;
                 }
                 job.SetCheckpoint("ScanEnqueued", scanJobId.ToString());
@@ -450,7 +464,7 @@ namespace Listenarr.Infrastructure.Downloads.Processing
             catch (InvalidOperationException exception)
             {
                 await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
-                    correlationId, $"Unable to commit import finalization: {exception.Message}", cancellationToken);
+                    correlationId, $"Unable to commit import finalization: {exception.Message}", cancellationToken, retryInitialDelaySeconds);
             }
         }
     }
