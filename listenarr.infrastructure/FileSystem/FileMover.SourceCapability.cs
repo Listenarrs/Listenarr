@@ -92,28 +92,19 @@ public partial class FileMover : IFilePublicationSourceCapability
             // none of them. A locked file, a permissions problem and an unreadable mount were
             // indistinguishable afterwards, and this is the gate that refuses the import, so the
             // one line an operator gets is the only thing they have to go on.
-            // Both interpolated values are attacker-influenced: a download client writes the
-            // file name, and the file name is what most of these exception messages quote. A
-            // newline in either would let a crafted name forge a second log record, so they go
-            // through the same SanitizeText every other call site in this directory uses.
-            var linkedAncestor = FindSymlinkedAncestor(sourcePath);
-            var cause = $"{exception.GetType().Name}: {LogRedaction.SanitizeText(exception.Message)}";
-            var detail = linkedAncestor == null
-                ? cause
-                : $"the path is reached through a symbolic link at '{LogRedaction.SanitizeText(linkedAncestor)}', "
-                  + $"which cannot be pinned; configure the real path instead ({cause})";
+            var reason = ComposeUnsupportedReason(exception, FindSymlinkedAncestor(sourcePath));
 
             _logger.LogWarning(
                 exception,
                 "Source publication capability unavailable for {Source}: {Detail} (native error {NativeError})",
                 LogRedaction.SanitizeText(sourcePath),
-                detail,
+                reason,
                 // Nullable on purpose. Zero is a real errno meaning success, so reporting it for
                 // the six exception types that carry no native code would be a false reading.
                 (exception as Win32Exception)?.NativeErrorCode);
 
             return FilePublicationSourceCapabilityResult.Unsupported(
-                $"The source file cannot be pinned long enough to capture a stable content proof: {detail}",
+                reason,
                 FilePublicationSourceCapabilityFailureKind.Unavailable);
         }
     }
@@ -154,6 +145,35 @@ public partial class FileMover : IFilePublicationSourceCapability
             current.Dispose();
             throw;
         }
+    }
+
+    /// <summary>
+    /// The refusal an operator reads, cause first.
+    /// </summary>
+    /// <remarks>
+    /// Every consumer of <c>Reason</c> renders it through <c>LogRedaction.SanitizeText</c>, whose
+    /// 200-character default used to cut the exception off the end and leave behind only the fixed
+    /// sentence the operator already knew. Leading with the cause means the half that survives
+    /// truncation is the half that says what went wrong.
+    ///
+    /// The cause is formatted by <c>ExceptionCause</c> rather than here, because the import result
+    /// that persists a failure into History has to say the same thing this does. It also gives
+    /// this gate the inner chain it had no way to reach while it formatted the outer exception
+    /// on its own.
+    ///
+    /// Both interpolated values are attacker-influenced: a download client writes the file name,
+    /// and the file name is what most of these exception messages quote. A newline in either would
+    /// let a crafted name forge a second log record, so they go through the same SanitizeText
+    /// every other call site in this directory uses.
+    /// </remarks>
+    internal static string ComposeUnsupportedReason(Exception exception, string? linkedAncestor)
+    {
+        var cause = LogRedaction.SanitizeText(ExceptionCause.Describe(exception));
+
+        return linkedAncestor == null
+            ? $"{cause} The source file could not be pinned long enough to capture a stable content proof."
+            : $"{cause} The source file could not be pinned: it is reached through a symbolic link at "
+              + $"'{LogRedaction.SanitizeText(linkedAncestor)}', which cannot be pinned, so configure the real path instead.";
     }
 
     /// <summary>
