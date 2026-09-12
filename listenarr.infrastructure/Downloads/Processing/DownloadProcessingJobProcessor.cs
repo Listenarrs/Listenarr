@@ -304,9 +304,34 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                 var failedResults = results.Where(result => !result.Success).ToList();
                 if (failedResults.Count > 0)
                 {
-                    await FailImportAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
-                        correlationId, "Unable to import at least one file for the job (see the log entries)",
-                        cancellationToken, failedResults);
+                    // A whole import can fail for a reason that clears on its own, such as a source
+                    // the download client is still holding open. Every other failure point in this
+                    // method takes the bounded retry path; this one did not, so that ended the
+                    // download permanently with RetryCount still zero.
+                    //
+                    // Every file, not some of them. A partial failure stays terminal, as it is on
+                    // canary and in Readarr's CompletedDownloadService. Retrying one would not even
+                    // reach the import: the retry re-enters this block from the top, and under the
+                    // Move completed-file action the files that did land are gone from the download
+                    // directory, so the count guard above fails the job on a mismatch caused by the
+                    // earlier success and the history entry loses the per-file failedResults.
+                    //
+                    // The terminal call is FailImportAsync rather than letting ScheduleRetryAsync
+                    // exhaust itself, because only FailImportAsync records failedResults. That is
+                    // why the budget rule is restated here rather than left to ScheduleRetry, which
+                    // owns it; the two have to stay in step.
+                    if (failedResults.Count == results.Count && job.RetryCount < job.MaxRetries)
+                    {
+                        await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
+                            correlationId, "Unable to import at least one file for the job (see the log entries)",
+                            cancellationToken);
+                    }
+                    else
+                    {
+                        await FailImportAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
+                            correlationId, "Unable to import at least one file for the job (see the log entries)",
+                            cancellationToken, failedResults);
+                    }
                     return;
                 }
 
