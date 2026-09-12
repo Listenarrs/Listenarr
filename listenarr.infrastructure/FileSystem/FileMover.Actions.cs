@@ -306,7 +306,7 @@ public partial class FileMover
         }
         catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
         {
-            LogMutation(FileMutationOutcome.Failed, action, source, destination, exception.Message);
+            LogMutation(FileMutationOutcome.Failed, action, source, destination, exception.Message, exception);
             throw new InvalidOperationException($"Unable to perform {action} on {source} to {destination}", exception);
         }
     }
@@ -417,7 +417,13 @@ public partial class FileMover
         return true;
     }
 
-    private void LogMutation(FileMutationOutcome outcome, FileAction action, string source, string? destination, string? reason = null)
+    private void LogMutation(
+        FileMutationOutcome outcome,
+        FileAction action,
+        string source,
+        string? destination,
+        string? reason = null,
+        Exception? exception = null)
     {
         var result = new FileMutationResult(outcome, action, source, destination, reason);
         var arguments = new object?[]
@@ -436,7 +442,10 @@ public partial class FileMover
                 _logger.LogWarning(template, arguments);
                 break;
             case FileMutationOutcome.Failed:
-                _logger.LogError(template, arguments);
+                // The exception object, not just its Message. Without it the log records
+                // that a mutation failed and not what stopped it, so a cross-device link,
+                // a permissions error and a full disk are indistinguishable afterwards.
+                _logger.LogError(exception, template, arguments);
                 break;
             case FileMutationOutcome.Skipped:
                 _logger.LogDebug(template, arguments);
