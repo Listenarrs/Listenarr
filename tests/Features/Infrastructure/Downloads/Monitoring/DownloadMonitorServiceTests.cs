@@ -22,12 +22,6 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Monitoring
 
             monitorDownloadsAsync = method;
 
-            // These poll in a tight loop on the real clock and assert completion, so they need
-            // the completion stability window out of the way. Stated rather than inherited.
-            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
-                .WithoutCompletionStabilityWindow()
-                .Build());
-
             client = await _downloadClientConfigurationRepository.SaveAsync(new DownloadClientConfigurationBuilder()
                 .WithType("mock")
                 .WithName("Mock")
@@ -85,6 +79,14 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Monitoring
         [Trait("Method", "MonitorDownloadsAsync")]
         public async Task MonitorDownloadsAsync_DownloadingBecomesCompleted()
         {
+            // This test alone polls in a tight loop on the real clock and asserts completion,
+            // so it needs the completion stability window out of the way. Stated here rather
+            // than for the whole class, since every other test in this file leaves the
+            // repository's single settings row for its own save.
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithoutCompletionStabilityWindow()
+                .Build());
+
             var download = await _downloadRepository.AddAsync(new DownloadBuilder()
                 .WithDownloading(0)
                 .WithExternalId("1")
