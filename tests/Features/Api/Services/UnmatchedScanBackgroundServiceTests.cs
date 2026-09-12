@@ -184,5 +184,96 @@ namespace Listenarr.Tests.Features.Api.Services
             Assert.Contains(groups, group => group.Single() == jack);
             Assert.Contains(groups, group => group.Single() == nine);
         }
+
+        [Fact]
+        public void BuildGroupedFilesForFolder_KeepsSeriesFilesSpelledBookNumberOfTotalSeparate()
+        {
+            // A boxed set names every volume "Book N of M". Each file is a different work, so
+            // the folder must stay at one item per book. Stripping the index here would also
+            // cost them the embedded-tag rescue, which only runs when filename grouping
+            // produced more than one group.
+            var folder = @"D:\test\Wheel of Time";
+            var files = Enumerable.Range(1, 3)
+                .Select(n => Path.Join(folder, $"Wheel of Time Book {n} of 14.m4b"))
+                .ToArray();
+
+            var groups = UnmatchedScanBackgroundService.BuildGroupedFilesForFolder(
+                files,
+                folder,
+                FileSystemPathSemantics.CurrentHostDefault);
+
+            Assert.Equal(3, groups.Count);
+            Assert.All(groups, group => Assert.Single(group));
+        }
+
+        [Fact]
+        public void BuildGroupedFilesForFolder_KeepsSeriesFilesSpelledVolumeNumberOfTotalSeparate()
+        {
+            // The other spelling of the same convention, and the abbreviation beside it.
+            var folder = @"D:\test\Decline and Fall";
+            var volumeOne = Path.Join(folder, "Decline and Fall Volume 1 of 6.m4b");
+            var volumeTwo = Path.Join(folder, "Decline and Fall Volume 2 of 6.m4b");
+            var volumeThree = Path.Join(folder, "Decline and Fall Vol 3 of 6.m4b");
+
+            var groups = UnmatchedScanBackgroundService.BuildGroupedFilesForFolder(
+                new[] { volumeOne, volumeTwo, volumeThree },
+                folder,
+                FileSystemPathSemantics.CurrentHostDefault);
+
+            Assert.Equal(3, groups.Count);
+            Assert.Contains(groups, group => group.Single() == volumeOne);
+            Assert.Contains(groups, group => group.Single() == volumeTwo);
+            Assert.Contains(groups, group => group.Single() == volumeThree);
+        }
+
+        [Fact]
+        public void BuildGroupedFilesForFolder_StillGroupsBareNumberOfTotalAfterTheSeriesWordNarrowing()
+        {
+            // The control for the two above. Narrowing the strip must not reach a chapter rip
+            // that carries no series word, whether the filename is bare or titled. Both shapes
+            // are seeded here so a narrowing that over-reaches fails this rather than only the
+            // older cases.
+            var bareFolder = @"D:\test\Jack of Shadows";
+            var bare = Enumerable.Range(1, 3)
+                .Select(n => Path.Join(bareFolder, $"{n:000} of {497 + n:000}.mp3"))
+                .ToArray();
+
+            var bareGroups = UnmatchedScanBackgroundService.BuildGroupedFilesForFolder(
+                bare,
+                bareFolder,
+                FileSystemPathSemantics.CurrentHostDefault);
+
+            Assert.Equal(3, Assert.Single(bareGroups).Count);
+
+            var titledFolder = @"D:\test\Lord of Light";
+            var titled = Enumerable.Range(1, 4)
+                .Select(n => Path.Join(titledFolder, $"Lord of Light {n:000} of 004.mp3"))
+                .ToArray();
+
+            var titledGroups = UnmatchedScanBackgroundService.BuildGroupedFilesForFolder(
+                titled,
+                titledFolder,
+                FileSystemPathSemantics.CurrentHostDefault);
+
+            Assert.Equal(4, Assert.Single(titledGroups).Count);
+        }
+
+        [Fact]
+        public void BuildGroupedFilesForFolder_GroupsAChapterRipWhoseTitleMerelyEndsInBook()
+        {
+            // The narrowing keys on the whole word, so a title ending in "book" is not a series
+            // marker and its chapter rip still collapses to one item.
+            var folder = @"D:\test\The Storybook";
+            var files = Enumerable.Range(1, 3)
+                .Select(n => Path.Join(folder, $"The Storybook {n} of 30.mp3"))
+                .ToArray();
+
+            var groups = UnmatchedScanBackgroundService.BuildGroupedFilesForFolder(
+                files,
+                folder,
+                FileSystemPathSemantics.CurrentHostDefault);
+
+            Assert.Equal(3, Assert.Single(groups).Count);
+        }
     }
 }
