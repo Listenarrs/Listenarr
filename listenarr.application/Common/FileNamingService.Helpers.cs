@@ -86,7 +86,11 @@ namespace Listenarr.Application.Common
                 { "Publisher", string.IsNullOrWhiteSpace(metadata.Publisher) ? string.Empty : SanitizePathComponent(metadata.Publisher) },
                 { "Language", string.IsNullOrWhiteSpace(metadata.Language) ? string.Empty : SanitizePathComponent(metadata.Language) },
                 { "Asin", string.IsNullOrWhiteSpace(metadata.Asin) ? string.Empty : SanitizePathComponent(metadata.Asin) },
-                { "SeriesNumber", FirstNonEmpty(metadata.SeriesPosition?.ToString(CultureInfo.InvariantCulture), metadata.TrackNumber?.ToString()) },
+                // Prefer the position exactly as the source gave it. A non-numeric but real
+                // position (an omnibus at "1-4") does not survive the decimal parse, and
+                // falling through to TrackNumber here would write a track number into the
+                // filename as if it were the series number.
+                { "SeriesNumber", FirstNonEmpty(metadata.SeriesPositionRaw, metadata.SeriesPosition?.ToString(CultureInfo.InvariantCulture), metadata.TrackNumber?.ToString()) },
                 { "Year", FirstNonEmpty(metadata.Year?.ToString()) },
                 { "Quality", FirstNonEmpty(metadata.BitRate.HasValue ? metadata.BitRate + "kbps" : null, metadata.Format) },
                 { "DiskNumber", metadata.DiscNumber?.ToString() ?? string.Empty },
