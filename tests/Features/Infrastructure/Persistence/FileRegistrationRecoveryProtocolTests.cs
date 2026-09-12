@@ -109,6 +109,131 @@ public sealed class FileRegistrationRecoveryProtocolTests : BaseTests
         Assert.Equal(Enumerable.Repeat(true, 10).Concat(Enumerable.Repeat(false, 3)), listed);
     }
 
+    // The states the message names are read before the same method moves every one of those rows
+    // to NeedsAttention, so an operator who looks a journal up finds a different word there. The
+    // pre-update state is the useful one, because it says how far the mutation got, but only if
+    // the message says that is what it is.
+    [Fact]
+    [Trait("Scenario", "The listing says which state each mutation reached, not the one the row now carries")]
+    public async Task ReconcileAsync_LegacyJournals_NamesTheStateTheMutationReached()
+    {
+        Init();
+        var factory = _provider.GetRequiredService<
+            IDbContextFactory<ListenArrDbContext>>();
+
+        var planned = Guid.NewGuid();
+        var committed = Guid.NewGuid();
+        await using (var seed = await factory.CreateDbContextAsync())
+        {
+            var created = DateTime.UtcNow.AddMinutes(-30);
+            seed.FileMutationJournals.Add(NewLegacyJournal(planned, FileMutationJournalState.Planned, created, 0));
+            seed.FileMutationJournals.Add(
+                NewLegacyJournal(committed, FileMutationJournalState.RegistrationCommitted, created, 1));
+            await seed.SaveChangesAsync();
+        }
+
+        var service = new FileRegistrationRecoveryService(
+            factory,
+            Mock.Of<IFileMover>(),
+            TimeProvider.System,
+            NullLogger<FileRegistrationRecoveryService>.Instance);
+
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.ReconcileAsync());
+
+        Assert.Contains($"{planned} (interrupted at Planned)", thrown.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            $"{committed} (interrupted at RegistrationCommitted)",
+            thrown.Message,
+            StringComparison.OrdinalIgnoreCase);
+
+        // The half that makes the wording load-bearing: by the time anyone reads that message,
+        // neither row carries the state it names.
+        await using var check = await factory.CreateDbContextAsync();
+        var states = await check.FileMutationJournals
+            .AsNoTracking()
+            .Select(journal => journal.State)
+            .ToListAsync();
+        Assert.All(states, state => Assert.Equal(FileMutationJournalState.NeedsAttention, state));
+    }
+
+    // Past the cap the exception names ten and counts the rest, so the set an operator needs is
+    // only complete in the log the same message tells them to read.
+    [Fact]
+    [Trait("Scenario", "The full set reaches the log at Debug even when the message is capped")]
+    public async Task ReconcileAsync_MoreLegacyJournalsThanTheCap_LogsTheWholeSetAtDebug()
+    {
+        Init();
+        var factory = _provider.GetRequiredService<
+            IDbContextFactory<ListenArrDbContext>>();
+
+        var operationIds = await SeedLegacyJournalsAsync(factory, count: 13);
+        var logger = new CapturingLogger<FileRegistrationRecoveryService>();
+
+        var service = new FileRegistrationRecoveryService(
+            factory,
+            Mock.Of<IFileMover>(),
+            TimeProvider.System,
+            logger);
+
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.ReconcileAsync());
+
+        var debugRecord = Assert.Single(logger.Records, record => record.Level == LogLevel.Debug);
+        foreach (var operationId in operationIds)
+        {
+            Assert.Contains(operationId.ToString(), debugRecord.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        // Once, not one line per journal, and the message stays capped so the two are not the
+        // same listing written twice.
+        Assert.Equal(1, logger.Records.Count(record => record.Level == LogLevel.Debug));
+        Assert.Contains("and 3 more", thrown.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(operationIds[12].ToString(), thrown.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public List<(LogLevel Level, string Message)> Records { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull
+        {
+            return null;
+        }
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Records.Add((logLevel, formatter(state, exception)));
+        }
+    }
+
+    private static FileMutationJournal NewLegacyJournal(
+        Guid operationId,
+        FileMutationJournalState state,
+        DateTime created,
+        int index)
+    {
+        return new FileMutationJournal
+        {
+            OperationId = operationId,
+            Action = FileAction.HardlinkCopy,
+            State = state,
+            ProtocolVersion = FileMutationProtocol.Current - 1,
+            SourcePath = $"/incoming/book-{index}.m4b",
+            DestinationPath = $"/library/book-{index}.m4b",
+            CreatedAt = created.AddSeconds(index),
+            UpdatedAt = created.AddSeconds(index)
+        };
+    }
+
     private static async Task<IReadOnlyList<Guid>> SeedLegacyJournalsAsync(
         IDbContextFactory<ListenArrDbContext> factory,
         int count)
