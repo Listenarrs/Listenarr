@@ -172,4 +172,108 @@ describe('DownloadClientFormModal', () => {
     expect(calledWith.password).toBe('')
     expect(calledWith.id).toBe('4')
   })
+
+  it('offers only priority values the usenet planners accept', async () => {
+    // The values here have to stay in step with DownloadClientPriorityTests on the backend.
+    // They were not: the form offered default, last and first, none of which match an arm of
+    // the switch in NzbgetRequestPlanner or SabnzbdAddRequestPlanner, so every choice but
+    // Default resolved to normal and the control did nothing.
+    const wrapper = mount(DownloadClientFormModal, {
+      global: { plugins: [createPinia()] },
+      props: { visible: true, editingClient: null },
+    })
+
+    await wrapper.setProps({
+      editingClient: {
+        id: '1',
+        name: 'sab',
+        type: 'sabnzbd',
+        host: 'sabnzbd.local',
+        port: 8080,
+        isEnabled: true,
+        useSSL: false,
+      } as unknown as import('@/types').DownloadClientConfiguration,
+    })
+    await nextTick()
+
+    const options = wrapper
+      .findAll('#recentPriority option')
+      .map((option) => option.attributes('value'))
+
+    expect(options).toEqual(['default', 'low', 'normal', 'high', 'force'])
+    expect(options).not.toContain('first')
+    expect(options).not.toContain('last')
+
+    wrapper.unmount()
+  })
+
+  it('no longer renders the superseded legacy removal checkboxes', async () => {
+    // Remove Completed (Legacy) and Remove Failed (Legacy) had no backend reader at all, and
+    // the Completed Download Action dropdown above them already covers removing and deleting.
+    const wrapper = mount(DownloadClientFormModal, {
+      global: { plugins: [createPinia()] },
+      props: { visible: true, editingClient: null },
+    })
+
+    await wrapper.setProps({
+      editingClient: {
+        id: '1',
+        name: 'sab',
+        type: 'sabnzbd',
+        host: 'sabnzbd.local',
+        port: 8080,
+        isEnabled: true,
+        useSSL: false,
+      } as unknown as import('@/types').DownloadClientConfiguration,
+    })
+    await nextTick()
+
+    expect(wrapper.text()).not.toContain('Remove Completed (Legacy)')
+    expect(wrapper.text()).not.toContain('Remove Failed (Legacy)')
+    // The control: the section that replaced them is still there.
+    expect(wrapper.find('#removeCompletedDownloads').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['last', 'normal'],
+    ['first', 'normal'],
+    ['high', 'high'],
+    ['', 'default'],
+  ])('reads a stored priority of %s back as %s', async (stored, expected) => {
+    // Every install that ever moved this control off Default has 'last' or 'first' stored,
+    // because those are the only other values the old list offered. Neither is in the new list,
+    // and a select whose model holds a value none of its options carry renders with
+    // selectedIndex -1 and an empty value, so the operator is shown a blank dropdown by the
+    // release that fixed the control. Both fell through to normal on the wire before this
+    // change, so normal is what preserves their behaviour.
+    //
+    // The last two rows are the control: a normaliser that simply returned 'normal' would break
+    // the stored value that is already valid and the empty one that has always meant Default.
+    const wrapper = mount(DownloadClientFormModal, {
+      global: { plugins: [createPinia()] },
+      props: { visible: true, editingClient: null },
+    })
+
+    await wrapper.setProps({
+      editingClient: {
+        id: '1',
+        name: 'sab',
+        type: 'sabnzbd',
+        host: 'sabnzbd.local',
+        port: 8080,
+        isEnabled: true,
+        useSSL: false,
+        settings: stored ? { recentPriority: stored } : {},
+      } as unknown as import('@/types').DownloadClientConfiguration,
+    })
+    await nextTick()
+
+    const select = wrapper.find('#recentPriority').element as HTMLSelectElement
+    expect(select.value).toBe(expected)
+    expect(select.selectedIndex).toBeGreaterThanOrEqual(0)
+
+    wrapper.unmount()
+  })
 })
