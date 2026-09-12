@@ -8,7 +8,15 @@ namespace Listenarr.Application.Search.Indexers.Torznab
 {
     internal sealed partial class TorznabResponseParser
     {
-        private long ParseSizeString(string sizeStr)
+        /// <summary>
+        /// Reads a size out of a Torznab attribute value, either as plain bytes or as a
+        /// formatted string such as "1.5 GiB".
+        /// </summary>
+        /// <remarks>
+        /// Internal rather than private so the culture behaviour of the unit match can be
+        /// asserted against the real method rather than a copy of it.
+        /// </remarks>
+        internal long ParseSizeString(string sizeStr)
         {
             if (string.IsNullOrEmpty(sizeStr))
                 return 0;
@@ -26,7 +34,10 @@ namespace Listenarr.Application.Search.Indexers.Torznab
             if (match.Success &&
                 double.TryParse(match.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value))
             {
-                var unit = match.Groups[2].Value.ToUpper();
+                // ToUpperInvariant, not ToUpper: under tr-TR the 'i' of "GiB" uppercases to
+                // 'I' with a dot (U+0130), no binary arm matches, and the size falls through
+                // to the (long)value default, which is the raw mantissa in bytes.
+                var unit = match.Groups[2].Value.ToUpperInvariant();
                 return unit switch
                 {
                     "B" => (long)value,
