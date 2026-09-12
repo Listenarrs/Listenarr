@@ -2250,9 +2250,10 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                     Format = "mp3",
                     BitRate = 128000
                 });
-            metadata.Setup(service => service.WriteAsinTagAsync(
+            metadata.Setup(service => service.WriteImportTagsAsync(
                     It.IsAny<IAudiobookFileRegistrationLease>(),
-                    book.Asin))
+                    book.Asin,
+                    It.IsAny<string?>()))
                 .ThrowsAsync(new IOException("simulated tag failure"));
             var controller = GetController(
                 book,
@@ -2297,12 +2298,143 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                 "audio",
                 await File.ReadAllTextAsync(
                     Path.Join(destinationRoot, "Tagged Book.mp3")));
-            metadata.Verify(service => service.WriteAsinTagAsync(
+            metadata.Verify(service => service.WriteImportTagsAsync(
                 It.IsAny<IAudiobookFileRegistrationLease>(),
-                book.Asin), Times.Once);
+                book.Asin,
+                It.IsAny<string?>()), Times.Once);
             metadata.Verify(service => service.WriteAsinTagAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task InteractiveManualImport_BookWithArtworkAndNoAsin_StillWritesImportTags()
+        {
+            // Anything matched outside Audible has no ASIN. The tag write used to be gated on
+            // the ASIN alone, so cover art embedding was silently inert for all of those.
+            var destinationRoot = CreateTempDirectory(
+                "listenarr-manual-cover-no-asin-dest");
+            var sourceDir = CreateTempDirectory(
+                "listenarr-manual-cover-no-asin-src");
+            var source = Path.Join(sourceDir, "book.mp3");
+            await File.WriteAllTextAsync(source, "audio");
+            var book = new Audiobook
+            {
+                Id = 336,
+                Title = "Artwork Only",
+                Asin = null,
+                ImageUrl = "https://example.invalid/cover.jpg",
+                BasePath = destinationRoot
+            };
+            var recorder = new Listenarr.Tests.Mocks.MetadataServiceMock();
+            var metadata = new Mock<IMetadataService>();
+            metadata.Setup(service => service.ExtractFileMetadataAsync(source))
+                .ReturnsAsync(new AudioMetadata
+                {
+                    Title = book.Title,
+                    Format = "mp3",
+                    BitRate = 128000
+                });
+            metadata.Setup(service => service.WriteImportTagsAsync(
+                    It.IsAny<IAudiobookFileRegistrationLease>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<string?>()))
+                .Returns<IAudiobookFileRegistrationLease, string?, string?>(
+                    (lease, asin, coverArtUrl) =>
+                        recorder.WriteImportTagsAsync(lease, asin, coverArtUrl));
+            var controller = GetController(
+                book,
+                new ApplicationSettings
+                {
+                    OutputPath = destinationRoot,
+                    FolderNamingPattern = "",
+                    FileNamingPattern = "{Title}"
+                },
+                metadataMock: metadata);
+            var request = new ManualImportRequestDto
+            {
+                Path = sourceDir,
+                Mode = "interactive",
+                Action = FileAction.Copy,
+                Items =
+                [
+                    new ManualImportItemDto
+                    {
+                        FullPath = source,
+                        MatchedAudiobookId = book.Id
+                    }
+                ]
+            };
+
+            var action = await controller.Start(request);
+
+            Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(action.Result);
+            var write = Assert.Single(recorder.ImportTagWrites);
+            Assert.Null(write.Asin);
+            Assert.Equal("https://example.invalid/cover.jpg", write.CoverArtUrl);
+        }
+
+        [Fact]
+        public async Task InteractiveManualImport_BookWithNeitherAsinNorArtwork_WritesNoImportTags()
+        {
+            var destinationRoot = CreateTempDirectory(
+                "listenarr-manual-no-tags-dest");
+            var sourceDir = CreateTempDirectory(
+                "listenarr-manual-no-tags-src");
+            var source = Path.Join(sourceDir, "book.mp3");
+            await File.WriteAllTextAsync(source, "audio");
+            var book = new Audiobook
+            {
+                Id = 337,
+                Title = "Nothing To Write",
+                Asin = null,
+                ImageUrl = null,
+                BasePath = destinationRoot
+            };
+            var recorder = new Listenarr.Tests.Mocks.MetadataServiceMock();
+            var metadata = new Mock<IMetadataService>();
+            metadata.Setup(service => service.ExtractFileMetadataAsync(source))
+                .ReturnsAsync(new AudioMetadata
+                {
+                    Title = book.Title,
+                    Format = "mp3",
+                    BitRate = 128000
+                });
+            metadata.Setup(service => service.WriteImportTagsAsync(
+                    It.IsAny<IAudiobookFileRegistrationLease>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<string?>()))
+                .Returns<IAudiobookFileRegistrationLease, string?, string?>(
+                    (lease, asin, coverArtUrl) =>
+                        recorder.WriteImportTagsAsync(lease, asin, coverArtUrl));
+            var controller = GetController(
+                book,
+                new ApplicationSettings
+                {
+                    OutputPath = destinationRoot,
+                    FolderNamingPattern = "",
+                    FileNamingPattern = "{Title}"
+                },
+                metadataMock: metadata);
+            var request = new ManualImportRequestDto
+            {
+                Path = sourceDir,
+                Mode = "interactive",
+                Action = FileAction.Copy,
+                Items =
+                [
+                    new ManualImportItemDto
+                    {
+                        FullPath = source,
+                        MatchedAudiobookId = book.Id
+                    }
+                ]
+            };
+
+            var action = await controller.Start(request);
+
+            Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(action.Result);
+            Assert.Empty(recorder.ImportTagWrites);
         }
 
         [Fact]

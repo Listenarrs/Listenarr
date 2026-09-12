@@ -30,7 +30,7 @@ describe('FeaturesSection', () => {
       props: {
         settings: {
           enableMetadataProcessing: false,
-          enableCoverArtDownload: false,
+          embedCoverArtInAudioFiles: false,
           enableNotifications: false,
           showCompletedExternalDownloads: false,
         },
@@ -47,6 +47,6 @@ describe('FeaturesSection', () => {
     await checks[1].setValue(true)
     last =
       wrapper.emitted()['update:settings']![wrapper.emitted()['update:settings']!.length - 1][0]
-    expect(last.enableCoverArtDownload).toBe(true)
+    expect(last.embedCoverArtInAudioFiles).toBe(true)
   })
 })

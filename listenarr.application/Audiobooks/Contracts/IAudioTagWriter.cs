@@ -25,5 +25,15 @@ namespace Listenarr.Application.Audiobooks.Contracts
         Task WriteAsinTagAsync(
             IAudiobookFileRegistrationLease registrationLease,
             string asin);
+
+        /// <summary>
+        /// Write the ASIN and, when supplied, embed cover artwork, in a single open and save.
+        /// Splitting these into two calls would rewrite the file twice, and an audiobook is
+        /// commonly several gigabytes.
+        /// </summary>
+        Task WriteTagsAsync(
+            IAudiobookFileRegistrationLease registrationLease,
+            string? asin,
+            AudioCoverArt? coverArt);
     }
 }

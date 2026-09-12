@@ -26,6 +26,15 @@ namespace Listenarr.Tests.Features.Infrastructure.Persistence;
 [Trait("Category", "Infrastructure")]
 public class SqliteMigrationSchemaTests : BaseTests
 {
+    // Migrations this branch adds, declared apart from the consolidated list below and
+    // asserted apart from it. Two branches that each add a migration would otherwise rewrite
+    // the same two lines of this file and conflict on merge in either order.
+    private const string EmbedCoverArtSettingMigrationId =
+        "20260828190320_AddEmbedCoverArtInAudioFilesSetting";
+
+    private static readonly string[] BranchMigrationIds =
+        [EmbedCoverArtSettingMigrationId];
+
     private const string CanaryMigrationFrontierId =
         "20260621002226_AddApplicationSettingsConcurrency";
     private const string MoveJobSourcePathRepairId =
@@ -188,8 +197,19 @@ public class SqliteMigrationSchemaTests : BaseTests
 
         await context.Database.MigrateAsync();
         var applied = (await context.Database.GetAppliedMigrationsAsync()).ToList();
-        var postCanary = applied
+        var allPostCanary = applied
             .Where(id => string.CompareOrdinal(id, CanaryMigrationFrontierId) > 0)
+            .ToArray();
+        Assert.Equal(
+            BranchMigrationIds,
+            allPostCanary.Where(id => BranchMigrationIds.Contains(id, StringComparer.Ordinal)));
+        Assert.All(
+            BranchMigrationIds,
+            id => Assert.True(
+                string.CompareOrdinal(id, WeakStorageVerifiedCleanupMigrationId) > 0,
+                "A migration this branch adds has to sort after the consolidated history."));
+        var postCanary = allPostCanary
+            .Where(id => !BranchMigrationIds.Contains(id, StringComparer.Ordinal))
             .ToArray();
 
         Assert.Equal(
