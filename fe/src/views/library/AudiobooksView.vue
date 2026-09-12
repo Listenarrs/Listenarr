@@ -211,7 +211,7 @@
 
     <!-- Grouped View -->
     <div v-else-if="groupBy !== 'books'" class="grouped-view">
-      <div class="grouped-grid">
+      <div v-if="viewMode === 'grid'" class="grouped-grid">
         <div
           v-for="collection in groupedCollections || []"
           :key="collection.name"
@@ -395,6 +395,49 @@
                 {{ collection.count }} book{{ collection.count !== 1 ? 's' : '' }}
               </p>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-else class="audiobooks-list grouped-list">
+        <div v-if="(groupedCollections || []).length > 0" class="list-header">
+          <div class="col-cover">Cover</div>
+          <div class="col-title">{{ groupBy === 'authors' ? 'Author' : 'Series' }}</div>
+          <div class="col-count">Books</div>
+        </div>
+        <div
+          v-for="collection in groupedCollections || []"
+          :key="`collection-list-${collection.name}`"
+          tabindex="0"
+          class="audiobook-list-item collection-list-item"
+          @keydown.enter="navigateToCollection(collection)"
+          @click="navigateToCollection(collection)"
+        >
+          <div
+            class="list-thumb-container"
+            :data-author-name="groupBy === 'authors' ? collection.name : undefined"
+            :data-author-has-cover="authorHasSpecificCoverMap[collection.name] ? '1' : ''"
+          >
+            <img
+              class="list-thumb"
+              :src="
+                getProtectedImageSrc(
+                  groupBy === 'authors'
+                    ? getAuthorImageUrl(collection)
+                    : collection.coverUrls?.[0] || '',
+                  getPlaceholderUrl(),
+                )
+              "
+              :alt="collection.name"
+              loading="lazy"
+              decoding="async"
+            />
+          </div>
+          <div class="list-details">
+            <div class="audiobook-title">{{ safeText(collection.name) }}</div>
+          </div>
+          <div class="collection-list-count">
+            {{ collection.count }} book{{ collection.count !== 1 ? 's' : '' }}
           </div>
         </div>
       </div>
@@ -1510,10 +1553,9 @@ let authorCardObserver: IntersectionObserver | null = null
 
 function observeAuthorCards() {
   if (groupBy.value !== 'authors') return
+  // Both grouped layouts carry the hook, so a cover is fetched whichever one is showing.
   const cards = Array.from(
-    document.querySelectorAll<HTMLElement>(
-      '.author-collection .audiobook-poster-container[data-author-name]',
-    ),
+    document.querySelectorAll<HTMLElement>('.grouped-view [data-author-name]'),
   )
   if (cards.length === 0) return
 
@@ -1904,6 +1946,13 @@ async function initializeVirtualScroller() {
     )
   }
 
+  registerViewModeWatchers()
+}
+
+// Registered independently of the virtual scroller. The scroller bails out when there is no
+// scroll container, and there is none while the library is grouped, so leaving these in it
+// meant a view-mode switch made under a grouping was neither reacted to nor remembered.
+function registerViewModeWatchers() {
   if (!stopViewModeWatch) {
     stopViewModeWatch = watch(viewMode, async () => {
       measuredRowHeight.value = null
@@ -1911,6 +1960,10 @@ async function initializeVirtualScroller() {
       await nextTick()
       syncMeasuredRowHeight()
       updateVisibleRange()
+      // The grouped branches are v-if siblings, so a layout switch destroys the observed
+      // nodes and mounts fresh ones. Nothing else re-observes them: groupedCollections has
+      // not changed, so its watcher stays quiet.
+      observeAuthorCards()
     })
   }
 
@@ -1942,6 +1995,8 @@ onMounted(async () => {
   } catch {
     // ignore localStorage errors (e.g., privacy mode)
   }
+
+  registerViewModeWatchers()
 
   await initializeVirtualScroller()
 
@@ -2118,7 +2173,7 @@ async function waitForImagesToLoad(timeoutMs = 5000) {
       )
     }
   } else {
-    const grouped = document.querySelector('.grouped-grid')
+    const grouped = document.querySelector('.grouped-view')
     if (grouped) imgs.push(...Array.from(grouped.querySelectorAll<HTMLImageElement>('img')))
   }
 
@@ -2804,6 +2859,24 @@ defineExpose({
 
 .menu-item:last-child {
   border-radius: 6px;
+}
+
+/* A collection row carries a cover, a name and a count. The book row's five-column
+   template leaves two of its columns empty here, so the grouped list sets its own.
+
+   Both selectors have to out-rank the book row's own rules, which appear later in this
+   stylesheet. A bare `.collection-list-item` ties with `.audiobook-list-item` on
+   specificity and loses on source order, which left the header at three columns and the
+   rows it labels at five. */
+.grouped-list .list-header,
+.audiobook-list-item.collection-list-item {
+  grid-template-columns: 64px 1fr auto;
+}
+
+.collection-list-count {
+  color: #aaa;
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 .grouped-view {
