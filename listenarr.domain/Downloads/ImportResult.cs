@@ -17,6 +17,8 @@
  */
 
 
+using Listenarr.Domain.Common;
+
 namespace Listenarr.Domain.Downloads
 {
     public enum ImportSourceDisposition
@@ -107,35 +109,14 @@ namespace Listenarr.Domain.Downloads
             return new ImportResult
             {
                 Success = false,
-                Message = DescribeWithCauses(exception),
+                // A file mutation failure arrives here already wrapped, so the outer message
+                // names the operation and not the reason. This row outlives the application log
+                // and it is what an operator reads when a download is blocked, so the reason has
+                // to survive into it. The formatting is ExceptionCause's rather than this type's
+                // because the publication capability gate has to write the same thing.
+                Message = ExceptionCause.Describe(exception),
                 SourcePath = sourcePath
             };
-        }
-
-        /// <summary>
-        /// The message plus the chain of inner causes.
-        ///
-        /// A file mutation failure arrives here already wrapped, so the outer message names the
-        /// operation and not the reason. This row outlives the application log, and it is what an
-        /// operator reads when a download is blocked, so the reason has to survive into it.
-        /// </summary>
-        private static string DescribeWithCauses(Exception exception)
-        {
-            var parts = new List<string>();
-            var current = exception;
-            var guard = 0;
-            while (current != null && guard++ < 8)
-            {
-                var text = $"{current.GetType().Name}: {current.Message}";
-                if (!parts.Contains(text))
-                {
-                    parts.Add(text);
-                }
-
-                current = current.InnerException;
-            }
-
-            return string.Join(" -> ", parts);
         }
 
         public static ImportResult Skipped(string message)
