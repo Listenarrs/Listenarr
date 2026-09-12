@@ -286,6 +286,19 @@ export const useDownloadsStore = defineStore('downloads', () => {
     }
   }
 
+  const retryBlockedImport = async (downloadId: string) => {
+    try {
+      return await apiService.retryBlockedImport(downloadId)
+    } catch (error) {
+      errorTracking.captureException(error as Error, {
+        component: 'DownloadsStore',
+        operation: 'retryBlockedImport',
+        metadata: { downloadId },
+      })
+      throw error
+    }
+  }
+
   const updateDownload = (updatedDownload: Download) => {
     const index = downloads.value.findIndex((d) => d.id === updatedDownload.id)
     if (index !== -1) {
@@ -312,6 +325,7 @@ export const useDownloadsStore = defineStore('downloads', () => {
     loadDownloads,
     startDownload,
     cancelDownload,
+    retryBlockedImport,
     updateDownload,
     cleanup,
   }

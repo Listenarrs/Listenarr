@@ -145,6 +145,7 @@ namespace Listenarr.Tests.Common
                 provider.GetRequiredService<IDownloadService>(),
                 provider.GetRequiredService<ILogger<DownloadsController>>(),
                 provider.GetRequiredService<IConfigurationService>(),
+                provider.GetRequiredService<IDownloadProcessingJobService>(),
                 provider.GetRequiredService<IMemoryCache>());
         }
 
