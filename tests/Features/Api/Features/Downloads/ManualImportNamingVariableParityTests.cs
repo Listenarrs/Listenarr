@@ -15,6 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using System.Reflection;
 using Listenarr.Api.Dtos.ManualImport;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
@@ -26,10 +27,10 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads;
 [Trait("Category", "Unit")]
 public sealed class ManualImportNamingVariableParityTests : BaseTests
 {
-    private static ManualImportPathPlanner CreatePlanner() =>
+    private static ManualImportPathPlanner CreatePlanner(ILogger<FileNamingService>? logger = null) =>
         new(new FileNamingService(
             Mock.Of<IConfigurationService>(),
-            NullLogger<FileNamingService>.Instance));
+            logger ?? NullLogger<FileNamingService>.Instance));
 
     private static Audiobook CreateSeriesBook() => new()
     {
@@ -74,7 +75,8 @@ public sealed class ManualImportNamingVariableParityTests : BaseTests
     private static async Task<string> PlanAsync(
         Audiobook audiobook,
         string folderPattern,
-        string filePattern)
+        string filePattern,
+        ILogger<FileNamingService>? logger = null)
     {
         var settings = new ApplicationSettingsBuilder()
             .WithOutputPath("/library")
@@ -88,7 +90,7 @@ public sealed class ManualImportNamingVariableParityTests : BaseTests
             MatchedAudiobookId = 1
         };
 
-        var plan = await CreatePlanner().GeneratePathAsync(
+        var plan = await CreatePlanner(logger).GeneratePathAsync(
             audiobook,
             audiobook.CreateBasicAudioMetadata(),
             item,
@@ -175,10 +177,99 @@ public sealed class ManualImportNamingVariableParityTests : BaseTests
         Assert.Contains("M4B 128kbps", segments);
     }
 
-    // Deliberately not asserted here: whether an absent key should instead be inserted empty.
-    // A missing variable yields a sentinel that FileNamingService then cleans up, stripping
-    // brackets and adjacent separators, which an empty string does not get. So inserting empties
-    // would turn "{Series} - {Title}" into " - Title" where today it renders "Title". That
-    // divergence from RenameService is real but the behaviour here looks like the better one, so
-    // it is described in the issue rather than changed.
+    // ApplyNamingPattern takes the same branch for a key that is present and blank as for one that
+    // is absent: both become the empty sentinel, and the bracket and separator cleanup that
+    // follows strips the segment either way. The only difference between the two is a LogWarning.
+    // This is the control for the two tests below, and it is the claim an earlier version of this
+    // PR's body had backwards.
+    [Fact]
+    public async Task GeneratePathAsync_AnUnknownValue_RendersTheSameAsAMissingKey()
+    {
+        var destination = await PlanAsync(
+            new Audiobook { Title = "The Wonderful Wizard of Oz" },
+            "{Series} - {Title}",
+            "{Title}");
+
+        var segments = Segments(destination);
+
+        Assert.Contains("The Wonderful Wizard of Oz", segments);
+        Assert.DoesNotContain(segments, segment => segment.StartsWith(" - ", StringComparison.Ordinal));
+        Assert.DoesNotContain(segments, segment => segment.Contains("__EMPTY_VAR__", StringComparison.Ordinal));
+    }
+
+    // The table is meant to be the one RenameService builds. Reading the keys off rename rather
+    // than restating them means this fails when rename grows a token and manual import does not,
+    // which is how the two drifted apart in the first place.
+    [Fact]
+    public async Task GeneratePathAsync_BuildsEveryKeyRenameBuilds_EvenWhenTheValueIsUnknown()
+    {
+        var renameKeys = RenameNamingKeys();
+        Assert.Equal(14, renameKeys.Count);
+
+        var logger = new CapturingLogger<FileNamingService>();
+        var everyToken = string.Join(" ", renameKeys.Select(key => $"{{{key}}}"));
+
+        await PlanAsync(
+            new Audiobook { Title = "The Wonderful Wizard of Oz" },
+            everyToken,
+            "{Title}",
+            logger);
+
+        // "Variable {VariableName} not found" is the only observable difference between a key that
+        // is absent and one that is present and empty, so it is what pins the key set.
+        Assert.DoesNotContain(
+            logger.Records,
+            record => record.Message.Contains("not found in naming pattern", StringComparison.Ordinal));
+    }
+
+    // A populated book renders all fourteen without a warning either, so the keys are present on
+    // both sides of the known/unknown split rather than only where a value happened to exist.
+    [Fact]
+    public async Task GeneratePathAsync_EveryKnownValue_RendersWithoutAMissingVariableWarning()
+    {
+        var logger = new CapturingLogger<FileNamingService>();
+        var everyToken = string.Join(" ", RenameNamingKeys().Select(key => $"{{{key}}}"));
+
+        await PlanAsync(CreateSeriesBook(), everyToken, "{Title}", logger);
+
+        Assert.DoesNotContain(
+            logger.Records,
+            record => record.Message.Contains("not found in naming pattern", StringComparison.Ordinal));
+    }
+
+    private static IReadOnlyList<string> RenameNamingKeys()
+    {
+        var builder = typeof(RenameService).GetMethod(
+            "BuildNamingVariables",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(builder);
+
+        var table = (Dictionary<string, object>)builder.Invoke(
+            null,
+            [new Audiobook { Title = "The Wonderful Wizard of Oz" }, null, null, 1, false])!;
+        return [.. table.Keys];
+    }
+
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public List<(LogLevel Level, string Message)> Records { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull
+        {
+            return null;
+        }
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Records.Add((logLevel, formatter(state, exception)));
+        }
+    }
 }
