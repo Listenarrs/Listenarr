@@ -495,6 +495,228 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
             Assert.Empty(items);
         }
 
+        // A queue response whose middle torrent carries `downloaded` in the given JSON token form.
+        // The torrents either side of it are well formed, so anything missing from the result is
+        // attributable to that one field.
+        private static string QueueWithMalformedMiddleTorrent(string malformedDownloaded) => $$"""
+        [
+            {
+                "hash": "aaaa1111", "name": "First", "progress": 0.5, "size": 1000,
+                "downloaded": 500, "state": "downloading", "save_path": "/downloads/a"
+            },
+            {
+                "hash": "bbbb2222", "name": "Second", "progress": 0.5, "size": 1000,
+                "downloaded": {{malformedDownloaded}}, "state": "downloading", "save_path": "/downloads/b"
+            },
+            {
+                "hash": "cccc3333", "name": "Third", "progress": 0.5, "size": 1000,
+                "downloaded": 700, "state": "downloading", "save_path": "/downloads/c"
+            }
+        ]
+        """;
+
+        // qBittorrent documents `downloaded` as an integer, so the typed accessor reading it is
+        // right about the normal case. It was not resilient about the abnormal one: a value in
+        // another token form threw out of the mapper, out of the loop walking the response, and
+        // took every torrent after it along with it, while the poll still reported itself as a
+        // healthy live snapshot.
+        //
+        // "600.5" is a JSON number that is not an integer (FormatException from GetInt64) and
+        // "\"600\"" is a quoted one (InvalidOperationException). The quoted form is the shape
+        // already reported against the NZBGet adapter in #618 and #619.
+        [Theory]
+        [InlineData("600.5")]
+        [InlineData("\"600\"")]
+        [InlineData("6e2")]
+        public async Task GetQueueAsync_WhenOneTorrentIsUnreadable_DropsOnlyThatTorrent(string malformedDownloaded)
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent(malformedDownloaded);
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            var items = await adapter.GetQueueAsync(_client);
+
+            // The torrent AFTER the unreadable one is the whole point. Asserting only that the
+            // list is non-empty would pass on the truncating behaviour, because the first torrent
+            // is mapped before anything throws.
+            Assert.Contains(items, item => item.Id == "aaaa1111");
+            Assert.Contains(items, item => item.Id == "cccc3333");
+            Assert.DoesNotContain(items, item => item.Id == "bbbb2222");
+            Assert.Equal(2, items.Count);
+        }
+
+        // The item list is the half of the guard that matters most: completion and import
+        // decisions are made from it, so a torrent lost here stops being considered for import
+        // rather than merely going missing from a view. Without a case of its own, deleting the
+        // guard in QbittorrentItemFetchWorkflow leaves every test in this file green.
+        [Theory]
+        [InlineData("600.5")]
+        [InlineData("\"600\"")]
+        [InlineData("6e2")]
+        public async Task GetItemsAsync_WhenOneTorrentIsUnreadable_DropsOnlyThatTorrent(string malformedDownloaded)
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent(malformedDownloaded);
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            var items = await adapter.GetItemsAsync(_client);
+
+            Assert.Contains(items, item => item.DownloadId == "aaaa1111");
+            Assert.Contains(items, item => item.DownloadId == "cccc3333");
+            Assert.DoesNotContain(items, item => item.DownloadId == "bbbb2222");
+            Assert.Equal(2, items.Count);
+        }
+
+        // The counterpart control for the guard above. The per-torrent files request lives inside
+        // the guarded block, so a client that stops answering after the torrent list arrives
+        // throws once per remaining torrent. If the guard swallowed those, a monitor poll would
+        // return a short queue and report success, and the monitor would neither back off nor say
+        // anything, which is a worse outcome than the truncation the guard was added to fix.
+        [Fact]
+        public async Task GetQueueAsync_WithIds_WhenTheClientStopsAnsweringMidPoll_StillFailsThePoll()
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent("500");
+            apiMock.FilesRequestFailsAtTransport = true;
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            await Assert.ThrowsAsync<DownloadClientAdapterPollingException>(
+                () => adapter.GetQueueAsync(_client, ["aaaa1111", "bbbb2222", "cccc3333"]));
+        }
+
+        // The skip is a recurring condition, not an event. A torrent whose fields the mapper
+        // cannot read stays unreadable, so at the monitor's default cadence one such torrent
+        // writes a line on every poll for as long as it sits in the client. Warning would be
+        // asking the operator to act on something they cannot act on, so these two tests pin
+        // the level the way TransmissionQueueFetchWorkflow already logs the same condition.
+        [Fact]
+        public async Task GetQueueAsync_WhenOneTorrentIsUnreadable_LogsTheSkipAtDebug()
+        {
+            var logs = new RecordingLoggerProvider();
+            Init(builder => builder
+                .WithSingleton<ILoggerProvider>(logs)
+                .WithMocks(RecordingLoggerProvider.CaptureEveryLevel));
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent("\"600\"");
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            await adapter.GetQueueAsync(_client);
+
+            var skips = logs.EntriesContaining("Skipping unreadable qBittorrent torrent");
+            Assert.NotEmpty(skips);
+            Assert.All(skips, entry => Assert.Equal(LogLevel.Debug, entry.Level));
+        }
+
+        [Fact]
+        public async Task GetItemsAsync_WhenOneTorrentIsUnreadable_LogsTheSkipAtDebug()
+        {
+            var logs = new RecordingLoggerProvider();
+            Init(builder => builder
+                .WithSingleton<ILoggerProvider>(logs)
+                .WithMocks(RecordingLoggerProvider.CaptureEveryLevel));
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent("\"600\"");
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            await adapter.GetItemsAsync(_client);
+
+            var skips = logs.EntriesContaining("Skipping unreadable qBittorrent torrent");
+            Assert.NotEmpty(skips);
+            Assert.All(skips, entry => Assert.Equal(LogLevel.Debug, entry.Level));
+        }
+
+        // The hash is read out of the client's own JSON and then interpolated into the files
+        // query. The loop above now checks the token form of that value, so leaving the same
+        // value undefended one line later is the odd place to stop. With no escaping, a hash
+        // carrying an ampersand truncates at the delimiter and the client is asked about a
+        // torrent that does not exist, which returns an empty file list and no error.
+        [Fact]
+        public async Task GetQueueAsync_EscapesTheTorrentHashInTheFilesRequest()
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = """
+            [
+                {
+                    "hash": "aaaa1111&bbbb=2222", "name": "First", "progress": 0.5, "size": 1000,
+                    "downloaded": 500, "state": "downloading", "save_path": "/downloads/a"
+                }
+            ]
+            """;
+            apiMock.ResetRequestHistory();
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            await adapter.GetQueueAsync(_client);
+
+            var filesRequest = Assert.Single(apiMock.RequestHistory,
+                request => request.RequestUri.AbsolutePath.EndsWith("/api/v2/torrents/files", StringComparison.Ordinal));
+            var query = HttpUtility.ParseQueryString(filesRequest.RequestUri.Query);
+            Assert.Equal("aaaa1111&bbbb=2222", query["hash"]);
+        }
+
+        private sealed record RecordedLogEntry(LogLevel Level, string Message);
+
+        // Enough of a logger to answer "at what level was this written", which nothing else in
+        // the suite needed until now. Registered as the only ILoggerProvider, so it sees every
+        // category including the adapter's.
+        private sealed class RecordingLoggerProvider : ILoggerProvider
+        {
+            private readonly object _gate = new();
+            private readonly List<RecordedLogEntry> _entries = [];
+
+            // AddLogging() floors the factory at Information, so without this the Debug lines
+            // these tests exist to see would never reach a provider at all.
+            public static ServiceDescriptor CaptureEveryLevel { get; } =
+                ServiceDescriptor.Singleton<Microsoft.Extensions.Options.IConfigureOptions<LoggerFilterOptions>>(
+                    new Microsoft.Extensions.Options.ConfigureOptions<LoggerFilterOptions>(
+                        options => options.MinLevel = LogLevel.Trace));
+
+            public ILogger CreateLogger(string categoryName) => new RecordingLogger(this);
+
+            public IReadOnlyList<RecordedLogEntry> EntriesContaining(string fragment)
+            {
+                lock (_gate)
+                {
+                    return [.. _entries.Where(entry => entry.Message.Contains(fragment, StringComparison.Ordinal))];
+                }
+            }
+
+            public void Dispose()
+            {
+            }
+
+            private void Record(LogLevel level, string message)
+            {
+                lock (_gate)
+                {
+                    _entries.Add(new RecordedLogEntry(level, message));
+                }
+            }
+
+            private sealed class RecordingLogger(RecordingLoggerProvider owner) : ILogger
+            {
+                public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+                public bool IsEnabled(LogLevel logLevel) => true;
+
+                public void Log<TState>(
+                    LogLevel logLevel,
+                    EventId eventId,
+                    TState state,
+                    Exception? exception,
+                    Func<TState, Exception?, string> formatter)
+                {
+                    ArgumentNullException.ThrowIfNull(formatter);
+                    owner.Record(logLevel, formatter(state, exception));
+                }
+            }
+        }
+
         [Fact]
         public async Task MarkItemAsImportedAsync_SetsConfiguredPostImportCategory()
         {
