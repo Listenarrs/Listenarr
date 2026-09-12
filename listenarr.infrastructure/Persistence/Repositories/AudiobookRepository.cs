@@ -180,6 +180,8 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
 
             // Delete the aggregate root without materializing its navigation graph.
             // Relational foreign keys own cascade cleanup for file/identifier/series rows.
+            // BlockedReleases is the exception; RemoveBlocklistEntriesFor says why.
+            await RemoveBlocklistEntriesFor(id);
             _db.Audiobooks.Remove(audiobook);
             await _db.SaveChangesAsync();
             return true;

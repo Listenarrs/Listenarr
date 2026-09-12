@@ -17,6 +17,7 @@
  */
 
 using Listenarr.Domain.Common;
+using Listenarr.Infrastructure.Downloads.Blocklist;
 using Listenarr.Infrastructure.Persistence;
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Listenarr.Infrastructure.Configuration;
@@ -50,6 +51,7 @@ public static class InfrastructureStartupCompositionExtensions
         services.AddListenarrHostedWorkers(configuration);
         services.AddListenarrExternalRequests(configuration);
         services.AddScoped<IDownloadHistoryService, DownloadHistoryService>();
+        services.AddScoped<IBlocklistService, BlocklistService>();
 
         return services;
     }
