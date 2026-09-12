@@ -34,10 +34,24 @@ namespace Listenarr.Application.Search.Scoring
         public int QualityNotAllowedPenalty { get; set; } = -20;
         public int ForbiddenWordRejectionFlag { get; set; } = -1; // sentinel for rejection
 
+        private readonly IReadOnlyDictionary<int, Indexer>? _resolvedIndexers;
+
         public SearchResultScorer(IIndexerRepository? indexerRepository, ILogger logger)
+            : this(indexerRepository, logger, resolvedIndexers: null)
+        {
+        }
+
+        // resolvedIndexers lets a caller scoring a whole batch resolve each indexer once up front
+        // and pass the results in. The repository is scoped, and so is the DbContext behind it, so
+        // results scored in parallel must not each run their own lookup.
+        public SearchResultScorer(
+            IIndexerRepository? indexerRepository,
+            ILogger logger,
+            IReadOnlyDictionary<int, Indexer>? resolvedIndexers)
         {
             _indexerRepository = indexerRepository;
             _logger = logger;
+            _resolvedIndexers = resolvedIndexers;
         }
 
         public async Task<QualityScore> Score(SearchResult searchResult, QualityProfile profile)
@@ -118,11 +132,16 @@ namespace Listenarr.Application.Search.Scoring
             // Age checks and indexer retention
             double ageDays = 0;
             int indexerRetention = 0;
-            if (searchResult.IndexerId.HasValue && _indexerRepository != null)
+            if (searchResult.IndexerId.HasValue
+                && (_resolvedIndexers != null || _indexerRepository != null))
             {
                 try
                 {
-                    var idx = await _indexerRepository.GetByIdAsync(searchResult.IndexerId.Value);
+                    var idx = _resolvedIndexers != null
+                        ? (_resolvedIndexers.TryGetValue(searchResult.IndexerId.Value, out var preresolved)
+                            ? preresolved
+                            : null)
+                        : await _indexerRepository!.GetByIdAsync(searchResult.IndexerId.Value);
                     if (idx != null)
                     {
                         indexerRetention = idx.Retention;
