@@ -72,7 +72,12 @@ namespace Listenarr.Application.Common
 
         private Dictionary<string, object> BuildVariables(AudioMetadata metadata)
         {
-            return new Dictionary<string, object>
+            // StringComparer.OrdinalIgnoreCase: the token regex in ApplyNamingPattern carries
+            // RegexOptions.IgnoreCase, so a pattern written {series} arrives at this lookup as
+            // "series" and a case-sensitive dictionary misses it. Ordinal rather than
+            // culture-aware, because under tr-TR 'I' and 'i' are different letters and {TITLE}
+            // would stop matching Title.
+            return new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
             {
                 // Keep multi-word author names as a single folder name (e.g. "Jane Austen")
                 { "Author", SanitizePathComponent(FirstNonEmpty(ChooseAuthor(metadata), "Unknown Author")) },
@@ -103,7 +108,8 @@ namespace Listenarr.Application.Common
                 author = metadata.Authors.First();
             }
 
-            return new Dictionary<string, object>
+            // OrdinalIgnoreCase for the reason given on the AudioMetadata overload above.
+            return new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
             {
                 { "Author", SanitizePathComponent(author) },
                 { "Series", string.IsNullOrWhiteSpace(metadata.Series) ? string.Empty : SanitizePathComponent(metadata.Series) },

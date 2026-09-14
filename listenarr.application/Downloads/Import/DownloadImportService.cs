@@ -302,7 +302,7 @@ namespace Listenarr.Application.Downloads.Import
                                 effectiveChapterNumber ??= effectiveDiskNumber;
                             }
 
-                            var variablesForFile = new Dictionary<string, object>
+                            var variablesForFile = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase) // ApplyNamingPattern matches tokens case insensitively, so {series} must resolve here too
                             {
                                 { "Author", namingMetadata.Artist ?? "Unknown Author" },
                                 { "Series", string.IsNullOrWhiteSpace(namingMetadata.Series) ? string.Empty : namingMetadata.Series },
