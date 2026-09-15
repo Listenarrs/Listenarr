@@ -588,6 +588,80 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Quality
             Assert.False(score.IsRejected, "Result should not be rejected when MinimumScore = 0 and score > 0");
             Assert.True(score.TotalScore > 0, "Score should be positive");
         }
+
+        [Theory]
+        [InlineData(2048, false)]
+        [InlineData(4096, false)]
+        [InlineData(1024, true)]
+        public async Task Profile_MaximumSize_SurvivesProfilesLargerThanTwoGigabytes(int maximumSizeMb, bool expectRejection)
+        {
+            // profile.MaximumSize * 1024 * 1024 was evaluated in int. MaximumSize is int MB and
+            // the quality profile form puts no upper bound on the input, so 2048 MB or more
+            // overflows to a negative number and every release is larger than it: the gate
+            // rejects everything. A 2 GB ceiling on an audiobook profile is not exotic.
+            //
+            // The 1024 row is the control. It is below the overflow, the same 1.5 GB result is
+            // genuinely over it, and it has to keep being rejected, so a fix that simply stopped
+            // rejecting fails here.
+            var service = CreateService();
+            var profile = new QualityProfile
+            {
+                MinimumSeeders = 0,
+                MaximumAge = 3650,
+                MaximumSize = maximumSizeMb
+            };
+
+            var result = new SearchResult
+            {
+                Title = "Ordinary Torrent",
+                DownloadType = "torrent",
+                Size = 1536L * 1024 * 1024,
+                Seeders = 10,
+                PublishedDate = DateTime.UtcNow.AddDays(-1).ToString("o")
+            };
+
+            var score = await service.ScoreSearchResult(result, profile);
+
+            Assert.Equal(
+                expectRejection,
+                score.RejectionReasons.Any(reason => reason.Contains("too large (", StringComparison.OrdinalIgnoreCase)));
+        }
+
+        [Theory]
+        [InlineData(2048, true)]
+        [InlineData(4096, true)]
+        [InlineData(512, false)]
+        public async Task Profile_MinimumSize_SurvivesProfilesLargerThanTwoGigabytes(int minimumSizeMb, bool expectRejection)
+        {
+            // The same overflow on the other gate, failing the opposite way round: the comparison
+            // becomes "smaller than a negative number", which nothing is, so the minimum stops
+            // rejecting anything and the setting silently does nothing.
+            //
+            // The 512 row is the control: below the overflow the 1 GB result clears the minimum
+            // and must not be rejected.
+            var service = CreateService();
+            var profile = new QualityProfile
+            {
+                MinimumSeeders = 0,
+                MaximumAge = 3650,
+                MinimumSize = minimumSizeMb
+            };
+
+            var result = new SearchResult
+            {
+                Title = "Ordinary Torrent",
+                DownloadType = "torrent",
+                Size = 1024L * 1024 * 1024,
+                Seeders = 10,
+                PublishedDate = DateTime.UtcNow.AddDays(-1).ToString("o")
+            };
+
+            var score = await service.ScoreSearchResult(result, profile);
+
+            Assert.Equal(
+                expectRejection,
+                score.RejectionReasons.Any(reason => reason.Contains("too small (", StringComparison.OrdinalIgnoreCase)));
+        }
     }
 }
 

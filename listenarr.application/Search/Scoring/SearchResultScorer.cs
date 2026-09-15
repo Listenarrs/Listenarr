@@ -92,13 +92,17 @@ namespace Listenarr.Application.Search.Scoring
             // Size checks (skip for NZB)
             if (!isNzb && searchResult.Size > 0)
             {
-                if (profile.MinimumSize > 0 && searchResult.Size < profile.MinimumSize * 1024 * 1024)
+                // (long) before the multiply, not after. MinimumSize and MaximumSize are int MB
+                // and the settings form puts no ceiling on either, so 2048 or more overflows int
+                // and wraps negative: the maximum gate then rejects every release as too large,
+                // and the minimum gate stops rejecting anything at all.
+                if (profile.MinimumSize > 0 && searchResult.Size < (long)profile.MinimumSize * 1024 * 1024)
                 {
                     score.RejectionReasons.Add($"File too small (< {profile.MinimumSize} MB)");
                     score.TotalScore = -1;
                     return score;
                 }
-                if (profile.MaximumSize > 0 && searchResult.Size > profile.MaximumSize * 1024 * 1024)
+                if (profile.MaximumSize > 0 && searchResult.Size > (long)profile.MaximumSize * 1024 * 1024)
                 {
                     score.RejectionReasons.Add($"File too large (> {profile.MaximumSize} MB)");
                     score.TotalScore = -1;
