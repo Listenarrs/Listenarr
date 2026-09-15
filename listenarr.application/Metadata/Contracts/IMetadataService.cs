@@ -90,6 +90,17 @@ namespace Listenarr.Application.Metadata.Contracts
                     "Generation-bound ASIN tagging is unavailable."));
 
         /// <summary>
+        /// Write the tags an import should leave behind: the ASIN where there is one, and
+        /// cover artwork as well when <c>EmbedCoverArtInAudioFiles</c> is on. Both go in one
+        /// open and save. The ASIN is optional because a book matched outside Audible has
+        /// none and can still have artwork worth embedding.
+        /// </summary>
+        Task WriteImportTagsAsync(
+            IAudiobookFileRegistrationLease registrationLease,
+            string? asin,
+            string? coverArtUrl);
+
+        /// <summary>
         /// Downloads cover art image from URL
         /// </summary>
         /// <param name="coverArtUrl">URL of the cover art image</param>
