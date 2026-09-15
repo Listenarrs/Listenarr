@@ -1132,6 +1132,36 @@ function findLibraryMatch(
   return undefined
 }
 
+/**
+ * Whether a book already in the library belongs on this collection page.
+ *
+ * The page states a language context in its header, from the same preference that filters the
+ * catalog suggestions below it. Library records were never filtered by anything, so a page could
+ * announce English and then list the German editions of the same series underneath.
+ *
+ * Two deliberate differences from the catalog rule, both of which exist to avoid hiding something
+ * the user has.
+ *
+ * A monitored book is always kept. Monitoring is an explicit statement that the user wants this
+ * record, and a language preference should not overrule it.
+ *
+ * A book whose language is unknown is kept. The catalog rule drops those, which is right when
+ * deciding what to suggest and wrong when deciding what to hide: a missing language field is not
+ * evidence that a book the user owns is unwanted.
+ */
+function shouldIncludeLibraryBook(
+  book: CollectionDisplayItem,
+  languageFilter: string | null | undefined,
+): boolean {
+  if (!languageFilter) return true
+  if (book.monitored) return true
+
+  const normalizedBookLanguage = normalizeSearchResultLanguage(book.language)
+  if (!normalizedBookLanguage) return true
+
+  return normalizedBookLanguage === languageFilter
+}
+
 function shouldIncludeRemoteCatalogBook(
   book: RemoteCatalogBook,
   languageFilter: string | null | undefined,
@@ -1224,8 +1254,14 @@ const audiobooks = computed<CollectionDisplayItem[]>(() => {
         if (matchedLibraryIds.has(libraryMatch.id)) {
           return []
         }
+        // Mark the row consumed before deciding, so a match the preference excludes is dropped
+        // outright rather than falling through and being offered again as a catalog suggestion.
         matchedLibraryIds.add(libraryMatch.id)
-        return [mapLibraryItem(libraryMatch)]
+        const libraryItem = mapLibraryItem(libraryMatch)
+        if (!shouldIncludeLibraryBook(libraryItem, languageFilter)) {
+          return []
+        }
+        return [libraryItem]
       }
 
       if (!shouldIncludeRemoteCatalogBook(book, languageFilter)) {
@@ -1244,6 +1280,7 @@ const audiobooks = computed<CollectionDisplayItem[]>(() => {
     const unmatchedLibraryItems = localItems
       .filter((book) => !matchedLibraryIds.has(book.id))
       .map(mapLibraryItem)
+      .filter((book) => shouldIncludeLibraryBook(book, languageFilter))
 
     mergedItems = [...catalogItems, ...unmatchedLibraryItems]
   } else {
