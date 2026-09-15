@@ -15,7 +15,12 @@ namespace Listenarr.Application.Common
     /// Infrastructure adapters should avoid including credentials, query strings, or response
     /// bodies in the exception message.
     /// </summary>
-    public sealed class DownloadClientSubmissionException : Exception
+    /// <remarks>
+    /// Not sealed: <see cref="DownloadClientRejectedReleaseException"/> narrows this to the
+    /// case where the client refused the release rather than failing to accept it, so that
+    /// every existing handler keeps treating it as a submission failure by default.
+    /// </remarks>
+    public class DownloadClientSubmissionException : Exception
     {
         public DownloadClientSubmissionException(string message, Exception? innerException = null)
             : base(message, innerException)

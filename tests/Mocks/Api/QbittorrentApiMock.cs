@@ -11,6 +11,8 @@ namespace Listenarr.Tests.Mocks.Api
         public NameValueCollection? LastDeleteForm { get; private set; }
         public NameValueCollection? LastCategoryForm { get; private set; }
         public HttpStatusCode InfoStatusCode { get; set; } = HttpStatusCode.OK;
+        public HttpStatusCode AddStatusCode { get; set; } = HttpStatusCode.OK;
+        public string? AddResponseBody { get; set; }
         public string? InfoResponseOverride { get; set; }
 
         public QbittorrentApiMock()
@@ -49,6 +51,14 @@ namespace Listenarr.Tests.Mocks.Api
             if (!Authenticated)
             {
                 return new HttpResponseMessage(HttpStatusCode.Forbidden);
+            }
+
+            if (AddStatusCode != HttpStatusCode.OK)
+            {
+                return new HttpResponseMessage(AddStatusCode)
+                {
+                    Content = new StringContent(AddResponseBody ?? string.Empty)
+                };
             }
 
             return MockUtils.GetCannedResponse("Ok");
