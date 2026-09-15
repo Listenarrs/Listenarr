@@ -29,14 +29,16 @@ public class DownloadsController : ControllerBase
     private readonly IDownloadService _downloadService;
     private readonly ILogger<DownloadsController> _logger;
     private readonly IConfigurationService _configurationService;
+    private readonly IDownloadProcessingJobService _downloadProcessingJobService;
     private readonly IMemoryCache? _cache;
 
-    public DownloadsController(IDownloadRepository downloadRepository, IDownloadService downloadService, ILogger<DownloadsController> logger, IConfigurationService configurationService, IMemoryCache? cache = null)
+    public DownloadsController(IDownloadRepository downloadRepository, IDownloadService downloadService, ILogger<DownloadsController> logger, IConfigurationService configurationService, IDownloadProcessingJobService downloadProcessingJobService, IMemoryCache? cache = null)
     {
         _downloadRepository = downloadRepository;
         _downloadService = downloadService;
         _logger = logger;
         _configurationService = configurationService;
+        _downloadProcessingJobService = downloadProcessingJobService;
         _cache = cache;
     }
     /// <summary>
@@ -181,7 +183,17 @@ public class DownloadsController : ControllerBase
                 return NotFound(new { error = "Download not found", id });
             }
 
-            if (download.Status != DownloadStatus.ImportBlocked)
+            // ImportPending is accepted as well as ImportBlocked, but only when nothing is
+            // actually working on it. Before this endpoint queued anything it still cleared the
+            // block and set ImportPending, so anyone who called it is left with downloads that no
+            // job will ever pick up. Those are worse off than blocked ones: AutomaticSearchService
+            // and DownloadDuplicateGuard both count ImportPending as an active download and skip
+            // the book, while neither counts ImportBlocked, so the book is never re-searched
+            // either. Refusing them would leave every existing victim stranded permanently.
+            var stranded = download.Status == DownloadStatus.ImportPending
+                && await _downloadProcessingJobService.GetActiveJobAsync(download.Id) == null;
+
+            if (download.Status != DownloadStatus.ImportBlocked && !stranded)
             {
                 return BadRequest(new
                 {
@@ -191,16 +203,49 @@ public class DownloadsController : ControllerBase
                 });
             }
 
+            // At most one active download per audiobook: EfDownloadRepository sets
+            // ActiveAudiobookDeduplicationKey from the audiobook id whenever the status is active,
+            // and a filtered unique index enforces it. ImportPending counts as active and
+            // ImportBlocked does not, so unblocking this one collides with any other active
+            // download for the same book. Without this check that surfaces as a SQLite constraint
+            // violation from deep inside SaveChanges, which tells the caller nothing.
+            if (download.AudiobookId.HasValue)
+            {
+                var siblings = await _downloadRepository.GetByAudiobookIdAsync(download.AudiobookId.Value);
+                var active = siblings.FirstOrDefault(other =>
+                    other.Id != download.Id
+                    && other.ActiveAudiobookDeduplicationKey.HasValue);
+                if (active != null)
+                {
+                    return Conflict(new
+                    {
+                        error = "Another download for this audiobook is already active",
+                        id,
+                        conflictingDownloadId = active.Id,
+                        conflictingStatus = active.Status.ToString()
+                    });
+                }
+            }
+
             download.Unblock();
+
+            // Queue the work before persisting the unblock. Clearing the blocked status is what
+            // makes the download eligible for import, but nothing watches that field: the only
+            // thing that imports a download is a processing job, and the job that would have
+            // created one fires on the download client reporting completion, which already
+            // happened and will not happen again. Persisting first and queueing second would leave
+            // a download that reads as retrying and never is if the queue call failed.
+            var jobId = await _downloadProcessingJobService.RequeueAsync(download);
 
             await _downloadService.UpdateAsync(download);
 
-            _logger.LogInformation("Reset blocked import {DownloadId} back to ImportPending", LogRedaction.SanitizeText(id));
+            _logger.LogInformation("Requeued blocked import {DownloadId} as job {JobId}", LogRedaction.SanitizeText(id), jobId);
             return Ok(new
             {
                 message = "Import retry queued",
                 id,
-                status = download.Status.ToString()
+                status = download.Status.ToString(),
+                jobId
             });
         }
         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
