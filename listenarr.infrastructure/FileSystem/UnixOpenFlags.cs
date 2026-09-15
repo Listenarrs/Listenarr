@@ -76,6 +76,20 @@ internal static class UnixOpenFlags
         return LinuxWriteOnly | noFollow | LinuxCloseOnExec;
     }
 
+    // For a caller that has to read the file back through the same descriptor it writes to.
+    // Tag libraries do this: they parse the existing container through the stream they are
+    // about to rewrite, so a write-only descriptor fails partway through the parse.
+    internal static int OpenReadWriteNoFollow()
+    {
+        if (IsMacOSHost())
+        {
+            return MacReadWrite | MacNoFollow | MacCloseOnExec;
+        }
+
+        var (_, noFollow) = GetCurrentLinuxDirectorySafetyFlags();
+        return LinuxReadWrite | noFollow | LinuxCloseOnExec;
+    }
+
     internal static int CreateWriteExclusiveNoFollow()
     {
         if (IsMacOSHost())
