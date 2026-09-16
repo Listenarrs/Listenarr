@@ -210,6 +210,7 @@ namespace Listenarr.Infrastructure.Downloads.Processing
 
             var downloadService = scope.ServiceProvider.GetRequiredService<IDownloadService>();
             var historyRepository = scope.ServiceProvider.GetRequiredService<IHistoryRepository>();
+            var lifecycleNotifier = scope.ServiceProvider.GetRequiredService<IBookLifecycleNotifier>();
             var correlationId = job.GetOrCreateCorrelationId();
 
             await downloadService.UpdateAsync(download.Importing());
@@ -231,7 +232,7 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                     (string.IsNullOrEmpty(download.DownloadPath) || (!File.Exists(download.DownloadPath) && !Directory.Exists(download.DownloadPath))))
                 {
                     metrics.Increment("processing.source_missing");
-                    await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
+                    await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, lifecycleNotifier, download, audiobook,
                         correlationId, $"Direct-download source path not found at processing time: {download.DownloadPath}", cancellationToken);
                     return;
                 }
@@ -247,7 +248,7 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                     queueItem = await downloadItemService.GetImportItemAsync(download, cancellationToken);
                     if (queueItem?.SourceFiles == null)
                     {
-                        await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
+                        await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, lifecycleNotifier, download, audiobook,
                             correlationId, isDirectDownload
                                 ? "Unable to resolve the local direct-download file"
                                 : "Unable to fetch the download from the download client", cancellationToken);
@@ -260,7 +261,7 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                 }
                 catch (DownloadProcessingException exception)
                 {
-                    await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
+                    await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, lifecycleNotifier, download, audiobook,
                         correlationId, exception.Message, cancellationToken);
                     return;
                 }
@@ -270,7 +271,7 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                     var reason = files.Count == 0
                         ? "No importable files found"
                         : "Files reported by the download client and files on disk do not match";
-                    await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
+                    await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, lifecycleNotifier, download, audiobook,
                         correlationId, reason, cancellationToken);
                     return;
                 }
@@ -307,7 +308,7 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                 }
                 catch (InvalidOperationException exception)
                 {
-                    await FailImportAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
+                    await FailImportAsync(job, downloadProcessingJobService, historyRepository, lifecycleNotifier, download, audiobook,
                         correlationId, exception.Message, cancellationToken);
                     return;
                 }
@@ -320,7 +321,7 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                 var failedResults = results.Where(result => !result.Success).ToList();
                 if (failedResults.Count > 0)
                 {
-                    await FailImportAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
+                    await FailImportAsync(job, downloadProcessingJobService, historyRepository, lifecycleNotifier, download, audiobook,
                         correlationId, "Unable to import at least one file for the job (see the log entries)",
                         cancellationToken, failedResults);
                     return;
@@ -333,7 +334,7 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                     var existingAudiobookFiles = await audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id, cancellationToken);
                     if (existingAudiobookFiles.Count <= 0)
                     {
-                        await FailImportAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
+                        await FailImportAsync(job, downloadProcessingJobService, historyRepository, lifecycleNotifier, download, audiobook,
                             correlationId, "No audio files were registered after file import", cancellationToken);
                         return;
                     }
@@ -398,7 +399,7 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                     var downloadClientGateway = scope.ServiceProvider.GetRequiredService<IDownloadClientGateway>();
                     if (!await downloadClientGateway.MarkItemAsImportedAsync(client!, download, cancellationToken))
                     {
-                        await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
+                        await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, lifecycleNotifier, download, audiobook,
                             correlationId, $"Unable to mark the item imported in client {client!.Id}", cancellationToken);
                         return;
                     }
@@ -420,7 +421,7 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                 }
                 catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
                 {
-                    await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
+                    await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, lifecycleNotifier, download, audiobook,
                         correlationId, $"Unable to enqueue the post-import library scan: {exception.Message}", cancellationToken);
                     return;
                 }
@@ -465,7 +466,7 @@ namespace Listenarr.Infrastructure.Downloads.Processing
             }
             catch (InvalidOperationException exception)
             {
-                await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
+                await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, lifecycleNotifier, download, audiobook,
                     correlationId, $"Unable to commit import finalization: {exception.Message}", cancellationToken);
             }
         }
