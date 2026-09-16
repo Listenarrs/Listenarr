@@ -1175,7 +1175,27 @@ onMounted(() => {
     const np = Number(p)
     if (!isNaN(np) && np > 0) audiblePage.value = np
   }
+
+  // A pre-filled term arrives via ?q= from the global header's "Search for
+  // '<term>'" affordance (see App.vue). Auto-run it so the user lands on
+  // results without retyping. performSearch() auto-detects the search type.
+  const initialQuery = route.query.q
+  if (initialQuery) {
+    searchQuery.value = String(initialQuery)
+    void performSearch()
+  }
 })
+
+// If the header affordance is used while already on /add-new, the route query
+// changes without remounting, so onMounted won't fire again — re-run here.
+watch(
+  () => route.query.q,
+  (q, previous) => {
+    if (!q || q === previous) return
+    searchQuery.value = String(q)
+    void performSearch()
+  },
+)
 
 // Library checking functions - now handled by useLibraryCheck composable
 

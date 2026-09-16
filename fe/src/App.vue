@@ -128,11 +128,30 @@
               </li>
             </ul>
 
-            <div v-else class="search-empty-overlay">
-              <div class="overlay-spinner" v-if="searching" aria-hidden="true"></div>
-              <div class="search-empty" v-if="searching">Searching...</div>
-              <div class="search-empty" v-else-if="searchQuery.length > 0">No matches</div>
+            <div v-else-if="searching" class="search-empty-overlay">
+              <div class="overlay-spinner" aria-hidden="true"></div>
+              <div class="search-empty">Searching...</div>
             </div>
+
+            <div v-else-if="searchQuery.trim().length > 0" class="search-empty-overlay">
+              <div class="search-empty">No matches in your library</div>
+            </div>
+
+            <!-- Sonarr-style affordance: this bar searches the library you already
+                 have; if the book isn't here yet, jump into the Add New metadata
+                 search for the same term. Always offered while a term is present. -->
+            <button
+              v-if="searchQuery.trim().length > 0 && !searching"
+              type="button"
+              class="search-addnew"
+              @click="searchExternally"
+            >
+              <PhMagnifyingGlass class="search-addnew-icon" aria-hidden="true" />
+              <span class="search-addnew-text">
+                <span class="search-addnew-title">Search for “{{ searchQuery.trim() }}”</span>
+                <span class="search-addnew-sub">Find &amp; add a new audiobook</span>
+              </span>
+            </button>
           </div>
         </div>
         <div class="notification-wrapper" ref="notificationRef">
@@ -1284,8 +1303,22 @@ const selectSuggestion = (s: { id: number; title: string; author?: string }) => 
   }
 }
 
+// Jump from the "what I already have" library search into the Add New metadata
+// search, pre-filling the current term (Sonarr-style affordance). This is the
+// escape hatch when the book you want isn't in your library yet.
+const searchExternally = () => {
+  const q = searchQuery.value.trim()
+  if (!q) return
+  searchQuery.value = ''
+  suggestions.value = []
+  closeSearch()
+  void router.push({ name: 'add-new', query: { q } })
+}
+
 const applyFirstResult = () => {
   if (suggestions.value.length > 0) selectSuggestion(suggestions.value[0]!)
+  // No local match for a non-empty query: Enter takes you straight to Add New.
+  else if (searchQuery.value.trim().length > 0) searchExternally()
 }
 
 watch(
@@ -2662,6 +2695,57 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
   padding: 8px 10px;
   color: #9aa0a6;
   font-size: 0.9rem;
+}
+
+/* "Search for '<term>'" jump into Add New (Sonarr-style). */
+.search-addnew {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 0 0 6px 6px;
+  background: transparent;
+  color: #e6eef6;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+
+.search-addnew:hover,
+.search-addnew:focus-visible {
+  background: rgba(33, 150, 243, 0.12);
+  outline: none;
+}
+
+.search-addnew-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: #2196f3;
+}
+
+.search-addnew-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.search-addnew-title {
+  font-weight: 500;
+  color: #fff;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-addnew-sub {
+  font-size: 0.82rem;
+  color: #bfc8cf;
 }
 
 /* Mobile search overlay */
