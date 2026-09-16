@@ -220,7 +220,10 @@ internal static partial class ScanFileDiscovery
                 canonicalRoot,
                 semantics)
             .Select(path => NormalizeMetadataToken(Path.GetFileName(path)))
-            .Any(authorTokens.Contains);
+            .Any(token => authorTokens.Contains(token)
+                // Symmetric to BuildExpectedAuthorTokens: also match a folder that carries a
+                // post-nominal (e.g. "Jane Doe PhD") against clean author metadata.
+                || authorTokens.Contains(StripTrailingPostNominals(token)));
     }
 
     private static IEnumerable<string> EnumerateAncestorsWithinRoot(
@@ -273,15 +276,60 @@ internal static partial class ScanFileDiscovery
         return tokens;
     }
 
+    // Professional and generational post-nominals, in normalized (lowercase, punctuation-free)
+    // form. Deliberately curated to unambiguous multi-letter credentials and generational
+    // markers; short degree abbreviations that collide with real name words (e.g. "ma" as in
+    // Yo-Yo Ma, "do", "ba", "bs") are intentionally excluded to avoid stripping surnames.
+    private static readonly HashSet<string> AuthorPostNominals = new(StringComparer.Ordinal)
+    {
+        "phd", "md", "dds", "dvm", "dpt", "edd", "psyd", "jd", "esq",
+        "mba", "cpa", "llm", "llb", "mfa",
+        "jr", "sr", "ii", "iii", "iv",
+    };
+
     private static HashSet<string> BuildExpectedAuthorTokens(Audiobook audiobook)
     {
         var tokens = new HashSet<string>(StringComparer.Ordinal);
         foreach (var author in audiobook.Authors ?? [])
         {
             AddToken(tokens, author);
+
+            // Also accept a directory that omits professional/generational post-nominals,
+            // e.g. metadata "Jane Doe, PhD" matching a "Jane Doe" folder. This is additive
+            // (never removes a token) and covers post-nominals only — initials are NOT
+            // expanded, which would over-match distinct authors.
+            var normalized = NormalizeMetadataToken(author);
+            var stripped = StripTrailingPostNominals(normalized);
+            if (!string.IsNullOrWhiteSpace(stripped)
+                && !string.Equals(stripped, normalized, StringComparison.Ordinal))
+            {
+                tokens.Add(stripped);
+            }
         }
 
         return tokens;
+    }
+
+    // Removes trailing post-nominal words from an already-normalized token, stopping at the
+    // first non-post-nominal word and always leaving at least one word, so a name never
+    // collapses to nothing.
+    private static string StripTrailingPostNominals(string normalizedToken)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedToken))
+        {
+            return string.Empty;
+        }
+
+        var words = normalizedToken.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var end = words.Length;
+        while (end > 1 && AuthorPostNominals.Contains(words[end - 1]))
+        {
+            end--;
+        }
+
+        return end == words.Length
+            ? normalizedToken
+            : string.Join(' ', words.Take(end));
     }
 
     private static HashSet<string> BuildExpectedIdentifierTokens(Audiobook audiobook)

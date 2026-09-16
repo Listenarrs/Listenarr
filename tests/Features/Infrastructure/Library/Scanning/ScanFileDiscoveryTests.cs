@@ -314,6 +314,67 @@ public sealed class ScanFileDiscoveryTests : BaseTests, IDisposable
             && issue.Path == link);
     }
 
+    [Fact]
+    public void FindMatchingAudioFiles_AuthorHasPostNominalInMetadata_MatchesCleanFolder()
+    {
+        var requested = CreateAudioFile("Jane Doe", "Study", "Study.m4b");
+        var audiobook = new AudiobookBuilder()
+            .WithTitle("Study")
+            .WithAuthor("Jane Doe, PhD")
+            .Build();
+
+        var result = Discover(audiobook);
+
+        Assert.Equal(requested, Assert.Single(result));
+    }
+
+    [Fact]
+    public void FindMatchingAudioFiles_AuthorFolderHasGenerationalSuffix_MatchesCleanMetadata()
+    {
+        var requested = CreateAudioFile("Martin King Jr", "Speeches", "Speeches.m4b");
+        var audiobook = new AudiobookBuilder()
+            .WithTitle("Speeches")
+            .WithAuthor("Martin King")
+            .Build();
+
+        var result = Discover(audiobook);
+
+        Assert.Equal(requested, Assert.Single(result));
+    }
+
+    [Fact]
+    public void FindMatchingAudioFiles_AmbiguousShortWordSuffix_IsNotStrippedAsPostNominal()
+    {
+        // "Ma" is a real surname (e.g. Yo-Yo Ma), not a post-nominal, so a "Yo Yo" folder must
+        // not capture a "Yo Yo Ma" book. Excluding short ambiguous degree abbreviations keeps
+        // the normalization from silently dropping surnames.
+        _ = CreateAudioFile("Yo Yo", "Suite", "Suite.m4b");
+        var audiobook = new AudiobookBuilder()
+            .WithTitle("Suite")
+            .WithAuthor("Yo Yo Ma")
+            .Build();
+
+        var result = Discover(audiobook);
+
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public void FindMatchingAudioFiles_AuthorInitials_AreNotExpandedToFullName()
+    {
+        // Post-nominals only: initials such as "L. M." must not be treated as equivalent to a
+        // spelled-out given name, which would over-match otherwise-distinct authors.
+        _ = CreateAudioFile("Lucy Maud Montgomery", "Avonlea", "Avonlea.m4b");
+        var audiobook = new AudiobookBuilder()
+            .WithTitle("Avonlea")
+            .WithAuthor("L. M. Montgomery")
+            .Build();
+
+        var result = Discover(audiobook);
+
+        Assert.Empty(result);
+    }
+
     private List<string> Discover(Audiobook audiobook) =>
         DiscoverResult(audiobook).AttributedFiles.ToList();
 
