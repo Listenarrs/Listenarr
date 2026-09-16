@@ -8,13 +8,15 @@
  * (at your option) any later version.
  */
 using System.Text.Json;
+using Listenarr.Domain.Notifications;
 using Listenarr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
 namespace Listenarr.Infrastructure.Downloads.Import
 {
     public sealed class ImportFinalizationService(
-        IDbContextFactory<ListenArrDbContext> dbFactory) : IImportFinalizationService
+        IDbContextFactory<ListenArrDbContext> dbFactory,
+        IBookLifecycleNotifier lifecycleNotifier) : IImportFinalizationService
     {
         public async Task FinalizeAsync(
             string jobId,
@@ -94,6 +96,13 @@ namespace Listenarr.Infrastructure.Downloads.Import
             job.SetCheckpoint("ImportCommitted");
 
             await db.SaveChangesAsync(ct);
+
+            await lifecycleNotifier.NotifyAsync(NotificationTriggers.BookImported, new
+            {
+                id = audiobookId,
+                downloadId,
+                title,
+            }, ct);
         }
     }
 }

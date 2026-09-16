@@ -20,6 +20,7 @@ using System.Text.RegularExpressions;
 using Listenarr.Application.Common;
 using Listenarr.Application.Common.Exceptions;
 using Listenarr.Domain.Common;
+using Listenarr.Domain.Notifications;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Features.Library
@@ -40,6 +41,7 @@ namespace Listenarr.Api.Features.Library
         private readonly IRootFolderService _rootFolderService;
         private readonly IRootFolderStorageHealthResolver _storageHealthResolver;
         private readonly IAudiobookFileIdentityReconciler _fileIdentityReconciler;
+        private readonly IBookLifecycleNotifier _lifecycleNotifier;
         private readonly ILogger<LibraryDeleteWorkflow> _logger;
 
         public LibraryDeleteWorkflow(
@@ -57,6 +59,7 @@ namespace Listenarr.Api.Features.Library
             IRootFolderService rootFolderService,
             IRootFolderStorageHealthResolver storageHealthResolver,
             IAudiobookFileIdentityReconciler fileIdentityReconciler,
+            IBookLifecycleNotifier lifecycleNotifier,
             ILogger<LibraryDeleteWorkflow> logger)
         {
             _deletionCommitService = deletionCommitService ?? throw new ArgumentNullException(nameof(deletionCommitService));
@@ -77,6 +80,8 @@ namespace Listenarr.Api.Features.Library
                 ?? throw new ArgumentNullException(nameof(storageHealthResolver));
             _fileIdentityReconciler = fileIdentityReconciler
                 ?? throw new ArgumentNullException(nameof(fileIdentityReconciler));
+            _lifecycleNotifier = lifecycleNotifier
+                ?? throw new ArgumentNullException(nameof(lifecycleNotifier));
             _logger = logger;
         }
 
@@ -316,6 +321,16 @@ namespace Listenarr.Api.Features.Library
             }
 
             await DeleteCachedImageAsync(audiobook);
+            await _lifecycleNotifier.NotifyAsync(
+                NotificationTriggers.BookDeleted,
+                new
+                {
+                    id = audiobook.Id,
+                    title = audiobook.Title,
+                    deletedFiles = deleteFiles,
+                    deletedFolder = deleteFolder,
+                },
+                cancellationToken);
             var message = filesystemResult?.BuildDeleteMessage() ?? "Audiobook deleted successfully.";
             return new OkObjectResult(new
             {

@@ -35,9 +35,17 @@ namespace Listenarr.Domain.Notifications
         public const string BookAdded = "book-added";
 
         // Library-management lifecycle (beyond acquisition).
-        public const string BookUpgraded = "book-upgraded";
         public const string BookDeleted = "book-deleted";
         public const string BookRenamed = "book-renamed";
+
+        /// <summary>
+        /// Reserved for a future "a better file replaced an existing one" event. Not in the
+        /// catalog yet because Listenarr's import path does not currently emit a distinct
+        /// upgrade-completion signal (a replacement looks identical to a first import), so
+        /// firing it reliably would require new pre-import state tracking. Kept as a stable id
+        /// so integrations and the catalog can adopt it without a breaking rename later.
+        /// </summary>
+        public const string BookUpgraded = "book-upgraded";
 
         /// <summary>One catalog entry: the trigger id, a human label, a description, and lifecycle order.</summary>
         public sealed record Definition(string Id, string DisplayName, string Description, int Order);
@@ -55,14 +63,22 @@ namespace Listenarr.Domain.Notifications
             new(BookDownloadFailed, "Download Failed", "A download failed.", 80),
             new(BookImportFailed, "Import Failed", "An import failed.", 90),
             new(BookAdded, "Book Added", "A book was added to the library.", 100),
-            new(BookUpgraded, "Book Upgraded", "An existing book's file was replaced by a higher-quality one.", 110),
             new(BookRenamed, "Book Renamed", "A book's files were renamed.", 120),
             new(BookDeleted, "Book Deleted", "A book or its files were removed from the library.", 130),
         };
 
-        /// <summary>Trigger ids enabled by default on a fresh install (users may narrow this).</summary>
-        public static readonly IReadOnlyList<string> DefaultEnabled =
-            Catalog.OrderBy(d => d.Order).Select(d => d.Id).ToList();
+        /// <summary>
+        /// Trigger ids enabled by default on a fresh install. Intentionally the historical
+        /// back-compat set (the four that shipped before the lifecycle expansion) so upgrading
+        /// does not suddenly emit new notification types; every other trigger is opt-in via the UI.
+        /// </summary>
+        public static readonly IReadOnlyList<string> DefaultEnabled = new List<string>
+        {
+            BookAdded,
+            BookDownloading,
+            BookAvailable,
+            BookCompleted,
+        };
 
         public static bool IsKnown(string trigger) =>
             Catalog.Any(d => string.Equals(d.Id, trigger, System.StringComparison.Ordinal));
