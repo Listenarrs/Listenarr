@@ -40,6 +40,7 @@ namespace Listenarr.Infrastructure.Persistence
         public DbSet<DownloadClientConfiguration> DownloadClientConfigurations { get; set; } = null!;
         public DbSet<User> Users { get; set; } = null!;
         public DbSet<Download> Downloads { get; set; } = null!;
+        public DbSet<BlockedRelease> BlockedReleases { get; set; } = null!;
         public DbSet<DownloadProcessingJob> DownloadProcessingJobs { get; set; } = null!;
         public DbSet<FileMutationJournal> FileMutationJournals { get; set; } = null!;
         public DbSet<CompatibilityFilePublicationJournal> CompatibilityFilePublicationJournals { get; set; } = null!;
@@ -125,6 +126,13 @@ namespace Listenarr.Infrastructure.Persistence
             modelBuilder.ApplyConfigurationsFromAssembly(typeof(ListenArrDbContext).Assembly);
 
             // Register commonly used indexes here for safety; prefer moving indexes into configuration classes.
+            // One entry per release per book, and the lookup on the search path is always
+            // "what is blocked for this book", so the pair is both the uniqueness rule and
+            // the access path.
+            modelBuilder.Entity<BlockedRelease>()
+                .HasIndex(entry => new { entry.AudiobookId, entry.ReleaseIdentifier })
+                .IsUnique();
+
             modelBuilder.Entity<Download>().HasIndex(d => d.Status);
             modelBuilder.Entity<Download>().HasIndex(d => d.DownloadClientId);
             modelBuilder.Entity<Download>().HasIndex(d => d.CompletedAt);

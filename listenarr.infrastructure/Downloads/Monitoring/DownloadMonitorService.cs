@@ -389,6 +389,42 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
                 return;
             }
 
+            // Block the release before the auto-search below, so the search that follows a
+            // failure cannot pick the same broken release straight back up.
+            //
+            // Below the FailedDownloadHandlingEnabled gate rather than above it. An operator who
+            // has turned failed-download handling off has said they want failures left alone, and
+            // a blocklist entry is durable state with no expiry: writing one anyway would
+            // accumulate permanent bans that the setting gives no hint exist.
+            //
+            // Only downloads the client accepted and then failed reach this method. A
+            // release the client refused at submission never gets here, which is what keeps
+            // a qBittorrent 409 out of the blocklist: that answer means the client already
+            // holds the release, so blocking it would ban something the user is currently
+            // downloading. The carve-out is structural rather than a condition to remember.
+            if (download.AudiobookId.HasValue)
+            {
+                var blocklistService = scope.ServiceProvider.GetRequiredService<IBlocklistService>();
+                // Read back the identity stamped on the download when it was grabbed. This method
+                // must not work one out for itself: by the time a download fails, its TotalSize
+                // has been overwritten from the client's queue snapshot and its OriginalUrl may be
+                // a spent per-fetch link, so anything derived here disagrees with what the search
+                // side derives from the indexer's listing and the row never matches. A live
+                // install wrote one correctly formatted row after the first failure and then
+                // grabbed the identical release more than a hundred times over the next eleven
+                // hours.
+                var identifier = ReleaseIdentity.ForGrabbed(download);
+                if (identifier is not null)
+                {
+                    await blocklistService.BlockAsync(
+                        download.AudiobookId.Value,
+                        identifier,
+                        download.Title ?? "Unknown",
+                        download.ExpectedFileSize ?? (download.TotalSize > 0 ? download.TotalSize : null),
+                        errorMessage);
+                }
+            }
+
             var clientItemId = download.GetExternalId();
             // NZBGet history is part of failure diagnostics and final-path recovery.
             // Do not remove failed NZBGet history here; successful imports remove client

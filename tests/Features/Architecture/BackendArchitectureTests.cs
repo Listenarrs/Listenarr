@@ -1375,6 +1375,58 @@ public sealed class BackendArchitectureTests : BaseTests
             + string.Join(Environment.NewLine, violations));
     }
 
+    [Fact]
+    public void ReleaseBlocklistKeys_AreDerivedOnlyByReleaseIdentity()
+    {
+        // The release blocklist has had four defects and all four were one defect: a release
+        // identity worked out in one place and worked out differently in another, so the row
+        // written when a release failed was looked up under a key nothing computed again. The
+        // fourth cost a live install an indexer termination warning while a correctly formatted
+        // row for the book sat in the database unmatched.
+        //
+        // BlockedReleaseFilter already carries a comment saying the field-picking belongs to
+        // ReleaseIdentity and nowhere else. A comment is advice. This is the same statement in a
+        // form that fails a build.
+        var owner = Normalize(Path.Join("listenarr.domain", "Downloads", "ReleaseIdentity.cs"));
+        var roots = new[]
+        {
+            "listenarr.domain",
+            "listenarr.application",
+            "listenarr.infrastructure",
+            "listenarr.api"
+        };
+
+        var violations = roots
+            .SelectMany(root => Directory.EnumerateFiles(
+                Path.Join(RepositoryRoot, root),
+                "*.cs",
+                SearchOption.AllDirectories))
+            .Where(file => !IsBuildArtifact(file))
+            .Where(file => !file.Contains(
+                $"{Path.DirectorySeparatorChar}Persistence{Path.DirectorySeparatorChar}Migrations{Path.DirectorySeparatorChar}",
+                StringComparison.OrdinalIgnoreCase))
+            .Select(file => new
+            {
+                Path = file,
+                Relative = Normalize(Path.GetRelativePath(RepositoryRoot, file))
+            })
+            .Where(source => !string.Equals(source.Relative, owner, StringComparison.OrdinalIgnoreCase))
+            .SelectMany(source => ReleaseIdentitySourceAnalyzer
+                .Analyze(File.ReadAllText(source.Path))
+                .Select(violation => $"{source.Relative}:{violation.Line} {violation.Reason}"))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.True(
+            violations.Length == 0,
+            "Only ReleaseIdentity may work out a release blocklist key. Call "
+            + "ReleaseIdentity.For(searchResult) where the search result is still in hand, or read "
+            + "the grab-time value back with ReleaseIdentity.ForGrabbed(download). Deriving a key "
+            + "here gives the feature two authors of one value, which is the shape of every defect "
+            + "it has had:" + Environment.NewLine
+            + string.Join(Environment.NewLine, violations));
+    }
+
     private static void AssertRequiredConstructorParameter<TParameter>(IEnumerable<Type> serviceTypes)
     {
         foreach (var serviceType in serviceTypes)
