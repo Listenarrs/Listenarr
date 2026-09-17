@@ -285,11 +285,13 @@ namespace Listenarr.Infrastructure.Library.Moving
                     continue;
                 }
 
-                if (string.IsNullOrWhiteSpace(file.PhysicalObjectIdentity))
+                if (string.IsNullOrWhiteSpace(file.PhysicalObjectIdentity)
+                    || PhysicalObjectIdentitySafety.IsKnownWeak(
+                        file.PhysicalObjectIdentity))
                 {
                     hasUnprovenTrackedPhysicalIdentities = true;
                     result.Warnings.Add(
-                        "A tracked audiobook file has no persisted physical generation, so filesystem deletion was blocked.");
+                        "A tracked audiobook file has no durable persisted physical generation, so filesystem deletion was blocked.");
                     continue;
                 }
 

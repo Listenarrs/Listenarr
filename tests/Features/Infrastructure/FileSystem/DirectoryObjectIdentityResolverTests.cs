@@ -354,6 +354,28 @@ public sealed class DirectoryObjectIdentityResolverTests : BaseTests
             candidates);
     }
 
+    [Theory]
+    [InlineData("linux:00000008:00000001:0000000000001234:0000000000005678:00009abc")]
+    [InlineData("linux-generation:00000008:00000001:0000000000001234:fh:00000081:341200000000000000000000")]
+    [InlineData("linux:00000008:00000001:0000000000001234:0000000000005678:00009abc:fh:00000081:341200000000000000000000")]
+    public void LinuxIdentity_ReleasedGenericFidSpellings_AreClassifiedAsLegacyWeak(
+        string identity)
+    {
+        Assert.True(
+            PhysicalObjectIdentitySafety.IsKnownWeak(identity));
+    }
+
+    [Theory]
+    [InlineData("linux-generation:00000008:00000001:0000000000001234:gen:00000002")]
+    [InlineData("linux-generation:00000008:00000001:0000000000001234:fh:00000001:deadbeef")]
+    [InlineData("linux-generation:00000008:00000001:0000000000001234:fh:00000081")]
+    public void LinuxIdentity_StrongOrMalformedSpellings_AreNotLegacyWeak(
+        string identity)
+    {
+        Assert.False(
+            PhysicalObjectIdentitySafety.IsKnownWeak(identity));
+    }
+
     [Fact]
     public void LinuxIdentity_WithoutBirthTime_UsesStrongAlternativeGenerationEvidence()
     {
@@ -410,6 +432,9 @@ public sealed class DirectoryObjectIdentityResolverTests : BaseTests
         Assert.False(PinnedDirectoryCreation.ArePersistedObjectIdentitiesDurablyEquivalent(
             birthTimeIdentity,
             augmented));
+        Assert.False(PinnedDirectoryCreation.ArePersistedObjectIdentitiesDurablyEquivalent(
+            birthTimeIdentity,
+            birthTimeIdentity));
         Assert.True(PinnedDirectoryCreation.ArePersistedObjectIdentitiesDurablyEquivalent(
             augmented,
             strong));

@@ -98,6 +98,38 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
             commitRegistration);
     }
 
+    internal static PinnedAudiobookFileRegistrationLease OpenForMetadataRead(
+        string publicPath,
+        string? expectedPhysicalObjectIdentity)
+    {
+        if (OperatingSystem.IsLinux()
+            && PhysicalObjectIdentitySafety.IsKnownWeak(expectedPhysicalObjectIdentity))
+        {
+            return OpenPinnedPathOnly(publicPath);
+        }
+
+        try
+        {
+            return Open(publicPath, expectedPhysicalObjectIdentity);
+        }
+        catch (PlatformNotSupportedException) when (OperatingSystem.IsLinux())
+        {
+            return OpenPinnedPathOnly(publicPath);
+        }
+    }
+
+    private static PinnedAudiobookFileRegistrationLease OpenPinnedPathOnly(
+        string publicPath)
+    {
+        var canonicalPath = Path.GetFullPath(publicPath);
+        var parentPath = Path.GetDirectoryName(canonicalPath)
+            ?? throw new InvalidOperationException("The metadata path has no parent directory.");
+        using var parent = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+            parentPath, createMissing: false);
+        var file = parent.OpenExistingFileForStableRead(Path.GetFileName(canonicalPath));
+        return CreatePinnedPathOnly(file, canonicalPath);
+    }
+
     internal static PinnedAudiobookFileRegistrationLease Create(
         PinnedDirectoryCreation.PinnedFileEntry file,
         string publicPath,

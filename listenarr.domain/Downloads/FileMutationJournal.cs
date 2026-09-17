@@ -37,7 +37,43 @@ public enum FileMutationJournalState
     SourceDeleted,
     Completed,
     OwnerMetadataReconciled,
-    NeedsAttention
+    NeedsAttention,
+    RollbackAuthorized,
+    RolledBack
+}
+
+public static class FileMutationJournalLifecycle
+{
+    public static bool IsRegistrationPublicationTerminal(
+        FileMutationJournalState state) =>
+        state is FileMutationJournalState.Completed
+            or FileMutationJournalState.RolledBack
+            or FileMutationJournalState.NeedsAttention;
+
+    public static bool IsRegistrationPublicationRecoverable(
+        FileMutationJournalState state) =>
+        state is FileMutationJournalState.Planned
+            or FileMutationJournalState.TargetIdentityPersisted
+            or FileMutationJournalState.TargetVerified
+            or FileMutationJournalState.RegistrationCommitted
+            or FileMutationJournalState.SourceDeletionAuthorized
+            or FileMutationJournalState.SourceDeleted
+            or FileMutationJournalState.RollbackAuthorized;
+
+    public static bool RequiresOperatorAttention(
+        FileMutationJournalState state) =>
+        state == FileMutationJournalState.NeedsAttention;
+
+    public static bool MayRetireSource(FileMutationJournalState state) =>
+        state is FileMutationJournalState.RegistrationCommitted
+            or FileMutationJournalState.SourceDeletionAuthorized
+            or FileMutationJournalState.SourceDeleted
+            or FileMutationJournalState.Completed;
+
+    public static bool ClearsRegistrationRecoveryBoundary(
+        FileMutationJournalState state) =>
+        state is FileMutationJournalState.Completed
+            or FileMutationJournalState.RolledBack;
 }
 
 /// <summary>

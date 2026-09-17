@@ -346,6 +346,10 @@ namespace Listenarr.Api.Features.Library
                     code = "root_folder_identity_unsupported"
                 });
             }
+            catch (RootFolderRecoveryBlockedException exception)
+            {
+                return RegistrationRecoveryConflict(exception.Blocker);
+            }
             catch (InvalidOperationException)
             {
                 return Conflict(new

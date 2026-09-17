@@ -142,7 +142,7 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
                             .GetRequiredService<IAudiobookFileService>();
                         cancellationToken.ThrowIfCancellationRequested();
                         using var registrationLease =
-                            PinnedAudiobookFileRegistrationLease.Open(
+                            PinnedAudiobookFileRegistrationLease.OpenForMetadataRead(
                                 resolvedIdentity.CanonicalPath,
                                 file.PhysicalObjectIdentity);
                         if (!registrationLease.MatchesCurrentPublication())
@@ -153,13 +153,20 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
                             return;
                         }
 
-                        if (await taskFileService.RefreshPhysicalGenerationAsync(
+                        var updated = registrationLease.HasDurablePhysicalObjectIdentity
+                            ? await taskFileService.RefreshPhysicalGenerationAsync(
                                 new Audiobook { Id = file.AudiobookId },
                                 file.Id,
                                 file.PhysicalObjectIdentity,
                                 registrationLease,
                                 "MetadataRescan",
-                                cancellationToken))
+                                cancellationToken)
+                            : await taskFileService.RefreshMetadataAsync(
+                                new Audiobook { Id = file.AudiobookId },
+                                file.Id,
+                                registrationLease,
+                                cancellationToken);
+                        if (updated)
                         {
                             logger.LogInformation(
                                 "Updated metadata for file id={Id}",

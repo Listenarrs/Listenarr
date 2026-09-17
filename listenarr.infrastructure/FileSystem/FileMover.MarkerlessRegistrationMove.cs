@@ -40,11 +40,13 @@ public partial class FileMover
             throw new InvalidOperationException(
                 "The markerless registration move identity does not match the requested completion.");
         }
-        if (journal.State == FileMutationJournalState.NeedsAttention)
+        if (journal.State == FileMutationJournalState.NeedsAttention
+            || journal.State == FileMutationJournalState.RollbackAuthorized
+            || journal.State == FileMutationJournalState.RolledBack)
         {
             return false;
         }
-        if (journal.State < FileMutationJournalState.RegistrationCommitted
+        if (!FileMutationJournalLifecycle.MayRetireSource(journal.State)
             || !journal.AudiobookId.HasValue)
         {
             _logger.LogWarning(
@@ -127,7 +129,8 @@ public partial class FileMover
             return false;
         }
 
-        if (journal.State >= FileMutationJournalState.SourceDeleted)
+        if (journal.State is FileMutationJournalState.SourceDeleted
+            or FileMutationJournalState.Completed)
         {
             var sourceOpenOutcome = gate.SourceParent.TryOpenExistingFileWithOutcome(
                 gate.SourceName,
@@ -150,7 +153,7 @@ public partial class FileMover
             }
         }
 
-        if (journal.State < FileMutationJournalState.SourceDeletionAuthorized)
+        if (journal.State == FileMutationJournalState.RegistrationCommitted)
         {
             journal = await _fileMutationJournalStore.AdvanceAsync(
                 journal.OperationId,

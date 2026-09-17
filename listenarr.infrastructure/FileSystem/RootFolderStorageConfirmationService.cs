@@ -9,7 +9,8 @@ internal sealed class RootFolderStorageConfirmationService(
     IFileSystemSemanticsResolver semanticsResolver,
     IMoveQueueService moveQueueService,
     IFilesystemMutationCoordinator mutationCoordinator,
-    IAudiobookOperationCoordinator audiobookOperationCoordinator)
+    IAudiobookOperationCoordinator audiobookOperationCoordinator,
+    IFileRegistrationRecoveryProbe fileRegistrationRecoveryProbe)
     : IRootFolderStorageConfirmationService
 {
     internal Action? BeforeCommitForTest { get; set; }
@@ -247,26 +248,42 @@ internal sealed class RootFolderStorageConfirmationService(
         }
     }
 
-    private static async Task EnsureNoExternalRecoveryOwnerTouchesRootAsync(
+    private async Task EnsureNoExternalRecoveryOwnerTouchesRootAsync(
         ListenArrDbContext db,
         int rootFolderId,
         string canonicalRootPath,
         FileSystemPathSemantics semantics,
         CancellationToken cancellationToken)
     {
-        var audiobooks = await db.Audiobooks
+        var audiobookPaths = await db.Audiobooks
             .AsNoTracking()
-            .AsSplitQuery()
-            .Include(audiobook => audiobook.Files)
+            .Select(audiobook => new
+            {
+                audiobook.Id,
+                audiobook.BasePath,
+                audiobook.FilePath
+            })
             .ToListAsync(cancellationToken);
-        var audiobookIds = audiobooks
+        var audiobookIds = audiobookPaths
             .Where(audiobook =>
                 PathTouchesConfirmedRoot(audiobook.BasePath, canonicalRootPath, semantics)
-                || PathTouchesConfirmedRoot(audiobook.FilePath, canonicalRootPath, semantics)
-                || (audiobook.Files?.Any(file =>
-                    PathTouchesConfirmedRoot(file.Path, canonicalRootPath, semantics)) ?? false))
+                || PathTouchesConfirmedRoot(audiobook.FilePath, canonicalRootPath, semantics))
             .Select(audiobook => audiobook.Id)
             .ToHashSet();
+        var audiobookFilePaths = await db.AudiobookFiles
+            .AsNoTracking()
+            .Select(file => new
+            {
+                file.AudiobookId,
+                file.Path
+            })
+            .ToListAsync(cancellationToken);
+        audiobookIds.UnionWith(audiobookFilePaths
+            .Where(file => PathTouchesConfirmedRoot(
+                file.Path,
+                canonicalRootPath,
+                semantics))
+            .Select(file => file.AudiobookId));
         audiobookIds.UnionWith(await db.LibraryDirectoryOwnerships
             .AsNoTracking()
             .Where(ownership => ownership.ManagedRootFolderId == rootFolderId
@@ -274,18 +291,26 @@ internal sealed class RootFolderStorageConfirmationService(
                 && ownership.State != LibraryDirectoryOwnershipState.Removed)
             .Select(ownership => ownership.AudiobookId!.Value)
             .ToListAsync(cancellationToken));
+        var registrationBlocker = (await fileRegistrationRecoveryProbe
+                .GetBlockingBoundaryAsync(
+                    canonicalRootPath,
+                    semantics,
+                    cancellationToken))
+            .FirstOrDefault();
+        if (registrationBlocker != null)
+        {
+            throw new RootFolderRecoveryBlockedException(registrationBlocker);
+        }
         var activeMutationJournals = await db.FileMutationJournals
             .AsNoTracking()
             .Where(journal =>
-                (journal.AudiobookFileId == null
-                    && journal.State != FileMutationJournalState.Completed)
-                || (journal.AudiobookId != null
+                journal.AudiobookId != null
                     && journal.AudiobookFileId != null
                     && (journal.AudiobookFileId == FileMutationOwner.CompanionFile
                         || journal.AudiobookFileId
                             == FileMutationOwner.RegistrationCompanionFile
                         ? journal.State != FileMutationJournalState.Completed
-                        : journal.State != FileMutationJournalState.OwnerMetadataReconciled)))
+                        : journal.State != FileMutationJournalState.OwnerMetadataReconciled))
             .ToListAsync(cancellationToken);
         if (activeMutationJournals.Any(journal =>
                 (journal.AudiobookId.HasValue

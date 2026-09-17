@@ -1302,12 +1302,24 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync([]);
             var registrationRecovery = new Mock<IFileRegistrationRecoveryProbe>();
+            var blockerOperationId = Guid.NewGuid();
             registrationRecovery
-                .Setup(probe => probe.HasBlockingBoundaryAsync(
+                .Setup(probe => probe.GetBlockingBoundaryAsync(
                     It.IsAny<string>(),
                     It.IsAny<FileSystemPathSemantics>(),
                     It.IsAny<CancellationToken>()))
-                .ReturnsAsync(true);
+                .ReturnsAsync([
+                    new FileRegistrationRecoveryBlocker(
+                        blockerOperationId,
+                        FileMutationJournalState.TargetVerified,
+                        FileAction.Copy,
+                        AudiobookId: null,
+                        OwnerKind: "anonymous",
+                        SourceTouchesBoundary: false,
+                        DestinationTouchesBoundary: true,
+                        FileRegistrationRecoveryDisposition.AutomaticRecovery,
+                        "This file publication is waiting for restart recovery.")
+                ]);
             var service = new RootFolderService(
                 repo,
                 null!,
@@ -1317,7 +1329,8 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.RootFolders
             var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 service.DeleteAsync(root.Id));
 
-            Assert.Contains("file-registration recovery", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(blockerOperationId.ToString(), exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("TargetVerified", exception.Message, StringComparison.Ordinal);
             await using var verification = new ListenArrDbContext(options);
             Assert.Single(verification.RootFolders);
         }

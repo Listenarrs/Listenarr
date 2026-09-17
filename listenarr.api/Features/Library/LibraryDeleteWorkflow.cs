@@ -339,8 +339,11 @@ namespace Listenarr.Api.Features.Library
         private static bool HasUnverifiedTrackedDeleteSource(Audiobook audiobook) =>
             audiobook.Files?.Any(file =>
                 !string.IsNullOrWhiteSpace(file.Path)
-                && file.PathIdentityState == PathIdentityState.Valid
-                && string.IsNullOrWhiteSpace(file.PhysicalObjectIdentity)) == true;
+                && (PhysicalObjectIdentitySafety.IsKnownWeak(
+                        file.PhysicalObjectIdentity)
+                    || (file.PathIdentityState == PathIdentityState.Valid
+                        && string.IsNullOrWhiteSpace(
+                            file.PhysicalObjectIdentity)))) == true;
 
         private async Task<RootFolderStorageObservation?> GetManagedStorageMutationBlockAsync(
             Audiobook audiobook,

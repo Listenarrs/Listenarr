@@ -209,6 +209,64 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
+        public async Task DeleteAudiobook_LegacyWeakTrackedGeneration_BlocksBeforeDeletionIntent()
+        {
+            var rootPath = FileService.GetTempDirectory(
+                "listenarr-delete-legacy-weak-root");
+            var root = new RootFolderBuilder()
+                .WithName("Legacy Weak Delete Root")
+                .WithPath(rootPath)
+                .WithIsDefault()
+                .Build();
+            await AddAuthorizedRootAsync(root);
+            var bookFolder = Path.Join(rootPath, "Author", "Book");
+            Directory.CreateDirectory(bookFolder);
+            var filePath = await FileService.GetFileAsync(
+                bookFolder,
+                "book.m4b",
+                "audio");
+            var audiobook = await _audiobookRepository.AddAsync(
+                new AudiobookBuilder()
+                    .WithTitle("Legacy weak delete")
+                    .WithBasePath(bookFolder)
+                    .WithFilePath(filePath)
+                    .Build());
+            await AddTrackedGenerationAsync(
+                audiobook,
+                filePath,
+                _ => "linux-generation:00000008:00000001:0000000000001234:fh:00000081:341200000000000000000000");
+
+            var controller = _provider.GetRequiredService<LibraryController>();
+            var capabilitiesResult = await controller.GetDeleteCapabilities(
+                audiobook.Id);
+            var capabilities = Assert.IsType<AudiobookDeleteCapabilities>(
+                Assert.IsType<OkObjectResult>(capabilitiesResult).Value);
+            Assert.False(capabilities.CanDeleteTrackedFiles);
+            Assert.False(capabilities.CanDeleteFolder);
+            Assert.Equal("RemoveFromLibraryOnly", capabilities.FallbackAction);
+
+            var result = await controller.DeleteAudiobook(
+                audiobook.Id,
+                deleteFiles: true,
+                deleteFolder: true);
+
+            var conflict = Assert.IsType<ConflictObjectResult>(result);
+            var payload = System.Text.Json.JsonSerializer.Serialize(conflict.Value);
+            Assert.Contains(
+                "delete_source_unverified",
+                payload,
+                StringComparison.Ordinal);
+            Assert.True(File.Exists(filePath));
+            Assert.NotNull(await _audiobookRepository.GetByIdAsync(audiobook.Id));
+            await using var db = await _provider
+                .GetRequiredService<IDbContextFactory<ListenArrDbContext>>()
+                .CreateDbContextAsync();
+            Assert.DoesNotContain(
+                db.AudiobookDeletionIntents,
+                intent => intent.AudiobookId == audiobook.Id);
+        }
+
+        [Fact]
         public async Task DeleteAudiobook_ExistingPlannedIntentWithUnverifiedTrackedGeneration_ReconcilesAndResumes()
         {
             var rootPath = FileService.GetTempDirectory(
@@ -1923,6 +1981,48 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             Assert.Contains(result.Warnings, warning =>
                 warning.Contains("physical", StringComparison.OrdinalIgnoreCase)
                 || warning.Contains("generation", StringComparison.OrdinalIgnoreCase));
+        }
+
+        [Fact]
+        public async Task FilesystemDelete_LegacyWeakTrackedGeneration_BlocksDirectServiceDelete()
+        {
+            var tempRoot = FileService.GetTempDirectory(
+                "listenarr-delete-legacy-weak-direct");
+            var bookFolder = Path.Join(tempRoot, "Book");
+            var audioPath = Path.Join(bookFolder, "book.mp3");
+            Directory.CreateDirectory(bookFolder);
+            await File.WriteAllTextAsync(audioPath, "owned audio");
+            await AddAuthorizedRootAsync(new RootFolderBuilder()
+                .WithName("Library")
+                .WithPath(tempRoot)
+                .WithCaseSensitivityMode(FileSystemCaseSensitivityMode.Auto)
+                .WithIsDefault()
+                .Build());
+            var audiobook = await _audiobookRepository.AddAsync(
+                new AudiobookBuilder()
+                    .WithTitle("Legacy Weak Direct Delete")
+                    .WithBasePath(bookFolder)
+                    .WithFilePath(audioPath)
+                    .Build());
+            await AddTrackedGenerationAsync(
+                audiobook,
+                audioPath,
+                _ => "linux-generation:00000008:00000001:0000000000001234:fh:00000081:341200000000000000000000");
+            var snapshot = await _audiobookRepository.GetByIdSnapshotAsync(
+                audiobook.Id);
+            Assert.NotNull(snapshot);
+
+            var result = await _provider
+                .GetRequiredService<IAudiobookFilesystemDeleteService>()
+                .DeleteAsync(snapshot!, deleteFolder: true);
+
+            Assert.False(result.TrackedFileCleanupComplete);
+            Assert.Equal(0, result.DeletedFiles);
+            Assert.True(File.Exists(audioPath));
+            Assert.True(Directory.Exists(bookFolder));
+            Assert.Contains(result.Warnings, warning =>
+                warning.Contains("durable", StringComparison.OrdinalIgnoreCase)
+                && warning.Contains("generation", StringComparison.OrdinalIgnoreCase));
         }
 
         [Fact]

@@ -353,16 +353,21 @@ namespace Listenarr.Application.Audiobooks.RootFolders
             string rootPath,
             FileSystemPathSemantics semantics)
         {
-            if (_fileRegistrationRecoveryProbe == null
-                || !await _fileRegistrationRecoveryProbe.HasBlockingBoundaryAsync(
-                    rootPath,
-                    semantics))
+            if (_fileRegistrationRecoveryProbe == null)
+            {
+                return;
+            }
+
+            var blockers = await _fileRegistrationRecoveryProbe
+                .GetBlockingBoundaryAsync(rootPath, semantics);
+            var blocker = blockers.FirstOrDefault();
+            if (blocker == null)
             {
                 return;
             }
 
             throw new InvalidOperationException(
-                "Root folder has unresolved file-registration recovery touching this path; complete that recovery before deleting or reassigning the root.");
+                $"Root folder has unresolved file-registration recovery {blocker.OperationId} in state {blocker.JournalState}; complete that recovery before deleting or reassigning the root.");
         }
 
         private async Task<FileSystemSemanticsResolution> ResolveSemanticsAsync(

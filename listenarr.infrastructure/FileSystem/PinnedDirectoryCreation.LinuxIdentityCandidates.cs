@@ -150,8 +150,8 @@ internal sealed partial class PinnedDirectoryCreation
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(left);
         ArgumentException.ThrowIfNullOrWhiteSpace(right);
-        if (IsLegacyWeakLinuxObjectIdentity(left)
-            || IsLegacyWeakLinuxObjectIdentity(right))
+        if (PhysicalObjectIdentitySafety.IsKnownWeak(left)
+            || PhysicalObjectIdentitySafety.IsKnownWeak(right))
         {
             return false;
         }
@@ -312,39 +312,6 @@ internal sealed partial class PinnedDirectoryCreation
             && TryValidateLinuxFileHandle(parts, 0, requireDurable: false)
             && string.Equals(parts[1], "00000081", StringComparison.OrdinalIgnoreCase);
     }
-
-    private static bool IsLegacyWeakLinuxObjectIdentity(string identity)
-    {
-        var parts = identity.Split(':');
-        if (parts.Length >= 6
-            && string.Equals(parts[0], "linux-generation", StringComparison.Ordinal)
-            && IsFixedHex(parts[1], 8)
-            && IsFixedHex(parts[2], 8)
-            && IsFixedHex(parts[3], 16))
-        {
-            return IsLegacyWeakLinuxGenerationSuffix(parts, 4);
-        }
-
-        return parts.Length >= 8
-            && string.Equals(parts[0], "linux", StringComparison.Ordinal)
-            && IsFixedHex(parts[1], 8)
-            && IsFixedHex(parts[2], 8)
-            && IsFixedHex(parts[3], 16)
-            && IsFixedHex(parts[4], 16)
-            && IsFixedHex(parts[5], 8)
-            && IsLegacyWeakLinuxGenerationSuffix(parts, 6);
-    }
-
-    private static bool IsLegacyWeakLinuxGenerationSuffix(
-        string[] parts,
-        int suffixIndex) =>
-        parts.Length == suffixIndex + 3
-        && string.Equals(parts[suffixIndex], "fh", StringComparison.Ordinal)
-        && TryValidateLinuxFileHandle(parts, suffixIndex, requireDurable: false)
-        && string.Equals(
-            parts[suffixIndex + 1],
-            "00000081",
-            StringComparison.OrdinalIgnoreCase);
 
     private static bool TryValidateLinuxGenerationSuffix(
         string[] parts,

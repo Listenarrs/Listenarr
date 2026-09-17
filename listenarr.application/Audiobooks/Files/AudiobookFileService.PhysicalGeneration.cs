@@ -203,7 +203,7 @@ public partial class AudiobookFileService
                     expectedPhysicalObjectIdentity)
                 && !registrationLease.MatchesPhysicalObjectIdentity(
                     expectedPhysicalObjectIdentity));
-        var predecessor = ClonePhysicalGeneration(currentFile);
+        var predecessor = CapturePhysicalGeneration(currentFile);
 
         if (!registrationLease.MatchesCurrentPublication())
         {
@@ -240,14 +240,14 @@ public partial class AudiobookFileService
         }
 
         var reverted = basePathMutation == null
-            ? await audiobookFileRepository.ReplacePhysicalGenerationAsync(
+            ? await audiobookFileRepository.RestorePhysicalGenerationAsync(
                 currentFile.Id,
                 currentFile.AudiobookId,
                 currentFile.Path,
                 registrationLease.PhysicalObjectIdentity,
                 predecessor,
                 CancellationToken.None)
-            : await audiobookFileRepository.ReplacePhysicalGenerationWithBasePathAsync(
+            : await audiobookFileRepository.RestorePhysicalGenerationWithBasePathAsync(
                 currentFile.Id,
                 currentFile.AudiobookId,
                 currentFile.Path,
@@ -413,27 +413,19 @@ public partial class AudiobookFileService
         return false;
     }
 
-    private static AudiobookFile ClonePhysicalGeneration(AudiobookFile source)
-    {
-        var clone = AudiobookFile.CreateUnresolved(source.Path);
-        clone.AudiobookId = source.AudiobookId;
-        clone.Size = source.Size;
-        clone.DurationSeconds = source.DurationSeconds;
-        clone.Format = source.Format;
-        clone.Container = source.Container;
-        clone.Codec = source.Codec;
-        clone.Bitrate = source.Bitrate;
-        clone.SampleRate = source.SampleRate;
-        clone.Channels = source.Channels;
-        clone.Source = source.Source;
-        if (!string.IsNullOrWhiteSpace(source.PhysicalObjectIdentity)
-            && source.PhysicalIdentityObservedAtUtc.HasValue)
-        {
-            clone.ApplyPhysicalObjectIdentity(
-                source.PhysicalObjectIdentity,
-                source.PhysicalIdentityObservedAtUtc.Value);
-        }
-
-        return clone;
-    }
+    private static AudiobookFilePhysicalGenerationSnapshot
+        CapturePhysicalGeneration(AudiobookFile source) =>
+        new(
+            source.Size,
+            source.DurationSeconds,
+            source.Format,
+            source.Container,
+            source.Codec,
+            source.Bitrate,
+            source.SampleRate,
+            source.Channels,
+            source.Source,
+            source.PhysicalObjectIdentity,
+            source.PhysicalIdentityVersion,
+            source.PhysicalIdentityObservedAtUtc);
 }

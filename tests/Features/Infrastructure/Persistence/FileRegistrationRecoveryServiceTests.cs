@@ -305,7 +305,7 @@ public sealed class FileRegistrationRecoveryServiceTests : BaseTests
     }
 
     [WindowsFact]
-    public async Task ReconcileAsync_MultipleAnonymousMovesShareCommittedTargetGeneration_FailsClosedWithoutRetiringSources()
+    public async Task ReconcileAsync_MultipleAnonymousMovesShareCommittedTargetGeneration_MarksAttentionWithoutRetiringSources()
     {
         var root = FileService.GetTempDirectory("registration-ambiguous-adoption");
         await AddAuthorizedRootAsync(root);
@@ -372,7 +372,7 @@ public sealed class FileRegistrationRecoveryServiceTests : BaseTests
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             recovery.ReconcileAsync());
 
-        Assert.Contains("shares its published target generation", exception.Message);
+        Assert.Contains("requires operator repair", exception.Message);
         Assert.True(File.Exists(firstSource));
         Assert.True(File.Exists(secondSource));
         await using var db = await factory.CreateDbContextAsync();
@@ -384,11 +384,15 @@ public sealed class FileRegistrationRecoveryServiceTests : BaseTests
         Assert.Equal(2, journals.Count);
         Assert.All(journals, journal => Assert.Null(journal.AudiobookId));
         Assert.All(journals, journal =>
-            Assert.Equal(FileMutationJournalState.TargetVerified, journal.State));
+            Assert.Equal(FileMutationJournalState.NeedsAttention, journal.State));
+        Assert.All(journals, journal => Assert.Contains(
+            "same published target generation",
+            journal.Error,
+            StringComparison.OrdinalIgnoreCase));
     }
 
     [WindowsFact]
-    public async Task ReconcileAsync_AnonymousVerifiedMoveWithoutCommittedTrackedGeneration_RemainsRetryable()
+    public async Task ReconcileAsync_AnonymousVerifiedMoveWithoutDurableOwner_RollsBackExactTarget()
     {
         var root = FileService.GetTempDirectory("registration-anonymous-retry");
         await AddAuthorizedRootAsync(root);
@@ -429,14 +433,15 @@ public sealed class FileRegistrationRecoveryServiceTests : BaseTests
             .ReconcileAsync();
 
         Assert.True(File.Exists(source));
-        Assert.Equal("audio", await File.ReadAllTextAsync(destination));
+        Assert.False(File.Exists(destination));
         await using var db = await factory.CreateDbContextAsync();
         var anonymous = await db.FileMutationJournals
             .AsNoTracking()
             .SingleAsync(candidate => candidate.OperationId == operationId);
-        Assert.Equal(FileMutationJournalState.TargetVerified, anonymous.State);
+        Assert.Equal(FileMutationJournalState.RolledBack, anonymous.State);
         Assert.Null(anonymous.AudiobookId);
         Assert.Null(anonymous.AudiobookFileId);
+        Assert.Contains("retained its source", anonymous.Error, StringComparison.OrdinalIgnoreCase);
     }
 
     [WindowsFact]

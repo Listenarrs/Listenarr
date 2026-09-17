@@ -7,6 +7,11 @@ public sealed partial class AudiobookFilesystemDeleteService
     {
         foreach (var tracked in trackedPhysicalObjectIdentities)
         {
+            if (PhysicalObjectIdentitySafety.IsKnownWeak(tracked.Value))
+            {
+                return false;
+            }
+
             var parentPath = Path.GetDirectoryName(tracked.Key);
             var fileName = Path.GetFileName(tracked.Key);
             if (string.IsNullOrWhiteSpace(parentPath)

@@ -252,6 +252,82 @@ public partial class EfAudiobookFileRepository
         return true;
     }
 
+    public async Task<bool> RestorePhysicalGenerationWithBasePathAsync(
+        int fileId,
+        int audiobookId,
+        string? expectedPath,
+        string? expectedPhysicalObjectIdentity,
+        AudiobookFilePhysicalGenerationSnapshot predecessor,
+        AudiobookBasePathMutation basePathMutation,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(predecessor);
+        ValidateBasePathMutation(audiobookId, basePathMutation);
+
+        if (!_db.Database.IsRelational())
+        {
+            var audiobook = await _db.Audiobooks.SingleOrDefaultAsync(candidate => candidate.Id == audiobookId, ct);
+            var existing = await _db.AudiobookFiles.SingleOrDefaultAsync(
+                candidate => candidate.Id == fileId
+                    && candidate.AudiobookId == audiobookId
+                    && candidate.Path == expectedPath
+                    && candidate.PhysicalObjectIdentity == expectedPhysicalObjectIdentity,
+                ct);
+            if (audiobook == null || existing == null
+                || !string.Equals(audiobook.BasePath, basePathMutation.ExpectedCurrentBasePath, StringComparison.Ordinal))
+            {
+                return false;
+            }
+            audiobook.BasePath = basePathMutation.ResultingBasePath;
+            ApplyPhysicalGenerationSnapshot(existing, predecessor);
+            var nonRelationalCompletionToken = RequestCancellationBoundary.EnterNonCancelablePhase(ct);
+            await _db.SaveChangesAsync(nonRelationalCompletionToken);
+            return true;
+        }
+
+        await using var transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+        var basePathUpdated = await _db.Audiobooks
+            .Where(candidate => candidate.Id == audiobookId
+                && candidate.BasePath == basePathMutation.ExpectedCurrentBasePath)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(candidate => candidate.BasePath, basePathMutation.ResultingBasePath),
+                ct);
+        if (basePathUpdated != 1)
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            return false;
+        }
+        var fileUpdated = await _db.AudiobookFiles
+            .Where(candidate => candidate.Id == fileId
+                && candidate.AudiobookId == audiobookId
+                && candidate.Path == expectedPath
+                && candidate.PhysicalObjectIdentity == expectedPhysicalObjectIdentity)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(candidate => candidate.Size, predecessor.Size)
+                    .SetProperty(candidate => candidate.DurationSeconds, predecessor.DurationSeconds)
+                    .SetProperty(candidate => candidate.Format, predecessor.Format)
+                    .SetProperty(candidate => candidate.Container, predecessor.Container)
+                    .SetProperty(candidate => candidate.Codec, predecessor.Codec)
+                    .SetProperty(candidate => candidate.Bitrate, predecessor.Bitrate)
+                    .SetProperty(candidate => candidate.SampleRate, predecessor.SampleRate)
+                    .SetProperty(candidate => candidate.Channels, predecessor.Channels)
+                    .SetProperty(candidate => candidate.Source, predecessor.Source)
+                    .SetProperty(candidate => candidate.PhysicalObjectIdentity, predecessor.PhysicalObjectIdentity)
+                    .SetProperty(candidate => candidate.PhysicalIdentityVersion, predecessor.PhysicalIdentityVersion)
+                    .SetProperty(candidate => candidate.PhysicalIdentityObservedAtUtc, predecessor.PhysicalIdentityObservedAtUtc),
+                ct);
+        if (fileUpdated != 1)
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            return false;
+        }
+        var completionToken = RequestCancellationBoundary.EnterNonCancelablePhase(ct);
+        await transaction.CommitAsync(completionToken);
+        SynchronizeTrackedBasePath(basePathMutation);
+        SynchronizeTrackedPhysicalGeneration(fileId, predecessor);
+        return true;
+    }
     public async Task<bool> DeletePhysicalGenerationWithBasePathAsync(
         int fileId,
         int audiobookId,

@@ -6,9 +6,9 @@ using Microsoft.Extensions.Logging;
 namespace Listenarr.Infrastructure.Persistence;
 
 /// <summary>
-/// Resumes source retirement for Move publications after the destination generation
-/// and audiobook ownership were already committed. These journals are deliberately
-/// separate from organize/rename recovery because they do not own an AudiobookFileId.
+/// Adopts registration publications after audiobook ownership was committed and
+/// resumes any remaining source retirement. These journals are separate from
+/// organize/rename recovery because they do not own an AudiobookFileId.
 /// </summary>
 public sealed partial class FileRegistrationRecoveryService(
     IDbContextFactory<ListenArrDbContext> dbContextFactory,
@@ -21,18 +21,23 @@ public sealed partial class FileRegistrationRecoveryService(
         CancellationToken cancellationToken = default)
     {
         await EnsureCurrentRecoveryProtocolAsync(cancellationToken);
-        await AdoptCommittedAnonymousMoveRegistrationsAsync(
+        await AdoptCommittedAnonymousPublicationsAsync(
             audiobookId: null,
+            operationId: null,
             cancellationToken);
     }
 
     public async Task ReconcileAsync(CancellationToken cancellationToken = default)
     {
         await AdoptCommittedAnonymousAsync(cancellationToken);
+        await ReconcileOrphanedAnonymousPublicationsAsync(
+            operationId: null,
+            cancellationToken);
+        await LogRegistrationPublicationSummaryAsync(cancellationToken);
         await using var readContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var attentionOperationId = await readContext.FileMutationJournals
             .AsNoTracking()
-            .Where(RegistrationMoveOwnerPredicate)
+            .Where(RegistrationPublicationPredicate)
             .Where(journal => journal.State == FileMutationJournalState.NeedsAttention)
             .OrderBy(journal => journal.CreatedAt)
             .ThenBy(journal => journal.OperationId)
@@ -41,12 +46,12 @@ public sealed partial class FileRegistrationRecoveryService(
         if (attentionOperationId.HasValue)
         {
             throw new InvalidOperationException(
-                $"File-registration move journal {attentionOperationId.Value} requires operator repair before filesystem mutations can resume.");
+                $"File-registration publication {attentionOperationId.Value} requires operator repair before filesystem mutations can resume.");
         }
 
         var operationIds = await readContext.FileMutationJournals
             .AsNoTracking()
-            .Where(RegistrationMoveOwnerPredicate)
+            .Where(RegistrationPublicationOwnerPredicate)
             .Where(journal => journal.State == FileMutationJournalState.TargetVerified
                 || journal.State == FileMutationJournalState.RegistrationCommitted
                 || journal.State == FileMutationJournalState.SourceDeletionAuthorized
@@ -89,15 +94,17 @@ public sealed partial class FileRegistrationRecoveryService(
         ArgumentNullException.ThrowIfNull(requestedSourcePaths);
 
         await EnsureCurrentRecoveryProtocolAsync(cancellationToken);
-        await AdoptCommittedAnonymousMoveRegistrationsAsync(
+        await AdoptCommittedAnonymousPublicationsAsync(
             audiobookId,
+            operationId: null,
             cancellationToken);
         await using var readContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var operationIds = await readContext.FileMutationJournals
             .AsNoTracking()
-            .Where(RegistrationMoveOwnerPredicate)
+            .Where(RegistrationPublicationOwnerPredicate)
             .Where(journal => journal.AudiobookId == audiobookId
-                && journal.State != FileMutationJournalState.Completed)
+                && journal.State != FileMutationJournalState.Completed
+                && journal.State != FileMutationJournalState.RolledBack)
             .OrderBy(journal => journal.CreatedAt)
             .ThenBy(journal => journal.OperationId)
             .Select(journal => journal.OperationId)
@@ -129,124 +136,111 @@ public sealed partial class FileRegistrationRecoveryService(
         return receipts;
     }
 
-    private async Task AdoptCommittedAnonymousMoveRegistrationsAsync(
-        int? audiobookId,
+    public async Task<FileRegistrationRecoveryStatus> RetryAsync(
+        Guid operationId,
+        CancellationToken cancellationToken = default)
+    {
+        if (operationId == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "A registration recovery retry requires a non-empty operation ID.",
+                nameof(operationId));
+        }
+
+        await EnsureCurrentRecoveryProtocolAsync(
+            cancellationToken,
+            operationId);
+        var journal = await LoadRegistrationPublicationAsync(
+            operationId,
+            cancellationToken);
+        if (journal.State == FileMutationJournalState.NeedsAttention)
+        {
+            return CreateRecoveryStatus(journal);
+        }
+
+        if (!FileMutationJournalLifecycle.ClearsRegistrationRecoveryBoundary(
+                journal.State))
+        {
+            if (!journal.AudiobookId.HasValue)
+            {
+                await AdoptCommittedAnonymousPublicationsAsync(
+                    audiobookId: null,
+                    operationId,
+                    cancellationToken);
+                await ReconcileOrphanedAnonymousPublicationsAsync(
+                    operationId,
+                    cancellationToken);
+            }
+
+            journal = await LoadRegistrationPublicationAsync(
+                operationId,
+                cancellationToken);
+            if (journal.AudiobookId.HasValue
+                && FileMutationJournalLifecycle.IsRegistrationPublicationRecoverable(
+                    journal.State))
+            {
+                await ReconcileOperationAsync(
+                    operationId,
+                    failWhenStillPending: false,
+                    cancellationToken);
+                journal = await LoadRegistrationPublicationAsync(
+                    operationId,
+                    cancellationToken);
+            }
+        }
+
+        return CreateRecoveryStatus(journal);
+    }
+
+    private async Task<FileMutationJournal> LoadRegistrationPublicationAsync(
+        Guid operationId,
         CancellationToken cancellationToken)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var anonymousJournals = await db.FileMutationJournals
+        var journal = await db.FileMutationJournals
             .AsNoTracking()
-            .Where(journal => journal.Action == FileAction.Move
-                && journal.AudiobookId == null
-                && journal.AudiobookFileId == null
-                && journal.State == FileMutationJournalState.TargetVerified)
-            .OrderBy(journal => journal.CreatedAt)
-            .ThenBy(journal => journal.OperationId)
-            .ToListAsync(cancellationToken);
-        if (anonymousJournals.Count == 0)
+            .SingleOrDefaultAsync(
+                candidate => candidate.OperationId == operationId,
+                cancellationToken)
+            ?? throw new KeyNotFoundException(
+                "File-registration recovery operation not found.");
+        if (!IsRegistrationPublicationAction(journal.Action)
+            || journal.AudiobookFileId.HasValue)
         {
-            return;
+            throw new InvalidOperationException(
+                "The requested operation is not a file-registration publication.");
         }
 
-        var filesQuery = db.AudiobookFiles.AsNoTracking();
-        if (audiobookId.HasValue)
-        {
-            filesQuery = filesQuery.Where(file => file.AudiobookId == audiobookId.Value);
-        }
-        var trackedFiles = await filesQuery.ToListAsync(cancellationToken);
-        foreach (var journal in anonymousJournals)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var matches = trackedFiles
-                .Where(file => RegisteredPathMatches(file, journal.DestinationPath)
-                    && RegisteredGenerationMatches(
-                        file,
-                        journal.TargetPhysicalObjectIdentity))
-                .ToList();
-            if (matches.Count == 0)
-            {
-                // This is the valid crash-before-metadata-commit state, or an anonymous
-                // journal owned by another audiobook during scoped recovery. Leave it
-                // anonymous so its own operation/recovery can resolve it later.
-                continue;
-            }
-            if (anonymousJournals.Count(candidate =>
-                    AnonymousTargetGenerationMatches(candidate, journal)) != 1)
-            {
-                throw new InvalidOperationException(
-                    $"Anonymous file-registration move journal {journal.OperationId} shares its published target generation with another unowned journal and cannot be adopted safely.");
-            }
-            if (matches.Count != 1)
-            {
-                throw new InvalidOperationException(
-                    $"Anonymous file-registration move journal {journal.OperationId} matches multiple tracked audiobook files and cannot be adopted safely.");
-            }
-
-            var matchedFile = matches[0];
-            var adopted = await TryAdoptAnonymousOwnerAsync(
-                db,
-                journal,
-                matchedFile.AudiobookId,
-                cancellationToken);
-            if (adopted)
-            {
-                logger.LogInformation(
-                    "Adopted committed anonymous file-registration move {OperationId} for audiobook {AudiobookId}",
-                    journal.OperationId,
-                    matchedFile.AudiobookId);
-            }
-        }
+        return journal;
     }
 
-    private async Task<bool> TryAdoptAnonymousOwnerAsync(
-        ListenArrDbContext db,
-        FileMutationJournal expected,
-        int audiobookId,
-        CancellationToken cancellationToken)
+    private static FileRegistrationRecoveryStatus CreateRecoveryStatus(
+        FileMutationJournal journal)
     {
-        var now = timeProvider.GetUtcNow().UtcDateTime;
-        if (!db.Database.IsRelational())
-        {
-            var tracked = await db.FileMutationJournals.SingleOrDefaultAsync(
-                candidate => candidate.OperationId == expected.OperationId,
-                cancellationToken);
-            if (tracked == null
-                || tracked.AudiobookId != null
-                || tracked.AudiobookFileId != null
-                || tracked.Action != FileAction.Move
-                || tracked.State != FileMutationJournalState.TargetVerified
-                || !string.Equals(
-                    tracked.TargetPhysicalObjectIdentity,
-                    expected.TargetPhysicalObjectIdentity,
-                    StringComparison.Ordinal))
-            {
-                return false;
-            }
-
-            tracked.AudiobookId = audiobookId;
-            tracked.UpdatedAt = now;
-            await db.SaveChangesAsync(cancellationToken);
-            return true;
-        }
-
-        var affected = await db.FileMutationJournals
-            .Where(candidate => candidate.OperationId == expected.OperationId
-                && candidate.AudiobookId == null
-                && candidate.AudiobookFileId == null
-                && candidate.Action == FileAction.Move
-                && candidate.State == FileMutationJournalState.TargetVerified
-                && candidate.TargetPhysicalObjectIdentity
-                    == expected.TargetPhysicalObjectIdentity)
-            .ExecuteUpdateAsync(
-                setters => setters
-                    .SetProperty(
-                        candidate => candidate.AudiobookId,
-                        audiobookId)
-                    .SetProperty(
-                        candidate => candidate.UpdatedAt,
-                        now),
-                cancellationToken);
-        return affected == 1;
+        var needsAttention = FileMutationJournalLifecycle
+            .RequiresOperatorAttention(journal.State);
+        var recoverable = FileMutationJournalLifecycle
+            .IsRegistrationPublicationRecoverable(journal.State);
+        var cleared = FileMutationJournalLifecycle
+            .ClearsRegistrationRecoveryBoundary(journal.State);
+        return new FileRegistrationRecoveryStatus(
+            journal.OperationId,
+            journal.State,
+            journal.AudiobookId,
+            cleared
+                ? FileRegistrationRecoveryDisposition.Cleared
+                : needsAttention || !recoverable
+                    ? FileRegistrationRecoveryDisposition.RequiresOperatorAttention
+                    : journal.AudiobookId.HasValue
+                        ? FileRegistrationRecoveryDisposition.WaitingForOwnerRetry
+                        : FileRegistrationRecoveryDisposition.AutomaticRecovery,
+            CanRetry: recoverable,
+            CanAbandon: false,
+            cleared
+                ? "The file-registration recovery boundary is clear."
+                : needsAttention || !recoverable
+                    ? "This publication still requires operator repair; no destructive action was authorized."
+                    : "Recovery remains pending because its durable evidence could not yet be reconciled.");
     }
 
     private async Task<FileRegistrationRecoveryReceipt?> ReconcileOperationAsync(
@@ -262,7 +256,8 @@ public sealed partial class FileRegistrationRecoveryService(
             journal = await db.FileMutationJournals
                 .AsNoTracking()
                 .SingleAsync(candidate => candidate.OperationId == operationId, cancellationToken);
-            if (journal.State == FileMutationJournalState.Completed)
+            if (FileMutationJournalLifecycle.ClearsRegistrationRecoveryBoundary(
+                    journal.State))
             {
                 return null;
             }
@@ -270,8 +265,9 @@ public sealed partial class FileRegistrationRecoveryService(
             {
                 throw RepairRequired(operationId);
             }
-            if (!IsRegistrationMoveOwner(journal)
-                || journal.State < FileMutationJournalState.TargetVerified
+            if (!IsRegistrationPublicationOwner(journal)
+                || !FileMutationJournalLifecycle.IsRegistrationPublicationRecoverable(
+                    journal.State)
                 || !journal.AudiobookId.HasValue)
             {
                 return null;
@@ -320,7 +316,7 @@ public sealed partial class FileRegistrationRecoveryService(
         {
             preparedLease = !string.IsNullOrWhiteSpace(journal.SourceSha256)
                 ? await fileMover.PrepareActionForRegistrationAsync(
-                    FileAction.Move,
+                    journal.Action,
                     journal.SourcePath,
                     journal.DestinationPath,
                     journal.OperationId,
@@ -330,7 +326,7 @@ public sealed partial class FileRegistrationRecoveryService(
                         journal.SourceLength,
                         journal.SourceSha256))
                 : await fileMover.PrepareActionForRegistrationAsync(
-                    FileAction.Move,
+                    journal.Action,
                     journal.SourcePath,
                     journal.DestinationPath,
                     journal.OperationId,
@@ -363,11 +359,12 @@ public sealed partial class FileRegistrationRecoveryService(
         if (!lease.PrepareCleanupRecovery(audiobookId)
             || lease.CompletePublication()
                 == RegistrationPublicationCompletion.CommittedCleanupPending
-            || !await fileMover.CompletePreparedMoveAsync(
-                journal.SourcePath,
-                journal.DestinationPath,
-                lease,
-                journal.OperationId))
+            || (journal.Action == FileAction.Move
+                && !await fileMover.CompletePreparedMoveAsync(
+                    journal.SourcePath,
+                    journal.DestinationPath,
+                    lease,
+                    journal.OperationId)))
         {
             await ThrowIfNeedsAttentionAsync(operationId, cancellationToken);
             if (failWhenStillPending)
@@ -378,14 +375,16 @@ public sealed partial class FileRegistrationRecoveryService(
         }
 
         logger.LogInformation(
-            "Recovered committed file-registration move {OperationId} for audiobook {AudiobookId}",
+            "Recovered committed file-registration publication {OperationId} for audiobook {AudiobookId}",
             operationId,
             audiobookId);
-        return new FileRegistrationRecoveryReceipt(
-            journal.OperationId,
-            audiobookId,
-            journal.SourcePath,
-            journal.DestinationPath);
+        return journal.Action == FileAction.Move
+            ? new FileRegistrationRecoveryReceipt(
+                journal.OperationId,
+                audiobookId,
+                journal.SourcePath,
+                journal.DestinationPath)
+            : null;
     }
 
     private static bool IsTransientRecoveryFilesystemException(Exception exception)
@@ -407,7 +406,11 @@ public sealed partial class FileRegistrationRecoveryService(
         FileMutationJournal left,
         FileMutationJournal right)
     {
-        if (string.IsNullOrWhiteSpace(left.TargetPhysicalObjectIdentity)
+        if (!string.Equals(
+                left.DestinationPath,
+                right.DestinationPath,
+                StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(left.TargetPhysicalObjectIdentity)
             || string.IsNullOrWhiteSpace(right.TargetPhysicalObjectIdentity))
         {
             return false;
@@ -467,15 +470,26 @@ public sealed partial class FileRegistrationRecoveryService(
         }
     }
 
-    private static bool IsRegistrationMoveOwner(FileMutationJournal journal) =>
-        journal.Action == FileAction.Move
+    private static bool IsRegistrationPublicationAction(FileAction action) =>
+        action is FileAction.Move or FileAction.Copy or FileAction.HardlinkCopy;
+
+    private static bool IsRegistrationPublicationOwner(FileMutationJournal journal) =>
+        IsRegistrationPublicationAction(journal.Action)
         && journal.AudiobookId != null
         && journal.AudiobookFileId == null;
 
     private static System.Linq.Expressions.Expression<Func<FileMutationJournal, bool>>
-        RegistrationMoveOwnerPredicate => journal =>
-            journal.Action == FileAction.Move
-            && journal.AudiobookId != null
+        RegistrationPublicationOwnerPredicate => journal =>
+            (journal.Action == FileAction.Move
+                || journal.Action == FileAction.Copy
+                || journal.Action == FileAction.HardlinkCopy)
+            && journal.AudiobookId != null && journal.AudiobookFileId == null;
+
+    private static System.Linq.Expressions.Expression<Func<FileMutationJournal, bool>>
+        RegistrationPublicationPredicate => journal =>
+            (journal.Action == FileAction.Move
+                || journal.Action == FileAction.Copy
+                || journal.Action == FileAction.HardlinkCopy)
             && journal.AudiobookFileId == null;
 
 }

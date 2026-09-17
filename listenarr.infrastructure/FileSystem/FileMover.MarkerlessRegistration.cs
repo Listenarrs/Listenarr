@@ -151,7 +151,9 @@ public partial class FileMover
             }
         }
 
-        if (journal.State == FileMutationJournalState.NeedsAttention)
+        if (journal.State == FileMutationJournalState.NeedsAttention
+            || journal.State == FileMutationJournalState.RollbackAuthorized
+            || journal.State == FileMutationJournalState.RolledBack)
         {
             return new MarkerlessRegistrationPreparation(true, null);
         }
@@ -199,7 +201,8 @@ public partial class FileMover
                 return new MarkerlessRegistrationPreparation(true, null);
             }
         }
-        else if (journal.State >= FileMutationJournalState.TargetVerified)
+        else if (FileMutationJournalLifecycle.IsRegistrationPublicationRecoverable(
+            journal.State))
         {
             if (!await MarkerlessRegistrationTargetMatchesAsync(
                     gate,
@@ -273,7 +276,9 @@ public partial class FileMover
             throw new InvalidOperationException(
                 "The markerless registration identity changed before commit.");
         }
-        if (journal.State == FileMutationJournalState.NeedsAttention)
+        if (journal.State == FileMutationJournalState.NeedsAttention
+            || journal.State == FileMutationJournalState.RollbackAuthorized
+            || journal.State == FileMutationJournalState.RolledBack)
         {
             throw new InvalidOperationException(
                 "A markerless registration requiring attention cannot be committed.");
@@ -291,7 +296,11 @@ public partial class FileMover
                 "The registration destination changed before its journal commit.");
             return false;
         }
-        if (journal.State < FileMutationJournalState.TargetVerified)
+        if (journal.State != FileMutationJournalState.TargetVerified
+            && journal.State != FileMutationJournalState.RegistrationCommitted
+            && journal.State != FileMutationJournalState.SourceDeletionAuthorized
+            && journal.State != FileMutationJournalState.SourceDeleted
+            && journal.State != FileMutationJournalState.Completed)
         {
             throw new InvalidOperationException(
                 "The markerless registration destination is not verified.");
@@ -307,7 +316,7 @@ public partial class FileMover
                 : validation;
         }
 
-        if (journal.State < FileMutationJournalState.RegistrationCommitted)
+        if (journal.State == FileMutationJournalState.TargetVerified)
         {
             var commitValidation =
                 _fileMutationJournalStore.AdvanceWithCommitValidation(
@@ -362,7 +371,7 @@ public partial class FileMover
         }
 
         if (action != FileAction.Move
-            && journal.State < FileMutationJournalState.Completed)
+            && journal.State != FileMutationJournalState.Completed)
         {
             var completionValidation =
                 _fileMutationJournalStore.AdvanceWithCommitValidation(
@@ -387,10 +396,9 @@ public partial class FileMover
                     "The markerless registration journal disappeared after publication completion.");
         }
 
-        return journal.State != FileMutationJournalState.NeedsAttention
-            && (action == FileAction.Move
-                ? journal.State >= FileMutationJournalState.RegistrationCommitted
-                : journal.State >= FileMutationJournalState.Completed);
+        return action == FileAction.Move
+            ? FileMutationJournalLifecycle.MayRetireSource(journal.State)
+            : journal.State == FileMutationJournalState.Completed;
     }
 
 
