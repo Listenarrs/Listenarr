@@ -41,7 +41,8 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
                     throw new FfmpegException($"ffprobe target does not exist: {sanitizedPublicPath}");
                 }
 
-                if (!FileUtils.IsAudioFile(fileSource.PublicPath))
+                if (!FileUtils.IsAudioFile(fileSource.PublicPath)
+                    && !FileUtils.IsAmbiguousAudioContainer(fileSource.PublicPath))
                 {
                     throw new FfmpegException($"ffprobe target is not a supported audio file: {sanitizedPublicPath}");
                 }

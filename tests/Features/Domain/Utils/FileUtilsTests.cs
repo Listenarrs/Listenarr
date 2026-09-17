@@ -1282,5 +1282,49 @@ namespace Listenarr.Tests.Features.Domain.Utils
             Assert.Contains(".MP3", FileUtils.AudioExtensions);
             Assert.True(FileUtils.IsAudioFile("Target Book.MP3"));
         }
+
+        // The fix for Listenarr#890 keeps the characterization above intact: .mp4 is still not in
+        // AudioExtensions and IsAudioFile(".mp4") is still false, so the scanner and every
+        // extension-only gate behave exactly as before. .mp4 is admitted through a separate tier,
+        // AmbiguousAudioExtensions, which requires a content probe rather than trusting the
+        // extension. This test pins the boundary between the two tiers.
+        [Fact]
+        public void AmbiguousAudioContainer_RecognizesMp4WithoutAddingItToTheExtensionSet()
+        {
+            // The extension set is unchanged; .mp4 lives only in the ambiguous tier.
+            Assert.DoesNotContain(".mp4", FileUtils.AudioExtensions);
+            Assert.Contains(".mp4", FileUtils.AmbiguousAudioExtensions);
+
+            // A bare .mp4 is ambiguous, not audio-by-extension. Case does not decide admission.
+            Assert.True(FileUtils.IsAmbiguousAudioContainer("Target Book.mp4"));
+            Assert.True(FileUtils.IsAmbiguousAudioContainer("Target Book.MP4"));
+            Assert.False(FileUtils.IsAudioFile("Target Book.mp4"));
+
+            // The always-audio containers are not ambiguous and never take the probe path.
+            foreach (var alwaysAudio in new[] { ".m4b", ".m4a", ".mp3", ".flac" })
+            {
+                Assert.False(FileUtils.IsAmbiguousAudioContainer($"Target Book{alwaysAudio}"), alwaysAudio);
+            }
+
+            // A file with no extension is neither.
+            Assert.False(FileUtils.IsAmbiguousAudioContainer("Target Book"));
+        }
+
+        // IsProbedAudioContent is the gate an ambiguous container must pass. Audio present and no
+        // playable video admits; a playable video stream rejects; no audio rejects. The mapping
+        // from ffprobe stream JSON onto these flags, including the cover-art case, is pinned in
+        // FfprobeStreamPresenceTests.
+        [Fact]
+        public void IsProbedAudioContent_AdmitsAudioWithoutVideoAndRejectsOtherwise()
+        {
+            Assert.True(FileUtils.IsProbedAudioContent(
+                new AudioMetadata { HasAudioStream = true, HasVideoStream = false }));
+            Assert.False(FileUtils.IsProbedAudioContent(
+                new AudioMetadata { HasAudioStream = true, HasVideoStream = true }));
+            Assert.False(FileUtils.IsProbedAudioContent(
+                new AudioMetadata { HasAudioStream = false, HasVideoStream = false }));
+            Assert.False(FileUtils.IsProbedAudioContent(
+                new AudioMetadata { HasAudioStream = false, HasVideoStream = true }));
+        }
     }
 }

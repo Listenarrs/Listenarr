@@ -48,12 +48,52 @@ namespace Listenarr.Domain.Common
         };
 
         /// <summary>
+        /// Container extensions that are audio only some of the time. Unlike the entries in
+        /// <see cref="AudioExtensions"/>, which always carry audio (.m4a and .m4b are audio-only
+        /// MPEG-4 profiles), a bare .mp4 can hold audio, video, or both. The extension alone
+        /// cannot decide, so these are deliberately kept out of <see cref="AudioExtensions"/> and
+        /// admitted only after a content probe (see <see cref="IsProbedAudioContent"/>). Keeping
+        /// them out of the extension set means the library scanner, which walks every file and
+        /// cannot afford a probe per file, does not treat a stray video .mp4 as an audiobook.
+        /// </summary>
+        public static readonly HashSet<string> AmbiguousAudioExtensions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ".mp4"
+        };
+
+        /// <summary>
         /// Returns true when the file path has a recognized audio extension.
         /// </summary>
         public static bool IsAudioFile(string filePath)
         {
             var ext = Path.GetExtension(filePath);
             return !string.IsNullOrEmpty(ext) && AudioExtensions.Contains(ext);
+        }
+
+        /// <summary>
+        /// Returns true when the file path has an extension that may or may not be audio and so
+        /// requires a content probe before it can be admitted. This is intentionally separate
+        /// from <see cref="IsAudioFile"/>: an ambiguous container must never be accepted on the
+        /// strength of its extension alone.
+        /// </summary>
+        public static bool IsAmbiguousAudioContainer(string filePath)
+        {
+            var ext = Path.GetExtension(filePath);
+            return !string.IsNullOrEmpty(ext) && AmbiguousAudioExtensions.Contains(ext);
+        }
+
+        /// <summary>
+        /// Decides whether a probed container should be admitted as audio. True when the file
+        /// carries an audio stream and no playable video stream. Attached-picture streams (cover
+        /// art) are not playable video and are ignored by the probe mapper, so an audiobook whose
+        /// only "video" is embedded artwork still qualifies. This is the gate an ambiguous
+        /// container (see <see cref="IsAmbiguousAudioContainer"/>) must pass; the always-audio
+        /// entries in <see cref="AudioExtensions"/> never need it.
+        /// </summary>
+        public static bool IsProbedAudioContent(Listenarr.Domain.Audiobooks.AudioMetadata metadata)
+        {
+            ArgumentNullException.ThrowIfNull(metadata);
+            return metadata.HasAudioStream && !metadata.HasVideoStream;
         }
 
         public static bool IsPathInvalidForCurrentOs(string? path)
