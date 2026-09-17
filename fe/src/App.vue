@@ -2697,17 +2697,21 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
   font-size: 0.9rem;
 }
 
-/* "Search for '<term>'" jump into Add New (Sonarr-style). */
+/* "Search for '<term>'" jump into Add New (Sonarr-style). Pinned to the bottom of
+   the scrollable results so a long list of local matches can't push it out of view
+   (which hid it entirely on the narrow mobile dropdown). */
 .search-addnew {
+  position: sticky;
+  bottom: -6px; /* cancel the dropdown's 6px bottom padding so it hugs the edge */
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
   padding: 10px;
   border: none;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 0 0 6px 6px;
-  background: transparent;
+  background: #1f1f1f; /* solid so scrolled results don't show through */
   color: #e6eef6;
   cursor: pointer;
   text-align: left;

@@ -1179,11 +1179,7 @@ onMounted(() => {
   // A pre-filled term arrives via ?q= from the global header's "Search for
   // '<term>'" affordance (see App.vue). Auto-run it so the user lands on
   // results without retyping. performSearch() auto-detects the search type.
-  const initialQuery = route.query.q
-  if (initialQuery) {
-    searchQuery.value = String(initialQuery)
-    void performSearch()
-  }
+  void runQueryParamSearch(route.query.q)
 })
 
 // If the header affordance is used while already on /add-new, the route query
@@ -1191,11 +1187,21 @@ onMounted(() => {
 watch(
   () => route.query.q,
   (q, previous) => {
-    if (!q || q === previous) return
-    searchQuery.value = String(q)
-    void performSearch()
+    if (q === previous) return
+    void runQueryParamSearch(q)
   },
 )
+
+// Run a search driven by the ?q= route param and bring the results into view.
+// Without the scroll, running the search while already on this page updates the
+// results lower down with no visible change, so the affordance reads as a no-op.
+const runQueryParamSearch = async (raw: unknown) => {
+  const term = raw == null ? '' : String(raw).trim()
+  if (!term) return
+  searchQuery.value = term
+  await performSearch()
+  await scrollUnifiedSearchInputIntoView()
+}
 
 // Library checking functions - now handled by useLibraryCheck composable
 
