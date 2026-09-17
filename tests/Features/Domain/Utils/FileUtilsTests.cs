@@ -1250,5 +1250,37 @@ namespace Listenarr.Tests.Features.Domain.Utils
                 try { Directory.Delete(root, true); } catch (IOException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); } catch (UnauthorizedAccessException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
             }
         }
+
+        // Characterization test for the audio admission set behind Listenarr#890. Every import
+        // and scan gate is Path.GetExtension against this set and nothing inspects the container
+        // or the codec, so identical MP4/AAC bytes are admitted when the file is named .m4b and
+        // refused when it is named .mp4. A batch of only refused files registers nothing, and the
+        // download processor turns that into Import Blocked. The set is pinned exactly so that a
+        // rewrite which changes what is accepted has to change this test on purpose.
+        [Fact]
+        public void AudioExtensions_AdmitsAudiobookContainersAndRefusesMp4()
+        {
+            Assert.Equal(
+                [
+                    ".aac", ".aif", ".aiff", ".alac", ".ape", ".flac", ".m4a",
+                    ".m4b", ".mp3", ".ogg", ".opus", ".wav", ".wma", ".wv"
+                ],
+                FileUtils.AudioExtensions.Order(StringComparer.Ordinal).ToArray());
+
+            Assert.DoesNotContain(".mp4", FileUtils.AudioExtensions);
+            Assert.False(FileUtils.IsAudioFile("Target Book.mp4"));
+            Assert.False(FileUtils.IsAudioFile("Target Book.MP4"));
+
+            foreach (var accepted in new[] { ".m4b", ".m4a", ".mp3", ".flac" })
+            {
+                Assert.Contains(accepted, FileUtils.AudioExtensions);
+                Assert.True(FileUtils.IsAudioFile($"Target Book{accepted}"), accepted);
+            }
+
+            // The set is built with StringComparer.OrdinalIgnoreCase, so casing never decides
+            // admission and an upper case extension cannot be the reason an import was refused.
+            Assert.Contains(".MP3", FileUtils.AudioExtensions);
+            Assert.True(FileUtils.IsAudioFile("Target Book.MP3"));
+        }
     }
 }
