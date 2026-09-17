@@ -153,7 +153,8 @@ internal sealed partial class EfFileMutationJournalStore
                 "Owner metadata reconciliation must be committed atomically with the owning audiobook metadata, not through the filesystem journal store.");
         }
         if (state >= FileMutationJournalState.TargetIdentityPersisted
-            && state != FileMutationJournalState.NeedsAttention
+            && state is not (FileMutationJournalState.NeedsAttention
+                or FileMutationJournalState.RolledBack)
             && string.IsNullOrWhiteSpace(targetPhysicalObjectIdentity))
         {
             throw new ArgumentException(
@@ -182,6 +183,44 @@ internal sealed partial class EfFileMutationJournalStore
         {
             throw new InvalidOperationException(
                 "A file mutation whose owner metadata is reconciled is terminal and cannot be advanced.");
+        }
+        if (journal.State == FileMutationJournalState.RolledBack
+            && state != FileMutationJournalState.RolledBack)
+        {
+            throw new InvalidOperationException(
+                "A rolled-back file-registration publication cannot be advanced.");
+        }
+        if (journal.State == FileMutationJournalState.Completed
+            && state is not (FileMutationJournalState.Completed
+                or FileMutationJournalState.NeedsAttention))
+        {
+            throw new InvalidOperationException(
+                "A completed file-registration publication cannot resume filesystem mutation.");
+        }
+        if (state == FileMutationJournalState.RollbackAuthorized
+            && (journal.State is not (
+                    FileMutationJournalState.TargetIdentityPersisted
+                    or FileMutationJournalState.TargetVerified)
+                || journal.AudiobookId.HasValue
+                || journal.AudiobookFileId.HasValue
+                || audiobookId.HasValue))
+        {
+            throw new InvalidOperationException(
+                "Only an anonymous verified registration publication can authorize rollback.");
+        }
+        if (state == FileMutationJournalState.RolledBack
+            && (journal.State is not (
+                    FileMutationJournalState.Planned
+                    or FileMutationJournalState.TargetIdentityPersisted
+                    or FileMutationJournalState.TargetVerified
+                    or FileMutationJournalState.RollbackAuthorized
+                    or FileMutationJournalState.RolledBack)
+                || journal.AudiobookId.HasValue
+                || journal.AudiobookFileId.HasValue
+                || audiobookId.HasValue))
+        {
+            throw new InvalidOperationException(
+                "Only an anonymous uncommitted registration publication can be rolled back.");
         }
         if (journal.State == FileMutationJournalState.NeedsAttention
             && state != FileMutationJournalState.NeedsAttention)

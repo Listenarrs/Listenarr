@@ -10,6 +10,7 @@ internal interface ICompatibilityFilePublicationRecoveryService
 
 internal sealed class CompatibilityFilePublicationRecoveryService(
     IDbContextFactory<ListenArrDbContext> dbContextFactory,
+    ICompatibilitySourceCleanupCoordinator compatibilitySourceCleanupCoordinator,
     TimeProvider timeProvider,
     ILogger<CompatibilityFilePublicationRecoveryService> logger)
     : ICompatibilityFilePublicationRecoveryService
@@ -34,6 +35,8 @@ internal sealed class CompatibilityFilePublicationRecoveryService(
             cancellationToken.ThrowIfCancellationRequested();
             await ReconcileOperationAsync(operationId, cancellationToken);
         }
+
+        await RecoverManifestedBatchesAsync(cancellationToken);
     }
 
     private async Task ReconcileOperationAsync(
@@ -123,9 +126,20 @@ internal sealed class CompatibilityFilePublicationRecoveryService(
                     == CompatibilityFilePublicationProtocol.Current
                 && journal.CleanupOwner != CompatibilityCleanupOwner.None)
             {
-                // The original batch must decide whether every publication succeeded.
-                // Startup recovery cannot reconstruct that manifest, so it revokes
-                // destructive authority and completes retain-only.
+                if (journal.BatchId.HasValue
+                    && journal.ExpectedBatchMemberCount.HasValue
+                    && !string.IsNullOrWhiteSpace(
+                        journal.ExpectedBatchSourceManifestSha256))
+                {
+                    // A sealed manifest can be revalidated after every operation-level
+                    // recovery pass completes. Leave this journal committed so the
+                    // batch coordinator can decide the whole batch atomically.
+                    return;
+                }
+
+                // Released verified-cleanup journals predate persisted manifests.
+                // Without a durable expected-member set, startup cannot prove that
+                // another source should have produced a journal, so fail closed.
                 journal.SourceDisposition = CompatibilitySourceDisposition.Retained;
                 journal.State = CompatibilityFilePublicationState.Completed;
                 journal.Error = "Interrupted compatibility batch recovered retain-only.";
@@ -145,6 +159,73 @@ internal sealed class CompatibilityFilePublicationRecoveryService(
 
         journal.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
         await context.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task RecoverManifestedBatchesAsync(
+        CancellationToken cancellationToken)
+    {
+        await using var context = await dbContextFactory.CreateDbContextAsync(
+            cancellationToken);
+        var batchIds = await context.CompatibilityFilePublicationJournals
+            .AsNoTracking()
+            .Where(journal =>
+                journal.BatchId.HasValue
+                && journal.State == CompatibilityFilePublicationState.RegistrationCommitted
+                && journal.CleanupOwner != CompatibilityCleanupOwner.None
+                && journal.ExpectedBatchMemberCount.HasValue
+                && journal.ExpectedBatchSourceManifestSha256 != null)
+            .Select(journal => journal.BatchId!.Value)
+            .Distinct()
+            .OrderBy(batchId => batchId)
+            .ToListAsync(cancellationToken);
+
+        foreach (var batchId in batchIds)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var journals = await context.CompatibilityFilePublicationJournals
+                .AsNoTracking()
+                .Where(journal => journal.BatchId == batchId)
+                .ToListAsync(cancellationToken);
+            var incompleteSealedBatch = journals.Count > 0
+                && journals.All(journal =>
+                    journal.ExpectedBatchMemberCount.HasValue
+                    && journal.ExpectedBatchMemberCount.Value > 0
+                    && !string.IsNullOrWhiteSpace(
+                        journal.ExpectedBatchSourceManifestSha256))
+                && journals.Select(journal => journal.ExpectedBatchMemberCount!.Value)
+                    .Distinct()
+                    .Count() == 1
+                && journals.Select(journal => journal.ExpectedBatchSourceManifestSha256)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Count() == 1
+                && journals[0].ExpectedBatchMemberCount!.Value > journals.Count;
+            if (incompleteSealedBatch)
+            {
+                logger.LogInformation(
+                    "Manifested compatibility batch {BatchId} is incomplete at startup ({ObservedCount}/{ExpectedCount}); leaving committed members pending for retry",
+                    batchId,
+                    journals.Count,
+                    journals[0].ExpectedBatchMemberCount!.Value);
+                continue;
+            }
+
+            try
+            {
+                await compatibilitySourceCleanupCoordinator.CompleteBatchAsync(
+                    batchId,
+                    batchSucceeded: true,
+                    cancellationToken);
+            }
+            catch (Exception exception) when (exception is not (
+                OperationCanceledException or OutOfMemoryException
+                    or StackOverflowException))
+            {
+                logger.LogWarning(
+                    exception,
+                    "Manifested compatibility batch {BatchId} could not be recovered",
+                    batchId);
+            }
+        }
     }
 
     private void ReconcileInterruptedCleanup(

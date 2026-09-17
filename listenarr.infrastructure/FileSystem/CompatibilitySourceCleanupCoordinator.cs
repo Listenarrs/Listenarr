@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Listenarr.Domain.Audiobooks.Enumerations;
 using Listenarr.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -43,12 +42,52 @@ public sealed partial class CompatibilitySourceCleanupCoordinator(
                 CompatibilityBatchCleanupDisposition.NotApplicable);
         }
 
+        if (journals.All(journal =>
+                journal.State == CompatibilityFilePublicationState.Completed))
+        {
+            if (journals.All(journal =>
+                    journal.ProtocolVersion == CompatibilityFilePublicationProtocol.Current
+                    && journal.RequestedAction == FileAction.Move
+                    && journal.CleanupOwner == CompatibilityCleanupOwner.DownloadClient
+                    && journal.SourceDisposition
+                        == CompatibilitySourceDisposition.DeferredToDownloadClient)
+                && HasPersistedBatchManifest(journals)
+                && BatchManifestMatches(journals)
+                && await PoliciesStillAuthorizeAsync(
+                    context,
+                    journals,
+                    cancellationToken)
+                && journals.All(journal => ContentMatches(
+                    journal.DestinationPath,
+                    journal.TargetLength ?? journal.SourceLength,
+                    journal.TargetSha256 ?? journal.SourceSha256)))
+            {
+                return new CompatibilityBatchCleanupResult(
+                    CompatibilityBatchCleanupDisposition.DeferredToDownloadClient,
+                    RetainedCount: journals.Count);
+            }
+
+            if (journals.All(journal =>
+                    journal.SourceDisposition
+                        == CompatibilitySourceDisposition.RetiredByListenarr))
+            {
+                return new CompatibilityBatchCleanupResult(
+                    CompatibilityBatchCleanupDisposition.RetiredByListenarr,
+                    RemovedCount: journals.Count);
+            }
+
+            return new CompatibilityBatchCleanupResult(
+                CompatibilityBatchCleanupDisposition.Retained,
+                RetainedCount: journals.Count);
+        }
+
         if (!batchSucceeded
             || journals.Any(journal =>
                 journal.ProtocolVersion != CompatibilityFilePublicationProtocol.Current
                 || journal.State != CompatibilityFilePublicationState.RegistrationCommitted
                 || journal.RequestedAction != FileAction.Move
                 || journal.CleanupOwner == CompatibilityCleanupOwner.None)
+            || !BatchManifestMatches(journals)
             || !await PoliciesStillAuthorizeAsync(context, journals, cancellationToken)
             || journals.Any(journal => !ContentMatches(
                 journal.DestinationPath,
@@ -434,56 +473,6 @@ public sealed partial class CompatibilitySourceCleanupCoordinator(
         {
             TryRemoveEmptyOwnedQuarantine(quarantineDirectory!, batchId);
         }
-    }
-
-    private void TryRemoveEmptyOwnedQuarantine(string path, Guid batchId)
-    {
-        try
-        {
-            var markerPath = Path.Join(path, OwnershipMarkerName);
-            var expectedMarker = JsonSerializer.Serialize(new
-            {
-                ProtocolVersion = CompatibilityFilePublicationProtocol.Current,
-                BatchId = batchId
-            });
-            if (!File.Exists(markerPath)
-                || !string.Equals(
-                    File.ReadAllText(markerPath),
-                    expectedMarker,
-                    StringComparison.Ordinal)
-                || Directory.EnumerateFileSystemEntries(path)
-                    .Any(entry => !string.Equals(entry, markerPath, StringComparison.Ordinal)))
-            {
-                return;
-            }
-
-            File.Delete(markerPath);
-            Directory.Delete(path, recursive: false);
-        }
-        catch (Exception exception) when (exception is not (
-            OutOfMemoryException or StackOverflowException))
-        {
-            logger.LogDebug(
-                exception,
-                "Could not remove empty compatibility quarantine {QuarantinePath}",
-                path);
-        }
-    }
-
-    private async Task RetainBatchAsync(
-        ListenArrDbContext context,
-        IReadOnlyCollection<CompatibilityFilePublicationJournal> journals,
-        CancellationToken cancellationToken)
-    {
-        foreach (var journal in journals.Where(journal =>
-            journal.State == CompatibilityFilePublicationState.RegistrationCommitted))
-        {
-            journal.SourceDisposition = CompatibilitySourceDisposition.Retained;
-            journal.State = CompatibilityFilePublicationState.Completed;
-            journal.Error = null;
-            journal.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
-        }
-        await context.SaveChangesAsync(cancellationToken);
     }
 
 }

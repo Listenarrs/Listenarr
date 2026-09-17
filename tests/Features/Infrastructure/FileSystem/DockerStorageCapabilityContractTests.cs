@@ -6,6 +6,154 @@ namespace Listenarr.Tests.Features.Infrastructure.FileSystem;
 [Trait("Category", "Infrastructure")]
 public sealed class DockerStorageCapabilityContractTests : BaseTests
 {
+    [NativeStorageIdentityFact]
+    public async Task MountedStorage_IdentityCapability_MatchesDeclaredNativeExpectation()
+    {
+        var path = Environment.GetEnvironmentVariable(
+            NativeStorageIdentityFactAttribute.PathEnvironmentVariable)!;
+        var expectation = Environment.GetEnvironmentVariable(
+            NativeStorageIdentityFactAttribute.ExpectationEnvironmentVariable)!;
+
+        Directory.CreateDirectory(path);
+        var resolver = new DirectoryObjectIdentityResolver();
+        var resolution = await resolver.ResolveAsync(path);
+
+        switch (expectation.Trim().ToLowerInvariant())
+        {
+            case "durable":
+                Assert.True(resolution.IsAvailable, resolution.UnavailableReason);
+                break;
+            case "unsupported":
+                Assert.False(resolution.IsAvailable);
+                Assert.Equal(
+                    DirectoryObjectIdentityFailureKind.IdentityUnsupported,
+                    resolution.FailureKind);
+                break;
+            case "generic-fid":
+                Assert.False(resolution.IsAvailable);
+                Assert.Equal(
+                    DirectoryObjectIdentityFailureKind.IdentityUnsupported,
+                    resolution.FailureKind);
+                string persistedWeakIdentity;
+                using (var anchor = PinnedDirectoryCreation.OpenPinnedBoundary(path))
+                {
+                    var weakCandidates =
+                        anchor.GetLegacyWeakDirectoryObjectIdentityCandidates();
+                    persistedWeakIdentity = Assert.Single(
+                        weakCandidates,
+                        candidate => candidate.StartsWith(
+                                "linux-generation:",
+                                StringComparison.Ordinal)
+                            && candidate.Contains(
+                                ":fh:00000081:",
+                                StringComparison.Ordinal));
+                }
+
+                var legacyResolution = await resolver.ResolveExistingAsync(
+                    path,
+                    ManagedDirectoryIdentity.CurrentVersion,
+                    ManagedDirectoryIdentity.CreateMarkerless(persistedWeakIdentity));
+                Assert.False(legacyResolution.IsAvailable);
+                Assert.Equal(
+                    DirectoryObjectIdentityFailureKind.LegacyWeakIdentity,
+                    legacyResolution.FailureKind);
+                break;
+            default:
+                throw new InvalidOperationException(
+                    $"Unknown native storage identity expectation '{expectation}'.");
+        }
+    }
+
+    [NativeStorageRemountFact]
+    public async Task MountedStorage_IdentityClassification_SurvivesDeclaredRemount()
+    {
+        var path = Environment.GetEnvironmentVariable(
+            NativeStorageRemountFactAttribute.PathEnvironmentVariable)!;
+        var statePath = Environment.GetEnvironmentVariable(
+            NativeStorageRemountFactAttribute.StatePathEnvironmentVariable)!;
+        var phase = Environment.GetEnvironmentVariable(
+            NativeStorageRemountFactAttribute.PhaseEnvironmentVariable)!;
+        var expectation = Environment.GetEnvironmentVariable(
+            NativeStorageRemountFactAttribute.ExpectationEnvironmentVariable)!;
+
+        Directory.CreateDirectory(path);
+        var resolver = new DirectoryObjectIdentityResolver();
+        switch (phase.Trim().ToLowerInvariant())
+        {
+            case "capture":
+                {
+                    var persistedValue = expectation.Trim().ToLowerInvariant() switch
+                    {
+                        "durable" => await CaptureDurableManagedIdentityAsync(resolver, path),
+                        "generic-fid" => CaptureWeakManagedIdentity(path),
+                        _ => throw new InvalidOperationException(
+                            $"Unknown native storage identity expectation '{expectation}'.")
+                    };
+                    Directory.CreateDirectory(Path.GetDirectoryName(statePath)!);
+                    await File.WriteAllLinesAsync(
+                        statePath,
+                        [
+                            ManagedDirectoryIdentity.CurrentVersion.ToString(),
+                            persistedValue,
+                            expectation.Trim().ToLowerInvariant()
+                        ]);
+                    break;
+                }
+            case "verify":
+                {
+                    var persisted = await File.ReadAllLinesAsync(statePath);
+                    Assert.Equal(3, persisted.Length);
+                    var resolution = await resolver.ResolveExistingAsync(
+                        path,
+                        int.Parse(persisted[0]),
+                        persisted[1]);
+                    switch (persisted[2])
+                    {
+                        case "durable":
+                            Assert.True(resolution.IsAvailable, resolution.UnavailableReason);
+                            break;
+                        case "generic-fid":
+                            Assert.False(resolution.IsAvailable);
+                            Assert.Equal(
+                                DirectoryObjectIdentityFailureKind.LegacyWeakIdentity,
+                                resolution.FailureKind);
+                            break;
+                        default:
+                            throw new InvalidOperationException(
+                                $"Unknown persisted native storage identity expectation '{persisted[2]}'.");
+                    }
+                    break;
+                }
+            default:
+                throw new InvalidOperationException(
+                    $"Unknown native storage identity phase '{phase}'.");
+        }
+    }
+
+    private static async Task<string> CaptureDurableManagedIdentityAsync(
+        DirectoryObjectIdentityResolver resolver,
+        string path)
+    {
+        var resolution = await resolver.ResolveAsync(path);
+        Assert.True(resolution.IsAvailable, resolution.UnavailableReason);
+        Assert.Equal(ManagedDirectoryIdentity.CurrentVersion, resolution.Version);
+        return Assert.IsType<string>(resolution.Value);
+    }
+
+    private static string CaptureWeakManagedIdentity(string path)
+    {
+        using var anchor = PinnedDirectoryCreation.OpenPinnedBoundary(path);
+        var weakIdentity = Assert.Single(
+            anchor.GetLegacyWeakDirectoryObjectIdentityCandidates(),
+            candidate => candidate.StartsWith(
+                    "linux-generation:",
+                    StringComparison.Ordinal)
+                && candidate.Contains(
+                    ":fh:00000081:",
+                    StringComparison.Ordinal));
+        return ManagedDirectoryIdentity.CreateMarkerless(weakIdentity);
+    }
+
     [Fact]
     public void Restart_StrongFileHandleThenBirthTimeOnly_FailsClosedRatherThanDowngradingAuthority()
     {

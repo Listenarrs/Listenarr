@@ -1,7 +1,9 @@
 
 namespace Listenarr.Application.Downloads.Contracts
 {
-    public sealed record DownloadImportOptions(bool ForceArchiveExtraction = false);
+    public sealed record DownloadImportOptions(
+        bool ForceArchiveExtraction = false,
+        Guid? CompatibilityBatchId = null);
 
     /// <summary>
     /// Download import responsible for processing a given download importation

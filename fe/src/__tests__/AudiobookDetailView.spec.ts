@@ -23,7 +23,6 @@ import { useLibraryStore } from '@/stores/library'
 import { useScanNotificationsStore } from '@/stores/scanNotifications'
 import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import { apiService, ensureImageCached } from '@/services/api'
-import { signalRService } from '@/services/signalr'
 import AudiobookDetailViewCmp from '@/views/library/AudiobookDetailView.vue'
 const routerPushMock = vi.fn()
 // Mock useRoute to provide params for the detail view
@@ -38,6 +37,7 @@ vi.mock('@/services/api', () => ({
     getImageUrl: vi.fn((url: string) => url || 'https://via.placeholder.com/300x450?text=No+Image'),
     getQualityProfiles: vi.fn(async () => []),
     getLibrary: vi.fn(async () => []),
+    getAudiobook: vi.fn(async () => undefined),
     scanAudiobook: vi.fn(),
     getWeakStorageMissingFiles: vi.fn(async () => ({ items: [] })),
     confirmWeakStorageMissingFiles: vi.fn(),
@@ -329,10 +329,7 @@ describe('AudiobookDetailView image recache behavior', () => {
     const wrapper = mount(AudiobookDetailViewCmp, { global: { plugins: [pinia] } })
     await new Promise((resolve) => setTimeout(resolve, 10))
 
-    const scanCallback = vi.mocked(signalRService.onScanJobUpdate).mock.calls[0]?.[0] as
-      | ((job: { audiobookId: number; status: string }) => void)
-      | undefined
-    expect(scanCallback).toBeDefined()
+    const scanNotificationsStore = useScanNotificationsStore()
 
     let resolveOlder!: (value: {
       scanToken: string
@@ -349,8 +346,19 @@ describe('AudiobookDetailView image recache behavior', () => {
       .mockImplementationOnce(() => older)
       .mockImplementationOnce(() => newer)
 
-    scanCallback!({ audiobookId: 5, status: 'Completed' })
-    scanCallback!({ audiobookId: 5, status: 'Completed' })
+    scanNotificationsStore.registerManualScan('older-scan', 5)
+    scanNotificationsStore.applyUpdate({
+      jobId: 'older-scan',
+      audiobookId: 5,
+      status: 'Completed',
+    })
+    await new Promise((resolve) => setTimeout(resolve, 2))
+    scanNotificationsStore.registerManualScan('newer-scan', 5)
+    scanNotificationsStore.applyUpdate({
+      jobId: 'newer-scan',
+      audiobookId: 5,
+      status: 'Completed',
+    })
 
     resolveNewer({
       scanToken: 'new-token',

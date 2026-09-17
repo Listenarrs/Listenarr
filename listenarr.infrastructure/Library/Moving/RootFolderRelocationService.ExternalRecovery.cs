@@ -161,26 +161,30 @@ public sealed partial class RootFolderRelocationService
             sourcePath,
             sourceMode,
             cancellationToken);
-        if (sourceSemantics.HasValue
-            && await _fileRegistrationRecoveryProbe.HasBlockingBoundaryAsync(
+        var sourceBlocker = sourceSemantics.HasValue
+            ? (await _fileRegistrationRecoveryProbe.GetBlockingBoundaryAsync(
                 sourcePath,
                 sourceSemantics.Value,
-                cancellationToken))
+                cancellationToken)).FirstOrDefault()
+            : null;
+        if (sourceBlocker != null)
         {
-            return RegistrationBoundaryConflict(sourcePath);
+            return RegistrationBoundaryConflict(sourcePath, sourceBlocker);
         }
 
         var targetSemantics = await ResolveRecoveryBoundarySemanticsAsync(
             targetPath,
             targetMode,
             cancellationToken);
-        if (targetSemantics.HasValue
-            && await _fileRegistrationRecoveryProbe.HasBlockingBoundaryAsync(
+        var targetBlocker = targetSemantics.HasValue
+            ? (await _fileRegistrationRecoveryProbe.GetBlockingBoundaryAsync(
                 targetPath,
                 targetSemantics.Value,
-                cancellationToken))
+                cancellationToken)).FirstOrDefault()
+            : null;
+        if (targetBlocker != null)
         {
-            return RegistrationBoundaryConflict(targetPath);
+            return RegistrationBoundaryConflict(targetPath, targetBlocker);
         }
 
         return null;
@@ -244,18 +248,26 @@ public sealed partial class RootFolderRelocationService
         var sourceSemantics =
             sourcePathSemantics.MetadataSourcePathSemantics?.Semantics
             ?? sourcePathSemantics.SourceOperationSemantics;
-        if (_fileRegistrationRecoveryProbe != null
-            && ((sourceSemantics.HasValue
-                    && await _fileRegistrationRecoveryProbe.HasBlockingBoundaryAsync(
+        FileRegistrationRecoveryBlocker? registrationBlocker = null;
+        if (_fileRegistrationRecoveryProbe != null)
+        {
+            if (sourceSemantics.HasValue)
+            {
+                registrationBlocker = (await _fileRegistrationRecoveryProbe
+                    .GetBlockingBoundaryAsync(
                         root.Path,
                         sourceSemantics.Value,
-                        cancellationToken))
-                || await _fileRegistrationRecoveryProbe.HasBlockingBoundaryAsync(
+                        cancellationToken)).FirstOrDefault();
+            }
+            registrationBlocker ??= (await _fileRegistrationRecoveryProbe
+                .GetBlockingBoundaryAsync(
                     targetPath,
                     targetResolution.Semantics,
-                    cancellationToken)))
+                    cancellationToken)).FirstOrDefault();
+        }
+        if (registrationBlocker != null)
         {
-            var conflict = RegistrationBoundaryConflict(root.Path);
+            var conflict = RegistrationBoundaryConflict(root.Path, registrationBlocker);
             throw new RootFolderPathChangeRejectedException(
                 conflict.Code,
                 conflict.PublicMessage,
@@ -276,11 +288,13 @@ public sealed partial class RootFolderRelocationService
         return targetIdentityKey;
     }
 
-    private static ExternalRecoveryConflict RegistrationBoundaryConflict(string path) =>
+    private static ExternalRecoveryConflict RegistrationBoundaryConflict(
+        string path,
+        FileRegistrationRecoveryBlocker blocker) =>
         new(
             "registration_recovery_pending",
-            "An unresolved file publication still owns a path under this root. Complete file-registration recovery before changing the root folder path.",
-            $"File-registration recovery touches relocation boundary {LogRedaction.SanitizeFilePath(path)}.");
+            $"File publication {blocker.OperationId} is in state {blocker.JournalState}. Complete file-registration recovery before changing the root folder path.",
+            $"File-registration recovery {blocker.OperationId} touches relocation boundary {LogRedaction.SanitizeFilePath(path)}.");
 
     private static async Task<ExternalRecoveryConflict?>
         FindExternalRecoveryConflictAsync(
@@ -298,8 +312,11 @@ public sealed partial class RootFolderRelocationService
             .Where(journal => journal.AudiobookId != null
                 && audiobookIds.Contains(journal.AudiobookId.Value)
                 && journal.AudiobookFileId == null
-                && journal.Action == FileAction.Move
-                && journal.State != FileMutationJournalState.Completed)
+                && (journal.Action == FileAction.Move
+                    || journal.Action == FileAction.Copy
+                    || journal.Action == FileAction.HardlinkCopy)
+                && journal.State != FileMutationJournalState.Completed
+                && journal.State != FileMutationJournalState.RolledBack)
             .Select(journal => journal.AudiobookId)
             .FirstOrDefaultAsync(cancellationToken);
         if (registrationOwnerId.HasValue)

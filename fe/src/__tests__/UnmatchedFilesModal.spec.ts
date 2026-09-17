@@ -111,4 +111,113 @@ describe('UnmatchedFilesModal filesystem readiness', () => {
     expect(document.body.querySelector('add-library-modal-stub')).toBeNull()
     wrapper.unmount()
   })
+
+  it('shows cached partial-scan warnings even when no unmatched items were found', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useFilesystemReadinessStore().readiness = {
+      isReady: true,
+      status: 'ready',
+      databaseConnected: true,
+      migrationsCurrent: true,
+      errorCode: null,
+      filesystemReady: true,
+      filesystemStatus: 'Ready',
+      filesystemPhase: null,
+      filesystemErrorCode: null,
+      filesystemErrorMessage: null,
+    }
+    vi.mocked(apiService.getSavedUnmatchedFiles).mockResolvedValueOnce({
+      items: [],
+      lastScannedAt: new Date().toISOString(),
+      warnings: ['One path could not be read and was skipped.'],
+    })
+    const rootFolder = {
+      id: 7,
+      name: 'Library',
+      path: 'C:\\library',
+      isDefault: true,
+    } as unknown as RootFolder
+
+    const wrapper = mount(UnmatchedFilesModal, {
+      props: { isOpen: false, rootFolder },
+      attachTo: document.body,
+      global: { plugins: [pinia], stubs: { AddLibraryModal: true } },
+    })
+    await wrapper.setProps({ isOpen: true })
+    await flushPromises()
+
+    expect(document.body.textContent).toContain('One path could not be read and was skipped.')
+    expect(document.body.textContent).toContain('All files are in your library')
+    wrapper.unmount()
+  })
+
+  it('polls a scan to completion when the SignalR terminal event is missed', async () => {
+    vi.useFakeTimers()
+    try {
+      const pinia = createPinia()
+      setActivePinia(pinia)
+      useFilesystemReadinessStore().readiness = {
+        isReady: true,
+        status: 'ready',
+        databaseConnected: true,
+        migrationsCurrent: true,
+        errorCode: null,
+        filesystemReady: true,
+        filesystemStatus: 'Ready',
+        filesystemPhase: null,
+        filesystemErrorCode: null,
+        filesystemErrorMessage: null,
+      }
+      vi.mocked(apiService.getSavedUnmatchedFiles).mockResolvedValueOnce({
+        items: [],
+        lastScannedAt: undefined,
+        warnings: [],
+      })
+      vi.mocked(apiService.scanUnmatchedFiles).mockResolvedValueOnce({ jobId: 'scan-job-7' })
+      vi.mocked(apiService.getUnmatchedResults)
+        .mockResolvedValueOnce({
+          jobId: 'scan-job-7',
+          status: 'Processing',
+          items: [],
+          warnings: [],
+        })
+        .mockResolvedValue({
+          jobId: 'scan-job-7',
+          status: 'Completed',
+          items: [],
+          warnings: ['One path could not be read and was skipped.'],
+        })
+      const rootFolder = {
+        id: 7,
+        name: 'Library',
+        path: 'C:\\library',
+        isDefault: true,
+      } as unknown as RootFolder
+
+      const wrapper = mount(UnmatchedFilesModal, {
+        props: { isOpen: false, rootFolder },
+        attachTo: document.body,
+        global: { plugins: [pinia], stubs: { AddLibraryModal: true } },
+      })
+      await wrapper.setProps({ isOpen: true })
+      await flushPromises()
+      const scan = Array.from(document.body.querySelectorAll('button')).find(
+        (button) => button.textContent?.trim() === 'Scan',
+      )
+      expect(scan).toBeTruthy()
+      scan!.click()
+      await flushPromises()
+      expect(document.body.textContent).toContain('Scanning')
+
+      await vi.advanceTimersByTimeAsync(2500)
+      await flushPromises()
+
+      expect(document.body.textContent).toContain('All files are in your library')
+      expect(document.body.textContent).toContain('One path could not be read and was skipped.')
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

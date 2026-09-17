@@ -70,6 +70,12 @@ internal sealed class LibraryFilesystemStartupReconciliationService(
                 static (service, token) => service.ReconcileAsync(token),
                 stoppingToken);
 
+            phase = "VerifiedFileRenameRecovery";
+            readiness.MarkRunning(phase);
+            await RunScopedAsync<IVerifiedFileRenameRecoveryService>(
+                static (service, token) => service.ReconcileAsync(token),
+                stoppingToken);
+
             phase = "FileRenameRecovery";
             readiness.MarkRunning(phase);
             await RunScopedAsync<IFileRenameRecoveryReconciler>(

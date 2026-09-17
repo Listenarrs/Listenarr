@@ -53,6 +53,36 @@ public sealed class CompatibilitySourceCleanupCoordinatorTests : BaseTests
     }
 
     [Fact]
+    public async Task CompleteBatchAsync_ManifestExpectsMissingMember_RetainsExistingSource()
+    {
+        var scenario = await CreateScenarioAsync(CompatibilityCleanupOwner.DownloadClient);
+        var missingSource = Path.Join(
+            Path.GetDirectoryName(scenario.Source)!,
+            "source-never-published.m4b");
+        var manifest = CompatibilityBatchManifest.Create(
+            [scenario.Source, missingSource]);
+        await using (var db = await scenario.Factory.CreateDbContextAsync())
+        {
+            var journal = await db.CompatibilityFilePublicationJournals
+                .SingleAsync(candidate => candidate.OperationId == scenario.OperationId);
+            journal.ExpectedBatchMemberCount = manifest.ExpectedMemberCount;
+            journal.ExpectedBatchSourceManifestSha256 = manifest.SourceManifestSha256;
+            await db.SaveChangesAsync();
+        }
+        var service = CreateService(scenario.Factory);
+
+        var result = await service.CompleteBatchAsync(
+            scenario.BatchId,
+            batchSucceeded: true);
+
+        Assert.Equal(CompatibilityBatchCleanupDisposition.Retained, result.Disposition);
+        Assert.True(File.Exists(scenario.Source));
+        var retained = await LoadJournalAsync(scenario);
+        Assert.Equal(CompatibilityFilePublicationState.Completed, retained.State);
+        Assert.Equal(CompatibilitySourceDisposition.Retained, retained.SourceDisposition);
+    }
+
+    [Fact]
     public async Task CompleteBatchAsync_ChangedPolicyRevision_RetainsSource()
     {
         var scenario = await CreateScenarioAsync(CompatibilityCleanupOwner.Listenarr);

@@ -403,6 +403,109 @@ public sealed class FileMutationJournalStoreTests : BaseTests
                 CancellationToken.None));
     }
 
+    [Fact]
+    public async Task AdvanceAsync_RollbackCannotClaimCommittedRegistration()
+    {
+        var operationId = Guid.NewGuid();
+        var store = CreateStore();
+        await store.GetOrCreateAsync(CreateClaim(operationId), CancellationToken.None);
+        await store.AdvanceAsync(operationId, FileMutationJournalState.TargetVerified,
+            "target-generation", null, null, CancellationToken.None);
+        await store.AdvanceAsync(operationId, FileMutationJournalState.RegistrationCommitted,
+            "target-generation", 42, null, CancellationToken.None);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.AdvanceAsync(operationId, FileMutationJournalState.RollbackAuthorized,
+                "target-generation", null, null, CancellationToken.None));
+
+        var persisted = await store.GetAsync(operationId, CancellationToken.None);
+        Assert.NotNull(persisted);
+        Assert.Equal(FileMutationJournalState.RegistrationCommitted, persisted.State);
+        Assert.Equal(42, persisted.AudiobookId);
+    }
+
+    [Fact]
+    public async Task AdvanceAsync_RollbackAuthorizationCannotAttachOwner()
+    {
+        var operationId = Guid.NewGuid();
+        var store = CreateStore();
+        await store.GetOrCreateAsync(CreateClaim(operationId), CancellationToken.None);
+        await store.AdvanceAsync(operationId,
+            FileMutationJournalState.TargetVerified,
+            "target-generation", null, null, CancellationToken.None);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.AdvanceAsync(operationId,
+                FileMutationJournalState.RollbackAuthorized,
+                "target-generation", 42, null, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task AdvanceAsync_RolledBackCannotAttachOwner()
+    {
+        var operationId = Guid.NewGuid();
+        var store = CreateStore();
+        await store.GetOrCreateAsync(CreateClaim(operationId), CancellationToken.None);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.AdvanceAsync(operationId,
+                FileMutationJournalState.RolledBack,
+                targetPhysicalObjectIdentity: null,
+                audiobookId: 42,
+                error: "No target was published.",
+                CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task AdvanceAsync_PlannedRegistrationCanCloseWhenNoTargetWasPublished()
+    {
+        var operationId = Guid.NewGuid();
+        var store = CreateStore();
+        await store.GetOrCreateAsync(CreateClaim(operationId), CancellationToken.None);
+
+        var rolledBack = await store.AdvanceAsync(operationId,
+            FileMutationJournalState.RolledBack, null, null,
+            "No target was published.", CancellationToken.None);
+
+        Assert.Equal(FileMutationJournalState.RolledBack, rolledBack.State);
+        Assert.Null(rolledBack.TargetPhysicalObjectIdentity);
+    }
+
+    [Fact]
+    public async Task AdvanceAsync_PersistedTargetGenerationCanAuthorizeRollback()
+    {
+        var operationId = Guid.NewGuid();
+        var store = CreateStore();
+        await store.GetOrCreateAsync(CreateClaim(operationId), CancellationToken.None);
+        await store.AdvanceAsync(operationId,
+            FileMutationJournalState.TargetIdentityPersisted,
+            "target-generation", null, null, CancellationToken.None);
+
+        var authorized = await store.AdvanceAsync(operationId,
+            FileMutationJournalState.RollbackAuthorized,
+            "target-generation", null, "Exact target generation proved.",
+            CancellationToken.None);
+
+        Assert.Equal(FileMutationJournalState.RollbackAuthorized, authorized.State);
+    }
+
+    [Fact]
+    public async Task AdvanceAsync_RolledBackRegistrationIsTerminal()
+    {
+        var operationId = Guid.NewGuid();
+        var store = CreateStore();
+        await store.GetOrCreateAsync(CreateClaim(operationId), CancellationToken.None);
+        await store.AdvanceAsync(operationId, FileMutationJournalState.TargetVerified,
+            "target-generation", null, null, CancellationToken.None);
+        await store.AdvanceAsync(operationId, FileMutationJournalState.RollbackAuthorized,
+            "target-generation", null, null, CancellationToken.None);
+        await store.AdvanceAsync(operationId, FileMutationJournalState.RolledBack,
+            "target-generation", null, null, CancellationToken.None);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.AdvanceAsync(operationId, FileMutationJournalState.NeedsAttention,
+                "target-generation", null, "stale writer", CancellationToken.None));
+    }
     private EfFileMutationJournalStore CreateStore() =>
         CreateStore(_provider.GetRequiredService<
             IDbContextFactory<ListenArrDbContext>>());

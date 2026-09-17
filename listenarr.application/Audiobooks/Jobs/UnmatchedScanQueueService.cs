@@ -59,13 +59,19 @@ namespace Listenarr.Application.Audiobooks.Jobs
         public string Status { get; set; } = "Queued";
         public string? Error { get; set; }
         public List<UnmatchedFileResult>? Results { get; set; }
+        public List<string> Warnings { get; set; } = new();
     }
 
     public interface IUnmatchedScanQueueService
     {
         Task<Guid> EnqueueAsync(string rootFolderPath);
         bool TryGetJob(Guid id, out UnmatchedScanJob? job);
-        void UpdateJob(Guid id, string status, List<UnmatchedFileResult>? results = null, string? error = null);
+        void UpdateJob(
+            Guid id,
+            string status,
+            List<UnmatchedFileResult>? results = null,
+            string? error = null,
+            List<string>? warnings = null);
         bool TryGetLastJobForPath(string rootFolderPath, out UnmatchedScanJob? job);
         ChannelReader<UnmatchedScanJob> Reader { get; }
     }
@@ -129,15 +135,24 @@ namespace Listenarr.Application.Audiobooks.Jobs
 
         public bool TryGetJob(Guid id, out UnmatchedScanJob? job) => _jobs.TryGetValue(id, out job);
 
-        public void UpdateJob(Guid id, string status, List<UnmatchedFileResult>? results = null, string? error = null)
+        public void UpdateJob(
+            Guid id,
+            string status,
+            List<UnmatchedFileResult>? results = null,
+            string? error = null,
+            List<string>? warnings = null)
         {
             if (!_jobs.TryGetValue(id, out var job)) return;
             job.Status = status;
             job.Error = error;
             if (results != null) job.Results = results;
-            if (status == "Completed")
+            if (warnings != null) job.Warnings = warnings;
+            if (status is "Completed" or "Failed")
             {
                 job.CompletedAt = DateTime.UtcNow;
+            }
+            if (status == "Completed")
+            {
                 _lastJobByPath[job.RootFolderPath] = id;
             }
             _jobs[id] = job;

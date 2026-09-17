@@ -4,6 +4,56 @@ namespace Listenarr.Infrastructure.Persistence.Repositories;
 
 public partial class EfAudiobookFileRepository
 {
+    public async Task<bool> RestorePhysicalGenerationAsync(
+        int fileId,
+        int audiobookId,
+        string? expectedPath,
+        string? expectedPhysicalObjectIdentity,
+        AudiobookFilePhysicalGenerationSnapshot predecessor,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(predecessor);
+        var query = _db.AudiobookFiles.Where(candidate =>
+            candidate.Id == fileId
+            && candidate.AudiobookId == audiobookId
+            && candidate.Path == expectedPath
+            && candidate.PhysicalObjectIdentity == expectedPhysicalObjectIdentity);
+        if (_db.Database.IsRelational())
+        {
+            var completionToken = RequestCancellationBoundary.EnterNonCancelablePhase(ct);
+            var updated = await query.ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(candidate => candidate.Size, predecessor.Size)
+                    .SetProperty(candidate => candidate.DurationSeconds, predecessor.DurationSeconds)
+                    .SetProperty(candidate => candidate.Format, predecessor.Format)
+                    .SetProperty(candidate => candidate.Container, predecessor.Container)
+                    .SetProperty(candidate => candidate.Codec, predecessor.Codec)
+                    .SetProperty(candidate => candidate.Bitrate, predecessor.Bitrate)
+                    .SetProperty(candidate => candidate.SampleRate, predecessor.SampleRate)
+                    .SetProperty(candidate => candidate.Channels, predecessor.Channels)
+                    .SetProperty(candidate => candidate.Source, predecessor.Source)
+                    .SetProperty(candidate => candidate.PhysicalObjectIdentity, predecessor.PhysicalObjectIdentity)
+                    .SetProperty(candidate => candidate.PhysicalIdentityVersion, predecessor.PhysicalIdentityVersion)
+                    .SetProperty(candidate => candidate.PhysicalIdentityObservedAtUtc, predecessor.PhysicalIdentityObservedAtUtc),
+                completionToken);
+            if (updated != 1)
+            {
+                return false;
+            }
+            SynchronizeTrackedPhysicalGeneration(fileId, predecessor);
+            return true;
+        }
+
+        var existing = await query.SingleOrDefaultAsync(ct);
+        if (existing == null)
+        {
+            return false;
+        }
+        ApplyPhysicalGenerationSnapshot(existing, predecessor);
+        var nonRelationalCompletionToken = RequestCancellationBoundary.EnterNonCancelablePhase(ct);
+        await _db.SaveChangesAsync(nonRelationalCompletionToken);
+        return true;
+    }
     public async Task<bool> ReplacePhysicalGenerationAsync(
         int fileId,
         int audiobookId,
@@ -155,6 +205,57 @@ public partial class EfAudiobookFileRepository
         }
     }
 
+    private void SynchronizeTrackedPhysicalGeneration(
+        int fileId,
+        AudiobookFilePhysicalGenerationSnapshot snapshot)
+    {
+        var trackedEntry = _db.ChangeTracker.Entries<AudiobookFile>()
+            .FirstOrDefault(entry => entry.Entity.Id == fileId);
+        if (trackedEntry == null)
+        {
+            return;
+        }
+
+        Synchronize(nameof(AudiobookFile.Size), snapshot.Size);
+        Synchronize(nameof(AudiobookFile.DurationSeconds), snapshot.DurationSeconds);
+        Synchronize(nameof(AudiobookFile.Format), snapshot.Format);
+        Synchronize(nameof(AudiobookFile.Container), snapshot.Container);
+        Synchronize(nameof(AudiobookFile.Codec), snapshot.Codec);
+        Synchronize(nameof(AudiobookFile.Bitrate), snapshot.Bitrate);
+        Synchronize(nameof(AudiobookFile.SampleRate), snapshot.SampleRate);
+        Synchronize(nameof(AudiobookFile.Channels), snapshot.Channels);
+        Synchronize(nameof(AudiobookFile.Source), snapshot.Source);
+        Synchronize(nameof(AudiobookFile.PhysicalObjectIdentity), snapshot.PhysicalObjectIdentity);
+        Synchronize(nameof(AudiobookFile.PhysicalIdentityVersion), snapshot.PhysicalIdentityVersion);
+        Synchronize(nameof(AudiobookFile.PhysicalIdentityObservedAtUtc), snapshot.PhysicalIdentityObservedAtUtc);
+
+        void Synchronize(string propertyName, object? value)
+        {
+            var property = trackedEntry.Property(propertyName);
+            property.CurrentValue = value;
+            property.OriginalValue = value;
+            property.IsModified = false;
+        }
+    }
+
+    private void ApplyPhysicalGenerationSnapshot(
+        AudiobookFile target,
+        AudiobookFilePhysicalGenerationSnapshot snapshot)
+    {
+        target.Size = snapshot.Size;
+        target.DurationSeconds = snapshot.DurationSeconds;
+        target.Format = snapshot.Format;
+        target.Container = snapshot.Container;
+        target.Codec = snapshot.Codec;
+        target.Bitrate = snapshot.Bitrate;
+        target.SampleRate = snapshot.SampleRate;
+        target.Channels = snapshot.Channels;
+        target.Source = snapshot.Source;
+        var entry = _db.Entry(target);
+        entry.Property(nameof(AudiobookFile.PhysicalObjectIdentity)).CurrentValue = snapshot.PhysicalObjectIdentity;
+        entry.Property(nameof(AudiobookFile.PhysicalIdentityVersion)).CurrentValue = snapshot.PhysicalIdentityVersion;
+        entry.Property(nameof(AudiobookFile.PhysicalIdentityObservedAtUtc)).CurrentValue = snapshot.PhysicalIdentityObservedAtUtc;
+    }
     private static void ApplyPhysicalGeneration(
         AudiobookFile target,
         AudiobookFile source)

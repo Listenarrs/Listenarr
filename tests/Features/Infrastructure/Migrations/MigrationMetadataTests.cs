@@ -26,6 +26,20 @@ public class MigrationMetadataTests
     }
 
     [Fact]
+    public void AddCompatibilityBatchManifestMigration_IsDiscoverableByEf()
+    {
+        AssertMigrationId<AddCompatibilityBatchManifest>(
+            "20260830025709_AddCompatibilityBatchManifest");
+    }
+
+    [Fact]
+    public void AddVerifiedFileRenameJournalMigration_IsDiscoverableByEf()
+    {
+        AssertMigrationId<AddVerifiedFileRenameJournal>(
+            "20260901142347_AddVerifiedFileRenameJournal");
+    }
+
+    [Fact]
     public void AddImportBlacklistExtensionsMigration_IsDiscoverableByEf()
     {
         AssertMigrationId<AddImportBlacklistExtensionsToApplicationSettings>(

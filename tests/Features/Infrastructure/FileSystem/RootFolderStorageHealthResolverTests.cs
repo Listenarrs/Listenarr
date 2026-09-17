@@ -303,6 +303,44 @@ public sealed class RootFolderStorageHealthResolverTests : BaseTests
     }
 
     [Fact]
+    public async Task ResolveAsync_LegacyWeakIdentityWithoutCurrentStrongIdentity_RemainsLimitedWithoutConfirmation()
+    {
+        var path = Path.GetFullPath("root-storage-legacy-weak-unsupported-current");
+        var root = BuildRoot(path, identity: "legacy");
+        var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
+        identityResolver
+            .Setup(resolver => resolver.ResolveExistingAsync(
+                path,
+                ManagedDirectoryIdentity.CurrentVersion,
+                "legacy",
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DirectoryObjectIdentityResolution.Unavailable(
+                "Generic FILEID_INO64_GEN evidence is no longer durable authority.",
+                DirectoryObjectIdentityFailureKind.LegacyWeakIdentity));
+        identityResolver
+            .Setup(resolver => resolver.ResolveAsync(
+                path,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DirectoryObjectIdentityResolution.Unavailable(
+                "The filesystem does not expose a durable file handle or inode generation for this object.",
+                DirectoryObjectIdentityFailureKind.IdentityUnsupported));
+        var resolver = new RootFolderStorageHealthResolver(
+            identityResolver.Object,
+            readOnlyFileSystemProbe: _ => false);
+
+        var result = await resolver.ResolveAsync(root);
+
+        Assert.Equal(RootFolderStorageState.Limited, result.State);
+        Assert.Equal(RootFolderStorageReason.IdentityUnsupported, result.Reason);
+        Assert.True(result.CanReadFilesystem);
+        Assert.True(result.CanScanFilesystem);
+        Assert.False(result.CanMutateFilesystem);
+        Assert.False(result.CanConfirmCurrentFolder);
+        Assert.Null(result.ConfirmationToken);
+        identityResolver.VerifyAll();
+    }
+
+    [Fact]
     public async Task ResolveAsync_LegacyRootWithoutPersistedSemantics_ReturnsUnconfirmed()
     {
         var path = Path.GetFullPath("root-storage-legacy-unconfirmed");

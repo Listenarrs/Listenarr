@@ -1,9 +1,31 @@
 using Listenarr.Domain.Common;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Features.Library;
 
 public partial class RootFoldersController
 {
+    private ConflictObjectResult RegistrationRecoveryConflict(
+        FileRegistrationRecoveryBlocker blocker)
+    {
+        var canRetry = blocker.Recoverability is
+            FileRegistrationRecoveryDisposition.AutomaticRecovery
+            or FileRegistrationRecoveryDisposition.WaitingForOwnerRetry;
+        return Conflict(new
+        {
+            message = blocker.PublicReason,
+            code = "registration_recovery_pending",
+            operationId = blocker.OperationId,
+            audiobookId = blocker.AudiobookId,
+            journalState = blocker.JournalState.ToString(),
+            ownerKind = blocker.OwnerKind,
+            recoverability = blocker.Recoverability.ToString(),
+            canRetry,
+            canAbandon = false,
+            retryOperationId = canRetry ? blocker.OperationId : (Guid?)null
+        });
+    }
+
     private async Task<RootFolderDto> MapAsync(RootFolder root)
     {
         RootFolderPathChangeResult? active = null;

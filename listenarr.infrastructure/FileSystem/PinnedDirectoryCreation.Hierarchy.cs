@@ -155,6 +155,14 @@ internal sealed partial class PinnedDirectoryCreation
                 : [PinnedDirectoryCreation.GetDirectoryObjectIdentity(_handle)];
         }
 
+        internal IReadOnlyList<string> GetLegacyWeakDirectoryObjectIdentityCandidates()
+        {
+            ThrowIfDisposed();
+            return OperatingSystem.IsLinux()
+                ? PinnedDirectoryCreation.GetLinuxLegacyWeakObjectIdentityCandidates(_handle)
+                : Array.Empty<string>();
+        }
+
         internal bool MatchesManagedDirectoryIdentity(
             int? expectedVersion,
             string? expectedValue)

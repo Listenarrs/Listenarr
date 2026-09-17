@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using Listenarr.Tests.Common;
 using Microsoft.AspNetCore.SignalR;
 
@@ -277,6 +279,61 @@ namespace Listenarr.Tests.Features.Api.Services
             var result = Assert.Single(updatedJob.Results!);
             Assert.Equal(file, result.FullPath);
             Assert.Equal("M4B", result.Format);
+        }
+
+        [LinuxFact]
+        [SupportedOSPlatform("linux")]
+        public async Task UnmatchedScanProcessor_UnreadableChild_PreservesReadableResultsAndWarning()
+        {
+            Assert.NotEqual((uint)0, GetEffectiveUserId());
+
+            var root = FileService.GetTempDirectory("unmatched-processor-partial-root");
+            var readableDirectory = Path.Join(root, "Readable Book");
+            var unreadableDirectory = Path.Join(root, "Unreadable Book");
+            Directory.CreateDirectory(readableDirectory);
+            Directory.CreateDirectory(unreadableDirectory);
+            var readableFile = await FileService.GetFileAsync(
+                readableDirectory,
+                "Readable Book.m4b",
+                "audio");
+            await FileService.GetFileAsync(
+                unreadableDirectory,
+                "Unreadable Book.m4b",
+                "audio");
+            await AddAuthorizedRootAsync(root);
+            await CreateApplicationSettings();
+            var queue = new UnmatchedScanQueueService(
+                _provider.GetRequiredService<ILogger<UnmatchedScanQueueService>>(),
+                _provider.GetRequiredService<IFileSystemSemanticsResolver>());
+            CreateHubProxy<SettingsHub>(out var hubContext);
+            var processor = new UnmatchedScanProcessor(
+                queue,
+                _provider.GetRequiredService<IServiceScopeFactory>(),
+                _provider.GetRequiredService<ILogger<UnmatchedScanProcessor>>(),
+                hubContext.Object,
+                _provider.GetRequiredService<IFfmpegService>(),
+                _provider.GetRequiredService<IFileSystemSemanticsResolver>());
+            await queue.EnqueueAsync(root);
+            Assert.True(queue.Reader.TryRead(out var job));
+
+            var originalMode = File.GetUnixFileMode(unreadableDirectory);
+            File.SetUnixFileMode(unreadableDirectory, UnixFileMode.None);
+            try
+            {
+                await processor.ProcessJobAsync(job, CancellationToken.None);
+            }
+            finally
+            {
+                File.SetUnixFileMode(unreadableDirectory, originalMode);
+            }
+
+            Assert.True(queue.TryGetJob(job.Id, out var updatedJob));
+            Assert.Equal("Completed", updatedJob!.Status);
+            var result = Assert.Single(updatedJob.Results!);
+            Assert.Equal(readableFile, result.FullPath);
+            var warning = Assert.Single(updatedJob.Warnings);
+            Assert.Contains("could not be read", warning, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("preserved", warning, StringComparison.OrdinalIgnoreCase);
         }
 
         [Fact]
@@ -685,6 +742,9 @@ namespace Listenarr.Tests.Features.Api.Services
             Assert.Equal("Processing", updatedJob!.Status);
             Assert.Null(updatedJob.Results);
         }
+
+        [DllImport("libc", EntryPoint = "geteuid")]
+        private static extern uint GetEffectiveUserId();
 
         private static Mock<IClientProxy> CreateHubProxy<THub>(out Mock<IHubContext<THub>> hubContext)
             where THub : Hub

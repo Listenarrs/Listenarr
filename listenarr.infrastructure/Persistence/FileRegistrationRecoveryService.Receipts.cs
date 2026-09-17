@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Listenarr.Domain.Audiobooks.Enumerations;
 using Microsoft.EntityFrameworkCore;
 
 namespace Listenarr.Infrastructure.Persistence;
@@ -14,8 +15,9 @@ public sealed partial class FileRegistrationRecoveryService
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var completedJournals = await db.FileMutationJournals
             .AsNoTracking()
-            .Where(RegistrationMoveOwnerPredicate)
-            .Where(journal => journal.AudiobookId == audiobookId
+            .Where(RegistrationPublicationOwnerPredicate)
+            .Where(journal => journal.Action == FileAction.Move
+                && journal.AudiobookId == audiobookId
                 && journal.State == FileMutationJournalState.Completed)
             .OrderBy(journal => journal.CreatedAt)
             .ThenBy(journal => journal.OperationId)

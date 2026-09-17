@@ -1987,6 +1987,13 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                         .HasMaxLength(2048)
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("ExpectedBatchMemberCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ExpectedBatchSourceManifestSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("IsCompanionFile")
                         .HasColumnType("INTEGER");
 
@@ -2409,6 +2416,96 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("RemotePathMappings");
+                });
+
+            modelBuilder.Entity("Listenarr.Domain.Downloads.VerifiedFileRenameJournal", b =>
+                {
+                    b.Property<Guid>("OperationId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AudiobookFileId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AudiobookId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("BatchId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DestinationPath")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("DestinationRootFolderId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("DestinationStorageContractRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExpectedBatchManifestSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ExpectedBatchMemberCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ProtocolVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("RetirementPath")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("SourceLength")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SourcePath")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SourceRootFolderId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SourceSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SourceStorageContractRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("StagingPath")
+                        .IsRequired()
+                        .HasMaxLength(4096)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("State")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("OperationId");
+
+                    b.HasIndex("AudiobookId");
+
+                    b.HasIndex("BatchId");
+
+                    b.HasIndex("State");
+
+                    b.ToTable("VerifiedFileRenameJournals", (string)null);
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Identity.User", b =>

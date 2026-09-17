@@ -1144,6 +1144,567 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
         }
 
         [Fact]
+        public async Task ExecuteRename_ContentOnlySource_UsesVerifiedProtocolAndClearsPhysicalIdentity()
+        {
+            var libraryRoot = Path.Join(_tempRoot, "verified-organize-success");
+            var sourceFolder = Path.Join(libraryRoot, "Old");
+            var targetFolder = Path.Join(libraryRoot, "Author", "Book");
+            var sourcePath = Path.Join(sourceFolder, "old-name.m4b");
+            var targetPath = Path.Join(targetFolder, "Book.m4b");
+            Directory.CreateDirectory(sourceFolder);
+            await File.WriteAllTextAsync(sourcePath, "verified-audio");
+
+            var capability = BuildContentOnlySourceCapability();
+            var coordinator = new Mock<IVerifiedFileRenameTransactionCoordinator>(
+                MockBehavior.Strict);
+            VerifiedFileRenameBatchManifest? capturedManifest = null;
+            coordinator.Setup(candidate => candidate.PrepareAsync(
+                    sourcePath,
+                    targetPath,
+                    It.IsAny<Guid>(),
+                    It.IsAny<Guid>(),
+                    It.IsAny<VerifiedFileRenameBatchManifest>(),
+                    40,
+                    401,
+                    It.IsAny<FilePublicationSourceProof>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns<string, string, Guid, Guid, VerifiedFileRenameBatchManifest, int, int, FilePublicationSourceProof, CancellationToken>(
+                    async (_, _, operationId, _, manifest, _, _, proof, _) =>
+                    {
+                        capturedManifest = manifest;
+                        Directory.CreateDirectory(targetFolder);
+                        File.Copy(sourcePath, targetPath, overwrite: false);
+                        return new VerifiedFileRenamePreparationResult(
+                            true,
+                            new TestVerifiedRenameLease(
+                                operationId,
+                                rollBack: () =>
+                                {
+                                    File.Delete(targetPath);
+                                    return true;
+                                },
+                                complete: () =>
+                                {
+                                    File.Delete(sourcePath);
+                                    return VerifiedFileRenameRetirementOutcome.Completed;
+                                }));
+                    });
+
+            var (service, db, dbName) = BuildService(
+                new ApplicationSettings
+                {
+                    OutputPath = libraryRoot,
+                    FolderNamingPattern = "{Author}/{Title}",
+                    FileNamingPattern = "{Title}"
+                },
+                filePublicationSourceCapabilityOverride: capability,
+                verifiedFileRenameTransactionCoordinatorOverride: coordinator.Object);
+            db.Audiobooks.Add(new Audiobook
+            {
+                Id = 40,
+                Title = "Book",
+                Authors = ["Author"],
+                BasePath = sourceFolder,
+                FilePath = sourcePath,
+                Files = [CreateTrackedFile(401, 40, sourcePath)]
+            });
+            await db.SaveChangesAsync();
+
+            var result = Assert.Single(await service.ExecuteRenameAsync(
+            [
+                new RenameOperation
+                {
+                    AudiobookId = 40,
+                    CurrentFolderPath = sourceFolder,
+                    CurrentFolderSemantics = ExpectedSemantics(sourceFolder),
+                    NewFolderPath = targetFolder,
+                    FileRenames =
+                    [
+                        new FileRenameOperation
+                        {
+                            FileId = 401,
+                            CurrentPath = sourcePath,
+                            NewPath = targetPath
+                        }
+                    ]
+                }
+            ]));
+
+            Assert.True(result.Success, result.Error);
+            Assert.False(File.Exists(sourcePath));
+            Assert.True(File.Exists(targetPath));
+            Assert.True(capturedManifest.HasValue);
+            Assert.Equal(1, capturedManifest.Value.ExpectedMemberCount);
+            await using var verifyDb = CreateContext(dbName);
+            var saved = await verifyDb.Audiobooks
+                .Include(candidate => candidate.Files)
+                .SingleAsync(candidate => candidate.Id == 40);
+            var savedFile = Assert.Single(saved.Files!);
+            Assert.Equal(NormalizePath(targetFolder), NormalizePath(saved.BasePath));
+            Assert.Equal(NormalizePath(targetPath), NormalizePath(savedFile.Path));
+            Assert.Null(savedFile.PhysicalObjectIdentity);
+            coordinator.VerifyAll();
+        }
+
+        [Fact]
+        public async Task ExecuteRename_DurableLiveProofWithPersistedWeakIdentity_UsesVerifiedProtocol()
+        {
+            const string legacyWeakIdentity =
+                "linux:00000008:00000001:0000000000000001:0000000000000001:00000001";
+            Assert.True(PhysicalObjectIdentitySafety.IsKnownWeak(legacyWeakIdentity));
+
+            var libraryRoot = Path.Join(_tempRoot, "verified-organize-legacy-weak");
+            var sourceFolder = Path.Join(libraryRoot, "Old");
+            var targetFolder = Path.Join(libraryRoot, "Author", "Book");
+            var sourcePath = Path.Join(sourceFolder, "old-name.m4b");
+            var targetPath = Path.Join(targetFolder, "Book.m4b");
+            Directory.CreateDirectory(sourceFolder);
+            await File.WriteAllTextAsync(sourcePath, "legacy-weak-audio");
+
+            var coordinator = new Mock<IVerifiedFileRenameTransactionCoordinator>(MockBehavior.Strict);
+            coordinator.Setup(candidate => candidate.PrepareAsync(
+                    sourcePath,
+                    targetPath,
+                    It.IsAny<Guid>(),
+                    It.IsAny<Guid>(),
+                    It.IsAny<VerifiedFileRenameBatchManifest>(),
+                    45,
+                    451,
+                    It.Is<FilePublicationSourceProof>(proof => proof.HasDurablePhysicalObjectIdentity),
+                    It.IsAny<CancellationToken>()))
+                .Returns<string, string, Guid, Guid, VerifiedFileRenameBatchManifest, int, int, FilePublicationSourceProof, CancellationToken>(
+                    (_, _, operationId, _, _, _, _, _, _) =>
+                    {
+                        Directory.CreateDirectory(targetFolder);
+                        File.Copy(sourcePath, targetPath, overwrite: false);
+                        return Task.FromResult(new VerifiedFileRenamePreparationResult(
+                            true,
+                            new TestVerifiedRenameLease(
+                                operationId,
+                                rollBack: () =>
+                                {
+                                    File.Delete(targetPath);
+                                    return true;
+                                },
+                                complete: () =>
+                                {
+                                    File.Delete(sourcePath);
+                                    return VerifiedFileRenameRetirementOutcome.Completed;
+                                })));
+                    });
+
+            var (service, db, dbName) = BuildService(
+                new ApplicationSettings
+                {
+                    OutputPath = libraryRoot,
+                    FolderNamingPattern = "{Author}/{Title}",
+                    FileNamingPattern = "{Title}"
+                },
+                verifiedFileRenameTransactionCoordinatorOverride: coordinator.Object);
+            var trackedFile = CreateTrackedFile(451, 45, sourcePath);
+            trackedFile.ApplyPhysicalObjectIdentity(legacyWeakIdentity, DateTime.UtcNow);
+            db.Audiobooks.Add(new Audiobook
+            {
+                Id = 45,
+                Title = "Book",
+                Authors = ["Author"],
+                BasePath = sourceFolder,
+                FilePath = sourcePath,
+                Files = [trackedFile]
+            });
+            await db.SaveChangesAsync();
+
+            var result = Assert.Single(await service.ExecuteRenameAsync(
+            [
+                new RenameOperation
+                {
+                    AudiobookId = 45,
+                    CurrentFolderPath = sourceFolder,
+                    CurrentFolderSemantics = ExpectedSemantics(sourceFolder),
+                    NewFolderPath = targetFolder,
+                    FileRenames =
+                    [
+                        new FileRenameOperation
+                        {
+                            FileId = 451,
+                            CurrentPath = sourcePath,
+                            NewPath = targetPath
+                        }
+                    ]
+                }
+            ]));
+
+            Assert.True(result.Success, result.Error);
+            Assert.False(File.Exists(sourcePath));
+            Assert.True(File.Exists(targetPath));
+            await using var verifyDb = CreateContext(dbName);
+            var saved = await verifyDb.Audiobooks
+                .Include(candidate => candidate.Files)
+                .SingleAsync(candidate => candidate.Id == 45);
+            Assert.Null(Assert.Single(saved.Files!).PhysicalObjectIdentity);
+            coordinator.VerifyAll();
+        }
+        [Fact]
+        public async Task ExecuteRename_VerifiedRetirementNeedsAttention_ReportsFailureAfterOwnerCommit()
+        {
+            var libraryRoot = Path.Join(_tempRoot, "verified-organize-attention");
+            var sourceFolder = Path.Join(libraryRoot, "Old");
+            var targetFolder = Path.Join(libraryRoot, "New");
+            var sourcePath = Path.Join(sourceFolder, "old-name.m4b");
+            var targetPath = Path.Join(targetFolder, "new-name.m4b");
+            Directory.CreateDirectory(sourceFolder);
+            await File.WriteAllTextAsync(sourcePath, "verified-attention-audio");
+
+            var coordinator = new Mock<IVerifiedFileRenameTransactionCoordinator>(
+                MockBehavior.Strict);
+            coordinator.Setup(candidate => candidate.PrepareAsync(
+                    sourcePath,
+                    targetPath,
+                    It.IsAny<Guid>(),
+                    It.IsAny<Guid>(),
+                    It.IsAny<VerifiedFileRenameBatchManifest>(),
+                    42,
+                    421,
+                    It.IsAny<FilePublicationSourceProof>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns<string, string, Guid, Guid, VerifiedFileRenameBatchManifest, int, int, FilePublicationSourceProof, CancellationToken>(
+                    (_, _, operationId, _, _, _, _, _, _) =>
+                    {
+                        Directory.CreateDirectory(targetFolder);
+                        File.Copy(sourcePath, targetPath, overwrite: false);
+                        return Task.FromResult(new VerifiedFileRenamePreparationResult(
+                            true,
+                            new TestVerifiedRenameLease(
+                                operationId,
+                                rollBack: () =>
+                                {
+                                    File.Delete(targetPath);
+                                    return true;
+                                },
+                                complete: () =>
+                                    VerifiedFileRenameRetirementOutcome.NeedsAttention)));
+                    });
+
+            var (service, db, dbName) = BuildService(
+                new ApplicationSettings
+                {
+                    OutputPath = libraryRoot,
+                    FolderNamingPattern = "{Title}",
+                    FileNamingPattern = "{Title}"
+                },
+                filePublicationSourceCapabilityOverride: BuildContentOnlySourceCapability(),
+                verifiedFileRenameTransactionCoordinatorOverride: coordinator.Object);
+            db.Audiobooks.Add(new Audiobook
+            {
+                Id = 42,
+                Title = "Book",
+                BasePath = sourceFolder,
+                FilePath = sourcePath,
+                Files = [CreateTrackedFile(421, 42, sourcePath)]
+            });
+            await db.SaveChangesAsync();
+
+            var result = Assert.Single(await service.ExecuteRenameAsync(
+            [
+                new RenameOperation
+                {
+                    AudiobookId = 42,
+                    CurrentFolderPath = sourceFolder,
+                    CurrentFolderSemantics = ExpectedSemantics(sourceFolder),
+                    NewFolderPath = targetFolder,
+                    FileRenames =
+                    [
+                        new FileRenameOperation
+                        {
+                            FileId = 421,
+                            CurrentPath = sourcePath,
+                            NewPath = targetPath
+                        }
+                    ]
+                }
+            ]));
+
+            Assert.False(result.Success);
+            Assert.Contains("requires repair", result.Error, StringComparison.OrdinalIgnoreCase);
+            var fileResult = Assert.Single(result.RenamedFiles);
+            Assert.False(fileResult.Success);
+            Assert.Contains("requires repair", fileResult.Error, StringComparison.OrdinalIgnoreCase);
+            Assert.True(File.Exists(sourcePath));
+            Assert.True(File.Exists(targetPath));
+
+            await using var verifyDb = CreateContext(dbName);
+            var saved = await verifyDb.Audiobooks
+                .Include(candidate => candidate.Files)
+                .SingleAsync(candidate => candidate.Id == 42);
+            Assert.Equal(NormalizePath(targetPath), NormalizePath(saved.Files!.Single().Path));
+            coordinator.VerifyAll();
+        }
+
+        [Fact]
+        public async Task ExecuteRename_VerifiedRetirementNeedsAttention_StopsLaterSourceRetirement()
+        {
+            var libraryRoot = Path.Join(_tempRoot, "verified-organize-attention-batch");
+            var sourceFolder = Path.Join(libraryRoot, "Old");
+            var targetFolder = Path.Join(libraryRoot, "New");
+            var firstSource = Path.Join(sourceFolder, "first.m4b");
+            var secondSource = Path.Join(sourceFolder, "second.m4b");
+            var firstTarget = Path.Join(targetFolder, "first-new.m4b");
+            var secondTarget = Path.Join(targetFolder, "second-new.m4b");
+            Directory.CreateDirectory(sourceFolder);
+            await File.WriteAllTextAsync(firstSource, "first-attention-audio");
+            await File.WriteAllTextAsync(secondSource, "second-attention-audio");
+
+            var secondRetirementCalled = false;
+            var secondDisposed = false;
+            var coordinator = new Mock<IVerifiedFileRenameTransactionCoordinator>(
+                MockBehavior.Strict);
+            coordinator.Setup(candidate => candidate.PrepareAsync(
+                    firstSource,
+                    firstTarget,
+                    It.IsAny<Guid>(),
+                    It.IsAny<Guid>(),
+                    It.IsAny<VerifiedFileRenameBatchManifest>(),
+                    43,
+                    431,
+                    It.IsAny<FilePublicationSourceProof>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns<string, string, Guid, Guid, VerifiedFileRenameBatchManifest, int, int, FilePublicationSourceProof, CancellationToken>(
+                    (_, _, operationId, _, manifest, _, _, _, _) =>
+                    {
+                        Assert.Equal(2, manifest.ExpectedMemberCount);
+                        Directory.CreateDirectory(targetFolder);
+                        File.Copy(firstSource, firstTarget, overwrite: false);
+                        return Task.FromResult(new VerifiedFileRenamePreparationResult(
+                            true,
+                            new TestVerifiedRenameLease(
+                                operationId,
+                                rollBack: () => true,
+                                complete: () =>
+                                    VerifiedFileRenameRetirementOutcome.NeedsAttention)));
+                    });
+            coordinator.Setup(candidate => candidate.PrepareAsync(
+                    secondSource,
+                    secondTarget,
+                    It.IsAny<Guid>(),
+                    It.IsAny<Guid>(),
+                    It.IsAny<VerifiedFileRenameBatchManifest>(),
+                    43,
+                    432,
+                    It.IsAny<FilePublicationSourceProof>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns<string, string, Guid, Guid, VerifiedFileRenameBatchManifest, int, int, FilePublicationSourceProof, CancellationToken>(
+                    (_, _, operationId, _, manifest, _, _, _, _) =>
+                    {
+                        Assert.Equal(2, manifest.ExpectedMemberCount);
+                        Directory.CreateDirectory(targetFolder);
+                        File.Copy(secondSource, secondTarget, overwrite: false);
+                        return Task.FromResult(new VerifiedFileRenamePreparationResult(
+                            true,
+                            new TestVerifiedRenameLease(
+                                operationId,
+                                rollBack: () => true,
+                                complete: () =>
+                                {
+                                    secondRetirementCalled = true;
+                                    File.Delete(secondSource);
+                                    return VerifiedFileRenameRetirementOutcome.Completed;
+                                },
+                                dispose: () => secondDisposed = true)));
+                    });
+
+            var (service, db, _) = BuildService(
+                new ApplicationSettings
+                {
+                    OutputPath = libraryRoot,
+                    FolderNamingPattern = "{Title}",
+                    FileNamingPattern = "{Title}"
+                },
+                filePublicationSourceCapabilityOverride: BuildContentOnlySourceCapability(),
+                verifiedFileRenameTransactionCoordinatorOverride: coordinator.Object);
+            db.Audiobooks.Add(new Audiobook
+            {
+                Id = 43,
+                Title = "Book",
+                BasePath = sourceFolder,
+                Files =
+                [
+                    CreateTrackedFile(431, 43, firstSource),
+                    CreateTrackedFile(432, 43, secondSource)
+                ]
+            });
+            await db.SaveChangesAsync();
+
+            var result = Assert.Single(await service.ExecuteRenameAsync(
+            [
+                new RenameOperation
+                {
+                    AudiobookId = 43,
+                    CurrentFolderPath = sourceFolder,
+                    CurrentFolderSemantics = ExpectedSemantics(sourceFolder),
+                    NewFolderPath = targetFolder,
+                    FileRenames =
+                    [
+                        new FileRenameOperation
+                        {
+                            FileId = 431,
+                            CurrentPath = firstSource,
+                            NewPath = firstTarget
+                        },
+                        new FileRenameOperation
+                        {
+                            FileId = 432,
+                            CurrentPath = secondSource,
+                            NewPath = secondTarget
+                        }
+                    ]
+                }
+            ]));
+
+            Assert.False(result.Success);
+            Assert.False(secondRetirementCalled);
+            Assert.True(secondDisposed);
+            Assert.True(File.Exists(firstSource));
+            Assert.True(File.Exists(secondSource));
+            Assert.True(File.Exists(firstTarget));
+            Assert.True(File.Exists(secondTarget));
+            coordinator.VerifyAll();
+        }
+
+        [Fact]
+        public async Task ExecuteRename_VerifiedBatchLaterMemberFails_RollsBackPublishedMembers()
+        {
+            var libraryRoot = Path.Join(_tempRoot, "verified-organize-rollback");
+            var sourceFolder = Path.Join(libraryRoot, "Old");
+            var targetFolder = Path.Join(libraryRoot, "New");
+            var firstSource = Path.Join(sourceFolder, "first.m4b");
+            var secondSource = Path.Join(sourceFolder, "second.m4b");
+            var firstTarget = Path.Join(targetFolder, "first.m4b");
+            var secondTarget = Path.Join(targetFolder, "second.m4b");
+            Directory.CreateDirectory(sourceFolder);
+            await File.WriteAllTextAsync(firstSource, "first-audio");
+            await File.WriteAllTextAsync(secondSource, "second-audio");
+
+            var capability = BuildContentOnlySourceCapability();
+            var coordinator = new Mock<IVerifiedFileRenameTransactionCoordinator>(
+                MockBehavior.Strict);
+            Guid? batchId = null;
+            coordinator.Setup(candidate => candidate.PrepareAsync(
+                    firstSource,
+                    firstTarget,
+                    It.IsAny<Guid>(),
+                    It.IsAny<Guid>(),
+                    It.IsAny<VerifiedFileRenameBatchManifest>(),
+                    41,
+                    411,
+                    It.IsAny<FilePublicationSourceProof>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns<string, string, Guid, Guid, VerifiedFileRenameBatchManifest, int, int, FilePublicationSourceProof, CancellationToken>(
+                    (_, _, operationId, currentBatchId, manifest, _, _, _, _) =>
+                    {
+                        batchId = currentBatchId;
+                        Assert.Equal(2, manifest.ExpectedMemberCount);
+                        Directory.CreateDirectory(targetFolder);
+                        File.Copy(firstSource, firstTarget, overwrite: false);
+                        return Task.FromResult(new VerifiedFileRenamePreparationResult(
+                            true,
+                            new TestVerifiedRenameLease(
+                                operationId,
+                                rollBack: () =>
+                                {
+                                    File.Delete(firstTarget);
+                                    return true;
+                                },
+                                complete: () => throw new InvalidOperationException(
+                                    "Source retirement must not run after batch rollback."))));
+                    });
+            coordinator.Setup(candidate => candidate.PrepareAsync(
+                    secondSource,
+                    secondTarget,
+                    It.IsAny<Guid>(),
+                    It.IsAny<Guid>(),
+                    It.IsAny<VerifiedFileRenameBatchManifest>(),
+                    41,
+                    412,
+                    It.IsAny<FilePublicationSourceProof>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns<string, string, Guid, Guid, VerifiedFileRenameBatchManifest, int, int, FilePublicationSourceProof, CancellationToken>(
+                    (_, _, _, currentBatchId, manifest, _, _, _, _) =>
+                    {
+                        Assert.Equal(batchId, currentBatchId);
+                        Assert.Equal(2, manifest.ExpectedMemberCount);
+                        return Task.FromResult(new VerifiedFileRenamePreparationResult(
+                            false,
+                            Error: "Injected second verified member failure."));
+                    });
+
+            var (service, db, dbName) = BuildService(
+                new ApplicationSettings
+                {
+                    OutputPath = libraryRoot,
+                    FolderNamingPattern = "{Title}",
+                    FileNamingPattern = "{Title}"
+                },
+                filePublicationSourceCapabilityOverride: capability,
+                verifiedFileRenameTransactionCoordinatorOverride: coordinator.Object);
+            db.Audiobooks.Add(new Audiobook
+            {
+                Id = 41,
+                Title = "Book",
+                BasePath = sourceFolder,
+                Files =
+                [
+                    CreateTrackedFile(411, 41, firstSource),
+                    CreateTrackedFile(412, 41, secondSource)
+                ]
+            });
+            await db.SaveChangesAsync();
+
+            var result = Assert.Single(await service.ExecuteRenameAsync(
+            [
+                new RenameOperation
+                {
+                    AudiobookId = 41,
+                    CurrentFolderPath = sourceFolder,
+                    CurrentFolderSemantics = ExpectedSemantics(sourceFolder),
+                    NewFolderPath = targetFolder,
+                    FileRenames =
+                    [
+                        new FileRenameOperation
+                        {
+                            FileId = 411,
+                            CurrentPath = firstSource,
+                            NewPath = firstTarget
+                        },
+                        new FileRenameOperation
+                        {
+                            FileId = 412,
+                            CurrentPath = secondSource,
+                            NewPath = secondTarget
+                        }
+                    ]
+                }
+            ]));
+
+            Assert.False(result.Success);
+            Assert.True(File.Exists(firstSource));
+            Assert.True(File.Exists(secondSource));
+            Assert.False(File.Exists(firstTarget));
+            Assert.False(File.Exists(secondTarget));
+            await using var verifyDb = CreateContext(dbName);
+            var saved = await verifyDb.Audiobooks
+                .Include(candidate => candidate.Files)
+                .SingleAsync(candidate => candidate.Id == 41);
+            Assert.Equal(NormalizePath(sourceFolder), NormalizePath(saved.BasePath));
+            Assert.Contains(saved.Files!, file =>
+                file.Id == 411
+                && NormalizePath(file.Path) == NormalizePath(firstSource));
+            Assert.Contains(saved.Files!, file =>
+                file.Id == 412
+                && NormalizePath(file.Path) == NormalizePath(secondSource));
+            coordinator.VerifyAll();
+        }
+
+        [Fact]
         public async Task PreviewRename_RelativeStoredFilePath_UsesAudiobookBasePath()
         {
             var libraryRoot = Path.Join(_tempRoot, "relative-preview");
@@ -1908,7 +2469,9 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
             IFileSystemSemanticsResolver? semanticsResolverOverride = null,
             IRootFolderService? rootFolderServiceOverride = null,
             IAudiobookFilePathIdentityResolver? identityResolverOverride = null,
-            IMoveQueueService? moveQueueServiceOverride = null)
+            IMoveQueueService? moveQueueServiceOverride = null,
+            IFilePublicationSourceCapability? filePublicationSourceCapabilityOverride = null,
+            IVerifiedFileRenameTransactionCoordinator? verifiedFileRenameTransactionCoordinatorOverride = null)
         {
             var dbName = Guid.NewGuid().ToString();
             var options = new DbContextOptionsBuilder<ListenArrDbContext>()
@@ -2051,6 +2614,33 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                     It.IsAny<CancellationToken>()))
                 .Returns<int, IReadOnlyCollection<Guid>, CancellationToken>(
                     (_, _, cancellationToken) => repo.SaveChangesAsync(cancellationToken));
+            var sourceCapability = filePublicationSourceCapabilityOverride;
+            if (sourceCapability == null)
+            {
+                var sourceCapabilityMock = new Mock<IFilePublicationSourceCapability>(
+                    MockBehavior.Strict);
+                sourceCapabilityMock.Setup(capability => capability.CheckAsync(
+                        It.IsAny<string>(),
+                        It.IsAny<CancellationToken>()))
+                    .Returns<string, CancellationToken>((path, _) =>
+                    {
+                        var bytes = File.ReadAllBytes(path);
+                        var proof = new FilePublicationSourceProof(
+                            GetPhysicalObjectIdentity(path),
+                            bytes.LongLength,
+                            Convert.ToHexString(
+                                System.Security.Cryptography.SHA256.HashData(bytes)));
+                        return Task.FromResult(
+                            FilePublicationSourceCapabilityResult.SupportedForProof(
+                                proof));
+                    });
+                sourceCapability = sourceCapabilityMock.Object;
+            }
+            var verifiedRenameCoordinator =
+                verifiedFileRenameTransactionCoordinatorOverride
+                ?? new Mock<IVerifiedFileRenameTransactionCoordinator>(
+                    MockBehavior.Strict).Object;
+
             var service = new RenameService(
                 config.Object,
                 fileNaming,
@@ -2066,6 +2656,8 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
                 moveQueueServiceOverride ?? moveQueueService.Object,
                 directoryOwnershipStore.Object,
                 renameCommitStore.Object,
+                sourceCapability,
+                verifiedRenameCoordinator,
                 rootFolderServiceOverride);
 
             return (service, db, dbName);
@@ -2097,6 +2689,57 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
         {
             using var lease = PinnedAudiobookFileRegistrationLease.Open(path);
             return lease.PhysicalObjectIdentity;
+        }
+
+        private static IFilePublicationSourceCapability BuildContentOnlySourceCapability()
+        {
+            var capability = new Mock<IFilePublicationSourceCapability>(MockBehavior.Strict);
+            capability.Setup(candidate => candidate.CheckAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns<string, CancellationToken>((path, _) =>
+                {
+                    var bytes = File.ReadAllBytes(path);
+                    var hash = Convert.ToHexString(
+                        System.Security.Cryptography.SHA256.HashData(bytes));
+                    return Task.FromResult(
+                        FilePublicationSourceCapabilityResult.SupportedForProof(
+                            new FilePublicationSourceProof(
+                                $"content-only:{hash}",
+                                bytes.LongLength,
+                                hash,
+                                FilePublicationSourceAuthority.ContentOnly)));
+                });
+            return capability.Object;
+        }
+
+        private sealed class TestVerifiedRenameLease(
+            Guid operationId,
+            Func<bool> rollBack,
+            Func<VerifiedFileRenameRetirementOutcome> complete,
+            Action? dispose = null) : IVerifiedFileRenameLease
+        {
+            public Guid OperationId { get; } = operationId;
+
+            public Task<bool> RollBackAsync(
+                CancellationToken cancellationToken = default)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return Task.FromResult(rollBack());
+            }
+
+            public Task<VerifiedFileRenameRetirementOutcome> CompleteSourceRetirementAsync(
+                CancellationToken cancellationToken = default)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return Task.FromResult(complete());
+            }
+
+            public ValueTask DisposeAsync()
+            {
+                dispose?.Invoke();
+                return ValueTask.CompletedTask;
+            }
         }
 
         private static IFileSystemSemanticsResolver BuildSemanticsResolver(FileSystemCaseSensitivity? caseSensitivity)

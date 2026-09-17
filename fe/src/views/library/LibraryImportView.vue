@@ -78,6 +78,13 @@
       </span>
     </div>
 
+    <div v-if="store.scanWarnings.length > 0" class="scan-warnings" role="status">
+      <div v-for="warning in store.scanWarnings" :key="warning" class="scan-warning">
+        <PhWarning :size="14" />
+        <span>{{ warning }}</span>
+      </div>
+    </div>
+
     <div v-if="store.scanStatus === 'scanning'" class="state-panel">
       <PhSpinner class="ph-spin state-icon" />
       <p>Scanning for unmatched audio files...</p>
@@ -561,6 +568,21 @@ async function refreshRootFolders(newFolder: RootFolder) {
   gap: 0.3rem;
   font-size: 0.8rem;
   color: #ef4444;
+}
+
+.scan-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.75rem 0;
+}
+
+.scan-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: #f59e0b;
 }
 
 .state-panel {

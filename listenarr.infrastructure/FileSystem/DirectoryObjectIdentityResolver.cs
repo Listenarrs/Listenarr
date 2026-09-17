@@ -7,13 +7,20 @@ internal sealed class DirectoryObjectIdentityResolver(
     Func<PinnedDirectoryCreation.PinnedDirectoryAnchor, string>?
         nativeIdentityResolver = null,
     Func<PinnedDirectoryCreation.PinnedDirectoryAnchor, IReadOnlyList<string>>?
-        nativeIdentityCandidatesResolver = null) : IDirectoryObjectIdentityResolver
+        nativeIdentityCandidatesResolver = null,
+    Func<PinnedDirectoryCreation.PinnedDirectoryAnchor, IReadOnlyList<string>>?
+        legacyWeakIdentityCandidatesResolver = null) : IDirectoryObjectIdentityResolver
 {
     private readonly Func<PinnedDirectoryCreation.PinnedDirectoryAnchor, IReadOnlyList<string>>
         _nativeIdentityCandidatesResolver = nativeIdentityCandidatesResolver
             ?? (nativeIdentityResolver == null
                 ? static anchor => anchor.GetDirectoryObjectIdentityCandidates()
                 : anchor => [nativeIdentityResolver(anchor)]);
+    private readonly Func<PinnedDirectoryCreation.PinnedDirectoryAnchor, IReadOnlyList<string>>
+        _legacyWeakIdentityCandidatesResolver = legacyWeakIdentityCandidatesResolver
+            ?? (nativeIdentityResolver == null && nativeIdentityCandidatesResolver == null
+                ? static anchor => anchor.GetLegacyWeakDirectoryObjectIdentityCandidates()
+                : static _ => Array.Empty<string>());
 
     public Task<DirectoryObjectIdentityResolution> ResolveAsync(
         string path,
@@ -21,10 +28,15 @@ internal sealed class DirectoryObjectIdentityResolver(
         ResolvePinnedAsync(
             path,
             cancellationToken,
-            nativeIdentities => new DirectoryObjectIdentityResolution(
-                ManagedDirectoryIdentity.CurrentVersion,
-                ManagedDirectoryIdentity.CreateMarkerless(nativeIdentities[0]),
-                null));
+            anchor =>
+            {
+                var nativeIdentities = _nativeIdentityCandidatesResolver(anchor);
+                EnsureDurableCandidateAvailable(nativeIdentities);
+                return new DirectoryObjectIdentityResolution(
+                    ManagedDirectoryIdentity.CurrentVersion,
+                    ManagedDirectoryIdentity.CreateMarkerless(nativeIdentities[0]),
+                    null);
+            });
 
     public Task<DirectoryObjectIdentityResolution> ResolveExistingAsync(
         string path,
@@ -44,8 +56,22 @@ internal sealed class DirectoryObjectIdentityResolver(
         return ResolvePinnedAsync(
             path,
             cancellationToken,
-            nativeIdentities =>
+            anchor =>
             {
+                var legacyWeakIdentities = _legacyWeakIdentityCandidatesResolver(anchor);
+                if (legacyWeakIdentities.Any(nativeIdentity =>
+                        ManagedDirectoryIdentity.MatchesNativeIdentity(
+                            expectedVersion,
+                            expectedValue,
+                            nativeIdentity)))
+                {
+                    return DirectoryObjectIdentityResolution.Unavailable(
+                        "The persisted Linux directory identity uses the generic FILEID_INO64_GEN handle, which does not prove a durable filesystem generation.",
+                        DirectoryObjectIdentityFailureKind.LegacyWeakIdentity);
+                }
+
+                var nativeIdentities = _nativeIdentityCandidatesResolver(anchor);
+                EnsureDurableCandidateAvailable(nativeIdentities);
                 if (nativeIdentities.Any(nativeIdentity =>
                         ManagedDirectoryIdentity.MatchesNativeIdentity(
                             expectedVersion,
@@ -77,7 +103,7 @@ internal sealed class DirectoryObjectIdentityResolver(
     private Task<DirectoryObjectIdentityResolution> ResolvePinnedAsync(
         string path,
         CancellationToken cancellationToken,
-        Func<IReadOnlyList<string>, DirectoryObjectIdentityResolution> resolve)
+        Func<PinnedDirectoryCreation.PinnedDirectoryAnchor, DirectoryObjectIdentityResolution> resolve)
     {
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -97,12 +123,7 @@ internal sealed class DirectoryObjectIdentityResolver(
         try
         {
             using var anchor = PinnedDirectoryCreation.OpenPinnedBoundary(canonicalPath);
-            var nativeIdentities = _nativeIdentityCandidatesResolver(anchor);
-            if (nativeIdentities.Count == 0)
-            {
-                throw new PlatformNotSupportedException(
-                    "The filesystem did not expose a durable directory identity candidate.");
-            }
+            var resolution = resolve(anchor);
             if (!anchor.VisiblePathMatches())
             {
                 return Task.FromResult(
@@ -111,7 +132,7 @@ internal sealed class DirectoryObjectIdentityResolver(
                         DirectoryObjectIdentityFailureKind.IdentityUnstable));
             }
 
-            return Task.FromResult(resolve(nativeIdentities));
+            return Task.FromResult(resolution);
         }
         catch (Exception exception) when (exception is
             IOException or UnauthorizedAccessException or Win32Exception
@@ -121,6 +142,16 @@ internal sealed class DirectoryObjectIdentityResolver(
                 DirectoryObjectIdentityResolution.Unavailable(
                     exception.Message,
                     ClassifyFailure(exception)));
+        }
+    }
+
+    private static void EnsureDurableCandidateAvailable(
+        IReadOnlyList<string> nativeIdentities)
+    {
+        if (nativeIdentities.Count == 0)
+        {
+            throw new PlatformNotSupportedException(
+                "The filesystem did not expose a durable directory identity candidate.");
         }
     }
 

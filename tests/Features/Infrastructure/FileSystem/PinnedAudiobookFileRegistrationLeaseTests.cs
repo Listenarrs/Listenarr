@@ -7,6 +7,28 @@ namespace Listenarr.Tests.Features.Infrastructure.FileSystem;
 public sealed class PinnedAudiobookFileRegistrationLeaseTests : BaseTests
 {
     [LinuxFact]
+    public async Task OpenForMetadataRead_LegacyWeakIdentity_UsesPathOnlyLease()
+    {
+        var parentPath = FileService.GetTempDirectory(
+            "registration-lease-legacy-weak-refresh");
+        var publicPath = await FileService.GetFileAsync(
+            parentPath,
+            "book.m4b",
+            "metadata generation");
+
+        using var lease = PinnedAudiobookFileRegistrationLease.OpenForMetadataRead(
+            publicPath,
+            "linux-generation:00000008:00000001:0000000000001234:fh:00000081:341200000000000000000000");
+
+        Assert.False(lease.HasDurablePhysicalObjectIdentity);
+        Assert.Equal(
+            RegistrationPublicationMatchOutcome.Match,
+            lease.ProbeCurrentPublication());
+        Assert.Equal(
+            "metadata generation",
+            await File.ReadAllTextAsync(lease.MetadataPath));
+    }
+    [LinuxFact]
     public async Task CreatePinnedPathOnly_PublicPathReplaced_KeepsOriginalMetadataHandleWithoutDurableAuthority()
     {
         var parentPath = FileService.GetTempDirectory(

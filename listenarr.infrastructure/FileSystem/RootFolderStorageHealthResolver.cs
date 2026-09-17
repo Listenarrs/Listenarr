@@ -128,6 +128,18 @@ internal sealed class RootFolderStorageHealthResolver(
                 cancellationToken);
             if (!legacyCurrentGeneration.IsAvailable)
             {
+                if (legacyCurrentGeneration.FailureKind
+                    == DirectoryObjectIdentityFailureKind.IdentityUnsupported)
+                {
+                    return await ValidateFilesystemSemanticsAsync(
+                        root,
+                        canonicalPath,
+                        LimitedIdentityUnsupported(
+                            legacyCurrentGeneration.UnavailableReason
+                                ?? expected.UnavailableReason),
+                        cancellationToken);
+                }
+
                 return FromFailure(legacyCurrentGeneration);
             }
 

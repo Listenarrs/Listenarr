@@ -203,6 +203,63 @@ public sealed class ScanPathAuthorizationServiceTests : BaseTests
         identityResolver.VerifyAll();
     }
 
+    [Fact]
+    public async Task AuthorizeAsync_LegacyWeakRootIdentityStillUnsupported_UsesPinnedPathOnlyProof()
+    {
+        var configuredRoot = FileService.GetTempDirectory(
+            "scan-authorization-legacy-weak-unsupported-root");
+        var scanRoot = Path.Join(configuredRoot, "Book");
+        Directory.CreateDirectory(scanRoot);
+        var root = await AddAuthorizedRootAsync(configuredRoot);
+        var rootFolderService = new Mock<IRootFolderService>(MockBehavior.Strict);
+        rootFolderService.Setup(service => service.GetAllAsync())
+            .ReturnsAsync([root]);
+        var configurationService = new Mock<IConfigurationService>(MockBehavior.Strict);
+        configurationService.Setup(service => service.GetApplicationSettingsAsync())
+            .ReturnsAsync(new ApplicationSettings());
+        var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
+        identityResolver
+            .Setup(resolver => resolver.ResolveExistingAsync(
+                configuredRoot,
+                root.DirectoryObjectIdentityVersion!.Value,
+                root.DirectoryObjectIdentity!,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DirectoryObjectIdentityResolution.Unavailable(
+                "Released generic Linux FID is weak evidence.",
+                DirectoryObjectIdentityFailureKind.LegacyWeakIdentity));
+        identityResolver
+            .Setup(resolver => resolver.ResolveAsync(
+                configuredRoot,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DirectoryObjectIdentityResolution.Unavailable(
+                "The filesystem exposes only generic weak identity evidence.",
+                DirectoryObjectIdentityFailureKind.IdentityUnsupported));
+        identityResolver
+            .Setup(resolver => resolver.ResolveAsync(
+                scanRoot,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DirectoryObjectIdentityResolution.Unavailable(
+                "The filesystem exposes only generic weak identity evidence.",
+                DirectoryObjectIdentityFailureKind.IdentityUnsupported));
+        var service = new ScanPathAuthorizationService(
+            configurationService.Object,
+            rootFolderService.Object,
+            _provider.GetRequiredService<IFileSystemSemanticsResolver>(),
+            identityResolver.Object,
+            new CapturingScanAuthorizationLogger());
+
+        var result = await service.AuthorizeAsync(scanRoot);
+
+        Assert.True(result.IsAuthorized, result.Error);
+        Assert.True(result.PhysicalIdentity.HasValue);
+        Assert.Equal(
+            ScanPathPhysicalProofKind.PinnedPathOnly,
+            result.PhysicalIdentity.Value.ProofKind);
+        Assert.False(result.PhysicalIdentity.Value.HasDurableGenerationProof);
+        rootFolderService.VerifyAll();
+        identityResolver.VerifyAll();
+    }
+
     [LinuxFact]
     public async Task AuthorizeAsync_AmbiguousNestedManagedRoot_DoesNotFallBackToBroaderRootAuthority()
     {

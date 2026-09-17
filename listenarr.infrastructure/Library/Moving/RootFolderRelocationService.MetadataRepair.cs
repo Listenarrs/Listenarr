@@ -153,8 +153,11 @@ public sealed partial class RootFolderRelocationService
             .AnyAsync(
                 journal => journal.AudiobookId == audiobookId
                     && journal.AudiobookFileId == null
-                    && journal.Action == FileAction.Move
-                    && journal.State != FileMutationJournalState.Completed,
+                    && (journal.Action == FileAction.Move
+                        || journal.Action == FileAction.Copy
+                        || journal.Action == FileAction.HardlinkCopy)
+                    && journal.State != FileMutationJournalState.Completed
+                    && journal.State != FileMutationJournalState.RolledBack,
                 cancellationToken))
         {
             throw new ApplicationConflictException(

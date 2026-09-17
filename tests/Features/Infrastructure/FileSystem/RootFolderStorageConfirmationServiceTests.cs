@@ -186,13 +186,14 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         var root = await fixture.LoadRootAsync();
         var observation = await fixture.HealthResolver.ResolveAsync(root);
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var exception = await Assert.ThrowsAsync<RootFolderRecoveryBlockedException>(() =>
             fixture.Service.ConfirmCurrentFolderAsync(
                 root.Id,
                 root.Path,
                 observation.ConfirmationToken!));
 
-        Assert.Contains("file import", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("waiting for restart recovery", exception.Blocker.PublicReason, StringComparison.OrdinalIgnoreCase);
+        Assert.NotEqual(Guid.Empty, exception.Blocker.OperationId);
         var persisted = await fixture.LoadRootAsync();
         Assert.Null(persisted.DirectoryObjectIdentity);
     }
@@ -206,13 +207,14 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         var root = await fixture.LoadRootAsync();
         var observation = await fixture.HealthResolver.ResolveAsync(root);
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var exception = await Assert.ThrowsAsync<RootFolderRecoveryBlockedException>(() =>
             fixture.Service.ConfirmCurrentFolderAsync(
                 root.Id,
                 root.Path,
                 observation.ConfirmationToken!));
 
-        Assert.Contains("file import", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("waiting for restart recovery", exception.Blocker.PublicReason, StringComparison.OrdinalIgnoreCase);
+        Assert.NotEqual(Guid.Empty, exception.Blocker.OperationId);
         var persisted = await fixture.LoadRootAsync();
         Assert.Null(persisted.DirectoryObjectIdentity);
     }
@@ -226,13 +228,14 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         var root = await fixture.LoadRootAsync();
         var observation = await fixture.HealthResolver.ResolveAsync(root);
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var exception = await Assert.ThrowsAsync<RootFolderRecoveryBlockedException>(() =>
             fixture.Service.ConfirmCurrentFolderAsync(
                 root.Id,
                 root.Path,
                 observation.ConfirmationToken!));
 
-        Assert.Contains("file import", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("waiting for restart recovery", exception.Blocker.PublicReason, StringComparison.OrdinalIgnoreCase);
+        Assert.NotEqual(Guid.Empty, exception.Blocker.OperationId);
         var persisted = await fixture.LoadRootAsync();
         Assert.Null(persisted.DirectoryObjectIdentity);
     }
@@ -690,12 +693,14 @@ public sealed class RootFolderStorageConfirmationServiceTests : BaseTests
         var mutationCoordinator = new FilesystemMutationCoordinator();
         var audiobookCoordinator = new AudiobookOperationCoordinator();
         var identityResolver = new DirectoryObjectIdentityResolver();
+        var recoveryProbe = new FileRegistrationRecoveryProbe(dbFactory);
         var service = new RootFolderStorageConfirmationService(
             dbFactory,
             new FileSystemSemanticsResolver(),
             moveQueue.Object,
             mutationCoordinator,
-            audiobookCoordinator);
+            audiobookCoordinator,
+            recoveryProbe);
         var healthResolver = new RootFolderStorageHealthResolver(identityResolver);
         var ownershipStore = new EfLibraryDirectoryOwnershipStore(
             dbFactory,

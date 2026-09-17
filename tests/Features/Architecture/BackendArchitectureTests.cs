@@ -1098,10 +1098,14 @@ public sealed class BackendArchitectureTests : BaseTests
             "entry.claim"
         };
 
-        var allowedQuarantineFiles = new HashSet<string>(StringComparer.Ordinal)
+        var allowedOperationNamespaceFiles = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            "listenarr.infrastructure/FileSystem/CompatibilitySourceCleanupCoordinator.cs",
-            "listenarr.infrastructure/Library/Scanning/ScanFileDiscovery.Enumeration.cs"
+            ["listenarr.infrastructure/FileSystem/CompatibilitySourceCleanupCoordinator.cs"] =
+                ".listenarr-quarantine-",
+            ["listenarr.infrastructure/Library/Scanning/ScanFileDiscovery.Enumeration.cs"] =
+                ".listenarr-quarantine-",
+            ["listenarr.infrastructure/FileSystem/VerifiedFileRenameTransactionCoordinator.cs"] =
+                ".listenarr-organize-"
         };
         var violations = productionRoots
             .SelectMany(root => Directory.EnumerateFiles(
@@ -1117,9 +1121,11 @@ public sealed class BackendArchitectureTests : BaseTests
             .SelectMany(candidate => forbidden
                 .Where(token => candidate.Source.Contains(token, StringComparison.Ordinal)
                     && !(token == ".listenarr-"
-                        && allowedQuarantineFiles.Contains(candidate.File)
+                        && allowedOperationNamespaceFiles.TryGetValue(
+                            candidate.File,
+                            out var auditedPrefix)
                         && candidate.Source.Contains(
-                            ".listenarr-quarantine-",
+                            auditedPrefix,
                             StringComparison.Ordinal)))
                 .Select(token => $"{candidate.File}: {token}"))
             .ToList();

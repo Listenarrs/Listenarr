@@ -100,6 +100,16 @@ namespace Listenarr.Application.Audiobooks.Contracts
             string? source = "scan",
             CancellationToken cancellationToken = default);
 
+        /// <summary>
+        /// Refresh metadata for an already-owned path using a live read lease.
+        /// Does not enroll, replace, or clear path or physical-generation identity.
+        /// </summary>
+        Task<bool> RefreshMetadataAsync(
+            Audiobook audiobook,
+            int fileId,
+            IAudiobookFileRegistrationLease registrationLease,
+            CancellationToken cancellationToken = default);
+
         Task<bool> RollbackPhysicalGenerationClaimAsync(
             Audiobook audiobook,
             int fileId,

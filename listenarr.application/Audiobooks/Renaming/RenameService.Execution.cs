@@ -10,6 +10,7 @@ public partial class RenameService
         FileRenameOperation fileOperation,
         IReadOnlyCollection<string> allowedRoots,
         FileSystemPathSemantics semantics,
+        RenameExecutionPlan executionPlan,
         CancellationToken cancellationToken)
     {
         var source = NormalizePath(fileOperation.CurrentPath);
@@ -98,7 +99,8 @@ public partial class RenameService
             }
 
             var targetDirectory = Path.GetDirectoryName(destination);
-            if (!string.IsNullOrWhiteSpace(targetDirectory))
+            if (!string.IsNullOrWhiteSpace(targetDirectory)
+                && !executionPlan.UseVerifiedProtocol)
             {
                 await EnsureOwnedRenameHierarchyAsync(
                     targetDirectory,
@@ -118,7 +120,40 @@ public partial class RenameService
                 var operationId = Guid.NewGuid();
                 item.OperationId = operationId;
                 bool moved;
-                if (databaseFile != null)
+                if (executionPlan.UseVerifiedProtocol)
+                {
+                    var sourceProof = FindSourceProof(
+                        executionPlan,
+                        fileOperation.FileId);
+                    if (!sourceProof.HasValue
+                        || !executionPlan.BatchManifest.HasValue)
+                    {
+                        item.Error =
+                            "Verified organize source proof is unavailable.";
+                        return item;
+                    }
+
+                    var preparation = await _verifiedFileRenameTransactionCoordinator
+                        .PrepareAsync(
+                            source,
+                            destination,
+                            operationId,
+                            executionPlan.BatchId,
+                            executionPlan.BatchManifest.Value,
+                            audiobook.Id,
+                            databaseFile?.Id ?? 0,
+                            sourceProof.Value,
+                            cancellationToken);
+                    moved = preparation.Success && preparation.Lease != null;
+                    item.VerifiedRenameLease = preparation.Lease;
+                    if (!moved)
+                    {
+                        item.Error = preparation.Error
+                            ?? "Verified file organize operation failed.";
+                        return item;
+                    }
+                }
+                else if (databaseFile != null)
                 {
                     if (string.IsNullOrWhiteSpace(
                             databaseFile.PhysicalObjectIdentity))
@@ -158,6 +193,11 @@ public partial class RenameService
             if (databaseFile != null)
             {
                 databaseFile.ApplyPathIdentity(destination, destinationIdentity);
+                if (executionPlan.UseVerifiedProtocol
+                    && !PathsEqual(source, destination, semantics))
+                {
+                    databaseFile.ClearPhysicalObjectIdentity();
+                }
             }
             else if (fileOperation.FileId == 0
                 && !string.IsNullOrWhiteSpace(audiobook.FilePath))

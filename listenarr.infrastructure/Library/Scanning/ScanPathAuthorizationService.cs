@@ -219,16 +219,27 @@ internal sealed partial class ScanPathAuthorizationService(
                     if (enrolled.FailureKind
                         == DirectoryObjectIdentityFailureKind.LegacyWeakIdentity)
                     {
-                        if (!liveBoundary.IsAvailable)
+                        if (liveBoundary.IsAvailable)
+                        {
+                            verifiedBoundaryIdentity = liveBoundary;
+                            limitedBoundary = true;
+                        }
+                        else if (liveBoundary.FailureKind
+                            == DirectoryObjectIdentityFailureKind.IdentityUnsupported)
+                        {
+                            // A released weak Linux identity may still be the best
+                            // evidence this mount can provide (for example CIFS
+                            // FILEID_INO64_GEN). Keep scanning under pinned path-only
+                            // authority, but do not restore destructive generation proof.
+                            limitedBoundary = true;
+                        }
+                        else
                         {
                             return PhysicalIdentityCapture.Failed(
                                 liveBoundary.UnavailableReason
                                     ?? enrolled.UnavailableReason
                                     ?? "The configured scan root physical identity cannot be verified.");
                         }
-
-                        verifiedBoundaryIdentity = liveBoundary;
-                        limitedBoundary = true;
                     }
                     else if (enrolled.FailureKind
                         == DirectoryObjectIdentityFailureKind.IdentityUnsupported)

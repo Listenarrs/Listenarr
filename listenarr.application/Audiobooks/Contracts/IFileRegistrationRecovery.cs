@@ -3,8 +3,29 @@ using Listenarr.Domain.Common;
 namespace Listenarr.Application.Audiobooks.Contracts;
 
 /// <summary>
-/// Reports whether a committed file-registration move still owns source-cleanup state
-/// for an audiobook.
+/// Describes how a nonterminal file-registration publication can progress.
+/// </summary>
+public enum FileRegistrationRecoveryDisposition
+{
+    Cleared,
+    AutomaticRecovery,
+    WaitingForOwnerRetry,
+    RequiresOperatorAttention
+}
+
+public sealed record FileRegistrationRecoveryBlocker(
+    Guid OperationId,
+    FileMutationJournalState JournalState,
+    FileAction Action,
+    int? AudiobookId,
+    string OwnerKind,
+    bool SourceTouchesBoundary,
+    bool DestinationTouchesBoundary,
+    FileRegistrationRecoveryDisposition Recoverability,
+    string PublicReason);
+
+/// <summary>
+/// Reports file-registration publications that still own recovery state.
 /// </summary>
 public interface IFileRegistrationRecoveryProbe
 {
@@ -16,6 +37,11 @@ public interface IFileRegistrationRecoveryProbe
         string boundaryPath,
         FileSystemPathSemantics semantics,
         CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<FileRegistrationRecoveryBlocker>> GetBlockingBoundaryAsync(
+        string boundaryPath,
+        FileSystemPathSemantics semantics,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed record FileRegistrationRecoveryReceipt(
@@ -23,6 +49,15 @@ public sealed record FileRegistrationRecoveryReceipt(
     int AudiobookId,
     string SourcePath,
     string DestinationPath);
+
+public sealed record FileRegistrationRecoveryStatus(
+    Guid OperationId,
+    FileMutationJournalState JournalState,
+    int? AudiobookId,
+    FileRegistrationRecoveryDisposition Disposition,
+    bool CanRetry,
+    bool CanAbandon,
+    string PublicReason);
 
 /// <summary>
 /// Reconciles committed file-registration moves whose published destination is already
@@ -37,6 +72,10 @@ public interface IFileRegistrationRecoveryService
 
     Task ReconcileAudiobookAsync(
         int audiobookId,
+        CancellationToken cancellationToken = default);
+
+    Task<FileRegistrationRecoveryStatus> RetryAsync(
+        Guid operationId,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<FileRegistrationRecoveryReceipt>>

@@ -1214,11 +1214,13 @@ export interface UnmatchedFilesResponse {
   jobId: string
   status: 'Queued' | 'Processing' | 'Completed' | 'Failed'
   error?: string
+  warnings?: string[]
   items: UnmatchedFileItem[]
 }
 
 export interface SavedUnmatchedResponse {
   lastScannedAt?: string
+  warnings?: string[]
   items: UnmatchedFileItem[]
 }
 

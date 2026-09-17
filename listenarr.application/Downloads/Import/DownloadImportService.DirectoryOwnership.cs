@@ -5,19 +5,20 @@ namespace Listenarr.Application.Downloads.Import;
 
 public partial class DownloadImportService
 {
-    private Task<FilePublicationPlan> ResolvePublicationPlanAsync(
+    private async Task<FilePublicationPlan> ResolvePublicationPlanAsync(
         FileAction requestedAction,
         string source,
         string destination,
         FilePublicationSourceProof sourceProof,
         Guid compatibilityBatchId,
+        CompatibilityBatchManifest? compatibilityBatchManifest,
         CancellationToken cancellationToken)
     {
-        return filePublicationCapabilityResolver == null
-            ? Task.FromResult(sourceProof.HasDurablePhysicalObjectIdentity
+        var plan = filePublicationCapabilityResolver == null
+            ? sourceProof.HasDurablePhysicalObjectIdentity
                 ? FilePublicationPlan.Durable(requestedAction)
-                : FilePublicationPlan.Additive(requestedAction))
-            : filePublicationCapabilityResolver.ResolveAsync(
+                : FilePublicationPlan.Additive(requestedAction)
+            : await filePublicationCapabilityResolver.ResolveAsync(
                 requestedAction,
                 source,
                 destination,
@@ -25,6 +26,12 @@ public partial class DownloadImportService
                 cancellationToken,
                 compatibilityBatchId,
                 CompatibilityCleanupOwner.DownloadClient);
+        if (compatibilityBatchManifest.HasValue)
+        {
+            plan = plan.WithCompatibilityBatchManifest(
+                compatibilityBatchManifest.Value);
+        }
+        return plan;
     }
 
     private static ImportResult CreateBlockedImportResult(
@@ -112,6 +119,7 @@ public partial class DownloadImportService
         FilePublicationSourceProof expectedSourceProof,
         int audiobookId,
         Guid compatibilityBatchId,
+        CompatibilityBatchManifest? compatibilityBatchManifest,
         CancellationToken cancellationToken)
     {
         expectedSourceProof.Validate();
@@ -127,6 +135,11 @@ public partial class DownloadImportService
                 cancellationToken,
                 compatibilityBatchId,
                 CompatibilityCleanupOwner.DownloadClient);
+        if (compatibilityBatchManifest.HasValue)
+        {
+            publicationPlan = publicationPlan.WithCompatibilityBatchManifest(
+                compatibilityBatchManifest.Value);
+        }
         if (!publicationPlan.IsAllowed)
         {
             logger.LogWarning(
