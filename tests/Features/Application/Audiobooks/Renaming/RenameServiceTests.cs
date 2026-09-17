@@ -1247,6 +1247,104 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
         }
 
         [Fact]
+        public async Task ExecuteRename_DurableLiveProofWithPersistedWeakIdentity_UsesVerifiedProtocol()
+        {
+            const string legacyWeakIdentity =
+                "linux:00000008:00000001:0000000000000001:0000000000000001:00000001";
+            Assert.True(PhysicalObjectIdentitySafety.IsKnownWeak(legacyWeakIdentity));
+
+            var libraryRoot = Path.Join(_tempRoot, "verified-organize-legacy-weak");
+            var sourceFolder = Path.Join(libraryRoot, "Old");
+            var targetFolder = Path.Join(libraryRoot, "Author", "Book");
+            var sourcePath = Path.Join(sourceFolder, "old-name.m4b");
+            var targetPath = Path.Join(targetFolder, "Book.m4b");
+            Directory.CreateDirectory(sourceFolder);
+            await File.WriteAllTextAsync(sourcePath, "legacy-weak-audio");
+
+            var coordinator = new Mock<IVerifiedFileRenameTransactionCoordinator>(MockBehavior.Strict);
+            coordinator.Setup(candidate => candidate.PrepareAsync(
+                    sourcePath,
+                    targetPath,
+                    It.IsAny<Guid>(),
+                    It.IsAny<Guid>(),
+                    It.IsAny<VerifiedFileRenameBatchManifest>(),
+                    45,
+                    451,
+                    It.Is<FilePublicationSourceProof>(proof => proof.HasDurablePhysicalObjectIdentity),
+                    It.IsAny<CancellationToken>()))
+                .Returns<string, string, Guid, Guid, VerifiedFileRenameBatchManifest, int, int, FilePublicationSourceProof, CancellationToken>(
+                    (_, _, operationId, _, _, _, _, _, _) =>
+                    {
+                        Directory.CreateDirectory(targetFolder);
+                        File.Copy(sourcePath, targetPath, overwrite: false);
+                        return Task.FromResult(new VerifiedFileRenamePreparationResult(
+                            true,
+                            new TestVerifiedRenameLease(
+                                operationId,
+                                rollBack: () =>
+                                {
+                                    File.Delete(targetPath);
+                                    return true;
+                                },
+                                complete: () =>
+                                {
+                                    File.Delete(sourcePath);
+                                    return VerifiedFileRenameRetirementOutcome.Completed;
+                                })));
+                    });
+
+            var (service, db, dbName) = BuildService(
+                new ApplicationSettings
+                {
+                    OutputPath = libraryRoot,
+                    FolderNamingPattern = "{Author}/{Title}",
+                    FileNamingPattern = "{Title}"
+                },
+                verifiedFileRenameTransactionCoordinatorOverride: coordinator.Object);
+            var trackedFile = CreateTrackedFile(451, 45, sourcePath);
+            trackedFile.ApplyPhysicalObjectIdentity(legacyWeakIdentity, DateTime.UtcNow);
+            db.Audiobooks.Add(new Audiobook
+            {
+                Id = 45,
+                Title = "Book",
+                Authors = ["Author"],
+                BasePath = sourceFolder,
+                FilePath = sourcePath,
+                Files = [trackedFile]
+            });
+            await db.SaveChangesAsync();
+
+            var result = Assert.Single(await service.ExecuteRenameAsync(
+            [
+                new RenameOperation
+                {
+                    AudiobookId = 45,
+                    CurrentFolderPath = sourceFolder,
+                    CurrentFolderSemantics = ExpectedSemantics(sourceFolder),
+                    NewFolderPath = targetFolder,
+                    FileRenames =
+                    [
+                        new FileRenameOperation
+                        {
+                            FileId = 451,
+                            CurrentPath = sourcePath,
+                            NewPath = targetPath
+                        }
+                    ]
+                }
+            ]));
+
+            Assert.True(result.Success, result.Error);
+            Assert.False(File.Exists(sourcePath));
+            Assert.True(File.Exists(targetPath));
+            await using var verifyDb = CreateContext(dbName);
+            var saved = await verifyDb.Audiobooks
+                .Include(candidate => candidate.Files)
+                .SingleAsync(candidate => candidate.Id == 45);
+            Assert.Null(Assert.Single(saved.Files!).PhysicalObjectIdentity);
+            coordinator.VerifyAll();
+        }
+        [Fact]
         public async Task ExecuteRename_VerifiedRetirementNeedsAttention_ReportsFailureAfterOwnerCommit()
         {
             var libraryRoot = Path.Join(_tempRoot, "verified-organize-attention");

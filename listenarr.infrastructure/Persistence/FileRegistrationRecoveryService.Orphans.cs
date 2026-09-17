@@ -20,10 +20,10 @@ public sealed partial class FileRegistrationRecoveryService
                 && journal.AudiobookId == null
                 && journal.AudiobookFileId == null
                 && journal.State == FileMutationJournalState.TargetVerified);
-        if (operationId.HasValue)
+        if (operationId is Guid scopedOperationId)
         {
             anonymousQuery = anonymousQuery.Where(
-                journal => journal.OperationId == operationId.Value);
+                journal => journal.OperationId == scopedOperationId);
         }
         var anonymousJournals = await anonymousQuery
             .OrderBy(journal => journal.CreatedAt)
@@ -40,9 +40,9 @@ public sealed partial class FileRegistrationRecoveryService
             .ToListAsync(cancellationToken);
 
         var filesQuery = db.AudiobookFiles.AsNoTracking();
-        if (audiobookId.HasValue)
+        if (audiobookId is int scopedAudiobookId)
         {
-            filesQuery = filesQuery.Where(file => file.AudiobookId == audiobookId.Value);
+            filesQuery = filesQuery.Where(file => file.AudiobookId == scopedAudiobookId);
         }
         var trackedFiles = await filesQuery.ToListAsync(cancellationToken);
         foreach (var journal in anonymousJournals)
@@ -164,10 +164,10 @@ public sealed partial class FileRegistrationRecoveryService
                 && journal.State != FileMutationJournalState.Completed
                 && journal.State != FileMutationJournalState.RolledBack
                 && journal.State != FileMutationJournalState.NeedsAttention);
-        if (operationId.HasValue)
+        if (operationId is Guid scopedOperationId)
         {
             journalQuery = journalQuery.Where(
-                journal => journal.OperationId == operationId.Value);
+                journal => journal.OperationId == scopedOperationId);
         }
         var journals = await journalQuery
             .OrderBy(journal => journal.CreatedAt)

@@ -79,6 +79,8 @@ public partial class RenameService
                 proof.HasDurablePhysicalObjectIdentity
                 && (databaseFile == null
                     || !string.IsNullOrWhiteSpace(
+                        databaseFile.PhysicalObjectIdentity)
+                    && !PhysicalObjectIdentitySafety.IsKnownWeak(
                         databaseFile.PhysicalObjectIdentity));
         }
 

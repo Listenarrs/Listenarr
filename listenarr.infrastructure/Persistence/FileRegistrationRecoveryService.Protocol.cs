@@ -16,10 +16,10 @@ public sealed partial class FileRegistrationRecoveryService
                 && journal.State != FileMutationJournalState.Completed
                 && journal.State != FileMutationJournalState.RolledBack
                 && journal.State != FileMutationJournalState.OwnerMetadataReconciled);
-        if (operationId.HasValue)
+        if (operationId is Guid scopedOperationId)
         {
             unsupportedQuery = unsupportedQuery.Where(
-                journal => journal.OperationId == operationId.Value);
+                journal => journal.OperationId == scopedOperationId);
         }
         var unsupported = await unsupportedQuery
             .OrderBy(journal => journal.CreatedAt)
@@ -47,10 +47,10 @@ public sealed partial class FileRegistrationRecoveryService
                     && journal.State != FileMutationJournalState.RolledBack
                     && journal.State != FileMutationJournalState.OwnerMetadataReconciled
                     && journal.State != FileMutationJournalState.NeedsAttention);
-            if (operationId.HasValue)
+            if (operationId is Guid trackedOperationId)
             {
                 trackedQuery = trackedQuery.Where(
-                    journal => journal.OperationId == operationId.Value);
+                    journal => journal.OperationId == trackedOperationId);
             }
             var tracked = await trackedQuery
                 .ToListAsync(cancellationToken);
@@ -71,10 +71,10 @@ public sealed partial class FileRegistrationRecoveryService
                     && journal.State != FileMutationJournalState.RolledBack
                     && journal.State != FileMutationJournalState.OwnerMetadataReconciled
                     && journal.State != FileMutationJournalState.NeedsAttention);
-            if (operationId.HasValue)
+            if (operationId is Guid relationalOperationId)
             {
                 trackedQuery = trackedQuery.Where(
-                    journal => journal.OperationId == operationId.Value);
+                    journal => journal.OperationId == relationalOperationId);
             }
             await trackedQuery
                 .ExecuteUpdateAsync(
