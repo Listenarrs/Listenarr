@@ -8,8 +8,11 @@
  * (at your option) any later version.
  */
 using System.Text.Json;
+using Listenarr.Domain.Notifications;
+using Listenarr.Infrastructure.Downloads.Import;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
+using Microsoft.EntityFrameworkCore;
 
 namespace Listenarr.Tests.Features.Infrastructure.Downloads.Import
 {
@@ -85,6 +88,69 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Import
             using var details = JsonDocument.Parse(imported.Data!);
             Assert.True(details.RootElement.GetProperty("SourceRetentionKnown").GetBoolean());
             Assert.True(details.RootElement.GetProperty(Download.SourceRetainedMetadataKey).GetBoolean());
+        }
+
+        [Fact]
+        public async Task FinalizeAsync_WhenUpgrade_FiresBookImportedAndBookUpgraded()
+        {
+            var (service, notifier, job, download, audiobook, client) = await SeedFinalizableJobWithSpyAsync();
+
+            await service.FinalizeAsync(
+                job.Id, download.Id, audiobook.Id, audiobook.Title ?? download.Title,
+                client.Id, "finalization-upgrade", sourceRetained: false, wasUpgrade: true);
+
+            notifier.Verify(n => n.NotifyAsync(
+                NotificationTriggers.BookImported, It.IsAny<object>(), It.IsAny<CancellationToken>()), Times.Once);
+            notifier.Verify(n => n.NotifyAsync(
+                NotificationTriggers.BookUpgraded, It.IsAny<object>(), It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [Fact]
+        public async Task FinalizeAsync_WhenFirstImport_DoesNotFireBookUpgraded()
+        {
+            var (service, notifier, job, download, audiobook, client) = await SeedFinalizableJobWithSpyAsync();
+
+            await service.FinalizeAsync(
+                job.Id, download.Id, audiobook.Id, audiobook.Title ?? download.Title,
+                client.Id, "finalization-first-import", sourceRetained: false, wasUpgrade: false);
+
+            notifier.Verify(n => n.NotifyAsync(
+                NotificationTriggers.BookImported, It.IsAny<object>(), It.IsAny<CancellationToken>()), Times.Once);
+            notifier.Verify(n => n.NotifyAsync(
+                NotificationTriggers.BookUpgraded, It.IsAny<object>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        private async Task<(
+            ImportFinalizationService service,
+            Mock<IBookLifecycleNotifier> notifier,
+            DownloadProcessingJob job,
+            Download download,
+            Audiobook audiobook,
+            DownloadClientConfiguration client)> SeedFinalizableJobWithSpyAsync()
+        {
+            var audiobook = await CreateAudiobook();
+            var client = await CreateDownloadClientConfiguration();
+            var download = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithAudiobook(audiobook)
+                .WithDownloadClientConfiguration(client)
+                .WithStatus(DownloadStatus.ImportPending)
+                .Build());
+            var job = new DownloadProcessingJobBuilder()
+                .WithDownload(download)
+                .WithStatus(ProcessingJobStatus.Processing)
+                .Build();
+            job.SetCheckpoint("FilesImported");
+            job.SetCheckpoint("ClientMarkedImported");
+            job.SetCheckpoint("ScanEnqueued", Guid.NewGuid().ToString());
+            await _downloadProcessingJobRepository.AddAsync(job);
+
+            var notifier = new Mock<IBookLifecycleNotifier>();
+            notifier
+                .Setup(n => n.NotifyAsync(It.IsAny<string>(), It.IsAny<object>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            var dbFactory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+            var service = new ImportFinalizationService(dbFactory, notifier.Object);
+            return (service, notifier, job, download, audiobook, client);
         }
     }
 }

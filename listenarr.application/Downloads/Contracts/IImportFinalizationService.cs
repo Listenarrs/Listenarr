@@ -19,6 +19,7 @@ namespace Listenarr.Application.Downloads.Contracts
             string downloadClientId,
             string correlationId,
             bool? sourceRetained,
+            bool wasUpgrade = false,
             Dictionary<string, object>? details = null,
             CancellationToken ct = default);
     }
