@@ -1003,6 +1003,138 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Files
             Assert.Equal(1, file.Channels);
         }
 
+        private const long DescriptorLinkReportedLength = 64;
+
+        [Fact]
+        public async Task DivergentDescriptorFixture_ReportsDescriptorLengthRatherThanAudioLength()
+        {
+            var fixture = await CreateDivergentDescriptorFixtureAsync();
+
+            // Control for the two registration tests below. They only prove
+            // anything while stat'ing the descriptor path gives a different
+            // answer from stat'ing the audio file, so assert the divergence
+            // directly: if the fixture ever pointed both paths at the same
+            // file, those tests would pass without exercising the fault.
+            Assert.Equal(
+                DescriptorLinkReportedLength,
+                new FileInfo(fixture.DescriptorPath).Length);
+            Assert.Equal(
+                fixture.AudioLength,
+                new FileInfo(fixture.AudioPath).Length);
+            Assert.NotEqual(
+                new FileInfo(fixture.DescriptorPath).Length,
+                new FileInfo(fixture.AudioPath).Length);
+        }
+
+        [Fact]
+        public async Task EnsureAudiobookFileAsync_LeaseExposingGenerationBoundRead_RecordsAudioFileSize()
+        {
+            var fixture = await CreateDivergentDescriptorFixtureAsync();
+            _audiobook.BasePath = Path.GetDirectoryName(fixture.AudioPath);
+            await _audiobookRepository.UpdateAsync(_audiobook);
+            using var registrationLease = new DescriptorMetadataPathRegistrationLease(
+                fixture.AudioPath,
+                fixture.DescriptorPath,
+                "descriptor-metadata-generation",
+                exposesGenerationBoundRead: true);
+
+            Assert.True(await _provider
+                .GetRequiredService<IAudiobookFileService>()
+                .EnsureAudiobookFileAsync(_audiobook, registrationLease, "test"));
+
+            var file = Assert.Single(
+                await _audiobookFileRepository.GetByAudiobookIdAsync(_audiobook.Id));
+            Assert.Equal(fixture.AudioLength, file.Size);
+        }
+
+        [Fact]
+        public async Task EnsureAudiobookFileAsync_LeaseWithoutGenerationBoundRead_RecordsAudioFileSize()
+        {
+            var fixture = await CreateDivergentDescriptorFixtureAsync();
+            _audiobook.BasePath = Path.GetDirectoryName(fixture.AudioPath);
+            await _audiobookRepository.UpdateAsync(_audiobook);
+            using var registrationLease = new DescriptorMetadataPathRegistrationLease(
+                fixture.AudioPath,
+                fixture.DescriptorPath,
+                "descriptor-metadata-generation",
+                exposesGenerationBoundRead: false);
+
+            Assert.True(await _provider
+                .GetRequiredService<IAudiobookFileService>()
+                .EnsureAudiobookFileAsync(_audiobook, registrationLease, "test"));
+
+            var file = Assert.Single(
+                await _audiobookFileRepository.GetByAudiobookIdAsync(_audiobook.Id));
+            Assert.Equal(fixture.AudioLength, file.Size);
+        }
+
+        private sealed record DivergentDescriptorFixture(
+            string AudioPath,
+            string DescriptorPath,
+            long AudioLength);
+
+        private static async Task<DivergentDescriptorFixture>
+            CreateDivergentDescriptorFixtureAsync()
+        {
+            var directory = Directory
+                .CreateTempSubdirectory($"afs-descriptor-{Guid.NewGuid():N}")
+                .FullName;
+            var audioPath = Path.Combine(directory, "book.m4b");
+            var audioBytes = new byte[12_345];
+            await File.WriteAllBytesAsync(audioPath, audioBytes);
+
+            // Stands in for the lease's MetadataPath on Linux and macOS, which is
+            // a descriptor path (/proc/<pid>/fd/<n> or /dev/fd/<n>). Stat'ing one
+            // reports the descriptor link's own size, 64 bytes, rather than the
+            // length of the file the descriptor pins.
+            var descriptorPath = Path.Combine(directory, "descriptor-link-stand-in");
+            await File.WriteAllBytesAsync(
+                descriptorPath,
+                new byte[DescriptorLinkReportedLength]);
+
+            return new DivergentDescriptorFixture(
+                audioPath,
+                descriptorPath,
+                audioBytes.Length);
+        }
+
+        private sealed class DescriptorMetadataPathRegistrationLease(
+            string publicPath,
+            string metadataPath,
+            string physicalObjectIdentity,
+            bool exposesGenerationBoundRead) : IAudiobookFileRegistrationLease
+        {
+            public string PublicPath { get; } = publicPath;
+            public string MetadataPath { get; } = metadataPath;
+            public string PhysicalObjectIdentity { get; } = physicalObjectIdentity;
+            public string? SourcePhysicalObjectIdentity => null;
+
+            // The pinned lease serves this from the descriptor it holds, so the
+            // stream reports the pinned file's length. Leases without a
+            // generation-bound read reproduce the interface default, which throws.
+            public Stream OpenMetadataReadStream() =>
+                exposesGenerationBoundRead
+                    ? File.OpenRead(PublicPath)
+                    : throw new NotSupportedException(
+                        "This registration lease does not expose generation-bound metadata reads.");
+
+            public bool MatchesCurrentPublication() => true;
+
+            public bool PrepareCleanupRecovery(int audiobookId) => true;
+
+            public RegistrationPublicationCompletion CompletePublication() =>
+                RegistrationPublicationCompletion.Completed;
+
+            public Task<bool> MatchesContentAsync(
+                Stream candidateStream,
+                CancellationToken cancellationToken = default) =>
+                Task.FromResult(true);
+
+            public void Dispose()
+            {
+            }
+        }
+
         private sealed class SequencedRegistrationLease(
             string path,
             string physicalObjectIdentity,
