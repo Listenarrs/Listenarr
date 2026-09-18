@@ -177,7 +177,9 @@ namespace Listenarr.Application.Audiobooks.Files
                     return false;
                 }
 
-                if (!FileUtils.IsAudioFile(filePath))
+                // Extension pre-filter only. An ambiguous container passes here on its extension
+                // and is decided below, once its content has been probed.
+                if (!FileUtils.MayBeAudioPendingProbe(filePath))
                 {
                     logger.LogInformation("Skipping non-audio audiobook file registration for audiobook {AudiobookId}: {Path}", audiobook.Id, LogRedaction.SanitizeFilePath(filePath));
                     return false;
@@ -326,6 +328,22 @@ namespace Listenarr.Application.Audiobooks.Files
                     metadataPath,
                     cacheIdentity,
                     filePath);
+
+                // The one content gate. An always-audio extension short-circuits and is never
+                // probed for admission; an ambiguous container got this far on its extension
+                // alone and now has to prove it carries audio and no playable video. Cover art
+                // is an attached-picture stream and does not count as video, so an audiobook
+                // with embedded artwork still qualifies. The probe costs nothing extra here:
+                // registration extracts metadata for every file it records regardless.
+                if (!FileUtils.IsAudioFile(filePath)
+                    && (meta == null || !FileUtils.IsProbedAudioContent(meta)))
+                {
+                    logger.LogInformation(
+                        "Skipping audiobook file registration because the probed container carries no audio-only content for audiobook {AudiobookId}: {Path}",
+                        audiobook.Id,
+                        LogRedaction.SanitizeFilePath(filePath));
+                    return false;
+                }
 
                 var fi = new FileInfo(metadataPath);
                 var fileRecord = AudiobookFile.CreateUnresolved(filePath);

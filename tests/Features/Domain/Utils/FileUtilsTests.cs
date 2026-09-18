@@ -1326,5 +1326,37 @@ namespace Listenarr.Tests.Features.Domain.Utils
             Assert.False(FileUtils.IsProbedAudioContent(
                 new AudioMetadata { HasAudioStream = false, HasVideoStream = true }));
         }
+
+        // MayBeAudioPendingProbe is the pre-filter that stands in front of the content gate, so
+        // an ambiguous container reaches the probe instead of being dropped on its extension. It
+        // is deliberately wider than IsAudioFile and it admits nothing on its own. The control
+        // that has to come out differently is the pair of assertions on IsAudioFile below: the
+        // same .mp4 path is true here and still false there, which is what keeps the library
+        // scanner extension-only while manual import can probe.
+        [Fact]
+        public void MayBeAudioPendingProbe_WidensToAmbiguousContainersOnlyAndNeverToVideoExtensions()
+        {
+            foreach (var accepted in FileUtils.AudioExtensions)
+            {
+                Assert.True(FileUtils.MayBeAudioPendingProbe($"Target Book{accepted}"), accepted);
+            }
+
+            Assert.True(FileUtils.MayBeAudioPendingProbe("Target Book.mp4"));
+            Assert.True(FileUtils.MayBeAudioPendingProbe("Target Book.MP4"));
+
+            // The control. The extension-only gate is untouched, so the scanner still refuses the
+            // very path the pre-filter lets through.
+            Assert.False(FileUtils.IsAudioFile("Target Book.mp4"));
+            Assert.False(FileUtils.IsAudioFile("Target Book.MP4"));
+
+            // Widening stops at .mp4. No other container extension became importable, and a
+            // non-media extension is still refused outright.
+            foreach (var refused in new[] { ".mkv", ".avi", ".mov", ".webm", ".m4v", ".txt", ".nfo" })
+            {
+                Assert.False(FileUtils.MayBeAudioPendingProbe($"Target Book{refused}"), refused);
+            }
+
+            Assert.False(FileUtils.MayBeAudioPendingProbe("Target Book"));
+        }
     }
 }

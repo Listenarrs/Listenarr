@@ -63,6 +63,39 @@ public partial class ManualImportController
                     item.FullPath);
             }
 
+            // An ambiguous container cannot be admitted on its extension, because the same
+            // extension carries audiobooks and films. Probe the content once, here, before any
+            // filesystem mutation is planned, so a film is refused with a reason the user can act
+            // on rather than failing late with a generic registration error. One probe per
+            // user-selected item is affordable; the library scanner, which walks every file,
+            // stays extension-only and never reaches this.
+            if (FileUtils.IsAmbiguousAudioContainer(item.FullPath)
+                && !FileUtils.IsAudioFile(item.FullPath))
+            {
+                var probedContent = await _metadataService.ExtractFileMetadataAsync(
+                    item.FullPath);
+                if (probedContent == null)
+                {
+                    return ManualImportResultDto.FailureResult(
+                        "Failed to extract metadata from file",
+                        item.FullPath);
+                }
+
+                if (!FileUtils.IsProbedAudioContent(probedContent))
+                {
+                    _logger.LogInformation(
+                        "Refused manual import of ambiguous container {Path}: audio stream {HasAudio}, video stream {HasVideo}",
+                        LogRedaction.SanitizeFilePath(item.FullPath),
+                        probedContent.HasAudioStream,
+                        probedContent.HasVideoStream);
+                    return ManualImportResultDto.FailureResult(
+                        probedContent.HasVideoStream
+                            ? "The file carries video, so it was not imported as an audiobook."
+                            : "The file carries no audio stream.",
+                        item.FullPath);
+                }
+            }
+
             if (action == FileAction.None)
             {
                 if (string.IsNullOrWhiteSpace(audiobook.BasePath))
