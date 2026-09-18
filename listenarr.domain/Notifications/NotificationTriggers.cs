@@ -39,11 +39,9 @@ namespace Listenarr.Domain.Notifications
         public const string BookRenamed = "book-renamed";
 
         /// <summary>
-        /// Reserved for a future "a better file replaced an existing one" event. Not in the
-        /// catalog yet because Listenarr's import path does not currently emit a distinct
-        /// upgrade-completion signal (a replacement looks identical to a first import), so
-        /// firing it reliably would require new pre-import state tracking. Kept as a stable id
-        /// so integrations and the catalog can adopt it without a breaking rename later.
+        /// An import replaced/added to a book that already had files — i.e. an upgrade rather
+        /// than a first import. Derived from a pre-import file count in the import processor
+        /// (there is no distinct upgrade decision persisted from grab time).
         /// </summary>
         public const string BookUpgraded = "book-upgraded";
 
@@ -58,6 +56,7 @@ namespace Listenarr.Domain.Notifications
             new(BookDownloading, "Downloading", "A download has started.", 30),
             new(BookDownloadCompleted, "Download Completed", "The download client finished downloading.", 40),
             new(BookImported, "Imported", "The downloaded file was imported into the library.", 50),
+            new(BookUpgraded, "Book Upgraded", "An import replaced an existing book's files with a newer release.", 55),
             new(BookAvailable, "Available", "The book's files are registered and available in the library.", 60),
             new(BookCompleted, "Completed", "Post-import processing (move/organize) finished.", 70),
             new(BookDownloadFailed, "Download Failed", "A download failed.", 80),

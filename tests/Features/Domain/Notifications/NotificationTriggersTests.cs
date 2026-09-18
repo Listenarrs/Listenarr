@@ -67,15 +67,15 @@ namespace Listenarr.Tests.Features.Domain.Notifications
         }
 
         [Fact]
-        public void ReservedUpgradedTrigger_IsDefinedButNotYetCatalogued()
+        public void UpgradedTrigger_IsCataloguedAndKnown()
         {
-            // book-upgraded is a reserved id with no reliable fire point yet, so it must not appear
-            // in the catalog (which only advertises triggers the backend actually fires).
+            // book-upgraded now fires (an import that replaced an existing book's files), so it is
+            // catalogued and recognized like any other trigger.
             Assert.Equal("book-upgraded", NotificationTriggers.BookUpgraded);
-            Assert.DoesNotContain(
+            Assert.Contains(
                 NotificationTriggers.Catalog,
                 t => string.Equals(t.Id, NotificationTriggers.BookUpgraded, StringComparison.Ordinal));
-            Assert.False(NotificationTriggers.IsKnown(NotificationTriggers.BookUpgraded));
+            Assert.True(NotificationTriggers.IsKnown(NotificationTriggers.BookUpgraded));
         }
     }
 }

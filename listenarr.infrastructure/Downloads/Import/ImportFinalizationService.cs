@@ -26,6 +26,7 @@ namespace Listenarr.Infrastructure.Downloads.Import
             string downloadClientId,
             string correlationId,
             bool? sourceRetained,
+            bool wasUpgrade = false,
             Dictionary<string, object>? details = null,
             CancellationToken ct = default)
         {
@@ -103,6 +104,17 @@ namespace Listenarr.Infrastructure.Downloads.Import
                 downloadId,
                 title,
             }, ct);
+
+            // If the import replaced/added to a book that already had files, it's an upgrade.
+            if (wasUpgrade)
+            {
+                await lifecycleNotifier.NotifyAsync(NotificationTriggers.BookUpgraded, new
+                {
+                    id = audiobookId,
+                    downloadId,
+                    title,
+                }, ct);
+            }
         }
     }
 }
