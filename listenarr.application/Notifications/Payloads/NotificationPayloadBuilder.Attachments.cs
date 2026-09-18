@@ -259,51 +259,41 @@ namespace Listenarr.Application.Notifications.Payloads
             return scheme + "://" + host;
         }
 
+        // Human phrasing per lifecycle trigger: (verb phrase, generic-noun fallback).
+        // Keyed by canonical trigger id (see Listenarr.Domain.Notifications.NotificationTriggers).
+        private static readonly IReadOnlyDictionary<string, (string Phrase, string Generic)> TriggerContentPhrases =
+            new Dictionary<string, (string, string)>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["book-wanted"] = ("is wanted", "An audiobook is wanted"),
+                ["book-grabbed"] = ("was grabbed", "An audiobook was grabbed"),
+                ["book-downloading"] = ("is downloading", "An audiobook is downloading"),
+                ["book-download-completed"] = ("finished downloading", "An audiobook finished downloading"),
+                ["book-imported"] = ("was imported", "An audiobook was imported"),
+                ["book-available"] = ("is now available", "An audiobook is now available"),
+                ["book-completed"] = ("is complete", "An audiobook is complete"),
+                ["book-download-failed"] = ("failed to download", "An audiobook failed to download"),
+                ["book-import-failed"] = ("failed to import", "An audiobook failed to import"),
+                ["book-added"] = ("has been added", "A new audiobook has been added"),
+                ["book-upgraded"] = ("was upgraded", "An audiobook was upgraded"),
+                ["book-renamed"] = ("was renamed", "An audiobook was renamed"),
+                ["book-deleted"] = ("was deleted", "An audiobook was deleted"),
+            };
+
         private static string BuildDiscordContent(string trigger, string title, string author)
         {
-            if (string.Equals(trigger, "book-added", StringComparison.OrdinalIgnoreCase))
+            if (TriggerContentPhrases.TryGetValue(trigger, out var content))
             {
                 if (!string.IsNullOrWhiteSpace(title) && !string.IsNullOrWhiteSpace(author))
                 {
-                    return $"{title} by {author} has been added";
+                    return $"{title} by {author} {content.Phrase}";
                 }
 
                 if (!string.IsNullOrWhiteSpace(title))
                 {
-                    return $"{title} has been added";
+                    return $"{title} {content.Phrase}";
                 }
 
-                return "A new audiobook has been added";
-            }
-
-            if (string.Equals(trigger, "book-available", StringComparison.OrdinalIgnoreCase))
-            {
-                if (!string.IsNullOrWhiteSpace(title) && !string.IsNullOrWhiteSpace(author))
-                {
-                    return $"{title} by {author} is now available";
-                }
-
-                if (!string.IsNullOrWhiteSpace(title))
-                {
-                    return $"{title} is now available";
-                }
-
-                return "An audiobook is now available";
-            }
-
-            if (string.Equals(trigger, "book-downloading", StringComparison.OrdinalIgnoreCase))
-            {
-                if (!string.IsNullOrWhiteSpace(title) && !string.IsNullOrWhiteSpace(author))
-                {
-                    return $"{title} by {author} is downloading";
-                }
-
-                if (!string.IsNullOrWhiteSpace(title))
-                {
-                    return $"{title} is downloading";
-                }
-
-                return "An audiobook is downloading";
+                return content.Generic;
             }
 
             if (!string.IsNullOrWhiteSpace(title))
