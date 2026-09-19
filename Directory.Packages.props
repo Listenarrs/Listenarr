@@ -10,7 +10,7 @@
 	<ItemGroup>
 		<PackageVersion Include="Asp.Versioning.Mvc" Version="10.0.0" />
 		<PackageVersion Include="Asp.Versioning.Mvc.ApiExplorer" Version="10.0.0" />
-		<PackageVersion Include="AsyncKeyedLock" Version="8.0.2" />
+		<PackageVersion Include="AsyncKeyedLock" Version="8.1.2" />
 		<PackageVersion Include="Backport.System.Threading.Lock" Version="3.1.6" />
 		<PackageVersion Include="coverlet.collector" Version="10.0.1" />
 		<PackageVersion Include="HtmlAgilityPack" Version="1.12.4" />
