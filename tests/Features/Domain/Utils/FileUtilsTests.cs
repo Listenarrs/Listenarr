@@ -1250,5 +1250,113 @@ namespace Listenarr.Tests.Features.Domain.Utils
                 try { Directory.Delete(root, true); } catch (IOException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); } catch (UnauthorizedAccessException ex) { System.Diagnostics.Debug.WriteLine(ex.Message); }
             }
         }
+
+        // Characterization test for the audio admission set behind Listenarr#890. Every import
+        // and scan gate is Path.GetExtension against this set and nothing inspects the container
+        // or the codec, so identical MP4/AAC bytes are admitted when the file is named .m4b and
+        // refused when it is named .mp4. A batch of only refused files registers nothing, and the
+        // download processor turns that into Import Blocked. The set is pinned exactly so that a
+        // rewrite which changes what is accepted has to change this test on purpose.
+        [Fact]
+        public void AudioExtensions_AdmitsAudiobookContainersAndRefusesMp4()
+        {
+            Assert.Equal(
+                [
+                    ".aac", ".aif", ".aiff", ".alac", ".ape", ".flac", ".m4a",
+                    ".m4b", ".mp3", ".ogg", ".opus", ".wav", ".wma", ".wv"
+                ],
+                FileUtils.AudioExtensions.Order(StringComparer.Ordinal).ToArray());
+
+            Assert.DoesNotContain(".mp4", FileUtils.AudioExtensions);
+            Assert.False(FileUtils.IsAudioFile("Target Book.mp4"));
+            Assert.False(FileUtils.IsAudioFile("Target Book.MP4"));
+
+            foreach (var accepted in new[] { ".m4b", ".m4a", ".mp3", ".flac" })
+            {
+                Assert.Contains(accepted, FileUtils.AudioExtensions);
+                Assert.True(FileUtils.IsAudioFile($"Target Book{accepted}"), accepted);
+            }
+
+            // The set is built with StringComparer.OrdinalIgnoreCase, so casing never decides
+            // admission and an upper case extension cannot be the reason an import was refused.
+            Assert.Contains(".MP3", FileUtils.AudioExtensions);
+            Assert.True(FileUtils.IsAudioFile("Target Book.MP3"));
+        }
+
+        // The fix for Listenarr#890 keeps the characterization above intact: .mp4 is still not in
+        // AudioExtensions and IsAudioFile(".mp4") is still false, so the scanner and every
+        // extension-only gate behave exactly as before. .mp4 is admitted through a separate tier,
+        // AmbiguousAudioExtensions, which requires a content probe rather than trusting the
+        // extension. This test pins the boundary between the two tiers.
+        [Fact]
+        public void AmbiguousAudioContainer_RecognizesMp4WithoutAddingItToTheExtensionSet()
+        {
+            // The extension set is unchanged; .mp4 lives only in the ambiguous tier.
+            Assert.DoesNotContain(".mp4", FileUtils.AudioExtensions);
+            Assert.Contains(".mp4", FileUtils.AmbiguousAudioExtensions);
+
+            // A bare .mp4 is ambiguous, not audio-by-extension. Case does not decide admission.
+            Assert.True(FileUtils.IsAmbiguousAudioContainer("Target Book.mp4"));
+            Assert.True(FileUtils.IsAmbiguousAudioContainer("Target Book.MP4"));
+            Assert.False(FileUtils.IsAudioFile("Target Book.mp4"));
+
+            // The always-audio containers are not ambiguous and never take the probe path.
+            foreach (var alwaysAudio in new[] { ".m4b", ".m4a", ".mp3", ".flac" })
+            {
+                Assert.False(FileUtils.IsAmbiguousAudioContainer($"Target Book{alwaysAudio}"), alwaysAudio);
+            }
+
+            // A file with no extension is neither.
+            Assert.False(FileUtils.IsAmbiguousAudioContainer("Target Book"));
+        }
+
+        // IsProbedAudioContent is the gate an ambiguous container must pass. Audio present and no
+        // playable video admits; a playable video stream rejects; no audio rejects. The mapping
+        // from ffprobe stream JSON onto these flags, including the cover-art case, is pinned in
+        // FfprobeStreamPresenceTests.
+        [Fact]
+        public void IsProbedAudioContent_AdmitsAudioWithoutVideoAndRejectsOtherwise()
+        {
+            Assert.True(FileUtils.IsProbedAudioContent(
+                new AudioMetadata { HasAudioStream = true, HasVideoStream = false }));
+            Assert.False(FileUtils.IsProbedAudioContent(
+                new AudioMetadata { HasAudioStream = true, HasVideoStream = true }));
+            Assert.False(FileUtils.IsProbedAudioContent(
+                new AudioMetadata { HasAudioStream = false, HasVideoStream = false }));
+            Assert.False(FileUtils.IsProbedAudioContent(
+                new AudioMetadata { HasAudioStream = false, HasVideoStream = true }));
+        }
+
+        // MayBeAudioPendingProbe is the pre-filter that stands in front of the content gate, so
+        // an ambiguous container reaches the probe instead of being dropped on its extension. It
+        // is deliberately wider than IsAudioFile and it admits nothing on its own. The control
+        // that has to come out differently is the pair of assertions on IsAudioFile below: the
+        // same .mp4 path is true here and still false there, which is what keeps the library
+        // scanner extension-only while manual import can probe.
+        [Fact]
+        public void MayBeAudioPendingProbe_WidensToAmbiguousContainersOnlyAndNeverToVideoExtensions()
+        {
+            foreach (var accepted in FileUtils.AudioExtensions)
+            {
+                Assert.True(FileUtils.MayBeAudioPendingProbe($"Target Book{accepted}"), accepted);
+            }
+
+            Assert.True(FileUtils.MayBeAudioPendingProbe("Target Book.mp4"));
+            Assert.True(FileUtils.MayBeAudioPendingProbe("Target Book.MP4"));
+
+            // The control. The extension-only gate is untouched, so the scanner still refuses the
+            // very path the pre-filter lets through.
+            Assert.False(FileUtils.IsAudioFile("Target Book.mp4"));
+            Assert.False(FileUtils.IsAudioFile("Target Book.MP4"));
+
+            // Widening stops at .mp4. No other container extension became importable, and a
+            // non-media extension is still refused outright.
+            foreach (var refused in new[] { ".mkv", ".avi", ".mov", ".webm", ".m4v", ".txt", ".nfo" })
+            {
+                Assert.False(FileUtils.MayBeAudioPendingProbe($"Target Book{refused}"), refused);
+            }
+
+            Assert.False(FileUtils.MayBeAudioPendingProbe("Target Book"));
+        }
     }
 }
