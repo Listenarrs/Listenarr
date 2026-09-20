@@ -155,25 +155,75 @@ public static class ListenarrBuilderFactory
         }
     }
 
+    /// <summary>
+    /// Parses a log level string into a <see cref="LogEventLevel"/>, mapping common aliases
+    /// such as 'Trace' to Verbose and 'Critical' to Fatal (Issue #996).
+    /// </summary>
+    internal static bool TryParseLogLevel(string? value, out LogEventLevel level)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            level = default;
+            return false;
+        }
+
+        var trimmed = value.Trim();
+        if (string.Equals(trimmed, "Trace", StringComparison.OrdinalIgnoreCase))
+        {
+            level = LogEventLevel.Verbose;
+            return true;
+        }
+
+        if (string.Equals(trimmed, "Critical", StringComparison.OrdinalIgnoreCase))
+        {
+            level = LogEventLevel.Fatal;
+            return true;
+        }
+
+        return Enum.TryParse<LogEventLevel>(trimmed, ignoreCase: true, out level);
+    }
+
+    /// <summary>
+    /// Resolves the minimum log level from environment variables and configuration,
+    /// emitting diagnostic warnings when unrecognized levels are provided (Issue #996).
+    /// </summary>
+    internal static LogEventLevel ResolveMinimumLevel(
+        string? logLevelEnv,
+        string? configLevel,
+        Action<string>? warningLogger = null)
+    {
+        var warn = warningLogger ?? (msg => Console.WriteLine(msg));
+
+        if (!string.IsNullOrWhiteSpace(logLevelEnv))
+        {
+            if (TryParseLogLevel(logLevelEnv, out var envLevel))
+            {
+                return envLevel;
+            }
+
+            warn($"[Listenarr] Warning: Unrecognized log level '{logLevelEnv}' in LISTENARR_LOG_LEVEL. Accepted levels: Verbose (or Trace), Debug, Information, Warning, Error, Fatal (or Critical).");
+        }
+
+        if (!string.IsNullOrWhiteSpace(configLevel))
+        {
+            if (TryParseLogLevel(configLevel, out var cfgLevel))
+            {
+                return cfgLevel;
+            }
+
+            warn($"[Listenarr] Warning: Unrecognized log level '{configLevel}' in configuration. Accepted levels: Verbose (or Trace), Debug, Information, Warning, Error, Fatal (or Critical).");
+        }
+
+        return LogEventLevel.Information;
+    }
+
     private static void ConfigureSerilog(WebApplicationBuilder builder, ILogEventSink realtimeLogSink)
     {
         var logFilePath = Path.Join(builder.Environment.ContentRootPath, "config", "logs", "listenarr-.log");
         var logLevelEnv = Environment.GetEnvironmentVariable("LISTENARR_LOG_LEVEL");
         var configLevel = builder.Configuration["Serilog:MinimumLevel:Default"] ?? builder.Configuration["Logging:LogLevel:Default"];
 
-        LogEventLevel minimumLevel;
-        if (!string.IsNullOrWhiteSpace(logLevelEnv) && Enum.TryParse<LogEventLevel>(logLevelEnv, ignoreCase: true, out var parsedFromEnv))
-        {
-            minimumLevel = parsedFromEnv;
-        }
-        else if (!string.IsNullOrWhiteSpace(configLevel) && Enum.TryParse<LogEventLevel>(configLevel, ignoreCase: true, out var parsedFromConfig))
-        {
-            minimumLevel = parsedFromConfig;
-        }
-        else
-        {
-            minimumLevel = LogEventLevel.Information;
-        }
+        var minimumLevel = ResolveMinimumLevel(logLevelEnv, configLevel);
 
         Log.Logger = new LoggerConfiguration()
             .Enrich.FromLogContext()

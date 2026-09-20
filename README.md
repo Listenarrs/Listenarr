@@ -373,7 +373,7 @@ Configure your search APIs in the Settings page:
 
 You can control the application logging level in three ways:
 
-- Environment variable (recommended for Docker): set LISTENARR_LOG_LEVEL to one of Verbose, Debug, Information, Warning, Error, Fatal (e.g., `LISTENARR_LOG_LEVEL=Debug`).
+- Environment variable (recommended for Docker): set LISTENARR_LOG_LEVEL to one of Verbose (or Trace), Debug, Information, Warning, Error, Fatal (or Critical) (e.g., `LISTENARR_LOG_LEVEL=Debug`).
 - Configuration file: create or edit `config/appsettings/appsettings.json` under the active content root. In local development this is `.env/development/config/appsettings/appsettings.json`; in Docker this is `/app/config/appsettings/appsettings.json`. Set either `Serilog:MinimumLevel:Default` or `Logging:LogLevel:Default` to the desired level.
 - Runtime args / orchestration: pass environment variables via `docker run -e LISTENARR_LOG_LEVEL=Debug` or `docker-compose` environment section.
 
