@@ -145,6 +145,21 @@ internal static partial class ScanFileDiscovery
             return true;
         }
 
+        // Tolerate a differing leading article ("The"/"A"/"An") on either side, so a
+        // folder named "Language of Emotions" still matches the expected title
+        // "The Language of Emotions" (and vice versa). This stays a full-title equality
+        // modulo the article -- it never widens into substring or author matching, so
+        // the same-author / different-book boundary guards remain intact.
+        var articleFreeSegment = StripLeadingArticle(normalizedSegment);
+        if (titleTokens.Any(token =>
+                string.Equals(
+                    StripLeadingArticle(token),
+                    articleFreeSegment,
+                    StringComparison.Ordinal)))
+        {
+            return true;
+        }
+
         var components = segment
             .Split(
                 [" - ", " – ", " — "],
@@ -165,6 +180,21 @@ internal static partial class ScanFileDiscovery
         }
 
         return false;
+    }
+
+    private static readonly string[] LeadingArticlePrefixes = ["the ", "a ", "an "];
+
+    private static string StripLeadingArticle(string normalizedToken)
+    {
+        foreach (var prefix in LeadingArticlePrefixes)
+        {
+            if (normalizedToken.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                return normalizedToken[prefix.Length..];
+            }
+        }
+
+        return normalizedToken;
     }
 
     private static string? TryFindIdentifierBoundary(
