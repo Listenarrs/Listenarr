@@ -14,6 +14,7 @@
  */
 
 using Listenarr.Api.Dtos.ManualImport;
+using Listenarr.Application.Downloads.Import;
 using Listenarr.Domain.Common;
 
 namespace Listenarr.Api.Features.Downloads;
@@ -84,6 +85,7 @@ public sealed partial class ManualImportCompanionImporter
         FileSystemPathSemantics sourceSemantics,
         IReadOnlyDictionary<int, FileSystemSemanticsResolution> destinationResolutionsByAudiobook,
         IEnumerable<string> importBlacklist,
+        IReadOnlyCollection<RootFolder> rootFolders,
         CancellationToken cancellationToken = default) =>
         (await ImportWithOutcomeAsync(
             action,
@@ -96,6 +98,7 @@ public sealed partial class ManualImportCompanionImporter
             destinationResolutionsByAudiobook,
             importBlacklist,
             Guid.NewGuid(),
+            rootFolders,
             cancellationToken)).ImportedCount;
 
     public async Task<int> ImportAsync(
@@ -109,6 +112,7 @@ public sealed partial class ManualImportCompanionImporter
         IReadOnlyDictionary<int, FileSystemSemanticsResolution> destinationResolutionsByAudiobook,
         IEnumerable<string> importBlacklist,
         Guid compatibilityBatchId,
+        IReadOnlyCollection<RootFolder> rootFolders,
         CancellationToken cancellationToken = default) =>
         (await ImportWithOutcomeAsync(
             action,
@@ -121,6 +125,7 @@ public sealed partial class ManualImportCompanionImporter
             destinationResolutionsByAudiobook,
             importBlacklist,
             compatibilityBatchId,
+            rootFolders,
             cancellationToken)).ImportedCount;
 
     public async Task<ManualImportCompanionPassResult> ImportWithOutcomeAsync(
@@ -134,6 +139,7 @@ public sealed partial class ManualImportCompanionImporter
         IReadOnlyDictionary<int, FileSystemSemanticsResolution> destinationResolutionsByAudiobook,
         IEnumerable<string> importBlacklist,
         Guid compatibilityBatchId,
+        IReadOnlyCollection<RootFolder> rootFolders,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -241,7 +247,6 @@ public sealed partial class ManualImportCompanionImporter
                 }
 
                 if (!TryResolveCompanionDestination(
-                        sourceRootPath,
                         destinationRoot,
                         companionFile,
                         results,
@@ -326,13 +331,33 @@ public sealed partial class ManualImportCompanionImporter
                     continue;
                 }
 
+                // The managed boundary has to be a configured root folder: AuthorizeAsync matches the
+                // boundary against RootFolders by equivalence, not by containment. destinationRoot is
+                // the common parent of the destination paths this batch produced, so for the ordinary
+                // single-book import it is the book folder, which is never a root and is always
+                // refused. Select the boundary the same way the primary audio file's import does, so
+                // the companion and the audio it accompanies are authorized against the same root.
+                var companionBoundary = LibraryDirectoryOwnershipPlanning.SelectMostSpecificBoundary(
+                    destinationDirectory,
+                    rootFolders.Select(root => root.Path),
+                    destinationResolution.Semantics)
+                    ?? destinationResolution.BoundaryPath;
+                if (string.IsNullOrWhiteSpace(companionBoundary))
+                {
+                    _logger.LogWarning(
+                        "Skipping companion file {FilePath} because its destination has no managed ownership boundary",
+                        companionFile);
+                    succeeded = false;
+                    continue;
+                }
+
                 if (publicationPlan.Mode is
                     FilePublicationExecutionMode.AdditiveCopyRetainSource or
                     FilePublicationExecutionMode.CompatibilityCopyVerifiedCleanup)
                 {
                     await _directoryOwnershipStore.EnsureAdditiveHierarchyAsync(
                         destinationDirectory,
-                        destinationRoot,
+                        companionBoundary,
                         destinationResolution.Semantics,
                         cancellationToken);
                 }
@@ -340,7 +365,7 @@ public sealed partial class ManualImportCompanionImporter
                 {
                     await _directoryOwnershipStore.EnsureCreatedHierarchyAsync(
                         destinationDirectory,
-                        destinationRoot,
+                        companionBoundary,
                         destinationResolution.Semantics,
                         "manual-import-companion",
                         operationId,
@@ -385,8 +410,30 @@ public sealed partial class ManualImportCompanionImporter
         return new ManualImportCompanionPassResult(importedCount, succeeded);
     }
 
+    /// <summary>
+    /// Where the companion belongs under <paramref name="destinationRoot"/>: in the destination
+    /// directory of the file imported out of the companion's own source directory, under the
+    /// companion's own name. If no such file was imported, the companion is refused rather than
+    /// given a home somebody made up for it.
+    ///
+    /// The decision is <see cref="ImportCompanionDestinationResolver"/>'s, which the automatic
+    /// download import reaches through the same method for its own fallback. This path asks no
+    /// question about source structure, because it has none to reproduce: the audio destination
+    /// comes from the naming pattern (<see cref="ManualImportPathPlanner.GeneratePathAsync"/>)
+    /// and never reproduces the source's directory structure, so mirroring a companion's source
+    /// position hands the sidecar a shape the file it accompanies has just lost. The source path
+    /// is read on this path, but only for numbers: <c>MultiFileImportPlanner.InferOrderHints</c>
+    /// takes a disc or part hint from the parent directory's name, which a <c>{DiskNumber}</c>
+    /// pattern may turn into a destination subfolder. A companion follows the audio into that
+    /// subfolder, because it follows the audio wherever it went.
+    ///
+    /// Both paths ask one implementation because two copies of a containment rule is how a fix to
+    /// one of them leaves the other broken.
+    ///
+    /// The resolver answers with a path relative to the destination root. Resolving that back
+    /// under the root is what rejects a relative path that would escape it.
+    /// </summary>
     private static bool TryResolveCompanionDestination(
-        string sourceRootPath,
         string destinationRoot,
         string companionFile,
         IReadOnlyCollection<ManualImportResultDto> results,
@@ -394,62 +441,38 @@ public sealed partial class ManualImportCompanionImporter
         FileSystemPathSemantics destinationSemantics,
         out string destinationPath)
     {
-        var sourceRoot = FileSystemPathIdentity.ResolveNativeAbsolutePath(sourceRootPath);
-        var companion = FileSystemPathIdentity.ResolveNativeAbsolutePath(companionFile);
+        destinationPath = string.Empty;
         var destination = FileSystemPathIdentity.ResolveNativeAbsolutePath(destinationRoot);
-        if (FileSystemPathIdentity.TryGetRelativePathWithinBase(
-                sourceRoot,
-                companion,
-                sourceSemantics,
-                out var relativePath)
+        return ImportCompanionDestinationResolver.TryResolveBesideImportedFile(
+                   companionFile,
+                   destination,
+                   ImportedFilesFrom(results),
+                   sourceSemantics,
+                   destinationSemantics,
+                   out var relativePath)
             && FileSystemPathIdentity.TryResolveRelativePathWithinBase(
                 destination,
                 relativePath,
                 destinationSemantics,
-                out destinationPath))
-        {
-            return true;
-        }
-
-        var companionDirectory = Path.GetDirectoryName(companion);
-        if (string.IsNullOrWhiteSpace(companionDirectory))
-        {
-            destinationPath = string.Empty;
-            return false;
-        }
-
-        var matchingImport = results.FirstOrDefault(result =>
-        {
-            if (!result.Success
-                || string.IsNullOrWhiteSpace(result.SourcePath)
-                || string.IsNullOrWhiteSpace(result.DestinationPath))
-            {
-                return false;
-            }
-
-            var importedSourceDirectory = Path.GetDirectoryName(
-                FileSystemPathIdentity.ResolveNativeAbsolutePath(result.SourcePath));
-            return importedSourceDirectory != null
-                && sourceSemantics.Comparer.Equals(importedSourceDirectory, companionDirectory);
-        });
-        var importedDestinationDirectory = matchingImport?.DestinationPath == null
-            ? null
-            : Path.GetDirectoryName(
-                FileSystemPathIdentity.ResolveNativeAbsolutePath(
-                    matchingImport.DestinationPath));
-        if (string.IsNullOrWhiteSpace(importedDestinationDirectory)
-            || !FileSystemPathIdentity.TryResolveRelativePathWithinBase(
-                importedDestinationDirectory,
-                Path.GetFileName(companion),
-                destinationSemantics,
-                out destinationPath))
-        {
-            destinationPath = string.Empty;
-            return false;
-        }
-
-        return true;
+                out destinationPath);
     }
+
+    /// <summary>
+    /// The batch's successful imports, in the shape the resolver's fallback wants. No audio
+    /// filter, unlike the automatic path: that batch's results carry the companions it has
+    /// already placed, while this pass never writes into <paramref name="results"/> at all, so
+    /// everything here is a file the caller selected. The caller may legitimately have selected a
+    /// non-audio file, since GET preview lists every file that is not blacklisted.
+    /// </summary>
+    private static IEnumerable<ImportCompanionDestinationResolver.ImportedFilePlacement>
+        ImportedFilesFrom(IReadOnlyCollection<ManualImportResultDto> results) =>
+        results
+            .Where(result => result.Success
+                && !string.IsNullOrWhiteSpace(result.SourcePath)
+                && !string.IsNullOrWhiteSpace(result.DestinationPath))
+            .Select(result => new ImportCompanionDestinationResolver.ImportedFilePlacement(
+                result.SourcePath!,
+                result.DestinationPath!));
 
     private async Task<FileUtils.AudioMatchProfile?> BuildAudioMatchProfileAsync(string filePath)
     {

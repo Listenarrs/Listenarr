@@ -128,7 +128,7 @@ namespace Listenarr.Application.Downloads.Import
                     sourcePathComparer = sourceSemantics.Value.Comparer;
                 }
                 var sourceFiles = candidateFiles.Distinct(sourcePathComparer).ToList();
-                sourceRootPath = FileUtils.GetCommonDirectory(sourceFiles);
+                var companionSourceRoots = ImportCompanionDestinationResolver.ResolveRoots(sourceFiles, archiveImportExtractor.ExtractionRoots, sourceSemantics);
                 var plannedAudioFiles = MultiFileImportPlanner.BuildPlans(
                     sourceFiles.Where(FileUtils.IsAudioFile).Select(f => (f, (string?)null)),
                     sourcePathComparer);
@@ -184,11 +184,11 @@ namespace Listenarr.Application.Downloads.Import
 
                             try
                             {
-                                var relativePath = !string.IsNullOrWhiteSpace(sourceRootPath) ? Path.GetRelativePath(sourceRootPath, file) : Path.GetFileName(file);
-                                if (!destinationPlanner.TryResolve(audiobook.BasePath, relativePath, destinationSemantics, out var destination))
+                                var companionPlaced = ImportCompanionDestinationResolver.TryResolveRelativeDestination(companionSourceRoots, file, audiobook.BasePath, results, fileSourceSemantics, destinationSemantics, out var relativePath);
+                                if (!companionPlaced || !destinationPlanner.TryResolve(audiobook.BasePath, relativePath, destinationSemantics, out var destination))
                                 {
-                                    results.Add(ImportResult.ImportFailure(completedFileAction, file, audiobook.BasePath));
-                                    logger.LogWarning("Blocked companion import outside audiobook base path. Audiobook {AudiobookId}, Source {Source}, Relative {Relative}, BasePath {BasePath}", audiobook.Id, file, relativePath, audiobook.BasePath);
+                                    results.Add(companionPlaced ? ImportResult.ImportFailure(completedFileAction, file, audiobook.BasePath) : ImportResult.Skipped($"Companion file {Path.GetFileName(file)} has no destination inside the audiobook folder: it came from neither the batch's source directory nor an archive, and no audio file was imported from its own directory"));
+                                    logger.LogWarning("Companion import not placed inside the audiobook base path. Audiobook {AudiobookId}, Source {Source}, Placed {Placed}, Relative {Relative}, BasePath {BasePath}", audiobook.Id, file, companionPlaced, relativePath, audiobook.BasePath);
                                     continue;
                                 }
 
