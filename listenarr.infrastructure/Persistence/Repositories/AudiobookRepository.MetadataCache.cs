@@ -28,14 +28,36 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
         // are enough to produce it: the losing write is dropped and that author's cache entry
         // goes unwritten for the cycle.
         //
-        // Retrying is what closes the gap, because the second pass reads the row the winner just
-        // committed and takes the update path. The alternative, an INSERT ... ON CONFLICT DO
-        // UPDATE, would have to restate the field-by-field merge rules below in SQL, including
-        // the JSON columns that EF serializes through value converters, so the merge would then
-        // live in two places that have to agree.
+        // Retrying closes the gap, because the second pass reads the row the winner committed
+        // and takes the update path. Normally one retry does it; the bound is what guarantees
+        // termination if some repeat we have not thought of keeps the read missing.
         //
-        // One retry is enough once a winner exists. The bound is here so that a row deleted
-        // between two attempts cannot spin.
+        // INSERT ... ON CONFLICT DO UPDATE is not a drop-in here. It takes a single conflict
+        // target, which can only be the unique (NameNormalized, Region) index, but the
+        // resolution below is ASIN-first against an index that is deliberately not unique.
+        // Finding the row that holds an ASIN whose name differs is not expressible as a conflict
+        // clause on the name index, so the SQL form would quietly change what the method does.
+        // It would also restate the field merge rules, JSON columns and value converters
+        // included, somewhere they have to be kept in step by hand.
+        //
+        // BEGIN IMMEDIATE would make the read and the write atomic rather than detecting the
+        // loss afterwards, and it would hold across processes. It is not used because EF's
+        // BeginTransactionAsync issues a deferred BEGIN, so it means dropping to the raw
+        // connection, and a later refactor that restores the deferred form turns the symptom
+        // into SQLITE_BUSY without anything failing loudly. It also serializes every cache
+        // upsert to fix a collision that is rare by construction.
+        //
+        // Two limits on the retry below, both deliberate.
+        //
+        // A blank normalized name is never retried. The key being written is blank too, and
+        // re-reading it would mean resolving on the empty string, which merges authors whose
+        // names differ only in punctuation onto one row. There is no correct row to find, so
+        // that case keeps the behaviour it has today.
+        //
+        // SaveChangesAsync saves the whole scoped context rather than this entity alone, and
+        // the translated exception carries no table or column, so a violation raised by another
+        // pending entity in the same scope would be read as this one's. No caller shares a
+        // scope that way today, and the bound limits the cost if one ever does.
         private const int CacheUpsertAttempts = 3;
 
         public async Task<AuthorCacheEntry> UpsertCachedAuthorAsync(AuthorCacheEntry authorCacheEntry)
@@ -108,10 +130,14 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                     await _db.SaveChangesAsync();
                     return existing;
                 }
-                // Only an insert that lost a race is retried. A violation on the update path means
-                // the row this resolved to cannot hold the incoming key, which re-reading will not
-                // change, so that one still surfaces to the caller.
-                catch (UniqueConstraintViolationException) when (inserting && attempt < CacheUpsertAttempts)
+                // Only an insert that lost a race is retried, and only when the key it wrote can
+                // be looked up again. A violation on the update path is the by-ASIN lookup having
+                // resolved a row that cannot take the incoming name; the deterministic form of
+                // that would resolve the same row every pass and spin, so it surfaces instead.
+                catch (UniqueConstraintViolationException) when (
+                    inserting
+                    && !string.IsNullOrWhiteSpace(normalizedName)
+                    && attempt < CacheUpsertAttempts)
                 {
                     _db.Entry(existing).State = EntityState.Detached;
                 }
@@ -183,7 +209,10 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                     await _db.SaveChangesAsync();
                     return existing;
                 }
-                catch (UniqueConstraintViolationException) when (inserting && attempt < CacheUpsertAttempts)
+                catch (UniqueConstraintViolationException) when (
+                    inserting
+                    && !string.IsNullOrWhiteSpace(normalizedName)
+                    && attempt < CacheUpsertAttempts)
                 {
                     _db.Entry(existing).State = EntityState.Detached;
                 }
