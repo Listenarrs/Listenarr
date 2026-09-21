@@ -100,7 +100,12 @@ namespace Listenarr.Tests.Features.Infrastructure.Repositories
             var winning = db.NewContext();
             var repository = new AudiobookRepository(losing);
 
+            var saves = 0;
             var interleaved = false;
+            losing.SavingChanges += (_, _) =>
+            {
+                saves++;
+            };
             losing.SavingChanges += (_, _) =>
             {
                 if (interleaved)
@@ -109,8 +114,11 @@ namespace Listenarr.Tests.Features.Infrastructure.Repositories
                 }
 
                 interleaved = true;
-                new AudiobookRepository(winning)
-                    .UpsertCachedAuthorAsync(Author("Mary Shelley", imageUrl: "https://example.invalid/first.jpg"))
+                // Task.Run keeps this off the runner's synchronization context. SavingChanges is
+                // a synchronous event, so the other writer has to be waited on here, and blocking
+                // on a continuation that wanted to post back to a busy context is how that hangs.
+                Task.Run(() => new AudiobookRepository(winning)
+                        .UpsertCachedAuthorAsync(Author("Mary Shelley", imageUrl: "https://example.invalid/first.jpg")))
                     .GetAwaiter()
                     .GetResult();
             };
@@ -119,6 +127,9 @@ namespace Listenarr.Tests.Features.Infrastructure.Repositories
                 Author("Mary Shelley", asin: "B000AP9A2E"));
 
             Assert.True(interleaved, "the interleaving never happened, so this test proved nothing");
+            // One failed attempt and one that succeeded. More than two would mean the retry is
+            // not resolving the winner's row on the second pass.
+            Assert.Equal(2, saves);
 
             var rows = await db.NewContext().AuthorCacheEntries.AsNoTracking().ToListAsync();
             var row = Assert.Single(rows);
@@ -138,7 +149,12 @@ namespace Listenarr.Tests.Features.Infrastructure.Repositories
             var winning = db.NewContext();
             var repository = new AudiobookRepository(losing);
 
+            var saves = 0;
             var interleaved = false;
+            losing.SavingChanges += (_, _) =>
+            {
+                saves++;
+            };
             losing.SavingChanges += (_, _) =>
             {
                 if (interleaved)
@@ -147,8 +163,8 @@ namespace Listenarr.Tests.Features.Infrastructure.Repositories
                 }
 
                 interleaved = true;
-                new AudiobookRepository(winning)
-                    .UpsertCachedSeriesAsync(Series("Frankenstein", imageUrl: "https://example.invalid/first.jpg"))
+                Task.Run(() => new AudiobookRepository(winning)
+                        .UpsertCachedSeriesAsync(Series("Frankenstein", imageUrl: "https://example.invalid/first.jpg")))
                     .GetAwaiter()
                     .GetResult();
             };
@@ -157,6 +173,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Repositories
                 Series("Frankenstein", asin: "B002V0QC5I"));
 
             Assert.True(interleaved, "the interleaving never happened, so this test proved nothing");
+            Assert.Equal(2, saves);
 
             var rows = await db.NewContext().SeriesCacheEntries.AsNoTracking().ToListAsync();
             var row = Assert.Single(rows);
@@ -227,22 +244,81 @@ namespace Listenarr.Tests.Features.Infrastructure.Repositories
             Assert.Equal(2, await db.NewContext().SeriesCacheEntries.CountAsync());
         }
 
-        // Control with teeth. The unique violation raised on the UPDATE path is a different
-        // defect: the by-ASIN lookup resolved a row belonging to another name, and renaming it
-        // collides with that other name's own row. Re-reading cannot change that outcome, so it
-        // must still reach the caller. If the retry had been written to catch the violation
-        // unconditionally this test would hang or report success instead.
+
+
+        // Control with teeth, and the assertion that gives it teeth is the save count rather
+        // than the throw. The unique violation raised on the UPDATE path is a different defect:
+        // the by-ASIN lookup resolved a row belonging to another name, and renaming it collides
+        // with that other name's own row. Re-reading resolves the same row every pass, so it
+        // must not be retried.
+        //
+        // The throw alone proves nothing here. Drop the `inserting` term from the retry filter
+        // and this still throws, because the attempt bound stops it either way. What separates
+        // the two is how many times it reaches the database: once when the filter is right,
+        // three times when it is not.
         [Fact]
-        public async Task UpsertCachedAuthor_WhenTheResolvedRowCannotTakeTheIncomingName_StillThrows()
+        public async Task UpsertCachedAuthor_WhenTheResolvedRowCannotTakeTheIncomingName_ThrowsWithoutRetrying()
         {
             using var db = new SharedDb();
-            var repository = new AudiobookRepository(db.NewContext());
+            var context = db.NewContext();
+            var repository = new AudiobookRepository(context);
 
             await repository.UpsertCachedAuthorAsync(Author("Mary Shelley", asin: "B000AP9A2E"));
             await repository.UpsertCachedAuthorAsync(Author("Bram Stoker"));
 
+            var saves = 0;
+            context.SavingChanges += (_, _) => saves++;
+
             await Assert.ThrowsAsync<UniqueConstraintViolationException>(() =>
                 repository.UpsertCachedAuthorAsync(Author("Bram Stoker", asin: "B000AP9A2E")));
+
+            Assert.Equal(1, saves);
+        }
+
+        [Fact]
+        public async Task UpsertCachedSeries_WhenTheResolvedRowCannotTakeTheIncomingName_ThrowsWithoutRetrying()
+        {
+            using var db = new SharedDb();
+            var context = db.NewContext();
+            var repository = new AudiobookRepository(context);
+
+            await repository.UpsertCachedSeriesAsync(Series("Frankenstein", asin: "B002V0QC5I"));
+            await repository.UpsertCachedSeriesAsync(Series("Dracula"));
+
+            var saves = 0;
+            context.SavingChanges += (_, _) => saves++;
+
+            await Assert.ThrowsAsync<UniqueConstraintViolationException>(() =>
+                repository.UpsertCachedSeriesAsync(Series("Dracula", asin: "B002V0QC5I")));
+
+            Assert.Equal(1, saves);
+        }
+
+        // A name made only of punctuation normalizes to the empty string, and two such names
+        // collide on the unique index with no concurrency involved. Retrying cannot help: the
+        // key written is blank, and the name lookup is skipped for a blank key, so every pass
+        // repeats the same insert. Resolving on the empty string instead would be worse, since
+        // it would merge two authors whose names differ only in punctuation onto one row.
+        //
+        // So this collision is left to surface on the first attempt, the way it does today. The
+        // save count is the assertion that matters; without the blank-name term in the retry
+        // filter it is three.
+        [Fact]
+        public async Task UpsertCachedAuthor_BlankNormalizedName_ThrowsWithoutRetrying()
+        {
+            using var db = new SharedDb();
+            var context = db.NewContext();
+            var repository = new AudiobookRepository(context);
+
+            await new AudiobookRepository(db.NewContext()).UpsertCachedAuthorAsync(Author("???"));
+
+            var saves = 0;
+            context.SavingChanges += (_, _) => saves++;
+
+            await Assert.ThrowsAsync<UniqueConstraintViolationException>(() =>
+                repository.UpsertCachedAuthorAsync(Author("!!!")));
+
+            Assert.Equal(1, saves);
         }
     }
 }
