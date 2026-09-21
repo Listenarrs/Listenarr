@@ -44,11 +44,14 @@ namespace Listenarr.Tests.Features.Domain.Audiobooks
         }
 
         [Fact]
-        public void ToAudiobook_CleansTheCreditWhicheverEndOfTheBylineItIsOn()
+        public void ToAudiobook_StoresTheAuthorFirstEvenWhenTheProviderDidNot()
         {
+            // B00EZAXAF8 credits the translator ahead of Dostoevsky. Everybody is kept and
+            // everybody is spelled properly, and the author is stored first, because once the
+            // role is gone every consumer that takes Authors[0] has no other way to find them.
             var audiobook = Metadata("Constance Garnett - translator", "Fyodor Dostoevsky").ToAudiobook();
 
-            Assert.Equal(new[] { "Constance Garnett", "Fyodor Dostoevsky" }, audiobook.Authors);
+            Assert.Equal(new[] { "Fyodor Dostoevsky", "Constance Garnett" }, audiobook.Authors);
         }
 
         [Fact]

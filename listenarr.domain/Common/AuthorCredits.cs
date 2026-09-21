@@ -76,7 +76,7 @@ namespace Listenarr.Domain.Common
 
         private const string WorkRoleWords =
             "translated|translation|traducao|tradução|traduccion|traducción|edited|adapted|" +
-            "adaptado|adaptation|illustrated|annotation|introduction|introductions|introduccion|" +
+            "adaptado|adaptation|illustrated|annotated|annotation|introduction|introductions|introduccion|" +
             "introducción|foreword|afterword|preface|préface|prefacio|postface|avant-propos|" +
             "prologue|prologo|prólogo|essay|notes";
 
@@ -99,27 +99,30 @@ namespace Listenarr.Domain.Common
         private const string DashTailBody =
             TailLead + "(?:" + AnyRole + ")" + TailRest;
 
-        // Inside brackets the vocabulary is the same as after a dash, and that is a reversal
-        // worth explaining because it was the other way round one branch ago.
+        // Inside brackets the vocabulary depends on who is asking, and that is the whole
+        // subtlety of this class.
         //
-        // Amazon and Audible use a trailing parenthetical for two different things: the
-        // person's role ("Smith(Translated by)") and the edition ("Lewis Carroll (Illustrated)").
-        // While the rule was to DROP a detected credit, telling those apart was critical, since
-        // reading an edition descriptor as a role deleted the author. So participles were
-        // required to carry a "by" in brackets.
+        // Amazon and Audible use a trailing parenthetical for two different things: the person's
+        // role ("Smith(Translated by)") and the edition ("Lewis Carroll (Illustrated)"). Nothing
+        // in the text tells them apart.
         //
-        // Removing the role rather than the credit changes what a confusion costs. Both readings
-        // now produce the same thing, the person's name without the parenthetical, and for an
-        // edition descriptor that is the answer you wanted anyway: "Lewis Carroll (Illustrated)"
-        // and "Miguel de Cervantes (adapted)" both become the author they were always about,
-        // and stop being separate entries on the Authors page. So the restriction is lifted and
-        // the two notations agree.
+        // For REMOVING the tail that ambiguity is cheap, and resolving it either way gives the
+        // same answer: the person's name without the bracket. "Lewis Carroll (Illustrated)"
+        // becoming "Lewis Carroll" is what you wanted from a reading that was arguably wrong,
+        // and it stops one author being two entries. So StripRole accepts the loose form.
         //
-        // What still protects a real name is the vocabulary, not the punctuation. A trailing
-        // parenthetical is only removed when everything inside it is role vocabulary, so
-        // "Hector Hugh Munro (Saki)", "Plato (Greek)" and "Martin Luther King (Jr.)" are
-        // untouched. There are tests for each.
-        private const string ParenTailBody = DashTailBody;
+        // For DECIDING WHO WROTE THE BOOK it is not cheap at all. Reading an edition descriptor
+        // as a role there demotes the author in favour of whoever is credited next, which is
+        // the same severity as deleting them. So IsRoleCredit, which is what Primary consults,
+        // takes the strict form: an agent noun names a person and can only be a credit, and a
+        // participle has to carry a "by" before it counts.
+        //
+        // An earlier revision used the loose form for both and a review caught it:
+        // Primary(["Lewis Carroll (Illustrated)", "John Tenniel"]) returned John Tenniel.
+        private const string ParenStrictBody =
+            TailLead + "(?:" + AgentAny + "|(?:" + WorkRoleWords + ")\\s+by)" + TailRest;
+
+        private const string ParenLooseBody = DashTailBody;
 
         // Every separator inside a tail is mandatory whitespace. That is not tidiness: the
         // previous pattern put optional whitespace on both sides of an alternation inside a
@@ -143,8 +146,13 @@ namespace Listenarr.Domain.Common
         // Putting it back in the constant is what made the pattern exponential, and while
         // NonBacktracking would now absorb that, the call-site version stays correct if anyone
         // ever removes the option.
+        // What Primary consults. Strict: an edition descriptor must not decide authorship.
+        private static readonly Regex ParenthesisedRole = new(
+            "\\s*\\(\\s*" + ParenStrictBody + "\\s*\\)\\s*$", TailOptions, MatchTimeout);
+
+        // What StripRole removes. Loose: an edition descriptor is worth taking off a name.
         private static readonly Regex ParenthesisedTail = new(
-            "\\s*\\(\\s*" + ParenTailBody + "\\s*\\)\\s*$", TailOptions, MatchTimeout);
+            "\\s*\\(\\s*" + ParenLooseBody + "\\s*\\)\\s*$", TailOptions, MatchTimeout);
 
         /// <summary>
         /// True when a credited name ends in a contributor role rather than naming an author.
@@ -181,7 +189,7 @@ namespace Listenarr.Domain.Common
             var trimmed = name.Trim();
             try
             {
-                return ParenthesisedTail.IsMatch(trimmed) || DashTail.IsMatch(trimmed);
+                return ParenthesisedRole.IsMatch(trimmed) || DashTail.IsMatch(trimmed);
             }
             catch (RegexMatchTimeoutException)
             {
@@ -217,8 +225,22 @@ namespace Listenarr.Domain.Common
             string stripped;
             try
             {
-                stripped = ParenthesisedTail.Replace(trimmed, string.Empty);
-                stripped = DashTail.Replace(stripped, string.Empty);
+                // Repeated because one pass is not a fixed point. Each regex is anchored at the
+                // end and replaces once, so removing an outer tail can expose an inner one:
+                // "Constance Garnett (editor) - translator" loses the dash tail and is left
+                // holding a bracket tail that nothing has looked at. The cap is there so a
+                // pathological input cannot spin; four is well past anything observed.
+                stripped = trimmed;
+                for (var pass = 0; pass < 4; pass++)
+                {
+                    var before = stripped;
+                    stripped = ParenthesisedTail.Replace(stripped, string.Empty).TrimEnd();
+                    stripped = DashTail.Replace(stripped, string.Empty).TrimEnd();
+                    if (stripped == before)
+                    {
+                        break;
+                    }
+                }
             }
             catch (RegexMatchTimeoutException)
             {
@@ -235,10 +257,23 @@ namespace Listenarr.Domain.Common
         /// The credited names with their roles removed, in order, without duplicates.
         /// </summary>
         /// <remarks>
-        /// Removing a role can make two credits identical, which is the one way this rule
-        /// creates a problem the alternative did not: a book crediting somebody as both author
-        /// and translator arrives as two names and would otherwise leave as the same name twice.
-        /// Duplicates are collapsed, keeping the first occurrence so byline order survives.
+        /// Two things happen here beyond the obvious, and both are forced.
+        ///
+        /// Credits that name a role are moved after the ones that do not, keeping the relative
+        /// order within each group. That is not tidiness. Once the role is removed nothing
+        /// downstream can tell a translator from an author, and four separate code paths pick an
+        /// author by taking <c>Authors[0]</c> off the stored row: the library path planner, the
+        /// rename service, the manual import planner and the search result classifier. If a
+        /// reversed byline were stored in the order it arrived, those four would all name the
+        /// folder after the translator while the add path, which still sees the provider's
+        /// original strings, named it after the author. They would disagree about the same book
+        /// and rename would keep proposing to move it. Putting the author first makes
+        /// <c>Authors[0]</c> and <see cref="Primary"/> agree by construction.
+        ///
+        /// Removing a role can also make two credits identical, which is the one problem this
+        /// rule creates that dropping the credit did not: somebody credited as both author and
+        /// translator arrives as two names and would otherwise leave as the same name twice.
+        /// Duplicates are collapsed, first occurrence winning.
         /// </remarks>
         public static IReadOnlyList<string> WithoutRoleSuffixes(IReadOnlyList<string>? credits)
         {
@@ -247,18 +282,29 @@ namespace Listenarr.Domain.Common
                 return credits ?? Array.Empty<string>();
             }
 
-            var cleaned = new List<string>(credits.Count);
+            var authors = new List<string>(credits.Count);
+            var contributors = new List<string>(credits.Count);
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var credit in credits)
             {
                 var stripped = StripRole(credit);
-                if (stripped.Length > 0 && seen.Add(stripped))
+                if (stripped.Length == 0 || !seen.Add(stripped))
                 {
-                    cleaned.Add(stripped);
+                    continue;
+                }
+
+                if (IsRoleCredit(credit))
+                {
+                    contributors.Add(stripped);
+                }
+                else
+                {
+                    authors.Add(stripped);
                 }
             }
 
-            return cleaned.Count == 0 ? credits : cleaned;
+            authors.AddRange(contributors);
+            return authors.Count == 0 ? credits : authors;
         }
 
         /// <summary>
