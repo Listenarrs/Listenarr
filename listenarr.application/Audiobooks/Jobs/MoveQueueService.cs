@@ -425,6 +425,10 @@ namespace Listenarr.Application.Audiobooks.Jobs
                 var currentStatus = dbJob?.Status ?? status;
                 var currentError = dbJob?.Error ?? error;
                 LogStatusChange(id, currentStatus, currentError);
+                if (currentStatus == MoveJobStatus.Completed && dbJob != null)
+                {
+                    await SupersedeStaleFailuresAsync(dbJob, cancellationToken);
+                }
                 try
                 {
                     await _hubBroadcaster.BroadcastAsync(
