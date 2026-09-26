@@ -496,6 +496,76 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
         }
 
         [Fact]
+        public async Task GetQueueAsync_WhenIpIsBanned_ReportsBanAndDoesNotRetryLogin()
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.LoginResponseOverride = () => new HttpResponseMessage(HttpStatusCode.Forbidden)
+            {
+                Content = new StringContent("Your IP address has been banned after too many failed authentication attempts.")
+            };
+            apiMock.ResetRequestHistory();
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            var first = await Assert.ThrowsAsync<DownloadClientAdapterPollingException>(
+                () => adapter.GetQueueAsync(_client, ["ABCDEF"]));
+            Assert.Contains("banned", first.InnerException!.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("credentials are incorrect", first.InnerException.Message, StringComparison.OrdinalIgnoreCase);
+
+            await Assert.ThrowsAsync<DownloadClientAdapterPollingException>(
+                () => adapter.GetQueueAsync(_client, ["ABCDEF"]));
+
+            Assert.Single(apiMock.RequestHistory,
+                request => request.RequestUri.AbsolutePath.EndsWith("/api/v2/auth/login", StringComparison.Ordinal));
+        }
+
+        [Fact]
+        public async Task GetQueueAsync_WhenLoginReturnsFails_TreatsCredentialsAsRejected()
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.LoginResponseOverride = () => MockUtils.GetCannedResponse("Fails.");
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            var exception = await Assert.ThrowsAsync<DownloadClientAdapterPollingException>(
+                () => adapter.GetQueueAsync(_client, ["ABCDEF"]));
+
+            Assert.Contains("credentials are incorrect", exception.InnerException!.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public async Task GetQueueAsync_AfterRejectedLogin_RetriesOnceCredentialsChange()
+        {
+            _client.Password = "wrong";
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            await Assert.ThrowsAsync<DownloadClientAdapterPollingException>(
+                () => adapter.GetQueueAsync(_client, ["ABCDEF"]));
+
+            _client.Password = "admin";
+            var items = await adapter.GetQueueAsync(_client, ["NEWHASH"]);
+
+            Assert.NotEmpty(items);
+        }
+
+        [Fact]
+        public async Task TestConnection_WhenIpIsBanned_ReportsBan()
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.LoginResponseOverride = () => new HttpResponseMessage(HttpStatusCode.Forbidden)
+            {
+                Content = new StringContent("Your IP address has been banned after too many failed authentication attempts.")
+            };
+            var adapter = _provider.GetRequiredService<IDownloadClientGateway>();
+
+            var (success, message) = await adapter.TestConnectionAsync(_client);
+
+            Assert.False(success);
+            Assert.Contains("banned", message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
         public async Task MarkItemAsImportedAsync_SetsConfiguredPostImportCategory()
         {
             _client.Settings = new Dictionary<string, object>
