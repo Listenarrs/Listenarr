@@ -133,11 +133,21 @@ namespace Listenarr.Application.Downloads.Submission
             if (audiobook.QualityProfile == null)
             {
                 logger.LogWarning("Audiobook '{Title}' has no quality profile assigned", audiobook.Title);
-                return new SearchAndDownloadResult
+                return new SearchAndDownloadResult { Success = false, Message = "Audiobook has no quality profile assigned" };
+            }
+
+            // Check if an active download already exists before querying indexers (Issue #936)
+            try
+            {
+                if (await DownloadDuplicateGuard.HasActiveDownloadAsync(audiobookId, configurationService, downloadRepository))
                 {
-                    Success = false,
-                    Message = "Audiobook has no quality profile assigned"
-                };
+                    logger.LogInformation("Skipping search for audiobook {AudiobookId} — active download exists. Title: '{Title}'", audiobookId, audiobook.Title);
+                    return new SearchAndDownloadResult { Success = false, Message = "An active download already exists for this audiobook" };
+                }
+            }
+            catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
+            {
+                logger.LogWarning(ex, "Failed to check for duplicate downloads for audiobook {AudiobookId}", audiobookId);
             }
 
             // Build search query from audiobook metadata
@@ -151,11 +161,7 @@ namespace Listenarr.Application.Downloads.Submission
 
             if (searchResults == null || !searchResults.Any())
             {
-                return new SearchAndDownloadResult
-                {
-                    Success = false,
-                    Message = "No search results found"
-                };
+                return new SearchAndDownloadResult { Success = false, Message = "No search results found" };
             }
 
             // Score results against quality profile
@@ -184,11 +190,7 @@ namespace Listenarr.Application.Downloads.Submission
             if (topResult == null)
             {
                 logger.LogWarning("No acceptable search results found for audiobook '{Title}' after quality filtering", audiobook.Title);
-                return new SearchAndDownloadResult
-                {
-                    Success = false,
-                    Message = "No acceptable search results found"
-                };
+                return new SearchAndDownloadResult { Success = false, Message = "No acceptable search results found" };
             }
 
             // Assign score to SearchResult
@@ -201,15 +203,17 @@ namespace Listenarr.Application.Downloads.Submission
             if (downloadClientId == null)
             {
                 logger.LogWarning("No suitable download client found for type: {Type}", isTorrent ? "Torrent" : "NZB");
-                return new SearchAndDownloadResult
-                {
-                    Success = false,
-                    Message = $"No suitable download client found for {(isTorrent ? "torrent" : "NZB")} results"
-                };
+                return new SearchAndDownloadResult { Success = false, Message = $"No suitable download client found for {(isTorrent ? "torrent" : "NZB")} results" };
             }
 
             // Send to download client with audiobookId for proper metadata linking
             var downloadId2 = await SendToDownloadClientAsync(candidate, downloadClientId, audiobookId);
+
+            if (string.IsNullOrEmpty(downloadId2))
+            {
+                logger.LogInformation("Download was skipped (duplicate or client rejected) for audiobook {AudiobookId}", audiobookId);
+                return new SearchAndDownloadResult { Success = false, Message = "Download skipped — an active download already exists", DownloadClientUsed = downloadClientId, SearchResult = topResult.SearchResult };
+            }
 
             // Log to history
             await LogDownloadHistory(audiobook, "Search", topResult.SearchResult);
@@ -250,9 +254,7 @@ namespace Listenarr.Application.Downloads.Submission
                 try
                 {
                     if (await DownloadDuplicateGuard.HasActiveDownloadAsync(
-                            audiobookIdValue,
-                            configurationService,
-                            downloadRepository))
+                            audiobookIdValue, configurationService, downloadRepository))
                     {
                         logger.LogInformation(
                             "Skipping duplicate download for audiobook {AudiobookId} — an active download already exists. Title: '{Title}'",
@@ -263,10 +265,8 @@ namespace Listenarr.Application.Downloads.Submission
                 }
                 catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
                 {
-                    logger.LogDebug(
-                        exception,
-                        "Failed to check for duplicate downloads for audiobook {AudiobookId} (non-blocking)",
-                        audiobookIdValue);
+                    logger.LogDebug(exception,
+                        "Failed to check for duplicate downloads for audiobook {AudiobookId} (non-blocking)", audiobookIdValue);
                 }
             }
 

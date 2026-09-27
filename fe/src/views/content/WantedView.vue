@@ -37,10 +37,11 @@
         </div>
         <button
           class="btn btn-primary"
-          @click="searchMissing"
-          :disabled="categorizedWanted.missing.length === 0"
+          @click="openConfirmSearchAll"
+          :disabled="actionableMissingWanted.length === 0 || isSearchingAll"
         >
-          <PhRobot />
+          <PhSpinner v-if="isSearchingAll" class="ph-spin" />
+          <PhRobot v-else />
           Search All
         </button>
         <button class="btn btn-secondary" @click="openManualImport">
@@ -139,7 +140,7 @@
                 <button
                   class="btn-icon"
                   @click="searchAudiobook(item)"
-                  :disabled="searching[item.id]"
+                  :disabled="searching[item.id] || hasActiveDownload(item) || isSearchingAll"
                   title="Automatic Search"
                 >
                   <PhRobot />
@@ -177,6 +178,17 @@
       </template>
     </EmptyState>
 
+    <!-- Confirm Search All Modal -->
+    <ConfirmModal
+      :visible="showConfirmSearchAll"
+      title="Search Missing Audiobooks"
+      :message="confirmSearchAllMessage"
+      confirmLabel="Search All"
+      :confirming="isSearchingAll"
+      @confirm="searchMissing"
+      @cancel="closeConfirmSearchAll"
+    />
+
     <!-- Manual Search Modal -->
     <ManualSearchModal
       :is-open="showManualSearchModal"
@@ -203,6 +215,7 @@ import { errorTracking } from '@/services/errorTracking'
 import { handleImageError } from '@/utils/imageFallback'
 import ManualSearchModal from '@/components/domain/search/ManualSearchModal.vue'
 import ManualImportModal from '@/components/feedback/ManualImportModal.vue'
+import { ConfirmModal } from '@/components/feedback'
 import { EmptyState, LoadingState } from '@/components/base'
 import type { Audiobook, SearchResult, Download } from '@/types'
 import { safeText } from '@/utils/textUtils'
@@ -291,6 +304,33 @@ const searchResults = ref<Record<number, string>>({})
 const showManualSearchModal = ref(false)
 const selectedAudiobook = ref<Audiobook | null>(null)
 const showManualImportModal = ref(false)
+const showConfirmSearchAll = ref(false)
+const isSearchingAll = ref(false)
+const isCancelled = ref(false)
+let activeDelayTimer: ReturnType<typeof setTimeout> | null = null
+let delayResolve: (() => void) | null = null
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    delayResolve = resolve
+    activeDelayTimer = setTimeout(() => {
+      activeDelayTimer = null
+      delayResolve = null
+      resolve()
+    }, ms)
+  })
+
+const abortDelay = () => {
+  if (activeDelayTimer !== null) {
+    clearTimeout(activeDelayTimer)
+    activeDelayTimer = null
+  }
+  if (delayResolve !== null) {
+    const res = delayResolve
+    delayResolve = null
+    res()
+  }
+}
 
 const syncWantedLayout = async () => {
   await nextTick()
@@ -317,6 +357,8 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  isCancelled.value = true
+  abortDelay()
   if (typeof window !== 'undefined') {
     window.removeEventListener('resize', handleViewportResize)
   }
@@ -337,15 +379,20 @@ const wantedAudiobooks = computed(() => {
   })
 })
 
-// Categorize wanted audiobooks by their current search state
-const categorizedWanted = computed(() => {
-  const all = wantedAudiobooks.value
-  const missingItems = all.filter((a) => !searching.value[a.id] && !searchResults.value[a.id])
+// Actionable wanted audiobooks: scoped to visible filter, excluding active downloads and in-flight searches (Issue #936)
+const actionableMissingWanted = computed(() => {
+  return filteredWanted.value.filter(
+    (item) =>
+      !hasActiveDownload(item) && !searching.value[item.id] && !searchResults.value[item.id],
+  )
+})
 
-  return {
-    all,
-    missing: missingItems,
+const confirmSearchAllMessage = computed(() => {
+  const count = actionableMissingWanted.value.length
+  if (count === 1) {
+    return 'Are you sure you want to search for 1 missing audiobook? This will send search requests to all indexers and download the best matches.'
   }
+  return `Are you sure you want to search for all ${count} missing audiobooks? This will send search requests to all indexers and download the best matches.`
 })
 
 const filteredWanted = computed(() => {
@@ -438,15 +485,42 @@ function getStatusText(item: Audiobook): string {
   return 'Missing'
 }
 
-const searchMissing = async () => {
-  logger.debug('Automatic search for all missing audiobooks')
-
-  for (const audiobook of categorizedWanted.value.missing) {
-    await searchAudiobook(audiobook)
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-  }
+function openConfirmSearchAll() {
+  if (isSearchingAll.value || actionableMissingWanted.value.length === 0) return
+  showConfirmSearchAll.value = true
 }
 
+function closeConfirmSearchAll() {
+  showConfirmSearchAll.value = false
+}
+
+const searchMissing = async () => {
+  if (isSearchingAll.value || actionableMissingWanted.value.length === 0) return
+
+  showConfirmSearchAll.value = false
+  isSearchingAll.value = true
+  isCancelled.value = false
+  logger.debug('Automatic search for actionable missing audiobooks initiated')
+
+  try {
+    const targetBooks = [...actionableMissingWanted.value]
+    for (let i = 0; i < targetBooks.length; i++) {
+      if (isCancelled.value) break
+
+      const audiobook = targetBooks[i]
+      if (hasActiveDownload(audiobook) || searching.value[audiobook.id]) continue
+
+      await searchAudiobook(audiobook)
+
+      if (i < targetBooks.length - 1 && !isCancelled.value) {
+        await sleep(1000)
+      }
+    }
+  } finally {
+    isSearchingAll.value = false
+    abortDelay()
+  }
+}
 function openManualSearch(item: Audiobook) {
   selectedAudiobook.value = item
   showManualSearchModal.value = true
