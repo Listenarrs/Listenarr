@@ -2305,6 +2305,78 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                 It.IsAny<string>()), Times.Never);
         }
 
+        [Theory]
+        [InlineData(FileAction.Copy, 1)]
+        [InlineData(FileAction.HardlinkCopy, 0)]
+        public async Task InteractiveManualImport_AsinTag_IsNotWrittenThroughAHardlinkToTheSource(
+            FileAction fileAction,
+            int expectedTagWrites)
+        {
+            // A hardlinked destination is the source's own inode, which a download client may
+            // still be seeding, so rewriting its tags would rewrite the source as well. The Copy
+            // case is the control: the same import with an independent destination is tagged.
+            var destinationRoot = CreateTempDirectory(
+                $"listenarr-manual-asin-link-dest-{fileAction}");
+            var sourceDir = CreateTempDirectory(
+                $"listenarr-manual-asin-link-src-{fileAction}");
+            var source = Path.Join(sourceDir, "book.mp3");
+            await File.WriteAllTextAsync(source, "audio");
+            var book = new Audiobook
+            {
+                Id = 336,
+                Title = "Linked Book",
+                Asin = "B000TEST",
+                BasePath = destinationRoot
+            };
+            var metadata = new Mock<IMetadataService>();
+            metadata.Setup(service => service.ExtractFileMetadataAsync(source))
+                .ReturnsAsync(new AudioMetadata
+                {
+                    Title = book.Title,
+                    Format = "mp3",
+                    BitRate = 128000
+                });
+            var controller = GetController(
+                book,
+                new ApplicationSettings
+                {
+                    OutputPath = destinationRoot,
+                    FolderNamingPattern = "",
+                    FileNamingPattern = "{Title}"
+                },
+                metadataMock: metadata);
+            var request = new ManualImportRequestDto
+            {
+                Path = sourceDir,
+                Mode = "interactive",
+                Action = fileAction,
+                Items =
+                [
+                    new ManualImportItemDto
+                    {
+                        FullPath = source,
+                        MatchedAudiobookId = book.Id
+                    }
+                ]
+            };
+
+            var action = await controller.Start(request);
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(
+                action.Result);
+            var results = Assert.IsAssignableFrom<IEnumerable<ManualImportResultDto>>(
+                ok.Value!.GetType().GetProperty("results")!.GetValue(ok.Value));
+            Assert.True(Assert.Single(results).Success);
+            Assert.True(File.Exists(source));
+            Assert.Equal(
+                "audio",
+                await File.ReadAllTextAsync(
+                    Path.Join(destinationRoot, "Linked Book.mp3")));
+            metadata.Verify(service => service.WriteAsinTagAsync(
+                It.IsAny<IAudiobookFileRegistrationLease>(),
+                book.Asin), Times.Exactly(expectedTagWrites));
+        }
+
         [Fact]
         public async Task InteractiveManualImport_CompanionPass_SkipsDifferentAudiobookAudioInSameFolder()
         {

@@ -407,7 +407,17 @@ public partial class ManualImportController
                     };
                 }
 
-                if (registrationLease.HasDurablePhysicalObjectIdentity
+                // A hardlinked destination is the source's own inode, which a download client
+                // may still be seeding, so writing tags through it would rewrite the source too.
+                if (publicationPlan.EffectiveAction == FileAction.HardlinkCopy
+                    && !string.IsNullOrWhiteSpace(audiobook.Asin))
+                {
+                    _logger.LogDebug(
+                        "Skipped ASIN tag enrichment for audiobook {AudiobookId} because {Path} was imported as a hardlink of its source",
+                        audiobook.Id,
+                        LogRedaction.SanitizeFilePath(destinationPath));
+                }
+                else if (registrationLease.HasDurablePhysicalObjectIdentity
                     && !string.IsNullOrWhiteSpace(audiobook.Asin))
                 {
                     try
