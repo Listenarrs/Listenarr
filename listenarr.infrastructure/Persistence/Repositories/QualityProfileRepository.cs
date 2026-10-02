@@ -65,6 +65,7 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             // Manually update scalar properties to avoid EF attaching a second instance
             existing.Name = profile.Name;
             existing.Description = profile.Description;
+            existing.UpgradeAllowed = profile.UpgradeAllowed;
             existing.CutoffQuality = profile.CutoffQuality;
             existing.MinimumSize = profile.MinimumSize;
             existing.MaximumSize = profile.MaximumSize;

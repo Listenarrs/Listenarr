@@ -80,6 +80,12 @@ public static class InfrastructureStartupCompositionExtensions
                     "[Startup] Normalized {Count} legacy move job row(s) after applying durable move migrations",
                     repairedPostMigrationData.MoveJobsRepaired);
             }
+            if (repairedPostMigrationData.QualityProfileUpgradeFlagsRepaired > 0)
+            {
+                Log.Logger.Information(
+                    "[Startup] Turned quality upgrades off on {Count} profile(s) that recorded it with a blank cutoff",
+                    repairedPostMigrationData.QualityProfileUpgradeFlagsRepaired);
+            }
             Log.Logger.Information("[Startup] EF Core migrations applied successfully");
         }
         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)

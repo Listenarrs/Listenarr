@@ -75,6 +75,80 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Matching
             Assert.Equal(AudiobookStatusEvaluator.QualityMismatch, status);
         }
 
+        /// <summary>
+        /// The library view has to agree with the search side. A profile that is not upgrading has
+        /// nothing to fall short of, so a file below the cutoff it still names is a match rather
+        /// than a mismatch, and the row stops showing a quality warning the user cannot act on.
+        /// </summary>
+        [Fact]
+        public void ComputeStatus_ReturnsQualityMatch_WhenUpgradesAreOff_EvenBelowTheNamedCutoff()
+        {
+            var profile = CreateProfile(cutoffQuality: "256kbps", preferredFormats: new List<string> { "m4b" });
+            profile.UpgradeAllowed = false;
+            var files = new List<AudiobookFormatSummary>
+            {
+                new() { Format = "m4b", Bitrate = 192000 }
+            };
+
+            var status = AudiobookStatusEvaluator.ComputeStatus(false, true, null, profile, files);
+
+            Assert.Equal(AudiobookStatusEvaluator.QualityMatch, status);
+        }
+
+        /// <summary>
+        /// The control. The identical profile and file with upgrades left on is a mismatch, which
+        /// is the assertion ComputeStatus_ReturnsQualityMismatch_WhenDerivedQualityIsBelowCutoff
+        /// already makes; repeating it beside the case above is what makes the pair a measurement
+        /// rather than an observation.
+        /// </summary>
+        [Fact]
+        public void ComputeStatus_ReturnsQualityMismatch_ForTheSameFile_WhenUpgradesAreOn()
+        {
+            var profile = CreateProfile(cutoffQuality: "256kbps", preferredFormats: new List<string> { "m4b" });
+            var files = new List<AudiobookFormatSummary>
+            {
+                new() { Format = "m4b", Bitrate = 192000 }
+            };
+
+            Assert.True(profile.UpgradeAllowed);
+            Assert.Equal(
+                AudiobookStatusEvaluator.QualityMismatch,
+                AudiobookStatusEvaluator.ComputeStatus(false, true, null, profile, files));
+        }
+
+        /// <summary>
+        /// A pinned audiobook-level quality takes a different branch inside ComputeStatus, so the
+        /// upgrades-off answer has to hold there too.
+        /// </summary>
+        [Fact]
+        public void ComputeStatus_ReturnsQualityMatch_WhenUpgradesAreOff_ForAPinnedQualityBelowTheCutoff()
+        {
+            var profile = CreateProfile(cutoffQuality: "256kbps", preferredFormats: new List<string> { "m4b" });
+            profile.UpgradeAllowed = false;
+            var files = new List<AudiobookFormatSummary>
+            {
+                new() { Format = "m4b", Bitrate = 256000 }
+            };
+
+            var status = AudiobookStatusEvaluator.ComputeStatus(false, true, "192kbps", profile, files);
+
+            Assert.Equal(AudiobookStatusEvaluator.QualityMatch, status);
+        }
+
+        [Fact]
+        public void ComputeStatus_ReturnsQualityMismatch_ForThePinnedQuality_WhenUpgradesAreOn()
+        {
+            var profile = CreateProfile(cutoffQuality: "256kbps", preferredFormats: new List<string> { "m4b" });
+            var files = new List<AudiobookFormatSummary>
+            {
+                new() { Format = "m4b", Bitrate = 256000 }
+            };
+
+            Assert.Equal(
+                AudiobookStatusEvaluator.QualityMismatch,
+                AudiobookStatusEvaluator.ComputeStatus(false, true, "192kbps", profile, files));
+        }
+
         [Fact]
         public void ComputeStatus_ReturnsQualityMatch_WhenOnlyLegacyFileSummaryExists()
         {
