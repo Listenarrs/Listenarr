@@ -38,8 +38,9 @@ public static class AudiobookSearchQueryBuilder
     /// Edition and format annotations that metadata providers append to a title.
     /// </summary>
     /// <remarks>
-    /// Everything here describes how a recording was produced, never which work it is,
-    /// so removing it cannot make two different audiobooks look alike. Annotations that
+    /// Everything here describes how a recording was produced, not which work it is.
+    /// Removing it does mean that editions of the same work, such as an abridged reading,
+    /// an unabridged one and a dramatization, all send the same query. Annotations that
     /// do disambiguate, such as a part or volume number, are deliberately absent: losing
     /// those would turn a search for one half of a work into a search for either half.
     /// The list is closed rather than a pattern because a heuristic that guesses at
