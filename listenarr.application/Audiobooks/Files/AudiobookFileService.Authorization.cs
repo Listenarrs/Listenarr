@@ -22,7 +22,9 @@ public partial class AudiobookFileService
                     "The audiobook file does not exist or is a linked filesystem entry.");
             }
 
-            if (requireAudioFile && !FileUtils.IsAudioFile(physicalPath))
+            // Extension pre-filter only, so an ambiguous container can reach the content gate in
+            // EnsureAudiobookFileCoreAsync. Authorizing a path is not admitting its content.
+            if (requireAudioFile && !FileUtils.MayBeAudioPendingProbe(physicalPath))
             {
                 return AuthorizedClaimPath.Failed(
                     "The claimed audiobook file is not a supported audio file.");
