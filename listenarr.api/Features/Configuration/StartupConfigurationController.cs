@@ -97,8 +97,12 @@ namespace Listenarr.Api.Features.Configuration
         {
             if (!IsValidUrlBase(config.UrlBase))
             {
-                _logger.LogWarning("Rejected a startup config whose UrlBase is a full URL rather than a path.");
-                return BadRequest(new { error = InvalidUrlBaseMessage });
+                var stored = await _configurationService.GetStartupConfigAsync();
+                if (!UrlBaseUnchanged(stored?.UrlBase, config.UrlBase))
+                {
+                    _logger.LogWarning("Rejected a startup config whose UrlBase is a full URL rather than a path.");
+                    return BadRequest(new { error = InvalidUrlBaseMessage });
+                }
             }
 
             config.ApiVersion = NormalizeStartupApiVersion(config.ApiVersion);
@@ -137,6 +141,20 @@ namespace Listenarr.Api.Features.Configuration
 
         [GeneratedRegex(@"^/?https?://[-_a-z0-9.]+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
         private static partial Regex AbsoluteUrlBase();
+
+        /// <summary>
+        /// An absolute UrlBase already on disk predates ApplicationUrl and was, until this
+        /// setting existed, the only way to put images in outbound notifications. SettingsView
+        /// round-trips the whole stored startup config on every save, so rejecting that stored
+        /// value outright here would lock an install that already has one out of every future
+        /// Settings save, including fields that have nothing to do with UrlBase. Leaving the
+        /// value exactly as it was is let through; submitting a different absolute value is
+        /// still rejected.
+        /// </summary>
+        internal static bool UrlBaseUnchanged(string? storedUrlBase, string? submittedUrlBase)
+        {
+            return string.Equals(storedUrlBase?.Trim(), submittedUrlBase?.Trim(), StringComparison.Ordinal);
+        }
 
         private string NormalizeStartupApiVersion(string? configuredApiVersion)
             => _startupConfigService.NormalizeApiVersion(configuredApiVersion, GetRequestedApiVersion());
