@@ -15,7 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -42,9 +41,9 @@ namespace Listenarr.Infrastructure.Persistence
                 await audiobookRepository.NormalizeJsonColumnsAsync(stoppingToken);
                 logger.LogInformation("StartupDbNormalizer: normalization pass complete.");
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            catch (OperationCanceledException exception) when (stoppingToken.IsCancellationRequested)
             {
-                Debug.WriteLine("StartupDbNormalizer canceled during host shutdown.");
+                logger.LogDebug(exception, "StartupDbNormalizer canceled during host shutdown");
             }
             catch (OperationCanceledException ex)
             {

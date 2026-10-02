@@ -213,8 +213,7 @@ internal static partial class FileSystemSafety
         }
         catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
         {
-            System.Diagnostics.Debug.WriteLine(
-                $"Suppressed empty-directory cleanup failure for '{rootPath}': {exception.Message}");
+            // Nothing is logged here: FileSystemSafety is a static utility with no logger; empty-directory cleanup is best effort and the caller is not told.
         }
     }
 

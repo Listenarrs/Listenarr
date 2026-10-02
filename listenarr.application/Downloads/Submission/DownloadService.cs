@@ -463,7 +463,7 @@ namespace Listenarr.Application.Downloads.Submission
             }
             catch (Exception caughtEx_13) when (caughtEx_13 is not OperationCanceledException && caughtEx_13 is not OutOfMemoryException && caughtEx_13 is not StackOverflowException)
             {
-                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                // Nothing is logged here: the call that failed is the logging call itself.
             }
             await Task.CompletedTask;
         }
