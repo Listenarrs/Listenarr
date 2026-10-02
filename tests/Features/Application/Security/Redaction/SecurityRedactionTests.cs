@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Net;
+using System.Text.Json.Nodes;
 
 namespace Listenarr.Tests.Features.Application.Security.Redaction
 {
@@ -176,6 +177,139 @@ namespace Listenarr.Tests.Features.Application.Security.Redaction
             // Assert
             Assert.NotNull(capturedLog);
             Assert.Contains("<redacted>", capturedLog);
+        }
+
+        private static Mock<ILogger<NotificationService>> CreateCapturingLogger(List<string> capturedLogs)
+        {
+            var mockLogger = new Mock<ILogger<NotificationService>>();
+            mockLogger
+                .Setup(l => l.Log(It.IsAny<LogLevel>(), It.IsAny<EventId>(), It.IsAny<It.IsAnyType>(), It.IsAny<Exception?>(), (Func<It.IsAnyType, Exception?, string>)It.IsAny<object>()))
+                .Callback(new InvocationAction(invocation =>
+                {
+                    var formatter = invocation.Arguments[4] as Func<object, Exception?, string>;
+                    var state = invocation.Arguments[2];
+                    if (formatter != null)
+                    {
+                        capturedLogs.Add(formatter.Invoke(state!, null));
+                    }
+                    else if (state != null)
+                    {
+                        capturedLogs.Add(state.ToString() ?? string.Empty);
+                    }
+                }));
+            return mockLogger;
+        }
+
+        // These three tests pin down the actual call sites in NotificationService.Webhooks.cs:
+        // if any of them regressed to LogRedaction.RedactText(webhookUrl, GetSensitiveValuesFromEnvironment())
+        // (the environment-only helper the bug report is about), the credential below is not an
+        // environment value, so it would sail straight through into the captured log line and these
+        // assertions would fail.
+        [Fact]
+        public async Task NotificationService_PushoverSuccessLog_DoesNotLeakTokenOrUser()
+        {
+            var token = "pushover-app-token-not-an-env-secret";
+            var user = "pushover-user-key-not-an-env-secret";
+            var webhookUrl = $"https://api.pushover.net/1/messages.json?token={token}&user={user}";
+
+            var handler = new Mock<HttpMessageHandler>();
+            handler
+                .Protected()
+                .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+                .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("1") });
+
+            using var httpClient = new HttpClient(handler.Object);
+
+            var mockConfigService = new Mock<IConfigurationService>();
+            mockConfigService.Setup(x => x.GetStartupConfigAsync()).ReturnsAsync(new StartupConfig { UrlBase = "https://listenarr.example.com" });
+
+            var services = new ServiceCollection();
+            services.AddSingleton<INotificationPayloadBuilder, NotificationPayloadBuilderAdapter>();
+            var payloadBuilder = services.BuildServiceProvider().GetRequiredService<INotificationPayloadBuilder>();
+
+            var capturedLogs = new List<string>();
+            var mockLogger = CreateCapturingLogger(capturedLogs);
+
+            var service = new NotificationService(httpClient, mockLogger.Object, mockConfigService.Object, payloadBuilder, Mock.Of<IRequestContextAccessor>());
+
+            await service.SendNotificationAsync("book-added", new { id = 1, title = "Pushover Test" }, webhookUrl, new List<string> { "book-added" });
+
+            var sendLog = Assert.Single(capturedLogs, l => l.Contains("Sending Pushover POST", StringComparison.Ordinal));
+            Assert.DoesNotContain(token, sendLog);
+            Assert.DoesNotContain(user, sendLog);
+            // The form body (token=/user=) must be dropped entirely, not merely redacted.
+            Assert.DoesNotContain("Body", sendLog, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public async Task NotificationService_TelegramSuccessLog_DoesNotLeakBotToken()
+        {
+            var token = "123456789:telegram-bot-token-not-an-env-secret";
+            var webhookUrl = $"https://api.telegram.org/bot{token}/sendMessage?chat_id=987654321";
+
+            var handler = new Mock<HttpMessageHandler>();
+            handler
+                .Protected()
+                .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+                .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"ok\":true}") });
+
+            using var httpClient = new HttpClient(handler.Object);
+
+            var mockConfigService = new Mock<IConfigurationService>();
+            mockConfigService.Setup(x => x.GetStartupConfigAsync()).ReturnsAsync(new StartupConfig { UrlBase = "https://listenarr.example.com" });
+
+            var services = new ServiceCollection();
+            services.AddSingleton<INotificationPayloadBuilder, NotificationPayloadBuilderAdapter>();
+            var payloadBuilder = services.BuildServiceProvider().GetRequiredService<INotificationPayloadBuilder>();
+
+            var capturedLogs = new List<string>();
+            var mockLogger = CreateCapturingLogger(capturedLogs);
+
+            var service = new NotificationService(httpClient, mockLogger.Object, mockConfigService.Object, payloadBuilder, Mock.Of<IRequestContextAccessor>());
+
+            await service.SendNotificationAsync("book-added", new { id = 1, title = "Telegram Test" }, webhookUrl, new List<string> { "book-added" });
+
+            var sendLog = Assert.Single(capturedLogs, l => l.Contains("Sending Telegram POST", StringComparison.Ordinal));
+            Assert.DoesNotContain(token, sendLog);
+            Assert.Contains("api.telegram.org/bot<redacted>/sendMessage", sendLog);
+        }
+
+        [Fact]
+        public async Task NotificationService_DiscordHttpErrorLog_DoesNotLeakWebhookIdOrToken()
+        {
+            var id = "222333444555666777";
+            var token = "discord-webhook-token-not-an-env-secret";
+            var webhookUrl = $"https://discord.com/api/webhooks/{id}/{token}";
+
+            var handler = new Mock<HttpMessageHandler>();
+            handler
+                .Protected()
+                .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+                .ThrowsAsync(new HttpRequestException("simulated network failure"));
+
+            using var httpClient = new HttpClient(handler.Object);
+
+            var mockConfigService = new Mock<IConfigurationService>();
+            mockConfigService.Setup(x => x.GetStartupConfigAsync()).ReturnsAsync(new StartupConfig { UrlBase = "https://listenarr.example.com" });
+
+            var mockPayloadBuilder = new Mock<INotificationPayloadBuilder>();
+            mockPayloadBuilder
+                .Setup(p => p.CreateDiscordPayloadWithAttachmentAsync(
+                    It.IsAny<string>(), It.IsAny<object>(), It.IsAny<string?>(), It.IsAny<HttpClient>(), It.IsAny<IRequestContextAccessor?>(),
+                    It.IsAny<Action<string>?>(), It.IsAny<Action<Exception, string>?>(), It.IsAny<string?>()))
+                .ReturnsAsync((new JsonObject { ["content"] = "test" }, (NotificationAttachmentInfo?)null));
+
+            var capturedLogs = new List<string>();
+            var mockLogger = CreateCapturingLogger(capturedLogs);
+
+            var service = new NotificationService(httpClient, mockLogger.Object, mockConfigService.Object, mockPayloadBuilder.Object, Mock.Of<IRequestContextAccessor>());
+
+            await service.SendNotificationAsync("book-added", new { id = 1, title = "Discord Test" }, webhookUrl, new List<string> { "book-added" });
+
+            var errorLog = Assert.Single(capturedLogs, l => l.Contains("HTTP error sending Discord notification", StringComparison.Ordinal));
+            Assert.DoesNotContain(id, errorLog);
+            Assert.DoesNotContain(token, errorLog);
+            Assert.Contains("api/webhooks", errorLog);
         }
     }
 }
