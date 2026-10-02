@@ -1175,6 +1175,33 @@ namespace Listenarr.Tests.Features.Domain.Utils
         }
 
         [Fact]
+        public void IsFilesystemRoot_SeparatesABareRootFromADirectoryUnderIt()
+        {
+            var unix = new FileSystemPathSemantics(
+                FileSystemPathSyntax.Unix,
+                FileSystemCaseSensitivity.Sensitive);
+            var windows = new FileSystemPathSemantics(
+                FileSystemPathSyntax.Windows,
+                FileSystemCaseSensitivity.Insensitive);
+
+            Assert.True(FileUtils.IsFilesystemRoot("/", unix));
+            Assert.True(FileUtils.IsFilesystemRoot(@"C:\", windows));
+
+            // The control: anything with a segment under the root is a real directory and
+            // is still mirrored by the companion importer.
+            Assert.False(FileUtils.IsFilesystemRoot("/tmp", unix));
+            Assert.False(FileUtils.IsFilesystemRoot("/tmp/listenarr-extract/0e3cec09", unix));
+            Assert.False(FileUtils.IsFilesystemRoot(@"C:\downloads", windows));
+            // The shapes GetCommonPathForDirectories actually returns for disjoint inputs.
+            Assert.True(FileUtils.IsFilesystemRoot(@"\\server\share", windows));
+            Assert.True(FileUtils.IsFilesystemRoot(@"\\server\share\", windows));
+            Assert.False(FileUtils.IsFilesystemRoot(@"\\server\share\Books", windows));
+
+            Assert.False(FileUtils.IsFilesystemRoot(null, unix));
+            Assert.False(FileUtils.IsFilesystemRoot("   ", unix));
+        }
+
+        [Fact]
         public void GetCommonPathForDirectories_UsesHostFilesystemCaseRules()
         {
             if (OperatingSystem.IsWindows())
