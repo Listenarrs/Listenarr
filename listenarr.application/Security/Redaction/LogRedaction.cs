@@ -154,8 +154,12 @@ namespace Listenarr.Application.Security.Redaction
                 }
 
                 // Discord: /api/webhooks/<id>/<token> - keep the "webhooks" segment, mask what follows.
+                // discordapp.com is the legacy webhook domain; Discord still accepts it, and a
+                // webhook URL saved before the rename to discord.com would still use it.
                 if (uri.Host.Equals("discord.com", StringComparison.OrdinalIgnoreCase)
-                    || uri.Host.EndsWith(".discord.com", StringComparison.OrdinalIgnoreCase))
+                    || uri.Host.EndsWith(".discord.com", StringComparison.OrdinalIgnoreCase)
+                    || uri.Host.Equals("discordapp.com", StringComparison.OrdinalIgnoreCase)
+                    || uri.Host.EndsWith(".discordapp.com", StringComparison.OrdinalIgnoreCase))
                 {
                     var webhooksIndex = Array.FindIndex(segments, s => s.Equals("webhooks", StringComparison.OrdinalIgnoreCase));
                     if (webhooksIndex >= 0)
@@ -184,8 +188,16 @@ namespace Listenarr.Application.Security.Redaction
                     return $"{authority}/{string.Join('/', segments)}";
                 }
 
-                // Everything else (e.g. Pushover, Pushbullet, NTFY): the credential lives in the
-                // query string, already dropped above, so the path can be kept as-is.
+                // Pushbullet's legacy pushbullet://TOKEN format (NotificationService.Webhooks.cs)
+                // puts the access token where a URI's host would be, so it is already sitting in
+                // `authority` built above. Drop the whole authority rather than keep it.
+                if (uri.Scheme.Equals("pushbullet", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "pushbullet://<redacted>";
+                }
+
+                // Everything else (e.g. Pushover, NTFY): the credential lives in the query
+                // string, already dropped above, so the path can be kept as-is.
                 return $"{authority}{uri.AbsolutePath}";
             }
             catch (Exception caughtEx_5) when (caughtEx_5 is not OperationCanceledException && caughtEx_5 is not OutOfMemoryException && caughtEx_5 is not StackOverflowException)
