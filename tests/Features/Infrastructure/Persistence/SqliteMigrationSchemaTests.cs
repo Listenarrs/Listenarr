@@ -44,6 +44,8 @@ public class SqliteMigrationSchemaTests : BaseTests
         "20260825021432_AddWeakStorageVerifiedCleanup";
     private const string OperationEvidencePublicationsMigrationId =
         "20261002210137_AddOperationEvidencePublications";
+    private const string QualityProfileUpgradeAllowedMigrationId =
+        "20261018212549_AddQualityProfileUpgradeAllowed";
     private const string AutomaticSearchTimingMigrationId =
         "20261021212418_AddAutomaticSearchTiming";
     private const string ReleaseBlocklistMigrationId =
@@ -231,6 +233,7 @@ public class SqliteMigrationSchemaTests : BaseTests
                 CompatibilityFilePublicationMigrationId,
                 WeakStorageVerifiedCleanupMigrationId,
                 OperationEvidencePublicationsMigrationId,
+                QualityProfileUpgradeAllowedMigrationId,
                 AutomaticSearchTimingMigrationId,
                 ReleaseBlocklistMigrationId
             ],

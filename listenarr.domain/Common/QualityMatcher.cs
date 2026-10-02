@@ -307,10 +307,40 @@ namespace Listenarr.Domain.Common
         private static EffectiveRungInfo Worst(IEnumerable<EffectiveRungInfo> rungs)
             => rungs.OrderByDescending(r => r.Priority).First();
 
+        /// <summary>
+        /// The rung the profile stops upgrading at, or null with <paramref name="cutoffBlank"/>
+        /// set when the profile is not upgrading at all.
+        /// </summary>
+        /// <remarks>
+        /// A profile with <see cref="QualityProfile.UpgradeAllowed"/> false counts as blank here
+        /// even when it carries a real cutoff, because it is not going to upgrade past anything.
+        /// Before that flag existed the only way to record "upgrades off" was to blank the cutoff,
+        /// so the two arms of this test used to be the same arm, and callers that already treat a
+        /// blank cutoff as satisfied keep the answer they had.
+        ///
+        /// Readarr and Sonarr reach the same outcome by a different route, and the difference is
+        /// worth naming because it is where a reviewer will look. They do not switch the cutoff
+        /// off; they lower it, with
+        /// <c>var cutoff = profile.UpgradeAllowed ? profile.Cutoff : profile.FirstAllowedQuality().Id;</c>
+        /// (src/NzbDrone.Core/DecisionEngine/Specifications/UpgradableSpecification.cs:99 in
+        /// Readarr; Sonarr's :126 is the same line, spelling its own helper FirststAllowedQuality).
+        /// The flag is then checked again on its own, and refuses the upgrade outright: Sonarr
+        /// returns UpgradeableRejectReason.UpgradesNotAllowed at :64 and Readarr's
+        /// CheckUpgradeAllowed returns false at :171-174. So the file is not replaced there
+        /// either.
+        ///
+        /// Listenarr has one question instead of two, and answers it here. That keeps the flag and
+        /// the blank cutoff it replaces on the same code path, which is what lets every profile
+        /// that has been recording upgrades-off as a blank cutoff keep the answer it had. The cost
+        /// is that "meets cutoff" reports true for a file the family would call below cutoff while
+        /// still declining to replace it, so the two agree on what happens and disagree on what to
+        /// call it.
+        /// </remarks>
         private static QualityDefinition? ResolveCutoff(QualityProfile? profile, out bool cutoffBlank)
         {
             cutoffBlank = false;
             if (profile?.Qualities == null || profile.Qualities.Count == 0
+                || !profile.UpgradeAllowed
                 || string.IsNullOrWhiteSpace(profile.CutoffQuality))
             {
                 cutoffBlank = true;
