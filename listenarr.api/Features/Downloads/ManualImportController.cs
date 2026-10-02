@@ -344,6 +344,7 @@ public partial class ManualImportController : ControllerBase
                                 planningDestinationResolutions,
                                 appSettings.ImportBlacklistExtensions,
                                 compatibilityBatchId,
+                                rootFolders,
                                 operationToken);
                             companionPassSucceeded = companionPass.Succeeded;
                             _logger.LogInformation(
