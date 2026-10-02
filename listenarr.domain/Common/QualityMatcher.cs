@@ -258,6 +258,42 @@ namespace Listenarr.Domain.Common
             return cand.Priority < exist.Priority;
         }
 
+        /// <summary>
+        /// The codec group a free-text quality label belongs to ("FLAC", "AAC", "MP3", "OPUS", ...),
+        /// or null when the label names no codec at all. A bare bitrate such as "320kbps" comes
+        /// back null because it says nothing about the codec, and so does any label this method
+        /// does not recognise.
+        ///
+        /// Recognition is <see cref="ParseQualityLabel"/>'s, and it is kept in step with
+        /// <see cref="MapCodec"/> on containers: "M4B", "M4A", "MP4", "AAX" and "AAXC" all resolve
+        /// to AAC in both. They used to disagree, so an Audible AAX rip came back null here and a
+        /// caller asking whether the profile had an opinion was told it had none.
+        ///
+        /// Null still means what it has always meant: this method cannot name a codec for the
+        /// label. It is not a verdict, and callers should not read it as permission. What one
+        /// caller does with it: <see cref="QualityGate"/> treats null as a refusal. Another caller
+        /// is free to differ, so do not rely on that here.
+        /// </summary>
+        public static string? CodecGroupOfLabel(string? qualityLabel)
+            => string.IsNullOrWhiteSpace(qualityLabel) ? null : ParseQualityLabel(qualityLabel).Codec;
+
+        /// <summary>
+        /// The codec group a profile rung belongs to, preferring its structured
+        /// <see cref="QualityDefinition.Codec"/> and parsing its label otherwise, since seed and
+        /// legacy rungs carry only Quality and Priority.
+        /// </summary>
+        public static string? CodecGroupOfRung(QualityDefinition? rung)
+        {
+            if (rung is null)
+            {
+                return null;
+            }
+
+            return string.IsNullOrWhiteSpace(rung.Codec)
+                ? CodecGroupOfLabel(rung.Quality)
+                : CanonicalCodec(rung.Codec!);
+        }
+
         // ---- internals --------------------------------------------------------------------
 
         private readonly record struct EffectiveRungInfo(QualityDefinition Source, string? Codec, int? BitrateKbps, bool IsLossless)
@@ -325,7 +361,13 @@ namespace Listenarr.Domain.Common
 
             if (Contains(lower, "flac")) return ("FLAC", bitrate, true);
             if (Contains(lower, "alac")) return ("ALAC", bitrate, true);
-            if (Contains(lower, "aac") || Contains(lower, "m4b") || Contains(lower, "m4a")) return ("AAC", bitrate, false);
+            // Every MPEG-4 container carries AAC, so they all resolve to the AAC group: "M4B" and
+            // "M4A" as before, "MP4" because MapCodec has always accepted it here and the two
+            // diverging left a label this method could not place, and "AAX"/"AAXC" because those
+            // are Audible's MPEG-4 containers and the scorer ranks AAX second only to FLAC.
+            // "aaxc" is covered by the "aax" test.
+            if (Contains(lower, "aac") || Contains(lower, "m4b") || Contains(lower, "m4a")
+                || Contains(lower, "mp4") || Contains(lower, "aax")) return ("AAC", bitrate, false);
             if (Contains(lower, "mp3")) return ("MP3", bitrate, false);
             if (Contains(lower, "opus")) return ("OPUS", bitrate, false);
             if (Contains(lower, "vorbis") || Contains(lower, "ogg")) return ("OGG Vorbis", bitrate, false);
@@ -363,8 +405,14 @@ namespace Listenarr.Domain.Common
             if (Any("mp3")) groups.Add("MP3");
             if (Any("opus")) groups.Add("OPUS");
             if (Any("vorbis") || Any("ogg")) groups.Add("OGG Vorbis");
-            // AAC commonly lives in M4B/M4A/MP4 containers; cover the legacy "M4B" codec group too.
-            if (Any("aac") || Any("m4b") || Any("m4a") || Any("mp4"))
+            // AAC commonly lives in M4B/M4A/MP4/AAX containers; cover the legacy "M4B" codec group
+            // too. This family is deliberately kept in step across ParseQualityLabel, MapCodec and
+            // CanonicalCodec, because when they disagree a label the gate can place maps to a codec
+            // group the matcher cannot, or the reverse. The three do NOT agree outside it:
+            // CanonicalCodec handles no aiff, ape, dsd, wav/wv or lossless and returns the raw
+            // string for them, which mostly hides behind the gate's OrdinalIgnoreCase comparison.
+            // That predates this change; do not read the MPEG-4 agreement as a general property.
+            if (Any("aac") || Any("m4b") || Any("m4a") || Any("mp4") || Any("aax"))
             {
                 groups.Add("AAC");
                 groups.Add("M4B");
@@ -435,7 +483,8 @@ namespace Listenarr.Domain.Common
             var lower = codec.Trim().ToLowerInvariant();
             if (Contains(lower, "flac")) return "FLAC";
             if (Contains(lower, "alac")) return "ALAC";
-            if (Contains(lower, "aac") || Contains(lower, "m4b") || Contains(lower, "m4a")) return "AAC";
+            if (Contains(lower, "aac") || Contains(lower, "m4b") || Contains(lower, "m4a")
+                || Contains(lower, "mp4") || Contains(lower, "aax")) return "AAC";
             if (Contains(lower, "mp3")) return "MP3";
             if (Contains(lower, "opus")) return "OPUS";
             if (Contains(lower, "vorbis") || Contains(lower, "ogg")) return "OGG Vorbis";
