@@ -268,7 +268,13 @@ public partial class ManualImportController : ControllerBase
                         {
                             selectedAudioProfiles = await _companionImporter.BuildAudioMatchProfilesAsync(
                                 freshItems.Where(item => !string.IsNullOrWhiteSpace(item.FullPath))
-                                    .Select(item => item.FullPath!).Where(FileUtils.IsAudioFile),
+                                    .Select(item => item.FullPath!)
+                                    // Match profiles decide which companion files belong to the selection,
+                                    // which is a naming question and admits nothing by itself. An ambiguous
+                                    // container in the selection is included so its companions are matched
+                                    // the same way an .m4b's are; whether it imports at all is settled
+                                    // per item by the content probe.
+                                    .Where(FileUtils.MayBeAudioPendingProbe),
                                 sourceSemantics.Value.Comparer, operationToken);
                         }
                     }
