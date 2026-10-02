@@ -8,26 +8,20 @@
  * (at your option) any later version.
  */
 
-
 namespace Listenarr.Application.Downloads.Queue
 {
     internal static class DownloadSearchQueryBuilder
     {
+        /// <summary>
+        /// Builds the indexer query for a download search.
+        /// </summary>
+        /// <remarks>
+        /// The query is composed by <see cref="AudiobookSearchQueryBuilder"/> rather than
+        /// here, so that this path and the automatic sweep ask indexers the same question.
+        /// </remarks>
         public static string Build(Audiobook audiobook)
         {
-            var parts = new List<string>();
-
-            if (!string.IsNullOrEmpty(audiobook.Title))
-            {
-                parts.Add(audiobook.Title);
-            }
-
-            if (audiobook.Authors != null && audiobook.Authors.Any())
-            {
-                parts.Add(audiobook.Authors.First());
-            }
-
-            return string.Join(" ", parts);
+            return AudiobookSearchQueryBuilder.Build(audiobook);
         }
     }
 }
