@@ -258,6 +258,53 @@ namespace Listenarr.Tests.Features.Domain.Utils
             Assert.Equal("256kbps", QualityMatcher.Match(file, profile).Rung!.Quality);
         }
 
+        // ---- Audible containers map to AAC ------------------------------------------------
+
+        [Fact]
+        public void AnAaxFile_MatchesTheAacRungs_AndCanMeetCutoff()
+        {
+            // A declared consequence of teaching MapCodec the AAX containers. Before, an .aax or
+            // .aaxc file produced no codec group at all, fell through to the codec-less wildcard
+            // rungs, found none and came back CodecMismatch, so it never met cutoff and was
+            // flagged for upgrade forever. That is the same re-grab loop this class was written to
+            // fix for M4B (see the QualityMatcher header comment).
+            var profile = StructuredProfile().WithCutoff("AAC 64kbps").Build();
+
+            foreach (var container in new[] { "aax", "aaxc", "mp4" })
+            {
+                var file = new AudioQualityInput { Container = container, BitrateBitsPerSecond = 128_000 };
+
+                Assert.Equal("AAC 128kbps", QualityMatcher.MatchLabel(file, profile));
+                Assert.True(QualityMatcher.MeetsCutoff(file, profile), $"{container} must meet the cutoff");
+            }
+
+            // The control that must come out differently: a container nothing maps still misses,
+            // so this is the AAC mapping doing the work rather than the matcher having gone
+            // permissive about unknown containers.
+            var unknown = new AudioQualityInput { Container = "wma", BitrateBitsPerSecond = 128_000 };
+            Assert.Equal(QualityMatchKind.CodecMismatch, QualityMatcher.Match(unknown, profile).Kind);
+            Assert.False(QualityMatcher.MeetsCutoff(unknown, profile));
+        }
+
+        [Fact]
+        public void ARungNamedForAnMpeg4Container_IsAacRatherThanAWildcard()
+        {
+            // The second declared consequence. A hand-made rung called "AAX" or "MP4" used to parse
+            // to a null codec, which made it a codec-agnostic wildcard that any lossy file could
+            // land on. It is an AAC rung now, so a file of another codec misses it.
+            var profile = new QualityProfileBuilder()
+                .WithName("Aax")
+                .WithCutoff("AAX")
+                .WithQuality("AAX", 0)
+                .Build();
+
+            var opus = new AudioQualityInput { Codec = "opus", BitrateBitsPerSecond = 128_000 };
+            var aac = new AudioQualityInput { Codec = "aac", BitrateBitsPerSecond = 128_000 };
+
+            Assert.Equal(QualityMatchKind.CodecMismatch, QualityMatcher.Match(opus, profile).Kind);
+            Assert.Equal("AAX", QualityMatcher.MatchLabel(aac, profile));
+        }
+
         // ---- MeetsCutoff direction (lower priority = higher quality) ----------------------
 
         [Fact]
