@@ -124,6 +124,38 @@ namespace Listenarr.Tests.Features.Application.Security.Redaction
         }
 
         [Fact]
+        public void SanitizeWebhookUrl_DiscordappLegacyDomain_MasksIdAndTokenSegments()
+        {
+            var id = "111222333444555666";
+            var token = "DiscordWebhookTokenValueNotReal";
+            var url = $"https://discordapp.com/api/webhooks/{id}/{token}";
+
+            var sanitized = LogRedaction.SanitizeWebhookUrl(url);
+
+            Assert.DoesNotContain(id, sanitized);
+            Assert.DoesNotContain(token, sanitized);
+            Assert.Contains("api/webhooks", sanitized);
+            Assert.Equal("https://discordapp.com/api/webhooks/<redacted>/<redacted>", sanitized);
+        }
+
+        [Fact]
+        public void SanitizeWebhookUrl_PushbulletUriSchemeToken_DoesNotLeakTokenAsHost()
+        {
+            // pushbullet://TOKEN is a legacy Listenarr webhook format (see
+            // NotificationService.Webhooks.cs). The access token sits where a
+            // URI's host would be; it must not survive sanitization.
+            var token = "o.ExamplePushbulletTokenValueNotReal";
+            var url = $"pushbullet://{token}";
+
+            var sanitized = LogRedaction.SanitizeWebhookUrl(url);
+
+            // Uri lowercases the host, so a case-sensitive DoesNotContain(token, ...) would pass
+            // even if the token leaked through unredacted. Check case-insensitively instead.
+            Assert.DoesNotContain(token, sanitized, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal("pushbullet://<redacted>", sanitized);
+        }
+
+        [Fact]
         public void SanitizeWebhookUrl_ControlCase_NonCredentialUrl_PathSurvivesIntact()
         {
             // No query string, no known-provider host, no credential-shaped path segments.
