@@ -2,6 +2,19 @@ using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Persistence;
 
+/// <summary>
+/// Replays durable audiobook deletion intents during startup recovery.
+/// <para>
+/// Any intent in NeedsAttention is reported and stepped over rather than thrown
+/// on. It is a row waiting for a human, which says nothing about whether the
+/// library filesystem is usable, so it must not fail the recovery phase and
+/// disable filesystem mutations across the whole install. The reconciler parks an
+/// intent that way itself when the audiobook row it names has already gone: the
+/// paths that intent was going to clean went with that row, so no later pass can
+/// do better. A filesystem that is genuinely failing is a separate condition and
+/// still fails the phase.
+/// </para>
+/// </summary>
 public sealed class AudiobookDeletionIntentReconciler(
     IAudiobookDeletionIntentStore intentStore,
     IAudiobookRepository audiobookRepository,
@@ -9,6 +22,9 @@ public sealed class AudiobookDeletionIntentReconciler(
     IAudiobookFilesystemDeleteService filesystemDeleteService,
     ILogger<AudiobookDeletionIntentReconciler> logger) : IAudiobookDeletionIntentReconciler
 {
+    private const string MissingAudiobookReason =
+        "The audiobook row disappeared before its durable filesystem cleanup completed.";
+
     public async Task ReconcileAsync(CancellationToken cancellationToken = default)
     {
         var intents = await intentStore.GetActiveAsync(cancellationToken);
@@ -17,8 +33,8 @@ public sealed class AudiobookDeletionIntentReconciler(
             cancellationToken.ThrowIfCancellationRequested();
             if (intent.State == AudiobookDeletionIntentState.NeedsAttention)
             {
-                throw new InvalidOperationException(
-                    $"Audiobook deletion intent {intent.Id} requires operator attention: {intent.Error}");
+                ReportParkedIntent(intent, intent.Error);
+                continue;
             }
 
             if (intent.State == AudiobookDeletionIntentState.Planned)
@@ -28,13 +44,12 @@ public sealed class AudiobookDeletionIntentReconciler(
                     cancellationToken);
                 if (audiobook == null)
                 {
-                    var reason =
-                        "The audiobook row disappeared before its durable filesystem cleanup completed.";
                     await intentStore.MarkNeedsAttentionAsync(
                         intent.Id,
-                        reason,
+                        MissingAudiobookReason,
                         CancellationToken.None);
-                    throw new InvalidOperationException(reason);
+                    ReportParkedIntent(intent, MissingAudiobookReason);
+                    continue;
                 }
 
                 AudiobookFilesystemDeleteResult result;
@@ -116,6 +131,15 @@ public sealed class AudiobookDeletionIntentReconciler(
                 intent.AudiobookId);
         }
     }
+
+    private void ReportParkedIntent(AudiobookDeletionIntent intent, string? reason) =>
+        logger.LogError(
+            "Audiobook deletion intent {IntentId} for audiobook {AudiobookId} cannot be recovered and was skipped so the rest of library filesystem startup can continue. Files belonging to that audiobook may still be on disk and need clearing by hand. Reason: {Reason}",
+            intent.Id,
+            intent.AudiobookId,
+            string.IsNullOrWhiteSpace(reason)
+                ? "No reason was recorded against the intent."
+                : reason);
 
     private static bool IsTransientRecoveryFilesystemException(Exception exception)
     {
