@@ -2368,13 +2368,19 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                 ok.Value!.GetType().GetProperty("results")!.GetValue(ok.Value));
             Assert.True(Assert.Single(results).Success);
             Assert.True(File.Exists(source));
-            Assert.Equal(
-                "audio",
-                await File.ReadAllTextAsync(
-                    Path.Join(destinationRoot, "Linked Book.mp3")));
+            var destination = Path.Join(destinationRoot, "Linked Book.mp3");
+            Assert.Equal("audio", await File.ReadAllTextAsync(destination));
             metadata.Verify(service => service.WriteAsinTagAsync(
                 It.IsAny<IAudiobookFileRegistrationLease>(),
                 book.Asin), Times.Exactly(expectedTagWrites));
+
+            // The call count above is the gate; this pins its premise rather than assuming it.
+            // A write through the destination reaches the source exactly when the import
+            // produced a hardlink.
+            await File.AppendAllTextAsync(destination, "+");
+            Assert.Equal(
+                fileAction == FileAction.HardlinkCopy ? "audio+" : "audio",
+                await File.ReadAllTextAsync(source));
         }
 
         [Fact]
