@@ -70,7 +70,7 @@ namespace Listenarr.Api.Middleware
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                 {
-                    System.Diagnostics.Debug.WriteLine($"AuthenticationEnforcerMiddleware logout logging failed: {ex.Message}");
+                    // Nothing is logged here: the call that failed is the logging call itself.
                 }
             }
 

@@ -9,6 +9,7 @@
  */
 
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Configuration.Core
 {
@@ -21,7 +22,7 @@ namespace Listenarr.Application.Configuration.Core
             settings.Webhooks ??= [];
         }
 
-        private static List<string>? NormalizeTriggerList(List<string>? list)
+        private List<string>? NormalizeTriggerList(List<string>? list)
         {
             if (list == null) return null;
             if (list.Count == 1)
@@ -34,13 +35,13 @@ namespace Listenarr.Application.Configuration.Core
                         var decoded = JsonSerializer.Deserialize<List<string>>(first);
                         if (decoded != null && decoded.Count > 0) return decoded;
                     }
-                    catch (JsonException)
+                    catch (JsonException exception)
                     {
-                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                        logger.LogWarning(exception, "Stored notification trigger list is not valid JSON; keeping its raw single-element form");
                     }
-                    catch (NotSupportedException)
+                    catch (NotSupportedException exception)
                     {
-                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                        logger.LogWarning(exception, "Stored notification trigger list could not be decoded; keeping its raw single-element form");
                     }
                 }
             }

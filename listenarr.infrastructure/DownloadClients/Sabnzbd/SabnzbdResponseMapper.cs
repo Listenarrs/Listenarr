@@ -227,7 +227,7 @@ internal static class SabnzbdResponseMapper
         }
         catch (Exception caughtEx) when (caughtEx is not OperationCanceledException && caughtEx is not OutOfMemoryException && caughtEx is not StackOverflowException)
         {
-            System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+            // Nothing is logged here: SabnzbdResponseMapper is a static mapper with no logger; an unusable element yields 0.0, as it does for a value that fails to parse without throwing.
         }
 
         return 0.0;
