@@ -69,7 +69,7 @@ namespace Listenarr.Application.Notifications.Diagnostics
                 logger.LogDebug(ex, "Failed to read notification response body for diagnostic logging");
             }
 
-            var redactedUrl = LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment());
+            var redactedUrl = LogRedaction.SanitizeWebhookUrl(webhookUrl);
             var redactedBody = LogRedaction.RedactText(body, LogRedaction.GetSensitiveValuesFromEnvironment());
             redactedBody = AggressiveRedact(redactedBody);
             if (string.IsNullOrEmpty(redactedBody)) redactedBody = "<redacted>";
