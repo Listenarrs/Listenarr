@@ -39,8 +39,47 @@ namespace Listenarr.Domain.Audiobooks
         public List<QualityDefinition> Qualities { get; set; } = new();
 
         /// <summary>
+        /// Whether an already-acquired audiobook may be replaced by a better release.
+        /// </summary>
+        /// <remarks>
+        /// The same flag Readarr and Sonarr carry (<c>public bool UpgradeAllowed</c>, at
+        /// src/NzbDrone.Core/Profiles/Qualities/QualityProfile.cs:17 in both). Listenarr used to
+        /// encode "upgrades off" as a blank <see cref="CutoffQuality"/>. That left no way to say
+        /// "upgrades off, and here is the cutoff I had picked", and no way for a profile with
+        /// upgrades off to satisfy a cutoff rule at all.
+        ///
+        /// Defaults to true so a caller that omits the field gets what a profile with a cutoff has
+        /// always done. The migration that adds the column derives the value from the stored
+        /// cutoff instead, so no existing profile changes meaning.
+        ///
+        /// That default is also what a PUT which omits the field will store, because the controller
+        /// binds this entity straight from the request body and a whole-document replace has
+        /// nothing to distinguish "absent" from "false". Every other field on this profile has
+        /// always behaved the same way, and the UI sends back the whole object it read
+        /// (fe/src/views/settings/QualityProfilesTab.vue:535 on save, :563 for the set-default
+        /// button), so nothing in the application hits it. Pinned, with MinimumSeeders as the
+        /// control that shows it is the endpoint's contract rather than this field's, by
+        /// Update_OmittingAField_ResetsItToItsDefault_ForTheFlagAndForItsNeighbour.
+        ///
+        /// Worth saying that the family does not solve this either: their API resource is a
+        /// separate type but declares the same non-nullable
+        /// <c>public bool UpgradeAllowed</c> (src/Readarr.Api.V1/Profiles/Quality/QualityProfileResource.cs:13,
+        /// src/Sonarr.Api.V3/Profiles/Quality/QualityProfileResource.cs:13), so a PUT that omits
+        /// it lands on false there for the same reason it lands on true here. Fixing it properly
+        /// means nullable fields on an inbound resource, which is a change to every field at once
+        /// and does not belong on this branch.
+        /// </remarks>
+        public bool UpgradeAllowed { get; set; } = true;
+
+        /// <summary>
         /// The quality level to stop upgrading at (cutoff)
         /// </summary>
+        /// <remarks>
+        /// Validated on save only, and only while <see cref="UpgradeAllowed"/> is true. A profile
+        /// stored before this rule existed keeps whatever it holds and is still returned by the
+        /// API unchanged.
+        /// </remarks>
+        [ValidCutoff]
         public string? CutoffQuality { get; set; }
 
         /// <summary>
