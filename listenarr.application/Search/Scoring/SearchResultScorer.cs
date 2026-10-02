@@ -170,9 +170,8 @@ namespace Listenarr.Application.Search.Scoring
             //
             // Case-insensitive on purpose. Every indexer parser writes this field capitalised,
             // "Torrent", and an ordinal `==` against a lowercase literal is always false, so the
-            // configured MinimumSeeders never applied to a real torrent. Every other protocol
-            // comparison in this codebase already compares case-insensitively, including the nzb
-            // and usenet check further down this same method.
+            // configured MinimumSeeders never applied to a real torrent. The nzb and usenet check
+            // in IsNzbResult (SearchResultScorer.Helpers.cs) already compares case-insensitively.
             if (string.Equals(searchResult.DownloadType, "torrent", StringComparison.OrdinalIgnoreCase)
                 && (searchResult.Seeders ?? 0) < profile.MinimumSeeders)
             {
