@@ -115,6 +115,7 @@ public sealed class LibraryPersistenceTests : BackendIntegrationTests
         {
             name = "Backend Integration Persistence Profile",
             isDefault = true,
+            upgradeAllowed = false,
         }, HttpStatusCode.Created);
         var profileId = (int)profile["id"]!;
 

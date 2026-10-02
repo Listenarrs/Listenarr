@@ -101,6 +101,7 @@ public sealed class RepairPersistenceTests : BackendIntegrationTests
         {
             name = "Backend Integration Repair Profile",
             isDefault = true,
+            upgradeAllowed = false,
         }, HttpStatusCode.Created);
         var profileId = (int)profile["id"]!;
         await Host.SendOkAsync(HttpMethod.Put, $"/api/v1/library/{bookId}", new { monitored = false, qualityProfileId = profileId });
