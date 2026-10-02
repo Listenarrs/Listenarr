@@ -39,6 +39,11 @@ namespace Listenarr.Domain.Audiobooks
         public int? BitRate { get; set; }
         public int? SampleRate { get; set; }
         public int? Channels { get; set; }
+        // True when the probe found at least one audio stream in the container.
+        public bool HasAudioStream { get; set; }
+        // True when the probe found a playable video stream. Attached-picture (cover art)
+        // streams are excluded: they are not playable video and must not disqualify an audiobook.
+        public bool HasVideoStream { get; set; }
         public string? Isbn { get; set; }
         public string? Asin { get; set; }
         public string? Description { get; set; }
