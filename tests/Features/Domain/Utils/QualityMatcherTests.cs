@@ -357,6 +357,57 @@ namespace Listenarr.Tests.Features.Domain.Utils
             Assert.True(QualityMatcher.MeetsCutoff(file, profile));
         }
 
+        /// <summary>
+        /// A profile with upgrades off answers the same way it did when the only way to say that
+        /// was to blank the cutoff, whether or not it still names one. Nothing is going to be
+        /// upgraded, so nothing is short of the cutoff, and every caller that already short-circuits
+        /// on a blank cutoff keeps the answer it had.
+        /// </summary>
+        [Fact]
+        public void MeetsCutoff_UpgradesOff_IsTrue_EvenWellBelowTheNamedCutoff()
+        {
+            var profile = StructuredProfile()
+                .WithCutoff("AAC 256kbps")
+                .WithUpgradesDisabled()
+                .Build();
+            var file = new AudioQualityInput { Codec = "aac", BitrateBitsPerSecond = 64_000 };
+
+            Assert.True(QualityMatcher.MeetsCutoff(file, profile));
+        }
+
+        /// <summary>
+        /// The control: the identical profile and file with upgrades on is short of the cutoff, so
+        /// the answer above comes from the flag rather than from the file.
+        /// </summary>
+        [Fact]
+        public void MeetsCutoff_UpgradesOn_SameProfileAndFile_IsFalse()
+        {
+            var profile = StructuredProfile().WithCutoff("AAC 256kbps").Build();
+            var file = new AudioQualityInput { Codec = "aac", BitrateBitsPerSecond = 64_000 };
+
+            Assert.True(profile.UpgradeAllowed);
+            Assert.False(QualityMatcher.MeetsCutoff(file, profile));
+        }
+
+        [Fact]
+        public void LabelMeetsCutoff_UpgradesOff_IsTrue_EvenForALabelBelowTheCutoff()
+        {
+            var profile = StructuredProfile()
+                .WithCutoff("AAC 256kbps")
+                .WithUpgradesDisabled()
+                .Build();
+
+            Assert.True(QualityMatcher.LabelMeetsCutoff("MP3 128kbps", profile));
+        }
+
+        [Fact]
+        public void LabelMeetsCutoff_UpgradesOn_SameProfileAndLabel_IsFalse()
+        {
+            var profile = StructuredProfile().WithCutoff("AAC 256kbps").Build();
+
+            Assert.False(QualityMatcher.LabelMeetsCutoff("MP3 128kbps", profile));
+        }
+
         [Fact]
         public void MeetsCutoff_CutoffRungMissing_IsFalse()
         {
