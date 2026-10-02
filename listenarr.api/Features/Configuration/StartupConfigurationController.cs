@@ -17,6 +17,7 @@
  */
 
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Listenarr.Api.Attributes;
 using Listenarr.Api.Dtos;
 using Microsoft.AspNetCore.Authorization;
@@ -27,7 +28,7 @@ namespace Listenarr.Api.Features.Configuration
     [ApiController]
     [Route("api/v{version:apiVersion}/configuration")]
     [RequireAdminOrApiKey]
-    public class StartupConfigurationController : ControllerBase
+    public partial class StartupConfigurationController : ControllerBase
     {
         private readonly IConfigurationService _configurationService;
         private readonly IStartupConfigService _startupConfigService;
@@ -116,6 +117,12 @@ namespace Listenarr.Api.Features.Configuration
                 return BadRequest("Startup configuration body has a property of the wrong type.");
             }
 
+            if (!IsValidUrlBase(config.UrlBase))
+            {
+                _logger.LogWarning("Rejected a startup config whose UrlBase is a full URL rather than a path.");
+                return BadRequest(new { error = InvalidUrlBaseMessage });
+            }
+
             config.ApiVersion = NormalizeStartupApiVersion(config.ApiVersion);
             await _configurationService.SaveStartupConfigAsync(config);
             var savedConfig = await _configurationService.GetStartupConfigAsync();
@@ -132,6 +139,26 @@ namespace Listenarr.Api.Features.Configuration
 
             return Ok(savedConfig);
         }
+
+        internal const string InvalidUrlBaseMessage = "Must be a valid URL path (ie: '/listenarr')";
+
+        /// <summary>
+        /// A full URL in <c>UrlBase</c> is stored happily and then ignored at startup, because the
+        /// path base is a path. Sonarr, Radarr and Readarr all refuse it at the controller with
+        /// <c>ValidUrlBase</c>; this is the same rule and the same message.
+        /// </summary>
+        internal static bool IsValidUrlBase(string? urlBase)
+        {
+            if (string.IsNullOrWhiteSpace(urlBase))
+            {
+                return true;
+            }
+
+            return !AbsoluteUrlBase().IsMatch(urlBase.Trim());
+        }
+
+        [GeneratedRegex(@"^/?https?://[-_a-z0-9.]+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
+        private static partial Regex AbsoluteUrlBase();
 
         private string NormalizeStartupApiVersion(string? configuredApiVersion)
             => _startupConfigService.NormalizeApiVersion(configuredApiVersion, GetRequestedApiVersion());
