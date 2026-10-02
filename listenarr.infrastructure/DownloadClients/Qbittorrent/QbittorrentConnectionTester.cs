@@ -115,7 +115,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                     try { body = await loginResp.Content.ReadAsStringAsync(ct); }
                     catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException)
                     {
-                        _logger.LogDebug("Suppressed non-fatal exception in catch block.");
+                        _logger.LogDebug(caughtEx_1, "Could not read the qBittorrent login response body; the failure below is reported with an empty body");
                     }
                     var redacted = LogRedaction.RedactText(body, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { client.Password ?? string.Empty }));
                     _logger.LogWarning("qBittorrent TestConnection: login failed with status {Status} for client {ClientId} - {Body}", loginResp.StatusCode, LogRedaction.SanitizeText(client.Id), redacted);

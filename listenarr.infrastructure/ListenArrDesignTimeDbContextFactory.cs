@@ -91,8 +91,8 @@ namespace Listenarr.Infrastructure
                 }
             }
             catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException)
-            { /* ignore and return null */
-                global::System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+            {
+                // Nothing is logged here: this is the EF design-time factory, outside the running application.
             }
 
             return null;

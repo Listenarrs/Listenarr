@@ -400,8 +400,7 @@ namespace Listenarr.Application.Common
             }
             catch (Exception caughtEx_4) when (caughtEx_4 is not OperationCanceledException && caughtEx_4 is not OutOfMemoryException && caughtEx_4 is not StackOverflowException)
             {
-                // best-effort, swallow errors
-                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                // Nothing is logged here: this bencode helper is static with no logger; the regex fallback below covers a failed parse.
             }
 
             // Fallback: regex to find tracker announce URLs if bencode parsing found nothing.
@@ -419,8 +418,7 @@ namespace Listenarr.Application.Common
                 }
                 catch (Exception caughtEx_5) when (caughtEx_5 is not OperationCanceledException && caughtEx_5 is not OutOfMemoryException && caughtEx_5 is not StackOverflowException)
                 {
-                    // ignore
-                    System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                    // Nothing is logged here: this bencode helper is static with no logger; the caller receives whatever the parse found.
                 }
             }
 

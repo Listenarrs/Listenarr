@@ -37,7 +37,7 @@ namespace Listenarr.Application.Notifications.Diagnostics
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                     {
-                        System.Diagnostics.Debug.WriteLine($"NotificationService.AggressiveRedact regex replace failed: {ex.Message}");
+                        // Nothing is logged here: the exception can carry the very value being redacted.
                     }
                 }
 
