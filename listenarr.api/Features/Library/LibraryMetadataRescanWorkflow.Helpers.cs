@@ -5,6 +5,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Caching.Memory;
+using Listenarr.Domain.Common;
 namespace Listenarr.Api.Features.Library
 {
     public sealed partial class LibraryMetadataRescanWorkflow
