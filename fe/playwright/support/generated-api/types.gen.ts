@@ -293,6 +293,7 @@ export type ListenarrDomainConfigurationStartupConfig = {
     port?: number | null;
     sslPort?: number | null;
     urlBase?: string | null;
+    applicationUrl?: string | null;
     bindAddress?: string | null;
     apiKey?: string | null;
     updateMechanism?: string | null;
