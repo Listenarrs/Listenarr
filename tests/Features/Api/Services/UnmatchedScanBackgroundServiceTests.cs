@@ -119,5 +119,242 @@ namespace Listenarr.Tests.Features.Api.Services
             Assert.Contains(groups, group => group.Single() == fileA);
             Assert.Contains(groups, group => group.Single() == fileB);
         }
+
+        [Fact]
+        public void BuildGroupedFilesForFolder_GroupsChapterFilesIndexedAsNumberOfTotal()
+        {
+            // A chapter-per-file rip that numbers its parts "N of M". The index carries its
+            // own total, so it describes a set rather than distinct works, and every file
+            // belongs to the one book the folder names.
+            var folder = @"D:\test\A Princess of Mars";
+            var files = Enumerable.Range(1, 4)
+                .Select(n => Path.Join(folder, $"A Princess of Mars {n:000} of 004.mp3"))
+                .ToArray();
+
+            var groups = UnmatchedScanBackgroundService.BuildGroupedFilesForFolder(
+                files,
+                folder,
+                FileSystemPathSemantics.CurrentHostDefault);
+
+            var group = Assert.Single(groups);
+            Assert.Equal(4, group.Count);
+        }
+
+        [Fact]
+        public void BuildGroupedFilesForFolder_GroupsBareNumberOfTotalFilenames()
+        {
+            // The same convention with no title in the filename at all. Stripping the index
+            // empties the stem, which is what lets the folder-name fallback gather them.
+            //
+            // The totals deliberately disagree. A rip that was renamed while it was still
+            // being produced carries a different M in each file, and that is the only shape
+            // of this case that the strip order actually decides. When every file shares one
+            // M, stripping the leading number first leaves the identical remainder "of 003"
+            // in all of them, so they group by accident whether or not this fix is present
+            // and the test proves nothing.
+            var folder = @"D:\test\A Princess of Mars";
+            var files = Enumerable.Range(1, 3)
+                .Select(n => Path.Join(folder, $"{n:000} of {497 + n:000}.mp3"))
+                .ToArray();
+
+            var groups = UnmatchedScanBackgroundService.BuildGroupedFilesForFolder(
+                files,
+                folder,
+                FileSystemPathSemantics.CurrentHostDefault);
+
+            var group = Assert.Single(groups);
+            Assert.Equal(3, group.Count);
+        }
+
+        [Fact]
+        public void BuildGroupedFilesForFolder_KeepsTitlesWhoseOwnWordsReadLikeAnIndex()
+        {
+            // "of" between two words is not an index, and a trailing number is not a total.
+            // Two separate works in one author folder must stay separate.
+            var folder = @"D:\test\Edgar Rice Burroughs";
+            var princess = Path.Join(folder, "A Princess of Mars.mp3");
+            var gods = Path.Join(folder, "The Gods of Mars 2.mp3");
+
+            var groups = UnmatchedScanBackgroundService.BuildGroupedFilesForFolder(
+                new[] { princess, gods },
+                folder,
+                FileSystemPathSemantics.CurrentHostDefault);
+
+            Assert.Equal(2, groups.Count);
+            Assert.Contains(groups, group => group.Single() == princess);
+            Assert.Contains(groups, group => group.Single() == gods);
+        }
+
+        [Fact]
+        public void BuildGroupedFilesForFolder_KeepsSeriesFilesSpelledBookNumberOfTotalSeparate()
+        {
+            // A boxed set names every volume "Book N of M". Each file is a different work, so
+            // the folder must stay at one item per book. Stripping the index here would also
+            // cost them the embedded-tag rescue, which only runs when filename grouping
+            // produced more than one group.
+            var folder = @"D:\test\Barsoom";
+            var files = Enumerable.Range(1, 3)
+                .Select(n => Path.Join(folder, $"Barsoom Book {n} of 6.m4b"))
+                .ToArray();
+
+            var groups = UnmatchedScanBackgroundService.BuildGroupedFilesForFolder(
+                files,
+                folder,
+                FileSystemPathSemantics.CurrentHostDefault);
+
+            Assert.Equal(3, groups.Count);
+            Assert.All(groups, group => Assert.Single(group));
+        }
+
+        [Fact]
+        public void BuildGroupedFilesForFolder_KeepsSeriesFilesSpelledVolumeNumberOfTotalSeparate()
+        {
+            // The other spelling of the same convention, and the abbreviation beside it.
+            var folder = @"D:\test\Anne of Green Gables";
+            var volumeOne = Path.Join(folder, "Anne of Green Gables Volume 1 of 8.m4b");
+            var volumeTwo = Path.Join(folder, "Anne of Green Gables Volume 2 of 8.m4b");
+            var volumeThree = Path.Join(folder, "Anne of Green Gables Vol 3 of 8.m4b");
+
+            var groups = UnmatchedScanBackgroundService.BuildGroupedFilesForFolder(
+                new[] { volumeOne, volumeTwo, volumeThree },
+                folder,
+                FileSystemPathSemantics.CurrentHostDefault);
+
+            Assert.Equal(3, groups.Count);
+            Assert.Contains(groups, group => group.Single() == volumeOne);
+            Assert.Contains(groups, group => group.Single() == volumeTwo);
+            Assert.Contains(groups, group => group.Single() == volumeThree);
+        }
+
+        [Fact]
+        public void BuildGroupedFilesForFolder_StillGroupsBareNumberOfTotalAfterTheSeriesWordNarrowing()
+        {
+            // The control for the two above. Narrowing the strip must not reach a chapter rip
+            // that carries no series word, whether the filename is bare or titled. Both shapes
+            // are seeded here so a narrowing that over-reaches fails this rather than only the
+            // older cases.
+            var bareFolder = @"D:\test\A Princess of Mars";
+            var bare = Enumerable.Range(1, 3)
+                .Select(n => Path.Join(bareFolder, $"{n:000} of {497 + n:000}.mp3"))
+                .ToArray();
+
+            var bareGroups = UnmatchedScanBackgroundService.BuildGroupedFilesForFolder(
+                bare,
+                bareFolder,
+                FileSystemPathSemantics.CurrentHostDefault);
+
+            Assert.Equal(3, Assert.Single(bareGroups).Count);
+
+            var titledFolder = @"D:\test\The Wonderful Wizard of Oz";
+            var titled = Enumerable.Range(1, 4)
+                .Select(n => Path.Join(titledFolder, $"The Wonderful Wizard of Oz {n:000} of 004.mp3"))
+                .ToArray();
+
+            var titledGroups = UnmatchedScanBackgroundService.BuildGroupedFilesForFolder(
+                titled,
+                titledFolder,
+                FileSystemPathSemantics.CurrentHostDefault);
+
+            Assert.Equal(4, Assert.Single(titledGroups).Count);
+        }
+
+        [Fact]
+        public void BuildGroupedFilesForFolder_GroupsAChapterRipWhoseTitleMerelyEndsInBook()
+        {
+            // The narrowing keys on the whole word, so a title ending in "book" is not a series
+            // marker and its chapter rip still collapses to one item.
+            var folder = @"D:\test\The Storybook";
+            var files = Enumerable.Range(1, 3)
+                .Select(n => Path.Join(folder, $"The Storybook {n} of 30.mp3"))
+                .ToArray();
+
+            var groups = UnmatchedScanBackgroundService.BuildGroupedFilesForFolder(
+                files,
+                folder,
+                FileSystemPathSemantics.CurrentHostDefault);
+
+            Assert.Equal(3, Assert.Single(groups).Count);
+        }
+
+        [Fact]
+        public void BuildGroupedFilesForFolder_KeepsSeriesFilesWithATwoDigitBookIndexSeparate()
+        {
+            // An index whose match could start at its second digit used to slip past the series
+            // word: "1 of 20" read as an index after "Series Book 1", so both files collapsed to
+            // the stem "Series Book 1".
+            var folder = @"D:\test\Series";
+            var eleventh = Path.Join(folder, "Series Book 11 of 20.m4b");
+            var twelfth = Path.Join(folder, "Series Book 12 of 20.m4b");
+
+            var groups = UnmatchedScanBackgroundService.BuildGroupedFilesForFolder(
+                new[] { eleventh, twelfth },
+                folder,
+                FileSystemPathSemantics.CurrentHostDefault);
+
+            Assert.Equal(2, groups.Count);
+            Assert.Contains(groups, group => group.Single() == eleventh);
+            Assert.Contains(groups, group => group.Single() == twelfth);
+        }
+
+        [Theory]
+        [InlineData("Rougon-Macquart Book {0} of 20", 11)]
+        [InlineData("Rougon-Macquart Book {0:000} of 020", 11)]
+        [InlineData("Barsoom Book {0:000} of 006", 1)]
+        [InlineData("Rougon-Macquart Bk {0} of 20", 11)]
+        [InlineData("Rougon-Macquart Vol {0} of 20", 11)]
+        [InlineData("Rougon-Macquart Volume {0} of 20", 10)]
+        [InlineData("Rougon-Macquart Vol {0} of 20", 2)]
+        [InlineData("Rougon-Macquart Book{0}of20", 11)]
+        [InlineData("Rougon-Macquart Vol. {0} of 20", 11)]
+        [InlineData("Rougon-Macquart Book #{0} of 20", 11)]
+        [InlineData("Rougon-Macquart Book    {0} of 20", 11)]
+        public void BuildGroupedFilesForFolder_KeepsSeriesFilesSeparateWhateverTheIndexLooksLike(
+            string nameFormat,
+            int firstPosition)
+        {
+            // Three consecutive works of one series, with the index multi-digit, zero-padded,
+            // abbreviated, punctuated or spaced out. The series word has to hold for every
+            // shape, so the index is never read from inside the number or past a "." or "#".
+            var folder = @"D:\test\Boxed Set";
+            var files = Enumerable.Range(firstPosition, 3)
+                .Select(n => Path.Join(
+                    folder,
+                    string.Format(System.Globalization.CultureInfo.InvariantCulture, nameFormat, n) + ".m4b"))
+                .ToArray();
+
+            var groups = UnmatchedScanBackgroundService.BuildGroupedFilesForFolder(
+                files,
+                folder,
+                FileSystemPathSemantics.CurrentHostDefault);
+
+            Assert.Equal(3, groups.Count);
+            Assert.All(groups, group => Assert.Single(group));
+        }
+
+        [Theory]
+        [InlineData("A Princess of Mars {0:000} of 006", 1, 6)]
+        [InlineData("A Princess of Mars {0:000} of 120", 10, 3)]
+        [InlineData("The Wonderful Wizard of Oz - {0} of 24", 10, 3)]
+        public void BuildGroupedFilesForFolder_StillGroupsChapterFilesWithAMultiDigitIndex(
+            string nameFormat,
+            int firstPosition,
+            int count)
+        {
+            // The control for the series cases: anchoring the index at the start of its number
+            // must not stop a chapter rip without a series word from collapsing to one item.
+            var folder = @"D:\test\A Princess of Mars";
+            var files = Enumerable.Range(firstPosition, count)
+                .Select(n => Path.Join(
+                    folder,
+                    string.Format(System.Globalization.CultureInfo.InvariantCulture, nameFormat, n) + ".mp3"))
+                .ToArray();
+
+            var groups = UnmatchedScanBackgroundService.BuildGroupedFilesForFolder(
+                files,
+                folder,
+                FileSystemPathSemantics.CurrentHostDefault);
+
+            Assert.Equal(count, Assert.Single(groups).Count);
+        }
     }
 }
