@@ -203,14 +203,17 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
                 try
                 {
                     var previousDownloads = clientDownloads.Select(item => item.Clone()).ToList();
-                    var updatedDownloads = await downloadClientGateway.FetchDownloadsAsync(client, clientDownloads, cancellationToken);
+                    var reportedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    var updatedDownloads = await downloadClientGateway.FetchDownloadsAsync(client, clientDownloads, cancellationToken, reportedIds);
 
                     foreach (Download download in updatedDownloads)
                     {
                         var downloadService = scope.ServiceProvider.GetRequiredService<IDownloadService>();
                         var previousDownload = previousDownloads.FirstOrDefault(d => d.Id == download.Id);
 
-                        if (previousDownload != null && !HasSettledAsComplete(download, previousDownload, stabilityWindow))
+                        if (previousDownload != null
+                            && !ReleaseIfGoneWhileHeld(download, previousDownload, reportedIds)
+                            && !HasSettledAsComplete(download, previousDownload, stabilityWindow))
                         {
                             // Hold the transition, not the update. Progress and size still persist,
                             // so the row stays current; only finalization waits. Reverting the

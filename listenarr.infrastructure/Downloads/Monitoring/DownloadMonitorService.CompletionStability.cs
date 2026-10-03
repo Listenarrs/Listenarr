@@ -33,10 +33,11 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
         // simply restarts the window, which is the safe direction, and persisting it would need a
         // column for a value that is meaningless once the transition has been let through.
         //
-        // Entries are removed when the transition is let through and when the client stops
-        // reporting the download as complete, but not when a download vanishes from the client
-        // mid-window, so the dictionary can hold entries for downloads that no longer exist. The
-        // processor is a singleton, so those survive for the life of the process. That is
+        // Entries are removed when the transition is let through, when the client stops
+        // reporting the download as complete, and when the client stops listing it (which lets it
+        // through, see ReleaseIfGoneWhileHeld). They are not removed when the row itself is
+        // deleted mid-window, so the dictionary can hold entries for downloads that no longer
+        // exist. The processor is a singleton, so those survive for the life of the process. That is
         // accepted rather than swept: an entry is a string key and a DateTime, it can only be
         // added for a download the client itself reported complete during this run, and the
         // bound is therefore the number of downloads that completed and then disappeared before
@@ -65,6 +66,9 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
 
             if (stabilityWindow <= TimeSpan.Zero)
             {
+                // The window can be set to zero while a download is held; drop its entry so it
+                // cannot outlive the hold.
+                _completionFirstSeen.TryRemove(current.Id, out _);
                 return true;
             }
 
@@ -81,6 +85,47 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
             }
 
             _completionFirstSeen.TryRemove(current.Id, out _);
+            return true;
+        }
+
+        /// <summary>
+        /// Lets a held download through to finalization when its client stops listing it.
+        /// </summary>
+        /// <remarks>
+        /// The hold writes the row back with its pre-completion status, so the completion is
+        /// remembered only in <see cref="_completionFirstSeen"/>. A download the client drops
+        /// before the window passes comes back unchanged and is never seen complete again, and
+        /// orphan cleanup would then delete it as missing from the client. Without the window the
+        /// import was enqueued on the first pass, so this does exactly that: it applies only to a
+        /// download the client itself reported complete during this run, and if the files went
+        /// with the item, the import fails the same way it would have without the window.
+        ///
+        /// Only a row still waiting for its first completion is released. An entry that outlived
+        /// its hold must not write Completed over a row that has moved into import, because the
+        /// Completed edge would enqueue that import a second time.
+        /// </remarks>
+        private bool ReleaseIfGoneWhileHeld(Download current, Download previous, ISet<string> reportedIds)
+        {
+            if (reportedIds.Contains(current.Id))
+            {
+                return false;
+            }
+
+            if (!IsPreCompletion(previous.Status))
+            {
+                _completionFirstSeen.TryRemove(current.Id, out _);
+                return false;
+            }
+
+            if (!_completionFirstSeen.TryRemove(current.Id, out _))
+            {
+                return false;
+            }
+
+            logger.LogInformation(
+                "Download {DownloadId} was reported complete and is no longer listed by its client; finalizing without waiting out the stability window",
+                LogRedaction.SanitizeText(current.Id));
+            current.SetStatus(DownloadStatus.Completed);
             return true;
         }
 
