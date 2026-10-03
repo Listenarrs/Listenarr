@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Application.Common;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Downloads.Submission
@@ -35,6 +36,14 @@ namespace Listenarr.Application.Downloads.Submission
         /// Writes the failed attempt to history before the provisional row is removed. The
         /// message carried here is the exception's own, so the no-identifier case reads as the
         /// client returning no verified identifier rather than as a refusal.
+        ///
+        /// A <see cref="DownloadClientRejectedReleaseException"/> is the one exception this does
+        /// not write. The client is refusing a release it already holds, most often because the
+        /// same release also satisfies another wanted book and was grabbed for that one first.
+        /// The download itself is still running; recording a DownloadFailed row would show the
+        /// user a red failure next to a release that is actively downloading. Sonarr's
+        /// DownloadService reaches the same decision for the same exception: trace the rejection
+        /// and record nothing (Sonarr DownloadService.cs:167-171 at 76c684e09).
         /// </summary>
         public static async Task RecordRejectedSubmissionAsync(
             string downloadId,
@@ -46,6 +55,14 @@ namespace Listenarr.Application.Downloads.Submission
         {
             if (string.IsNullOrEmpty(downloadClientId))
             {
+                return;
+            }
+
+            if (failure is DownloadClientRejectedReleaseException)
+            {
+                logger.LogDebug(
+                    "Download client rejected download {DownloadId} as a possible duplicate; not recording a failed attempt",
+                    downloadId);
                 return;
             }
 

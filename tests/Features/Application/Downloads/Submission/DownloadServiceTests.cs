@@ -183,6 +183,56 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
         }
 
         [Fact]
+        public async Task SendToDownloadClientAsync_WhenClientRejectsAsDuplicate_DoesNotRecordAFailureInHistory()
+        {
+            // DownloadClientRejectedReleaseException means the client already holds this release,
+            // most often because it also satisfies another wanted book that grabbed it first. The
+            // download itself is still running, so a DownloadFailed row here would show the user a
+            // red failure next to a release that is actively downloading.
+            var rejection = new DownloadClientRejectedReleaseException("qBittorrent already has this release.");
+            var gatewayMock = new Mock<IDownloadClientGateway>(MockBehavior.Strict);
+            gatewayMock
+                .Setup(g => g.AddAsync(
+                    It.Is<DownloadClientConfiguration>(client => client.Id == "qb-1"),
+                    It.IsAny<PreparedDownloadSubmission>(),
+                    It.IsAny<CancellationToken>()))
+                .ThrowsAsync(rejection);
+
+            // Loose, not Strict: RecordRejectedSubmissionAsync wraps the history call in a
+            // try/catch that logs and swallows any exception, including one a Strict mock would
+            // throw for an unexpected call. That would make this test pass whether or not the
+            // production code actually skips the call. A Loose mock with an explicit setup lets
+            // the call go through if it happens, so Times.Never below is a real assertion.
+            var historyMock = new Mock<IDownloadHistoryService>();
+            historyMock
+                .Setup(h => h.RecordDownloadFailedAsync(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()))
+                .Returns(Task.CompletedTask);
+            _services.AddSingleton(gatewayMock.Object);
+            _services.AddSingleton(historyMock.Object);
+
+            Init();
+            await InitData();
+            var downloadService = _provider.GetRequiredService<DownloadService>();
+            var searchResult = new SearchResult
+            {
+                Title = "Artemis",
+                Artist = "Andy Weir",
+                DownloadType = "Torrent",
+                MagnetLink = "magnet:?xt=urn:btih:ABCDEF1234567890ABCDEF1234567890ABCDEF12",
+                Size = 123456789
+            };
+
+            await Assert.ThrowsAsync<DownloadClientRejectedReleaseException>(
+                () => downloadService.SendToDownloadClientAsync(searchResult, _client.Id));
+
+            historyMock.Verify(
+                h => h.RecordDownloadFailedAsync(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()),
+                Times.Never);
+        }
+
+        [Fact]
         public async Task SendToDownloadClientAsync_SanitizesTheClientMessageItWritesToHistory()
         {
             // The client's own error text lands in a durable row the user can read. A download
