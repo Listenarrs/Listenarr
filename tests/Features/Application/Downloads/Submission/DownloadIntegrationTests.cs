@@ -65,7 +65,10 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
                 CompletedFileAction = FileAction.Move,
                 AllowedFileExtensions = [".m4b", ".mp3"],
                 EnabledNotificationTriggers = [],
-                WebhookUrl = string.Empty
+                WebhookUrl = string.Empty,
+                // Walks the whole chain in one pass on the real clock, so finalization has to
+                // start as soon as the client reports completion.
+                DownloadCompletionStabilitySeconds = 0
             };
 
             var metadataMock = new Mock<IMetadataService>();
