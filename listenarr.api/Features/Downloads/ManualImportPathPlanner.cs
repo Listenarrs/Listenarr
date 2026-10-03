@@ -258,21 +258,11 @@ public sealed class ManualImportPathPlanner
         bool isMultiFile,
         out int? stableSuffixNumber)
     {
-        var variables = new Dictionary<string, object>();
-
-        var author = audiobook.Authors?.FirstOrDefault();
-        if (!string.IsNullOrWhiteSpace(author)) variables["Author"] = author;
+        var author = audiobook.Authors?.FirstOrDefault(n => !string.IsNullOrWhiteSpace(n));
 
         var narrator = audiobook.Narrators != null
             ? string.Join(", ", audiobook.Narrators.Where(n => !string.IsNullOrWhiteSpace(n)))
             : string.Empty;
-        if (!string.IsNullOrWhiteSpace(narrator)) variables["Narrator"] = narrator;
-
-        if (!string.IsNullOrWhiteSpace(audiobook.Publisher)) variables["Publisher"] = audiobook.Publisher;
-        if (!string.IsNullOrWhiteSpace(audiobook.Language)) variables["Language"] = audiobook.Language;
-        if (!string.IsNullOrWhiteSpace(audiobook.Asin)) variables["Asin"] = audiobook.Asin;
-        if (!string.IsNullOrWhiteSpace(audiobook.Subtitle)) variables["Subtitle"] = audiobook.Subtitle;
-        if (!string.IsNullOrWhiteSpace(audiobook.Edition)) variables["Edition"] = audiobook.Edition;
 
         var usesSubtitleToken = (!string.IsNullOrWhiteSpace(folderPattern) && folderPattern.IndexOf("Subtitle", StringComparison.OrdinalIgnoreCase) >= 0)
             || (!string.IsNullOrWhiteSpace(filePattern) && filePattern.IndexOf("Subtitle", StringComparison.OrdinalIgnoreCase) >= 0);
@@ -283,10 +273,6 @@ public sealed class ManualImportPathPlanner
             && !audiobook.Title.Contains(audiobook.Subtitle, StringComparison.OrdinalIgnoreCase)
             ? $"{audiobook.Title}: {audiobook.Subtitle}"
             : audiobook.Title;
-        variables["Title"] = !string.IsNullOrWhiteSpace(titleFull) ? titleFull : "Unknown Title";
-
-        if (!string.IsNullOrWhiteSpace(audiobook.Series)) variables["Series"] = audiobook.Series;
-        if (!string.IsNullOrWhiteSpace(audiobook.PublishYear)) variables["Year"] = audiobook.PublishYear;
 
         var effectiveDiskNumber = item.DiskNumberHint
             ?? (metadata.DiscNumber.HasValue && metadata.DiscNumber.Value > 0 ? metadata.DiscNumber.Value : null);
@@ -299,11 +285,40 @@ public sealed class ManualImportPathPlanner
             effectiveChapterNumber ??= effectiveDiskNumber;
         }
 
-        if (effectiveDiskNumber.HasValue && effectiveDiskNumber.Value > 0) variables["DiskNumber"] = effectiveDiskNumber.Value;
-        if (effectiveChapterNumber.HasValue && effectiveChapterNumber.Value > 0) variables["ChapterNumber"] = effectiveChapterNumber.Value;
-
         stableSuffixNumber = effectiveChapterNumber ?? effectiveDiskNumber ?? item.SequenceNumberHint;
-        return variables;
+
+        // The same fourteen keys RenameService.BuildNamingVariables builds, with the same comparer
+        // and in the same order, because a pattern has to mean one thing wherever it is rendered.
+        //
+        // Every key is present even when its value is unknown. ApplyNamingPattern takes the same
+        // branch for a key that is present and blank as for one that is absent: both become the
+        // empty sentinel, and the bracket and separator cleanup that follows strips the segment
+        // either way. So this is rendering-neutral, and it silences a LogWarning that fired once
+        // per missing token per item and meant nothing.
+        //
+        // Ordinal-ignore-case matches rename. The token regex in FileNamingService is already
+        // case-insensitive, so a case-sensitive dictionary here meant a pattern written {series}
+        // resolved under rename and missed under manual import. Ordinal rather than culture-aware
+        // on purpose: under tr-TR the dotless i would stop {TITLE} matching Title.
+        return new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+        {
+            // Rename substitutes "Unknown Author" here. This does not, because that string would
+            // be rendered into a real destination path where today the segment collapses away.
+            { "Author", author ?? string.Empty },
+            { "Series", audiobook.Series ?? string.Empty },
+            { "Title", string.IsNullOrWhiteSpace(titleFull) ? "Unknown Title" : titleFull },
+            { "Subtitle", audiobook.Subtitle ?? string.Empty },
+            { "Edition", audiobook.Edition ?? string.Empty },
+            { "Narrator", narrator },
+            { "Publisher", audiobook.Publisher ?? string.Empty },
+            { "Language", audiobook.Language ?? string.Empty },
+            { "Asin", audiobook.Asin ?? string.Empty },
+            { "SeriesNumber", audiobook.SeriesNumber ?? string.Empty },
+            { "Year", audiobook.PublishYear ?? string.Empty },
+            { "Quality", audiobook.Quality ?? string.Empty },
+            { "DiskNumber", effectiveDiskNumber is > 0 ? effectiveDiskNumber.Value : string.Empty },
+            { "ChapterNumber", effectiveChapterNumber is > 0 ? effectiveChapterNumber.Value : string.Empty }
+        };
     }
 
     private static bool PatternAllowsSubfolders(string effectiveFilePattern)
