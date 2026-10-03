@@ -43,3 +43,60 @@ function formatMembership(membership: AudiobookSeriesMembership): string {
   const number = (membership.seriesNumber || '').trim()
   return number ? `${name} #${number}` : name
 }
+
+/** A series entry as the search endpoint and the product lookup both return it. */
+export interface SeriesEntry {
+  asin?: string
+  name?: string
+  position?: string
+}
+
+/** Series data in the shape AudibleBookMetadata expects, memberships and legacy scalars alike. */
+export interface SeriesFields {
+  seriesMemberships?: AudiobookSeriesMembership[]
+  series?: string
+  seriesNumber?: string
+  seriesAsin?: string
+}
+
+// An Audible digital ASIN is the literal prefix B0 followed by eight alphanumerics. A bare
+// ten-character check is not enough: single-word series names of that length, Foundation
+// among them, pass it and then get stored as if they were identifiers.
+const ASIN_PATTERN = /^B0[A-Z0-9]{8}$/i
+
+export function looksLikeAsin(value: string | undefined | null): boolean {
+  const trimmed = value?.trim()
+  return Boolean(trimmed && ASIN_PATTERN.test(trimmed))
+}
+
+/**
+ * A book can belong to more than one series, so every entry becomes a membership, ordered,
+ * with the first marked primary. The legacy scalars come off that primary membership so the
+ * two can never disagree.
+ */
+export function buildSeriesFields(entries: SeriesEntry[] | undefined | null): SeriesFields {
+  const seriesMemberships: AudiobookSeriesMembership[] = (entries ?? [])
+    .filter((entry) => (entry?.name ?? '').trim().length > 0)
+    .map((entry, index) => {
+      const asin = entry.asin?.trim()
+      return {
+        seriesName: (entry.name ?? '').trim(),
+        seriesNumber: entry.position?.trim() || undefined,
+        // The search fallback branch fills `asin` with the series *name* when the ASIN
+        // re-fetch fails, so only keep a value that actually looks like an ASIN.
+        seriesAsin: looksLikeAsin(asin) ? asin : undefined,
+        isPrimary: index === 0,
+        sortOrder: index,
+      }
+    })
+
+  const primary = seriesMemberships[0]
+  return primary
+    ? {
+        seriesMemberships,
+        series: primary.seriesName,
+        seriesNumber: primary.seriesNumber,
+        seriesAsin: primary.seriesAsin,
+      }
+    : {}
+}
