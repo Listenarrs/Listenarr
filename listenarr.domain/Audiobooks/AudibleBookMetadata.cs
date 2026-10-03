@@ -31,6 +31,7 @@ namespace Listenarr.Domain.Audiobooks
         public string? PublishedDate { get; set; } // Full date (YYYY-MM-DD) for calendar/timeline features
         public string? Series { get; set; }
         public string? SeriesNumber { get; set; }
+        public string? SeriesAsin { get; set; }
         public List<AudiobookSeriesMembership>? SeriesMemberships { get; set; }
         public string? Description { get; set; }
         public List<string>? Genres { get; set; }
@@ -87,7 +88,8 @@ namespace Listenarr.Domain.Audiobooks
                 audiobook,
                 SeriesMemberships,
                 Series,
-                SeriesNumber);
+                SeriesNumber,
+                SeriesAsin);
 
             return audiobook;
         }
