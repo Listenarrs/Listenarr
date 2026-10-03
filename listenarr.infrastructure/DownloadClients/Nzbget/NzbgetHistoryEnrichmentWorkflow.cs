@@ -24,7 +24,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
     internal sealed class NzbgetHistoryEnrichmentWorkflow(
         NzbgetHistoryReader historyReader,
         ILogger logger,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        NzbgetFailedHistoryWarningTracker failedHistoryWarningTracker)
     {
         private const long SlowHistoryThresholdMilliseconds = 2_000;
         private const string QueueSurface = "GetQueueAsync";
@@ -86,7 +87,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
                     activeIdentities,
                     history,
                     cancellationToken,
-                    entry => TryMergeOrAppendQueueItem(client, entry, activeIdentities, items));
+                    entry => TryMergeOrAppendQueueItem(client, entry, activeIdentities, items),
+                    monitoredIdSet);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
@@ -152,25 +154,36 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
             IReadOnlyList<ActiveHistoryIdentity> activeIdentities,
             IReadOnlyList<NzbgetHistoryEntry> history,
             CancellationToken cancellationToken,
-            Action<NzbgetHistoryEntry> append)
+            Action<NzbgetHistoryEntry> append,
+            ISet<string>? monitoredIds = null)
         {
             var processedHistoryIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var matchedTerminalActiveIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var candidates = new List<NzbgetHistoryEntry>();
 
             foreach (var entry in history)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (!IsHistoryCandidate(
+                if (IsHistoryCandidate(
                     entry,
                     configuredCategory,
                     activeIdentities,
                     processedHistoryIds,
-                    matchedTerminalActiveIds))
+                    matchedTerminalActiveIds,
+                    monitoredIds))
                 {
-                    continue;
+                    candidates.Add(entry);
                 }
+            }
 
-                LogFailedHistoryEntry(client, surface, entry);
+            var unwarnedFailureKeys = failedHistoryWarningTracker.MarkFailed(
+                client.Id ?? client.Name ?? client.Type,
+                surface,
+                NzbgetFailedHistoryWarningTracker.GetFailedEntryKeys(candidates),
+                isScopedRead: monitoredIds is { Count: > 0 });
+            foreach (var entry in candidates)
+            {
+                LogFailedHistoryEntry(client, surface, entry, unwarnedFailureKeys);
                 append(entry);
             }
 
@@ -182,7 +195,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
             string? configuredCategory,
             IReadOnlyList<ActiveHistoryIdentity> activeIdentities,
             ISet<string> processedHistoryIds,
-            ISet<string> matchedTerminalActiveIds)
+            ISet<string> matchedTerminalActiveIds,
+            ISet<string>? monitoredIds)
         {
             if (entry.Outcome == NzbgetHistoryOutcome.Ignored ||
                 !DownloadClientCategoryFilter.Matches(configuredCategory, entry.Category))
@@ -197,6 +211,15 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
             }
 
             var activeMatch = FindActiveIdentity(activeIdentities, entry);
+
+            // A monitor poll asks about specific downloads and NzbgetQueueFilter.FilterByIds
+            // discards the rest of the category once enrichment has run. Attributing the
+            // entry here keeps those rows out of the log and out of the merge.
+            if (monitoredIds is { Count: > 0 } &&
+                !NzbgetQueueFilter.IsRequestedByIds(entry.CanonicalNzbId, activeMatch, monitoredIds))
+            {
+                return false;
+            }
 
             // Active listgroups records are progress telemetry. They suppress older
             // history only while they still look like active work. If NZBGet reports
@@ -288,9 +311,16 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
         private void LogFailedHistoryEntry(
             DownloadClientConfiguration client,
             string surface,
-            NzbgetHistoryEntry entry)
+            NzbgetHistoryEntry entry,
+            IReadOnlySet<string> unwarnedFailureKeys)
         {
             if (entry.Outcome != NzbgetHistoryOutcome.Failed)
+            {
+                return;
+            }
+
+            var entryKey = NzbgetFailedHistoryWarningTracker.GetEntryKey(entry.CanonicalNzbId, entry.Title);
+            if (entryKey.Length > 0 && !unwarnedFailureKeys.Contains(entryKey))
             {
                 return;
             }
