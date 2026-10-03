@@ -145,11 +145,14 @@ namespace Listenarr.Tests.Features.Domain.Utils
             }
 
             // The control that has to come out differently: the same labels against a ladder with
-            // no AAC rung at all. That is the second rule, not the third, and it stays silent.
+            // no AAC rung at all. No rung covers them, so the profile's PreferredFormats decide, as
+            // they did in the allow-list this replaced. The domain default lists "m4b", so M4B is
+            // left alone, and nothing in it names AAX, AAXC or MP4, so those are refused.
             var noAacRung = WithRungs(("MP3 320kbps", false), ("FLAC", false));
-            foreach (var container in new[] { "AAX", "AAXC", "MP4", "M4B" })
+            Assert.Equal(QualityGateVerdict.NoOpinion, QualityGate.Evaluate("M4B", noAacRung));
+            foreach (var container in new[] { "AAX", "AAXC", "MP4" })
             {
-                Assert.Equal(QualityGateVerdict.NoOpinion, QualityGate.Evaluate(container, noAacRung));
+                Assert.Equal(QualityGateVerdict.Refused, QualityGate.Evaluate(container, noAacRung));
             }
         }
 
@@ -309,6 +312,32 @@ namespace Listenarr.Tests.Features.Domain.Utils
             // one is being ignored rather than the whole profile being discarded.
             Assert.Equal(QualityGateVerdict.Refused, QualityGate.Evaluate("MP3 320kbps", blankRung));
             Assert.Equal(QualityGateVerdict.NoOpinion, QualityGate.Evaluate("FLAC", blankRung));
+        }
+
+        [Fact]
+        public void ACodecTheLadderDoesNotCarry_IsRefusedUnlessAPreferredFormatNamesIt()
+        {
+            // The shape a profile saved from the settings UI actually has: switching a codec off
+            // deletes its rungs, and the form saves PreferredFormats as [] or ["m4b"]. On canary
+            // the scorer refused FLAC and OPUS against that profile, because its allow-list was the
+            // allowed rung names plus the PreferredFormats tokens and neither names them. The gate
+            // has to keep that refusal, or switching FLAC off in the UI stops refusing FLAC.
+            var uiSaved = WithRungs(("AAC 128kbps", true), ("MP3 320kbps", true));
+            uiSaved.PreferredFormats = new List<string>();
+
+            Assert.Equal(QualityGateVerdict.Refused, QualityGate.Evaluate("FLAC", uiSaved));
+            Assert.Equal(QualityGateVerdict.Refused, QualityGate.Evaluate("OPUS", uiSaved));
+
+            // Controls that must come out differently. A codec the ladder carries is still
+            // decided by its rungs, so the profile above is not simply refusing everything.
+            Assert.Equal(QualityGateVerdict.Allowed, QualityGate.Evaluate("MP3 320kbps", uiSaved));
+
+            // And a PreferredFormats token naming the codec is what canary's allow-list let through,
+            // so the same label against the same ladder with "flac" preferred is not refused.
+            var flacPreferred = WithRungs(("AAC 128kbps", true), ("MP3 320kbps", true));
+            flacPreferred.PreferredFormats = new List<string> { "flac" };
+            Assert.Equal(QualityGateVerdict.NoOpinion, QualityGate.Evaluate("FLAC", flacPreferred));
+            Assert.Equal(QualityGateVerdict.Refused, QualityGate.Evaluate("OPUS", flacPreferred));
         }
 
         [Fact]

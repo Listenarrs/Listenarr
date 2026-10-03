@@ -248,6 +248,38 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Quality
         }
 
         [Fact]
+        public async Task UiSavedProfile_StillRefusesACodecItsLadderDoesNotCarry()
+        {
+            // Measured on stock canary (a630572e9) through POST /api/v1/qualityprofile/{id}/score:
+            // with the seeded AAC and MP3 ladder all ticked and PreferredFormats [], the shape a
+            // profile saved from the UI has, FLAC and OPUS were refused and MP3 320kbps accepted.
+            // The gate must not turn that refusal into silence.
+            var service = CreateService();
+            var profile = Profile(SeededLadder(), new List<string>());
+
+            var flac = await service.ScoreSearchResult(Release("Book (FLAC)", "FLAC", "FLAC"), profile);
+            var opus = await service.ScoreSearchResult(Release("Book (OPUS)", "OPUS", "OPUS"), profile);
+
+            // Controls: a rung the ladder carries is accepted, and the same FLAC release is accepted
+            // once "flac" is a preferred format, as canary's allow-list also accepted it.
+            var mp3 = await service.ScoreSearchResult(Release("Book (MP3 320)", "MP3 320kbps", "MP3"), profile);
+            var flacPreferred = await service.ScoreSearchResult(
+                Release("Book (FLAC)", "FLAC", "FLAC"),
+                Profile(SeededLadder(), new List<string> { "flac" }));
+
+            Assert.True(flac.IsRejected, $"FLAC must be refused by a ladder with no FLAC rung (score {flac.TotalScore})");
+            Assert.True(opus.IsRejected, $"OPUS must be refused too (score {opus.TotalScore})");
+            Assert.False(mp3.IsRejected, $"MP3 320kbps must be accepted: {string.Join("; ", mp3.RejectionReasons)}");
+            Assert.False(flacPreferred.IsRejected, $"FLAC must be accepted where it is preferred: {string.Join("; ", flacPreferred.RejectionReasons)}");
+
+            // The deliberate difference from canary, pinned so it stays a decision: an M4B release
+            // against this profile was refused on stock (no rung name and no token contains "m4b").
+            // The gate judges it by the AAC rungs instead, and here they are all ticked.
+            var m4b = await service.ScoreSearchResult(Release("Book (M4B)", "M4B", "M4B"), profile);
+            Assert.False(m4b.IsRejected, $"M4B must be judged by the AAC rungs: {string.Join("; ", m4b.RejectionReasons)}");
+        }
+
+        [Fact]
         public async Task ProfileWithNoQualityLadder_GatesNothing()
         {
             var service = CreateService();
