@@ -97,7 +97,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
 
             var status = MapDownloadItemStatus(state, progress);
             TimeSpan? remainingTime = eta.HasValue && eta.Value < 8640000 ? TimeSpan.FromSeconds(eta.Value) : null;
-            var isStopped = state is "pausedUP" or "stoppedUP";
+            var isStopped = IsFinishedStoppedState(state);
             var seedLimitReached = QbittorrentSeedLimitEvaluator.HasReachedSeedLimit(
                 ratio ?? 0,
                 ratioLimit,
@@ -149,6 +149,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 "checkingDL" => DownloadItemStatus.Downloading,
                 "stoppedDL" => DownloadItemStatus.Paused,
                 "stoppedUP" => DownloadItemStatus.Paused,
+                "pausedDL" => DownloadItemStatus.Paused,
+                "pausedUP" => DownloadItemStatus.Paused,
                 "queuedDL" => DownloadItemStatus.Queued,
                 "queuedUP" => DownloadItemStatus.Queued,
                 "uploading" => DownloadItemStatus.Downloading,
@@ -162,7 +164,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 _ => DownloadItemStatus.Warning
             };
 
-            if (progress >= 100.0 && (status == DownloadItemStatus.Downloading || state is "uploading" or "stalledUP" or "checkingUP" or "forcedUP" or "stoppedUP"))
+            if (progress >= 100.0 && (status == DownloadItemStatus.Downloading || IsSeedingOrFinishedState(state)))
             {
                 return DownloadItemStatus.Completed;
             }
@@ -182,6 +184,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 "checkingDL" => "downloading",
                 "stoppedDL" => "paused",
                 "stoppedUP" => "paused",
+                "pausedDL" => "paused",
+                "pausedUP" => "paused",
                 "queuedDL" => "queued",
                 "queuedUP" => "queued",
                 "uploading" => "seeding",
@@ -195,9 +199,31 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 _ => "unknown"
             };
 
-            return progress >= 100.0 && (status == "seeding" || state is "uploading" or "stalledUP" or "checkingUP" or "forcedUP" or "stoppedUP")
+            return progress >= 100.0 && (status == "seeding" || IsSeedingOrFinishedState(state))
                 ? "completed"
                 : status;
+        }
+
+        /// <summary>
+        /// A torrent that has finished downloading and is no longer transferring.
+        /// qBittorrent 5.0 (Web API 2.11.0) renamed the paused states to stopped states,
+        /// so 4.x servers report "pausedUP" where 5.x servers report "stoppedUP".
+        /// Both spellings stay live for as long as 4.x installs do.
+        /// </summary>
+        public static bool IsFinishedStoppedState(string state)
+        {
+            return state is "stoppedUP" or "pausedUP";
+        }
+
+        /// <summary>
+        /// States a torrent occupies once its content is fully downloaded, whether it is
+        /// still seeding, being rechecked, or stopped. At 100% progress these all mean the
+        /// payload is on disk and ready to import.
+        /// </summary>
+        private static bool IsSeedingOrFinishedState(string state)
+        {
+            return state is "uploading" or "stalledUP" or "checkingUP" or "forcedUP"
+                || IsFinishedStoppedState(state);
         }
 
         private static string GetString(Dictionary<string, JsonElement> values, string key, string defaultValue = "")
