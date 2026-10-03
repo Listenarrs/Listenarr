@@ -342,12 +342,14 @@ namespace Listenarr.Application.Downloads.Submission
             }
             catch (OperationCanceledException)
             {
-                await RemoveProvisionalDownloadAsync(downloadId);
+                await DownloadSubmissionFailureHandler.RemoveProvisionalDownloadAsync(downloadId, downloadRepository, logger);
                 throw;
             }
             catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
             {
-                await RemoveProvisionalDownloadAsync(downloadId);
+                await DownloadSubmissionFailureHandler.RecordRejectedSubmissionAsync(
+                    downloadId, downloadClientIdForModel, candidate.Title, exception, downloadHistoryService, logger);
+                await DownloadSubmissionFailureHandler.RemoveProvisionalDownloadAsync(downloadId, downloadRepository, logger);
 
                 if (exception is DownloadClientSubmissionException)
                 {
@@ -412,19 +414,6 @@ namespace Listenarr.Application.Downloads.Submission
             }
 
             return downloadId;
-        }
-
-        private async Task RemoveProvisionalDownloadAsync(string downloadId)
-        {
-            try
-            {
-                await downloadRepository.RemoveAsync(downloadId);
-                logger.LogInformation("Removed provisional download {DownloadId} after client submission failed", downloadId);
-            }
-            catch (Exception cleanupException) when (cleanupException is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
-            {
-                logger.LogError(cleanupException, "Failed to remove provisional download {DownloadId} after client submission failure", downloadId);
-            }
         }
 
         public async Task<bool> RemoveFromQueueAsync(string downloadId, string? downloadClientId = null, bool force = false)
