@@ -283,6 +283,171 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
 
         [Fact]
         [Trait("Method", "RetryBlockedImport")]
+        [Trait("Scenario", "RetryBlockedImportActuallyQueuesTheImport")]
+        public async Task RetryBlockedImport_QueuesAProcessingJob()
+        {
+            // Clearing the blocked status is not a retry. Nothing watches that field, and the one
+            // thing that enqueues an import fires on the download client reporting completion,
+            // which has already happened and will not happen again. Without a job the download
+            // sits in ImportPending forever while the endpoint reports "Import retry queued".
+            await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithId("d-retry-queues")
+                .WithStartDate(DateTime.UtcNow.AddMinutes(-1))
+                .WithDownloadClientConfiguration(_client)
+                .WithBlockedStatus("RepeatedFailure")
+                .WithImportAttempts(3)
+                .WithBlockMessage("still failing")
+                .Build());
+
+            Assert.Empty(await _downloadProcessingJobRepository.GetByDownloadIdAsync("d-retry-queues"));
+
+            var controller = MockUtils.CreateDownloadsController(_provider);
+            var ok = Assert.IsType<OkObjectResult>(await controller.RetryBlockedImport("d-retry-queues"));
+
+            var jobId = ok.Value!.GetType().GetProperty("jobId")?.GetValue(ok.Value)?.ToString();
+            Assert.False(string.IsNullOrWhiteSpace(jobId));
+
+            var queued = await _downloadProcessingJobRepository.GetActiveByDownloadIdAsync("d-retry-queues");
+            Assert.NotNull(queued);
+            Assert.Equal(jobId, queued!.Id);
+            Assert.Equal(ProcessingJobStatus.Pending, queued.Status);
+        }
+
+        [Fact]
+        [Trait("Method", "RetryBlockedImport")]
+        [Trait("Scenario", "RetryBlockedImportRecoversAStrandedImportPending")]
+        public async Task RetryBlockedImport_StrandedImportPending_IsRecovered()
+        {
+            // Before this endpoint queued anything it still cleared the block and set
+            // ImportPending, so callers of the old version are left with downloads no job will
+            // ever pick up. Those are worse off than blocked ones: AutomaticSearchService and
+            // DownloadDuplicateGuard both treat ImportPending as an active download and skip the
+            // book, while neither treats ImportBlocked that way. Refusing them would strand every
+            // existing victim permanently.
+            await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithId("d-stranded")
+                .WithStartDate(DateTime.UtcNow.AddMinutes(-1))
+                .WithDownloadClientConfiguration(_client)
+                .WithStatus(DownloadStatus.ImportPending)
+                .Build());
+
+            Assert.Null(await _downloadProcessingJobRepository.GetActiveByDownloadIdAsync("d-stranded"));
+
+            var controller = MockUtils.CreateDownloadsController(_provider);
+            var ok = Assert.IsType<OkObjectResult>(await controller.RetryBlockedImport("d-stranded"));
+
+            var jobId = ok.Value!.GetType().GetProperty("jobId")?.GetValue(ok.Value)?.ToString();
+            Assert.False(string.IsNullOrWhiteSpace(jobId));
+
+            var queued = await _downloadProcessingJobRepository.GetActiveByDownloadIdAsync("d-stranded");
+            Assert.NotNull(queued);
+            Assert.Equal(ProcessingJobStatus.Pending, queued!.Status);
+        }
+
+        [Fact]
+        [Trait("Method", "RetryBlockedImport")]
+        [Trait("Scenario", "RetryBlockedImportLeavesAnInFlightImportAlone")]
+        public async Task RetryBlockedImport_ImportPendingWithAnActiveJob_IsRefused()
+        {
+            // The control on the widened gate. An import that is genuinely in flight has an active
+            // job, and must not be disturbed. Without this, accepting ImportPending would mean
+            // accepting everything mid-import as well.
+            var download = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithId("d-inflight")
+                .WithStartDate(DateTime.UtcNow.AddMinutes(-1))
+                .WithDownloadClientConfiguration(_client)
+                .WithStatus(DownloadStatus.ImportPending)
+                .Build());
+
+            await _downloadProcessingJobRepository.AddAsync(new DownloadProcessingJobBuilder()
+                .WithId("job-inflight")
+                .WithDownload(download)
+                .WithPending(at: DateTime.UtcNow)
+                .Build());
+
+            var controller = MockUtils.CreateDownloadsController(_provider);
+            var result = await controller.RetryBlockedImport("d-inflight");
+
+            Assert.IsType<BadRequestObjectResult>(result);
+            Assert.Single(await _downloadProcessingJobRepository.GetByDownloadIdAsync("d-inflight"));
+        }
+
+        [Fact]
+        [Trait("Method", "RetryBlockedImport")]
+        [Trait("Scenario", "RetryBlockedImportRefusesWhenAnotherDownloadForTheBookIsActive")]
+        public async Task RetryBlockedImport_AnotherActiveDownloadForSameAudiobook_ReturnsConflict()
+        {
+            // Only one download per audiobook may be active: the repository derives
+            // ActiveAudiobookDeduplicationKey from the audiobook id for active statuses and a
+            // filtered unique index enforces it. Unblocking makes this one ImportPending, which
+            // counts as active, so without a check it collides inside SaveChanges and the caller
+            // gets a SQLite constraint violation instead of an explanation.
+            var audiobook = await CreateAudiobook();
+
+            await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithId("d-active-sibling")
+                .WithStartDate(DateTime.UtcNow.AddMinutes(-2))
+                .WithDownloadClientConfiguration(_client)
+                .WithAudiobook(audiobook)
+                .WithStatus(DownloadStatus.Downloading)
+                .Build());
+
+            await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithId("d-blocked-sibling")
+                .WithStartDate(DateTime.UtcNow.AddMinutes(-1))
+                .WithDownloadClientConfiguration(_client)
+                .WithAudiobook(audiobook)
+                .WithBlockedStatus("RepeatedFailure")
+                .WithBlockMessage("still failing")
+                .Build());
+
+            var controller = MockUtils.CreateDownloadsController(_provider);
+            var result = await controller.RetryBlockedImport("d-blocked-sibling");
+
+            var conflict = Assert.IsType<ConflictObjectResult>(result);
+            var conflicting = conflict.Value!.GetType()
+                .GetProperty("conflictingDownloadId")?.GetValue(conflict.Value)?.ToString();
+            Assert.Equal("d-active-sibling", conflicting);
+
+            // And it must not have been half applied.
+            var untouched = await _downloadRepository.GetByIdAsync("d-blocked-sibling");
+            Assert.Equal(DownloadStatus.ImportBlocked, untouched!.Status);
+        }
+
+        [Fact]
+        [Trait("Method", "RetryBlockedImport")]
+        [Trait("Scenario", "RetryBlockedImportProceedsWhenTheOnlyOtherDownloadIsTerminal")]
+        public async Task RetryBlockedImport_SiblingIsTerminal_StillProceeds()
+        {
+            // The control. A terminal sibling holds no deduplication key, so it must not block
+            // the retry; otherwise this check would refuse every book that has ever failed twice.
+            var audiobook = await CreateAudiobook();
+
+            await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithId("d-failed-sibling")
+                .WithStartDate(DateTime.UtcNow.AddMinutes(-2))
+                .WithDownloadClientConfiguration(_client)
+                .WithAudiobook(audiobook)
+                .WithStatus(DownloadStatus.Failed)
+                .Build());
+
+            await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithId("d-blocked-alone")
+                .WithStartDate(DateTime.UtcNow.AddMinutes(-1))
+                .WithDownloadClientConfiguration(_client)
+                .WithAudiobook(audiobook)
+                .WithBlockedStatus("RepeatedFailure")
+                .WithBlockMessage("still failing")
+                .Build());
+
+            var controller = MockUtils.CreateDownloadsController(_provider);
+            var ok = Assert.IsType<OkObjectResult>(await controller.RetryBlockedImport("d-blocked-alone"));
+            Assert.False(string.IsNullOrWhiteSpace(
+                ok.Value!.GetType().GetProperty("jobId")?.GetValue(ok.Value)?.ToString()));
+        }
+
+        [Fact]
+        [Trait("Method", "RetryBlockedImport")]
         [Trait("Scenario", "RetryBlockedImportRejectsNonBlockedStatus")]
         public async Task RetryBlockedImport_NonBlocked_ReturnsBadRequest()
         {
