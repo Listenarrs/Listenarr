@@ -25,5 +25,15 @@ namespace Listenarr.Application.Metadata.Audible
         public List<AudibleSearchResult> Results { get; set; } = new();
         public int TotalResults { get; set; }
         public List<JsonElement>? RawProducts { get; set; }
+
+        /// <summary>
+        /// Audible did not answer, so an empty <see cref="Results"/> means "not known"
+        /// rather than "not in the catalogue".
+        ///
+        /// Without this the two are the same object. A per-call timeout returns an empty
+        /// response that is byte for byte what a genuine zero-match produces, and every
+        /// caller downstream has to guess.
+        /// </summary>
+        public bool ProviderUnavailable { get; set; }
     }
 }
