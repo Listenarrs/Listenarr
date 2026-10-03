@@ -355,7 +355,7 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                     {
                         await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
                             correlationId, "Unable to import at least one file for the job (see the log entries)",
-                            cancellationToken);
+                            cancellationToken, retryInitialDelaySeconds);
                     }
                     else
                     {
