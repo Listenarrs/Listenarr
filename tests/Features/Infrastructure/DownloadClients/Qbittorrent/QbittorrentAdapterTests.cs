@@ -825,11 +825,51 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
         [Theory]
         [InlineData("uploading")]
         [InlineData("stalledUP")]
+        [InlineData("checkingUP")]
+        [InlineData("forcedUP")]
         [InlineData("stoppedUP")]
+        [InlineData("pausedUP")]
         public void CompletedTorrentStates_MapToCompleted(string state)
         {
             Assert.Equal(DownloadItemStatus.Completed, QbittorrentResponseMapper.MapDownloadItemStatus(state, 100));
             Assert.Equal("completed", QbittorrentResponseMapper.MapQueueStatus(state, 100));
+        }
+
+        [Theory]
+        [InlineData("stoppedDL")]
+        [InlineData("pausedDL")]
+        [InlineData("stoppedUP")]
+        [InlineData("pausedUP")]
+        public void HaltedTorrentStates_MapToPaused_WhileIncomplete(string state)
+        {
+            Assert.Equal(DownloadItemStatus.Paused, QbittorrentResponseMapper.MapDownloadItemStatus(state, 50));
+            Assert.Equal("paused", QbittorrentResponseMapper.MapQueueStatus(state, 50));
+        }
+
+        [Fact]
+        public async Task GetQueueAsync_WhenServerReportsLegacyPausedUpload_ReportsCompleted()
+        {
+            // qBittorrent 4.x reports "pausedUP" where 5.x reports "stoppedUP".
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = """
+            [
+                {
+                    "hash": "abcdef",
+                    "name": "Book",
+                    "progress": 1.0,
+                    "size": 1000,
+                    "downloaded": 1000,
+                    "state": "pausedUP",
+                    "save_path": "/downloads/book"
+                }
+            ]
+            """;
+            var gateway = _provider.GetRequiredService<IDownloadClientGateway>();
+
+            var items = await gateway.GetQueueAsync(_client);
+
+            var item = Assert.Single(items);
+            Assert.Equal("completed", item.Status);
         }
     }
 }
