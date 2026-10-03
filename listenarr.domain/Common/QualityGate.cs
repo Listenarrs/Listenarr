@@ -24,28 +24,33 @@ namespace Listenarr.Domain.Common
         /// <summary>The profile carries a rung covering this quality and permits it.</summary>
         Allowed,
 
-        /// <summary>The profile carries a rung covering this quality and refuses it.</summary>
+        /// <summary>
+        /// The profile refuses this quality. Either it carries rungs covering the quality and
+        /// none of them is allowed, or no rung covers the quality and no PreferredFormats token
+        /// names it, which includes a label the gate cannot place at all.
+        /// </summary>
         Refused,
 
         /// <summary>
         /// The profile describes nothing that covers this quality: there is no label to judge,
-        /// or no ladder to judge it against, or the label names a codec the ladder carries no
-        /// rung for. Those are the absences that read as silence. The absence that does not is a
-        /// label the gate cannot place at all, which is <see cref="Refused"/>.
+        /// or no ladder to judge it against, or the ladder carries no rung for the label's codec
+        /// and one of the profile's PreferredFormats names it.
         /// </summary>
         NoOpinion
     }
 
     /// <summary>
-    /// Reads a quality profile's <see cref="QualityDefinition.Allowed"/> flags as a gate, and
-    /// nothing else as a gate.
+    /// Reads a quality profile's <see cref="QualityDefinition.Allowed"/> flags as a gate.
     ///
     /// A profile expresses two separate things about a release. Its quality rungs say what is
     /// permitted; its <see cref="QualityProfile.PreferredFormats"/> say what is preferred among
-    /// the permitted. Only the first belongs here. The scorer applies the second as a score
-    /// adjustment, which is where a preference belongs and where it cannot widen the gate.
-    /// Sonarr and Readarr keep the same two apart: their QualityAllowedByProfileSpecification is
-    /// a boolean veto that no custom-format score can override.
+    /// the permitted. Wherever a rung covers the label, only the rungs decide, and a preferred
+    /// format cannot override an unticked rung. The scorer applies preferences as a score
+    /// adjustment. The one place PreferredFormats reaches the gate is a label no rung covers,
+    /// where it decides the way the allow-list this replaced did (see <see cref="Evaluate"/>).
+    /// Sonarr and Readarr keep the two apart: their QualityAllowedByProfileSpecification is a
+    /// boolean veto that no custom-format score can override, and their ladders list every
+    /// quality, so they have no uncovered label to decide.
     /// </summary>
     public static class QualityGate
     {
@@ -58,56 +63,41 @@ namespace Listenarr.Domain.Common
         /// broader, so the bare "MP3" a loose parser emits lands on "MP3 320kbps".
         ///
         /// Only when no rung name matches does the codec group decide, which is what lets a profile
-        /// refuse a container label like "M4B" that names no rung of its own. Note what that
+        /// refuse a container label like "M4B" that names no rung of its own. "M4A", "MP4", "AAX"
+        /// and "AAXC" are MPEG-4 containers and land in the AAC group the same way. Note what that
         /// ordering costs. Once the fallback is reached the gate is working at codec granularity,
         /// and one permitted rung in the group permits the whole group. A profile that refuses
         /// "MP3 VBR" refuses a release labelled exactly that, and permits one labelled "MP3 V0" as
         /// long as some other MP3 rung is permitted. Per-rung refusal only bites on labels the
         /// ladder names.
         ///
-        /// The third rule is for a label the gate cannot place at all: no rung names it, and
-        /// <see cref="QualityMatcher.CodecGroupOfLabel"/> cannot say what codec it is. Read that
-        /// literally, because it is narrower than "unrecognised". "Lossless" is recognised by
-        /// ParseQualityLabel, which reports it as lossless with no codec, and a bare bitrate is
-        /// recognised as a bitrate with no codec; both have no codec to report and so both land
-        /// here. That is
-        /// <see cref="QualityGateVerdict.Refused"/>. A ladder is an allow-list, and a label nobody
-        /// can map onto it is not on it. The argument for the other reading is that absence is not
-        /// refusal, and it is a good argument about a *rung*, but it does not reach this far: the
-        /// question here is not whether the operator ticked a box, it is that nothing in the
-        /// profile is even about this release. The costs are not symmetric either. A wrongly
-        /// refused release is one candidate missing from a list, carrying its reason. A wrongly
-        /// permitted one is a grab, and it wins the ranking on the way through, because the labels
-        /// in this gap are containers the scorer ranks highly: AAX is 95, second only to FLAC
-        /// (SearchResultScorer.GetQualityScore).
+        /// When no rung covers the label, either because the ladder has no rung in its codec group
+        /// or because <see cref="QualityMatcher.CodecGroupOfLabel"/> cannot say what codec it is,
+        /// the gate decides the way the old allow-list did. That list was the allowed rung names
+        /// plus every PreferredFormats token, so with no rung to match, a token naming the label
+        /// was the only way through. Where a token names it the gate returns
+        /// <see cref="QualityGateVerdict.NoOpinion"/>; otherwise
+        /// <see cref="QualityGateVerdict.Refused"/>. It can only keep a release the old code kept,
+        /// and it never overrides a rung's Allowed flag. "Lossless" and a bare bitrate are among the
+        /// labels with no codec group: ParseQualityLabel recognises both but has no codec to report.
+        ///
+        /// The stock default profile keeps the domain's PreferredFormats (m4b, mp3, m4a, flac,
+        /// opus) and QualityProfileService.EnsureProfileHasRequiredQualitiesAsync keeps its ladder
+        /// to the eleven AAC and MP3 rungs, so FLAC and OPUS stay permitted there. A profile saved
+        /// from the settings UI stores PreferredFormats as [] or ["m4b"], and switching a codec off
+        /// deletes that codec's rungs, so FLAC and OPUS stay refused there. Making the ladder
+        /// exhaustive, the way Sonarr and Readarr do, would let this read the Allowed flag instead,
+        /// and is a larger change.
         ///
         /// Reachability, stated so nobody has to re-derive it: no parser in this repo emits AAX,
-        /// AAXC or MP4 as a quality or a format today. Every provider maps format into a closed
-        /// set first. The one line that would pass a raw filetype through, in
+        /// AAXC, MP4 or M4A as a quality or a format today. Every provider maps format into a
+        /// closed set first. The one line that would pass a raw filetype through, in
         /// MyAnonamouseSearchProvider's enrichment, runs only when Format is empty, and the
-        /// MyAnonamouse parser always fills Format (DetectFormatFromTags falls back to "MP3").
-        /// So this rule is the scorer's contract, ready for the first parser that does emit one,
-        /// not a fix for an observed grab. The scorer's aax branch would rank such a release highly.
-        ///
-        /// Two things this is NOT. It is not new severity. The scorer used to build this allow-list
-        /// inline from the Allowed=true rungs and refuse any label that matched none of them, so
-        /// every profile carrying a ladder already refused AAX, the stock default included. An
-        /// earlier draft of this comment implied otherwise; it was wrong, and dropping the third
-        /// rule would have been a loosening rather than a preserved behaviour.
-        ///
-        /// And it is not the second rule in disguise: a label that IS placed, into a codec group
-        /// the ladder happens to carry no rung for, still returns
-        /// <see cref="QualityGateVerdict.NoOpinion"/>. That case has to stay silent.
-        /// QualityProfileService.EnsureProfileHasRequiredQualitiesAsync re-adds any of eleven AAC
-        /// and MP3 rungs missing from the default profile, with Allowed set to true, on every read
-        /// of it. Deletion is undone; Allowed=false survives. Reading that absence as refusal would
-        /// refuse FLAC, OPUS and every other codec that seeded ladder never lists, on the stock
-        /// default profile, while doing nothing an operator asked for.
-        ///
-        /// The cost that remains: a codec switched off in the settings UI has its rungs deleted
-        /// rather than kept as not-allowed, so codec-level refusal made that way is still not
-        /// honoured here. Making the ladder exhaustive, the way Sonarr and Readarr do, is the fix
-        /// and is a larger change than this one.
+        /// MyAnonamouse parser always fills Format (DetectFormatFromTags falls back to "MP3"). So
+        /// how those labels are judged is the scorer's contract for the first parser that emits
+        /// one. Under it they follow the AAC rungs: refused by a profile that refuses every AAC
+        /// rung, and permitted wherever an AAC rung is allowed, the stock default included. The
+        /// allow-list this replaced refused AAX, AAXC and MP4 on every profile with a ladder.
         /// </summary>
         public static QualityGateVerdict Evaluate(string? qualityLabel, QualityProfile? profile)
         {
@@ -139,21 +129,34 @@ namespace Listenarr.Domain.Common
             var group = QualityMatcher.CodecGroupOfLabel(qualityLabel);
             if (group == null)
             {
-                // No rung names it and nothing can say what codec it is. Refused, per the third
-                // rule above. A bare bitrate has no codec group either and reaches here only when
-                // no rung name carries that bitrate, so "320kbps" is decided by rule 1 against the
-                // seeded ladder while "96kbps" is refused here. That is an accident of which
+                // No rung names it and nothing can say what codec it is, so the third rule above
+                // decides. A bare bitrate has no codec group either and reaches here only when no
+                // rung name carries that bitrate, so "320kbps" is decided by rule 1 against the
+                // seeded ladder while "96kbps" is decided here. That is an accident of which
                 // bitrates the seed lists rather than a designed boundary, and it matches what the
                 // allow-list this replaced did with the same two labels.
-                return QualityGateVerdict.Refused;
+                return NoRungCovers(label, profile!);
             }
 
             var peers = rungs
                 .Where(rung => string.Equals(QualityMatcher.CodecGroupOfRung(rung), group, StringComparison.OrdinalIgnoreCase))
                 .ToList();
 
-            return peers.Count == 0 ? QualityGateVerdict.NoOpinion : Verdict(peers);
+            return peers.Count == 0 ? NoRungCovers(label, profile!) : Verdict(peers);
         }
+
+        /// <summary>
+        /// No rung covers the label. The old allow-list still let it through when a
+        /// PreferredFormats token named it, by the same two-way substring test, and refused it
+        /// otherwise; this keeps both answers.
+        /// </summary>
+        private static QualityGateVerdict NoRungCovers(string label, QualityProfile profile)
+            => (profile.PreferredFormats ?? new List<string>())
+                .Where(format => !string.IsNullOrWhiteSpace(format))
+                .Select(format => format.Trim().ToLowerInvariant())
+                .Any(format => NamesTheSameQuality(label, format))
+                ? QualityGateVerdict.NoOpinion
+                : QualityGateVerdict.Refused;
 
         /// <summary>
         /// Whether the profile refuses this label outright. A label it says nothing about is not
