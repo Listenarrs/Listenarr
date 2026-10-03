@@ -44,6 +44,62 @@ namespace Listenarr.Tests.Features.Infrastructure.ActivityHistory.Services
         }
 
         [Fact]
+        public async Task RecordGrabbedAsync_AttachesAudiobookIdToTheCanonicalRow()
+        {
+            await _service.RecordGrabbedAsync(
+                "abc123",
+                "client-1",
+                "Test Book",
+                DownloadProtocol.Torrent,
+                audiobookId: 42);
+
+            var entry = Assert.Single(_context.History);
+            Assert.Equal(42, entry.AudiobookId);
+        }
+
+        [Fact]
+        public async Task RecordGrabbedAsync_IsVisibleToThePerBookHistoryQuery()
+        {
+            await _service.RecordGrabbedAsync(
+                "abc123",
+                "client-1",
+                "Test Book",
+                DownloadProtocol.Torrent,
+                audiobookId: 42);
+
+            var repository = new EfHistoryRepository(_context);
+            var forBook = await repository.GetByAudiobookIdAsync(42);
+
+            var entry = Assert.Single(forBook);
+            Assert.Equal("ABC123", entry.DownloadId);
+            Assert.Equal(HistoryEvents.Grabbed, entry.EventType);
+        }
+
+        [Fact]
+        public async Task RecordImportedAsync_IsVisibleToThePerBookHistoryQueryOfThatBookOnly()
+        {
+            await _service.RecordImportedAsync("abc123", "client-1", "Test Book", audiobookId: 42);
+            await _service.RecordImportedAsync("def456", "client-1", "Other Book", audiobookId: 43);
+
+            var repository = new EfHistoryRepository(_context);
+
+            var entry = Assert.Single(await repository.GetByAudiobookIdAsync(42));
+            Assert.Equal("ABC123", entry.DownloadId);
+            Assert.Equal(HistoryEvents.Imported, entry.EventType);
+
+            Assert.Empty(await repository.GetByAudiobookIdAsync(99));
+        }
+
+        [Fact]
+        public async Task RecordGrabbedAsync_WithoutAudiobookIdLeavesTheRowUnattached()
+        {
+            await _service.RecordGrabbedAsync("abc123", "client-1", "Test Book", DownloadProtocol.Torrent);
+
+            var entry = Assert.Single(_context.History);
+            Assert.Null(entry.AudiobookId);
+        }
+
+        [Fact]
         public async Task RecordImportedAsync_IsAppendOnlyAndDrivesIdempotency()
         {
             await _service.RecordGrabbedAsync("abc123", "client-1", "Test Book", DownloadProtocol.Torrent);
