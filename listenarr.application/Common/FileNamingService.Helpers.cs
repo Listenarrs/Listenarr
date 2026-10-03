@@ -102,11 +102,11 @@ namespace Listenarr.Application.Common
                 // The first credit that names no role, with any role removed from it. This used
                 // to be whichever credit came first, on the assumption that a publisher always
                 // lists the author ahead of the translator. Measured against the catalogue that
-                // does not hold: B002V9ZF3K credits Dostoevsky then Garnett and B00EZAXAF8
-                // credits Garnett then Dostoevsky, so taking index 0 files one of those two
-                // editions under its translator. Removing roles at ingestion does not settle
-                // this on its own, because both names come out clean and the translator can
-                // still be first; the role has to be read before it is removed.
+                // does not hold: B00EZAXAF8 credits Garnett before Dostoevsky
+                // ("Constance Garnett - translator" then "Fyodor Dostoevsky"), so taking index 0
+                // would file that edition under its translator. Removing roles at ingestion does
+                // not settle this on its own, because both names come out clean and the
+                // translator can still be first; the role has to be read before it is removed.
                 author = AuthorCredits.Primary(metadata.Authors) ?? author;
             }
 

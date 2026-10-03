@@ -51,14 +51,14 @@ namespace Listenarr.Tests.Features.Api.Services
         [Fact]
         public void AuthorFolder_UsesTheAuthorWhenTheTranslatorIsCreditedSecond()
         {
-            // B002V9ZF3K, Crime and Punishment.
+            // A translator credited after the author, the common case.
             Assert.Equal("Fyodor Dostoevsky", RenderAuthor("Fyodor Dostoevsky", "Constance Garnett - translator"));
         }
 
         [Fact]
         public void AuthorFolder_UsesTheAuthorWhenTheTranslatorIsCreditedFirst()
         {
-            // B00EZAXAF8, The Brothers Karamazov, the same pair the other way round. Taking the
+            // B00EZAXAF8, The Brothers Karamazov, credits Garnett before Dostoevsky. Taking the
             // first credit renders "Constance Garnett - translator" here, so this is the
             // assertion that separates the two rules.
             Assert.Equal("Fyodor Dostoevsky", RenderAuthor("Constance Garnett - translator", "Fyodor Dostoevsky"));
