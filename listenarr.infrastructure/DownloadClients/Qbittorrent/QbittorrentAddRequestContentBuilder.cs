@@ -74,6 +74,13 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
         /// - Only options the user actually chose are sent, so Default keeps the client's own
         ///   preference rather than overriding it with something that looks like a default here.
         ///
+        /// Initial State of "start" sends both names as false. Readarr does the same
+        /// (QBittorrentProxyV2.AddTorrentDownloadFormParameters), and the reason carries over: a
+        /// torrent added while qBittorrent's own "add torrents in a stopped state" preference is
+        /// on would otherwise come in stopped despite the user asking for Start, with nothing in
+        /// this request saying otherwise. Default still sends neither name, which is the one case
+        /// that genuinely defers to that client-side preference.
+        ///
         /// Force start is not here. It is not accepted at add time and needs a separate call once
         /// the torrent exists, which the workflow makes.
         /// </remarks>
@@ -85,6 +92,11 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
             {
                 options.Add(new("stopped", "true"));
                 options.Add(new("paused", "true"));
+            }
+            else if (addPlan.ExplicitStart)
+            {
+                options.Add(new("stopped", "false"));
+                options.Add(new("paused", "false"));
             }
 
             if (addPlan.SequentialDownload)
