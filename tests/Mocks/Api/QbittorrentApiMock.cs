@@ -13,6 +13,12 @@ namespace Listenarr.Tests.Mocks.Api
         public HttpStatusCode InfoStatusCode { get; set; } = HttpStatusCode.OK;
         public string? InfoResponseOverride { get; set; }
 
+        /// <summary>
+        /// Make the per-torrent files request fail at the transport layer, the way it does when
+        /// the client stops answering between the torrent list and the files calls that follow it.
+        /// </summary>
+        public bool FilesRequestFailsAtTransport { get; set; }
+
         public QbittorrentApiMock()
         {
             AddRoute("api/v2/auth/login", DoLogin, HttpMethod.Post);
@@ -86,6 +92,11 @@ namespace Listenarr.Tests.Mocks.Api
             if (!Authenticated)
             {
                 return new HttpResponseMessage(HttpStatusCode.Forbidden);
+            }
+
+            if (FilesRequestFailsAtTransport)
+            {
+                throw new HttpRequestException("Connection refused");
             }
 
             return MockUtils.GetCannedResponse("[]");

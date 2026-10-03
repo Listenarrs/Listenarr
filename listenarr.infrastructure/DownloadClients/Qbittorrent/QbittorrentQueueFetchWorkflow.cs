@@ -98,17 +98,48 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
 
                 foreach (var torrent in torrents)
                 {
-                    var hash = torrent.TryGetValue("hash", out var hashEl) ? hashEl.GetString() ?? string.Empty : string.Empty;
+                    var hash = torrent.TryGetValue("hash", out var hashEl) && hashEl.ValueKind == JsonValueKind.String
+                        ? hashEl.GetString() ?? string.Empty
+                        : string.Empty;
 
-                    List<Dictionary<string, JsonElement>> files = [];
-                    using var filesResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/files?hash={hash}", ct);
-                    if (filesResp.IsSuccessStatusCode)
+                    // One torrent that cannot be read must not take the rest of the response with
+                    // it. Without this, an exception raised while mapping torrent N escapes the
+                    // loop and is caught only by the handler below, so torrents N..end are dropped
+                    // while the poll still reports itself as a healthy live snapshot: the queue
+                    // simply appears shorter, with nothing to say a row was lost.
+                    //
+                    // HttpRequestException is excluded on purpose. The per-torrent files request
+                    // sits inside this block, and a transport failure there means the client went
+                    // away mid-poll, not that this torrent is unreadable. Swallowing it would log
+                    // one warning per remaining torrent and hand the caller a short queue that
+                    // still claims to be a healthy live snapshot, which is the failure this guard
+                    // exists to stop. An error status from that request is already handled by the
+                    // IsSuccessStatusCode check and does not reach here.
+                    try
                     {
-                        var filesJson = await filesResp.Content.ReadAsStringAsync(ct);
-                        files = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(filesJson) ?? [];
-                    }
+                        List<Dictionary<string, JsonElement>> files = [];
+                        using var filesResp = await httpClient.GetAsync($"{baseUrl}/api/v2/torrents/files?hash={Uri.EscapeDataString(hash)}", ct);
+                        if (filesResp.IsSuccessStatusCode)
+                        {
+                            var filesJson = await filesResp.Content.ReadAsStringAsync(ct);
+                            files = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(filesJson) ?? [];
+                        }
 
-                    items.Add(QbittorrentResponseMapper.MapQueueItem(torrent, client, files));
+                        items.Add(QbittorrentResponseMapper.MapQueueItem(torrent, client, files));
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not HttpRequestException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                    {
+                        // Debug rather than Warning. A torrent whose fields the mapper cannot read
+                        // does not heal, so this fires once per torrent on every poll for as long
+                        // as the torrent sits in the client, and the operator has nothing to act
+                        // on. TransmissionQueueFetchWorkflow logs the same condition at Debug for
+                        // the same reason. The torrent's absence from the queue stays observable.
+                        logger.LogDebug(
+                            ex,
+                            "Skipping unreadable qBittorrent torrent {TorrentHash} for client {ClientId}; the rest of the queue is unaffected",
+                            LogRedaction.SanitizeText(hash),
+                            LogRedaction.SanitizeText(client.Id));
+                    }
                 }
             }
             catch (DownloadClientAdapterPollingException)
