@@ -20,6 +20,22 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget;
 
 internal static class NzbgetQueueFilter
 {
+    /// <summary>
+    /// Whether a history entry belongs to one of the requested IDs, either directly or
+    /// through the active queue row it matches. History enrichment applies this before it
+    /// logs or merges an entry, so it deliberately admits a superset of what
+    /// <see cref="FilterByIds"/> keeps: an entry with no canonical NZBID can be attributed
+    /// here through the active row its title matches, and is then dropped by FilterByIds,
+    /// which requires a non-empty item ID. Erring wide keeps queue output unchanged.
+    /// </summary>
+    public static bool IsRequestedByIds(
+        string canonicalNzbId,
+        NzbgetHistoryEnrichmentWorkflow.ActiveHistoryIdentity? activeMatch,
+        ISet<string> ids)
+    {
+        return ids.Contains(canonicalNzbId) || activeMatch?.MatchesAny(ids) == true;
+    }
+
     public static List<QueueItem> FilterByIds(
         List<QueueItem> items,
         List<string> ids,
