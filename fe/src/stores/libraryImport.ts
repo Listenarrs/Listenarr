@@ -21,7 +21,7 @@ import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import { logger } from '@/utils/logger'
 import { buildLibraryImportSearchParams } from '@/utils/libraryImportSearch'
-import { buildSeriesFields, looksLikeAsin } from '@/utils/seriesUtils'
+import { buildSeriesFields } from '@/utils/seriesUtils'
 import type { SeriesEntry } from '@/utils/seriesUtils'
 import type { SearchResult, AudibleBookMetadata, UnmatchedFileItem } from '@/types'
 
@@ -406,13 +406,19 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
 
   // ─── Per-row manual search ────────────────────────────────────────────────
 
+  // Manual search box detection, not a series-identifier guard: a real Audible product ASIN
+  // is not always B0-prefixed (ISBN-shaped ones like 1781105022 are valid ten-character
+  // ASINs on the catalogue too), so this stays the loose ten-character check rather than
+  // looksLikeAsin, which is deliberately narrower for series-membership identifiers.
+  const MANUAL_SEARCH_ASIN_PATTERN = /^[A-Z0-9]{10}$/i
+
   async function searchItem(id: string, query: string) {
     const item = items.value[id]
     if (!item) return
 
     items.value[id] = { ...item, isSearching: true }
     try {
-      const isAsin = looksLikeAsin(query)
+      const isAsin = MANUAL_SEARCH_ASIN_PATTERN.test(query.trim())
       const results = await apiService.advancedSearch(
         isAsin ? { asin: query.trim(), cap: 5 } : { title: query, cap: 5 },
       )
