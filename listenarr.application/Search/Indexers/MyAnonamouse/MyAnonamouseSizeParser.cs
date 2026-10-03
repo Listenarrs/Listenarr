@@ -33,7 +33,7 @@ namespace Listenarr.Application.Search.Indexers.MyAnonamouse
 
                 var sizeValue = match.Groups[1].Value.Replace(",", "");
                 var unit = match.Groups[2].Value.ToUpper();
-                if (double.TryParse(sizeValue, out var value))
+                if (double.TryParse(sizeValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
                 {
                     var result = ParseDecimalUnit(value, unit, binary: true);
                     logger.LogDebug("Extracted size from MyAnonamouse description formatted: {Value} {Unit} = {Result} bytes", value, unit, result);
@@ -46,7 +46,7 @@ namespace Listenarr.Application.Search.Indexers.MyAnonamouse
             {
                 var sizeValue = match.Groups[1].Value.Replace(",", "");
                 var unit = match.Groups[2].Value.ToUpper();
-                if (double.TryParse(sizeValue, out var value))
+                if (double.TryParse(sizeValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
                 {
                     var result = ParseDecimalUnit(value, unit, binary: true);
                     logger.LogDebug("Extracted size from MyAnonamouse description (no bytes): {Value} {Unit} = {Result} bytes", value, unit, result);
