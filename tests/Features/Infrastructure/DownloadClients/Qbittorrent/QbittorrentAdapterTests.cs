@@ -132,6 +132,70 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
         }
 
         [Fact]
+        public async Task AddAsync_WhenClientAlreadyHoldsTheRelease_ThrowsRejectionNotSubmissionFailure()
+        {
+            // qBittorrent 5.2 answers 409 when the info-hash is already in its download list.
+            // That happens whenever one release satisfies more than one wanted book, and it
+            // means "I have this", not "the client is broken", so it has to be tellable apart
+            // from a genuine submission failure by type.
+            Init();
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.AddStatusCode = HttpStatusCode.Conflict;
+            apiMock.AddResponseBody = "Torrent is already in the download list.";
+
+            var client = await _downloadClientConfigurationRepository.SaveAsync(new DownloadClientConfigurationBuilder()
+                .WithHost("localhost")
+                .WithPort(8080)
+                .WithUsername("admin")
+                .WithPassword("admin")
+                .WithType("qbittorrent")
+                .Build());
+
+            var searchResult = new SearchResult
+            {
+                Title = "Book",
+                MagnetLink = "magnet:?xt=urn:btih:ABCDEF1234567890ABCDEF1234567890ABCDEF12"
+            };
+
+            var adapter = _provider.GetRequiredService<IDownloadClientGateway>();
+
+            await Assert.ThrowsAsync<DownloadClientRejectedReleaseException>(
+                () => adapter.AddAsync(client, PreparedSubmissionTestFactory.Torrent(searchResult)));
+        }
+
+        [Fact]
+        public async Task AddAsync_WhenClientFailsForAnotherReason_StaysAPlainSubmissionFailure()
+        {
+            // The control for the test above. If the new branch were widened to any failure
+            // status, this would start reporting a rejection and a genuinely broken client
+            // would be silently skipped instead of surfaced.
+            Init();
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.AddStatusCode = HttpStatusCode.InternalServerError;
+
+            var client = await _downloadClientConfigurationRepository.SaveAsync(new DownloadClientConfigurationBuilder()
+                .WithHost("localhost")
+                .WithPort(8080)
+                .WithUsername("admin")
+                .WithPassword("admin")
+                .WithType("qbittorrent")
+                .Build());
+
+            var searchResult = new SearchResult
+            {
+                Title = "Book",
+                MagnetLink = "magnet:?xt=urn:btih:ABCDEF1234567890ABCDEF1234567890ABCDEF12"
+            };
+
+            var adapter = _provider.GetRequiredService<IDownloadClientGateway>();
+
+            var exception = await Assert.ThrowsAsync<DownloadClientSubmissionException>(
+                () => adapter.AddAsync(client, PreparedSubmissionTestFactory.Torrent(searchResult)));
+
+            Assert.IsNotType<DownloadClientRejectedReleaseException>(exception);
+        }
+
+        [Fact]
         public async Task AddAsync_WhenMagnetUsesBase32Hash_ReturnsNormalizedHexHash()
         {
             var client = await _downloadClientConfigurationRepository.SaveAsync(new DownloadClientConfigurationBuilder()
