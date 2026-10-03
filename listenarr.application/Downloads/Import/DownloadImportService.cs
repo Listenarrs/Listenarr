@@ -313,7 +313,7 @@ namespace Listenarr.Application.Downloads.Import
                                 { "Publisher", string.IsNullOrWhiteSpace(namingMetadata.Publisher) ? string.Empty : namingMetadata.Publisher },
                                 { "Language", string.IsNullOrWhiteSpace(namingMetadata.Language) ? string.Empty : namingMetadata.Language },
                                 { "Asin", string.IsNullOrWhiteSpace(namingMetadata.Asin) ? string.Empty : namingMetadata.Asin },
-                                { "SeriesNumber", namingMetadata.SeriesPosition?.ToString() ?? effectiveChapterNumber?.ToString() ?? string.Empty },
+                                { "SeriesNumber", SeriesNumberToken(namingMetadata, effectiveChapterNumber) },
                                 { "Year", namingMetadata.Year?.ToString() ?? string.Empty },
                                 { "Quality", (namingMetadata.BitRate.HasValue ? $"{namingMetadata.BitRate}kbps" : null) ?? namingMetadata.Format ?? string.Empty },
                                 { "DiskNumber", effectiveDiskNumber?.ToString() ?? string.Empty },
