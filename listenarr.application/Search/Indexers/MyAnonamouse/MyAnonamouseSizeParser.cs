@@ -72,7 +72,10 @@ namespace Listenarr.Application.Search.Indexers.MyAnonamouse
             if (match.Success &&
                 double.TryParse(match.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
             {
-                var unit = match.Groups[2].Value.ToUpper();
+                // ToUpperInvariant, not ToUpper: under tr-TR the 'i' of "GiB" uppercases to 'I'
+                // with a dot (U+0130), no binary arm matches, and this falls through to the
+                // (long)value default, i.e. 1 byte for "1.5 GiB".
+                var unit = match.Groups[2].Value.ToUpperInvariant();
                 return unit switch
                 {
                     "B" => (long)value,

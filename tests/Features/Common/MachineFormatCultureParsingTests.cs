@@ -125,6 +125,20 @@ namespace Listenarr.Tests.Features.Common
             });
         }
 
+        // MyAnonamouseSizeParser.cs:71-75. The same ToUpper() bug as the two Torznab parsers:
+        // under tr-TR the 'i' of "GiB" uppercases to U+0130, no binary arm matches, and
+        // ParseSizeString fell through to the (long)value default, i.e. 1 byte.
+        [Theory]
+        [MemberData(nameof(ServerCultures))]
+        public void MyAnonamouseParseSizeString_ParsesTheSameUnderEveryServerCulture(string culture)
+        {
+            InCulture(culture, () =>
+            {
+                Assert.Equal(1610612736L, MyAnonamouseSizeParser.ParseSizeString("1.5 GiB", Mock.Of<ILogger>()));
+                Assert.Equal(1500000000L, MyAnonamouseSizeParser.ParseSizeString("1.5 GB", Mock.Of<ILogger>()));
+            });
+        }
+
         // SabnzbdResponseMapper.cs:201. SABnzbd reports the queue speed as a formatted string.
         [Theory]
         [MemberData(nameof(ServerCultures))]
