@@ -114,10 +114,23 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
         }
 
         [Fact]
-        [Trait("Scenario", "Start does not pause")]
-        public async Task Build_InitialStateStart_DoesNotPause()
+        [Trait("Scenario", "Start sends both parameter names as explicitly false")]
+        public async Task Build_InitialStateStart_SendsStoppedAndPausedFalse()
         {
+            // Matches Readarr's QBittorrentProxyV2: an explicit Start sends a definite false
+            // rather than nothing, so a torrent still starts immediately even when qBittorrent's
+            // own "add torrents in a stopped state" preference is on.
             var body = await AddBodyAsync(Client(("initialState", "start")));
+
+            Assert.Contains("stopped=false", body, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("paused=false", body, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        [Trait("Scenario", "Default sends neither name, leaving qBittorrent's own preference in charge")]
+        public async Task Build_InitialStateDefault_SendsNeitherParameter()
+        {
+            var body = await AddBodyAsync(Client(("initialState", "default")));
 
             Assert.DoesNotContain("stopped", body, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("paused", body, StringComparison.OrdinalIgnoreCase);
