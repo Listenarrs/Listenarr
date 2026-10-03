@@ -765,6 +765,54 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Processing
         }
 
         [Fact]
+        [Trait("Scenario", "FailedFileImportRetryUsesTheConfiguredInitialDelay")]
+        public async Task Import_FileImportFailure_RetryWaitsTheConfiguredInitialDelay()
+        {
+            // The file-import retry path is the one retry call that was added alongside the
+            // configured delay rather than before it, so it is the one most easily left on the
+            // parameter's default of thirty seconds. Ten minutes cannot be mistaken for that.
+            var source = FileService.GetTempDirectory("failing-source-delay");
+            var filePath = await FileService.GetFileAsync(source, "audiobook.mp3");
+            downloadClientGatewayMock.SourceFiles = [filePath];
+
+            var importService = new Mock<IDownloadImportService>();
+            importService
+                .Setup(service => service.ImportDownloadFilesAsync(
+                    It.IsAny<Audiobook>(),
+                    It.IsAny<List<string>>(),
+                    It.IsAny<CancellationToken>(),
+                    It.IsAny<DownloadImportOptions?>()))
+                .ReturnsAsync((Audiobook _, List<string> files, CancellationToken _, DownloadImportOptions? _) =>
+                    [ImportResult.ImportFailure(FileAction.Copy, files[0], files[0])]);
+            Init(builder => builder.WithSingleton<IDownloadImportService>(importService.Object));
+
+            // Saved after Init, which rebuilds the provider the processor reads settings through.
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithMissingSourceRetryInitialDelaySeconds(600)
+                .Build());
+
+            var download = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithAudiobook(await CreateAudiobook())
+                .WithDownloadClientConfiguration(await CreateDownloadClientConfiguration())
+                .WithPath(source)
+                .WithCompletedStatus(at: DateTime.UtcNow)
+                .Build());
+            var job = await _downloadProcessingJobRepository.AddAsync(new DownloadProcessingJobBuilder()
+                .WithDownload(download)
+                .Build());
+
+            var before = DateTime.UtcNow;
+            await _provider.GetRequiredService<DownloadProcessingJobProcessor>()
+                .ProcessQueueAsync(CancellationToken.None);
+
+            job = await _downloadProcessingJobRepository.GetByIdAsync(job.Id);
+            Assert.NotNull(job);
+            Assert.Equal(ProcessingJobStatus.Pending, job!.Status);
+            Assert.NotNull(job.NextRetryAt);
+            Assert.InRange((job.NextRetryAt!.Value - before).TotalSeconds, 570, 660);
+        }
+
+        [Fact]
         [Trait("Scenario", "PartialImportFailureStaysTerminal")]
         public async Task Import_PartialFileImportFailure_BlocksOnTheFirstAttemptAndKeepsFailedResults()
         {
