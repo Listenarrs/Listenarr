@@ -22,9 +22,10 @@ namespace Listenarr.Infrastructure.Downloads.Processing
             Audiobook audiobook,
             string correlationId,
             string reason,
-            CancellationToken ct)
+            CancellationToken ct,
+            int initialDelaySeconds = 30)
         {
-            job.ScheduleRetry(reason);
+            job.ScheduleRetry(reason, initialDelaySeconds);
             await jobService.UpdateJobAsync(job);
             var exhausted = job.Status == ProcessingJobStatus.Failed;
             await RecordHistoryAsync(
