@@ -27,6 +27,16 @@ namespace Listenarr.Domain.Configuration
         public int? Port { get; set; }
         public int? SslPort { get; set; }
         public string? UrlBase { get; set; }
+
+        /// <summary>
+        /// Absolute external URL this instance is reached on, scheme included, for links and images
+        /// embedded in outbound notifications. Distinct from <see cref="UrlBase"/>, which is the
+        /// path the app is served under and never carries a scheme or host.
+        /// The <c>LISTENARR_PUBLIC_URL</c> environment variable takes priority over this, so a
+        /// container that already sets it needs nothing here.
+        /// </summary>
+        public string? ApplicationUrl { get; set; }
+
         public string? BindAddress { get; set; }
         public string? ApiKey { get; set; }
         public string? UpdateMechanism { get; set; }

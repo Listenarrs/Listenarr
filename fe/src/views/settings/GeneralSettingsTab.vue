@@ -30,6 +30,11 @@
       </div>
 
       <div v-if="props.settings" class="settings-form">
+        <HostSettingsSection
+          :startupConfig="props.startupConfig"
+          @update:startupConfig="(val) => emit('update:startupConfig', val)"
+        ></HostSettingsSection>
+
         <FileManagementSection
           :settings="localSettings"
           @update:settings="(val) => Object.assign(localSettings, val)"
@@ -69,6 +74,7 @@ import { computed } from 'vue'
 import type { ApplicationSettings, StartupConfig } from '@/types'
 // icons not used directly in this view
 
+import HostSettingsSection from '@/components/settings/HostSettingsSection.vue'
 import FileManagementSection from '@/components/settings/FileManagementSection.vue'
 import DownloadSettingsSection from '@/components/settings/DownloadSettingsSection.vue'
 import FeaturesSection from '@/components/settings/FeaturesSection.vue'
