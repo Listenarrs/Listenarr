@@ -707,6 +707,195 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
             Assert.Equal("English", r.Language);
         }
 
+        private static string TorznabFeed(string title, string? description, string? filetype)
+        {
+            var descriptionElement = description == null ? "" : $"<description>{description}</description>";
+            var filetypeElement = filetype == null
+                ? ""
+                : $@"<torznab:attr xmlns:torznab=""http://torznab.com/schemas/2015/feed"" name=""filetype"" value=""{filetype}"" />";
+
+            return $@"<?xml version=""1.0""?>
+<rss>
+  <channel>
+    <item>
+      <title>{title}</title>
+      <guid>x264-case</guid>
+      <pubDate>Mon, 01 Jan 2025 00:00:00 +0000</pubDate>
+      {descriptionElement}
+      {filetypeElement}
+      <torznab:attr xmlns:torznab=""http://torznab.com/schemas/2015/feed"" name=""size"" value=""123456"" />
+      <enclosure url=""https://example.com/test.torrent"" length=""123456"" />
+    </item>
+  </channel>
+</rss>";
+        }
+
+        private static Indexer TestIndexer() => new()
+        {
+            Name = "test",
+            Url = "https://example.com",
+            Type = "Torrent",
+            Implementation = "torznab"
+        };
+
+        [Fact]
+        public async Task ParseTorznabResponse_X264TitleWithDescription_KeepsTheDeclaredQuality()
+        {
+            var service = CreateSearchService();
+
+            // The control, which is how this release is labelled today when it carries no
+            // description: the filetype attribute decides, and it says M4B.
+            var withoutDescription = await service.ParseTorznabResponseAsync(
+                TorznabFeed("The Governor x264 WEBRip", null, "m4b"),
+                TestIndexer());
+
+            // The defect: adding a description made the title guess run, x264 matched the bare
+            // digits 64, and the declared M4B was overwritten with MP3 64kbps.
+            var withDescription = await service.ParseTorznabResponseAsync(
+                TorznabFeed("The Governor x264 WEBRip", "The Governor WEBRip", "m4b"),
+                TestIndexer());
+
+            Assert.Equal("M4B", Assert.Single(withoutDescription).Quality);
+            Assert.Equal("M4B", Assert.Single(withDescription).Quality);
+        }
+
+        [Fact]
+        public async Task ParseTorznabResponse_WithoutFormatAttribute_StillReadsARealBitrate()
+        {
+            var service = CreateSearchService();
+
+            // No attribute to fall back on, so the description branch is the only thing that can
+            // label these two. A real bitrate still resolves.
+            var genuine = await service.ParseTorznabResponseAsync(
+                TorznabFeed("The Governor 64kbps", "Narrated edition", null),
+                TestIndexer());
+
+            // The same shape with a video codec in the title must not borrow that label.
+            var video = await service.ParseTorznabResponseAsync(
+                TorznabFeed("The Governor x264 WEBRip", "Narrated edition", null),
+                TestIndexer());
+
+            Assert.Equal("MP3 64kbps", Assert.Single(genuine).Quality);
+            Assert.Equal("Unknown", Assert.Single(video).Quality);
+        }
+
+        [Fact]
+        public async Task ParseTorznabResponse_YearInTitle_IsNotABitrate()
+        {
+            var service = CreateSearchService();
+
+            var year = await service.ParseTorznabResponseAsync(
+                TorznabFeed("Mercury Rising 1964 Unabridged", "Narrated edition", null),
+                TestIndexer());
+
+            // Control: the same title once it really does declare a bitrate.
+            var yearAndBitrate = await service.ParseTorznabResponseAsync(
+                TorznabFeed("Mercury Rising 1964 Unabridged 128kbps", "Narrated edition", null),
+                TestIndexer());
+
+            Assert.Equal("Unknown", Assert.Single(year).Quality);
+            Assert.Equal("MP3 128kbps", Assert.Single(yearAndBitrate).Quality);
+        }
+
+        [Fact]
+        public async Task ParseTorznabResponse_DescriptionDoesNotOverwriteTheFormatAttribute()
+        {
+            var service = CreateSearchService();
+
+            var declared = await service.ParseTorznabResponseAsync(
+                TorznabFeed("Some Book", "Sample chapter at 128kbps, full download", "mp3 320kbps"),
+                TestIndexer());
+
+            // Control: drop the attribute and the same description labels the release 128kbps,
+            // so the difference above is the attribute winning, not the description being ignored.
+            var undeclared = await service.ParseTorznabResponseAsync(
+                TorznabFeed("Some Book", "Sample chapter at 128kbps, full download", null),
+                TestIndexer());
+
+            Assert.Equal("MP3 320kbps", Assert.Single(declared).Quality);
+            Assert.Equal("MP3 128kbps", Assert.Single(undeclared).Quality);
+        }
+
+        [Fact]
+        public async Task ParseTorznabResponse_FormatAttribute_ReadsABitrateTheSameWayTheTextDoes()
+        {
+            var service = CreateSearchService();
+
+            // No description, so the filetype attribute is the only thing that can label these.
+            // A resolution in the attribute used to come back as MP3 192kbps, and the attribute now
+            // outranks the description, so it cannot be corrected later.
+            var resolution = await service.ParseTorznabResponseAsync(
+                TorznabFeed("Some Book", null, "mp4 1920x1080"),
+                TestIndexer());
+
+            // Control: a real bitrate in the same attribute still resolves, 64kbps included, which
+            // the old chain had no arm for at all.
+            var bitrate = await service.ParseTorznabResponseAsync(
+                TorznabFeed("Some Book", null, "mp3 64kbps"),
+                TestIndexer());
+
+            Assert.Null(Assert.Single(resolution).Quality);
+            Assert.Equal("MP3 64kbps", Assert.Single(bitrate).Quality);
+        }
+
+        [Fact]
+        public async Task TorznabProvider_X264TitleWithDescription_KeepsTheDeclaredQuality()
+        {
+            // The infrastructure provider carries its own copy of the same description branch and
+            // is the one registered for searches, so it gets the same pair of cases.
+            var indexer = new Indexer
+            {
+                Name = "test",
+                Url = "https://example.com",
+                Type = "Torrent",
+                Implementation = "torznab",
+                ApiKey = "key"
+            };
+
+            async Task<IndexerSearchResult> SearchOnce(string feed)
+            {
+                var handler = new DelegatingHandlerStub(_ =>
+                    new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(feed) });
+                using var httpClient = new HttpClient(handler);
+                var provider = new TorznabNewznabSearchProvider(
+                    httpClient,
+                    NullLogger<TorznabNewznabSearchProvider>.Instance);
+
+                return Assert.Single(await provider.SearchAsync(indexer, "the governor"));
+            }
+
+            var withoutDescription = await SearchOnce(
+                TorznabFeed("The Governor x264 WEBRip", null, "m4b"));
+            var withDescription = await SearchOnce(
+                TorznabFeed("The Governor x264 WEBRip", "The Governor WEBRip", "m4b"));
+            var genuine = await SearchOnce(
+                TorznabFeed("The Governor 64kbps", "Narrated edition", null));
+
+            Assert.Equal("M4B", withoutDescription.Quality);
+            Assert.Equal("M4B", withDescription.Quality);
+            Assert.Equal("MP3 64kbps", genuine.Quality);
+        }
+
+        [Fact]
+        public void ParseMyAnonamouse_X264InTitle_IsNotReadAsLowBitrateMp3()
+        {
+            var indexer = new Indexer { Name = "MyAnonamouse", Url = "https://www.myanonamouse.net", Type = "Torrent", Implementation = "MyAnonamouse" };
+
+            // MyAnonamouse probes the raw title through the same shared detector.
+            var video = MyAnonamouseResponseParser.Parse(
+                @"[{ ""guid"": ""https://www.myanonamouse.net/t/801"", ""title"": ""The Governor x264 WEBRip"" }]",
+                indexer,
+                NullLogger.Instance);
+
+            var genuine = MyAnonamouseResponseParser.Parse(
+                @"[{ ""guid"": ""https://www.myanonamouse.net/t/802"", ""title"": ""The Governor 64kbps"" }]",
+                indexer,
+                NullLogger.Instance);
+
+            Assert.Equal("Unknown", Assert.Single(video).Quality);
+            Assert.Equal("MP3 64kbps", Assert.Single(genuine).Quality);
+        }
+
         // Simple delegating handler stub used to return canned HTML content for tests
         private class DelegatingHandlerStub : DelegatingHandler
         {

@@ -966,6 +966,9 @@ export interface QualityProfile {
   name: string
   description?: string
   qualities: QualityDefinition[]
+  // Whether an acquired audiobook may be replaced by a better release. Absent on responses from
+  // an older server, where a blank cutoffQuality carried the same meaning.
+  upgradeAllowed?: boolean
   cutoffQuality?: string
   minimumSize?: number // MB (optional - no minimum if not set)
   maximumSize?: number // MB (optional - no maximum if not set)
