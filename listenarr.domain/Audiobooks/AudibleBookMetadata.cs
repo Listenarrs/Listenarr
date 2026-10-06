@@ -15,6 +15,8 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using Listenarr.Domain.Common;
+
 namespace Listenarr.Domain.Audiobooks
 {
     public class AudibleBookMetadata
@@ -31,6 +33,7 @@ namespace Listenarr.Domain.Audiobooks
         public string? PublishedDate { get; set; } // Full date (YYYY-MM-DD) for calendar/timeline features
         public string? Series { get; set; }
         public string? SeriesNumber { get; set; }
+        public string? SeriesAsin { get; set; }
         public List<AudiobookSeriesMembership>? SeriesMemberships { get; set; }
         public string? Description { get; set; }
         public List<string>? Genres { get; set; }
@@ -57,8 +60,14 @@ namespace Listenarr.Domain.Audiobooks
             {
                 Title = Title ?? string.Empty,
                 Subtitle = Subtitle,
-                Authors = (Authors != null && Authors.Count != 0) ? Authors :
-                    (!string.IsNullOrWhiteSpace(Author) ? [Author!] : new List<string>()),
+                // Roles are removed here rather than on the way out, so that one clean list is
+                // what every consumer sees. It also makes the stored name a better key: author
+                // grouping, the Authors page and the by-name ASIN lookup all key off this
+                // string, and "Miguel de Cervantes (adapted)" is a different key from
+                // "Miguel de Cervantes" on all three.
+                Authors = AuthorCredits.WithoutRoleSuffixes(
+                    (Authors != null && Authors.Count != 0) ? Authors :
+                        (!string.IsNullOrWhiteSpace(Author) ? [Author!] : new List<string>())).ToList(),
                 PublishYear = PublishYear,
                 PublishedDate = PublishedDate,
                 Series = Series ?? string.Empty,
@@ -87,7 +96,8 @@ namespace Listenarr.Domain.Audiobooks
                 audiobook,
                 SeriesMemberships,
                 Series,
-                SeriesNumber);
+                SeriesNumber,
+                SeriesAsin);
 
             return audiobook;
         }

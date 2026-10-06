@@ -73,5 +73,75 @@ namespace Listenarr.Tests.Features.Application.Metadata.Core
             Assert.Equal("Test description", metadata.Description);
             Assert.True(metadata.Explicit);
         }
+
+        [Fact]
+        public async Task GetMetadataAsync_CarriesAudnexusSeriesIdentifiersIntoTheLookupResponse()
+        {
+            var response = await LookupAudnexusBookAsync(new AudnexusBookResponse
+            {
+                Asin = "BTESTASIN",
+                Title = "Test Title",
+                SeriesPrimary = new AudnexusSeries { Asin = "B01E633FQM", Name = "Ayesha", Position = "0" },
+                SeriesSecondary = new AudnexusSeries { Asin = "B01F5TL5K4", Name = "Allan Quatermain", Position = "7" }
+            });
+
+            Assert.NotNull(response.Series);
+            Assert.Collection(
+                response.Series!,
+                primary =>
+                {
+                    Assert.Equal("B01E633FQM", primary.Asin);
+                    Assert.Equal("Ayesha", primary.Name);
+                    Assert.Equal("0", primary.Position);
+                },
+                secondary =>
+                {
+                    Assert.Equal("B01F5TL5K4", secondary.Asin);
+                    Assert.Equal("Allan Quatermain", secondary.Name);
+                    Assert.Equal("7", secondary.Position);
+                });
+        }
+
+        [Fact]
+        public async Task GetMetadataAsync_LeavesSeriesEmptyWhenAudnexusReportsNone()
+        {
+            var response = await LookupAudnexusBookAsync(new AudnexusBookResponse
+            {
+                Asin = "BTESTASIN",
+                Title = "Test Title"
+            });
+
+            Assert.True(response.Series == null || response.Series.Count == 0);
+        }
+
+        private static async Task<AudibleBookResponse> LookupAudnexusBookAsync(AudnexusBookResponse audnexusResponse)
+        {
+            var mockSearch = new Mock<ISearchService>();
+            using var httpClientForAudible = new System.Net.Http.HttpClient();
+            var audibleMock = new Mock<AudibleService>(httpClientForAudible, Mock.Of<ILogger<AudibleService>>());
+            var audnexusMock = new Mock<IAudnexusService>();
+
+            mockSearch
+                .Setup(s => s.GetEnabledMetadataSourcesAsync())
+                .ReturnsAsync(new List<ApiConfiguration>
+                {
+                    new ApiConfiguration { Name = "Audnexus", BaseUrl = "https://api.audnex.us", Priority = 1, IsEnabled = true }
+                });
+
+            audnexusMock
+                .Setup(a => a.GetBookMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<bool>()))
+                .ReturnsAsync(audnexusResponse);
+
+            var svc = new AudiobookMetadataService(
+                mockSearch.Object,
+                audibleMock.Object,
+                audnexusMock.Object,
+                Mock.Of<ILogger<AudiobookMetadataService>>());
+
+            var result = await svc.GetMetadataAsync("BTESTASIN", "us", true);
+
+            Assert.NotNull(result);
+            return result!.Metadata;
+        }
     }
 }

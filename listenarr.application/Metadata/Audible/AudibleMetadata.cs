@@ -31,7 +31,18 @@ namespace Listenarr.Application.Metadata.Audible
     public class AudibleGenre { public string? Asin { get; set; } public string? Name { get; set; } public string? Type { get; set; } }
     public class AudibleSeries { public string? Asin { get; set; } public string? Name { get; set; } public string? Position { get; set; } }
 
-    public class AudibleSearchResponse { public List<AudibleSearchResult>? Results { get; set; } public int? TotalResults { get; set; } }
+    public class AudibleSearchResponse
+    {
+        public List<AudibleSearchResult>? Results { get; set; }
+        public int? TotalResults { get; set; }
+
+        /// <summary>
+        /// True when Audible did not answer, so an empty <see cref="Results"/> means the
+        /// lookup failed rather than the catalogue having nothing. Callers that treat an
+        /// empty list as "this book does not exist" need to check this first.
+        /// </summary>
+        public bool ProviderUnavailable { get; set; }
+    }
 
     public class AudibleSearchResult
     {

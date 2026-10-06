@@ -248,6 +248,93 @@ namespace Listenarr.Tests.Features.Api
         }
 
         [Fact]
+        public async Task RescanMetadata_StripsRoleSuffixesFromAuthorsLikeTheAddPathDoes()
+        {
+            // AudibleBookMetadata.ToAudiobook() (the add path) strips a role suffix from a
+            // credit before storing it; a rescan that writes metadata.Authors straight through
+            // without the same AuthorCredits.WithoutRoleSuffixes call would put a role-suffixed
+            // name like "Constance Garnett - translator" back on a book re-added or re-scanned
+            // after this bundle's earlier commit cleaned it, and would also flip Authors[0] back
+            // to the translator since the add path's ordering guarantee would no longer hold.
+            var metadataMock = new Mock<IAudiobookMetadataService>();
+            metadataMock
+                .Setup(m => m.GetMetadataAsync("B0ROLETEST", "us", false))
+                .ReturnsAsync(new AudiobookMetadataEnvelope(
+                    new AudibleBookResponse
+                    {
+                        Asin = "B0ROLETEST",
+                        Title = "The Brothers Karamazov",
+                        Authors = new List<AudibleAuthor>
+                        {
+                            new() { Name = "Constance Garnett - translator" },
+                            new() { Name = "Fyodor Dostoevsky" }
+                        }
+                    },
+                    "Audible",
+                    "https://audible.com"));
+
+            var asinLookupMock = new Mock<IAsinLookupService>();
+
+            var factory = _factory.WithWebHostBuilder(builder =>
+            {
+                builder.ConfigureServices(services =>
+                {
+                    services.RemoveAll<IAudiobookMetadataService>();
+                    services.AddSingleton(metadataMock.Object);
+
+                    services.RemoveAll<IAsinLookupService>();
+                    services.AddSingleton(asinLookupMock.Object);
+                });
+            });
+
+            int audiobookId;
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                var audiobook = new Audiobook
+                {
+                    Title = "Broken Title",
+                    Authors = new List<string> { "Wrong Author" },
+                    Monitored = true,
+                    Asin = "B0ROLETEST",
+                    ExternalIdentifiers = new List<AudiobookExternalIdentifier>
+                    {
+                        new()
+                        {
+                            Type = AudiobookExternalIdentifierType.Asin,
+                            ValueRaw = "B0ROLETEST",
+                            ValueNormalized = "B0ROLETEST",
+                            Region = "us",
+                            IsPrimary = true,
+                            Source = AudiobookExternalIdentifierSource.Manual
+                        }
+                    }
+                };
+
+                db.Audiobooks.Add(audiobook);
+                await db.SaveChangesAsync();
+                audiobookId = audiobook.Id;
+            }
+
+            var client = factory.CreateClient();
+            var response = await PostRescanAsync(client, audiobookId);
+            var responseBody = await response.Content.ReadAsStringAsync();
+            Assert.True(
+                response.IsSuccessStatusCode,
+                $"Expected success but got {(int)response.StatusCode} {response.StatusCode}: {responseBody}");
+
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                var updated = await db.Audiobooks.FirstAsync(a => a.Id == audiobookId);
+
+                Assert.Equal(
+                    new List<string> { "Fyodor Dostoevsky", "Constance Garnett" },
+                    updated.Authors);
+            }
+        }
+
+        [Fact]
         public async Task RescanMetadata_PublishesImageOnlyAfterMetadataCommit()
         {
             const string asin = "B0IMGORDER";

@@ -26,6 +26,7 @@ const advancedSearch = vi.fn()
 const scanUnmatchedFiles = vi.fn()
 const getUnmatchedResults = vi.fn()
 const getSavedUnmatchedFiles = vi.fn()
+const getAudibleMetadata = vi.fn()
 let unmatchedScanHandler:
   | ((payload: { jobId: string; error?: string }) => void | Promise<void>)
   | null = null
@@ -36,7 +37,7 @@ vi.mock('@/services/api', () => ({
     updateAudiobook,
     startManualImport,
     advancedSearch,
-    getAudibleMetadata: vi.fn(),
+    getAudibleMetadata,
     scanUnmatchedFiles,
     getUnmatchedResults,
     getSavedUnmatchedFiles,
@@ -416,5 +417,250 @@ describe('library import store', () => {
     expect(store.items['C:\\incoming\\Chapter 01.mp3']?.selectedMatch?.title).toBe(
       'Jack of Shadows',
     )
+  })
+
+  it('carries every series membership of a multi-series match into the add request', async () => {
+    const { useLibraryImportStore } = await import('@/stores/libraryImport')
+    const store = useLibraryImportStore()
+
+    // A book can legitimately belong to more than one series. Audnexus returns these as
+    // seriesPrimary/seriesSecondary and the backend builds one membership per entry, so the
+    // import path has to send both rather than keeping only the first.
+    store.items = {
+      '/incoming/Two Series/Book.m4b': {
+        id: '/incoming/Two Series/Book.m4b',
+        fullPath: '/incoming/Two Series/Book.m4b',
+        sourceFiles: ['/incoming/Two Series/Book.m4b'],
+        folderPath: '/incoming/Two Series',
+        relativePath: 'Two Series',
+        folderName: 'Two Series',
+        format: 'M4B',
+        fileCount: 1,
+        selectedMatch: {
+          title: 'Two Series Book',
+          authors: [{ name: 'Author' }],
+          series: [
+            { asin: 'B01E633FQM', name: 'First Series', position: '0' },
+            { asin: 'B01F5TL5K4', name: 'Second Series', position: '7' },
+          ],
+        } as unknown as SearchResult,
+        hasSearched: true,
+        isSearching: false,
+        selected: true,
+      },
+    }
+    store.action = 'none'
+
+    await store.importSelected('')
+
+    const metadata = addToLibrary.mock.calls[0][0]
+    expect(metadata.seriesMemberships).toEqual([
+      {
+        seriesName: 'First Series',
+        seriesNumber: '0',
+        seriesAsin: 'B01E633FQM',
+        isPrimary: true,
+        sortOrder: 0,
+      },
+      {
+        seriesName: 'Second Series',
+        seriesNumber: '7',
+        seriesAsin: 'B01F5TL5K4',
+        isPrimary: false,
+        sortOrder: 1,
+      },
+    ])
+    // The primary is still mirrored onto the legacy scalars.
+    expect(metadata.series).toBe('First Series')
+    expect(metadata.seriesNumber).toBe('0')
+  })
+
+  it('drops a series asin that is really the series name', async () => {
+    const { useLibraryImportStore } = await import('@/stores/libraryImport')
+    const store = useLibraryImportStore()
+
+    // When the search endpoint cannot re-fetch the book by ASIN it synthesizes a single
+    // series entry whose `asin` is a copy of the series name. That must not be persisted
+    // as a series ASIN.
+    store.items = {
+      '/incoming/Fallback/Book.m4b': {
+        id: '/incoming/Fallback/Book.m4b',
+        fullPath: '/incoming/Fallback/Book.m4b',
+        sourceFiles: ['/incoming/Fallback/Book.m4b'],
+        folderPath: '/incoming/Fallback',
+        relativePath: 'Fallback',
+        folderName: 'Fallback',
+        format: 'M4B',
+        fileCount: 1,
+        selectedMatch: {
+          title: 'Fallback Book',
+          authors: [{ name: 'Author' }],
+          series: [{ asin: 'Some Series', name: 'Some Series', position: '2' }],
+        } as unknown as SearchResult,
+        hasSearched: true,
+        isSearching: false,
+        selected: true,
+      },
+    }
+    store.action = 'none'
+
+    await store.importSelected('')
+
+    const metadata = addToLibrary.mock.calls[0][0]
+    expect(metadata.seriesMemberships).toEqual([
+      {
+        seriesName: 'Some Series',
+        seriesNumber: '2',
+        seriesAsin: undefined,
+        isPrimary: true,
+        sortOrder: 0,
+      },
+    ])
+  })
+
+  it('takes the series memberships of the enriched product over the search match', async () => {
+    const { useLibraryImportStore } = await import('@/stores/libraryImport')
+    const store = useLibraryImportStore()
+
+    // The search match knows one series; the product lookup knows the book is in two.
+    getAudibleMetadata.mockResolvedValue({
+      source: 'Audible',
+      metadata: {
+        authors: [{ name: 'Author' }],
+        series: [
+          { asin: 'B01E633FQM', name: 'First Series', position: '0' },
+          { asin: 'B01F5TL5K4', name: 'Second Series', position: '7' },
+        ],
+      },
+    })
+
+    store.items = {
+      '/incoming/Enriched/Book.m4b': {
+        id: '/incoming/Enriched/Book.m4b',
+        fullPath: '/incoming/Enriched/Book.m4b',
+        sourceFiles: ['/incoming/Enriched/Book.m4b'],
+        folderPath: '/incoming/Enriched',
+        relativePath: 'Enriched',
+        folderName: 'Enriched',
+        format: 'M4B',
+        fileCount: 1,
+        selectedMatch: {
+          asin: 'B000000001',
+          title: 'Enriched Book',
+          authors: [],
+          series: [{ asin: 'B01E633FQM', name: 'First Series', position: '0' }],
+        } as unknown as SearchResult,
+        hasSearched: true,
+        isSearching: false,
+        selected: true,
+      },
+    }
+    store.action = 'none'
+
+    await store.importSelected('')
+
+    const metadata = addToLibrary.mock.calls[0][0]
+    expect(metadata.seriesMemberships).toEqual([
+      {
+        seriesName: 'First Series',
+        seriesNumber: '0',
+        seriesAsin: 'B01E633FQM',
+        isPrimary: true,
+        sortOrder: 0,
+      },
+      {
+        seriesName: 'Second Series',
+        seriesNumber: '7',
+        seriesAsin: 'B01F5TL5K4',
+        isPrimary: false,
+        sortOrder: 1,
+      },
+    ])
+    // The legacy scalars agree with the primary membership rather than the older match.
+    expect(metadata.series).toBe('First Series')
+    expect(metadata.seriesNumber).toBe('0')
+    expect(metadata.seriesAsin).toBe('B01E633FQM')
+  })
+
+  it('keeps the match series when the enriched product reports none', async () => {
+    const { useLibraryImportStore } = await import('@/stores/libraryImport')
+    const store = useLibraryImportStore()
+
+    getAudibleMetadata.mockResolvedValue({
+      source: 'Audible',
+      metadata: {
+        authors: [{ name: 'Author' }],
+      },
+    })
+
+    store.items = {
+      '/incoming/Enriched/Book.m4b': {
+        id: '/incoming/Enriched/Book.m4b',
+        fullPath: '/incoming/Enriched/Book.m4b',
+        sourceFiles: ['/incoming/Enriched/Book.m4b'],
+        folderPath: '/incoming/Enriched',
+        relativePath: 'Enriched',
+        folderName: 'Enriched',
+        format: 'M4B',
+        fileCount: 1,
+        selectedMatch: {
+          asin: 'B000000001',
+          title: 'Enriched Book',
+          authors: [],
+          series: [{ asin: 'B01E633FQM', name: 'First Series', position: '0' }],
+        } as unknown as SearchResult,
+        hasSearched: true,
+        isSearching: false,
+        selected: true,
+      },
+    }
+    store.action = 'none'
+
+    await store.importSelected('')
+
+    const metadata = addToLibrary.mock.calls[0][0]
+    expect(metadata.seriesMemberships).toEqual([
+      {
+        seriesName: 'First Series',
+        seriesNumber: '0',
+        seriesAsin: 'B01E633FQM',
+        isPrimary: true,
+        sortOrder: 0,
+      },
+    ])
+    expect(metadata.series).toBe('First Series')
+  })
+
+  it('treats a ten-character, non-B0 value typed into the manual search box as an ASIN', async () => {
+    // Real Audible product ASINs are not all B0-prefixed: ISBN-shaped ones like 1781105022
+    // and 177424599X are valid ten-character ASINs on the catalogue. The manual search box's
+    // own ASIN-vs-title detection has to accept those, even though a series membership's
+    // seriesAsin is deliberately restricted to the B0 shape (see seriesUtils.ts). Regression
+    // guard for the two detectors sharing one predicate.
+    const { useLibraryImportStore } = await import('@/stores/libraryImport')
+    const store = useLibraryImportStore()
+
+    advancedSearch.mockResolvedValue([])
+
+    store.items = {
+      '/incoming/Book.m4b': {
+        id: '/incoming/Book.m4b',
+        fullPath: '/incoming/Book.m4b',
+        sourceFiles: ['/incoming/Book.m4b'],
+        folderPath: '/incoming',
+        relativePath: 'Book',
+        folderName: 'Book',
+        format: 'M4B',
+        fileCount: 1,
+        selectedMatch: null,
+        hasSearched: false,
+        isSearching: false,
+        selected: false,
+      },
+    }
+
+    await store.searchItem('/incoming/Book.m4b', '1781105022')
+
+    expect(advancedSearch).toHaveBeenCalledWith({ asin: '1781105022', cap: 5 })
   })
 })
