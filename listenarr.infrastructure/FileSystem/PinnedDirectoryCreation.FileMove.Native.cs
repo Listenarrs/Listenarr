@@ -101,12 +101,15 @@ internal sealed partial class PinnedDirectoryCreation
     private static SafeFileHandle OpenRelativeFileForWriteUnix(
         SafeFileHandle parentHandle,
         string fileName,
-        string fullPath)
+        string fullPath,
+        bool readable = false)
     {
         var fd = OpenAt(
             parentHandle.DangerousGetHandle().ToInt32(),
             fileName,
-            UnixOpenFlags.OpenWriteNoFollow(),
+            readable
+                ? UnixOpenFlags.OpenReadWriteNoFollow()
+                : UnixOpenFlags.OpenWriteNoFollow(),
             mode: 0);
         if (fd >= 0)
         {

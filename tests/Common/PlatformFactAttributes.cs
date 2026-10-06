@@ -195,3 +195,43 @@ public sealed class LinuxDirectoryAndFileLinkFactAttribute : FactAttribute
         }
     }
 }
+
+/// <summary>
+/// A fact that needs two writable directories whose only common ancestor is the filesystem
+/// root. The test output tree and the system temp directory usually qualify, but a checkout
+/// under the temp directory, or a TMPDIR inside the workspace, leaves no such pair, and on
+/// Windows they can sit on different drives entirely. Skipping says so rather than failing a
+/// run for a property of the machine.
+/// </summary>
+public sealed class DisjointFilesystemRootsFactAttribute : FactAttribute
+{
+    public DisjointFilesystemRootsFactAttribute()
+    {
+        var buildOutput = Path.GetFullPath(AppContext.BaseDirectory);
+        var temp = Path.GetFullPath(Path.GetTempPath());
+        if (!string.Equals(
+                Path.GetPathRoot(buildOutput),
+                Path.GetPathRoot(temp),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            Skip = "The build output and the temp directory are on different filesystem roots, "
+                + "so a batch spanning both has no common directory at all.";
+            return;
+        }
+
+        if (string.Equals(FirstSegment(buildOutput), FirstSegment(temp), StringComparison.OrdinalIgnoreCase))
+        {
+            Skip = "The build output and the temp directory share a first path segment, so this "
+                + "fixture cannot build a batch whose only common ancestor is the filesystem root.";
+        }
+    }
+
+    private static string FirstSegment(string path)
+    {
+        var root = Path.GetPathRoot(path) ?? string.Empty;
+        return path[root.Length..]
+            .Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault()
+            ?? string.Empty;
+    }
+}
