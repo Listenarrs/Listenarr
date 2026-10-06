@@ -39,7 +39,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 var ratioLimit = torrent.TryGetValue("ratio_limit", out var ratioLimitElement) ? (float)ratioLimitElement.GetDouble() : -2f;
                 var seedingTimeLimit = torrent.TryGetValue("seeding_time_limit", out var seedingTimeLimitElement) ? seedingTimeLimitElement.GetInt64() : -2L;
 
-                var isStopped = state is "pausedUP" or "stoppedUP";
+                var isStopped = QbittorrentResponseMapper.IsFinishedStoppedState(state);
                 var seedLimitReached = QbittorrentSeedLimitEvaluator.HasReachedSeedLimit(
                     ratio,
                     ratioLimit,
