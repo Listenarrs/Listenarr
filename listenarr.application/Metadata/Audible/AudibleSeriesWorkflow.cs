@@ -337,9 +337,27 @@ namespace Listenarr.Application.Metadata.Audible
             return GetString(product, "cover_art_url");
         }
 
-        private static decimal ParseSeriesPosition(string? rawPosition)
+        /// <summary>
+        /// Sort key for a series position. Positions come from Audible's `sequence`/`sort`
+        /// field as a string that always uses '.' as the decimal separator, so the parse is
+        /// invariant: under a server culture where '.' is the group separator, "1.5" would
+        /// otherwise read as 15 and a novella would sort after book 10.
+        /// </summary>
+        /// <remarks>
+        /// A position that is not a decimal at all, such as the "1-4" of an omnibus, still
+        /// sorts last. Internal rather than private so the culture behaviour can be asserted
+        /// directly.
+        ///
+        /// NumberStyles.Float rather than Number: Number carries AllowThousands, and the
+        /// invariant group separator is ',', so under Number a position written "1,5" parses
+        /// as 15 and sorts after book 10 by the same route this method exists to close.
+        /// Float rejects it, which sends it to the end with the other unorderable positions.
+        /// </remarks>
+        internal static decimal ParseSeriesPosition(string? rawPosition)
         {
-            return decimal.TryParse(rawPosition, out var parsed) ? parsed : decimal.MaxValue;
+            return decimal.TryParse(rawPosition, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
+                ? parsed
+                : decimal.MaxValue;
         }
     }
 }
