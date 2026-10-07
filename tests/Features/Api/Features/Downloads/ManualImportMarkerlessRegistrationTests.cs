@@ -1564,7 +1564,14 @@ public sealed class ManualImportMarkerlessRegistrationTests : BaseTests
         Task<Microsoft.AspNetCore.Mvc.IActionResult>? recovering = null;
         try
         {
-            await pause.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            var reached = await Task.WhenAny(pause.Entered.Task, importing)
+                .WaitAsync(TimeSpan.FromSeconds(60));
+            if (reached == importing)
+            {
+                var earlyResult = await importing;
+                Assert.Fail("Import completed before the second owner commit pause: "
+                    + System.Text.Json.JsonSerializer.Serialize(earlyResult.Result));
+            }
             await using var paused = await factory.CreateDbContextAsync();
             var journals = await paused.FileMutationJournals.AsNoTracking().ToListAsync();
             Assert.Equal(2, journals.Count);

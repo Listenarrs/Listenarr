@@ -170,6 +170,7 @@ public sealed class VerifiedFileRenameTransactionCoordinatorTests : BaseTests
         else
         {
             Assert.Equal(VerifiedFileRenameRetirementOutcome.Completed, await lease.CompleteSourceRetirementAsync());
+            await lease.DisposeAsync();
         }
         Assert.Equal(restart, File.Exists(scenario.Source));
         Assert.Equal("verified-organize-audio", await File.ReadAllTextAsync(scenario.Destination));
