@@ -18,7 +18,9 @@ public sealed partial class FileRegistrationRecoveryService
             .Where(RegistrationPublicationOwnerPredicate)
             .Where(journal => journal.Action == FileAction.Move
                 && journal.AudiobookId == audiobookId
-                && journal.State == FileMutationJournalState.Completed)
+                && (journal.State == FileMutationJournalState.Completed
+                    || journal.State
+                        == FileMutationJournalState.CompletedSourceRetained))
             .OrderBy(journal => journal.CreatedAt)
             .ThenBy(journal => journal.OperationId)
             .ToListAsync(cancellationToken);
@@ -48,59 +50,73 @@ public sealed partial class FileRegistrationRecoveryService
 
             var matchingFiles = trackedFiles
                 .Where(file =>
-                    RegisteredPathMatches(file, journal.DestinationPath)
-                    && RegisteredGenerationMatches(
-                        file,
-                        journal.TargetPhysicalObjectIdentity))
+                    RegisteredPathMatches(file, journal.DestinationPath))
                 .ToList();
             if (matchingFiles.Count != 1
-                || !CompletedReceiptTargetIsStillPublished(
-                    journal,
-                    matchingFiles[0]))
+                || !CompletedReceiptTargetIsStillPublished(journal))
             {
                 continue;
             }
 
+            var sourceRetained = journal.State
+                == FileMutationJournalState.CompletedSourceRetained;
             receipts.Add(new FileRegistrationRecoveryReceipt(
                 journal.OperationId,
                 audiobookId,
                 journal.SourcePath,
-                journal.DestinationPath));
+                journal.DestinationPath,
+                SourceRetained: sourceRetained,
+                SourceLength: sourceRetained ? journal.SourceLength : null,
+                SourceSha256: sourceRetained ? journal.SourceSha256 : null));
             includedOperationIds.Add(journal.OperationId);
         }
     }
 
     private static bool CompletedReceiptTargetIsStillPublished(
-        FileMutationJournal journal,
-        AudiobookFile trackedFile)
+        FileMutationJournal journal)
     {
         try
         {
-            using var lease = PinnedAudiobookFileRegistrationLease.Open(
-                journal.DestinationPath,
-                trackedFile.PhysicalObjectIdentity);
-            if (lease.ProbeCurrentPublication()
-                != RegistrationPublicationMatchOutcome.Match)
+            var parentPath = Path.GetDirectoryName(journal.DestinationPath);
+            var fileName = Path.GetFileName(journal.DestinationPath);
+            if (string.IsNullOrWhiteSpace(parentPath)
+                || string.IsNullOrWhiteSpace(fileName)
+                || string.IsNullOrWhiteSpace(journal.SourceSha256))
             {
                 return false;
             }
 
-            using var stream = lease.OpenMetadataReadStream();
+            using var parent =
+                PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                    parentPath,
+                    createMissing: false);
+            using var file = parent.TryOpenExistingFile(
+                fileName,
+                requireDeleteAccess: false);
+            if (file == null
+                || !parent.VisiblePathMatches()
+                || !file.VisiblePathMatches()
+                || !file.IsRegularFile())
+            {
+                return false;
+            }
+
+            using var stream = file.OpenReadStream(
+                bufferSize: 81920,
+                asynchronous: false);
             if (stream.Length != journal.SourceLength)
             {
                 return false;
             }
-            if (string.IsNullOrWhiteSpace(journal.SourceSha256))
-            {
-                return true;
-            }
 
             stream.Position = 0;
             var hash = Convert.ToHexString(SHA256.HashData(stream));
-            return string.Equals(
-                hash,
-                journal.SourceSha256,
-                StringComparison.OrdinalIgnoreCase);
+            return file.VisiblePathMatches()
+                && parent.VisiblePathMatches()
+                && string.Equals(
+                    hash,
+                    journal.SourceSha256,
+                    StringComparison.OrdinalIgnoreCase);
         }
         catch (Exception exception) when (exception is
             FileNotFoundException or DirectoryNotFoundException

@@ -31,6 +31,7 @@ namespace Listenarr.Application.Audiobooks.RootFolders
         private readonly IAudiobookOperationCoordinator _audiobookOperationCoordinator;
         private readonly IDirectoryObjectIdentityResolver? _directoryObjectIdentityResolver;
         private readonly IFileRegistrationRecoveryProbe? _fileRegistrationRecoveryProbe;
+        private readonly IFileRenameRecoveryProbe? _fileRenameRecoveryProbe;
 
         public RootFolderService(
             IRootFolderRepository repo,
@@ -41,7 +42,8 @@ namespace Listenarr.Application.Audiobooks.RootFolders
             IFilesystemMutationCoordinator mutationCoordinator,
             IAudiobookOperationCoordinator audiobookOperationCoordinator,
             IDirectoryObjectIdentityResolver? directoryObjectIdentityResolver = null,
-            IFileRegistrationRecoveryProbe? fileRegistrationRecoveryProbe = null)
+            IFileRegistrationRecoveryProbe? fileRegistrationRecoveryProbe = null,
+            IFileRenameRecoveryProbe? fileRenameRecoveryProbe = null)
         {
             _repo = repo;
             _logger = logger;
@@ -53,6 +55,7 @@ namespace Listenarr.Application.Audiobooks.RootFolders
                 ?? throw new ArgumentNullException(nameof(audiobookOperationCoordinator));
             _directoryObjectIdentityResolver = directoryObjectIdentityResolver;
             _fileRegistrationRecoveryProbe = fileRegistrationRecoveryProbe;
+            _fileRenameRecoveryProbe = fileRenameRecoveryProbe;
         }
 
         public async Task<RootFolder?> GetDefaultAsync()
@@ -353,6 +356,13 @@ namespace Listenarr.Application.Audiobooks.RootFolders
             string rootPath,
             FileSystemPathSemantics semantics)
         {
+            if (_fileRenameRecoveryProbe != null
+                && await _fileRenameRecoveryProbe.HasBlockingBoundaryAsync(rootPath, semantics))
+            {
+                throw new InvalidOperationException(
+                    "Resolve interrupted file organize recovery before deleting or reassigning this root.");
+            }
+
             if (_fileRegistrationRecoveryProbe == null)
             {
                 return;

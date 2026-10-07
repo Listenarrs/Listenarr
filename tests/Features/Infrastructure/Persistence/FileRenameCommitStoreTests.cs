@@ -252,8 +252,12 @@ public sealed class FileRenameCommitStoreTests : BaseTests
                 .SingleAsync(candidate => candidate.Id == audiobook.Id)).BasePath);
     }
 
-    [Fact]
-    public async Task CommitOwnerMetadataAsync_VerifiedBatch_CommitsOwnerAndJournalTogether()
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    [InlineData(false, true)]
+    public async Task CommitOwnerMetadataAsync_VerifiedBatch_CommitsOwnerAndJournalTogether(bool managedRoot, bool changedTarget)
     {
         await using var connection = new SqliteConnection("DataSource=:memory:");
         await connection.OpenAsync();
@@ -272,6 +276,8 @@ public sealed class FileRenameCommitStoreTests : BaseTests
         {
             Name = "Verified Commit Root",
             Path = rootPath,
+            PathIdentityState = PathIdentityState.Valid,
+            ResolvedCaseSensitivity = FileSystemPathSemantics.CurrentHostDefault.CaseSensitivity,
             StorageContractRevision = 7
         };
         var audiobook = new Audiobook
@@ -280,7 +286,7 @@ public sealed class FileRenameCommitStoreTests : BaseTests
             BasePath = rootPath,
             FilePath = sourcePath
         };
-        db.RootFolders.Add(root);
+        if (managedRoot) db.RootFolders.Add(root);
         db.Audiobooks.Add(audiobook);
         await db.SaveChangesAsync();
 
@@ -309,28 +315,45 @@ public sealed class FileRenameCommitStoreTests : BaseTests
             SourceSha256 = Convert.ToHexString(
                 System.Security.Cryptography.SHA256.HashData(bytes)),
             SourceRootFolderId = root.Id,
-            SourceStorageContractRevision = root.StorageContractRevision,
+            SourceStorageContractRevision = managedRoot ? root.StorageContractRevision : 0,
             DestinationRootFolderId = root.Id,
-            DestinationStorageContractRevision = root.StorageContractRevision,
+            DestinationStorageContractRevision = managedRoot ? root.StorageContractRevision : 0,
             State = VerifiedFileRenameState.TargetVerified
         });
         await db.SaveChangesAsync();
 
         audiobook.FilePath = destinationPath;
         var store = new FileRenameCommitStore(db, TimeProvider.System);
-        await store.CommitOwnerMetadataAsync(audiobook.Id, [operationId]);
-
-        await using var verification = new ListenArrDbContext(options);
-        Assert.Equal(
-            destinationPath,
-            (await verification.Audiobooks.AsNoTracking()
+        if (changedTarget)
+        {
+            await File.WriteAllTextAsync(destinationPath, "changed-target");
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                store.CommitOwnerMetadataAsync(audiobook.Id, [operationId]));
+            using var sourceAccess = File.Open(sourcePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            using var targetAccess = File.Open(destinationPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            await using var failedVerification = new ListenArrDbContext(options);
+            Assert.Equal(sourcePath, (await failedVerification.Audiobooks.AsNoTracking()
                 .SingleAsync(candidate => candidate.Id == audiobook.Id)).FilePath);
-        Assert.Equal(
-            VerifiedFileRenameState.OwnerMetadataReconciled,
-            (await verification.VerifiedFileRenameJournals.AsNoTracking()
-                .SingleAsync(candidate => candidate.OperationId == operationId)).State);
-        Assert.True(File.Exists(sourcePath));
-        Assert.True(File.Exists(destinationPath));
+            Assert.Equal(VerifiedFileRenameState.TargetVerified,
+                (await failedVerification.VerifiedFileRenameJournals.AsNoTracking()
+                    .SingleAsync(journal => journal.OperationId == operationId)).State);
+        }
+        else
+        {
+            await store.CommitOwnerMetadataAsync(audiobook.Id, [operationId]);
+
+            await using var verification = new ListenArrDbContext(options);
+            Assert.Equal(
+                destinationPath,
+                (await verification.Audiobooks.AsNoTracking()
+                    .SingleAsync(candidate => candidate.Id == audiobook.Id)).FilePath);
+            Assert.Equal(
+                VerifiedFileRenameState.OwnerMetadataReconciled,
+                (await verification.VerifiedFileRenameJournals.AsNoTracking()
+                    .SingleAsync(candidate => candidate.OperationId == operationId)).State);
+            Assert.True(File.Exists(sourcePath));
+            Assert.True(File.Exists(destinationPath));
+        }
     }
 
     [Fact]
@@ -355,6 +378,8 @@ public sealed class FileRenameCommitStoreTests : BaseTests
         {
             Name = "Verified Incomplete Root",
             Path = rootPath,
+            PathIdentityState = PathIdentityState.Valid,
+            ResolvedCaseSensitivity = FileSystemPathSemantics.CurrentHostDefault.CaseSensitivity,
             StorageContractRevision = 4
         };
         var audiobook = new Audiobook
@@ -436,6 +461,8 @@ public sealed class FileRenameCommitStoreTests : BaseTests
         {
             Name = "Verified Refresh Root",
             Path = rootPath,
+            PathIdentityState = PathIdentityState.Valid,
+            ResolvedCaseSensitivity = FileSystemPathSemantics.CurrentHostDefault.CaseSensitivity,
             StorageContractRevision = 9
         };
         var audiobook = new Audiobook

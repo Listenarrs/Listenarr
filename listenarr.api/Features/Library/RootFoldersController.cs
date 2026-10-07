@@ -40,7 +40,7 @@ namespace Listenarr.Api.Features.Library
         bool CanScanFilesystem,
         bool CanPublishNewFiles,
         bool CanMutateFilesystem,
-        bool CanRetireWithDurableIdentity,
+        bool CanRetireSource,
         bool CanRetireAfterVerifiedCopy,
         string WeakStorageSourceCleanupPolicy,
         int WeakStoragePolicyRevision,
@@ -342,8 +342,8 @@ namespace Listenarr.Api.Features.Library
             {
                 return Conflict(new
                 {
-                    message = "The current storage does not expose the durable physical identity required to confirm this folder for filesystem mutation.",
-                    code = "root_folder_identity_unsupported"
+                    message = "The current storage cannot provide the live filesystem capabilities required to confirm this folder for mutation.",
+                    code = "root_folder_confirmation_unsupported"
                 });
             }
             catch (RootFolderRecoveryBlockedException exception)

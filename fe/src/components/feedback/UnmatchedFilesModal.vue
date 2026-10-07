@@ -279,11 +279,12 @@ const fileActionLabel = computed(() =>
   fileInputMode.value === 'copy' || fileInputMode.value === 'hardlink/copy' ? 'Copy to' : 'Move to',
 )
 
-let jobId = ''
+let scanSession = 0
 let offSignalR: (() => void) | null = null
 let pollInterval: ReturnType<typeof setInterval> | null = null
 
 function stopScanTracking() {
+  scanSession++
   offSignalR?.()
   offSignalR = null
   if (pollInterval) {
@@ -294,17 +295,24 @@ function stopScanTracking() {
 
 // On open: load cached results — no auto-scan
 watch(
-  () => props.isOpen,
-  async (open) => {
+  () => [props.isOpen, props.rootFolder?.id] as const,
+  async ([open, rootId]) => {
+    stopScanTracking()
+    const session = scanSession
+    const isCurrent = () =>
+      props.isOpen && props.rootFolder?.id === rootId && session === scanSession
     if (!open) return
-    if (!props.rootFolder?.id) return
+    if (!rootId) return
 
     // Ensure stores are populated (may not be loaded yet if opened from a cold page)
     if (!configStore.applicationSettings) await configStore.loadApplicationSettings()
+    if (!isCurrent()) return
     if (!rootFoldersStore.folders.length) await rootFoldersStore.load()
+    if (!isCurrent()) return
 
     try {
-      const saved = await apiService.getSavedUnmatchedFiles(props.rootFolder.id)
+      const saved = await apiService.getSavedUnmatchedFiles(rootId)
+      if (!isCurrent()) return
       scanWarnings.value = saved.warnings ?? []
       if (saved.items.length > 0 || saved.lastScannedAt) {
         items.value = saved.items
@@ -316,6 +324,7 @@ watch(
         phase.value = 'empty'
       }
     } catch {
+      if (!isCurrent()) return
       items.value = []
       phase.value = 'empty'
     }
@@ -325,18 +334,21 @@ watch(
 // Explicit scan button handler
 async function startScan() {
   if (!props.rootFolder?.id || !filesystemReadinessStore.filesystemReady) return
+  stopScanTracking()
+  const session = scanSession
+  const rootId = props.rootFolder.id
+  const isCurrent = () => props.isOpen && props.rootFolder?.id === rootId && session === scanSession
+  let jobId = ''
 
   phase.value = 'scanning'
   items.value = []
   errorMessage.value = ''
   scanWarnings.value = []
-  jobId = ''
-
-  stopScanTracking()
 
   function applyCompletedScan(
     response: Awaited<ReturnType<typeof apiService.getUnmatchedResults>>,
   ) {
+    if (!isCurrent()) return
     items.value = response.items
     scanWarnings.value = response.warnings ?? []
     lastScannedAt.value = new Date().toISOString()
@@ -345,20 +357,23 @@ async function startScan() {
   }
 
   async function completeScan(completedJobId: string) {
-    applyCompletedScan(await apiService.getUnmatchedResults(completedJobId))
+    const response = await apiService.getUnmatchedResults(completedJobId)
+    if (isCurrent() && completedJobId === jobId) applyCompletedScan(response)
   }
 
   // Subscribe to SignalR before triggering the scan
   offSignalR = signalRService.onUnmatchedScanComplete(async (payload) => {
-    if (payload.jobId !== jobId) return
+    if (!isCurrent() || payload.jobId !== jobId) return
     if (payload.error) {
       phase.value = 'error'
       errorMessage.value = payload.error
+      stopScanTracking()
       return
     }
     try {
       await completeScan(payload.jobId)
     } catch (e) {
+      if (!isCurrent()) return
       phase.value = 'error'
       errorMessage.value = (e as Error)?.message || 'Failed to fetch results'
       stopScanTracking()
@@ -366,10 +381,12 @@ async function startScan() {
   })
 
   try {
-    const result = await apiService.scanUnmatchedFiles(props.rootFolder.id)
+    const result = await apiService.scanUnmatchedFiles(rootId)
+    if (!isCurrent()) return
     jobId = result.jobId
     // Poll once immediately — handles fast scans that complete before SignalR fires
     const check = await apiService.getUnmatchedResults(jobId)
+    if (!isCurrent()) return
     if (check.status === 'Completed') {
       applyCompletedScan(check)
     } else if (check.status === 'Failed') {
@@ -378,9 +395,10 @@ async function startScan() {
       stopScanTracking()
     } else {
       pollInterval = setInterval(async () => {
-        if (!jobId || phase.value !== 'scanning') return
+        if (!isCurrent() || !jobId || phase.value !== 'scanning') return
         try {
           const poll = await apiService.getUnmatchedResults(jobId)
+          if (!isCurrent()) return
           if (poll.status === 'Completed') {
             applyCompletedScan(poll)
           } else if (poll.status === 'Failed') {
@@ -394,6 +412,7 @@ async function startScan() {
       }, 2500)
     }
   } catch (e) {
+    if (!isCurrent()) return
     phase.value = 'error'
     errorMessage.value = (e as Error)?.message || 'Failed to start scan'
     stopScanTracking()

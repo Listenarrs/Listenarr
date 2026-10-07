@@ -96,7 +96,7 @@ internal sealed partial class AudiobookContentMoveService
 
             if (!entryExists
                 && allowVerifiedNativeRenameMissingSources
-                && IsVerifiedMarkerlessNativeRenameEntry(entry))
+                && IsVerifiedPublishedFileEntry(entry))
             {
                 continue;
             }
@@ -120,15 +120,11 @@ internal sealed partial class AudiobookContentMoveService
         ValidateMoveSourceRoot(source);
     }
 
-    private static bool IsVerifiedMarkerlessNativeRenameEntry(
+    private static bool IsVerifiedPublishedFileEntry(
         MoveJobEntry entry) =>
         entry.EntryType == MoveJobEntryType.File
         && entry.CopyState == MoveJobEntryCopyState.Verified
-        && !string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
-        && !string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity)
-        && PinnedDirectoryCreation.ArePersistedObjectIdentitiesDurablyEquivalent(
-            entry.SourcePhysicalObjectIdentity,
-            entry.TargetPhysicalObjectIdentity);
+        && !string.IsNullOrWhiteSpace(entry.Sha256);
 
     private static bool FileMetadataMatchesManifest(
         string path,

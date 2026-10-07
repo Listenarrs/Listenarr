@@ -10,7 +10,7 @@ internal sealed class RootFolderStorageHealthResolver(
     Func<string, bool?>? readOnlyFileSystemProbe = null)
     : IRootFolderStorageHealthResolver
 {
-    private const string ConfirmationTokenVersion = "root-storage-v1";
+    private const string ConfirmationTokenVersion = "root-storage-v2";
     private readonly IFileSystemSemanticsResolver _semanticsResolver =
         semanticsResolver ?? new FileSystemSemanticsResolver();
     private readonly Func<string, bool?> _readOnlyFileSystemProbe =
@@ -35,150 +35,82 @@ internal sealed class RootFolderStorageHealthResolver(
             return Unavailable(reason, pathReason);
         }
 
-        var hasAuthorizedIdentity = root.DirectoryObjectIdentityVersion.HasValue
-            && !string.IsNullOrWhiteSpace(root.DirectoryObjectIdentity);
-        if (!hasAuthorizedIdentity)
+        // Root availability is a current-capability decision. Persisted directory
+        // identities are intentionally not compared here: mount-local device numbers,
+        // inode generations, or file handles are diagnostics, not cross-session authority.
+        DirectoryObjectIdentityResolution current;
+        try
         {
-            var current = await identityResolver.ResolveAsync(canonicalPath, cancellationToken);
-            if (!current.IsAvailable)
+            current = await identityResolver.ResolveAsync(canonicalPath, cancellationToken);
+        }
+        catch (Exception exception) when (exception is
+            IOException or UnauthorizedAccessException or InvalidOperationException
+                or NotSupportedException or System.ComponentModel.Win32Exception)
+        {
+            current = DirectoryObjectIdentityResolution.Unavailable(
+                exception.Message, DirectoryObjectIdentityFailureKind.Unknown);
+        }
+        if (!current.IsAvailable
+            && current.FailureKind is not (
+                DirectoryObjectIdentityFailureKind.IdentityUnsupported
+                or DirectoryObjectIdentityFailureKind.LegacyWeakIdentity))
+        {
+            // Failure to capture an optional diagnostic is distinct from failure to
+            // access the root. Independently prove the currently configured path;
+            // mutations still acquire their own live leases at execution time.
+            var accessFailure = ProbeCurrentRootAccess(canonicalPath, cancellationToken);
+            if (accessFailure != null)
             {
-                if (current.FailureKind == DirectoryObjectIdentityFailureKind.IdentityUnsupported)
-                {
-                    return await ValidateFilesystemSemanticsAsync(
-                        root,
-                        canonicalPath,
-                        LimitedIdentityUnsupported(current.UnavailableReason),
-                        cancellationToken);
-                }
-
-                return FromFailure(current);
+                return accessFailure;
             }
-
-            return await ValidateFilesystemSemanticsAsync(
-                root,
-                canonicalPath,
-                new RootFolderStorageObservation(
-                    RootFolderStorageState.Unconfirmed,
-                    RootFolderStorageReason.NoAuthorizedIdentity,
-                    "Listenarr has not yet confirmed the physical directory currently at this path.",
-                    CanConfirmCurrentFolder: true,
-                    CanChangePath: true,
-                    CanMutateFilesystem: false,
-                    ConfirmationToken: CreateConfirmationToken(root, canonicalPath, current)),
-                cancellationToken);
-        }
-
-        var expected = await identityResolver.ResolveExistingAsync(
-            canonicalPath,
-            root.DirectoryObjectIdentityVersion!.Value,
-            root.DirectoryObjectIdentity!,
-            cancellationToken);
-        if (expected.IsAvailable)
-        {
-            return await ValidateFilesystemSemanticsAsync(
-                root,
-                canonicalPath,
-                new RootFolderStorageObservation(
-                    RootFolderStorageState.Healthy,
-                    RootFolderStorageReason.None,
-                    null,
-                    CanConfirmCurrentFolder: false,
-                    CanChangePath: true,
-                    CanMutateFilesystem: true,
-                    ConfirmationToken: null),
-                cancellationToken);
-        }
-
-        if (expected.FailureKind == DirectoryObjectIdentityFailureKind.IdentityUnsupported)
-        {
-            var unsupportedCurrentGeneration = await identityResolver.ResolveAsync(
-                canonicalPath,
-                cancellationToken);
-            if (unsupportedCurrentGeneration.IsAvailable)
-            {
-                return await ValidateFilesystemSemanticsAsync(
-                    root,
-                    canonicalPath,
-                    UnsupportedPersistedIdentity(
-                        root,
-                        canonicalPath,
-                        unsupportedCurrentGeneration,
-                        expected.UnavailableReason),
-                    cancellationToken);
-            }
-            if (unsupportedCurrentGeneration.FailureKind
-                != DirectoryObjectIdentityFailureKind.IdentityUnsupported)
-            {
-                return FromFailure(unsupportedCurrentGeneration);
-            }
-
-            return await ValidateFilesystemSemanticsAsync(
-                root,
-                canonicalPath,
-                LimitedIdentityUnsupported(
-                    unsupportedCurrentGeneration.UnavailableReason
-                        ?? expected.UnavailableReason),
-                cancellationToken);
-        }
-
-        if (expected.FailureKind == DirectoryObjectIdentityFailureKind.LegacyWeakIdentity)
-        {
-            var legacyCurrentGeneration = await identityResolver.ResolveAsync(
-                canonicalPath,
-                cancellationToken);
-            if (!legacyCurrentGeneration.IsAvailable)
-            {
-                if (legacyCurrentGeneration.FailureKind
-                    == DirectoryObjectIdentityFailureKind.IdentityUnsupported)
-                {
-                    return await ValidateFilesystemSemanticsAsync(
-                        root,
-                        canonicalPath,
-                        LimitedIdentityUnsupported(
-                            legacyCurrentGeneration.UnavailableReason
-                                ?? expected.UnavailableReason),
-                        cancellationToken);
-                }
-
-                return FromFailure(legacyCurrentGeneration);
-            }
-
-            return await ValidateFilesystemSemanticsAsync(
-                root,
-                canonicalPath,
-                LimitedLegacyIdentity(
-                    root,
-                    canonicalPath,
-                    legacyCurrentGeneration,
-                    expected.UnavailableReason),
-                cancellationToken);
-        }
-
-        if (expected.FailureKind != DirectoryObjectIdentityFailureKind.IdentityMismatch)
-        {
-            return FromFailure(expected);
-        }
-
-        // Resolve the currently visible generation separately so the confirmation token
-        // is bound to the exact replacement generation the user is being asked to confirm.
-        var currentGeneration = await identityResolver.ResolveAsync(canonicalPath, cancellationToken);
-        if (!currentGeneration.IsAvailable)
-        {
-            return FromFailure(currentGeneration);
         }
 
         return await ValidateFilesystemSemanticsAsync(
             root,
             canonicalPath,
             new RootFolderStorageObservation(
-                RootFolderStorageState.Changed,
-                RootFolderStorageReason.IdentityMismatch,
-                "The folder currently at this path is different from the folder Listenarr previously confirmed.",
-                CanConfirmCurrentFolder: true,
+                RootFolderStorageState.Healthy,
+                RootFolderStorageReason.None,
+                null,
+                CanConfirmCurrentFolder: false,
                 CanChangePath: true,
-                CanMutateFilesystem: false,
-                ConfirmationToken: CreateConfirmationToken(root, canonicalPath, currentGeneration)),
+                CanMutateFilesystem: true,
+                ConfirmationToken: null,
+                Detail: current.IsAvailable ? null : current.UnavailableReason),
             cancellationToken);
+    }
+
+    private static RootFolderStorageObservation? ProbeCurrentRootAccess(
+        string canonicalPath,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            using var current = PinnedDirectoryCreation.OpenPinnedBoundary(canonicalPath);
+            return current.VisiblePathMatches()
+                ? null
+                : Unavailable(RootFolderStorageReason.IdentityUnstable,
+                    "The configured directory changed while its current path was being checked.");
+        }
+        catch (Exception exception) when (exception is
+            IOException or UnauthorizedAccessException or InvalidOperationException
+                or NotSupportedException or System.ComponentModel.Win32Exception)
+        {
+            if (FileSystemSafety.IsProvenMissingPathException(exception))
+            {
+                return FromFailure(DirectoryObjectIdentityResolution.Unavailable(
+                    exception.Message, DirectoryObjectIdentityFailureKind.Missing));
+            }
+            var reason = exception is UnauthorizedAccessException
+                    || exception is System.ComponentModel.Win32Exception native
+                        && (OperatingSystem.IsWindows()
+                            ? native.NativeErrorCode == 5
+                            : native.NativeErrorCode is 1 or 13)
+                    ? RootFolderStorageReason.AccessDenied
+                    : RootFolderStorageReason.Unknown;
+            return Unavailable(reason, exception.Message);
+        }
     }
 
     private async Task<RootFolderStorageObservation> ValidateFilesystemSemanticsAsync(
@@ -203,15 +135,24 @@ internal sealed class RootFolderStorageHealthResolver(
         if (persistedSemantics == null
             || persistedSemantics.Value.DetectAmbiguousCaseMatches)
         {
-            // A legacy or deliberately unconfirmed root has no prior filesystem
-            // semantics authority to preserve. Explicit folder confirmation may
-            // establish both its current semantics and physical generation.
-            return observation.State == RootFolderStorageState.Unconfirmed
-                ? observation
-                : SemanticsUnavailable(
-                    observation,
-                    RootFolderStorageReason.FilesystemSemanticsUnavailable,
-                    "The root folder has no persisted filesystem case-sensitivity authority.");
+            return observation with
+            {
+                State = RootFolderStorageState.Unconfirmed,
+                Reason = RootFolderStorageReason.NoAuthorizedIdentity,
+                Message =
+                    "Listenarr has not yet confirmed the filesystem path and case-sensitivity rules for this root.",
+                CanConfirmCurrentFolder = true,
+                CanMutateFilesystem = false,
+                CanPublishNewFiles = false,
+                CanRetireSource = false,
+                CanRetireAfterVerifiedCopy = false,
+                ConfirmationToken = CreateConfirmationToken(
+                    root,
+                    canonicalPath,
+                    currentSemantics.Semantics),
+                Detail =
+                    "The root folder has no persisted filesystem case-sensitivity authority."
+            };
         }
 
         if (persistedSemantics.Value.Semantics.CaseSensitivity
@@ -241,26 +182,6 @@ internal sealed class RootFolderStorageHealthResolver(
             return mutationCapability;
         }
 
-        if (root.CaseSensitivityMode == FileSystemCaseSensitivityMode.Auto
-            && !currentSemantics.HasDurableMutationSemanticsAuthority)
-        {
-            return mutationCapability with
-            {
-                State = RootFolderStorageState.Limited,
-                Reason = RootFolderStorageReason.MutationSemanticsUnproven,
-                Message =
-                    "Listenarr can read and scan this storage, but automatic case-sensitivity detection is not stable enough to authorize filesystem mutations. Select Sensitive or Insensitive explicitly to enable moves, deletes, and other writes.",
-                CanConfirmCurrentFolder = false,
-                CanMutateFilesystem = false,
-                CanPublishNewFiles = false,
-                CanRetireWithDurableIdentity = false,
-                CanRetireAfterVerifiedCopy = false,
-                ConfirmationToken = null,
-                Detail =
-                    "Automatic case sensitivity was inferred from an existing directory entry rather than an authoritative filesystem capability."
-            };
-        }
-
         return mutationCapability;
     }
 
@@ -279,7 +200,7 @@ internal sealed class RootFolderStorageHealthResolver(
             return observation with
             {
                 CanPublishNewFiles = supportsVerifiedCompatibilityCleanup,
-                CanRetireWithDurableIdentity = observation.CanMutateFilesystem,
+                CanRetireSource = observation.CanMutateFilesystem,
                 CanRetireAfterVerifiedCopy = supportsVerifiedCompatibilityCleanup
             };
         }
@@ -296,7 +217,7 @@ internal sealed class RootFolderStorageHealthResolver(
             CanConfirmCurrentFolder = false,
             CanMutateFilesystem = false,
             CanPublishNewFiles = false,
-            CanRetireWithDurableIdentity = false,
+            CanRetireSource = false,
             CanRetireAfterVerifiedCopy = false,
             ConfirmationToken = null,
             Detail = isReadOnly == true
@@ -342,12 +263,12 @@ internal sealed class RootFolderStorageHealthResolver(
             {
                 Reason = reason,
                 Message = reason == RootFolderStorageReason.FilesystemSemanticsChanged
-                    ? "The folder at this location changed and now uses different case-sensitivity rules. Review the root folder settings before using it for filesystem operations."
-                    : "The folder at this location changed and Listenarr cannot verify its path rules safely. Review the root folder settings.",
+                    ? "The filesystem case-sensitivity rules at this path changed. Review the root folder settings before using it for filesystem operations."
+                    : "Listenarr cannot verify the filesystem path rules at this location safely. Review the root folder settings.",
                 CanConfirmCurrentFolder = false,
                 CanMutateFilesystem = false,
                 CanPublishNewFiles = false,
-                CanRetireWithDurableIdentity = false,
+                CanRetireSource = false,
                 CanRetireAfterVerifiedCopy = false,
                 ConfirmationToken = null,
                 Detail = detail
@@ -360,68 +281,14 @@ internal sealed class RootFolderStorageHealthResolver(
     internal static string CreateConfirmationToken(
         RootFolder root,
         string canonicalPath,
-        DirectoryObjectIdentityResolution observedIdentity)
+        FileSystemPathSemantics observedSemantics)
     {
-        if (!observedIdentity.IsAvailable)
-        {
-            throw new InvalidOperationException(
-                "A confirmation token requires an available observed directory identity.");
-        }
-
         var material = FormattableString.Invariant(
-            $"{ConfirmationTokenVersion}|{root.Id}|{canonicalPath}|{root.DirectoryObjectIdentityVersion?.ToString() ?? "-"}|{root.DirectoryObjectIdentity ?? "-"}|{observedIdentity.Version}|{observedIdentity.Value}");
+            $"{ConfirmationTokenVersion}|{root.Id}|{canonicalPath}|{root.StorageContractRevision}|{root.CaseSensitivityMode}|{observedSemantics.Syntax}|{observedSemantics.CaseSensitivity}");
         return Convert.ToHexString(
                 SHA256.HashData(Encoding.UTF8.GetBytes(material)))
             .ToLowerInvariant();
     }
-
-    private static RootFolderStorageObservation LimitedIdentityUnsupported(
-        string? detail) =>
-        new(
-            RootFolderStorageState.Limited,
-            RootFolderStorageReason.IdentityUnsupported,
-            "This storage can be read and scanned, but it does not expose the durable file identity required for crash-safe moves and deletions.",
-            CanConfirmCurrentFolder: false,
-            CanChangePath: true,
-            CanMutateFilesystem: false,
-            ConfirmationToken: null,
-            Detail: detail);
-
-    private static RootFolderStorageObservation UnsupportedPersistedIdentity(
-        RootFolder root,
-        string canonicalPath,
-        DirectoryObjectIdentityResolution currentGeneration,
-        string? detail) =>
-        new(
-            RootFolderStorageState.Unconfirmed,
-            RootFolderStorageReason.IdentityUnsupported,
-            "This folder's saved physical identity version is no longer supported. Review and confirm the current folder before scanning or changing files.",
-            CanConfirmCurrentFolder: true,
-            CanChangePath: true,
-            CanMutateFilesystem: false,
-            ConfirmationToken: CreateConfirmationToken(
-                root,
-                canonicalPath,
-                currentGeneration),
-            Detail: detail);
-
-    private static RootFolderStorageObservation LimitedLegacyIdentity(
-        RootFolder root,
-        string canonicalPath,
-        DirectoryObjectIdentityResolution currentGeneration,
-        string? detail) =>
-        new(
-            RootFolderStorageState.Limited,
-            RootFolderStorageReason.IdentityUnsupported,
-            "This folder uses a legacy Linux identity that is no longer strong enough for safe moves and deletions. Listenarr can still read and scan it; review and confirm the current folder to upgrade its identity.",
-            CanConfirmCurrentFolder: true,
-            CanChangePath: true,
-            CanMutateFilesystem: false,
-            ConfirmationToken: CreateConfirmationToken(
-                root,
-                canonicalPath,
-                currentGeneration),
-            Detail: detail);
 
     private static RootFolderStorageObservation FromFailure(
         DirectoryObjectIdentityResolution resolution)
@@ -465,7 +332,7 @@ internal sealed class RootFolderStorageHealthResolver(
                 RootFolderStorageReason.AccessDenied =>
                     "Listenarr cannot access this folder. Check the storage permissions and mount settings.",
                 RootFolderStorageReason.IdentityUnsupported =>
-                    "This storage location does not expose the directory identity Listenarr requires for safe filesystem operations.",
+                    "Listenarr could not establish the current storage capabilities needed for this operation.",
                 RootFolderStorageReason.IdentityUnstable =>
                     "This folder changed while Listenarr was checking it. Refresh the storage state and try again.",
                 RootFolderStorageReason.FilesystemSemanticsUnavailable =>

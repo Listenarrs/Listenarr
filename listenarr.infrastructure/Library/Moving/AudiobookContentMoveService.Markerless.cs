@@ -90,11 +90,18 @@ internal sealed partial class AudiobookContentMoveService
             request.SourceSemantics,
             cancellationToken,
             structuralSpinePaths: targetStructuralSpine);
+        // Earlier publication evidence cannot recreate original-directory authority.
+        using var sourceRetirementLease = new MarkerlessSourceRetirementLease(
+            request.SourceSemantics,
+            allowDirectoryRetirement: physicalFiles.All(entry =>
+                entry.CopyState == MoveJobEntryCopyState.Pending
+                && string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity)));
         await ReportProgressAsync(request, 3, "Capturing source", cancellationToken);
         await CaptureMarkerlessSourceIdentitiesAsync(
             request,
             source,
             manifest,
+            sourceRetirementLease,
             cancellationToken);
         await ReportProgressAsync(request, 5, "Planning", cancellationToken);
         await UpdateJobPhaseAsync(
@@ -111,11 +118,8 @@ internal sealed partial class AudiobookContentMoveService
             request,
             target,
             cancellationToken);
-        await TryRetireReplacedMarkerlessTargetOwnershipAsync(
-            request,
-            target,
-            cancellationToken);
 
+        request = await ApplyDiagnosticRetentionAsync(request, manifest, cancellationToken);
         ValidateExistingDestinationContents(
             request,
             source,
@@ -133,14 +137,23 @@ internal sealed partial class AudiobookContentMoveService
             request.TargetSemantics);
         try
         {
-            await CopyMarkerlessTargetFilesAsync(
+            var adoptedPriorTarget = await CopyMarkerlessTargetFilesAsync(
                 request,
                 source,
                 target,
                 manifest,
-                crossVolumeMove || request.ForceCopyAndRetainSource,
+                crossVolumeMove || request.ForceCopyAndRetainSource
+                    || request.CommitOwnerMetadataAsync == null,
                 targetVerificationLease,
+                sourceRetirementLease,
                 cancellationToken);
+            if (manifest.Where(IsPhysicalManifestEntry).Any(entry =>
+                entry.TargetPhysicalObjectIdentity == string.Empty))
+            {
+                request = RetainMarkerlessSource(request);
+            }
+            await VerifyMarkerlessTargetAsync(request, target, manifest, cancellationToken,
+                targetVerificationLease: targetVerificationLease);
             await UpdateJobPhaseAsync(
                 request.JobId,
                 request.LeaseToken,
@@ -156,7 +169,20 @@ internal sealed partial class AudiobookContentMoveService
             // Cross-volume moves always copy the complete manifest first. Only after every
             // target is durably verified do we revalidate the persisted root-folder policy
             // snapshot and decide whether source deletion may begin.
-            var retainSource = request.ForceCopyAndRetainSource
+            // Target verification and owner commit precede every copied-source deletion.
+            // A caller without an owner commit seam receives a conservative retained source.
+            if (request.CommitOwnerMetadataAsync != null)
+            {
+                var publication = CreateMarkerlessMoveResult(
+                    request, source, target, targetInsideSource, sourceInsideTarget,
+                    manifest, sourceRetained: true, targetVerificationLease,
+                    sourceCleanupCompleted: false);
+                await request.CommitOwnerMetadataAsync(publication, cancellationToken);
+            }
+
+            var retainSource = request.CommitOwnerMetadataAsync == null
+                || request.ForceCopyAndRetainSource
+                || adoptedPriorTarget
                 || crossVolumeMove
                     && !await CanDeleteVerifiedCrossVolumeSourceAsync(
                         request,
@@ -176,7 +202,9 @@ internal sealed partial class AudiobookContentMoveService
             {
                 await RetainMarkerlessSourceAsync(
                     request,
+                    source,
                     target,
+                    adoptedPriorTarget,
                     manifest,
                     cancellationToken);
             }
@@ -188,7 +216,11 @@ internal sealed partial class AudiobookContentMoveService
                     target,
                     targetInsideSource,
                     manifest,
+                    sourceRetirementLease,
+                    targetVerificationLease,
                     cancellationToken);
+                retainSource = manifest.Where(IsPhysicalManifestEntry)
+                    .Any(entry => entry.CleanupState == MoveJobEntryCleanupState.Retained);
             }
             VerifySourceCleanupState(request, source, target, manifest);
             await UpdateJobPhaseAsync(
@@ -197,8 +229,7 @@ internal sealed partial class AudiobookContentMoveService
                 MoveJobPhase.Finalizing,
                 cancellationToken);
             await ReportProgressAsync(request, 92, "Finalizing", cancellationToken);
-
-            return CreateMarkerlessMoveResult(
+            var result = CreateMarkerlessMoveResult(
                 request,
                 source,
                 target,
@@ -207,6 +238,7 @@ internal sealed partial class AudiobookContentMoveService
                 manifest,
                 retainSource,
                 targetVerificationLease);
+            return result with { SourceAncestorRetirementLease = sourceRetirementLease.DuplicateAncestors(source) };
         }
         catch
         {
@@ -235,31 +267,27 @@ internal sealed partial class AudiobookContentMoveService
             physicalEntries);
         if (cleanupDisposition == MarkerlessSourceCleanupDisposition.NotStarted)
         {
-            return null;
-        }
-        if (request.ForceCopyAndRetainSource
-            && cleanupDisposition == MarkerlessSourceCleanupDisposition.Delete)
-        {
-            throw new MoveNeedsAttentionException(
-                "Forced source retention cannot resume after destructive source cleanup was authorized.");
-        }
-        var retainSource = cleanupDisposition
-            == MarkerlessSourceCleanupDisposition.Retain;
+            var persistedPhase = await GetJobPhaseAsync(
+                request.JobId,
+                cancellationToken);
+            if (persistedPhase < MoveJobPhase.Published)
+            {
+                return null;
+            }
 
+            // Publication was durably verified by an earlier process, but cleanup
+            // never began. Restart cannot recreate source-delete authority.
+        }
+        // Any persisted cleanup state is being observed after a process boundary.
+        // DeleteAuthorized is evidence that a live operation once intended to delete;
+        // it is never durable permission to resume destructive work. Reconcile what is
+        // already absent and retain every surviving source entry.
         if (physicalEntries
             .Where(entry => entry.EntryType == MoveJobEntryType.File)
-            .Any(entry => entry.CopyState != MoveJobEntryCopyState.Verified
-                || string.IsNullOrWhiteSpace(
-                    entry.TargetPhysicalObjectIdentity)))
+            .Any(entry => entry.CopyState != MoveJobEntryCopyState.Verified))
         {
             throw new MoveNeedsAttentionException(
                 "Markerless source cleanup started before every target file was durably verified.");
-        }
-        if (physicalEntries.Any(entry => string.IsNullOrWhiteSpace(
-                entry.SourcePhysicalObjectIdentity)))
-        {
-            throw new MoveNeedsAttentionException(
-                "Markerless source cleanup lacks persisted source-generation evidence.");
         }
 
         await UpdateJobPhaseAsync(
@@ -267,31 +295,12 @@ internal sealed partial class AudiobookContentMoveService
             request.LeaseToken,
             MoveJobPhase.CleaningSource,
             cancellationToken);
-        if (retainSource)
-        {
-            if (physicalEntries.Any(entry => entry.CleanupState is
-                    MoveJobEntryCleanupState.DeleteAuthorized
-                        or MoveJobEntryCleanupState.Deleted))
-            {
-                throw new MoveNeedsAttentionException(
-                    "Cross-volume source retention cannot resume after destructive source cleanup began.");
-            }
-            await RetainMarkerlessSourceAsync(
-                request,
-                target,
-                manifest,
-                cancellationToken);
-        }
-        else
-        {
-            await DeleteMarkerlessSourceAsync(
-                request,
-                source,
-                target,
-                targetInsideSource,
-                manifest,
-                cancellationToken);
-        }
+        var retainSource = await ReconcileRestartedMarkerlessSourceAsync(
+            request,
+            source,
+            target,
+            manifest,
+            cancellationToken);
         VerifySourceCleanupState(request, source, target, manifest);
         await UpdateJobPhaseAsync(
             request.JobId,
@@ -333,7 +342,8 @@ internal sealed partial class AudiobookContentMoveService
         bool sourceInsideTarget,
         IEnumerable<MoveJobEntry> manifest,
         bool sourceRetained,
-        MarkerlessTargetVerificationLease? targetVerificationLease = null)
+        MarkerlessTargetVerificationLease? targetVerificationLease = null,
+        bool sourceCleanupCompleted = true)
     {
         var targetIdentities = CreatePersistedTargetPhysicalIdentityMap(
             target,
@@ -344,7 +354,7 @@ internal sealed partial class AudiobookContentMoveService
             target,
             targetInsideSource,
             sourceInsideTarget,
-            SourceCleanupCompleted: true,
+            SourceCleanupCompleted: sourceCleanupCompleted,
             SourceRetained: sourceRetained,
             targetIdentities,
             targetVerificationLease);
@@ -411,7 +421,13 @@ internal sealed partial class AudiobookContentMoveService
                     or MoveJobEntryCleanupState.Retained);
             if (!sourceEntriesComplete || !sourceRootComplete)
             {
-                return null;
+                // Owner paths may already be committed while cleanup is incomplete.
+                // Recovery must retain survivors before finalized-state verification.
+                return await TryResumeMarkerlessSourceCleanupAsync(
+                    request, source, target,
+                    IsSameOrInside(target, source, request.SourceSemantics),
+                    IsSameOrInside(source, target, request.TargetSemantics),
+                    manifest, cancellationToken);
             }
 
             VerifySourceCleanupState(request, source, target, manifest);

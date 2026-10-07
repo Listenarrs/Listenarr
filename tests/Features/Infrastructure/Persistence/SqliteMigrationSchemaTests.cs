@@ -42,10 +42,8 @@ public class SqliteMigrationSchemaTests : BaseTests
         "20260821141235_AddCompatibilityFilePublication";
     private const string WeakStorageVerifiedCleanupMigrationId =
         "20260825021432_AddWeakStorageVerifiedCleanup";
-    private const string CompatibilityBatchManifestMigrationId =
-        "20260830025709_AddCompatibilityBatchManifest";
-    private const string VerifiedFileRenameJournalMigrationId =
-        "20260901142347_AddVerifiedFileRenameJournal";
+    private const string OperationEvidencePublicationsMigrationId =
+        "20261002210137_AddOperationEvidencePublications";
 
     private static (SqliteConnection Connection, ListenArrDbContext Context)
         CreateMigratedSqliteContext()
@@ -228,8 +226,7 @@ public class SqliteMigrationSchemaTests : BaseTests
                 FileMutationParentGenerationProofsMigrationId,
                 CompatibilityFilePublicationMigrationId,
                 WeakStorageVerifiedCleanupMigrationId,
-                CompatibilityBatchManifestMigrationId,
-                VerifiedFileRenameJournalMigrationId
+                OperationEvidencePublicationsMigrationId
             ],
             postCanary);
         Assert.Contains("20251124102000_AddMoveJobSourcePath", applied);

@@ -152,15 +152,6 @@ internal sealed partial class EfFileMutationJournalStore
             throw new InvalidOperationException(
                 "Owner metadata reconciliation must be committed atomically with the owning audiobook metadata, not through the filesystem journal store.");
         }
-        if (state >= FileMutationJournalState.TargetIdentityPersisted
-            && state is not (FileMutationJournalState.NeedsAttention
-                or FileMutationJournalState.RolledBack)
-            && string.IsNullOrWhiteSpace(targetPhysicalObjectIdentity))
-        {
-            throw new ArgumentException(
-                "A persisted target generation is required for this file-mutation state.",
-                nameof(targetPhysicalObjectIdentity));
-        }
         if (audiobookId <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(audiobookId));

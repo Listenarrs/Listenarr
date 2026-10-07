@@ -27,21 +27,17 @@ internal static class AudiobookPathReferenceRewriter
             sourceSemantics,
             targetSemantics);
 
-        if (targetPhysicalObjectIdentities != null
-            && targetPhysicalIdentityObservedAtUtc is not { Kind: DateTimeKind.Utc })
-        {
-            throw new ArgumentException(
-                "Moved physical identity observation time must be UTC.",
-                nameof(targetPhysicalIdentityObservedAtUtc));
-        }
+        // Legacy physical observations may still be supplied by callers for
+        // diagnostics, but path rewrite never persists them as future authority.
+        _ = targetPhysicalObjectIdentities;
+        _ = targetPhysicalIdentityObservedAtUtc;
 
         var filePath = audiobook.FilePath;
         var imageUrl = audiobook.ImageUrl;
         var rewrittenFiles = new List<(
             AudiobookFile File,
             string Path,
-            AudiobookFilePathIdentity Identity,
-            string? PhysicalObjectIdentity)>();
+            AudiobookFilePathIdentity Identity)>();
 
         if (!string.IsNullOrWhiteSpace(sourceBasePath))
         {
@@ -93,21 +89,10 @@ internal static class AudiobookPathReferenceRewriter
                         targetBasePath,
                         targetSemantics,
                         targetCaseSensitivityMode);
-                    string? targetPhysicalObjectIdentity = null;
-                    if (targetPhysicalObjectIdentities != null
-                        && !targetPhysicalObjectIdentities.TryGetValue(
-                            targetIdentity.CanonicalPath,
-                            out targetPhysicalObjectIdentity))
-                    {
-                        throw new AudiobookPathRewriteException(
-                            "A moved tracked audiobook file has no verified target physical generation.");
-                    }
-
                     rewrittenFiles.Add((
                         file,
                         rewrittenPath,
-                        targetIdentity,
-                        targetPhysicalObjectIdentity));
+                        targetIdentity));
                 }
             }
         }
@@ -116,21 +101,13 @@ internal static class AudiobookPathReferenceRewriter
         // one bad stored value cannot leave the audiobook half-rebased.
         audiobook.FilePath = filePath;
         audiobook.ImageUrl = imageUrl;
-        foreach (var (file, path, identity, physicalObjectIdentity) in rewrittenFiles)
+        foreach (var (file, path, identity) in rewrittenFiles)
         {
             file.ApplyPathIdentity(path, identity);
-            if (physicalObjectIdentity != null)
-            {
-                file.ApplyPhysicalObjectIdentity(
-                    physicalObjectIdentity,
-                    targetPhysicalIdentityObservedAtUtc!.Value);
-            }
-            else
-            {
-                // A metadata-only rewrite has no proof that the target pathname
-                // identifies the same physical generation as the old source.
-                file.ClearPhysicalObjectIdentity();
-            }
+            // Path ownership is authoritative across sessions; kernel object
+            // identity is not. A moved path therefore starts with no persisted
+            // physical mutation authority.
+            file.ClearPhysicalObjectIdentity();
         }
 
         audiobook.BasePath = targetBasePath;

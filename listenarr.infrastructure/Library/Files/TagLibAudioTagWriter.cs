@@ -58,10 +58,10 @@ namespace Listenarr.Infrastructure.Library.Files
             {
                 return Task.CompletedTask;
             }
-            if (!registrationLease.HasDurablePhysicalObjectIdentity)
+            if (!registrationLease.SupportsMetadataWrite)
             {
                 _logger.LogDebug(
-                    "Skipped ASIN tag write for scan-only file {File} because the registration lease has no durable physical identity.",
+                    "Skipped ASIN tag write for {File} because the live registration lease does not authorize metadata writes.",
                     LogRedaction.SanitizeFilePath(registrationLease.PublicPath));
                 return Task.CompletedTask;
             }

@@ -24,8 +24,8 @@ public sealed partial class CompatibilitySourceCleanupCoordinator
         if (manifestJournals.Count == 0)
         {
             // Released verified-cleanup journals predate persisted batch manifests.
-            // Same-process completion remains compatible; startup recovery keeps
-            // those older batches retain-only because it cannot prove completeness.
+            // Historical batches remain readable. This coordinator never retires
+            // a Listenarr-owned source without the original live publication proof.
             return true;
         }
         if (manifestJournals.Count != journals.Count)

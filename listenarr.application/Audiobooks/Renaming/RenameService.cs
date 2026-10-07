@@ -194,6 +194,7 @@ namespace Listenarr.Application.Audiobooks.Renaming
             List<RootFolder> rootFolders,
             CancellationToken ct)
         {
+            RenameResult? executionResult = null;
             try
             {
                 var audiobook = await _audiobookRepository.GetByIdAsync(operation.AudiobookId);
@@ -292,6 +293,7 @@ namespace Listenarr.Application.Audiobooks.Renaming
                 // can begin, complete or roll back to a stable persisted state.
                 var mutationToken = RequestCancellationBoundary.EnterNonCancelablePhase(ct);
                 var result = new RenameResult { AudiobookId = operation.AudiobookId };
+                executionResult = result;
                 var audiobookRollbackState = CaptureAudiobookPathRollbackState(audiobook);
                 foreach (var fileOperation in operation.FileRenames ?? [])
                 {
@@ -416,6 +418,16 @@ namespace Listenarr.Application.Audiobooks.Renaming
                     Success = false,
                     Error = "The organize operation failed. Review the server logs for details."
                 };
+            }
+            finally
+            {
+                // Rollback failures and later publication exceptions still end
+                // this live operation. Journals retain recovery facts; handles
+                // must not survive the request that owned their deletion proof.
+                if (executionResult != null)
+                {
+                    await DisposeVerifiedRenameLeasesAsync(executionResult.RenamedFiles);
+                }
             }
         }
 

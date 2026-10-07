@@ -41,7 +41,6 @@ public partial class RenameService
 
         var proofs = new Dictionary<int, FilePublicationSourceProof>();
         var members = new List<VerifiedFileRenameBatchMember>(changed.Length);
-        var allMembersHaveDurableAuthority = true;
         foreach (var fileOperation in changed)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -49,7 +48,7 @@ public partial class RenameService
                 audiobook,
                 fileOperation,
                 semantics,
-                out var databaseFile,
+                out _,
                 out var trackedPathError);
             if (trackedPathError != null)
             {
@@ -75,21 +74,10 @@ public partial class RenameService
                 fileOperation.FileId,
                 source,
                 destination));
-            allMembersHaveDurableAuthority &=
-                proof.HasDurablePhysicalObjectIdentity
-                && (databaseFile == null
-                    || !string.IsNullOrWhiteSpace(
-                        databaseFile.PhysicalObjectIdentity)
-                    && !PhysicalObjectIdentitySafety.IsKnownWeak(
-                        databaseFile.PhysicalObjectIdentity));
         }
 
-        if (allMembersHaveDurableAuthority)
-        {
-            return new RenameExecutionPlanningResult(
-                RenameExecutionPlan.Durable(proofs));
-        }
-
+        // Organise always uses the operation-local verified protocol. Persisted
+        // physical identity no longer selects a separate authority path.
         var manifest = VerifiedFileRenameBatchManifest.Create(members);
         manifest.Validate();
         return new RenameExecutionPlanningResult(
@@ -147,6 +135,7 @@ public partial class RenameService
                         case VerifiedFileRenameRetirementOutcome.Completed:
                             break;
                         case VerifiedFileRenameRetirementOutcome.SourceRetained:
+                            item.SourceRetained = true;
                             _logger.LogWarning(
                                 "Verified organize operation {OperationId} committed owner metadata but retained the old source for file {FileId}",
                                 lease.OperationId,

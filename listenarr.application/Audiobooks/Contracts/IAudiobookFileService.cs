@@ -52,6 +52,7 @@ namespace Listenarr.Application.Audiobooks.Contracts
         string MetadataPath { get; }
         string PhysicalObjectIdentity { get; }
         bool HasDurablePhysicalObjectIdentity => true;
+        bool SupportsMetadataWrite => false;
         string? SourcePhysicalObjectIdentity { get; }
         Stream OpenMetadataReadStream() =>
             throw new NotSupportedException(

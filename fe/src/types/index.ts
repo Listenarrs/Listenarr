@@ -330,7 +330,7 @@ export interface RootFolder {
   canScanFilesystem?: boolean
   canPublishNewFiles?: boolean
   canMutateFilesystem?: boolean
-  canRetireWithDurableIdentity?: boolean
+  canRetireSource?: boolean
   canRetireAfterVerifiedCopy?: boolean
   weakStorageSourceCleanupPolicy?: 'RetainSource' | 'DeleteSourceAfterVerifiedCopy'
   weakStoragePolicyRevision?: number
@@ -1279,6 +1279,7 @@ export interface FileRenameResultItem {
   newPath?: string
   success: boolean
   rolledBack: boolean
+  sourceRetained?: boolean
   error?: string
 }
 

@@ -15,9 +15,14 @@ public sealed partial class FileRenameRecoveryReconciler
                 journal.Action == FileAction.Move
                 && journal.AudiobookId != null
                 && journal.AudiobookFileId != null
-                && journal.ProtocolVersion != FileMutationProtocol.Current
+                && (journal.ProtocolVersion <= 0
+                    || journal.ProtocolVersion > FileMutationProtocol.Current)
                 && journal.State != FileMutationJournalState.Completed
-                && journal.State != FileMutationJournalState.OwnerMetadataReconciled)
+                && journal.State
+                    != FileMutationJournalState.CompletedSourceRetained
+                && journal.State != FileMutationJournalState.RolledBack
+                && journal.State != FileMutationJournalState.OwnerMetadataReconciled
+                && journal.State != FileMutationJournalState.NeedsAttention)
             .OrderBy(journal => journal.CreatedAt)
             .ThenBy(journal => journal.OperationId)
             .Select(journal => new
@@ -33,7 +38,7 @@ public sealed partial class FileRenameRecoveryReconciler
 
         var now = timeProvider.GetUtcNow().UtcDateTime;
         const string reason =
-            "This interrupted file mutation predates durable parent-directory generation fencing and cannot be resumed automatically.";
+            "This owner-bound file mutation uses an unsupported operation-evidence protocol. Its artifacts were preserved for scoped repair.";
         if (!db.Database.IsRelational())
         {
             var tracked = await db.FileMutationJournals
@@ -41,8 +46,12 @@ public sealed partial class FileRenameRecoveryReconciler
                     journal.Action == FileAction.Move
                     && journal.AudiobookId != null
                     && journal.AudiobookFileId != null
-                    && journal.ProtocolVersion != FileMutationProtocol.Current
+                    && (journal.ProtocolVersion <= 0
+                        || journal.ProtocolVersion > FileMutationProtocol.Current)
                     && journal.State != FileMutationJournalState.Completed
+                    && journal.State
+                        != FileMutationJournalState.CompletedSourceRetained
+                    && journal.State != FileMutationJournalState.RolledBack
                     && journal.State != FileMutationJournalState.OwnerMetadataReconciled
                     && journal.State != FileMutationJournalState.NeedsAttention)
                 .ToListAsync(cancellationToken);
@@ -61,8 +70,12 @@ public sealed partial class FileRenameRecoveryReconciler
                     journal.Action == FileAction.Move
                     && journal.AudiobookId != null
                     && journal.AudiobookFileId != null
-                    && journal.ProtocolVersion != FileMutationProtocol.Current
+                    && (journal.ProtocolVersion <= 0
+                        || journal.ProtocolVersion > FileMutationProtocol.Current)
                     && journal.State != FileMutationJournalState.Completed
+                    && journal.State
+                        != FileMutationJournalState.CompletedSourceRetained
+                    && journal.State != FileMutationJournalState.RolledBack
                     && journal.State != FileMutationJournalState.OwnerMetadataReconciled
                     && journal.State != FileMutationJournalState.NeedsAttention)
                 .ExecuteUpdateAsync(
@@ -75,7 +88,7 @@ public sealed partial class FileRenameRecoveryReconciler
                     cancellationToken);
         }
 
-        throw new InvalidOperationException(
-            $"Owner-bound file-mutation journal {unsupported[0].OperationId} uses legacy recovery protocol state {unsupported[0].State} and requires operator repair before filesystem mutations can resume.");
+        // Legacy/unknown owner-bound journals are operation-scoped. They
+        // remain visible as NeedsAttention without blocking unrelated recovery.
     }
 }

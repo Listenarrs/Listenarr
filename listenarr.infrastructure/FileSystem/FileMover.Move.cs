@@ -61,8 +61,6 @@ namespace Listenarr.Infrastructure.FileSystem
             int? audiobookId,
             int? audiobookFileId)
         {
-            ArgumentException.ThrowIfNullOrWhiteSpace(
-                expectedSourcePhysicalObjectIdentity);
             if (operationId == Guid.Empty)
             {
                 LogMutation(
@@ -80,10 +78,13 @@ namespace Listenarr.Infrastructure.FileSystem
             {
                 try
                 {
-                    using var lease = PinnedAudiobookFileRegistrationLease.Open(
-                        source,
-                        expectedSourcePhysicalObjectIdentity);
-                    return lease.MatchesCurrentPublication();
+                    var parent = Path.GetDirectoryName(Path.GetFullPath(source))!;
+                    using var hierarchy = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                        parent, createMissing: false);
+                    using var entry = hierarchy.TryOpenExistingFile(
+                        Path.GetFileName(source), requireDeleteAccess: false);
+                    return entry != null && entry.VisiblePathMatches()
+                        && hierarchy.VisiblePathMatches();
                 }
                 catch (Exception exception) when (exception is not (
                     OperationCanceledException or OutOfMemoryException or StackOverflowException))

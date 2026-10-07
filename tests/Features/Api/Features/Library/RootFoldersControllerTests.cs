@@ -2108,7 +2108,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
             var conflict = Assert.IsType<Microsoft.AspNetCore.Mvc.ConflictObjectResult>(result);
             var json = JsonSerializer.Serialize(conflict.Value);
-            Assert.Contains("root_folder_identity_unsupported", json, StringComparison.Ordinal);
+            Assert.Contains("root_folder_confirmation_unsupported", json, StringComparison.Ordinal);
             confirmationService.VerifyAll();
         }
 

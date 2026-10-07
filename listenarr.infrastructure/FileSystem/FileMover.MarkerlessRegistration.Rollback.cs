@@ -62,174 +62,64 @@ public partial class FileMover
                 cancellationToken);
             return UncommittedPublicationRollbackOutcome.NeedsAttention;
         }
-        if (!JournalParentGenerationsMatchGate(journal, gate))
+        var targetOutcome =
+            gate.DestinationParent.TryOpenExistingFileWithOutcome(
+                gate.DestinationName,
+                requireDeleteAccess: false,
+                out var targetEntry);
+        using (targetEntry)
         {
-            await MarkMarkerlessRegistrationNeedsAttentionAsync(
-                journal,
-                "An uncommitted registration parent directory changed physical generation.",
-                cancellationToken);
-            return UncommittedPublicationRollbackOutcome.NeedsAttention;
-        }
-
-        var sourceOutcome = gate.SourceParent.TryOpenExistingFileWithOutcome(
-            gate.SourceName,
-            requireDeleteAccess: false,
-            out var sourceEntry);
-        using (sourceEntry)
-        {
-            if (sourceOutcome == PinnedFileOpenOutcome.Unavailable)
+            if (targetOutcome == PinnedFileOpenOutcome.Unavailable)
             {
                 return UncommittedPublicationRollbackOutcome.Pending;
             }
 
-            var targetOutcome =
-                gate.DestinationParent.TryOpenExistingFileForStableDeleteWithOutcome(
-                    gate.DestinationName,
-                    out var targetEntry);
-            using (targetEntry)
+            if (targetOutcome == PinnedFileOpenOutcome.NotFound)
             {
-                if (targetOutcome == PinnedFileOpenOutcome.Unavailable)
+                try
                 {
-                    return UncommittedPublicationRollbackOutcome.Pending;
-                }
-                if (sourceOutcome != PinnedFileOpenOutcome.Opened
-                    || !await MatchesMarkerlessSourceProofAsync(
-                        sourceEntry!,
-                        journal,
-                        cancellationToken))
-                {
-                    await MarkMarkerlessRegistrationNeedsAttentionAsync(
-                        journal,
-                        "The uncommitted registration source is missing or no longer matches its durable proof; the target was preserved.",
+                    await _fileMutationJournalStore.AdvanceAsync(
+                        journal.OperationId,
+                        FileMutationJournalState.RolledBack,
+                        journal.TargetPhysicalObjectIdentity,
+                        audiobookId: null,
+                        error: "The uncommitted publication target is already absent; restart recovery performed no destructive cleanup.",
                         cancellationToken);
-                    return UncommittedPublicationRollbackOutcome.NeedsAttention;
+                }
+                catch (InvalidOperationException)
+                {
+                    var current = await _fileMutationJournalStore.GetAsync(
+                        journal.OperationId,
+                        cancellationToken);
+                    if (current?.AudiobookId.HasValue == true)
+                    {
+                        return UncommittedPublicationRollbackOutcome.OwnershipCommitted;
+                    }
+                    if (current != null
+                        && FileMutationJournalLifecycle
+                            .ClearsRegistrationRecoveryBoundary(current.State))
+                    {
+                        return UncommittedPublicationRollbackOutcome.AlreadyTerminal;
+                    }
+                    if (current?.State == FileMutationJournalState.NeedsAttention)
+                    {
+                        return UncommittedPublicationRollbackOutcome.NeedsAttention;
+                    }
+                    throw;
                 }
 
-                if (targetOutcome == PinnedFileOpenOutcome.NotFound)
-                {
-                    try
-                    {
-                        await _fileMutationJournalStore.AdvanceAsync(
-                            journal.OperationId,
-                            FileMutationJournalState.RolledBack,
-                            journal.TargetPhysicalObjectIdentity,
-                            audiobookId: null,
-                            error: "The uncommitted registration target was already absent; the exact source remains intact.",
-                            cancellationToken);
-                    }
-                    catch (InvalidOperationException)
-                    {
-                        var current = await _fileMutationJournalStore.GetAsync(
-                            journal.OperationId,
-                            cancellationToken);
-                        if (current?.AudiobookId.HasValue == true)
-                        {
-                            return UncommittedPublicationRollbackOutcome.OwnershipCommitted;
-                        }
-                        if (current != null
-                            && FileMutationJournalLifecycle
-                                .ClearsRegistrationRecoveryBoundary(current.State))
-                        {
-                            return UncommittedPublicationRollbackOutcome.AlreadyTerminal;
-                        }
-                        if (current?.State == FileMutationJournalState.NeedsAttention)
-                        {
-                            return UncommittedPublicationRollbackOutcome.NeedsAttention;
-                        }
-                        throw;
-                    }
-                    return UncommittedPublicationRollbackOutcome.RolledBack;
-                }
-                if (journal.State == FileMutationJournalState.Planned)
-                {
-                    await MarkMarkerlessRegistrationNeedsAttentionAsync(
-                        journal,
-                        "A target exists but this planned registration never persisted authority over its generation; it was preserved.",
-                        cancellationToken);
-                    return UncommittedPublicationRollbackOutcome.NeedsAttention;
-                }
-                if (!TargetMatchesMarkerlessJournal(targetEntry!, journal)
-                    || (journal.State == FileMutationJournalState.TargetVerified
-                        && !await MatchesMarkerlessTargetContentAsync(
-                            targetEntry!,
-                            journal,
-                            cancellationToken)))
-                {
-                    await MarkMarkerlessRegistrationNeedsAttentionAsync(
-                        journal,
-                        "The uncommitted registration target changed generation or content; it was preserved.",
-                        cancellationToken);
-                    return UncommittedPublicationRollbackOutcome.NeedsAttention;
-                }
-
-                if (journal.State is FileMutationJournalState.TargetIdentityPersisted
-                    or FileMutationJournalState.TargetVerified)
-                {
-                    try
-                    {
-                        journal = await _fileMutationJournalStore.AdvanceAsync(
-                            journal.OperationId,
-                            FileMutationJournalState.RollbackAuthorized,
-                            journal.TargetPhysicalObjectIdentity,
-                            audiobookId: null,
-                            error: "Startup recovery proved an exact source and unowned target and authorized compensation.",
-                            cancellationToken);
-                    }
-                    catch (InvalidOperationException)
-                    {
-                        var current = await _fileMutationJournalStore.GetAsync(
-                            journal.OperationId,
-                            cancellationToken);
-                        if (current?.AudiobookId.HasValue == true)
-                        {
-                            return UncommittedPublicationRollbackOutcome.OwnershipCommitted;
-                        }
-                        if (current != null
-                            && FileMutationJournalLifecycle
-                                .ClearsRegistrationRecoveryBoundary(current.State))
-                        {
-                            return UncommittedPublicationRollbackOutcome.AlreadyTerminal;
-                        }
-                        if (current?.State == FileMutationJournalState.NeedsAttention)
-                        {
-                            return UncommittedPublicationRollbackOutcome.NeedsAttention;
-                        }
-                        throw;
-                    }
-                }
-                if (journal.State != FileMutationJournalState.RollbackAuthorized
-                    || journal.AudiobookId.HasValue)
-                {
-                    return journal.AudiobookId.HasValue
-                        ? UncommittedPublicationRollbackOutcome.OwnershipCommitted
-                        : UncommittedPublicationRollbackOutcome.Pending;
-                }
-
-                targetEntry!.Delete(immediateWindows: true);
-                gate.DestinationParent.FlushDirectoryEntry();
-                var sourceVisibility = sourceEntry!.ProbeVisiblePathMatch();
-                if (sourceVisibility == RegistrationPublicationMatchOutcome.Unavailable)
-                {
-                    return UncommittedPublicationRollbackOutcome.Pending;
-                }
-                if (sourceVisibility == RegistrationPublicationMatchOutcome.Mismatch)
-                {
-                    await MarkMarkerlessRegistrationNeedsAttentionAsync(
-                        journal,
-                        "The registration source changed after exact target compensation.",
-                        cancellationToken);
-                    return UncommittedPublicationRollbackOutcome.NeedsAttention;
-                }
-
-                await _fileMutationJournalStore.AdvanceAsync(
-                    journal.OperationId,
-                    FileMutationJournalState.RolledBack,
-                    journal.TargetPhysicalObjectIdentity,
-                    audiobookId: null,
-                    error: "Startup recovery removed the exact unowned publication target and retained its source.",
-                    cancellationToken);
                 return UncommittedPublicationRollbackOutcome.RolledBack;
             }
+
+            // This API is invoked only after a process boundary. Persisted path,
+            // hash, parent-generation, or physical-identity evidence can describe
+            // the interrupted publication, but none of it recreates authority to
+            // unlink a surviving target. Preserve the target for scoped repair.
+            await MarkMarkerlessRegistrationNeedsAttentionAsync(
+                journal,
+                "An unowned publication target still exists after restart. It was preserved because restart recovery cannot recreate delete authority.",
+                cancellationToken);
+            return UncommittedPublicationRollbackOutcome.NeedsAttention;
         }
     }
 }

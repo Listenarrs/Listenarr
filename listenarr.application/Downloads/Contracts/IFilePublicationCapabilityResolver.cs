@@ -75,7 +75,7 @@ public sealed record FilePublicationPlan(
         int? sourceRootFolderId,
         int? sourcePolicyRevision,
         int destinationRootFolderId,
-        int destinationPolicyRevision,
+        int? destinationPolicyRevision,
         int? sourceStorageContractRevision,
         int destinationStorageContractRevision) =>
         new(

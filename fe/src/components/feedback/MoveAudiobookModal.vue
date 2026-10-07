@@ -312,7 +312,7 @@ const sourceFileDisposition = computed(() => {
   if (volumeCheckResult.value?.sourceCleanupMessage) {
     return volumeCheckResult.value.sourceCleanupMessage
   }
-  return 'Source files will be retained unless verified source deletion is authorized for both root folders.'
+  return 'Source files will be retained unless Listenarr can verify the destination and safely remove them.'
 })
 
 const buttonLabel = computed(() => {

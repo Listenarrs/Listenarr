@@ -56,8 +56,7 @@ public sealed class AudiobookScanServiceMetadataBoundaryTests : BaseTests
             .ScanAsync(new AudiobookScanCommand(
                 audiobook.Id,
                 root,
-                pathIdentity,
-                physicalIdentity));
+                pathIdentity));
 
         Assert.Empty(result.AttributedFiles);
         Assert.Empty(await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id));

@@ -6,7 +6,8 @@ public static class FileMutationProtocol
 {
     public const int MarkerlessDatabaseState = 1;
     public const int ParentGenerationMarkerlessDatabaseState = 2;
-    public const int Current = ParentGenerationMarkerlessDatabaseState;
+    public const int OperationEvidence = 3;
+    public const int Current = OperationEvidence;
 
     public static bool IsCurrent(int version) => version == Current;
 }
@@ -39,7 +40,8 @@ public enum FileMutationJournalState
     OwnerMetadataReconciled,
     NeedsAttention,
     RollbackAuthorized,
-    RolledBack
+    RolledBack,
+    CompletedSourceRetained
 }
 
 public static class FileMutationJournalLifecycle
@@ -47,6 +49,7 @@ public static class FileMutationJournalLifecycle
     public static bool IsRegistrationPublicationTerminal(
         FileMutationJournalState state) =>
         state is FileMutationJournalState.Completed
+            or FileMutationJournalState.CompletedSourceRetained
             or FileMutationJournalState.RolledBack
             or FileMutationJournalState.NeedsAttention;
 
@@ -73,6 +76,7 @@ public static class FileMutationJournalLifecycle
     public static bool ClearsRegistrationRecoveryBoundary(
         FileMutationJournalState state) =>
         state is FileMutationJournalState.Completed
+            or FileMutationJournalState.CompletedSourceRetained
             or FileMutationJournalState.RolledBack;
 }
 
@@ -90,6 +94,10 @@ public sealed class FileMutationJournal
     public string SourcePath { get; set; } = string.Empty;
     [Required, MaxLength(4096)]
     public string DestinationPath { get; set; } = string.Empty;
+    // Legacy diagnostic columns remain readable for compatibility, but v3
+    // operation-evidence rows do not require or derive authority from them.
+    // Empty is the persisted sentinel for "not observed" so the released SQLite
+    // schema can remain unchanged without a non-transactional table rebuild.
     [Required, MaxLength(512)]
     public string SourceParentDirectoryObjectIdentity { get; set; } = string.Empty;
     [Required, MaxLength(512)]

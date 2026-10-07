@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -6,11 +6,24 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace Listenarr.Infrastructure.Persistence.Migrations
 {
     /// <inheritdoc />
-    public partial class AddVerifiedFileRenameJournal : Migration
+    public partial class AddOperationEvidencePublications : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.AddColumn<int>(
+                name: "ExpectedBatchMemberCount",
+                table: "CompatibilityFilePublicationJournals",
+                type: "INTEGER",
+                nullable: true);
+
+            migrationBuilder.AddColumn<string>(
+                name: "ExpectedBatchSourceManifestSha256",
+                table: "CompatibilityFilePublicationJournals",
+                type: "TEXT",
+                maxLength: 64,
+                nullable: true);
+
             migrationBuilder.CreateTable(
                 name: "VerifiedFileRenameJournals",
                 columns: table => new
@@ -63,6 +76,14 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
         {
             migrationBuilder.DropTable(
                 name: "VerifiedFileRenameJournals");
+
+            migrationBuilder.DropColumn(
+                name: "ExpectedBatchMemberCount",
+                table: "CompatibilityFilePublicationJournals");
+
+            migrationBuilder.DropColumn(
+                name: "ExpectedBatchSourceManifestSha256",
+                table: "CompatibilityFilePublicationJournals");
         }
     }
 }

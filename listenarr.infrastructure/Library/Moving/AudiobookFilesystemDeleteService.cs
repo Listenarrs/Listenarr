@@ -32,6 +32,9 @@ namespace Listenarr.Infrastructure.Library.Moving
         private readonly ILogger<AudiobookFilesystemDeleteService> _logger;
         private readonly LibraryDirectoryOwnershipBoundaryAuthorizer? _ownershipAuthorizer;
 
+        internal Action? AfterTrackedContentCaptureForTest { get; set; }
+        internal Action<string>? BeforeOwnedDirectoryRetirementForTest { get; set; }
+
         public AudiobookFilesystemDeleteService(
             IAudiobookRepository audiobookRepository,
             IAudiobookFileRepository audioFileRepository,
@@ -83,18 +86,17 @@ namespace Listenarr.Infrastructure.Library.Moving
                 deleteSemantics,
                 result,
                 out var hasUnresolvedTrackedPaths);
-            var trackedPhysicalObjectIdentities = ResolveTrackedPhysicalObjectIdentities(
-                audiobook,
+            using var trackedContentProofs = await CaptureTrackedContentProofsAsync(
                 trackedFilePaths,
                 deleteSemantics,
                 result,
-                out var hasConflictingTrackedPhysicalIdentities,
-                out var hasUnprovenTrackedPhysicalIdentities);
-            if (hasConflictingTrackedPhysicalIdentities
-                || hasUnprovenTrackedPhysicalIdentities)
+                cancellationToken);
+            if (trackedContentProofs == null)
             {
                 return result;
             }
+
+            AfterTrackedContentCaptureForTest?.Invoke();
 
             var deleteTarget = hasUnresolvedTrackedPaths
                 ? null
@@ -107,7 +109,7 @@ namespace Listenarr.Infrastructure.Library.Moving
 
             if (deleteTarget != null)
             {
-                if (trackedFilePaths.Count == 0
+                if (trackedContentProofs.Count == 0
                     && !deleteTarget.OwnedDirectories.Any(ownership =>
                         FileSystemPathIdentity.AreEquivalent(
                             ownership.CanonicalPath,
@@ -115,7 +117,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                             deleteTarget.Semantics)))
                 {
                     result.Warnings.Add(
-                        "The audiobook folder has no tracked file generation or durable directory ownership, so filesystem deletion was blocked.");
+                        "The audiobook folder has no live tracked-file content proof or durable directory ownership, so filesystem deletion was blocked.");
                     return result;
                 }
 
@@ -129,28 +131,33 @@ namespace Listenarr.Infrastructure.Library.Moving
                     return result;
                 }
 
-                bool contentsDeleted;
-                CancellationToken mutationToken;
-                using (targetAuthorization)
-                {
-                    // Authorization can perform async persistence and filesystem identity work.
-                    // Request cancellation remains authoritative until that preflight finishes;
-                    // only the destructive mutation and its durable ownership cleanup are
-                    // noncancelable once this final fence has been crossed.
-                    mutationToken = RequestCancellationBoundary.EnterNonCancelablePhase(
-                        cancellationToken);
-                    contentsDeleted = TryDeleteFolderContents(
-                        deleteTarget,
-                        targetAuthorization,
-                        trackedPhysicalObjectIdentities,
-                        result);
-                }
+                using var liveTargetAuthorization = targetAuthorization;
+                using var capturedTreeProofs = new CapturedDeleteTreeProofs(deleteSemantics.Comparer);
+                // Authorization can perform async persistence and filesystem identity work.
+                // Request cancellation remains authoritative until that preflight finishes;
+                // only the destructive mutation and its durable ownership cleanup are
+                // noncancelable once this final fence has been crossed.
+                var mutationToken = RequestCancellationBoundary.EnterNonCancelablePhase(
+                    cancellationToken);
+                var contentsDeleted = TryDeleteFolderContents(
+                    deleteTarget,
+                    liveTargetAuthorization,
+                    trackedFilePaths,
+                    trackedContentProofs,
+                    capturedTreeProofs,
+                    result);
+
+                // Legacy Windows disposition completes on the last handle close.
+                // Release the captured file proofs before empty-folder cleanup.
+                trackedContentProofs.Dispose();
 
                 if (deleteFolder && contentsDeleted)
                 {
                     await TryDeleteAudiobookFolderAsync(
                         audiobook,
                         deleteTarget,
+                        liveTargetAuthorization,
+                        capturedTreeProofs,
                         result,
                         mutationToken);
                 }
@@ -167,15 +174,25 @@ namespace Listenarr.Infrastructure.Library.Moving
                     cancellationToken);
                 foreach (var trackedFilePath in trackedFilePaths)
                 {
-                    trackedPhysicalObjectIdentities.TryGetValue(
+                    if (!trackedContentProofs.TryGetValue(
+                            trackedFilePath,
+                            out var expectedContentProof))
+                    {
+                        // This path was proven absent during preflight. Never
+                        // delete a new entry that appears there afterward.
+                        continue;
+                    }
+
+                    await TryDeleteFileAsync(
                         trackedFilePath,
-                        out var expectedPhysicalObjectIdentity);
-                    TryDeleteFile(
-                        trackedFilePath,
-                        expectedPhysicalObjectIdentity,
+                        expectedContentProof,
                         result,
-                        allowedRoots);
+                        allowedRoots,
+                        deleteSemantics,
+                        mutationToken);
                 }
+
+                trackedContentProofs.Dispose();
 
                 if (deleteFolder)
                 {
@@ -193,7 +210,9 @@ namespace Listenarr.Infrastructure.Library.Moving
             }
 
             result.TrackedFileCleanupComplete =
-                VerifyTrackedFileCleanupComplete(trackedPhysicalObjectIdentities);
+                !hasUnresolvedTrackedPaths
+                && await VerifyTrackedFileCleanupCompleteAsync(
+                    trackedFilePaths, deleteSemantics, CancellationToken.None);
             return result;
         }
 
@@ -262,70 +281,6 @@ namespace Listenarr.Infrastructure.Library.Moving
             return paths.ToList();
         }
 
-        private static IReadOnlyDictionary<string, string> ResolveTrackedPhysicalObjectIdentities(
-            Audiobook audiobook,
-            IReadOnlyCollection<string> trackedFilePaths,
-            FileSystemPathSemantics semantics,
-            AudiobookFilesystemDeleteResult result,
-            out bool hasConflict,
-            out bool hasUnprovenTrackedPhysicalIdentities)
-        {
-            var identities = new Dictionary<string, string>(semantics.Comparer);
-            hasConflict = false;
-            hasUnprovenTrackedPhysicalIdentities = false;
-            foreach (var file in audiobook.Files ?? [])
-            {
-                if (string.IsNullOrWhiteSpace(file.Path)
-                    || !TryResolveStoredFilePath(
-                        audiobook,
-                        file.Path,
-                        semantics,
-                        out var resolvedPath))
-                {
-                    continue;
-                }
-
-                if (string.IsNullOrWhiteSpace(file.PhysicalObjectIdentity)
-                    || PhysicalObjectIdentitySafety.IsKnownWeak(
-                        file.PhysicalObjectIdentity))
-                {
-                    hasUnprovenTrackedPhysicalIdentities = true;
-                    result.Warnings.Add(
-                        "A tracked audiobook file has no durable persisted physical generation, so filesystem deletion was blocked.");
-                    continue;
-                }
-
-                if (identities.TryGetValue(resolvedPath, out var existingIdentity)
-                    && !string.Equals(
-                        existingIdentity,
-                        file.PhysicalObjectIdentity,
-                        StringComparison.Ordinal))
-                {
-                    hasConflict = true;
-                    result.Warnings.Add(
-                        "Conflicting tracked physical generations reference the same audiobook file path, so filesystem deletion was blocked.");
-                    return identities;
-                }
-
-                identities[resolvedPath] = file.PhysicalObjectIdentity;
-            }
-
-            foreach (var trackedFilePath in trackedFilePaths)
-            {
-                if (identities.ContainsKey(trackedFilePath))
-                {
-                    continue;
-                }
-
-                hasUnprovenTrackedPhysicalIdentities = true;
-                result.Warnings.Add(
-                    "A tracked audiobook path has no persisted physical generation, so filesystem deletion was blocked.");
-                break;
-            }
-
-            return identities;
-        }
-
         private static bool TryResolveStoredFilePath(
             Audiobook audiobook,
             string storedPath,
@@ -358,24 +313,22 @@ namespace Listenarr.Infrastructure.Library.Moving
                 out resolvedPath);
         }
 
-        private void TryDeleteFile(
+        private async Task TryDeleteFileAsync(
             string path,
-            string? expectedPhysicalObjectIdentity,
+            DeleteFileContentProof expectedContentProof,
             AudiobookFilesystemDeleteResult result,
-            IEnumerable<string> allowedRoots)
+            IEnumerable<string> allowedRoots,
+            FileSystemPathSemantics semantics,
+            CancellationToken cancellationToken)
         {
-            var observedExists = File.Exists(path);
-            if (!FileSystemSafety.TryDeleteFile(
+            if (!FileSystemSafety.TryValidateMutationTarget(
                     path,
                     allowedRoots,
-                    expectedPhysicalObjectIdentity,
+                    out var normalizedPath,
                     out var reason))
             {
-                var warning = !string.IsNullOrWhiteSpace(expectedPhysicalObjectIdentity)
-                    && reason.Contains("physical generation", StringComparison.OrdinalIgnoreCase)
-                        ? $"Could not delete file '{Path.GetFileName(path)}' because its tracked physical generation changed."
-                        : $"Could not delete file '{Path.GetFileName(path)}'.";
-                result.Warnings.Add(warning);
+                result.Warnings.Add(
+                    $"Could not delete file '{Path.GetFileName(path)}' safely.");
                 _logger.LogWarning(
                     "Blocked audiobook file delete for {Path}: {Reason}",
                     LogRedaction.SanitizeFilePath(path),
@@ -383,11 +336,69 @@ namespace Listenarr.Infrastructure.Library.Moving
                 return;
             }
 
-            if (observedExists)
+            var parentPath = Path.GetDirectoryName(normalizedPath);
+            var fileName = Path.GetFileName(normalizedPath);
+            if (string.IsNullOrWhiteSpace(parentPath)
+                || string.IsNullOrWhiteSpace(fileName))
             {
+                result.Warnings.Add(
+                    $"Could not delete file '{Path.GetFileName(path)}' safely.");
+                return;
+            }
+
+            try
+            {
+                using var parent =
+                    await OpenPinnedDeleteFileParentAsync(
+                        normalizedPath, semantics, cancellationToken);
+                // Keep the original preflight object pinned throughout this request.
+                // A same-content replacement is never a new deletion capability.
+                using var entry = expectedContentProof.OriginalEntry.DuplicateForOperation();
+                if (!await entry.MatchesAsync(
+                        expectedContentProof.Length,
+                        expectedContentProof.Sha256,
+                        cancellationToken)
+                    || !FileSystemSafety.TryValidateMutationTarget(
+                        normalizedPath,
+                        allowedRoots,
+                        out var revalidatedPath,
+                        out reason)
+                    || !StringComparer.Ordinal.Equals(
+                        normalizedPath,
+                        revalidatedPath)
+                    || !parent.VisiblePathMatches()
+                    || !entry.VisiblePathMatches())
+                {
+                    result.Warnings.Add(
+                        $"Could not delete file '{Path.GetFileName(path)}' because its live content or path changed.");
+                    _logger.LogWarning(
+                        "Blocked audiobook file delete for {Path}: live proof changed before deletion",
+                        LogRedaction.SanitizeFilePath(path));
+                    return;
+                }
+
+                entry.Delete(immediateWindows: true);
                 result.DeletedFiles++;
                 _logger.LogInformation(
                     "Deleted audiobook file {Path}",
+                    LogRedaction.SanitizeFilePath(path));
+            }
+            catch (Exception exception) when (
+                FileSystemSafety.IsProvenMissingPathException(exception))
+            {
+                return;
+            }
+            catch (Exception exception) when (exception is
+                IOException or UnauthorizedAccessException
+                    or InvalidOperationException or NotSupportedException
+                    or System.ComponentModel.Win32Exception
+                    or System.Security.SecurityException)
+            {
+                result.Warnings.Add(
+                    $"Could not delete file '{Path.GetFileName(path)}' safely.");
+                _logger.LogWarning(
+                    exception,
+                    "Blocked audiobook file delete for {Path}",
                     LogRedaction.SanitizeFilePath(path));
             }
         }

@@ -109,14 +109,29 @@ public sealed class AudiobookFileServiceMetadataRefreshTests : BaseTests
             }
             else
             {
-                Assert.False(await service.RefreshMetadataAsync(audiobook, file.Id, fixture.Lease));
+                var updated = await service.RefreshMetadataAsync(
+                    audiobook,
+                    file.Id,
+                    fixture.Lease);
+                Assert.Equal(mutation == "physical-identity", updated);
             }
 
-            // Then the newer state is preserved and old metadata remains unchanged.
+            // Path/ownership changes reject stale metadata. A diagnostic physical
+            // identity update is independent of metadata ownership and is preserved.
             var persisted = await ReloadFileAsync(file.Id);
-            Assert.Null(persisted.DurationSeconds);
-            Assert.Null(persisted.Format);
-            Assert.Null(persisted.SampleRate);
+            if (mutation == "physical-identity")
+            {
+                Assert.Equal(222, persisted.DurationSeconds);
+                Assert.Equal("refreshed-format", persisted.Format);
+                Assert.Equal(48000, persisted.SampleRate);
+                Assert.Equal("new-physical-evidence", persisted.PhysicalObjectIdentity);
+            }
+            else
+            {
+                Assert.Null(persisted.DurationSeconds);
+                Assert.Null(persisted.Format);
+                Assert.Null(persisted.SampleRate);
+            }
             Assert.Equal("existing-codec", persisted.Codec);
         }
     }
@@ -207,7 +222,11 @@ public sealed class AudiobookFileServiceMetadataRefreshTests : BaseTests
             var service = ActivatorUtilities.CreateInstance<AudiobookFileService>(
                 _provider, new EfAudiobookFileRepository(context));
 
-            Assert.False(await service.RefreshMetadataAsync(fixture.Audiobook, fixture.File.Id, fixture.Lease));
+            var updated = await service.RefreshMetadataAsync(
+                fixture.Audiobook,
+                fixture.File.Id,
+                fixture.Lease);
+            Assert.Equal(mutation == "physical-identity", updated);
 
             context.ChangeTracker.Clear();
             var persisted = await context.AudiobookFiles.SingleOrDefaultAsync();
@@ -218,9 +237,19 @@ public sealed class AudiobookFileServiceMetadataRefreshTests : BaseTests
             else
             {
                 Assert.NotNull(persisted);
-                Assert.Null(persisted.DurationSeconds);
-                Assert.Null(persisted.Format);
-                Assert.Null(persisted.SampleRate);
+                if (mutation == "physical-identity")
+                {
+                    Assert.Equal(222, persisted.DurationSeconds);
+                    Assert.Equal("refreshed-format", persisted.Format);
+                    Assert.Equal(48000, persisted.SampleRate);
+                    Assert.Equal("new-evidence", persisted.PhysicalObjectIdentity);
+                }
+                else
+                {
+                    Assert.Null(persisted.DurationSeconds);
+                    Assert.Null(persisted.Format);
+                    Assert.Null(persisted.SampleRate);
+                }
                 Assert.Equal("existing-codec", persisted.Codec);
             }
         }

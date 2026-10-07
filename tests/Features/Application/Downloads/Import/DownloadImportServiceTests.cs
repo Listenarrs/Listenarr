@@ -310,6 +310,47 @@ namespace Listenarr.Tests.Features.Application.Downloads.Import
         }
 
         [Fact]
+        public async Task ImportDownloadFilesAsync_AutoChildCaseConflictsWithRoot_RejectsBeforePublication()
+        {
+            var rootPath = FileService.GetTempDirectory("download-auto-root");
+            var bookPath = Path.Join(rootPath, "Book");
+            Directory.CreateDirectory(bookPath);
+            var root = await AddAuthorizedRootAsync(rootPath);
+            root.CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto;
+            await _rootFolderRepository.UpdateAsync(root);
+            var source = await FileService.GetTempFileAsync("case-conflict.mp3");
+            var sourceBytes = await File.ReadAllBytesAsync(source);
+            var book = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithBasePath(bookPath).Build());
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithCopyFileOnCompleted().WithoutMetadataProcessing().Build());
+            var rootSemantics = FileSystemPathSemantics.CurrentHostDefault;
+            var childSemantics = new FileSystemPathSemantics(rootSemantics.Syntax,
+                rootSemantics.CaseSensitivity == FileSystemCaseSensitivity.Sensitive
+                    ? FileSystemCaseSensitivity.Insensitive : FileSystemCaseSensitivity.Sensitive);
+            var resolver = new Mock<IFileSystemSemanticsResolver>(MockBehavior.Strict);
+            resolver.Setup(service => service.ResolveAsync(FileService.GetTempPath(),
+                    rootSemantics.CaseSensitivity == FileSystemCaseSensitivity.Sensitive
+                        ? FileSystemCaseSensitivityMode.Sensitive : FileSystemCaseSensitivityMode.Insensitive,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new FileSystemSemanticsResolution(rootSemantics, PathIdentityState.Valid, FileService.GetTempPath()));
+            resolver.Setup(service => service.ResolveAsync(rootPath,
+                    FileSystemCaseSensitivityMode.Auto, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new FileSystemSemanticsResolution(rootSemantics, PathIdentityState.Valid, rootPath));
+            resolver.Setup(service => service.ResolveAsync(bookPath,
+                    FileSystemCaseSensitivityMode.Auto, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new FileSystemSemanticsResolution(childSemantics, PathIdentityState.Valid, bookPath));
+            var importer = ActivatorUtilities.CreateInstance<DownloadImportService>(_provider, resolver.Object);
+
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                importer.ImportDownloadFilesAsync(book, [source]));
+
+            Assert.Contains("case rules differ", error.Message);
+            Assert.Equal(sourceBytes, await File.ReadAllBytesAsync(source));
+            Assert.Empty(Directory.GetFiles(bookPath));
+        }
+
+        [Fact]
         public async Task ImportDownloadFilesAsync_NestedRootUsesMostSpecificDestinationSemantics()
         {
             var outerRoot = FileService.GetTempDirectory("download-import-semantics-outer");
@@ -660,14 +701,16 @@ namespace Listenarr.Tests.Features.Application.Downloads.Import
                 [source]));
 
             Assert.False(first.Success);
-            Assert.True(second.Success);
+            Assert.True(second.Success, second.Message);
             Assert.Contains(
                 "Recovered a previously committed move import",
                 second.Message,
                 StringComparison.OrdinalIgnoreCase);
             Assert.True(second.WasRegisteredToAudiobook);
-            Assert.Equal(2, cleanupAttempts);
-            Assert.False(File.Exists(source));
+            Assert.Equal(ImportSourceDisposition.Retained, second.SourceDisposition);
+            Assert.Equal(1, cleanupAttempts);
+            Assert.True(File.Exists(source));
+            Assert.Equal("audio", await File.ReadAllTextAsync(source));
             Assert.Equal("audio", await File.ReadAllTextAsync(destination));
             Assert.Empty(Directory.GetFiles(basePath, "audio (1).mp3"));
             var registeredFiles = await _audiobookFileRepository
@@ -680,7 +723,9 @@ namespace Listenarr.Tests.Features.Application.Downloads.Import
             var journal = await db.FileMutationJournals
                 .AsNoTracking()
                 .SingleAsync();
-            Assert.Equal(FileMutationJournalState.Completed, journal.State);
+            Assert.Equal(
+                FileMutationJournalState.CompletedSourceRetained,
+                journal.State);
         }
 
         [Fact]

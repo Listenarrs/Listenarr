@@ -22,21 +22,9 @@ public static partial class MoveManifestIdentity
         IEnumerable<MoveJobEntry> entries)
     {
         ArgumentNullException.ThrowIfNull(entries);
-        var persistedEntries = entries.ToList();
-        if (!TryGetSourceBoundaryAuthorization(
-                persistedEntries,
-                out _,
-                out _,
-                out _)
-            || !TryGetTargetBoundaryAuthorization(
-                persistedEntries,
-                out _,
-                out _,
-                out _))
-        {
-            throw new InvalidOperationException(
-                "A durable move identity requires source- and target-boundary physical-generation authorization.");
-        }
+        var persistedEntries = entries
+            .Where(entry => !IsBoundaryAuthorization(entry))
+            .ToList();
 
         return CreateDeduplicationKeyCore(
             audiobookId,
@@ -81,7 +69,9 @@ public static partial class MoveManifestIdentity
             sourceIdentity,
             target,
             targetIdentity,
-            entries.Select(ToIdentityEntry));
+            entries
+                .Where(entry => !IsBoundaryAuthorization(entry))
+                .Select(ToIdentityEntry));
     }
 
     public static bool SourceManifestsMatch(

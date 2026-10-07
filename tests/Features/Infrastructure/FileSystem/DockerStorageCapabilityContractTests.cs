@@ -65,7 +65,7 @@ public sealed class DockerStorageCapabilityContractTests : BaseTests
     }
 
     [NativeStorageRemountFact]
-    public async Task MountedStorage_IdentityClassification_SurvivesDeclaredRemount()
+    public async Task MountedStorage_RootAvailability_SurvivesDeclaredRemount()
     {
         var path = Environment.GetEnvironmentVariable(
             NativeStorageRemountFactAttribute.PathEnvironmentVariable)!;
@@ -110,18 +110,55 @@ public sealed class DockerStorageCapabilityContractTests : BaseTests
                     switch (persisted[2])
                     {
                         case "durable":
-                            Assert.True(resolution.IsAvailable, resolution.UnavailableReason);
+                            var current = await resolver.ResolveAsync(path);
+                            Assert.True(current.IsAvailable, current.UnavailableReason);
+                            if (!resolution.IsAvailable)
+                            {
+                                Assert.Equal(DirectoryObjectIdentityFailureKind.IdentityMismatch,
+                                    resolution.FailureKind);
+                            }
                             break;
                         case "generic-fid":
                             Assert.False(resolution.IsAvailable);
-                            Assert.Equal(
+                            Assert.Contains(resolution.FailureKind, new[]
+                            {
                                 DirectoryObjectIdentityFailureKind.LegacyWeakIdentity,
-                                resolution.FailureKind);
+                                DirectoryObjectIdentityFailureKind.IdentityUnsupported
+                            });
+                            var currentWeak = await resolver.ResolveAsync(path);
+                            Assert.False(currentWeak.IsAvailable);
+                            Assert.Equal(DirectoryObjectIdentityFailureKind.IdentityUnsupported,
+                                currentWeak.FailureKind);
                             break;
                         default:
                             throw new InvalidOperationException(
                                 $"Unknown persisted native storage identity expectation '{persisted[2]}'.");
                     }
+
+                    var semantics = new FileSystemPathSemantics(
+                        FileSystemPathSyntax.Unix, FileSystemCaseSensitivity.Sensitive);
+                    var root = new RootFolder
+                    {
+                        Id = 42,
+                        Name = "Native remounted root",
+                        Path = Path.GetFullPath(path),
+                        CaseSensitivityMode = FileSystemCaseSensitivityMode.Sensitive,
+                        ResolvedCaseSensitivity = FileSystemCaseSensitivity.Sensitive,
+                        PathIdentityState = PathIdentityState.Valid,
+                        PathIdentityKey = FileSystemPathIdentity.CreateKey("root", path, semantics),
+                        DirectoryObjectIdentityVersion = int.Parse(persisted[0]),
+                        DirectoryObjectIdentity = persisted[1]
+                    };
+                    var health = await _provider.GetRequiredService<IRootFolderStorageHealthResolver>()
+                        .ResolveAsync(root);
+                    Assert.Equal(RootFolderStorageState.Healthy, health.State);
+                    Assert.Equal(RootFolderStorageReason.None, health.Reason);
+                    Assert.True(health.CanReadFilesystem);
+                    Assert.True(health.CanScanFilesystem);
+                    Assert.True(health.CanPublishAdditively);
+                    Assert.True(health.CanRetireVerifiedSource);
+                    Assert.True(health.CanMutateFilesystem);
+                    Assert.False(health.CanConfirmCurrentFolder);
                     break;
                 }
             default:

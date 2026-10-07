@@ -19,14 +19,6 @@ internal sealed partial class AudiobookContentMoveService
             request,
             target,
             cancellationToken);
-        var endpoints = await GetEndpointObjectIdentitiesAsync(
-            request.JobId,
-            cancellationToken);
-        if (string.IsNullOrWhiteSpace(endpoints.TargetDirectoryObjectIdentity))
-        {
-            throw new MoveNeedsAttentionException(
-                "Markerless target verification requires a persisted target endpoint generation.");
-        }
         if (targetVerificationLease != null)
         {
             targetVerificationLease.SetTargetRoot(
@@ -35,7 +27,6 @@ internal sealed partial class AudiobookContentMoveService
                     target,
                     target,
                     request.TargetSemantics,
-                    endpoints.TargetDirectoryObjectIdentity,
                     sourceEndpoint: false));
         }
         ValidateExistingDestinationContents(
@@ -66,8 +57,7 @@ internal sealed partial class AudiobookContentMoveService
                 continue;
             }
 
-            if (entry.CopyState != MoveJobEntryCopyState.Verified
-                || string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity))
+            if (entry.CopyState != MoveJobEntryCopyState.Verified)
             {
                 throw new MoveNeedsAttentionException(
                     $"A markerless target file is not durably verified: {entry.RelativePath}");
@@ -80,11 +70,22 @@ internal sealed partial class AudiobookContentMoveService
                 target,
                 parentPath,
                 request.TargetSemantics,
-                endpoints.TargetDirectoryObjectIdentity,
                 sourceEndpoint: false);
-            using var file = parent.OpenExistingFile(
+            var openOutcome = parent.TryOpenExistingFileWithOutcome(
                 Path.GetFileName(targetPath),
-                requireDeleteAccess: false);
+                requireDeleteAccess: false,
+                out var openedFile);
+            using var file = openedFile;
+            if (openOutcome == PinnedFileOpenOutcome.NotFound)
+            {
+                throw new MoveNeedsAttentionException(
+                    $"A verified markerless target file is missing: {entry.RelativePath}");
+            }
+            if (openOutcome != PinnedFileOpenOutcome.Opened || file == null)
+            {
+                throw new IOException(
+                    $"A verified markerless target file is temporarily unavailable: {entry.RelativePath}");
+            }
             ValidateMarkerlessTargetEntry(entry, file);
             PinnedDirectoryCreation.PinnedFileEntry? leasedTargetEntry = null;
             var hasProtectedContentProof = targetVerificationLease != null
@@ -93,26 +94,8 @@ internal sealed partial class AudiobookContentMoveService
                     out leasedTargetEntry);
             if (string.IsNullOrWhiteSpace(entry.Sha256))
             {
-                if (!IsVerifiedMarkerlessNativeRenameEntry(entry)
-                    || string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity))
-                {
-                    throw new MoveNeedsAttentionException(
-                        $"A verified markerless target lacks durable content proof: {entry.RelativePath}");
-                }
-
-                entry.Sha256 = await ComputePinnedFileSha256Async(
-                    file,
-                    cancellationToken);
-                var observedLastWriteTimeUtc = file.GetLastWriteTimeUtc();
-                await UpdateSourceEntryProofAsync(
-                    request.JobId,
-                    request.LeaseToken,
-                    entry.RelativePath,
-                    entry.SourcePhysicalObjectIdentity,
-                    entry.Sha256,
-                    observedLastWriteTimeUtc,
-                    cancellationToken);
-                entry.LastWriteTimeUtc = observedLastWriteTimeUtc;
+                throw new MoveNeedsAttentionException(
+                    $"A verified markerless target lacks durable content proof: {entry.RelativePath}");
             }
 
             Func<long, Task>? reportFileProgress = null;
@@ -144,9 +127,7 @@ internal sealed partial class AudiobookContentMoveService
                     || !PinnedFileVisibleOrThrowUnavailable(
                         leasedTargetEntry,
                         $"A protected markerless target generation is temporarily unavailable: {entry.RelativePath}")
-                    || !leasedTargetEntry.IdentifiesSameEntry(file)
-                    || !leasedTargetEntry.MatchesObjectIdentity(
-                        entry.TargetPhysicalObjectIdentity))
+                    || !leasedTargetEntry.IdentifiesSameEntry(file))
                 {
                     throw new MoveNeedsAttentionException(
                         $"A protected markerless target generation changed after native publication: {entry.RelativePath}");
@@ -163,8 +144,7 @@ internal sealed partial class AudiobookContentMoveService
                     $"A markerless target file is temporarily unavailable after verification: {entry.RelativePath}")
                 || !PinnedDirectoryVisibleOrThrowUnavailable(
                     parent,
-                    $"A markerless target file parent is temporarily unavailable after verification: {entry.RelativePath}")
-                || !file.MatchesObjectIdentity(entry.TargetPhysicalObjectIdentity))
+                    $"A markerless target file parent is temporarily unavailable after verification: {entry.RelativePath}"))
             {
                 throw new MoveNeedsAttentionException(
                     $"A markerless target file changed physical generation after verification: {entry.RelativePath}");
@@ -200,16 +180,16 @@ internal sealed partial class AudiobookContentMoveService
         MoveJobEntry entry,
         PinnedDirectoryCreation.PinnedFileEntry sourceEntry)
     {
-        ValidatePinnedSourcePhysicalIdentity(request, entry, sourceEntry);
-        if (string.IsNullOrWhiteSpace(entry.SourcePhysicalObjectIdentity)
-            || !sourceEntry.MatchesObjectIdentity(
-                entry.SourcePhysicalObjectIdentity)
+        // Persisted physical identity is diagnostic only. The live pinned entry,
+        // visible-path check, and manifest content proof are the operation authority.
+        _ = request;
+        if (!sourceEntry.IsRegularFile()
             || !PinnedFileVisibleOrThrowUnavailable(
                 sourceEntry,
                 $"A markerless source file is temporarily unavailable: {entry.RelativePath}"))
         {
             throw new MoveNeedsAttentionException(
-                $"A markerless source file changed physical generation: {entry.RelativePath}");
+                $"A markerless source file changed or is no longer a regular file: {entry.RelativePath}");
         }
     }
 
@@ -217,15 +197,13 @@ internal sealed partial class AudiobookContentMoveService
         MoveJobEntry entry,
         PinnedDirectoryCreation.PinnedFileEntry targetEntry)
     {
-        if (string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity)
-            || !targetEntry.MatchesObjectIdentity(
-                entry.TargetPhysicalObjectIdentity)
+        if (!targetEntry.IsRegularFile()
             || !PinnedFileVisibleOrThrowUnavailable(
                 targetEntry,
                 $"A markerless target file is temporarily unavailable: {entry.RelativePath}"))
         {
             throw new MoveNeedsAttentionException(
-                $"A markerless target file changed physical generation: {entry.RelativePath}");
+                $"A markerless target file changed or is no longer a regular file: {entry.RelativePath}");
         }
     }
 

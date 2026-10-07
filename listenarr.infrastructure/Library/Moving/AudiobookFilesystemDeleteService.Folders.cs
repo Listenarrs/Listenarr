@@ -163,6 +163,8 @@ namespace Listenarr.Infrastructure.Library.Moving
         private async Task TryDeleteAudiobookFolderAsync(
             Audiobook audiobook,
             DeleteFolderTarget deleteTarget,
+            PinnedDirectoryCreation.PinnedDirectoryAnchor originalTarget,
+            CapturedDeleteTreeProofs capturedTreeProofs,
             AudiobookFilesystemDeleteResult result,
             CancellationToken cancellationToken)
         {
@@ -170,6 +172,8 @@ namespace Listenarr.Infrastructure.Library.Moving
             if (deleteTarget.OwnedDirectories.Count > 0
                 && !await RetireOwnedHierarchyAsync(
                     deleteTarget.OwnedDirectories,
+                    originalTarget,
+                    capturedTreeProofs,
                     cancellationToken))
             {
                 result.Warnings.Add(
@@ -181,16 +185,13 @@ namespace Listenarr.Infrastructure.Library.Moving
             // Unowned exact audiobook folders may still be removed because the user
             // explicitly requested folder deletion. Implicit parent deletion remains
             // ownership-gated below.
-            if (!FileSystemSafety.TryDeleteEmptyDirectory(
-                    deleteTarget.FolderPath,
-                    deleteTarget.AllowedMutationRoots,
-                    out var reason))
+            if (!await TryDeleteAuthorizedEmptyFolderAsync(
+                    deleteTarget, originalTarget, cancellationToken))
             {
                 result.Warnings.Add("Failed to delete the audiobook folder.");
                 _logger.LogWarning(
-                    "Failed to safely delete audiobook folder {FolderPath}: {Reason}",
-                    LogRedaction.SanitizeFilePath(deleteTarget.FolderPath),
-                    LogRedaction.SanitizeText(reason));
+                    "Failed to safely delete audiobook folder {FolderPath}",
+                    LogRedaction.SanitizeFilePath(deleteTarget.FolderPath));
                 return;
             }
 

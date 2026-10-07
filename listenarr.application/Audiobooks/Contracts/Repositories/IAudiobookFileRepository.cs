@@ -46,14 +46,12 @@ namespace Listenarr.Application.Audiobooks.Contracts.Repositories
         int FileId,
         int AudiobookId,
         AudiobookFilePathState PathState,
-        string? PhysicalObjectIdentity,
-        int PhysicalIdentityVersion,
-        DateTime? PhysicalIdentityObservedAtUtc,
         string? BasePath)
     {
-        public static AudiobookFileMetadataRefreshSnapshot Capture(AudiobookFile file, string? basePath) =>
-            new(file.Id, file.AudiobookId, file.CapturePathState(), file.PhysicalObjectIdentity,
-                file.PhysicalIdentityVersion, file.PhysicalIdentityObservedAtUtc, basePath);
+        public static AudiobookFileMetadataRefreshSnapshot Capture(
+            AudiobookFile file,
+            string? basePath) =>
+            new(file.Id, file.AudiobookId, file.CapturePathState(), basePath);
     }
 
     public interface IAudiobookFileRepository
@@ -82,6 +80,13 @@ namespace Listenarr.Application.Audiobooks.Contracts.Repositories
         Task<bool> RefreshMetadataAsync(
             AudiobookFileMetadataRefreshSnapshot expectedFile,
             AudioMetadata metadata,
+            CancellationToken ct = default);
+        Task<bool> ReconcilePathIdentityAsync(
+            int fileId,
+            int audiobookId,
+            AudiobookFilePathState expectedPathState,
+            string storedPath,
+            AudiobookFilePathIdentity identity,
             CancellationToken ct = default);
         Task<bool> ReplacePhysicalGenerationAsync(
             int fileId,
@@ -118,6 +123,11 @@ namespace Listenarr.Application.Audiobooks.Contracts.Repositories
             int audiobookId,
             string? expectedPath,
             string? expectedPhysicalObjectIdentity,
+            CancellationToken ct = default);
+        Task<bool> DeletePathStateAsync(
+            int fileId,
+            int audiobookId,
+            AudiobookFilePathState expectedPathState,
             CancellationToken ct = default);
         Task<bool> DeletePhysicalGenerationWithBasePathAsync(
             int fileId,

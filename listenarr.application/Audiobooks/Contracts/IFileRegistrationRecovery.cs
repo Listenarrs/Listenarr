@@ -48,7 +48,10 @@ public sealed record FileRegistrationRecoveryReceipt(
     Guid OperationId,
     int AudiobookId,
     string SourcePath,
-    string DestinationPath);
+    string DestinationPath,
+    bool SourceRetained = false,
+    long? SourceLength = null,
+    string? SourceSha256 = null);
 
 public sealed record FileRegistrationRecoveryStatus(
     Guid OperationId,

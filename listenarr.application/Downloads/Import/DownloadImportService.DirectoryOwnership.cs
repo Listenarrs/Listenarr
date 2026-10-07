@@ -15,9 +15,7 @@ public partial class DownloadImportService
         CancellationToken cancellationToken)
     {
         var plan = filePublicationCapabilityResolver == null
-            ? sourceProof.HasDurablePhysicalObjectIdentity
-                ? FilePublicationPlan.Durable(requestedAction)
-                : FilePublicationPlan.Additive(requestedAction)
+            ? FilePublicationPlan.Durable(requestedAction)
             : await filePublicationCapabilityResolver.ResolveAsync(
                 requestedAction,
                 source,
@@ -124,9 +122,7 @@ public partial class DownloadImportService
     {
         expectedSourceProof.Validate();
         var publicationPlan = filePublicationCapabilityResolver == null
-            ? expectedSourceProof.HasDurablePhysicalObjectIdentity
-                ? FilePublicationPlan.Durable(action)
-                : FilePublicationPlan.Additive(action)
+            ? FilePublicationPlan.Durable(action)
             : await filePublicationCapabilityResolver.ResolveAsync(
                 action,
                 source,
@@ -208,7 +204,6 @@ public partial class DownloadImportService
         string managedBoundary,
         FileSystemPathSemantics semantics,
         Guid operationId,
-        string? expectedRegisteredPhysicalObjectIdentity,
         FilePublicationSourceProof expectedSourceProof,
         int audiobookId,
         CancellationToken cancellationToken)
@@ -236,23 +231,13 @@ public partial class DownloadImportService
         cancellationToken.ThrowIfCancellationRequested();
         if (publicationPlan.Mode == FilePublicationExecutionMode.Durable)
         {
-            var lease = publicationPlan.EffectiveAction == FileAction.HardlinkCopy
-                && !string.IsNullOrWhiteSpace(
-                    expectedRegisteredPhysicalObjectIdentity)
-                    ? await fileMover.PrepareActionForRegistrationAsync(
-                        publicationPlan.EffectiveAction,
-                        source,
-                        destination,
-                        operationId,
-                        expectedRegisteredPhysicalObjectIdentity,
-                        expectedSourceProof)
-                    : await fileMover.PrepareActionForRegistrationAsync(
-                        publicationPlan.EffectiveAction,
-                        source,
-                        destination,
-                        operationId,
-                        expectedRegisteredPhysicalObjectIdentity: null,
-                        expectedSourceProof);
+            var lease = await fileMover.PrepareActionForRegistrationAsync(
+                publicationPlan.EffectiveAction,
+                source,
+                destination,
+                operationId,
+                expectedRegisteredPhysicalObjectIdentity: null,
+                expectedSourceProof);
             return new FilePublicationPreparationResult(
                 lease == null
                     ? FilePublicationOutcome.Blocked
@@ -268,9 +253,7 @@ public partial class DownloadImportService
             source,
             destination,
             operationId,
-            publicationPlan.EffectiveAction == FileAction.HardlinkCopy
-                ? expectedRegisteredPhysicalObjectIdentity
-                : null,
+            expectedRegisteredPhysicalObjectIdentity: null,
             expectedSourceProof);
     }
 

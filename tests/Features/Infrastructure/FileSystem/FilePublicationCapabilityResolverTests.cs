@@ -7,6 +7,101 @@ namespace Listenarr.Tests.Features.Infrastructure.FileSystem;
 [Trait("Category", "Infrastructure")]
 public sealed class FilePublicationCapabilityResolverTests : BaseTests
 {
+    [Theory]
+    [InlineData(true, false, false, false)]
+    [InlineData(true, true, false, false)]
+    [InlineData(true, false, true, false)]
+    [InlineData(true, true, true, false)]
+    [InlineData(false, false, false, false)]
+    [InlineData(false, true, false, false)]
+    [InlineData(false, false, true, false)]
+    [InlineData(false, true, true, false)]
+    [InlineData(true, false, true, true)]
+    [InlineData(true, true, true, true)]
+    [InlineData(false, false, true, true)]
+    [InlineData(false, true, true, true)]
+    public async Task ResolveAsync_UnresolvedBoundary_DoesNotBorrowOuterOrExternalAuthority(
+        bool unresolvedSource, bool paddedRoot, bool withOuterRoot, bool equalBoundary)
+    {
+        var destinationRoot = BuildRoot();
+        var outer = BuildRoot();
+        outer.Id = 93;
+        outer.Path = FileService.GetTempDirectory("publication-source-boundary");
+        var unresolvedPath = equalBoundary ? outer.Path : Path.Join(outer.Path, "nested");
+        var unresolved = new RootFolder
+        {
+            Id = 92,
+            Name = "Unavailable boundary",
+            Path = paddedRoot ? " " + unresolvedPath + " " : unresolvedPath,
+            CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
+            PathIdentityState = PathIdentityState.Unavailable,
+            ResolvedCaseSensitivity = FileSystemCaseSensitivity.Unknown
+        };
+        var roots = new List<RootFolder> { destinationRoot, unresolved };
+        if (withOuterRoot) roots.Add(outer);
+        var repository = new Mock<IRootFolderRepository>(MockBehavior.Strict);
+        repository.Setup(candidate => candidate.GetAllAsync()).ReturnsAsync(roots);
+        var health = new Mock<IRootFolderStorageHealthResolver>(MockBehavior.Strict);
+        if (unresolvedSource)
+        {
+            health.Setup(candidate => candidate.ResolveAsync(destinationRoot, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(StrongWritableObservation());
+        }
+        var resolver = new FilePublicationCapabilityResolver(repository.Object, health.Object);
+
+        var plan = await resolver.ResolveAsync(
+            FileAction.Move,
+            Path.Join(unresolvedSource ? unresolvedPath : FileService.GetTempDirectory("unmanaged-source"), "source.m4b"),
+            Path.Join(unresolvedSource ? destinationRoot.Path : unresolvedPath, "target.m4b"),
+            ContentOnlyProof(),
+            compatibilityBatchId: Guid.NewGuid(),
+            cleanupOwner: CompatibilityCleanupOwner.Listenarr);
+
+        Assert.Equal(unresolvedSource, plan.IsAllowed);
+        Assert.Equal(unresolvedSource ? FilePublicationExecutionMode.AdditiveCopyRetainSource
+            : FilePublicationExecutionMode.Blocked, plan.Mode);
+        Assert.Equal(unresolvedSource ? FilePublicationSourceDisposition.Retained
+            : FilePublicationSourceDisposition.Unchanged, plan.SourceDisposition);
+        Assert.Null(plan.SourceRootFolderId);
+        repository.VerifyAll();
+        health.VerifyAll();
+        health.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ValidMoreSpecificBoundary_OverridesUnavailableAncestor()
+    {
+        var root = BuildRoot();
+        var ancestorPath = root.Path;
+        root.Path = Path.Join(ancestorPath, "authorized");
+        var ancestor = new RootFolder
+        {
+            Id = 92,
+            Name = "Unavailable ancestor",
+            Path = ancestorPath,
+            CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
+            PathIdentityState = PathIdentityState.Unavailable,
+            ResolvedCaseSensitivity = FileSystemCaseSensitivity.Unknown
+        };
+        var repository = new Mock<IRootFolderRepository>(MockBehavior.Strict);
+        repository.Setup(candidate => candidate.GetAllAsync()).ReturnsAsync([ancestor, root]);
+        var health = new Mock<IRootFolderStorageHealthResolver>(MockBehavior.Strict);
+        health.Setup(candidate => candidate.ResolveAsync(root, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(StrongWritableObservation());
+        var resolver = new FilePublicationCapabilityResolver(repository.Object, health.Object);
+
+        var plan = await resolver.ResolveAsync(FileAction.Move,
+            Path.Join(FileService.GetTempDirectory("external-source"), "source.m4b"),
+            Path.Join(root.Path, "target.m4b"), ContentOnlyProof());
+
+        // The existing deepest-boundary contract lets an explicit valid nested
+        // root authorize its own descendants without borrowing ancestor semantics.
+        Assert.Equal(FilePublicationExecutionMode.Durable, plan.Mode);
+        repository.VerifyAll();
+        health.VerifyAll();
+        health.VerifyNoOtherCalls();
+    }
+
     [Fact]
     public async Task ResolveAsync_WeakWritableDestination_DowngradesMoveToCopyAndRetain()
     {
@@ -77,11 +172,11 @@ public sealed class FilePublicationCapabilityResolverTests : BaseTests
     }
 
     [Fact]
-    public async Task ResolveAsync_WeakMoveWithExplicitPolicy_UsesVerifiedCleanup()
+    public async Task ResolveAsync_VerifiedMoveCapability_DoesNotRequireWeakStoragePolicy()
     {
         var root = BuildRoot();
         root.WeakStorageSourceCleanupPolicy =
-            WeakStorageSourceCleanupPolicy.DeleteSourceAfterVerifiedCopy;
+            WeakStorageSourceCleanupPolicy.RetainSource;
         root.WeakStoragePolicyRevision = 7;
         root.StorageContractRevision = 11;
         var repository = new Mock<IRootFolderRepository>(MockBehavior.Strict);
@@ -114,7 +209,7 @@ public sealed class FilePublicationCapabilityResolverTests : BaseTests
         Assert.Equal(batchId, plan.CompatibilityBatchId);
         Assert.Equal(CompatibilityCleanupOwner.Listenarr, plan.CleanupOwner);
         Assert.Equal(root.Id, plan.DestinationRootFolderId);
-        Assert.Equal(7, plan.DestinationPolicyRevision);
+        Assert.Null(plan.DestinationPolicyRevision);
         Assert.Equal(11, plan.DestinationStorageContractRevision);
         repository.VerifyAll();
         health.VerifyAll();
@@ -265,7 +360,7 @@ public sealed class FilePublicationCapabilityResolverTests : BaseTests
             CanMutateFilesystem: false,
             ConfirmationToken: null,
             CanPublishNewFiles: true,
-            CanRetireWithDurableIdentity: false,
+            CanRetireSource: false,
             CanRetireAfterVerifiedCopy: true);
 
     private static FilePublicationSourceProof DurableProof() =>
@@ -273,4 +368,15 @@ public sealed class FilePublicationCapabilityResolverTests : BaseTests
             "durable:test",
             5,
             new string('A', 64));
+
+    private static FilePublicationSourceProof ContentOnlyProof() =>
+        new("content-only:" + new string('A', 64), 5, new string('A', 64),
+            FilePublicationSourceAuthority.ContentOnly);
+
+    private static RootFolderStorageObservation StrongWritableObservation() =>
+        new(RootFolderStorageState.Healthy, RootFolderStorageReason.None, null,
+            CanConfirmCurrentFolder: true, CanChangePath: true,
+            CanMutateFilesystem: true, ConfirmationToken: null,
+            CanPublishNewFiles: true, CanRetireSource: true,
+            CanRetireAfterVerifiedCopy: true);
 }

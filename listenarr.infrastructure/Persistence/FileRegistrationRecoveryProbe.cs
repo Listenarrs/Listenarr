@@ -27,6 +27,7 @@ public sealed class FileRegistrationRecoveryProbe(
                     || journal.Action == FileAction.Copy
                     || journal.Action == FileAction.HardlinkCopy)
                 && journal.State != FileMutationJournalState.Completed
+                && journal.State != FileMutationJournalState.CompletedSourceRetained
                 && journal.State != FileMutationJournalState.RolledBack,
                 cancellationToken);
     }
@@ -60,6 +61,7 @@ public sealed class FileRegistrationRecoveryProbe(
                     || journal.Action == FileAction.Copy
                     || journal.Action == FileAction.HardlinkCopy)
                 && journal.State != FileMutationJournalState.Completed
+                && journal.State != FileMutationJournalState.CompletedSourceRetained
                 && journal.State != FileMutationJournalState.RolledBack)
             .Select(journal => new
             {

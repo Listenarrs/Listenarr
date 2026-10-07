@@ -11,6 +11,7 @@ internal sealed partial class AudiobookContentMoveService
         string directory,
         string boundary,
         FileSystemPathSemantics semantics,
+        MarkerlessSourceRetirementLease? liveAncestors,
         CancellationToken cancellationToken)
     {
         var current = directory;
@@ -39,6 +40,15 @@ internal sealed partial class AudiobookContentMoveService
                 // ownership claim, an empty ancestor has no deletion authority.
                 return;
             }
+            if (liveAncestors == null
+                || !liveAncestors.TryGetDirectory(current, out var originalDirectory)
+                || originalDirectory == null)
+            {
+                return;
+            }
+            using var currentDirectory = OpenPinnedMoveBoundaryDescendant(
+                request, current, semantics, sourceBoundary: true);
+            originalDirectory = liveAncestors.PromoteDirectory(current, currentDirectory);
             if (ownership.State == LibraryDirectoryOwnershipState.Removing)
             {
                 var interruptedRemovalCompleted = await ResumeOwnedDirectoryRemovalAsync(
@@ -46,7 +56,8 @@ internal sealed partial class AudiobookContentMoveService
                     source,
                     target,
                     ownership,
-                    cancellationToken);
+                    cancellationToken,
+                    originalDirectory);
                 if (!interruptedRemovalCompleted)
                 {
                     return;
@@ -99,7 +110,8 @@ internal sealed partial class AudiobookContentMoveService
                 source,
                 target,
                 finalOwnership,
-                cancellationToken);
+                cancellationToken,
+                originalDirectory);
             if (!removalCompleted)
             {
                 return;
@@ -138,6 +150,7 @@ internal sealed partial class AudiobookContentMoveService
         string target,
         string? boundary,
         FileSystemPathSemantics semantics,
+        MarkerlessSourceRetirementLease? liveAncestors,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(boundary))
@@ -164,6 +177,7 @@ internal sealed partial class AudiobookContentMoveService
                     current,
                     fullBoundary,
                     semantics,
+                    liveAncestors,
                     cancellationToken);
                 return;
             }

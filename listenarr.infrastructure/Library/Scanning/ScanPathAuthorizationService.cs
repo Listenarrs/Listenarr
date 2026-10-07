@@ -7,7 +7,6 @@ internal sealed partial class ScanPathAuthorizationService(
     IConfigurationService configurationService,
     IRootFolderService rootFolderService,
     IFileSystemSemanticsResolver semanticsResolver,
-    IDirectoryObjectIdentityResolver directoryObjectIdentityResolver,
     ILogger<ScanPathAuthorizationService> logger) : IScanPathAuthorizationService
 {
     public async Task<ScanPathAuthorizationResult> AuthorizeAsync(
@@ -68,7 +67,7 @@ internal sealed partial class ScanPathAuthorizationService(
         {
             return ScanPathAuthorizationResult.Rejected(
                 ScanPathAuthorizationFailure.ConfigurationUnavailable,
-                "A configured root that may contain the scan path has unavailable or ambiguous filesystem identity.");
+                "A configured root that may contain the scan path has unavailable or ambiguous path/case semantics.");
         }
         if (boundary == null)
         {
@@ -89,22 +88,25 @@ internal sealed partial class ScanPathAuthorizationService(
             boundary.RequestedMode,
             boundary.Path,
             fullPath);
-        var physicalCapture = await TryCapturePhysicalIdentityAsync(
+        var pinValidation = TryValidatePinnedScanPath(
             boundary,
             fullPath,
             cancellationToken);
-        if (!physicalCapture.Success)
+        if (!pinValidation.Success)
         {
             return ScanPathAuthorizationResult.Rejected(
                 ScanPathAuthorizationFailure.IdentityUnavailable,
-                physicalCapture.Error
-                    ?? "The scan path physical identity could not be established safely.");
+                pinValidation.Error
+                    ?? "The scan path could not be pinned and revalidated safely for this operation.");
         }
 
+        // Compatibility shape only: scan authority is path/case identity plus
+        // this live no-follow validation. No physical object token crosses the
+        // authorization boundary.
         return ScanPathAuthorizationResult.Authorized(
             fullPath,
             identity,
-            physicalCapture.Identity);
+            ScanPathPhysicalIdentity.PinnedPathOnly());
     }
 
     public async Task<ScanPathAuthorizationResult> ResolveDefaultAsync(
@@ -182,7 +184,7 @@ internal sealed partial class ScanPathAuthorizationService(
         return await AuthorizeAsync(storedOutputPath, cancellationToken);
     }
 
-    private async Task<PhysicalIdentityCapture> TryCapturePhysicalIdentityAsync(
+    private static PinValidation TryValidatePinnedScanPath(
         AuthorizedRoot authorizedRoot,
         string scanPath,
         CancellationToken cancellationToken)
@@ -196,120 +198,13 @@ internal sealed partial class ScanPathAuthorizationService(
                 scanPath,
                 authorizedRoot.Semantics.Syntax);
 
-            var limitedBoundary = false;
-            DirectoryObjectIdentityResolution? verifiedBoundaryIdentity = null;
-            if (authorizedRoot.RequiresEnrollment
-                && authorizedRoot.DirectoryObjectIdentityVersion.HasValue
-                && !string.IsNullOrWhiteSpace(authorizedRoot.DirectoryObjectIdentity))
-            {
-                var enrolled = await directoryObjectIdentityResolver.ResolveExistingAsync(
-                    canonicalBoundary,
-                    authorizedRoot.DirectoryObjectIdentityVersion.Value,
-                    authorizedRoot.DirectoryObjectIdentity,
-                    cancellationToken);
-                if (enrolled.IsAvailable)
-                {
-                    verifiedBoundaryIdentity = enrolled;
-                }
-                else
-                {
-                    var liveBoundary = await directoryObjectIdentityResolver.ResolveAsync(
-                        canonicalBoundary,
-                        cancellationToken);
-                    if (enrolled.FailureKind
-                        == DirectoryObjectIdentityFailureKind.LegacyWeakIdentity)
-                    {
-                        if (liveBoundary.IsAvailable)
-                        {
-                            verifiedBoundaryIdentity = liveBoundary;
-                            limitedBoundary = true;
-                        }
-                        else if (liveBoundary.FailureKind
-                            == DirectoryObjectIdentityFailureKind.IdentityUnsupported)
-                        {
-                            // A released weak Linux identity may still be the best
-                            // evidence this mount can provide (for example CIFS
-                            // FILEID_INO64_GEN). Keep scanning under pinned path-only
-                            // authority, but do not restore destructive generation proof.
-                            limitedBoundary = true;
-                        }
-                        else
-                        {
-                            return PhysicalIdentityCapture.Failed(
-                                liveBoundary.UnavailableReason
-                                    ?? enrolled.UnavailableReason
-                                    ?? "The configured scan root physical identity cannot be verified.");
-                        }
-                    }
-                    else if (enrolled.FailureKind
-                        == DirectoryObjectIdentityFailureKind.IdentityUnsupported)
-                    {
-                        // Distinguish an unsupported historical identity version from a
-                        // live filesystem that genuinely lacks durable generation support.
-                        if (liveBoundary.IsAvailable
-                            || liveBoundary.FailureKind
-                                != DirectoryObjectIdentityFailureKind.IdentityUnsupported)
-                        {
-                            return PhysicalIdentityCapture.Failed(
-                                enrolled.UnavailableReason
-                                    ?? "The configured scan root physical identity cannot be verified.");
-                        }
-
-                        limitedBoundary = true;
-                    }
-                    else
-                    {
-                        return PhysicalIdentityCapture.Failed(
-                            enrolled.UnavailableReason
-                                ?? "The configured scan root no longer identifies its enrolled physical generation.");
-                    }
-                }
-            }
-            else if (authorizedRoot.RequiresEnrollment)
-            {
-                var liveBoundary = await directoryObjectIdentityResolver.ResolveAsync(
-                    canonicalBoundary,
-                    cancellationToken);
-                if (liveBoundary.IsAvailable)
-                {
-                    return PhysicalIdentityCapture.Failed(
-                        "The configured scan root has not been enrolled with its available physical generation.");
-                }
-                if (liveBoundary.FailureKind
-                    != DirectoryObjectIdentityFailureKind.IdentityUnsupported)
-                {
-                    return PhysicalIdentityCapture.Failed(
-                        liveBoundary.UnavailableReason
-                            ?? "The configured scan root physical identity is unavailable.");
-                }
-
-                limitedBoundary = true;
-            }
-
-            var scanRootResolution = await directoryObjectIdentityResolver.ResolveAsync(
-                canonicalScanPath,
-                cancellationToken);
-            if (!scanRootResolution.IsAvailable
-                && scanRootResolution.FailureKind
-                    != DirectoryObjectIdentityFailureKind.IdentityUnsupported)
-            {
-                return PhysicalIdentityCapture.Failed(
-                    scanRootResolution.UnavailableReason
-                        ?? "The scan root physical identity is unavailable.");
-            }
-            var limitedScan = limitedBoundary || !scanRootResolution.IsAvailable;
-
             using var boundary = PinnedDirectoryCreation.OpenPinnedBoundary(
                 canonicalBoundary);
             cancellationToken.ThrowIfCancellationRequested();
-            if (!boundary.VisiblePathMatches()
-                || (verifiedBoundaryIdentity?.IsAvailable == true
-                    && !boundary.MatchesManagedDirectoryIdentity(
-                        verifiedBoundaryIdentity.Version,
-                        verifiedBoundaryIdentity.Value)))
+            if (!boundary.VisiblePathMatches())
             {
-                return PhysicalIdentityCapture.Failed(
-                    "The configured scan boundary changed after its enrolled physical identity was verified.");
+                return PinValidation.Failed(
+                    "The configured scan boundary changed while it was being pinned.");
             }
 
             using var scanRoot = OpenRelativeScanRoot(
@@ -319,41 +214,19 @@ internal sealed partial class ScanPathAuthorizationService(
             if (!boundary.VisiblePathMatches()
                 || !scanRoot.VisiblePathMatches())
             {
-                return PhysicalIdentityCapture.Failed(
-                    "The configured scan boundary changed while its physical identity was being captured.");
+                return PinValidation.Failed(
+                    "The scan path changed while its current directory handles were being verified.");
             }
 
-            if (limitedScan)
-            {
-                // Operation-local pinned path authority never authorizes destructive
-                // reconciliation or filesystem mutation.
-                return PhysicalIdentityCapture.Captured(
-                    ScanPathPhysicalIdentity.PinnedPathOnly());
-            }
-
-            var boundaryIdentity = boundary.GetDirectoryObjectIdentity();
-            var scanRootIdentity = scanRoot.GetDirectoryObjectIdentity();
-            if (!boundary.VisiblePathMatches()
-                || !scanRoot.VisiblePathMatches())
-            {
-                return PhysicalIdentityCapture.Failed(
-                    "The configured scan boundary changed while its physical identity was being captured.");
-            }
-
-            return PhysicalIdentityCapture.Captured(
-                new ScanPathPhysicalIdentity(
-                    boundaryIdentity,
-                    scanRootIdentity));
+            return PinValidation.Valid();
         }
         catch (Exception exception) when (exception is not (
             OperationCanceledException or OutOfMemoryException or StackOverflowException))
         {
-            return PhysicalIdentityCapture.Failed(exception switch
+            return PinValidation.Failed(exception switch
             {
                 DirectoryNotFoundException =>
                     "The scan path no longer exists beneath its configured root.",
-                _ when authorizedRoot.RequiresEnrollment =>
-                    "The configured scan root no longer identifies its enrolled physical generation.",
                 _ =>
                     "The scan path contains a linked, replaced, or unavailable directory component."
             });
@@ -397,10 +270,7 @@ internal sealed partial class ScanPathAuthorizationService(
         string Path,
         FileSystemCaseSensitivityMode RequestedMode,
         bool RequiresEnrollment,
-        PersistedRootFolderPathSemantics? PersistedSemantics,
-        int? DirectoryObjectIdentityVersion,
-        string? DirectoryObjectIdentity,
-        string? DirectoryObjectIdentityUnavailableReason);
+        PersistedRootFolderPathSemantics? PersistedSemantics);
 
     private sealed record AuthorizedRootSet(
         IReadOnlyList<AuthorizedRoot> Roots,
@@ -414,21 +284,15 @@ internal sealed partial class ScanPathAuthorizationService(
         string Path,
         FileSystemPathSemantics Semantics,
         FileSystemCaseSensitivityMode RequestedMode,
-        bool RequiresEnrollment,
-        int? DirectoryObjectIdentityVersion,
-        string? DirectoryObjectIdentity,
-        string? DirectoryObjectIdentityUnavailableReason);
+        bool RequiresEnrollment);
 
-    private sealed record PhysicalIdentityCapture(
+    private sealed record PinValidation(
         bool Success,
-        ScanPathPhysicalIdentity Identity,
         string? Error)
     {
-        public static PhysicalIdentityCapture Captured(
-            ScanPathPhysicalIdentity identity) =>
-            new(true, identity, null);
+        public static PinValidation Valid() => new(true, null);
 
-        public static PhysicalIdentityCapture Failed(string error) =>
-            new(false, default, error);
+        public static PinValidation Failed(string error) =>
+            new(false, error);
     }
 }

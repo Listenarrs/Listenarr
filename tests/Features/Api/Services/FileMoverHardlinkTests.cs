@@ -163,7 +163,7 @@ public sealed class FileMoverHardlinkTests : BaseTests
     }
 
     [Fact]
-    public async Task PerformActionOn_CopyCrashAfterTargetState_ResumesAndCompletes()
+    public async Task PerformActionOn_CopyCrashAfterTargetState_PreservesUnverifiedTarget()
     {
         var root = FileService.GetTempDirectory("markerless-copy-target-state-crash");
         var source = await FileService.GetFileAsync(root, "source.mp3", "content");
@@ -183,13 +183,14 @@ public sealed class FileMoverHardlinkTests : BaseTests
             operationId,
             FileMutationJournalState.TargetIdentityPersisted);
 
-        Assert.True(await CreateMover().PerformActionOn(
+        Assert.False(await CreateMover().PerformActionOn(
             FileAction.Copy,
             source,
             destination,
             operationId));
-        Assert.Equal("content", await File.ReadAllTextAsync(destination));
-        await AssertCompletedJournalAsync(operationId, FileAction.Copy);
+        Assert.Equal("content", await File.ReadAllTextAsync(source));
+        Assert.Equal(string.Empty, await File.ReadAllTextAsync(destination));
+        await AssertJournalStateAsync(operationId, FileMutationJournalState.NeedsAttention);
         AssertNoLibraryArtifacts(root);
     }
 

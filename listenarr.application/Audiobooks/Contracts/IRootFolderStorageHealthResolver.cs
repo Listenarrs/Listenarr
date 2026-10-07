@@ -39,14 +39,14 @@ public sealed record RootFolderStorageObservation(
     string? ConfirmationToken,
     string? Detail = null,
     bool CanPublishNewFiles = false,
-    bool CanRetireWithDurableIdentity = false,
+    bool CanRetireSource = false,
     bool CanRetireAfterVerifiedCopy = false)
 {
     public bool CanPublishAdditively =>
         CanPublishNewFiles || CanMutateFilesystem;
 
-    public bool CanRetireDurably =>
-        CanRetireWithDurableIdentity || CanMutateFilesystem;
+    public bool CanRetireSourceNow =>
+        CanRetireSource || CanMutateFilesystem;
 
     public bool CanRetireVerifiedSource =>
         CanRetireAfterVerifiedCopy || CanMutateFilesystem;

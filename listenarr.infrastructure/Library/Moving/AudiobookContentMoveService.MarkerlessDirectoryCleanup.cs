@@ -8,7 +8,7 @@ internal sealed partial class AudiobookContentMoveService
         string target,
         bool targetInsideSource,
         MoveJobEntry entry,
-        string sourceEndpointIdentity,
+        MarkerlessSourceRetirementLease sourceRetirementLease,
         CancellationToken cancellationToken)
     {
         var sourcePath = ResolveManifestPath(
@@ -96,6 +96,16 @@ internal sealed partial class AudiobookContentMoveService
             return;
         }
 
+        if (!sourceRetirementLease.TryGetDirectory(sourcePath, out var originalDirectory)
+            || originalDirectory == null
+            || !originalDirectory.VisiblePathMatches())
+        {
+            await RetainMarkerlessOwnedDirectoryIfRemovingAsync(
+                ownership, "Original live directory proof is unavailable; directory retained.", cancellationToken);
+            await RetainMarkerlessSourceEntryAsync(request, entry, cancellationToken);
+            return;
+        }
+
         var parentPath = Path.GetDirectoryName(sourcePath)
             ?? throw new MoveNeedsAttentionException(
                 "A markerless source directory has no parent.");
@@ -104,13 +114,13 @@ internal sealed partial class AudiobookContentMoveService
             source,
             parentPath,
             request.SourceSemantics,
-            sourceEndpointIdentity,
             sourceEndpoint: true))
         using (var publication = parent.OpenExistingChildForPublication(
             Path.GetFileName(sourcePath)))
         using (var directory = publication.OpenCreatedDirectoryAnchor())
         {
-            ValidateMarkerlessSourceDirectory(entry, directory);
+            ValidateMarkerlessSourceDirectory(entry, directory, originalDirectory);
+            originalDirectory = sourceRetirementLease.PromoteDirectory(sourcePath, directory);
             if (entry.CleanupState == MoveJobEntryCleanupState.Pending)
             {
                 await UpdateCleanupStateAsync(
@@ -129,7 +139,7 @@ internal sealed partial class AudiobookContentMoveService
                     source,
                     target,
                     cancellationToken);
-                ValidateMarkerlessSourceDirectory(entry, directory);
+                ValidateMarkerlessSourceDirectory(entry, directory, originalDirectory);
                 if (Directory.EnumerateFileSystemEntries(sourcePath).Any())
                 {
                     await RetainMarkerlessSourceEntryAsync(
@@ -151,7 +161,8 @@ internal sealed partial class AudiobookContentMoveService
                 source,
                 target,
                 ownership,
-                cancellationToken);
+                cancellationToken,
+                originalDirectory);
             if (!removed)
             {
                 await RetainMarkerlessSourceEntryAsync(
@@ -176,6 +187,7 @@ internal sealed partial class AudiobookContentMoveService
         string source,
         string target,
         bool targetInsideSource,
+        MarkerlessSourceRetirementLease sourceRetirementLease,
         CancellationToken cancellationToken)
     {
         var endpoints = await GetEndpointObjectIdentitiesAsync(
@@ -275,6 +287,17 @@ internal sealed partial class AudiobookContentMoveService
             return;
         }
 
+        if (!sourceRetirementLease.TryGetDirectory(source, out var originalDirectory)
+            || originalDirectory == null
+            || !originalDirectory.VisiblePathMatches())
+        {
+            await RetainMarkerlessOwnedDirectoryIfRemovingAsync(
+                ownership, "Original live directory proof is unavailable; directory retained.", cancellationToken);
+            await UpdateSourceDirectoryCleanupStateAsync(
+                request.JobId, request.LeaseToken, MoveJobEntryCleanupState.Retained, cancellationToken);
+            return;
+        }
+
         var parentPath = Path.GetDirectoryName(source)
             ?? throw new MoveNeedsAttentionException(
                 "The markerless source directory has no parent.");
@@ -287,9 +310,8 @@ internal sealed partial class AudiobookContentMoveService
             Path.GetFileName(source)))
         using (var directory = publication.OpenCreatedDirectoryAnchor())
         {
-            if (string.IsNullOrWhiteSpace(endpoints.SourceDirectoryObjectIdentity)
-                || !directory.MatchesDirectoryObjectIdentity(
-                    endpoints.SourceDirectoryObjectIdentity)
+            if (!originalDirectory.VisiblePathMatches()
+                || !directory.IdentifiesSameDirectory(originalDirectory)
                 || !PinnedDirectoryVisibleOrThrowUnavailable(
                     directory,
                     "The markerless source root is temporarily unavailable before deletion."))
@@ -297,6 +319,7 @@ internal sealed partial class AudiobookContentMoveService
                 throw new MoveNeedsAttentionException(
                     "The markerless source root changed physical generation before deletion.");
             }
+            originalDirectory = sourceRetirementLease.PromoteDirectory(source, directory);
             if (endpoints.SourceDirectoryCleanupState
                 == MoveJobEntryCleanupState.Pending)
             {
@@ -347,7 +370,8 @@ internal sealed partial class AudiobookContentMoveService
                 source,
                 target,
                 ownership,
-                cancellationToken);
+                cancellationToken,
+                originalDirectory);
             if (!removed)
             {
                 await UpdateSourceDirectoryCleanupStateAsync(

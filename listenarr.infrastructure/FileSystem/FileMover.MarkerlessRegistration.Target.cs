@@ -10,6 +10,7 @@ public partial class FileMover
         FileAction action,
         FileMoveGateLease gate,
         FileMutationJournal journal,
+        Action<PinnedDirectoryCreation.PinnedFileEntry> captureCreatedTarget,
         CancellationToken cancellationToken)
     {
         using var sourceEntry = gate.SourceParent.TryOpenExistingFile(
@@ -22,11 +23,11 @@ public partial class FileMover
         var sourceSharesDestinationVolume = sourceEntry != null
             && !ForceCrossVolumeForTest
             && sourceEntry.IsOnSameVolume(gate.DestinationParent);
+        // A Move no longer requires the destination to share the source's
+        // kernel identity. v3 publishes verified bytes, then retires the exact
+        // source only while its live pinned entry is still held.
         var requiresGenerationPreservingLink =
-            action == FileAction.HardlinkCopy
-            || (action == FileAction.Move
-                && !OperatingSystem.IsWindows()
-                && sourceSharesDestinationVolume);
+            action == FileAction.HardlinkCopy;
 
         if (existingTarget != null)
         {
@@ -51,7 +52,7 @@ public partial class FileMover
                 return await _fileMutationJournalStore!.AdvanceAsync(
                     journal.OperationId,
                     FileMutationJournalState.TargetIdentityPersisted,
-                    existingTarget.GetObjectIdentity(),
+                    targetPhysicalObjectIdentity: null,
                     audiobookId: null,
                     error: null,
                     cancellationToken);
@@ -85,7 +86,6 @@ public partial class FileMover
                     "The markerless registration journal disappeared.");
         }
 
-        string targetIdentity;
         PinnedDirectoryCreation.PinnedFileEntry? publishedHardlink = null;
         if (requiresGenerationPreservingLink
             && sourceSharesDestinationVolume)
@@ -99,7 +99,7 @@ public partial class FileMover
                 publishedHardlink = sourceEntry.CreateHardLinkTo(
                     gate.DestinationParent,
                     gate.DestinationName);
-                targetIdentity = publishedHardlink.GetObjectIdentity();
+                captureCreatedTarget(publishedHardlink);
                 if (AfterMarkerlessRegistrationTargetCreatedBeforeStateForTestAsync != null)
                 {
                     await AfterMarkerlessRegistrationTargetCreatedBeforeStateForTestAsync();
@@ -107,7 +107,7 @@ public partial class FileMover
                 journal = await _fileMutationJournalStore!.AdvanceAsync(
                     journal.OperationId,
                     FileMutationJournalState.TargetIdentityPersisted,
-                    targetIdentity,
+                    targetPhysicalObjectIdentity: null,
                     audiobookId: null,
                     error: null,
                     cancellationToken);
@@ -150,7 +150,7 @@ public partial class FileMover
             cancellationToken);
         using var created = gate.DestinationParent.CreateNewFile(
             gate.DestinationName);
-        targetIdentity = created.GetObjectIdentity();
+        captureCreatedTarget(created);
         if (AfterMarkerlessRegistrationTargetCreatedBeforeStateForTestAsync != null)
         {
             await AfterMarkerlessRegistrationTargetCreatedBeforeStateForTestAsync();
@@ -158,7 +158,7 @@ public partial class FileMover
         journal = await _fileMutationJournalStore!.AdvanceAsync(
             journal.OperationId,
             FileMutationJournalState.TargetIdentityPersisted,
-            targetIdentity,
+            targetPhysicalObjectIdentity: null,
             audiobookId: null,
             error: null,
             cancellationToken);
@@ -172,13 +172,23 @@ public partial class FileMover
     private async Task<FileMutationJournal> VerifyMarkerlessRegistrationTargetAsync(
         FileMoveGateLease gate,
         FileMutationJournal journal,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool requirePhysicalIdentity = true,
+        bool allowContentPublication = true,
+        PinnedDirectoryCreation.PinnedFileEntry? liveTargetEntry = null)
     {
-        using var targetEntry = gate.DestinationParent.TryOpenExistingFile(
-            gate.DestinationName,
-            requireDeleteAccess: false);
+        using var reopenedTarget = liveTargetEntry == null
+            ? gate.DestinationParent.TryOpenExistingFile(
+                gate.DestinationName,
+                requireDeleteAccess: false)
+            : null;
+        var targetEntry = liveTargetEntry ?? reopenedTarget;
         if (targetEntry == null
-            || !TargetMatchesMarkerlessJournal(targetEntry, journal))
+            || !VisiblePathMatchesOrThrowUnavailable(
+                targetEntry,
+                "The registration destination is temporarily unavailable during verification.")
+            || (requirePhysicalIdentity
+                && !TargetMatchesMarkerlessJournal(targetEntry, journal)))
         {
             await MarkMarkerlessRegistrationNeedsAttentionAsync(
                 journal,
@@ -196,6 +206,19 @@ public partial class FileMover
                 journal,
                 cancellationToken))
         {
+            if (!allowContentPublication)
+            {
+                await MarkMarkerlessRegistrationNeedsAttentionAsync(
+                    journal,
+                    "The interrupted registration destination has unverified content; it was preserved for review.",
+                    cancellationToken);
+                return await _fileMutationJournalStore!.GetAsync(
+                    journal.OperationId,
+                    cancellationToken)
+                    ?? throw new InvalidOperationException(
+                        "The markerless registration journal disappeared.");
+            }
+
             using var sourceEntry = gate.SourceParent.TryOpenExistingFile(
                 gate.SourceName,
                 requireDeleteAccess: false);
@@ -225,7 +248,11 @@ public partial class FileMover
             {
                 await AfterMarkerlessRegistrationTargetWrittenBeforeVerifiedStateForTestAsync();
             }
-            if (!TargetMatchesMarkerlessJournal(targetEntry, journal)
+            if (!VisiblePathMatchesOrThrowUnavailable(
+                    targetEntry,
+                    "The registration destination is temporarily unavailable after content publication.")
+                || (requirePhysicalIdentity
+                    && !TargetMatchesMarkerlessJournal(targetEntry, journal))
                 || !await MatchesMarkerlessTargetContentAsync(
                     targetEntry,
                     journal,
@@ -248,13 +275,18 @@ public partial class FileMover
     private static async Task<bool> MarkerlessRegistrationTargetMatchesAsync(
         FileMoveGateLease gate,
         FileMutationJournal journal,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool requirePhysicalIdentity = true)
     {
         using var targetEntry = gate.DestinationParent.TryOpenExistingFile(
             gate.DestinationName,
             requireDeleteAccess: false);
         return targetEntry != null
-            && TargetMatchesMarkerlessJournal(targetEntry, journal)
+            && VisiblePathMatchesOrThrowUnavailable(
+                targetEntry,
+                "The registration destination is temporarily unavailable while its content is being verified.")
+            && (!requirePhysicalIdentity
+                || TargetMatchesMarkerlessJournal(targetEntry, journal))
             && await MatchesMarkerlessTargetContentAsync(
                 targetEntry,
                 journal,

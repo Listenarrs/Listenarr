@@ -8,7 +8,8 @@ public partial class FileMover
 {
     private static RegistrationPublicationMatchOutcome ProbeMarkerlessJournalTarget(
         FileMutationJournal journal,
-        string targetPhysicalObjectIdentity)
+        string? targetPhysicalObjectIdentity,
+        bool requirePhysicalIdentity)
     {
         try
         {
@@ -25,10 +26,11 @@ public partial class FileMover
                 parent,
                 createMissing: false);
             if (journal.ProtocolVersion != FileMutationProtocol.Current
-                || string.IsNullOrWhiteSpace(
-                    journal.DestinationParentDirectoryObjectIdentity)
-                || !anchor.MatchesDirectoryObjectIdentity(
-                    journal.DestinationParentDirectoryObjectIdentity))
+                || (requirePhysicalIdentity
+                    && (string.IsNullOrWhiteSpace(
+                            journal.DestinationParentDirectoryObjectIdentity)
+                        || !anchor.MatchesDirectoryObjectIdentity(
+                            journal.DestinationParentDirectoryObjectIdentity))))
             {
                 return RegistrationPublicationMatchOutcome.Mismatch;
             }
@@ -51,7 +53,10 @@ public partial class FileMover
                 }
                 if (openOutcome != PinnedFileOpenOutcome.Opened
                     || entry == null
-                    || !entry.MatchesObjectIdentity(targetPhysicalObjectIdentity))
+                    || (requirePhysicalIdentity
+                        && (string.IsNullOrWhiteSpace(targetPhysicalObjectIdentity)
+                            || !entry.MatchesObjectIdentity(
+                                targetPhysicalObjectIdentity))))
                 {
                     return RegistrationPublicationMatchOutcome.Mismatch;
                 }
@@ -79,7 +84,7 @@ public partial class FileMover
                 return string.Equals(
                     hash,
                     journal.SourceSha256,
-                    StringComparison.Ordinal)
+                    StringComparison.OrdinalIgnoreCase)
                     ? RegistrationPublicationMatchOutcome.Match
                     : RegistrationPublicationMatchOutcome.Mismatch;
             }

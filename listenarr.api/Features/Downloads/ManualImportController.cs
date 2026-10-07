@@ -213,9 +213,8 @@ public partial class ManualImportController : ControllerBase
 
         try
         {
-            // Fetch root folders once for the whole batch (used for path containment validation)
+            // Source ordering is resolved before waiting; destination authority is refreshed under the gate.
             var rootFolders = await _rootFolderService.GetAllAsync();
-            var appSettings = await _configService.GetApplicationSettingsAsync();
             var sourceSemantics = await ResolvePathSemanticsAsync(
                 sourceDirectory,
                 rootFolders,
@@ -246,6 +245,8 @@ public partial class ManualImportController : ControllerBase
                     .ToArray(),
                 async (recoveryReceipts, operationToken) =>
                 {
+                    rootFolders = await _rootFolderService.GetAllAsync();
+                    var appSettings = await _configService.GetApplicationSettingsAsync();
                     var planningBasePaths = new Dictionary<int, string>();
                     var consumedRecoveryOperationIds = new HashSet<Guid>();
                     var planningDestinationResolutions =

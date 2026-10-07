@@ -157,6 +157,7 @@ public sealed partial class RootFolderRelocationService
                         || journal.Action == FileAction.Copy
                         || journal.Action == FileAction.HardlinkCopy)
                     && journal.State != FileMutationJournalState.Completed
+                    && journal.State != FileMutationJournalState.CompletedSourceRetained
                     && journal.State != FileMutationJournalState.RolledBack,
                 cancellationToken))
         {
@@ -174,12 +175,27 @@ public sealed partial class RootFolderRelocationService
                         || journal.AudiobookFileId
                             == FileMutationOwner.RegistrationCompanionFile
                         ? journal.State != FileMutationJournalState.Completed
-                        : journal.State != FileMutationJournalState.OwnerMetadataReconciled),
+                            && journal.State != FileMutationJournalState.CompletedSourceRetained
+                            && journal.State != FileMutationJournalState.RolledBack
+                        : journal.State != FileMutationJournalState.OwnerMetadataReconciled
+                            && journal.State != FileMutationJournalState.RolledBack),
                 cancellationToken))
         {
             throw new ApplicationConflictException(
                 "rename_recovery_pending",
                 "An unresolved file organize operation owns this audiobook's path state. Complete restart recovery before repairing tracked file records.");
+        }
+
+        if (await db.VerifiedFileRenameJournals.AsNoTracking().AnyAsync(
+                journal => journal.AudiobookId == audiobookId
+                    && journal.State != VerifiedFileRenameState.Completed
+                    && journal.State != VerifiedFileRenameState.CompletedSourceRetained
+                    && journal.State != VerifiedFileRenameState.RolledBack,
+                cancellationToken))
+        {
+            throw new ApplicationConflictException(
+                "rename_recovery_pending",
+                "An interrupted verified organize operation owns this audiobook's path state. Resolve recovery before repairing tracked file records.");
         }
 
         if (await db.AudiobookDeletionIntents
@@ -460,24 +476,6 @@ public sealed partial class RootFolderRelocationService
         {
             return false;
         }
-    }
-
-    private static string GetTargetRelativeDisplayPath(
-        string? storedPath,
-        string targetRoot,
-        FileSystemPathSemantics targetSemantics)
-    {
-        if (!string.IsNullOrWhiteSpace(storedPath)
-            && FileSystemPathIdentity.TryGetRelativePathWithinBase(
-                targetRoot,
-                storedPath,
-                targetSemantics,
-                out var relativePath))
-        {
-            return relativePath.Length == 0 ? "." : relativePath;
-        }
-
-        return "Tracked file";
     }
 
     private sealed record SkippedMetadataRepairState(

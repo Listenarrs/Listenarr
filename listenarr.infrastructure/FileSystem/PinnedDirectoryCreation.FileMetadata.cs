@@ -2,6 +2,14 @@ namespace Listenarr.Infrastructure.FileSystem;
 
 internal sealed partial class PinnedDirectoryCreation
 {
+    // Optional native observations are diagnostic only. Unsupported generation
+    // APIs must not block content publication; unavailable I/O still fails closed.
+    internal static string CaptureDiagnosticIdentity(Func<string> capture)
+    {
+        try { return capture(); }
+        catch (NotSupportedException) { return string.Empty; }
+    }
+
     internal sealed partial class PinnedFileEntry
     {
         internal long GetLength()

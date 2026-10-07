@@ -39,6 +39,42 @@ public partial class AudiobookFileService
         if (audiobook == null
             || currentFile == null
             || currentFile.AudiobookId != audiobookId
+            || string.IsNullOrWhiteSpace(currentFile.Path))
+        {
+            return false;
+        }
+
+        var resolvedPathIdentity = await filePathIdentityResolver.ResolveAsync(
+            audiobook,
+            currentFile.Path,
+            cancellationToken);
+        if (resolvedPathIdentity.State != PathIdentityState.Valid
+            || string.IsNullOrWhiteSpace(resolvedPathIdentity.OwnershipKey))
+        {
+            return false;
+        }
+
+        var ownership = await audiobookFileRepository.CheckOwnershipAsync(
+            audiobookId,
+            fileId,
+            resolvedPathIdentity,
+            cancellationToken);
+        if (ownership.Outcome != AudiobookFileOwnershipCheckOutcome.Available
+            || !await audiobookFileRepository.ReconcilePathIdentityAsync(
+                fileId,
+                audiobookId,
+                currentFile.CapturePathState(),
+                currentFile.Path,
+                resolvedPathIdentity,
+                cancellationToken))
+        {
+            return false;
+        }
+
+        currentFile = await audiobookFileRepository.GetByIdAsync(
+            fileId,
+            cancellationToken);
+        if (currentFile == null
             || currentFile.PathIdentityState != PathIdentityState.Valid)
         {
             return false;
@@ -46,7 +82,9 @@ public partial class AudiobookFileService
 
         // Capture immutable expected state before extraction; the persistence port
         // compares it atomically and writes metadata fields only.
-        var expectedFile = AudiobookFileMetadataRefreshSnapshot.Capture(currentFile, audiobook.BasePath);
+        var expectedFile = AudiobookFileMetadataRefreshSnapshot.Capture(
+            currentFile,
+            audiobook.BasePath);
         if (!await CanRefreshOwnedMetadataAsync(audiobook, expectedFile, lease, cancellationToken))
         {
             return false;

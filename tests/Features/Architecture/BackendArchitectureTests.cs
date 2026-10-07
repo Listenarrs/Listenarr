@@ -148,7 +148,6 @@ public sealed class BackendArchitectureTests : BaseTests
             "Listenarr.Tests.Features.Infrastructure.Library.Moving.MoveBackgroundService_FailureTests",
             "Listenarr.Tests.Features.Infrastructure.Library.Moving.MoveBackgroundService_FilePathPreservationTests",
             "Listenarr.Tests.Features.Infrastructure.Metadata.Parsing.PathMetadataParserTests",
-            "Listenarr.Tests.Features.Infrastructure.Migrations.MigrationMetadataTests",
             "Listenarr.Tests.Features.Infrastructure.Migrations.ReleasedSchemaUpgradeTests",
             "Listenarr.Tests.Features.Infrastructure.Notifications.Delivery.NotificationServiceTests",
             "Listenarr.Tests.Features.Infrastructure.Notifications.Discord.DiscordBotServiceTests",
@@ -1046,7 +1045,7 @@ public sealed class BackendArchitectureTests : BaseTests
             architecture,
             StringComparison.Ordinal);
         Assert.Contains(
-            "root-folder physical identities, active root relocations, directory ownership, durable audiobook-deletion intents, owner-bound file-rename journals, then audiobook-file identities",
+            "root path/case capabilities, active relocations, directory ownership, deletion intents, owner-bound rename journals, and audiobook-file path identities",
             architecture,
             StringComparison.Ordinal);
     }

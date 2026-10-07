@@ -210,17 +210,10 @@ public partial class ManualImportController
                         destinationPath,
                         pathPlan.AudiobookBasePath,
                         cancellationToken);
-                if (!destinationReservation.ReusesExistingFile
-                    || sourceProof.HasDurablePhysicalObjectIdentity
-                    || ownership.Outcome
-                        != AudiobookFileOwnershipCheckOutcome.Available)
-                {
-                    break;
-                }
-
-                // Byte equality is not ownership. Exclude an unowned existing
-                // pathname and continue planning a new no-overwrite destination.
-                destinationTracker.Commit(destinationReservation);
+                // A byte-identical existing destination may be adopted when
+                // ownership is available. Content proof is the idempotency evidence;
+                // persisted kernel identity is intentionally irrelevant.
+                break;
             }
             var authoritativeBasePath = pathPlan.AudiobookBasePath;
             if (string.IsNullOrWhiteSpace(authoritativeBasePath))
@@ -260,9 +253,7 @@ public partial class ManualImportController
             }
 
             var publicationPlan = _filePublicationCapabilityResolver == null
-                ? sourceProof.HasDurablePhysicalObjectIdentity
-                    ? FilePublicationPlan.Durable(action)
-                    : FilePublicationPlan.Additive(action)
+                ? FilePublicationPlan.Durable(action)
                 : await _filePublicationCapabilityResolver.ResolveAsync(
                     action,
                     item.FullPath,
@@ -309,6 +300,9 @@ public partial class ManualImportController
                     ownership.ExistingFile?.PhysicalObjectIdentity,
                     sourceProof,
                     cancellationToken);
+            var metadataEnrichmentDeferred = preparation.RegistrationLease != null
+                && !preparation.RegistrationLease.SupportsMetadataWrite
+                && !string.IsNullOrWhiteSpace(audiobook.Asin);
             using (var registrationLease = preparation.RegistrationLease)
             {
                 if (registrationLease == null)
@@ -374,7 +368,7 @@ public partial class ManualImportController
                     };
                 }
 
-                if (registrationLease.HasDurablePhysicalObjectIdentity
+                if (registrationLease.SupportsMetadataWrite
                     && !string.IsNullOrWhiteSpace(audiobook.Asin))
                 {
                     try
@@ -416,8 +410,11 @@ public partial class ManualImportController
                 RequestedAction = action.ToString(),
                 EffectiveAction = publicationPlan.EffectiveAction.ToString(),
                 SourceDisposition = publicationPlan.SourceDisposition.ToString(),
-                WarningCode = publicationPlan.ReasonCode,
-                Warning = publicationPlan.Message
+                WarningCode = publicationPlan.ReasonCode
+                    ?? (metadataEnrichmentDeferred ? "metadata_enrichment_deferred" : null),
+                Warning = metadataEnrichmentDeferred
+                    ? $"{publicationPlan.Message} ASIN tagging was deferred to preserve verified import recovery.".Trim()
+                    : publicationPlan.Message
             };
         }
         catch (Exception ex) when (ex is not OperationCanceledException

@@ -10,6 +10,96 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Scanning;
 public sealed class AudiobookScanServiceTests : BaseTests
 {
     [Fact]
+    public async Task ScanAsync_NestedDirectoryReplacedAfterDiscovery_PreservesTrackedRows()
+    {
+        var root = FileService.GetTempDirectory("scan-service-nested-snapshot-race");
+        var bookDirectory = Directory.CreateDirectory(Path.Join(root, "Author", "Book")).FullName;
+        var original = await FileService.GetFileAsync(bookDirectory, "Book.m4b", "original-audio");
+        var displaced = Path.Join(root, "OriginalBook");
+        await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+            .WithOutputPath(FileService.GetTempPath()).Build());
+        var authorization = await _provider.GetRequiredService<IScanPathAuthorizationService>()
+            .AuthorizeAsync(root);
+        Assert.True(authorization.IsAuthorized, authorization.Error);
+        var identity = Assert.IsType<PathIdentitySnapshot>(authorization.Identity);
+        var checks = 0;
+        var replaced = false;
+        var authorizer = new Mock<IScanPathAuthorizationService>(MockBehavior.Strict);
+        authorizer.Setup(service => service.AuthorizeAsync(root, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                if (++checks == 2)
+                {
+                    try
+                    {
+                        Directory.Move(bookDirectory, displaced);
+                        Directory.CreateDirectory(bookDirectory);
+                        replaced = true;
+                    }
+                    catch (IOException) when (OperatingSystem.IsWindows())
+                    {
+                        // Retained native handles may prevent replacement altogether.
+                    }
+                }
+                return authorization;
+            });
+        Init(builder => builder.WithSingleton(authorizer.Object));
+        var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+            .WithTitle("Book").WithAuthor("Author").WithBasePath(root).Build());
+        var tracked = await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
+            .WithAudiobook(audiobook).WithPath(original).Build());
+
+        var failure = await Record.ExceptionAsync(() =>
+            _provider.GetRequiredService<IAudiobookScanService>().ScanAsync(
+                new AudiobookScanCommand(audiobook.Id, root, identity)));
+
+        if (replaced) Assert.IsType<InvalidOperationException>(failure);
+        else Assert.Null(failure);
+        Assert.True(checks >= 2);
+
+        var surviving = Assert.Single(await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id));
+        Assert.Equal(tracked.Id, surviving.Id);
+        Assert.Equal(original, surviving.Path);
+        Assert.Equal("original-audio", await File.ReadAllTextAsync(Path.Join(replaced ? displaced : bookDirectory, "Book.m4b")));
+    }
+
+    [Fact]
+    public async Task ScanAsync_FileReplacedAfterDiscovery_DoesNotClaimReplacement()
+    {
+        var root = FileService.GetTempDirectory("scan-service-file-snapshot-race");
+        var original = await FileService.GetFileAsync(root, "Requested Book.m4b", "original-audio");
+        var displaced = Path.Join(root, "original.displaced");
+        await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+            .WithOutputPath(FileService.GetTempPath()).Build());
+        var authorization = await _provider.GetRequiredService<IScanPathAuthorizationService>()
+            .AuthorizeAsync(root);
+        Assert.True(authorization.IsAuthorized, authorization.Error);
+        var identity = Assert.IsType<PathIdentitySnapshot>(authorization.Identity);
+        var checks = 0;
+        var authorizer = new Mock<IScanPathAuthorizationService>(MockBehavior.Strict);
+        authorizer.Setup(service => service.AuthorizeAsync(root, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                if (++checks == 2)
+                {
+                    File.Move(original, displaced);
+                    File.WriteAllText(original, "replacement-audio");
+                }
+                return authorization;
+            });
+        Init(builder => builder.WithSingleton(authorizer.Object));
+        var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+            .WithTitle("Requested Book").WithBasePath(root).Build());
+
+        var result = await _provider.GetRequiredService<IAudiobookScanService>().ScanAsync(
+            new AudiobookScanCommand(audiobook.Id, root, identity));
+        Assert.Equal(0, result.CreatedCount);
+        Assert.Empty(await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id));
+        Assert.Equal("original-audio", await File.ReadAllTextAsync(displaced));
+        Assert.Equal("replacement-audio", await File.ReadAllTextAsync(original));
+    }
+
+    [Fact]
     public async Task ScanAsync_StableIdentifierBoundary_DoesNotClaimOutsideExactTitleFile()
     {
         var root = FileService.GetTempDirectory("scan-service-identifier-title");
@@ -253,15 +343,12 @@ public sealed class AudiobookScanServiceTests : BaseTests
         {
             var claimed = Assert.Single(tracked);
             Assert.Equal("original-generation", claimed.Format);
-            var physicalIdentityProperty = Assert.IsAssignableFrom<System.Reflection.PropertyInfo>(
-                typeof(AudiobookFile).GetProperty("PhysicalObjectIdentity"));
-            Assert.False(string.IsNullOrWhiteSpace(
-                Assert.IsType<string>(physicalIdentityProperty.GetValue(claimed))));
+            Assert.Null(claimed.PhysicalObjectIdentity);
         }
     }
 
     [Fact]
-    public async Task ScanAsync_TrackedPathReplaced_ReconcilesPhysicalGeneration()
+    public async Task ScanAsync_TrackedPathReplaced_PreservesPathOwnershipWithoutPhysicalBackfill()
     {
         var root = FileService.GetTempDirectory("scan-service-tracked-replacement");
         var candidate = await FileService.GetFileAsync(
@@ -278,8 +365,7 @@ public sealed class AudiobookScanServiceTests : BaseTests
         Assert.Equal(1, initialResult.CreatedCount);
         var original = Assert.Single(
             await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id));
-        Assert.False(string.IsNullOrWhiteSpace(original.PhysicalObjectIdentity));
-        var originalIdentity = original.PhysicalObjectIdentity;
+        Assert.Null(original.PhysicalObjectIdentity);
         var displaced = Path.Join(
             Path.GetDirectoryName(root)!,
             $"original-generation-{Guid.NewGuid():N}.m4b");
@@ -291,11 +377,11 @@ public sealed class AudiobookScanServiceTests : BaseTests
         var replacement = Assert.Single(
             await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id));
         Assert.Equal(original.Id, replacement.Id);
-        Assert.NotEqual(originalIdentity, replacement.PhysicalObjectIdentity);
+        Assert.Null(replacement.PhysicalObjectIdentity);
         Assert.Equal(candidate, replacement.Path);
         Assert.Equal(0, replacementResult.CreatedCount);
         Assert.Empty(replacementResult.RemovedFiles);
-        Assert.Contains(
+        Assert.DoesNotContain(
             replacementResult.Diagnostics,
             diagnostic => diagnostic.Code == "TrackedFileGenerationReplaced");
     }
@@ -319,7 +405,13 @@ public sealed class AudiobookScanServiceTests : BaseTests
         Assert.Equal(1, initialResult.CreatedCount);
         var original = Assert.Single(
             await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id));
-        var preferredIdentity = Assert.IsType<string>(original.PhysicalObjectIdentity);
+        Assert.Null(original.PhysicalObjectIdentity);
+        string preferredIdentity;
+        using (var lease = PinnedAudiobookFileRegistrationLease.Open(
+            Path.Join(root, "Requested Book.m4b")))
+        {
+            preferredIdentity = lease.PhysicalObjectIdentity;
+        }
         Assert.StartsWith("linux-generation:", preferredIdentity, StringComparison.Ordinal);
         var mergedV1AugmentedIdentity =
             LinuxIdentityTestHelper.ToMergedV1AugmentedIdentity(preferredIdentity);
@@ -565,8 +657,7 @@ public sealed class AudiobookScanServiceTests : BaseTests
                 .ScanAsync(new AudiobookScanCommand(
                     audiobook.Id,
                     root,
-                    identity,
-                    physicalIdentity)));
+                    identity)));
 
         Assert.Contains("root changed", exception.Message);
         Assert.Empty(
@@ -577,7 +668,7 @@ public sealed class AudiobookScanServiceTests : BaseTests
     }
 
     [Fact]
-    public async Task ScanAsync_PhysicalAuthorityChangesDuringDiscovery_DoesNotMutate()
+    public async Task ScanAsync_PersistedPhysicalAuthorityChanges_DoesNotBlockCurrentPathScan()
     {
         var root = FileService.GetTempDirectory("scan-service-physical-authority-race");
         _ = await FileService.GetFileAsync(root, "Physical Race Book.m4b", "audio");
@@ -600,13 +691,9 @@ public sealed class AudiobookScanServiceTests : BaseTests
         };
         var authorization = new Mock<IScanPathAuthorizationService>(
             MockBehavior.Strict);
-        authorization.SetupSequence(service => service.AuthorizeAsync(
+        authorization.Setup(service => service.AuthorizeAsync(
                 root,
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(ScanPathAuthorizationResult.Authorized(
-                root,
-                identity,
-                originalPhysical))
             .ReturnsAsync(ScanPathAuthorizationResult.Authorized(
                 root,
                 identity,
@@ -618,20 +705,18 @@ public sealed class AudiobookScanServiceTests : BaseTests
                 .WithTitle("Physical Race Book")
                 .Build());
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            _provider.GetRequiredService<IAudiobookScanService>()
-                .ScanAsync(new AudiobookScanCommand(
-                    audiobook.Id,
-                    root,
-                    identity,
-                    originalPhysical)));
+        var result = await _provider.GetRequiredService<IAudiobookScanService>()
+            .ScanAsync(new AudiobookScanCommand(
+                audiobook.Id,
+                root,
+                identity));
 
-        Assert.Contains("physical", exception.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Empty(
+        Assert.Single(result.AttributedFiles);
+        Assert.Single(
             await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id));
         var persisted = Assert.IsType<Audiobook>(
             await _audiobookRepository.GetByIdSnapshotAsync(audiobook.Id));
-        Assert.Null(persisted.BasePath);
+        Assert.Equal(root, persisted.BasePath);
     }
 
     [Fact]
@@ -715,8 +800,7 @@ public sealed class AudiobookScanServiceTests : BaseTests
             .ScanAsync(new AudiobookScanCommand(
                 audiobook.Id,
                 root,
-                pathIdentity,
-                physicalIdentity));
+                pathIdentity));
 
         Assert.False(result.IsComplete);
         Assert.False(result.ReconciliationPerformed);
@@ -897,7 +981,7 @@ public sealed class AudiobookScanServiceTests : BaseTests
     }
 
     [LinuxFact]
-    public async Task ScanAsync_PinnedPathOnly_ClaimsVisiblePathAndStagesMissingConfirmation()
+    public async Task ScanAsync_PinnedPathOnly_ClaimsVisiblePathAndReconcilesMissingPath()
     {
         var root = FileService.GetTempDirectory("scan-service-limited-storage");
         var bookDirectory = Path.Join(root, "Author", "Book");
@@ -948,29 +1032,25 @@ public sealed class AudiobookScanServiceTests : BaseTests
             .ScanAsync(new AudiobookScanCommand(
                 audiobook.Id,
                 root,
-                pathIdentity,
-                physicalIdentity));
+                pathIdentity));
 
         var tracked = await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id);
-        Assert.Contains(tracked, file => file.Id == missing.Id);
+        Assert.DoesNotContain(tracked, file => file.Id == missing.Id);
         var visible = Assert.Single(tracked, file => file.Path == visiblePath);
         Assert.Null(visible.PhysicalObjectIdentity);
-        Assert.False(result.ReconciliationPerformed);
-        Assert.Empty(result.RemovedFiles);
-        Assert.Contains(result.Diagnostics, diagnostic =>
-            diagnostic.Code == "WeakStorageMissingFilesRequireConfirmation");
-        var pending = Assert.Single(await _provider
+        Assert.True(result.ReconciliationPerformed);
+        Assert.Contains(result.RemovedFiles, file => file.Id == missing.Id);
+        Assert.DoesNotContain(result.Diagnostics, diagnostic =>
+            diagnostic.Code == "WeakStorageMissingFilesRequireConfirmation"
+            || diagnostic.Code == "MetadataEnrichmentSkippedLimitedStorage");
+        Assert.Empty(await _provider
             .GetRequiredService<IWeakStorageScanCandidateStore>()
             .GetPendingAsync(audiobook.Id));
-        Assert.Equal(missing.Id, pending.AudiobookFileId);
-        Assert.Equal(missingPath, pending.ExpectedResolvedPath);
-        Assert.Contains(result.Diagnostics, diagnostic =>
-            diagnostic.Code == "MetadataEnrichmentSkippedLimitedStorage");
         authorization.VerifyAll();
     }
 
     [Fact]
-    public async Task RegisterExistingFileAsync_DurableStorage_ClaimsPhysicalGenerationInPlace()
+    public async Task RegisterExistingFileAsync_DurableStorage_ClaimsPathWithoutPhysicalAuthority()
     {
         var root = FileService.GetTempDirectory("register-existing-durable-root");
         var bookDirectory = Path.Join(root, "Author", "Book");
@@ -1005,7 +1085,7 @@ public sealed class AudiobookScanServiceTests : BaseTests
         var tracked = Assert.Single(
             await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id));
         Assert.Equal(filePath, tracked.Path);
-        Assert.False(string.IsNullOrWhiteSpace(tracked.PhysicalObjectIdentity));
+        Assert.Null(tracked.PhysicalObjectIdentity);
         Assert.Equal("manual-import", tracked.Source);
     }
 
@@ -1331,8 +1411,7 @@ public sealed class AudiobookScanServiceTests : BaseTests
             .ScanAsync(new AudiobookScanCommand(
                 audiobook.Id,
                 root,
-                pathIdentity,
-                physicalIdentity));
+                pathIdentity));
 
         Assert.Contains(candidate, result.AttributedFiles);
         Assert.Equal(0, result.CreatedCount);
@@ -1402,8 +1481,7 @@ public sealed class AudiobookScanServiceTests : BaseTests
             .ScanAsync(new AudiobookScanCommand(
                 audiobook.Id,
                 root,
-                pathIdentity,
-                physicalIdentity));
+                pathIdentity));
 
         Assert.Contains(candidate, result.AttributedFiles);
         Assert.Equal(0, result.CreatedCount);
@@ -1447,7 +1525,6 @@ public sealed class AudiobookScanServiceTests : BaseTests
                 audiobook.Id,
                 scanRoot,
                 pathIdentity,
-                physicalIdentity,
                 IsAuthoritativeScope: isAuthoritativeScope));
     }
 }

@@ -6,7 +6,7 @@ namespace Listenarr.Infrastructure.Library.Scanning;
 
 internal static partial class ScanFileDiscovery
 {
-    private const string PinnedPathOnlyIdentity = "scan:pinned-path-only";
+    internal const string PinnedPathOnlyIdentity = "scan:pinned-path-only";
 
     internal static EnumerationResult CollectCandidates(
         IFileSystem fileSystem,
@@ -15,7 +15,9 @@ internal static partial class ScanFileDiscovery
         ILogger logger,
         FileSystemPathSemantics semantics,
         PinnedDirectoryCreation.PinnedDirectoryAnchor? pinnedScanRoot,
-        bool requireDurableGenerationProof = true)
+        bool requireDurableGenerationProof = true,
+        Action<PinnedDirectoryCreation.PinnedDirectoryAnchor>? directoryCaptured = null,
+        Action<PinnedDirectoryCreation.PinnedFileEntry>? fileCaptured = null)
     {
         var candidates = new HashSet<string>(semantics.Comparer);
         var enumeratedDirectories = new HashSet<string>(semantics.Comparer);
@@ -119,6 +121,7 @@ internal static partial class ScanFileDiscovery
                                 requireDurableGenerationProof
                                     ? pinnedFile.GetObjectIdentity()
                                     : PinnedPathOnlyIdentity;
+                            fileCaptured?.Invoke(pinnedFile);
                             localFileLengths[canonicalFile] = length;
                         }
                         catch (Exception exception) when (
@@ -214,6 +217,7 @@ internal static partial class ScanFileDiscovery
                         FileSystemPathIdentity.Canonicalize(
                             directory.FullPath,
                             semantics.Syntax);
+                    directoryCaptured?.Invoke(directory);
                     enumeratedDirectories.Add(canonicalDirectory);
                     directoryObjectIdentities[canonicalDirectory] =
                         pending.ObjectIdentity;

@@ -151,7 +151,7 @@
               />
               <span class="result-title">{{ titleFor(result.audiobookId) }}</span>
               <span class="result-detail">
-                {{ result.success ? 'Organized successfully' : result.error || 'Organize failed' }}
+                {{ resultDetail(result) }}
               </span>
             </div>
           </div>
@@ -327,6 +327,14 @@ function toggleSelected(id: number) {
     next.add(id)
   }
   selected.value = next
+}
+
+function resultDetail(result: RenameResult) {
+  if (!result.success) return result.error || 'Organize failed'
+  const retainedCount = result.renamedFiles.filter((file) => file.sourceRetained).length
+  return retainedCount > 0
+    ? `Organized successfully; original sources retained for ${retainedCount} file${retainedCount === 1 ? '' : 's'}.`
+    : 'Organized successfully'
 }
 
 function titleFor(audiobookId: number) {

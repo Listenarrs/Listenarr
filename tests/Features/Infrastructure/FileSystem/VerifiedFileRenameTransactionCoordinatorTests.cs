@@ -9,6 +9,175 @@ namespace Listenarr.Tests.Features.Infrastructure.FileSystem;
 [Trait("Category", "Infrastructure")]
 public sealed class VerifiedFileRenameTransactionCoordinatorTests : BaseTests
 {
+    [LinuxTheory]
+    [InlineData(22)]
+    [InlineData(38)]
+    [InlineData(95)]
+    public async Task PrepareAsync_NoReplaceRenameUnsupported_PublishesPinnedHardlinkAndRollsBack(int nativeError)
+    {
+        var scenario = await CreateScenarioAsync();
+        var coordinator = CreateCoordinator();
+        coordinator.PublicationRenameErrorForTest = nativeError;
+        var result = await coordinator.PrepareAsync(scenario.Source, scenario.Destination,
+            scenario.OperationId, scenario.BatchId, scenario.Manifest, scenario.Audiobook.Id,
+            scenario.AudiobookFile.Id, scenario.SourceProof);
+
+        Assert.True(result.Success, result.Error);
+        await using var lease = result.Lease!;
+        Assert.Equal("verified-organize-audio", await File.ReadAllTextAsync(scenario.Destination));
+        Assert.Equal("verified-organize-audio", await File.ReadAllTextAsync(scenario.Source));
+        Assert.False(File.Exists(scenario.StagingPath));
+        Assert.True(await lease.RollBackAsync());
+        Assert.False(File.Exists(scenario.Destination));
+        Assert.Equal(VerifiedFileRenameState.RolledBack, (await GetJournalAsync(scenario.OperationId)).State);
+    }
+
+    [LinuxFact]
+    public async Task PrepareAsync_FallbackDestinationOccupied_PreservesForeignFileAndSource()
+    {
+        var scenario = await CreateScenarioAsync();
+        var coordinator = CreateCoordinator();
+        coordinator.PublicationRenameErrorForTest = 22;
+        coordinator.BeforeFallbackPublicationForTest = () => File.WriteAllText(scenario.Destination, "foreign");
+        var result = await coordinator.PrepareAsync(scenario.Source, scenario.Destination,
+            scenario.OperationId, scenario.BatchId, scenario.Manifest, scenario.Audiobook.Id,
+            scenario.AudiobookFile.Id, scenario.SourceProof);
+
+        Assert.False(result.Success);
+        Assert.Null(result.Lease);
+        Assert.Equal("foreign", await File.ReadAllTextAsync(scenario.Destination));
+        Assert.Equal("verified-organize-audio", await File.ReadAllTextAsync(scenario.Source));
+        Assert.False(File.Exists(scenario.StagingPath));
+    }
+
+    [LinuxFact]
+    public async Task PrepareAsync_InterruptedAfterFallbackLink_RestartRetainsBothNamesAndSource()
+    {
+        var scenario = await CreateScenarioAsync();
+        var coordinator = CreateCoordinator();
+        coordinator.PublicationRenameErrorForTest = 22;
+        coordinator.AfterFallbackPublicationForTest = () => throw new OperationCanceledException("Injected interruption after link.");
+        await Assert.ThrowsAsync<OperationCanceledException>(() => coordinator.PrepareAsync(
+            scenario.Source, scenario.Destination, scenario.OperationId, scenario.BatchId,
+            scenario.Manifest, scenario.Audiobook.Id, scenario.AudiobookFile.Id, scenario.SourceProof));
+        var recovery = _provider.GetRequiredService<IVerifiedFileRenameRecoveryService>();
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            await recovery.ReconcileAsync();
+            Assert.Equal("verified-organize-audio", await File.ReadAllTextAsync(scenario.Source));
+            Assert.Equal("verified-organize-audio", await File.ReadAllTextAsync(scenario.Destination));
+            Assert.Equal("verified-organize-audio", await File.ReadAllTextAsync(scenario.StagingPath));
+            Assert.Equal(VerifiedFileRenameState.NeedsAttention, (await GetJournalAsync(scenario.OperationId)).State);
+        }
+    }
+
+    [LinuxTheory]
+    [InlineData(13)]
+    [InlineData(17)]
+    public async Task PrepareAsync_RenameDeniedOrCollision_DoesNotAttemptFallback(int nativeError)
+    {
+        var scenario = await CreateScenarioAsync();
+        var coordinator = CreateCoordinator();
+        coordinator.PublicationRenameErrorForTest = nativeError;
+        var fallbackAttempted = false;
+        coordinator.BeforeFallbackPublicationForTest = () => fallbackAttempted = true;
+        var result = await coordinator.PrepareAsync(scenario.Source, scenario.Destination,
+            scenario.OperationId, scenario.BatchId, scenario.Manifest, scenario.Audiobook.Id,
+            scenario.AudiobookFile.Id, scenario.SourceProof);
+        Assert.False(result.Success);
+        Assert.False(fallbackAttempted);
+        Assert.False(File.Exists(scenario.Destination));
+        Assert.Equal("verified-organize-audio", await File.ReadAllTextAsync(scenario.Source));
+        Assert.Equal(VerifiedFileRenameState.RolledBack, (await GetJournalAsync(scenario.OperationId)).State);
+    }
+
+    [LinuxFact]
+    public async Task PrepareAsync_FallbackStagingReplaced_DoesNotDeleteReplacement()
+    {
+        var scenario = await CreateScenarioAsync();
+        var coordinator = CreateCoordinator();
+        coordinator.PublicationRenameErrorForTest = 22;
+        coordinator.AfterFallbackPublicationForTest = () =>
+        {
+            File.Move(scenario.StagingPath, scenario.StagingPath + ".saved");
+            File.WriteAllText(scenario.StagingPath, "foreign staging");
+        };
+        var result = await coordinator.PrepareAsync(scenario.Source, scenario.Destination,
+            scenario.OperationId, scenario.BatchId, scenario.Manifest, scenario.Audiobook.Id,
+            scenario.AudiobookFile.Id, scenario.SourceProof);
+        Assert.False(result.Success);
+        Assert.Equal("foreign staging", await File.ReadAllTextAsync(scenario.StagingPath));
+        Assert.Equal("verified-organize-audio", await File.ReadAllTextAsync(scenario.StagingPath + ".saved"));
+        Assert.Equal("verified-organize-audio", await File.ReadAllTextAsync(scenario.Source));
+        Assert.False(File.Exists(scenario.Destination));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PrepareAsync_UnresolvedNestedConfiguredRoot_DoesNotBorrowOuterBoundary(bool paddedRoot)
+    {
+        var scenario = await CreateScenarioAsync();
+        var nested = Directory.CreateDirectory(Path.Join(scenario.Root.Path, "Author")).FullName;
+        await _rootFolderRepository.AddAsync(new RootFolder
+        {
+            Name = "Unresolved nested root",
+            Path = paddedRoot ? " " + nested + " " : nested,
+            CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
+            PathIdentityState = PathIdentityState.Unavailable,
+            ResolvedCaseSensitivity = FileSystemCaseSensitivity.Unknown,
+        });
+        var result = await CreateCoordinator().PrepareAsync(scenario.Source, scenario.Destination,
+            scenario.OperationId, scenario.BatchId, scenario.Manifest, scenario.Audiobook.Id,
+            scenario.AudiobookFile.Id, scenario.SourceProof);
+        Assert.False(result.Success);
+        Assert.Null(result.Lease);
+        Assert.Contains("unresolved configured boundary", result.Error);
+        Assert.Equal("verified-organize-audio", await File.ReadAllTextAsync(scenario.Source));
+        Assert.False(File.Exists(scenario.Destination));
+    }
+
+    [DirectoryLinkTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LinkedConfiguredBoundary_PrepareCommitAndFinish_UsesLiveBoundaryAndRestartRetainsSource(bool restart)
+    {
+        var scenario = await CreateLinkedScenarioAsync();
+        var preparation = await CreateCoordinator().PrepareAsync(scenario.Source, scenario.Destination,
+            scenario.OperationId, scenario.BatchId, scenario.Manifest, scenario.Audiobook.Id,
+            scenario.AudiobookFile.Id, scenario.SourceProof);
+        Assert.True(preparation.Success, preparation.Error);
+        Assert.NotNull(preparation.Lease);
+        await using var lease = preparation.Lease!;
+        var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var file = await db.AudiobookFiles.SingleAsync(candidate => candidate.Id == scenario.AudiobookFile.Id);
+            var identity = await _provider.GetRequiredService<IAudiobookFilePathIdentityResolver>()
+                .ResolveAsync(scenario.Audiobook, scenario.Destination);
+            Assert.Equal(PathIdentityState.Valid, identity.State);
+            file.ApplyPathIdentity(scenario.Destination, identity);
+            await new FileRenameCommitStore(db, TimeProvider.System)
+                .CommitOwnerMetadataAsync(scenario.Audiobook.Id, [scenario.OperationId]);
+        }
+        if (restart)
+        {
+            await lease.DisposeAsync();
+            var recovery = _provider.GetRequiredService<IVerifiedFileRenameRecoveryService>();
+            await recovery.ReconcileAsync();
+            await recovery.ReconcileAsync();
+        }
+        else
+        {
+            Assert.Equal(VerifiedFileRenameRetirementOutcome.Completed, await lease.CompleteSourceRetirementAsync());
+        }
+        Assert.Equal(restart, File.Exists(scenario.Source));
+        Assert.Equal("verified-organize-audio", await File.ReadAllTextAsync(scenario.Destination));
+        Assert.Equal(restart ? VerifiedFileRenameState.CompletedSourceRetained : VerifiedFileRenameState.Completed,
+            (await GetJournalAsync(scenario.OperationId)).State);
+        Assert.True(Directory.Exists(scenario.Root.Path));
+    }
+
     [Fact]
     public void ResolveDestinationHierarchySegments_CaseInsensitiveUnixAlias_DoesNotTraverseAboveRoot()
     {
@@ -24,10 +193,19 @@ public sealed class VerifiedFileRenameTransactionCoordinatorTests : BaseTests
         Assert.DoesNotContain("..", segments);
     }
 
-    [Fact]
-    public async Task PrepareAsync_ContentOnlySource_PublishesTargetWithoutRetiringSource_AndRollsBackExactly()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PrepareAsync_ContentOnlySource_PublishesTargetWithoutRetiringSource_AndRollsBackExactly(bool managedRoot)
     {
         var scenario = await CreateScenarioAsync();
+        if (!managedRoot)
+        {
+            var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+            await using var db = await factory.CreateDbContextAsync();
+            db.RootFolders.Remove(await db.RootFolders.SingleAsync(root => root.Id == scenario.Root.Id));
+            await db.SaveChangesAsync();
+        }
         var coordinator = CreateCoordinator();
         var preparation = await coordinator.PrepareAsync(
             scenario.Source,
@@ -86,6 +264,74 @@ public sealed class VerifiedFileRenameTransactionCoordinatorTests : BaseTests
         Assert.Equal(
             VerifiedFileRenameState.Completed,
             (await GetJournalAsync(scenario.OperationId)).State);
+    }
+
+    [Theory]
+    [InlineData(false, VerifiedFileRenameState.RolledBack)]
+    [InlineData(true, VerifiedFileRenameState.NeedsAttention)]
+    public async Task PrepareAsync_InterruptedBeforeTargetVerification_RestartPreservesContentAndOwner(
+        bool afterPublication,
+        VerifiedFileRenameState expectedRecoveryState)
+    {
+        var scenario = await CreateScenarioAsync();
+        var identityResolver = _provider.GetRequiredService<IAudiobookFilePathIdentityResolver>();
+        var sourceIdentity = await identityResolver.ResolveAsync(scenario.Audiobook, scenario.Source);
+        Assert.Equal(PathIdentityState.Valid, sourceIdentity.State);
+        await using (var db = await _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>()
+            .CreateDbContextAsync())
+        {
+            var file = await db.AudiobookFiles.SingleAsync(file => file.Id == scenario.AudiobookFile.Id);
+            file.ApplyPathIdentity(scenario.Source, sourceIdentity);
+            await db.SaveChangesAsync();
+        }
+        var coordinator = CreateCoordinator();
+        Action interrupt = () => throw new OperationCanceledException("Injected publication interruption.");
+        if (afterPublication)
+        {
+            coordinator.AfterTargetPublicationForTest = interrupt;
+        }
+        else
+        {
+            coordinator.AfterJournalPlannedForTest = interrupt;
+        }
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => coordinator.PrepareAsync(
+            scenario.Source,
+            scenario.Destination,
+            scenario.OperationId,
+            scenario.BatchId,
+            scenario.Manifest,
+            scenario.Audiobook.Id,
+            scenario.AudiobookFile.Id,
+            scenario.SourceProof));
+
+        Assert.Equal(
+            VerifiedFileRenameState.Planned,
+            (await GetJournalAsync(scenario.OperationId)).State);
+        var recovery = new VerifiedFileRenameRecoveryService(
+            _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>(),
+            _provider.GetRequiredService<IAudiobookFilePathIdentityResolver>(),
+            TimeProvider.System,
+            NullLogger<VerifiedFileRenameRecoveryService>.Instance);
+
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            await recovery.ReconcileAsync();
+
+            Assert.Equal("verified-organize-audio", await File.ReadAllTextAsync(scenario.Source));
+            Assert.Equal(afterPublication, File.Exists(scenario.Destination));
+            if (afterPublication)
+            {
+                Assert.Equal("verified-organize-audio", await File.ReadAllTextAsync(scenario.Destination));
+            }
+            Assert.False(File.Exists(scenario.StagingPath));
+            Assert.False(File.Exists(scenario.RetirementPath));
+            Assert.Equal(expectedRecoveryState, (await GetJournalAsync(scenario.OperationId)).State);
+            await using var db = await _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>()
+                .CreateDbContextAsync();
+            Assert.Equal(scenario.Source, (await db.AudiobookFiles.AsNoTracking()
+                .SingleAsync(file => file.Id == scenario.AudiobookFile.Id)).Path);
+        }
     }
 
     [LinuxFact]
@@ -174,7 +420,7 @@ public sealed class VerifiedFileRenameTransactionCoordinatorTests : BaseTests
                 CanMutateFilesystem: false,
                 ConfirmationToken: null,
                 CanPublishNewFiles: true,
-                CanRetireWithDurableIdentity: false,
+                CanRetireSource: false,
                 CanRetireAfterVerifiedCopy: true));
         return new VerifiedFileRenameTransactionCoordinator(
             _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>(),
@@ -184,9 +430,63 @@ public sealed class VerifiedFileRenameTransactionCoordinatorTests : BaseTests
             NullLogger<VerifiedFileRenameTransactionCoordinator>.Instance);
     }
 
-    private async Task<Scenario> CreateScenarioAsync()
+    [DirectoryLinkFact]
+    public async Task PrepareAsync_IntermediateSourceLink_PreservesForeignContentWithoutPublishing()
     {
-        var rootPath = FileService.GetTempDirectory("verified-organize-coordinator");
+        var scenario = await CreateScenarioAsync();
+        var foreign = FileService.GetTempDirectory("verified-organize-foreign");
+        var foreignBook = Directory.CreateDirectory(Path.Join(foreign, "Book")).FullName;
+        var foreignSource = Path.Join(foreignBook, "old.m4b");
+        File.Copy(scenario.Source, foreignSource);
+        var ancestorLink = Path.Join(scenario.Root.Path, "LinkedAuthor");
+        Directory.CreateSymbolicLink(ancestorLink, foreign);
+        var linkedSource = Path.Join(ancestorLink, "Book", "old.m4b");
+        var manifest = VerifiedFileRenameBatchManifest.Create(
+        [
+            new VerifiedFileRenameBatchMember(
+                scenario.AudiobookFile.Id, linkedSource, scenario.Destination)
+        ]);
+        try
+        {
+            var preparation = await CreateCoordinator().PrepareAsync(
+                linkedSource,
+                scenario.Destination,
+                scenario.OperationId,
+                scenario.BatchId,
+                manifest,
+                scenario.Audiobook.Id,
+                scenario.AudiobookFile.Id,
+                scenario.SourceProof);
+
+            Assert.False(preparation.Success);
+            Assert.Null(preparation.Lease);
+            Assert.False(File.Exists(scenario.Destination));
+            Assert.Equal("verified-organize-audio", await File.ReadAllTextAsync(foreignSource));
+            Assert.True(File.Exists(scenario.Source));
+            var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+            await using var db = await factory.CreateDbContextAsync();
+            Assert.False(await db.VerifiedFileRenameJournals.AnyAsync(
+                journal => journal.OperationId == scenario.OperationId));
+        }
+        finally
+        {
+            Directory.Delete(ancestorLink);
+        }
+    }
+
+    private Task<Scenario> CreateLinkedScenarioAsync()
+    {
+        var directory = FileService.GetTempDirectory("verified-organize-coordinator-linked");
+        var physical = Directory.CreateDirectory(Path.Join(directory, "physical")).FullName;
+        var linked = Path.Join(directory, "linked");
+        Directory.CreateSymbolicLink(linked, physical);
+        return CreateScenarioAsync(linked);
+    }
+
+    private async Task<Scenario> CreateScenarioAsync(string? configuredRootPath = null)
+    {
+        var rootPath = configuredRootPath
+            ?? FileService.GetTempDirectory("verified-organize-coordinator");
         var root = await AddAuthorizedRootAsync(rootPath);
         root.StorageContractRevision = 11;
         await _rootFolderRepository.UpdateAsync(root);

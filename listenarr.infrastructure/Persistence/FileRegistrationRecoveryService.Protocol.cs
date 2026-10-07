@@ -11,11 +11,16 @@ public sealed partial class FileRegistrationRecoveryService
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var unsupportedQuery = db.FileMutationJournals
             .AsNoTracking()
+            .Where(RegistrationPublicationPredicate)
             .Where(journal =>
-                journal.ProtocolVersion != FileMutationProtocol.Current
+                (journal.ProtocolVersion <= 0
+                    || journal.ProtocolVersion > FileMutationProtocol.Current)
                 && journal.State != FileMutationJournalState.Completed
+                && journal.State
+                    != FileMutationJournalState.CompletedSourceRetained
                 && journal.State != FileMutationJournalState.RolledBack
-                && journal.State != FileMutationJournalState.OwnerMetadataReconciled);
+                && journal.State != FileMutationJournalState.OwnerMetadataReconciled
+                && journal.State != FileMutationJournalState.NeedsAttention);
         if (operationId is Guid scopedOperationId)
         {
             unsupportedQuery = unsupportedQuery.Where(
@@ -37,13 +42,17 @@ public sealed partial class FileRegistrationRecoveryService
 
         var now = timeProvider.GetUtcNow().UtcDateTime;
         const string reason =
-            "This interrupted file mutation predates durable parent-directory generation fencing and cannot be resumed automatically.";
+            "This file publication uses an unsupported operation-evidence protocol. Its artifacts were preserved and only this operation requires repair.";
         if (!db.Database.IsRelational())
         {
             var trackedQuery = db.FileMutationJournals
+                .Where(RegistrationPublicationPredicate)
                 .Where(journal =>
-                    journal.ProtocolVersion != FileMutationProtocol.Current
+                    (journal.ProtocolVersion <= 0
+                        || journal.ProtocolVersion > FileMutationProtocol.Current)
                     && journal.State != FileMutationJournalState.Completed
+                    && journal.State
+                        != FileMutationJournalState.CompletedSourceRetained
                     && journal.State != FileMutationJournalState.RolledBack
                     && journal.State != FileMutationJournalState.OwnerMetadataReconciled
                     && journal.State != FileMutationJournalState.NeedsAttention);
@@ -65,9 +74,13 @@ public sealed partial class FileRegistrationRecoveryService
         else
         {
             var trackedQuery = db.FileMutationJournals
+                .Where(RegistrationPublicationPredicate)
                 .Where(journal =>
-                    journal.ProtocolVersion != FileMutationProtocol.Current
+                    (journal.ProtocolVersion <= 0
+                        || journal.ProtocolVersion > FileMutationProtocol.Current)
                     && journal.State != FileMutationJournalState.Completed
+                    && journal.State
+                        != FileMutationJournalState.CompletedSourceRetained
                     && journal.State != FileMutationJournalState.RolledBack
                     && journal.State != FileMutationJournalState.OwnerMetadataReconciled
                     && journal.State != FileMutationJournalState.NeedsAttention);
@@ -87,7 +100,7 @@ public sealed partial class FileRegistrationRecoveryService
                     cancellationToken);
         }
 
-        throw new InvalidOperationException(
-            $"File-mutation journal {unsupported[0].OperationId} uses legacy recovery protocol state {unsupported[0].State} and requires operator repair before filesystem mutations can resume.");
+        // Protocol ambiguity is operation-scoped. Startup recovery records
+        // NeedsAttention for those rows and continues reconciling unrelated work.
     }
 }

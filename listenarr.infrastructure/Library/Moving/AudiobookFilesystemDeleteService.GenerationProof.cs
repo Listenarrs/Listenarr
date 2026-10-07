@@ -1,19 +1,30 @@
+using Listenarr.Domain.Common;
+
 namespace Listenarr.Infrastructure.Library.Moving;
 
 public sealed partial class AudiobookFilesystemDeleteService
 {
     internal static bool VerifyTrackedFileCleanupComplete(
-        IReadOnlyDictionary<string, string> trackedPhysicalObjectIdentities)
-    {
-        foreach (var tracked in trackedPhysicalObjectIdentities)
-        {
-            if (PhysicalObjectIdentitySafety.IsKnownWeak(tracked.Value))
-            {
-                return false;
-            }
+        IReadOnlyCollection<string> trackedFilePaths)
+        => VerifyTrackedFileCleanupCompleteCoreAsync(trackedFilePaths,
+            path => Task.FromResult(PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                Path.GetDirectoryName(path)!, createMissing: false))).GetAwaiter().GetResult();
 
-            var parentPath = Path.GetDirectoryName(tracked.Key);
-            var fileName = Path.GetFileName(tracked.Key);
+    private Task<bool> VerifyTrackedFileCleanupCompleteAsync(
+        IReadOnlyCollection<string> trackedFilePaths,
+        FileSystemPathSemantics semantics,
+        CancellationToken cancellationToken) =>
+        VerifyTrackedFileCleanupCompleteCoreAsync(trackedFilePaths,
+            path => OpenPinnedDeleteFileParentAsync(path, semantics, cancellationToken));
+
+    private static async Task<bool> VerifyTrackedFileCleanupCompleteCoreAsync(
+        IReadOnlyCollection<string> trackedFilePaths,
+        Func<string, Task<PinnedDirectoryCreation.PinnedDirectoryAnchor>> openParent)
+    {
+        foreach (var trackedPath in trackedFilePaths)
+        {
+            var parentPath = Path.GetDirectoryName(trackedPath);
+            var fileName = Path.GetFileName(trackedPath);
             if (string.IsNullOrWhiteSpace(parentPath)
                 || string.IsNullOrWhiteSpace(fileName))
             {
@@ -23,9 +34,7 @@ public sealed partial class AudiobookFilesystemDeleteService
             PinnedDirectoryCreation.PinnedDirectoryAnchor parent;
             try
             {
-                parent = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
-                    parentPath,
-                    createMissing: false);
+                parent = await openParent(trackedPath);
             }
             catch (Exception exception) when (
                 FileSystemSafety.IsProvenMissingPathException(exception))
@@ -63,10 +72,10 @@ public sealed partial class AudiobookFilesystemDeleteService
                 {
                     return false;
                 }
-                if (entry.MatchesObjectIdentity(tracked.Value))
-                {
-                    return false;
-                }
+
+                // A currently visible tracked path means cleanup is incomplete.
+                // Persisted physical identity is deliberately irrelevant here.
+                return false;
             }
         }
 

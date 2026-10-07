@@ -31,6 +31,37 @@ public sealed class FileMutationJournalStoreTests : BaseTests
         Assert.Equal(1, await db.FileMutationJournals.CountAsync());
     }
 
+    [Fact]
+    public async Task GetOrCreateAsync_OperationEvidence_AllowsOmittedDiagnosticIdentities()
+    {
+        var operationId = Guid.NewGuid();
+        var claim = CreateClaim(operationId) with
+        {
+            SourceParentDirectoryObjectIdentity = null,
+            DestinationParentDirectoryObjectIdentity = null,
+            SourcePhysicalObjectIdentity = null
+        };
+        var store = CreateStore();
+
+        var created = await store.GetOrCreateAsync(
+            claim,
+            CancellationToken.None);
+        var advanced = await store.AdvanceAsync(
+            operationId,
+            FileMutationJournalState.TargetVerified,
+            targetPhysicalObjectIdentity: null,
+            audiobookId: null,
+            error: null,
+            CancellationToken.None);
+
+        Assert.Equal(FileMutationProtocol.OperationEvidence, created.ProtocolVersion);
+        Assert.Equal(string.Empty, created.SourceParentDirectoryObjectIdentity);
+        Assert.Equal(string.Empty, created.DestinationParentDirectoryObjectIdentity);
+        Assert.Equal(string.Empty, created.SourcePhysicalObjectIdentity);
+        Assert.Equal(FileMutationJournalState.TargetVerified, advanced.State);
+        Assert.Null(advanced.TargetPhysicalObjectIdentity);
+    }
+
     [WindowsFact]
     public async Task GetOrCreateAsync_CaseAliasRetryReturnsExistingJournal()
     {

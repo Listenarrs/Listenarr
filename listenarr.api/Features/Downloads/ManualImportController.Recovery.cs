@@ -49,9 +49,16 @@ public partial class ManualImportController
         var sourceCapability = await _filePublicationSourceCapability.CheckAsync(
             receipt.SourcePath,
             cancellationToken);
-        if (sourceCapability.IsSupported
-            || sourceCapability.FailureKind
-                != FilePublicationSourceCapabilityFailureKind.Missing)
+        var sourceMatchesReceipt = receipt.SourceRetained
+            ? sourceCapability.IsSupported
+                && sourceCapability.SourceProof is { } sourceProof
+                && sourceProof.Length == receipt.SourceLength
+                && string.Equals(sourceProof.Sha256, receipt.SourceSha256,
+                    StringComparison.OrdinalIgnoreCase)
+            : !sourceCapability.IsSupported
+                && sourceCapability.FailureKind
+                    == FilePublicationSourceCapabilityFailureKind.Missing;
+        if (!sourceMatchesReceipt)
         {
             return null;
         }
@@ -92,7 +99,12 @@ public partial class ManualImportController
             Success = true,
             SourcePath = item.FullPath,
             DestinationPath = receipt.DestinationPath,
-            Audiobook = audiobook
+            Audiobook = audiobook,
+            RequestedAction = action.ToString(),
+            EffectiveAction = FileAction.Move.ToString(),
+            SourceDisposition = receipt.SourceRetained
+                ? FilePublicationSourceDisposition.Retained.ToString()
+                : FilePublicationSourceDisposition.Retired.ToString()
         };
     }
 

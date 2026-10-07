@@ -12,8 +12,8 @@ namespace Listenarr.Tests.Features.Infrastructure.FileSystem;
 [Trait("Category", "Infrastructure")]
 public sealed class DockerWeakStorageOrganiseContractTests : BaseTests
 {
-    [NativeWeakStorageRemountFact]
-    public async Task OwnerCommittedVerifiedOrganise_AfterWeakCifsRemount_RetainsOldSourceSafely()
+    [NativeStorageRemountFact]
+    public async Task OwnerCommittedVerifiedOrganise_AfterMountedStorageRemount_RetainsOldSourceSafely()
     {
         var mountPath = Environment.GetEnvironmentVariable(
             NativeStorageRemountFactAttribute.PathEnvironmentVariable)!;
@@ -36,8 +36,8 @@ public sealed class DockerWeakStorageOrganiseContractTests : BaseTests
         }
     }
 
-    [NativeWeakStorageRemountFact]
-    public async Task SourceQuarantinedVerifiedOrganise_AfterWeakCifsRemount_PreservesRetirementArtifact()
+    [NativeStorageRemountFact]
+    public async Task SourceQuarantinedVerifiedOrganise_AfterMountedStorageRemount_PreservesRetirementArtifact()
     {
         var mountPath = Environment.GetEnvironmentVariable(
             NativeStorageRemountFactAttribute.PathEnvironmentVariable)!;
@@ -60,8 +60,8 @@ public sealed class DockerWeakStorageOrganiseContractTests : BaseTests
         }
     }
 
-    [NativeWeakStorageFact]
-    public async Task VerifiedOrganise_TrackedFile_SucceedsOnWeakCifs()
+    [NativeStorageIdentityFact]
+    public async Task VerifiedOrganise_TrackedFile_SucceedsOnMountedStorage()
     {
         var mountPath = Environment.GetEnvironmentVariable(
             NativeStorageIdentityFactAttribute.PathEnvironmentVariable)!;
@@ -75,7 +75,7 @@ public sealed class DockerWeakStorageOrganiseContractTests : BaseTests
         var root = new RootFolderBuilder()
             .WithName("Native Weak CIFS Organise")
             .WithPath(rootPath)
-            .WithCaseSensitivityMode(FileSystemCaseSensitivityMode.Sensitive)
+            .WithCaseSensitivityMode(FileSystemCaseSensitivityMode.Auto)
             .Build();
         root.ResolvedCaseSensitivity = FileSystemCaseSensitivity.Sensitive;
         root.PathIdentityState = PathIdentityState.Valid;
@@ -86,19 +86,20 @@ public sealed class DockerWeakStorageOrganiseContractTests : BaseTests
         root.StorageContractRevision = 12;
         await _rootFolderRepository.AddAsync(root);
 
-        var health = await _provider
-            .GetRequiredService<IRootFolderStorageHealthResolver>()
-            .ResolveAsync(root);
-        Assert.Equal(RootFolderStorageState.Limited, health.State);
-        Assert.Equal(RootFolderStorageReason.IdentityUnsupported, health.Reason);
-        Assert.True(health.CanPublishAdditively);
-        Assert.True(health.CanRetireVerifiedSource);
-        Assert.False(health.CanMutateFilesystem);
-
         var sourceFolder = Path.Join(rootPath, "Old");
         Directory.CreateDirectory(sourceFolder);
         var sourcePath = Path.Join(sourceFolder, "old-name.m4b");
         await File.WriteAllTextAsync(sourcePath, "native-verified-organise-audio");
+
+        var health = await _provider
+            .GetRequiredService<IRootFolderStorageHealthResolver>()
+            .ResolveAsync(root);
+        Assert.Equal(RootFolderStorageState.Healthy, health.State);
+        Assert.Equal(RootFolderStorageReason.None, health.Reason);
+        Assert.True(health.CanPublishAdditively);
+        Assert.True(health.CanRetireVerifiedSource);
+        Assert.True(health.CanMutateFilesystem);
+
         var sourceCapability = await _provider
             .GetRequiredService<IFilePublicationSourceCapability>()
             .CheckAsync(sourcePath);
@@ -166,8 +167,16 @@ public sealed class DockerWeakStorageOrganiseContractTests : BaseTests
         ]));
 
         Assert.True(result.Success, result.Error);
-        Assert.False(File.Exists(sourcePath));
+        var renamedFile = Assert.Single(result.RenamedFiles);
+        Assert.True(renamedFile.Success, renamedFile.Error);
+        Assert.Equal(renamedFile.SourceRetained, File.Exists(sourcePath));
+        if (renamedFile.SourceRetained)
+        {
+            Assert.Equal("native-verified-organise-audio", await File.ReadAllTextAsync(sourcePath));
+        }
         Assert.True(File.Exists(filePreview.NewPath));
+        Assert.Equal("native-verified-organise-audio", await File.ReadAllTextAsync(filePreview.NewPath));
+        Assert.Equal(FileSystemCaseSensitivityMode.Auto, root.CaseSensitivityMode);
         Assert.True(Directory.Exists(preview.NewFolderPath));
 
         var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
@@ -175,7 +184,9 @@ public sealed class DockerWeakStorageOrganiseContractTests : BaseTests
         var journal = await db.VerifiedFileRenameJournals
             .AsNoTracking()
             .SingleAsync(candidate => candidate.AudiobookId == audiobook.Id);
-        Assert.Equal(VerifiedFileRenameState.Completed, journal.State);
+        Assert.Equal(renamedFile.SourceRetained
+            ? VerifiedFileRenameState.CompletedSourceRetained
+            : VerifiedFileRenameState.Completed, journal.State);
         Assert.Equal(trackedFile.Id, journal.AudiobookFileId);
         Assert.Equal(1, journal.ExpectedBatchMemberCount);
         Assert.False(File.Exists(journal.StagingPath));
@@ -296,8 +307,8 @@ public sealed class DockerWeakStorageOrganiseContractTests : BaseTests
         await db.SaveChangesAsync();
 
         var health = await CreateNativeStorageHealthResolver().ResolveAsync(root);
-        Assert.Equal(RootFolderStorageState.Limited, health.State);
-        Assert.Equal(RootFolderStorageReason.IdentityUnsupported, health.Reason);
+        Assert.Equal(RootFolderStorageState.Healthy, health.State);
+        Assert.Equal(RootFolderStorageReason.None, health.Reason);
         Assert.True(File.Exists(source));
         Assert.True(File.Exists(destination));
     }
@@ -323,6 +334,7 @@ public sealed class DockerWeakStorageOrganiseContractTests : BaseTests
             NullLogger<VerifiedFileRenameRecoveryService>.Instance);
 
         await recovery.ReconcileAsync();
+        await recovery.ReconcileAsync();
 
         await using var db = await factory.CreateDbContextAsync();
         var journal = await db.VerifiedFileRenameJournals
@@ -333,6 +345,10 @@ public sealed class DockerWeakStorageOrganiseContractTests : BaseTests
             journal.State);
         Assert.True(File.Exists(journal.SourcePath));
         Assert.True(File.Exists(journal.DestinationPath));
+        Assert.Equal("native-organise-remount-audio",
+            await File.ReadAllTextAsync(journal.SourcePath));
+        Assert.Equal("native-organise-remount-audio",
+            await File.ReadAllTextAsync(journal.DestinationPath));
         Assert.Contains("retained", journal.Error, StringComparison.OrdinalIgnoreCase);
 
         var trackedFile = await db.AudiobookFiles
@@ -344,8 +360,8 @@ public sealed class DockerWeakStorageOrganiseContractTests : BaseTests
         Assert.Null(trackedFile.PhysicalObjectIdentity);
         var root = await db.RootFolders.AsNoTracking().SingleAsync();
         var health = await CreateNativeStorageHealthResolver().ResolveAsync(root);
-        Assert.Equal(RootFolderStorageState.Limited, health.State);
-        Assert.Equal(RootFolderStorageReason.IdentityUnsupported, health.Reason);
+        Assert.Equal(RootFolderStorageState.Healthy, health.State);
+        Assert.Equal(RootFolderStorageReason.None, health.Reason);
     }
 
     private static async Task CaptureSourceQuarantinedRecoveryStateAsync(
@@ -470,8 +486,8 @@ public sealed class DockerWeakStorageOrganiseContractTests : BaseTests
             TimeProvider.System,
             NullLogger<VerifiedFileRenameRecoveryService>.Instance);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            recovery.ReconcileAsync());
+        await recovery.ReconcileAsync();
+        await recovery.ReconcileAsync();
 
         await using var db = await factory.CreateDbContextAsync();
         var journal = await db.VerifiedFileRenameJournals.AsNoTracking().SingleAsync();
@@ -484,6 +500,8 @@ public sealed class DockerWeakStorageOrganiseContractTests : BaseTests
         Assert.True(File.Exists(journal.DestinationPath));
         Assert.True(await new FileRenameRecoveryProbe(factory)
             .HasBlockingAsync(journal.AudiobookId));
+        Assert.Equal("native-organise-quarantine-audio",
+            await File.ReadAllTextAsync(journal.DestinationPath));
     }
 
     private static ServiceProvider BuildSqliteProvider(string databasePath)

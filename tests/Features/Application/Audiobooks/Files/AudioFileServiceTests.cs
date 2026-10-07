@@ -800,6 +800,53 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Files
         }
 
         [Fact]
+        public async Task RegisterPublishedGenerationAsync_ScanExistingPath_DoesNotEnrollPhysicalIdentity()
+        {
+            var testFile = await FileService.GetTempFileAsync(
+                $"scan-no-physical-enrollment-{Guid.NewGuid():N}.m4b");
+            _audiobook.BasePath = Path.GetDirectoryName(testFile);
+            await _audiobookRepository.UpdateAsync(_audiobook);
+            var service = _provider.GetRequiredService<IAudiobookFileService>();
+
+            using (var initialLease = PinnedAudiobookFileRegistrationLease.Open(
+                testFile))
+            {
+                Assert.True(await service.EnsureAudiobookFileAsync(
+                    _audiobook,
+                    initialLease,
+                    "scan"));
+            }
+
+            var before = Assert.Single(await _audiobookFileRepository
+                .GetByAudiobookIdAsync(_audiobook.Id));
+            Assert.Null(before.PhysicalObjectIdentity);
+
+            var ownership = await service.CheckAudiobookFileOwnershipAsync(
+                _audiobook,
+                testFile,
+                _audiobook.BasePath);
+            Assert.Equal(
+                AudiobookFileOwnershipCheckOutcome.AlreadyOwnedByAudiobook,
+                ownership.Outcome);
+
+            using var observedLease = PinnedAudiobookFileRegistrationLease.Open(
+                testFile);
+            Assert.True(observedLease.HasDurablePhysicalObjectIdentity);
+
+            Assert.True(await service.RegisterPublishedGenerationAsync(
+                _audiobook,
+                ownership,
+                observedLease,
+                "scan"));
+
+            var persisted = Assert.Single(await _audiobookFileRepository
+                .GetByAudiobookIdAsync(_audiobook.Id));
+            Assert.Equal(before.Id, persisted.Id);
+            Assert.Null(persisted.PhysicalObjectIdentity);
+            Assert.Null(persisted.PhysicalIdentityObservedAtUtc);
+        }
+
+        [Fact]
         public async Task RollbackPublishedGenerationIfStaleAsync_CompatiblePhysicalToken_UsesPersistedCasToken()
         {
             var testFile = await FileService.GetTempFileAsync(

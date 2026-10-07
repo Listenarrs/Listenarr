@@ -1,10 +1,43 @@
 using Listenarr.Domain.Common;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Persistence;
 
 internal sealed partial class VerifiedFileRenameRecoveryService
 {
+    private static ContentProbeOutcome ProbeReadVisibility(
+        PinnedDirectoryCreation.PinnedDirectoryAnchor parent, PinnedDirectoryCreation.PinnedFileEntry entry)
+    {
+        var parentMatch = parent.ProbeVisiblePathMatch();
+        var entryMatch = entry.ProbeVisiblePathMatch();
+        if (parentMatch == RegistrationPublicationMatchOutcome.Unavailable
+            || entryMatch == RegistrationPublicationMatchOutcome.Unavailable)
+            return ContentProbeOutcome.Unavailable;
+        return parentMatch == RegistrationPublicationMatchOutcome.Match
+            && entryMatch == RegistrationPublicationMatchOutcome.Match
+            ? ContentProbeOutcome.Match : ContentProbeOutcome.Mismatch;
+    }
+
+    private async Task<(RootFolder? Source, RootFolder? Destination)?> ResolveJournalRootsAsync(
+        ListenArrDbContext db, VerifiedFileRenameJournal journal, CancellationToken cancellationToken)
+    {
+        var roots = await db.RootFolders.AsNoTracking()
+            .Where(root => root.Id == journal.SourceRootFolderId || root.Id == journal.DestinationRootFolderId)
+            .ToDictionaryAsync(root => root.Id, cancellationToken);
+        var source = roots.GetValueOrDefault(journal.SourceRootFolderId);
+        var destination = roots.GetValueOrDefault(journal.DestinationRootFolderId);
+        if ((journal.SourceRootFolderId != 0
+                && (source == null || source.StorageContractRevision != journal.SourceStorageContractRevision))
+            || (journal.DestinationRootFolderId != 0
+                && (destination == null || destination.StorageContractRevision != journal.DestinationStorageContractRevision)))
+        {
+            logger.LogWarning("Verified organize recovery {OperationId} is waiting for its root contracts", journal.OperationId);
+            return null;
+        }
+        return (source, destination);
+    }
+
     private async Task<bool> ValidateCommittedBatchAsync(
         ListenArrDbContext db,
         VerifiedFileRenameJournal journal,

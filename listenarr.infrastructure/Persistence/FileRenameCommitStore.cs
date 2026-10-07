@@ -319,14 +319,14 @@ public sealed class FileRenameCommitStore(
             .ToDictionaryAsync(root => root.Id, cancellationToken);
         foreach (var journal in fullBatch)
         {
-            if (!roots.TryGetValue(journal.SourceRootFolderId, out var sourceRoot)
-                || !roots.TryGetValue(
-                    journal.DestinationRootFolderId,
-                    out var destinationRoot)
-                || sourceRoot.StorageContractRevision
-                    != journal.SourceStorageContractRevision
-                || destinationRoot.StorageContractRevision
-                    != journal.DestinationStorageContractRevision)
+            if ((journal.SourceRootFolderId != 0
+                    && (!roots.TryGetValue(journal.SourceRootFolderId, out var sourceRoot)
+                        || sourceRoot.StorageContractRevision
+                            != journal.SourceStorageContractRevision))
+                || (journal.DestinationRootFolderId != 0
+                    && (!roots.TryGetValue(journal.DestinationRootFolderId, out var destinationRoot)
+                        || destinationRoot.StorageContractRevision
+                            != journal.DestinationStorageContractRevision)))
             {
                 throw new InvalidOperationException(
                     "A verified organize root storage contract changed before owner metadata commit.");
@@ -337,9 +337,11 @@ public sealed class FileRenameCommitStore(
         {
             originalState[journal.OperationId] =
                 (journal.State, journal.Error, journal.UpdatedAt);
-            var lease = VerifiedRenameCommitLease.Open(journal);
-            await lease.EnsureMatchesAsync(cancellationToken);
+            var lease = VerifiedRenameCommitLease.Open(journal,
+                roots.GetValueOrDefault(journal.SourceRootFolderId),
+                roots.GetValueOrDefault(journal.DestinationRootFolderId));
             leases.Add(lease);
+            await lease.EnsureMatchesAsync(cancellationToken);
             journal.State = VerifiedFileRenameState.OwnerMetadataReconciled;
             journal.Error = null;
             journal.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
@@ -402,7 +404,7 @@ public sealed class FileRenameCommitStore(
         }
 
         public static VerifiedRenameCommitLease Open(
-            VerifiedFileRenameJournal journal)
+            VerifiedFileRenameJournal journal, RootFolder? sourceRoot, RootFolder? destinationRoot)
         {
             var sourceParentPath = Path.GetDirectoryName(journal.SourcePath)
                 ?? throw new InvalidOperationException(
@@ -410,19 +412,24 @@ public sealed class FileRenameCommitStore(
             var destinationParentPath = Path.GetDirectoryName(journal.DestinationPath)
                 ?? throw new InvalidOperationException(
                     "The verified organize destination has no parent directory.");
-            var sourceParent = PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(
-                sourceParentPath);
+            var sourceParent = PinnedDirectoryCreation.OpenPinnedConfiguredHierarchy(
+                sourceRoot, sourceParentPath,
+                createMissing: false);
             PinnedDirectoryCreation.PinnedDirectoryAnchor? destinationParent = null;
             PinnedDirectoryCreation.PinnedFileEntry? source = null;
             PinnedDirectoryCreation.PinnedFileEntry? target = null;
             try
             {
-                destinationParent = PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(
-                    destinationParentPath);
-                source = sourceParent.OpenExistingFileForStableRead(
-                    Path.GetFileName(journal.SourcePath));
-                target = destinationParent.OpenExistingFileForStableRead(
-                    Path.GetFileName(journal.DestinationPath));
+                destinationParent = PinnedDirectoryCreation.OpenPinnedConfiguredHierarchy(
+                    destinationRoot, destinationParentPath,
+                    createMissing: false);
+                // The caller still holds its original source retirement and writable
+                // target publication handles. Read-only verification must share those
+                // existing accesses; it acquires no independent retirement authority.
+                source = sourceParent.OpenExistingFile(
+                    Path.GetFileName(journal.SourcePath), requireDeleteAccess: false);
+                target = destinationParent.OpenExistingFile(
+                    Path.GetFileName(journal.DestinationPath), requireDeleteAccess: false);
                 var lease = new VerifiedRenameCommitLease(
                     sourceParent,
                     destinationParent,

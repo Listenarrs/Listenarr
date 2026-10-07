@@ -18,11 +18,7 @@ internal sealed partial class AudiobookScanService
         try
         {
             current = PinnedDirectoryCreation.OpenPinnedBoundary(boundaryPath);
-            var requireDurableGenerationProof =
-                command.ScanPhysicalIdentity.HasDurableGenerationProof;
-            anchors.Add(PinnedDirectoryState.Capture(
-                current,
-                requireDurableGenerationProof));
+            anchors.Add(PinnedDirectoryState.Capture(current));
             var relative = Path.GetRelativePath(boundaryPath, scanRoot);
             if (relative != ".")
             {
@@ -38,13 +34,11 @@ internal sealed partial class AudiobookScanService
 
                     var next = current.OpenExistingChild(segment);
                     current = next;
-                    anchors.Add(PinnedDirectoryState.Capture(
-                        next,
-                        requireDurableGenerationProof));
+                    anchors.Add(PinnedDirectoryState.Capture(next));
                 }
             }
 
-            var authority = new PinnedScanAuthority(anchors);
+            var authority = new PinnedScanAuthority(anchors, command.ScanIdentity.Semantics);
             authority.Validate(command);
             return authority;
         }
@@ -231,21 +225,19 @@ internal sealed partial class AudiobookScanService
             }
 
             var file = current.OpenExistingFileForStableRead(segments[^1]);
-            if (!file.VisiblePathMatches() || !file.IsRegularFile())
+            if (!file.VisiblePathMatches() || !file.IsRegularFile()
+                || (expectedIdentity != null && !authority.DiscoveredFileMatches(canonicalPath)))
             {
                 file.Dispose();
                 throw new InvalidOperationException(
                     "The registration candidate changed or is no longer a regular file before stable extraction.");
             }
 
-            if (!command.ScanPhysicalIdentity.HasDurableGenerationProof)
-            {
-                return PinnedAudiobookFileRegistrationLease.CreatePinnedPathOnly(
-                    file,
-                    canonicalPath);
-            }
-
             if (!string.IsNullOrWhiteSpace(expectedIdentity)
+                && !string.Equals(
+                    expectedIdentity,
+                    ScanFileDiscovery.PinnedPathOnlyIdentity,
+                    StringComparison.Ordinal)
                 && !file.MatchesObjectIdentity(expectedIdentity))
             {
                 file.Dispose();
@@ -253,10 +245,12 @@ internal sealed partial class AudiobookScanService
                     "The registration candidate changed before stable extraction.");
             }
 
-            return PinnedAudiobookFileRegistrationLease.Create(
+            // Scan identity is operation-local only. Keep the live pinned file for
+            // stable reads, but never promote its kernel identity into durable
+            // AudiobookFile mutation authority.
+            return PinnedAudiobookFileRegistrationLease.CreatePinnedPathOnly(
                 file,
-                canonicalPath,
-                expectedIdentity);
+                canonicalPath);
         }
         finally
         {
@@ -306,8 +300,7 @@ internal sealed partial class AudiobookScanService
                 return outcome == PinnedFileOpenOutcome.Opened
                     && opened != null
                     && opened.VisiblePathMatches()
-                    && (!command.ScanPhysicalIdentity.HasDurableGenerationProof
-                        || opened.MatchesObjectIdentity(expectedIdentity));
+                    && authority.DiscoveredFileMatches(path);
             }
         }
         catch (Exception exception) when (exception is
@@ -396,18 +389,17 @@ internal sealed partial class AudiobookScanService
         string directory,
         string expectedObjectIdentity)
     {
+        authority.ValidateDiscoveredDirectory(directory);
         using var current = OpenRelativeDirectory(
             authority.Root,
             command.ScanRoot,
             directory,
             command.ScanIdentity.Semantics);
-        if (!current.VisiblePathMatches()
-            || (command.ScanPhysicalIdentity.HasDurableGenerationProof
-                && !current.MatchesDirectoryObjectIdentity(
-                    expectedObjectIdentity)))
+        authority.ValidateDiscoveredDirectory(directory);
+        if (!current.VisiblePathMatches())
         {
             throw new InvalidOperationException(
-                "A directory generation changed after scan discovery.");
+                "A scan directory changed or disappeared after discovery.");
         }
     }
 

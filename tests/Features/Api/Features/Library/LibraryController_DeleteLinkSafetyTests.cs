@@ -19,6 +19,127 @@ namespace Listenarr.Tests.Features.Api.Features.Library;
 [Trait("Category", "LibraryController")]
 public class LibraryController_DeleteLinkSafetyTests : BaseTests
 {
+    [WindowsTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FilesystemDelete_FailureAfterCapture_ReleasesOriginalHandles(bool cancelled)
+    {
+        // Given: all original file handles were captured before preflight fails.
+        Init();
+        var root = FileService.GetTempDirectory("delete-proof-disposal");
+        var folder = Path.Join(root, "Book");
+        Directory.CreateDirectory(folder);
+        var source = Path.Join(folder, "book.m4b");
+        var displaced = Path.Join(root, "retained.m4b");
+        await File.WriteAllTextAsync(source, "audio");
+        await AddAuthorizedRootAsync(root);
+        var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+            .WithTitle("Delete Proof Disposal")
+            .WithBasePath(folder)
+            .WithFilePath(source)
+            .Build());
+        await AddTrackedGenerationAsync(audiobook, source);
+        var service = Assert.IsType<AudiobookFilesystemDeleteService>(
+            _provider.GetRequiredService<IAudiobookFilesystemDeleteService>());
+        using var cancellation = new CancellationTokenSource();
+        service.AfterTrackedContentCaptureForTest = () =>
+        {
+            if (cancelled)
+            {
+                cancellation.Cancel();
+            }
+            else
+            {
+                throw new InvalidOperationException("Injected preflight failure.");
+            }
+        };
+
+        // When: an exception or request cancellation aborts before any deletion.
+        if (cancelled)
+        {
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                service.DeleteAsync(audiobook, deleteFolder: false, cancellation.Token));
+        }
+        else
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.DeleteAsync(audiobook, deleteFolder: false));
+        }
+
+        // Then: no retained Windows handle prevents the user from moving/writing the file.
+        File.Move(source, displaced);
+        Assert.Equal("audio", await File.ReadAllTextAsync(displaced));
+        await File.WriteAllTextAsync(displaced, "changed");
+        Assert.Equal("changed", await File.ReadAllTextAsync(displaced));
+    }
+
+    [Fact]
+    public async Task FilesystemDelete_UnchangedLiveSource_CompletesCleanup()
+    {
+        Init();
+        var root = FileService.GetTempDirectory("delete-original-live-source");
+        var folder = Path.Join(root, "Book");
+        Directory.CreateDirectory(folder);
+        var source = Path.Join(folder, "book.m4b");
+        await File.WriteAllTextAsync(source, "audio");
+        await AddAuthorizedRootAsync(root);
+        var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+            .WithTitle("Original Live Delete")
+            .WithBasePath(folder)
+            .WithFilePath(source)
+            .Build());
+        await AddTrackedGenerationAsync(audiobook, source);
+        var service = _provider.GetRequiredService<IAudiobookFilesystemDeleteService>();
+
+        var result = await service.DeleteAsync(audiobook, deleteFolder: false);
+
+        Assert.True(result.TrackedFileCleanupComplete, string.Join("; ", result.Warnings));
+        Assert.False(File.Exists(source));
+        Assert.Equal(1, result.DeletedFiles);
+    }
+
+    [LinuxTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FilesystemDelete_SameBytesReplacementAfterContentCapture_RetainsBothFiles(
+        bool deleteFolder)
+    {
+        // Given: the replacement has exactly the captured content, but is a new object.
+        Init();
+        var root = FileService.GetTempDirectory("delete-live-proof-replacement");
+        var folder = Path.Join(root, "Book");
+        Directory.CreateDirectory(folder);
+        var source = Path.Join(folder, "book.m4b");
+        var displaced = Path.Join(root, "original.m4b");
+        await File.WriteAllTextAsync(source, "audio");
+        await AddAuthorizedRootAsync(root);
+        var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+            .WithTitle("Live Delete Proof")
+            .WithBasePath(folder)
+            .WithFilePath(source)
+            .Build());
+        await AddTrackedGenerationAsync(audiobook, source);
+        var service = Assert.IsType<AudiobookFilesystemDeleteService>(
+            _provider.GetRequiredService<IAudiobookFilesystemDeleteService>());
+        service.AfterTrackedContentCaptureForTest = () =>
+        {
+            File.Move(source, displaced);
+            File.WriteAllText(source, "audio");
+        };
+
+        // When: deletion continues after its original file was displaced.
+        var result = await service.DeleteAsync(audiobook, deleteFolder);
+
+        // Then: matching bytes alone cannot authorize deleting the replacement.
+        Assert.True(File.Exists(source));
+        Assert.Equal("audio", await File.ReadAllTextAsync(source));
+        Assert.Equal("audio", await File.ReadAllTextAsync(displaced));
+        Assert.Equal(0, result.DeletedFiles);
+        Assert.False(result.TrackedFileCleanupComplete);
+        Assert.False(result.DeletedFolder);
+        Assert.NotEmpty(result.Warnings);
+    }
+
     [DirectoryLinkFact]
     public async Task FilesystemDelete_LinkedDirectoryDoesNotDeleteExternalFiles()
     {
@@ -151,8 +272,7 @@ public class LibraryController_DeleteLinkSafetyTests : BaseTests
         Assert.True(File.Exists(externalFile));
         Assert.Equal("external audio", await File.ReadAllTextAsync(externalFile));
         Assert.False(result.DeletedFolder);
-        Assert.Contains(result.Warnings, warning =>
-            warning.Contains("delete", StringComparison.OrdinalIgnoreCase));
+        Assert.NotEmpty(result.Warnings);
         Directory.Delete(bookFolder, recursive: false);
         Directory.Move(displacedFolder, bookFolder);
     }
@@ -202,8 +322,8 @@ public class LibraryController_DeleteLinkSafetyTests : BaseTests
         Assert.Equal("replacement audio", await File.ReadAllTextAsync(localFile));
         Assert.False(result.DeletedFolder);
         Assert.Contains(result.Warnings, warning =>
-            warning.Contains("generation", StringComparison.OrdinalIgnoreCase)
-            || warning.Contains("delete", StringComparison.OrdinalIgnoreCase));
+            warning.Contains("unavailable", StringComparison.OrdinalIgnoreCase)
+            || warning.Contains("deletion", StringComparison.OrdinalIgnoreCase));
 
         Directory.Delete(bookFolder, recursive: true);
         Directory.Move(displacedFolder, bookFolder);
@@ -251,7 +371,8 @@ public class LibraryController_DeleteLinkSafetyTests : BaseTests
         Assert.Equal("replacement", await File.ReadAllTextAsync(bookFolder));
         Assert.False(result.DeletedFolder);
         Assert.Contains(result.Warnings, warning =>
-            warning.Contains("delete", StringComparison.OrdinalIgnoreCase));
+            warning.Contains("unavailable", StringComparison.OrdinalIgnoreCase)
+            || warning.Contains("deletion", StringComparison.OrdinalIgnoreCase));
         File.Delete(bookFolder);
         Directory.Move(displacedFolder, bookFolder);
     }

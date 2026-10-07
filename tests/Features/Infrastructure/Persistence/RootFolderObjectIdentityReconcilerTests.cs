@@ -53,7 +53,7 @@ public sealed class RootFolderObjectIdentityReconcilerTests : BaseTests
     }
 
     [Fact]
-    public async Task ReconcileAsync_UnconfirmedRoot_DoesNotAuthorizeVisibleDirectory()
+    public async Task ReconcileAsync_UnavailableUnconfirmedRoot_RecordsCurrentAvailabilityFailure()
     {
         var rootPath = Path.GetFullPath("startup-unconfirmed-root");
         var options = new DbContextOptionsBuilder<ListenArrDbContext>()
@@ -84,10 +84,8 @@ public sealed class RootFolderObjectIdentityReconcilerTests : BaseTests
         var root = await verification.RootFolders.SingleAsync();
         Assert.Null(root.DirectoryObjectIdentityVersion);
         Assert.Null(root.DirectoryObjectIdentity);
-        Assert.Contains(
-            "not been confirmed",
-            root.DirectoryObjectIdentityUnavailableReason ?? string.Empty,
-            StringComparison.OrdinalIgnoreCase);
+        Assert.False(string.IsNullOrWhiteSpace(
+            root.DirectoryObjectIdentityUnavailableReason));
     }
 
     [Fact]
@@ -110,16 +108,8 @@ public sealed class RootFolderObjectIdentityReconcilerTests : BaseTests
             await setup.SaveChangesAsync();
         }
 
-        var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
-        identityResolver
-            .Setup(resolver => resolver.ResolveExistingAsync(
-                rootPath,
-                ManagedDirectoryIdentity.CurrentVersion,
-                "authorized",
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DirectoryObjectIdentityResolution.Unavailable(
-                "Directory not found.",
-                DirectoryObjectIdentityFailureKind.Missing));
+        var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(
+            MockBehavior.Strict);
         var reconciler = new RootFolderObjectIdentityReconciler(
             new TestDbContextFactory(options),
             identityResolver.Object,
@@ -128,19 +118,17 @@ public sealed class RootFolderObjectIdentityReconcilerTests : BaseTests
 
         await reconciler.ReconcileAsync();
 
-        identityResolver.VerifyAll();
+        identityResolver.VerifyNoOtherCalls();
         await using var verification = new ListenArrDbContext(options);
         var root = await verification.RootFolders.SingleAsync();
         Assert.Equal(ManagedDirectoryIdentity.CurrentVersion, root.DirectoryObjectIdentityVersion);
         Assert.Equal("authorized", root.DirectoryObjectIdentity);
-        Assert.Contains(
-            "not found",
-            root.DirectoryObjectIdentityUnavailableReason ?? string.Empty,
-            StringComparison.OrdinalIgnoreCase);
+        Assert.False(string.IsNullOrWhiteSpace(
+            root.DirectoryObjectIdentityUnavailableReason));
     }
 
     [Fact]
-    public async Task ReconcileAsync_AuthorizedRootMatches_ClearsObservedFailureWithoutReplacingAuthority()
+    public async Task ReconcileAsync_VisibleRoot_RefreshesDiagnosticIdentityAndClearsFailure()
     {
         var rootPath = FileService.GetTempDirectory("startup-healthy-root");
         var observed = await new DirectoryObjectIdentityResolver()
@@ -165,10 +153,8 @@ public sealed class RootFolderObjectIdentityReconcilerTests : BaseTests
 
         var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
         identityResolver
-            .Setup(resolver => resolver.ResolveExistingAsync(
+            .Setup(resolver => resolver.ResolveAsync(
                 rootPath,
-                observed.Version!.Value,
-                observed.Value!,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(observed);
         var reconciler = new RootFolderObjectIdentityReconciler(

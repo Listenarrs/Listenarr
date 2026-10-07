@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Listenarr.Tests.Common;
+using Listenarr.Tests.Builders;
 
 namespace Listenarr.Tests.Features.Infrastructure.FileSystem;
 
@@ -9,6 +10,165 @@ namespace Listenarr.Tests.Features.Infrastructure.FileSystem;
 [Trait("Category", "Infrastructure")]
 public sealed class CompatibilityFilePublicationRecoveryServiceTests : BaseTests
 {
+    [DirectoryLinkTheory]
+    [InlineData(CompatibilityFilePublicationState.TargetVerified, false)]
+    [InlineData(CompatibilityFilePublicationState.RegistrationCommitted, false)]
+    [InlineData(CompatibilityFilePublicationState.SourceQuarantined, false)]
+    [InlineData(CompatibilityFilePublicationState.TargetVerified, true)]
+    [InlineData(CompatibilityFilePublicationState.RegistrationCommitted, true)]
+    [InlineData(CompatibilityFilePublicationState.SourceQuarantined, true)]
+    public async Task ReconcileAsync_ConfiguredLinkedTargetBoundary_AllowsOnlyBoundaryLink(
+        CompatibilityFilePublicationState state, bool linkedDescendant)
+    {
+        var directory = FileService.GetTempDirectory("compatibility-configured-linked-target");
+        var physical = Directory.CreateDirectory(Path.Join(directory, "physical")).FullName;
+        var linked = Path.Join(directory, "library");
+        Directory.CreateSymbolicLink(linked, physical);
+        var foreign = Directory.CreateDirectory(Path.Join(directory, "foreign")).FullName;
+        var configured = await AddAuthorizedRootAsync(linked, "Linked compatibility target");
+        var targetParent = Path.Join(linked, "Book");
+        if (linkedDescendant) Directory.CreateSymbolicLink(targetParent, foreign);
+        else Directory.CreateDirectory(targetParent);
+        var journal = new CompatibilityQuarantineJournalBuilder(directory).Build();
+        journal.DestinationPath = Path.Join(targetParent, "destination.m4b");
+        journal.DestinationRootFolderId = configured.Id;
+        journal.DestinationStorageContractRevision = configured.StorageContractRevision;
+        journal.State = state;
+        await File.WriteAllTextAsync(journal.SourcePath, "audio");
+        await File.WriteAllTextAsync(journal.DestinationPath, "audio");
+        var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.CompatibilityFilePublicationJournals.Add(journal);
+            await db.SaveChangesAsync();
+        }
+
+        await CreateRecoveryService(factory).ReconcileAsync();
+        await CreateRecoveryService(factory).ReconcileAsync();
+
+        await using var verification = await factory.CreateDbContextAsync();
+        var recovered = await verification.CompatibilityFilePublicationJournals.SingleAsync();
+        Assert.Equal(linkedDescendant ? CompatibilityFilePublicationState.NeedsAttention
+            : state == CompatibilityFilePublicationState.TargetVerified ? state
+            : CompatibilityFilePublicationState.Completed, recovered.State);
+        Assert.Equal("audio", await File.ReadAllTextAsync(journal.SourcePath));
+        Assert.Equal("audio", await File.ReadAllTextAsync(journal.DestinationPath));
+        Assert.Equal(physical, new DirectoryInfo(linked).LinkTarget);
+    }
+
+    [FileLinkTheory]
+    [InlineData(CompatibilityFilePublicationState.TargetVerified)]
+    [InlineData(CompatibilityFilePublicationState.RegistrationCommitted)]
+    [InlineData(CompatibilityFilePublicationState.SourceQuarantined)]
+    public Task ReconcileAsync_LinkedDestination_DoesNotAdoptForeignContent(
+        CompatibilityFilePublicationState state) =>
+        AssertLinkedDestinationIsRetainedAsync(state, linkParent: false,
+            (journal, _, foreign) => File.CreateSymbolicLink(journal.DestinationPath, foreign));
+
+    [DirectoryLinkTheory]
+    [InlineData(CompatibilityFilePublicationState.TargetVerified)]
+    [InlineData(CompatibilityFilePublicationState.RegistrationCommitted)]
+    [InlineData(CompatibilityFilePublicationState.SourceQuarantined)]
+    public Task ReconcileAsync_LinkedDestinationParent_DoesNotAdoptForeignContent(
+        CompatibilityFilePublicationState state) =>
+        AssertLinkedDestinationIsRetainedAsync(state, linkParent: true,
+            (journal, root, foreign) =>
+            {
+                var parent = Path.Join(root, "linked-parent");
+                Directory.CreateSymbolicLink(parent, Path.GetDirectoryName(foreign)!);
+                journal.DestinationPath = Path.Join(parent, "destination.m4b");
+            });
+
+    private async Task AssertLinkedDestinationIsRetainedAsync(
+        CompatibilityFilePublicationState state,
+        bool linkParent,
+        Action<CompatibilityFilePublicationJournal, string, string> createLink)
+    {
+        // Given: persisted publication bytes match a foreign file reached through a link.
+        Init();
+        var root = FileService.GetTempDirectory("compatibility-linked-destination");
+        var journal = new CompatibilityQuarantineJournalBuilder(root).Build();
+        journal.State = state;
+        var foreignDirectory = Path.Join(root, "foreign");
+        Directory.CreateDirectory(foreignDirectory);
+        var foreign = Path.Join(foreignDirectory, "destination.m4b");
+        await File.WriteAllTextAsync(foreign, "audio");
+        await File.WriteAllTextAsync(journal.SourcePath, "audio");
+        createLink(journal, root, foreign);
+        var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.CompatibilityFilePublicationJournals.Add(journal);
+            await db.SaveChangesAsync();
+        }
+        var recovery = CreateRecoveryService(factory);
+
+        // When: restart recovery is repeated.
+        await recovery.ReconcileAsync();
+        await recovery.ReconcileAsync();
+
+        // Then: recovery preserves both artifacts and rejects linked publication evidence.
+        Assert.Equal("audio", await File.ReadAllTextAsync(journal.SourcePath));
+        Assert.Equal("audio", await File.ReadAllTextAsync(foreign));
+        Assert.Equal(linkParent ? foreignDirectory : foreign,
+            linkParent ? new DirectoryInfo(Path.GetDirectoryName(journal.DestinationPath)!).LinkTarget
+                : new FileInfo(journal.DestinationPath).LinkTarget);
+        await using var verification = await factory.CreateDbContextAsync();
+        Assert.Equal(CompatibilityFilePublicationState.NeedsAttention,
+            (await verification.CompatibilityFilePublicationJournals.SingleAsync()).State);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReconcileAsync_QuarantineRestore_VerifiesTheActuallyPinnedSource(
+        bool replaceBeforeRestore)
+    {
+        Init();
+        var root = FileService.GetTempDirectory("compatibility-quarantine-substitution");
+        var journal = new CompatibilityQuarantineJournalBuilder(root).Build();
+        Directory.CreateDirectory(Path.GetDirectoryName(journal.QuarantinePath!)!);
+        await File.WriteAllTextAsync(journal.QuarantinePath!, "audio");
+        await File.WriteAllTextAsync(journal.DestinationPath, "audio");
+        var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.CompatibilityFilePublicationJournals.Add(journal);
+            await db.SaveChangesAsync();
+        }
+        var service = CreateRecoveryService(factory);
+        var displaced = journal.QuarantinePath + ".original";
+        if (replaceBeforeRestore)
+        {
+            service.BeforeQuarantineRestoreForTest = () =>
+            {
+                File.Move(journal.QuarantinePath!, displaced);
+                File.WriteAllText(journal.QuarantinePath!, "other");
+            };
+        }
+
+        await service.ReconcileAsync();
+        await service.ReconcileAsync();
+
+        if (replaceBeforeRestore)
+        {
+            Assert.False(File.Exists(journal.SourcePath));
+            Assert.Equal("audio", await File.ReadAllTextAsync(displaced));
+            Assert.Equal("other", await File.ReadAllTextAsync(journal.QuarantinePath!));
+        }
+        else
+        {
+            Assert.Equal("audio", await File.ReadAllTextAsync(journal.SourcePath));
+            Assert.False(File.Exists(journal.QuarantinePath));
+        }
+        Assert.Equal("audio", await File.ReadAllTextAsync(journal.DestinationPath));
+        await using var verification = await factory.CreateDbContextAsync();
+        Assert.Equal(replaceBeforeRestore ? CompatibilityFilePublicationState.NeedsAttention
+            : CompatibilityFilePublicationState.Completed,
+            (await verification.CompatibilityFilePublicationJournals.SingleAsync()).State);
+    }
+
+
     [Fact]
     public async Task ReconcileAsync_PlannedJournalWithTarget_PreservesBothAndMarksAttention()
     {
@@ -51,7 +211,7 @@ public sealed class CompatibilityFilePublicationRecoveryServiceTests : BaseTests
     }
 
     [Fact]
-    public async Task ReconcileAsync_CompleteManifestedDownloadClientBatch_RestoresDeferredCleanup()
+    public async Task ReconcileAsync_CompleteManifestedDownloadClientBatch_RetainsSourcesAfterRestart()
     {
         var factory = _provider.GetRequiredService<
             IDbContextFactory<ListenArrDbContext>>();
@@ -73,7 +233,7 @@ public sealed class CompatibilityFilePublicationRecoveryServiceTests : BaseTests
         {
             Assert.Equal(CompatibilityFilePublicationState.Completed, journal.State);
             Assert.Equal(
-                CompatibilitySourceDisposition.DeferredToDownloadClient,
+                CompatibilitySourceDisposition.Retained,
                 journal.SourceDisposition);
         });
         Assert.All(scenario.Sources, source => Assert.True(File.Exists(source)));
@@ -239,7 +399,7 @@ public sealed class CompatibilityFilePublicationRecoveryServiceTests : BaseTests
         {
             Assert.Equal(CompatibilityFilePublicationState.Completed, journal.State);
             Assert.Equal(
-                CompatibilitySourceDisposition.DeferredToDownloadClient,
+                CompatibilitySourceDisposition.Retained,
                 journal.SourceDisposition);
         });
     }
@@ -275,26 +435,8 @@ public sealed class CompatibilityFilePublicationRecoveryServiceTests : BaseTests
     private CompatibilityFilePublicationRecoveryService CreateRecoveryService(
         IDbContextFactory<ListenArrDbContext> factory)
     {
-        var health = new Mock<IRootFolderStorageHealthResolver>(MockBehavior.Strict);
-        health.Setup(resolver => resolver.ResolveAsync(
-                It.IsAny<RootFolder>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RootFolderStorageObservation(
-                RootFolderStorageState.Healthy,
-                RootFolderStorageReason.None,
-                Message: null,
-                CanConfirmCurrentFolder: false,
-                CanChangePath: true,
-                CanMutateFilesystem: true,
-                ConfirmationToken: null));
-        var cleanup = new CompatibilitySourceCleanupCoordinator(
-            factory,
-            health.Object,
-            TimeProvider.System,
-            NullLogger<CompatibilitySourceCleanupCoordinator>.Instance);
         return new CompatibilityFilePublicationRecoveryService(
             factory,
-            cleanup,
             TimeProvider.System,
             NullLogger<CompatibilityFilePublicationRecoveryService>.Instance);
     }
@@ -330,6 +472,8 @@ public sealed class CompatibilityFilePublicationRecoveryServiceTests : BaseTests
         {
             Name = "Weak destination",
             Path = destinationRoot,
+            PathIdentityState = PathIdentityState.Valid,
+            ResolvedCaseSensitivity = FileSystemPathSemantics.CurrentHostDefault.CaseSensitivity,
             WeakStorageSourceCleanupPolicy =
                 WeakStorageSourceCleanupPolicy.DeleteSourceAfterVerifiedCopy,
             WeakStoragePolicyRevision = 7,

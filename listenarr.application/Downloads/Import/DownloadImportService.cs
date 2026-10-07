@@ -369,16 +369,10 @@ namespace Listenarr.Application.Downloads.Import
                                     AudiobookFileOwnershipCheckOutcome.Available or
                                     AudiobookFileOwnershipCheckOutcome.AlreadyOwnedByAudiobook)
                                 {
-                                    if (destinationReservation.ReusesExistingFile
-                                        && !sourceProof.Value.HasDurablePhysicalObjectIdentity
-                                        && ownership.Outcome
-                                            == AudiobookFileOwnershipCheckOutcome.Available)
-                                    {
-                                        // Matching bytes are not an ownership claim.
-                                        // Preserve the existing path and plan another suffix.
-                                        usedDestinations.Add(destination);
-                                        continue;
-                                    }
+                                    // A byte-identical existing destination can be
+                                    // adopted by this audiobook when no other owner
+                                    // claims it. Content proof, not persisted kernel
+                                    // identity, establishes idempotent publication.
                                     break;
                                 }
 
@@ -443,7 +437,6 @@ namespace Listenarr.Application.Downloads.Import
                                     destinationOwnershipBoundary,
                                     destinationSemantics,
                                     operationId,
-                                    ownership.ExistingFile?.PhysicalObjectIdentity,
                                     sourceProof.Value,
                                     audiobook,
                                     ownership,

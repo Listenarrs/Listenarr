@@ -624,7 +624,10 @@
             </label>
           </div>
           <p v-if="deleteCapabilities?.reason" class="warning-text">
-            {{ deleteCapabilities.reason }} The audiobook can still be removed from the library.
+            {{ deleteCapabilities.reason }}
+            <span v-if="deleteCapabilities.canRemoveFromLibrary">
+              The audiobook can still be removed from the library.
+            </span>
           </p>
         </div>
       </template>
@@ -701,7 +704,6 @@ import { safeText, stripHtmlAndNormalize } from '@/utils/textUtils'
 import { logger } from '@/utils/logger'
 import { errorTracking } from '@/services/errorTracking'
 import { useProtectedImages } from '@/composables/useProtectedImages'
-import { preparePhysicalDeleteRetry } from '@/composables/useMutationSemanticsConfirmation'
 import { buildAudibleProductUrl } from '@/utils/marketDomains'
 import EditAudiobookModal from '@/components/domain/audiobook/EditAudiobookModal.vue'
 import ManualSearchModal from '@/components/domain/search/ManualSearchModal.vue'
@@ -771,6 +773,8 @@ const scanning = ref(false)
 const rescanningMetadata = ref(false)
 const weakStorageMissingFiles = ref<WeakStorageMissingFilesResponse>({ items: [] })
 let weakStorageMissingFilesRequestId = 0
+let scanDetailRefreshRequestId = 0
+let detailViewUnmounted = false
 const trackedScanJob = computed(() => {
   const currentBookId = audiobook.value?.id
   if (!currentBookId) return undefined
@@ -1307,6 +1311,8 @@ function handleClickOutside() {
 }
 
 onUnmounted(() => {
+  detailViewUnmounted = true
+  scanDetailRefreshRequestId++
   document.removeEventListener('click', handleClickOutside)
   try {
     if (audiobookUpdateUnsub) audiobookUpdateUnsub()
@@ -1325,6 +1331,12 @@ watch(
 
 let lastHandledTerminalScanJobId: string | null = null
 watch(
+  () => route.params.id,
+  () => {
+    scanDetailRefreshRequestId++
+  },
+)
+watch(
   () =>
     [
       trackedScanJob.value?.jobId,
@@ -1339,7 +1351,7 @@ watch(
     lastHandledTerminalScanJobId = jobId
 
     if (normalizedStatus === 'completed') {
-      await refreshAudiobookAfterScan()
+      await refreshAudiobookAfterScan(jobId)
       return
     }
 
@@ -1349,8 +1361,17 @@ watch(
   { flush: 'post' },
 )
 
-async function refreshAudiobookAfterScan() {
+async function refreshAudiobookAfterScan(jobId: string) {
   const id = audiobook.value?.id ?? parseInt(route.params.id as string)
+  const routeId = String(route.params.id)
+  const requestId = ++scanDetailRefreshRequestId
+  const isCurrent = () =>
+    !detailViewUnmounted &&
+    requestId === scanDetailRefreshRequestId &&
+    audiobook.value?.id === id &&
+    parseInt(routeId, 10) === id &&
+    String(route.params.id) === routeId &&
+    trackedScanJob.value?.jobId === jobId
   try {
     let refreshed: Audiobook | null = null
     if (typeof apiService.getAudiobook === 'function') {
@@ -1360,15 +1381,16 @@ async function refreshAudiobookAfterScan() {
       refreshed = libraryStore.audiobooks.find((candidate) => candidate.id === id) ?? null
     }
 
+    if (!isCurrent()) return
     if (refreshed) {
       audiobook.value = refreshed
-      await afterLoad()
+      await afterLoad(isCurrent)
     }
   } catch (err) {
     logger.debug('Unable to refresh audiobook after scan completion', err)
   }
 
-  await loadWeakStorageMissingFiles()
+  if (isCurrent()) await loadWeakStorageMissingFiles()
 }
 
 async function loadAudiobook() {
@@ -1415,9 +1437,11 @@ async function loadAudiobook() {
 }
 
 // After loading audiobook, also fetch quality profiles so we can display the assigned profile
-async function afterLoad() {
-  await loadQualityProfilesForDetail()
-  await loadIdentifiersForDetail()
+async function afterLoad(isCurrent: () => boolean = () => true) {
+  await loadQualityProfilesForDetail(isCurrent)
+  if (!isCurrent()) return
+  await loadIdentifiersForDetail(isCurrent)
+  if (!isCurrent()) return
   try {
     const img = audiobook.value?.imageUrl
     if (img) {
@@ -1430,21 +1454,22 @@ async function afterLoad() {
   } catch {}
 }
 
-async function loadQualityProfilesForDetail() {
+async function loadQualityProfilesForDetail(isCurrent: () => boolean = () => true) {
   try {
-    qualityProfiles.value = await apiService.getQualityProfiles()
+    const profiles = await apiService.getQualityProfiles()
+    if (isCurrent()) qualityProfiles.value = profiles
   } catch (err) {
     logger.warn('Failed to load quality profiles for detail view:', err)
   }
 }
 
-async function loadIdentifiersForDetail() {
+async function loadIdentifiersForDetail(isCurrent: () => boolean = () => true) {
   const id = audiobook.value?.id
   if (!id || typeof apiService.getAudiobookIdentifiers !== 'function') return
 
   try {
     const response = await apiService.getAudiobookIdentifiers(id)
-    if (!audiobook.value || audiobook.value.id !== id) return
+    if (!isCurrent() || !audiobook.value || audiobook.value.id !== id) return
     audiobook.value = {
       ...audiobook.value,
       identifiers: Array.isArray(response?.identifiers) ? response.identifiers : [],
@@ -1715,10 +1740,6 @@ async function executeDelete() {
     const success = await libraryStore.removeFromLibrary(audiobook.value.id, {
       deleteFiles: shouldDeleteFiles,
       deleteFolder: shouldDeleteFolder,
-      retryAfterBlockedMutation: shouldDeleteFiles
-        ? (error) =>
-            preparePhysicalDeleteRetry(error, audiobook.value!.id, audiobook.value?.basePath)
-        : undefined,
     })
     if (success) {
       const toast = useToast()
@@ -1759,7 +1780,7 @@ function unavailableDeleteCapabilities(): AudiobookDeleteCapabilities {
     canRemoveFromLibrary: true,
     canDeleteTrackedFiles: false,
     canDeleteFolder: false,
-    reason: 'Physical-delete safety could not be checked.',
+    reason: 'Filesystem delete capability could not be checked.',
     fallbackAction: 'RemoveFromLibraryOnly',
   }
 }

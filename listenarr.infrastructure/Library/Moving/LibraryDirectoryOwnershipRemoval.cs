@@ -31,7 +31,11 @@ internal static class LibraryDirectoryOwnershipRemoval
         }
 
         using var directory = publication.OpenCreatedDirectoryAnchor();
-        EnsurePhysicalIdentity(ownership, directory);
+        if (!VisibilityMatchesOrThrowUnavailable(directory,
+                "The owned recovery directory is temporarily unavailable."))
+        {
+            throw new InvalidOperationException("The owned recovery directory changed while pinned.");
+        }
         if (!VisibilityMatchesOrThrowUnavailable(
                 parent,
                 "The owned directory recovery parent is temporarily unavailable during validation."))
@@ -44,7 +48,8 @@ internal static class LibraryDirectoryOwnershipRemoval
     public static LibraryDirectoryRemovalOutcome RemoveEmptyDirectory(
         LibraryDirectoryOwnership ownership,
         PinnedDirectoryCreation.PinnedDirectoryAnchor parentAnchor,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        PinnedDirectoryCreation.PinnedDirectoryAnchor? originalDirectory = null)
     {
         ArgumentNullException.ThrowIfNull(ownership);
         cancellationToken.ThrowIfCancellationRequested();
@@ -74,7 +79,10 @@ internal static class LibraryDirectoryOwnershipRemoval
         }
 
         using var directory = publication.OpenCreatedDirectoryAnchor();
-        EnsurePhysicalIdentity(ownership, directory);
+        if (!LiveDirectoryMatches(originalDirectory, directory))
+        {
+            return LibraryDirectoryRemovalOutcome.Retained;
+        }
         if (Directory.EnumerateFileSystemEntries(originalPath).Any())
         {
             return LibraryDirectoryRemovalOutcome.Retained;
@@ -90,7 +98,10 @@ internal static class LibraryDirectoryOwnershipRemoval
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        EnsurePhysicalIdentity(ownership, directory);
+        if (!LiveDirectoryMatches(originalDirectory, directory))
+        {
+            return LibraryDirectoryRemovalOutcome.Retained;
+        }
         publication.DeletePinnedEmptyDirectoryImmediately(
             Path.GetFileName(originalPath));
         return LibraryDirectoryRemovalOutcome.Removed;
@@ -114,22 +125,15 @@ internal static class LibraryDirectoryOwnershipRemoval
         }
     }
 
-    private static void EnsurePhysicalIdentity(
-        LibraryDirectoryOwnership ownership,
-        PinnedDirectoryCreation.PinnedDirectoryAnchor directory)
-    {
-        if (!directory.MatchesManagedDirectoryOwnershipIdentity(
-                ownership.DirectoryObjectIdentityVersion,
-                ownership.DirectoryObjectIdentity,
-                ownership.OwnershipToken)
-            || !VisibilityMatchesOrThrowUnavailable(
-                directory,
-                "The owned directory is temporarily unavailable while its persisted physical identity is being verified."))
-        {
-            throw new InvalidOperationException(
-                "The owned directory no longer matches its persisted physical identity.");
-        }
-    }
+    private static bool LiveDirectoryMatches(
+        PinnedDirectoryCreation.PinnedDirectoryAnchor? originalDirectory,
+        PinnedDirectoryCreation.PinnedDirectoryAnchor directory) =>
+        originalDirectory != null
+        && VisibilityMatchesOrThrowUnavailable(originalDirectory,
+            "The original directory is temporarily unavailable during live retirement.")
+        && VisibilityMatchesOrThrowUnavailable(directory,
+            "The current directory is temporarily unavailable during live retirement.")
+        && originalDirectory.IdentifiesSameDirectory(directory);
 
     private static bool VisibilityMatchesOrThrowUnavailable(
         PinnedDirectoryCreation.PinnedDirectoryAnchor directory,

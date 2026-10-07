@@ -28,8 +28,6 @@ internal sealed partial class AudiobookContentMoveService
             string boundaryPath,
             string root,
             FileSystemPathSemantics semantics,
-            int boundaryIdentityVersion,
-            string boundaryIdentity,
             IReadOnlyList<string> segments)
         {
             var anchors = new List<PinnedDirectoryCreation.PinnedDirectoryAnchor>();
@@ -39,8 +37,6 @@ internal sealed partial class AudiobookContentMoveService
                     boundaryPath,
                     root,
                     semantics,
-                    boundaryIdentityVersion,
-                    boundaryIdentity,
                     "target boundary");
                 anchors.Add(current);
                 foreach (var segment in segments)

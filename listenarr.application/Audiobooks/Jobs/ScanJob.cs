@@ -9,8 +9,6 @@ namespace Listenarr.Application.Audiobooks.Jobs
         public int AudiobookId { get; set; }
         public string? Path { get; set; }
         public PathIdentitySnapshot? PathIdentity { get; set; }
-        [JsonIgnore]
-        public ScanPathPhysicalIdentity? PhysicalIdentity { get; set; }
         public DateTime EnqueuedAt { get; set; } = DateTime.UtcNow;
         public string Status { get; set; } = "Queued";
         public string? Error { get; set; }

@@ -11,6 +11,28 @@ namespace Listenarr.Tests.Features.Api.Services;
 [Trait("Category", "FileSystem")]
 public sealed class FileMoverFileAliasRegressionTests : BaseTests
 {
+    [DirectoryLinkTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SourceCapability_ConfiguredLinkedBoundary_AllowsRootButRejectsLinkedDescendant(bool linkedDescendant)
+    {
+        var root = FileService.GetTempDirectory("source-capability-linked-root");
+        var physical = Directory.CreateDirectory(Path.Join(root, "physical")).FullName;
+        var linked = Path.Join(root, "linked");
+        Directory.CreateSymbolicLink(linked, physical);
+        var foreign = Directory.CreateDirectory(Path.Join(root, "foreign")).FullName;
+        var parent = Path.Join(linked, "Book");
+        if (linkedDescendant) Directory.CreateSymbolicLink(parent, foreign);
+        else Directory.CreateDirectory(parent);
+        var source = Path.Join(parent, "source.m4b");
+        await File.WriteAllTextAsync(source, "original-source");
+        await AddAuthorizedRootAsync(linked, "Linked source capability root");
+
+        var capability = await _provider.GetRequiredService<IFilePublicationSourceCapability>().CheckAsync(source);
+
+        Assert.Equal(!linkedDescendant, capability.IsSupported);
+        Assert.Equal("original-source", await File.ReadAllTextAsync(source));
+    }
     [LinuxFact]
     public async Task RegularFileIdentityProbe_NamedPipe_ReturnsWithoutBlockingAndRejectsSpecialFile()
     {

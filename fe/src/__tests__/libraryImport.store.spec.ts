@@ -109,7 +109,7 @@ describe('library import store', () => {
           success: true,
           sourcePath: 'C:\\incoming\\Part 1.mp3',
           destinationPath: 'D:\\library\\Ordered Book\\Part 1.mp3',
-          warning: 'The source file was retained because durable identity is unavailable.',
+          warning: 'The source file was retained because source cleanup could not be proven safe.',
         },
       ],
     })
@@ -131,7 +131,7 @@ describe('library import store', () => {
       ],
     })
     expect(result.warnings).toEqual([
-      'The source file was retained because durable identity is unavailable.',
+      'The source file was retained because source cleanup could not be proven safe.',
     ])
   })
 

@@ -19,21 +19,31 @@ public sealed partial class FileRenameRecoveryReconciler
             && IsTransientRecoveryFilesystemException(exception.InnerException);
     }
 
-    private static GenerationMatchOutcome ProbeTargetGeneration(FileMutationJournal journal) =>
-        ProbePathGeneration(
+    private static Task<GenerationMatchOutcome> ProbeTargetContentAsync(
+        FileMutationJournal journal,
+        CancellationToken cancellationToken) =>
+        ProbePathContentAsync(
             journal.DestinationPath,
-            journal.TargetPhysicalObjectIdentity);
+            journal.SourceLength,
+            journal.SourceSha256,
+            cancellationToken);
 
-    private static GenerationMatchOutcome ProbeSourceGeneration(FileMutationJournal journal) =>
-        ProbePathGeneration(
+    private static Task<GenerationMatchOutcome> ProbeSourceContentAsync(
+        FileMutationJournal journal,
+        CancellationToken cancellationToken) =>
+        ProbePathContentAsync(
             journal.SourcePath,
-            journal.SourcePhysicalObjectIdentity);
+            journal.SourceLength,
+            journal.SourceSha256,
+            cancellationToken);
 
-    private static GenerationMatchOutcome ProbePathGeneration(
+    private static async Task<GenerationMatchOutcome> ProbePathContentAsync(
         string path,
-        string? expectedPhysicalObjectIdentity)
+        long expectedLength,
+        string? expectedSha256,
+        CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(expectedPhysicalObjectIdentity))
+        if (string.IsNullOrWhiteSpace(expectedSha256))
         {
             return GenerationMatchOutcome.Mismatch;
         }
@@ -42,7 +52,9 @@ public sealed partial class FileRenameRecoveryReconciler
         {
             var fullPath = Path.GetFullPath(path);
             var parentPath = Path.GetDirectoryName(fullPath);
-            if (string.IsNullOrWhiteSpace(parentPath))
+            var fileName = Path.GetFileName(fullPath);
+            if (string.IsNullOrWhiteSpace(parentPath)
+                || string.IsNullOrWhiteSpace(fileName))
             {
                 return GenerationMatchOutcome.Mismatch;
             }
@@ -50,7 +62,24 @@ public sealed partial class FileRenameRecoveryReconciler
             using var parent = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
                 parentPath,
                 createMissing: false);
-            using var file = parent.OpenExistingFileForStableRead(Path.GetFileName(fullPath));
+            var openOutcome = parent.TryOpenExistingFileWithOutcome(
+                fileName,
+                requireDeleteAccess: false,
+                out var openedFile);
+            using var file = openedFile;
+            if (openOutcome == PinnedFileOpenOutcome.NotFound)
+            {
+                return GenerationMatchOutcome.Missing;
+            }
+            if (openOutcome == PinnedFileOpenOutcome.Unavailable)
+            {
+                return GenerationMatchOutcome.Unavailable;
+            }
+            if (file == null || !file.IsRegularFile())
+            {
+                return GenerationMatchOutcome.Mismatch;
+            }
+
             var fileVisibility = file.ProbeVisiblePathMatch();
             var parentVisibility = parent.ProbeVisiblePathMatch();
             if (fileVisibility == RegistrationPublicationMatchOutcome.Unavailable
@@ -64,24 +93,17 @@ public sealed partial class FileRenameRecoveryReconciler
                 return GenerationMatchOutcome.Mismatch;
             }
 
-            return file.MatchesObjectIdentity(expectedPhysicalObjectIdentity)
+            return await file.MatchesAsync(
+                    expectedLength,
+                    expectedSha256,
+                    cancellationToken)
                 ? GenerationMatchOutcome.Match
                 : GenerationMatchOutcome.Mismatch;
         }
-        catch (System.ComponentModel.Win32Exception exception) when (
-            OperatingSystem.IsWindows()
-                ? exception.NativeErrorCode is 2 or 3
-                : exception.NativeErrorCode == 2)
+        catch (Exception exception) when (
+            FileSystemSafety.IsProvenMissingPathException(exception))
         {
-            return GenerationMatchOutcome.Mismatch;
-        }
-        catch (FileNotFoundException)
-        {
-            return GenerationMatchOutcome.Mismatch;
-        }
-        catch (DirectoryNotFoundException)
-        {
-            return GenerationMatchOutcome.Mismatch;
+            return GenerationMatchOutcome.Missing;
         }
         catch (Exception exception) when (IsTransientRecoveryFilesystemException(exception))
         {
@@ -89,16 +111,17 @@ public sealed partial class FileRenameRecoveryReconciler
         }
         catch (Exception exception) when (exception is
             ArgumentException or InvalidOperationException
-                or NotSupportedException or PathTooLongException)
+                or NotSupportedException or PathTooLongException
+                or System.Security.SecurityException)
         {
             return GenerationMatchOutcome.Mismatch;
         }
     }
 
-    private async Task<bool?> OwnerMetadataPointsToSourceAsync(
+    private async Task<bool?> OwnerMetadataPointsToPathAsync(
         Audiobook audiobook,
         AudiobookFile? audiobookFile,
-        FileMutationJournal journal,
+        string expectedPath,
         CancellationToken cancellationToken)
     {
         if (audiobookFile != null)
@@ -119,7 +142,7 @@ public sealed partial class FileRenameRecoveryReconciler
             return identity.State == PathIdentityState.Valid
                 && FileSystemPathIdentity.AreEquivalent(
                     identity.CanonicalPath,
-                    journal.SourcePath,
+                    expectedPath,
                     new FileSystemPathSemantics(
                         identity.Syntax,
                         identity.CaseSensitivity));
@@ -130,7 +153,7 @@ public sealed partial class FileRenameRecoveryReconciler
             return false;
         }
         var resolution = await semanticsResolver.ResolveAsync(
-            journal.SourcePath,
+            expectedPath,
             FileSystemCaseSensitivityMode.Auto,
             cancellationToken);
         if (resolution.State == PathIdentityState.Unavailable)
@@ -147,7 +170,7 @@ public sealed partial class FileRenameRecoveryReconciler
             audiobook.BasePath);
         return FileSystemPathIdentity.AreEquivalent(
             storedSource,
-            journal.SourcePath,
+            expectedPath,
             resolution.Semantics);
     }
 
@@ -261,6 +284,7 @@ public sealed partial class FileRenameRecoveryReconciler
     private enum GenerationMatchOutcome
     {
         Match,
+        Missing,
         Mismatch,
         Unavailable
     }

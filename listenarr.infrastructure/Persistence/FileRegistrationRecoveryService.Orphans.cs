@@ -35,8 +35,10 @@ public sealed partial class FileRegistrationRecoveryService
         }
         var targetClaims = await db.FileMutationJournals
             .AsNoTracking()
-            .Where(journal => journal.TargetPhysicalObjectIdentity != null
-                && journal.State != FileMutationJournalState.RolledBack)
+            .Where(RegistrationPublicationPredicate)
+            .Where(journal => journal.State != FileMutationJournalState.RolledBack
+                && journal.State != FileMutationJournalState.Completed
+                && journal.State != FileMutationJournalState.CompletedSourceRetained)
             .ToListAsync(cancellationToken);
 
         var filesQuery = db.AudiobookFiles.AsNoTracking();
@@ -49,28 +51,48 @@ public sealed partial class FileRegistrationRecoveryService
         {
             cancellationToken.ThrowIfCancellationRequested();
             var matches = trackedFiles
-                .Where(file => RegisteredPathMatches(file, journal.DestinationPath)
-                    && RegisteredGenerationMatches(
-                        file,
-                        journal.TargetPhysicalObjectIdentity))
+                .Where(file => RegisteredPathMatches(
+                    file,
+                    journal.DestinationPath))
                 .ToList();
             if (matches.Count == 0)
             {
                 continue;
             }
+
             if (targetClaims.Count(candidate =>
-                    AnonymousTargetGenerationMatches(candidate, journal)) != 1)
+                    AnonymousTargetContentProofMatches(candidate, journal)) != 1)
             {
                 if (!audiobookId.HasValue)
                 {
                     await TryMarkNeedsAttentionAsync(
                         journal.OperationId,
                         journal.State,
-                        "Another anonymous registration journal claims the same published target generation.",
+                        "Another anonymous registration journal claims the same publication path and content proof.",
                         cancellationToken);
                 }
                 continue;
             }
+            var targetProbe = await ProbeRestartedPublicationTargetAsync(
+                journal,
+                cancellationToken);
+            if (targetProbe == RestartTargetProbe.Unavailable)
+            {
+                continue;
+            }
+            if (targetProbe != RestartTargetProbe.Match)
+            {
+                if (!audiobookId.HasValue)
+                {
+                    await TryMarkNeedsAttentionAsync(
+                        journal.OperationId,
+                        journal.State,
+                        "A tracked audiobook file claims the publication path, but the current target does not match the journaled content proof.",
+                        cancellationToken);
+                }
+                continue;
+            }
+
             if (matches.Count != 1)
             {
                 if (!audiobookId.HasValue)
@@ -78,7 +100,7 @@ public sealed partial class FileRegistrationRecoveryService
                     await TryMarkNeedsAttentionAsync(
                         journal.OperationId,
                         journal.State,
-                        "Multiple tracked audiobook files claim the anonymous publication target generation.",
+                        "Multiple tracked audiobook files claim the anonymous publication path.",
                         cancellationToken);
                 }
                 continue;
@@ -117,9 +139,14 @@ public sealed partial class FileRegistrationRecoveryService
                 || tracked.AudiobookFileId != null
                 || !IsRegistrationPublicationAction(tracked.Action)
                 || tracked.State != FileMutationJournalState.TargetVerified
+                || tracked.SourceLength != expected.SourceLength
                 || !string.Equals(
-                    tracked.TargetPhysicalObjectIdentity,
-                    expected.TargetPhysicalObjectIdentity,
+                    tracked.SourceSha256,
+                    expected.SourceSha256,
+                    StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(
+                    tracked.DestinationPath,
+                    expected.DestinationPath,
                     StringComparison.Ordinal))
             {
                 return false;
@@ -139,8 +166,9 @@ public sealed partial class FileRegistrationRecoveryService
                     || candidate.Action == FileAction.Copy
                     || candidate.Action == FileAction.HardlinkCopy)
                 && candidate.State == FileMutationJournalState.TargetVerified
-                && candidate.TargetPhysicalObjectIdentity
-                    == expected.TargetPhysicalObjectIdentity)
+                && candidate.SourceLength == expected.SourceLength
+                && candidate.SourceSha256 == expected.SourceSha256
+                && candidate.DestinationPath == expected.DestinationPath)
             .ExecuteUpdateAsync(
                 setters => setters
                     .SetProperty(candidate => candidate.AudiobookId, audiobookId)
@@ -162,6 +190,7 @@ public sealed partial class FileRegistrationRecoveryService
                 && journal.AudiobookId == null
                 && journal.AudiobookFileId == null
                 && journal.State != FileMutationJournalState.Completed
+                && journal.State != FileMutationJournalState.CompletedSourceRetained
                 && journal.State != FileMutationJournalState.RolledBack
                 && journal.State != FileMutationJournalState.NeedsAttention);
         if (operationId is Guid scopedOperationId)
@@ -179,8 +208,10 @@ public sealed partial class FileRegistrationRecoveryService
         }
         var targetClaims = await db.FileMutationJournals
             .AsNoTracking()
-            .Where(journal => journal.TargetPhysicalObjectIdentity != null
-                && journal.State != FileMutationJournalState.RolledBack)
+            .Where(RegistrationPublicationPredicate)
+            .Where(journal => journal.State != FileMutationJournalState.RolledBack
+                && journal.State != FileMutationJournalState.Completed
+                && journal.State != FileMutationJournalState.CompletedSourceRetained)
             .ToListAsync(cancellationToken);
 
         var trackedFiles = await db.AudiobookFiles
@@ -202,53 +233,71 @@ public sealed partial class FileRegistrationRecoveryService
                 continue;
             }
 
+            if (journal.State != FileMutationJournalState.Planned
+                && targetClaims.Count(candidate =>
+                    AnonymousTargetContentProofMatches(candidate, journal)) != 1)
+            {
+                await TryMarkNeedsAttentionAsync(
+                    journal.OperationId,
+                    journal.State,
+                    "Another anonymous registration journal claims the same publication path and content proof.",
+                    cancellationToken);
+                continue;
+            }
             var pathOwners = trackedFiles
                 .Where(file => RegisteredPathMatches(file, journal.DestinationPath))
                 .ToList();
-            var exactOwners = pathOwners
-                .Where(file => RegisteredGenerationMatches(
-                    file,
-                    journal.TargetPhysicalObjectIdentity))
-                .ToList();
-            if (exactOwners.Count == 1)
+            if (pathOwners.Count > 0)
             {
-                if (journal.State == FileMutationJournalState.TargetVerified)
+                var targetProbe = await ProbeRestartedPublicationTargetAsync(
+                    journal,
+                    cancellationToken);
+                if (targetProbe == RestartTargetProbe.Unavailable)
                 {
-                    await TryAdoptAnonymousOwnerAsync(
-                        db,
-                        journal,
-                        exactOwners[0].AudiobookId,
-                        cancellationToken);
+                    continue;
+                }
+
+                if (targetProbe == RestartTargetProbe.Match
+                    && pathOwners.Count == 1)
+                {
+                    if (journal.State == FileMutationJournalState.TargetVerified)
+                    {
+                        await TryAdoptAnonymousOwnerAsync(
+                            db,
+                            journal,
+                            pathOwners[0].AudiobookId,
+                            cancellationToken);
+                    }
+                    else
+                    {
+                        await TryMarkNeedsAttentionAsync(
+                            journal.OperationId,
+                            journal.State,
+                            "A tracked audiobook file claimed the target before uncommitted recovery completed; the target was preserved.",
+                            cancellationToken);
+                    }
                 }
                 else
                 {
                     await TryMarkNeedsAttentionAsync(
                         journal.OperationId,
                         journal.State,
-                        "A tracked audiobook file claimed the target before uncommitted compensation completed; the target was preserved.",
+                        pathOwners.Count > 1
+                            ? "Multiple tracked audiobook files claim the anonymous publication path."
+                            : "A tracked audiobook file claims the publication path, but the current target does not match the journaled content proof.",
                         cancellationToken);
                 }
                 continue;
             }
-            if (pathOwners.Count > 0)
+
+
+            if (journal.ProtocolVersion
+                < FileMutationProtocol.OperationEvidence)
             {
                 await TryMarkNeedsAttentionAsync(
                     journal.OperationId,
                     journal.State,
-                    exactOwners.Count > 1
-                        ? "Multiple tracked audiobook files claim the anonymous publication target generation."
-                        : "A tracked audiobook file claims the publication path with contradictory generation evidence.",
-                    cancellationToken);
-                continue;
-            }
-            if (journal.State != FileMutationJournalState.Planned
-                && targetClaims.Count(candidate =>
-                    AnonymousTargetGenerationMatches(candidate, journal)) != 1)
-            {
-                await TryMarkNeedsAttentionAsync(
-                    journal.OperationId,
-                    journal.State,
-                    "Another anonymous registration journal claims the same published target generation.",
+                    "This legacy anonymous publication has no durable owner. Its source and target were preserved because persisted physical identity cannot authorize restart cleanup.",
                     cancellationToken);
                 continue;
             }

@@ -250,8 +250,7 @@ namespace Listenarr.Infrastructure.Library.Scanning
                 ct);
             if (!authorization.IsAuthorized
                 || authorization.Path == null
-                || !authorization.Identity.HasValue
-                || !authorization.PhysicalIdentity.HasValue)
+                || !authorization.Identity.HasValue)
             {
                 throw new InvalidOperationException(
                     authorization.Error
@@ -260,8 +259,6 @@ namespace Listenarr.Infrastructure.Library.Scanning
 
             var canonicalRootFolderPath = authorization.Path;
             var semantics = authorization.Identity.Value.Semantics;
-            var hasDurableGenerationProof =
-                authorization.PhysicalIdentity.Value.HasDurableGenerationProof;
 
             // Load all tracked file paths (normalized) from DB.
             // Check BOTH AudiobookFiles (multi-file imports) AND Audiobook.FilePath (single-file imports)
@@ -283,10 +280,7 @@ namespace Listenarr.Infrastructure.Library.Scanning
             // enumeration primitive used by authoritative audiobook scans.
             using var pinnedRoot = PinnedDirectoryCreation.OpenPinnedBoundary(
                 canonicalRootFolderPath);
-            if (!pinnedRoot.VisiblePathMatches()
-                || (authorization.PhysicalIdentity.Value.HasDurableGenerationProof
-                    && !pinnedRoot.MatchesDirectoryObjectIdentity(
-                        authorization.PhysicalIdentity.Value.ScanRootObjectIdentity!)))
+            if (!pinnedRoot.VisiblePathMatches())
             {
                 throw new InvalidOperationException(
                     "The unmatched scan root changed after authorization.");
@@ -298,7 +292,7 @@ namespace Listenarr.Infrastructure.Library.Scanning
                 _logger,
                 semantics,
                 pinnedRoot,
-                authorization.PhysicalIdentity.Value.HasDurableGenerationProof);
+                requireDurableGenerationProof: false);
             if (enumeration.Issues.Any(issue =>
                     issue.Kind == ScanDiscoveryIssueKind.DirectoryGenerationChanged))
             {
@@ -351,10 +345,10 @@ namespace Listenarr.Infrastructure.Library.Scanning
                 .ToList();
 
             // Resolve ffprobe path once for the whole scan (null = not available)
-            var ffprobePath = hasDurableGenerationProof
-                && (OperatingSystem.IsWindows()
+            var ffprobePath =
+                OperatingSystem.IsWindows()
                     || OperatingSystem.IsLinux()
-                    || OperatingSystem.IsMacOS())
+                    || OperatingSystem.IsMacOS()
                     ? await _ffmpegService.GetFfprobePathAsync()
                     : null;
 
@@ -396,15 +390,12 @@ namespace Listenarr.Infrastructure.Library.Scanning
                             representative,
                             rootFolderPath,
                             semantics);
-                        if (hasDurableGenerationProof)
-                        {
-                            await ApplyPinnedFolderMetadataAsync(
-                                parsed,
-                                parsed.BookFolderPath ?? string.Empty,
-                                enumeration,
-                                semantics,
-                                token);
-                        }
+                        await ApplyPinnedFolderMetadataAsync(
+                            parsed,
+                            parsed.BookFolderPath ?? string.Empty,
+                            enumeration,
+                            semantics,
+                            token);
 
                         PathParsedMetadata? tags = null;
                         if (embeddedTagsByFile != null && embeddedTagsByFile.TryGetValue(representative, out var cachedTags))
@@ -416,17 +407,21 @@ namespace Listenarr.Infrastructure.Library.Scanning
                             var canonicalRepresentative = FileSystemPathIdentity.Canonicalize(
                                 representative,
                                 semantics.Syntax);
-                            if (!enumeration.FileObjectIdentities.TryGetValue(
-                                    canonicalRepresentative,
-                                    out var expectedPhysicalObjectIdentity))
+                            enumeration.FileObjectIdentities.TryGetValue(
+                                canonicalRepresentative,
+                                out var expectedPhysicalObjectIdentity);
+                            if (string.Equals(
+                                    expectedPhysicalObjectIdentity,
+                                    ScanFileDiscovery.PinnedPathOnlyIdentity,
+                                    StringComparison.Ordinal))
                             {
-                                throw new InvalidOperationException(
-                                    "The unmatched metadata candidate lacks its enumerated physical generation.");
+                                expectedPhysicalObjectIdentity = null;
                             }
 
-                            using var lease = PinnedAudiobookFileRegistrationLease.Open(
-                                representative,
-                                expectedPhysicalObjectIdentity);
+                            using var lease =
+                                PinnedAudiobookFileRegistrationLease.OpenForMetadataRead(
+                                    representative,
+                                    expectedPhysicalObjectIdentity);
                             tags = await PathMetadataParser.ReadEmbeddedTagsAsync(
                                 lease.MetadataPath,
                                 ffprobePath,

@@ -93,24 +93,6 @@ internal static class MoveJobTestFactory
             FileSystemCaseSensitivityMode.Auto,
             targetBoundary,
             targetPath);
-        var directoryIdentityResolver =
-            services.GetRequiredService<IDirectoryObjectIdentityResolver>();
-        var sourceDirectoryIdentity = await directoryIdentityResolver.ResolveAsync(
-            sourceAuthorizationBoundary);
-        if (!sourceDirectoryIdentity.IsAvailable)
-        {
-            throw new InvalidOperationException(
-                sourceDirectoryIdentity.UnavailableReason
-                    ?? "Move test source boundary identity is unavailable.");
-        }
-        var targetDirectoryIdentity = await directoryIdentityResolver.ResolveAsync(
-            targetBoundary);
-        if (!targetDirectoryIdentity.IsAvailable)
-        {
-            throw new InvalidOperationException(
-                targetDirectoryIdentity.UnavailableReason
-                    ?? "Move test target boundary identity is unavailable.");
-        }
         var manifest = await BuildManifestAsync(sourcePath);
         await EnsureTrackedRowsAsync(
             services,
@@ -125,10 +107,6 @@ internal static class MoveJobTestFactory
             manifest,
             targetPath,
             targetIdentity,
-            sourceDirectoryIdentity.Version!.Value,
-            sourceDirectoryIdentity.Value!,
-            targetDirectoryIdentity.Version!.Value,
-            targetDirectoryIdentity.Value!,
             deleteEmptySource,
             deleteEmptySource
                 ? sourceAuthorizationBoundary

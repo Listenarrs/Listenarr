@@ -7,6 +7,33 @@ namespace Listenarr.Tests.Features.Domain.Utils;
 public sealed class FileSystemPathIdentityTests : BaseTests
 {
     [Theory]
+    [InlineData(" /library/Nested", "/library/Nested/Book", "/library/NestedSibling/Book", FileSystemPathSyntax.Unix)]
+    [InlineData("/library/Nested ", "/library/Nested/Book", "/library/NestedSibling/Book", FileSystemPathSyntax.Unix)]
+    [InlineData(" /library/Nested ", "/library/Nested/Book", "/library/NestedSibling/Book", FileSystemPathSyntax.Unix)]
+    [InlineData(@" C:\Library\Nested", @"C:\Library\Nested\Book", @"C:\Library\NestedSibling\Book", FileSystemPathSyntax.Windows)]
+    [InlineData(@"C:\Library\Nested ", @"C:\Library\Nested\Book", @"C:\Library\NestedSibling\Book", FileSystemPathSyntax.Windows)]
+    [InlineData(@" C:\Library\Nested ", @"C:\Library\Nested\Book", @"C:\Library\NestedSibling\Book", FileSystemPathSyntax.Windows)]
+    public void StoredBoundaryMayContainPath_PaddingOnlyWidensSafetyFence(
+        string storedBoundary, string child, string sibling, FileSystemPathSyntax syntax)
+    {
+        Assert.True(FileSystemPathIdentity.StoredBoundaryMayContainPath(
+            storedBoundary, child, syntax, FileSystemCaseSensitivityMode.Sensitive));
+        Assert.True(FileSystemPathIdentity.AmbiguousStoredBoundaryMayContainPath(
+            storedBoundary, child, syntax, FileSystemCaseSensitivityMode.Sensitive));
+        Assert.False(FileSystemPathIdentity.StoredBoundaryMayContainPath(
+            storedBoundary, sibling, syntax, FileSystemCaseSensitivityMode.Sensitive));
+        Assert.False(FileSystemPathIdentity.AmbiguousStoredBoundaryMayContainPath(
+            storedBoundary, sibling, syntax, FileSystemCaseSensitivityMode.Sensitive));
+
+        if (char.IsWhiteSpace(storedBoundary[0]))
+        {
+            Assert.False(FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                storedBoundary, out var canonicalPath, out _, syntax));
+            Assert.Empty(canonicalPath);
+        }
+    }
+
+    [Theory]
     [InlineData(nameof(FileSystemPathSyntax.Unix))]
     [InlineData(nameof(FileSystemPathSyntax.Windows))]
     public void UnambiguousStoredAbsolutePath_DoubleForwardSlashIsRejected(

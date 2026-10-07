@@ -46,7 +46,9 @@ public sealed class WeakStorageScanCandidateStore(
                 AudiobookFileId = candidate.AudiobookFileId,
                 ExpectedStoredPath = candidate.ExpectedStoredPath,
                 ExpectedResolvedPath = candidate.ExpectedResolvedPath,
-                ExpectedPhysicalObjectIdentity = candidate.ExpectedPhysicalObjectIdentity,
+                // Legacy column retained for schema compatibility only. Confirmation
+                // authority comes from current path state plus a fresh absence proof.
+                ExpectedPhysicalObjectIdentity = null,
                 CreatedAt = now,
                 ExpiresAt = now + CandidateLifetime
             }));
@@ -109,9 +111,7 @@ public sealed class WeakStorageScanCandidateStore(
                 .SingleOrDefaultAsync(
                     file => file.Id == candidate.AudiobookFileId
                         && file.AudiobookId == audiobookId
-                        && file.Path == candidate.ExpectedStoredPath
-                        && EF.Property<string?>(file, "PhysicalObjectIdentity")
-                            == candidate.ExpectedPhysicalObjectIdentity,
+                        && file.Path == candidate.ExpectedStoredPath,
                     cancellationToken);
             var currentBasePath = await context.Audiobooks
                 .AsNoTracking()
@@ -142,9 +142,7 @@ public sealed class WeakStorageScanCandidateStore(
                     && file.Path == candidate.ExpectedStoredPath
                     && file.CanonicalPath == currentCanonicalPath
                     && file.PathSyntax == currentPathSyntax
-                    && file.PathIdentityState == currentPathIdentityState
-                    && EF.Property<string?>(file, "PhysicalObjectIdentity")
-                        == candidate.ExpectedPhysicalObjectIdentity);
+                    && file.PathIdentityState == currentPathIdentityState);
             if (dependsOnBasePath)
             {
                 matchingFileQuery = matchingFileQuery.Where(_ =>

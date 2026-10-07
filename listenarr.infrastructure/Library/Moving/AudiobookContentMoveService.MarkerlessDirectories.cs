@@ -77,8 +77,7 @@ internal sealed partial class AudiobookContentMoveService
                 }
                 if (planned.State is not (
                         MoveCreatedDirectoryState.Created
-                        or MoveCreatedDirectoryState.Retained)
-                    || string.IsNullOrWhiteSpace(planned.DirectoryObjectIdentity))
+                        or MoveCreatedDirectoryState.Retained))
                 {
                     throw new MoveNeedsAttentionException(
                         $"A planned markerless target directory has inconsistent persisted state: {path}");
@@ -117,7 +116,7 @@ internal sealed partial class AudiobookContentMoveService
             }
 
             using var directory = creation.OpenCreatedDirectoryAnchor();
-            var identity = directory.GetDirectoryObjectIdentity();
+            var identity = PinnedDirectoryCreation.CaptureDiagnosticIdentity(directory.GetDirectoryObjectIdentity);
             if (!PinnedDirectoryVisibleOrThrowUnavailable(
                     directory,
                     $"A newly created target directory is temporarily unavailable before persistence: {path}"))
@@ -193,7 +192,7 @@ internal sealed partial class AudiobookContentMoveService
                 $"An unproven markerless target directory changed during recovery: {planned.Path}");
         }
 
-        var identity = directory.GetDirectoryObjectIdentity();
+        var identity = PinnedDirectoryCreation.CaptureDiagnosticIdentity(directory.GetDirectoryObjectIdentity);
         await UpdateCreatedDirectoryPublicationAsync(
             request.JobId,
             request.LeaseToken,
@@ -331,10 +330,7 @@ internal sealed partial class AudiobookContentMoveService
             request.TargetSemantics,
             sourceBoundary: false);
         using var directory = parent.OpenExistingChild(Path.GetFileName(planned.Path));
-        if (string.IsNullOrWhiteSpace(planned.DirectoryObjectIdentity)
-            || !directory.MatchesDirectoryObjectIdentity(
-                planned.DirectoryObjectIdentity)
-            || !PinnedDirectoryVisibleOrThrowUnavailable(
+        if (!PinnedDirectoryVisibleOrThrowUnavailable(
                 directory,
                 $"A move-created target directory is temporarily unavailable: {planned.Path}")
             || !PinnedDirectoryVisibleOrThrowUnavailable(
@@ -376,17 +372,7 @@ internal sealed partial class AudiobookContentMoveService
             target,
             request.TargetSemantics,
             sourceBoundary: false);
-        var identity = root.GetDirectoryObjectIdentity();
-        var endpoints = await GetEndpointObjectIdentitiesAsync(
-            request.JobId,
-            cancellationToken);
-        if (!string.IsNullOrWhiteSpace(endpoints.TargetDirectoryObjectIdentity)
-            && !root.MatchesDirectoryObjectIdentity(
-                endpoints.TargetDirectoryObjectIdentity))
-        {
-            throw new MoveNeedsAttentionException(
-                "The markerless move target root changed physical generation.");
-        }
+        var identity = PinnedDirectoryCreation.CaptureDiagnosticIdentity(root.GetDirectoryObjectIdentity);
         if (!PinnedDirectoryVisibleOrThrowUnavailable(
                 root,
                 "The markerless target root is temporarily unavailable while pinned."))
@@ -394,14 +380,12 @@ internal sealed partial class AudiobookContentMoveService
             throw new MoveNeedsAttentionException(
                 "The markerless target root changed while pinned.");
         }
-        if (string.IsNullOrWhiteSpace(endpoints.TargetDirectoryObjectIdentity))
-        {
-            await UpdateEndpointObjectIdentitiesAsync(
-                request.JobId,
-                request.LeaseToken,
-                sourceDirectoryObjectIdentity: null,
-                identity,
-                cancellationToken);
-        }
+
+        await UpdateEndpointObjectIdentitiesAsync(
+            request.JobId,
+            request.LeaseToken,
+            sourceDirectoryObjectIdentity: null,
+            identity,
+            cancellationToken);
     }
 }

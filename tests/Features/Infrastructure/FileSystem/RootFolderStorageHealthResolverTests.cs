@@ -6,21 +6,79 @@ namespace Listenarr.Tests.Features.Infrastructure.FileSystem;
 [Trait("Category", "Infrastructure")]
 public sealed class RootFolderStorageHealthResolverTests : BaseTests
 {
+    [Theory]
+    [InlineData(DirectoryObjectIdentityFailureKind.Unknown)]
+    [InlineData(DirectoryObjectIdentityFailureKind.IdentityUnstable)]
+    [InlineData(DirectoryObjectIdentityFailureKind.AccessDenied)]
+    public async Task ResolveAsync_CurrentAccessibleRoot_OptionalDiagnosticFailureDoesNotDisableCapabilities(
+        DirectoryObjectIdentityFailureKind failureKind)
+    {
+        var path = FileService.GetTempDirectory("root-storage-optional-diagnostic");
+        var root = BuildRoot(path, "legacy-diagnostic");
+        var diagnostic = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
+        diagnostic.Setup(candidate => candidate.ResolveAsync(
+                path, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DirectoryObjectIdentityResolution.Unavailable(
+                "The optional identity observation failed.", failureKind));
+        var resolver = new RootFolderStorageHealthResolver(
+            diagnostic.Object, readOnlyFileSystemProbe: _ => false);
+
+        var result = await resolver.ResolveAsync(root);
+
+        Assert.True(result.CanReadFilesystem);
+        Assert.True(result.CanScanFilesystem);
+        Assert.True(result.CanPublishAdditively);
+        Assert.True(result.CanMutateFilesystem);
+        Assert.False(result.CanConfirmCurrentFolder);
+        Assert.Equal("legacy-diagnostic", root.DirectoryObjectIdentity);
+        diagnostic.VerifyAll();
+    }
+
+
+    [LinuxFact]
+    [System.Runtime.Versioning.SupportedOSPlatform("linux")]
+    public async Task ResolveAsync_OptionalDiagnosticFailure_CurrentAccessDeniedRemainsUnavailable()
+    {
+        var path = FileService.GetTempDirectory("root-storage-real-access-denial");
+        var root = BuildRoot(path, "legacy-diagnostic");
+        var diagnostic = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
+        diagnostic.Setup(candidate => candidate.ResolveAsync(
+                path, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DirectoryObjectIdentityResolution.Unavailable(
+                "The optional diagnostic failed.", DirectoryObjectIdentityFailureKind.Unknown));
+        var resolver = new RootFolderStorageHealthResolver(
+            diagnostic.Object, readOnlyFileSystemProbe: _ => false);
+        var originalMode = File.GetUnixFileMode(path);
+        try
+        {
+            File.SetUnixFileMode(path, UnixFileMode.None);
+
+            var result = await resolver.ResolveAsync(root);
+
+            Assert.False(result.CanReadFilesystem);
+            Assert.False(result.CanMutateFilesystem);
+            Assert.False(result.CanConfirmCurrentFolder);
+            Assert.Equal(RootFolderStorageReason.AccessDenied, result.Reason);
+        }
+        finally
+        {
+            File.SetUnixFileMode(path, originalMode);
+        }
+    }
+
     [Fact]
-    public async Task ResolveAsync_AuthorizedGenerationMatches_ReturnsHealthy()
+    public async Task ResolveAsync_CurrentPathAvailable_ReturnsHealthy()
     {
         var path = Path.GetFullPath("root-storage-healthy");
         var root = BuildRoot(path, identity: "authorized");
         var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
         identityResolver
-            .Setup(resolver => resolver.ResolveExistingAsync(
+            .Setup(resolver => resolver.ResolveAsync(
                 path,
-                ManagedDirectoryIdentity.CurrentVersion,
-                "authorized",
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DirectoryObjectIdentityResolution(
                 ManagedDirectoryIdentity.CurrentVersion,
-                "authorized",
+                "current-observation",
                 null));
         var resolver = new RootFolderStorageHealthResolver(
             identityResolver.Object,
@@ -37,21 +95,158 @@ public sealed class RootFolderStorageHealthResolverTests : BaseTests
     }
 
     [Fact]
-    public async Task ResolveAsync_AuthorizedGenerationWithBehavioralAutoSemantics_DisablesMutation()
+    public async Task ResolveAsync_PersistedPhysicalIdentityMismatch_DoesNotChangeWritableRootAvailability()
+    {
+        var path = Path.GetFullPath("root-storage-remounted-device");
+        var root = BuildRoot(path, identity: "persisted-device-a");
+        var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
+        identityResolver
+            .Setup(resolver => resolver.ResolveAsync(path, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DirectoryObjectIdentityResolution(
+                ManagedDirectoryIdentity.CurrentVersion,
+                "current-device-b",
+                null));
+        var semanticsResolver = new Mock<IFileSystemSemanticsResolver>(MockBehavior.Strict);
+        semanticsResolver
+            .Setup(resolver => resolver.ResolveAsync(
+                path,
+                root.CaseSensitivityMode,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileSystemSemanticsResolution(
+                new FileSystemPathSemantics(
+                    FileSystemPathSemantics.CurrentHostDefault.Syntax,
+                    root.ResolvedCaseSensitivity),
+                PathIdentityState.Valid,
+                path));
+        var resolver = new RootFolderStorageHealthResolver(
+            identityResolver.Object,
+            semanticsResolver.Object,
+            readOnlyFileSystemProbe: _ => false);
+
+        var result = await resolver.ResolveAsync(root);
+
+        Assert.Equal(RootFolderStorageState.Healthy, result.State);
+        Assert.Equal(RootFolderStorageReason.None, result.Reason);
+        Assert.True(result.CanReadFilesystem);
+        Assert.True(result.CanScanFilesystem);
+        Assert.True(result.CanMutateFilesystem);
+        Assert.False(result.CanConfirmCurrentFolder);
+        Assert.Null(result.ConfirmationToken);
+        identityResolver.VerifyAll();
+        semanticsResolver.VerifyAll();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResolveAsync_CephFsReporterDeviceChange_KeepsRootAvailable(bool returnToOriginalNode)
+    {
+        // Issue #947 reports inode 1099512613376 on mounts 0:278 and 0:687.
+        // Use identical synthetic file-handle evidence to isolate the device change.
+        var nodeA = PinnedDirectoryCreation.CreateLinuxObjectIdentityCandidatesFromEvidence(
+            deviceMajor: 0, deviceMinor: 278, inode: 1099512613376,
+            hasBirthTime: false, birthTimeSeconds: 0, birthTimeNanoseconds: 0,
+            generationIdentities: ["fh:00000001:01020304"]);
+        var nodeB = PinnedDirectoryCreation.CreateLinuxObjectIdentityCandidatesFromEvidence(
+            deviceMajor: 0, deviceMinor: 687, inode: 1099512613376,
+            hasBirthTime: false, birthTimeSeconds: 0, birthTimeNanoseconds: 0,
+            generationIdentities: ["fh:00000001:01020304"]);
+        var stored = ManagedDirectoryIdentity.CreateMarkerless(
+            Assert.Single(returnToOriginalNode ? nodeB : nodeA));
+        var current = ManagedDirectoryIdentity.CreateMarkerless(
+            Assert.Single(returnToOriginalNode ? nodeA : nodeB));
+        Assert.NotEqual(stored, current);
+        var path = Path.GetFullPath("cephfs-storage/books");
+        var semantics = new FileSystemPathSemantics(
+            FileSystemPathSemantics.CurrentHostDefault.Syntax,
+            FileSystemCaseSensitivity.Sensitive);
+        var root = BuildRoot(path, stored);
+        root.CaseSensitivityMode = FileSystemCaseSensitivityMode.Sensitive;
+        root.ResolvedCaseSensitivity = FileSystemCaseSensitivity.Sensitive;
+        root.PathIdentityKey = FileSystemPathIdentity.CreateKey("root", path, semantics);
+        var storedPathKey = root.PathIdentityKey;
+        var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
+        identityResolver.Setup(resolver => resolver.ResolveAsync(path, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DirectoryObjectIdentityResolution(
+                ManagedDirectoryIdentity.CurrentVersion, current, null));
+        var semanticsResolver = new Mock<IFileSystemSemanticsResolver>(MockBehavior.Strict);
+        semanticsResolver.Setup(resolver => resolver.ResolveAsync(
+                path, root.CaseSensitivityMode, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileSystemSemanticsResolution(semantics, PathIdentityState.Valid, path));
+        var resolver = new RootFolderStorageHealthResolver(
+            identityResolver.Object, semanticsResolver.Object, readOnlyFileSystemProbe: _ => false);
+
+        var result = await resolver.ResolveAsync(root);
+
+        Assert.Equal(RootFolderStorageState.Healthy, result.State);
+        Assert.Equal(RootFolderStorageReason.None, result.Reason);
+        Assert.True(result.CanReadFilesystem);
+        Assert.True(result.CanScanFilesystem);
+        Assert.True(result.CanPublishAdditively);
+        Assert.True(result.CanRetireVerifiedSource);
+        Assert.True(result.CanMutateFilesystem);
+        Assert.False(result.CanConfirmCurrentFolder);
+        Assert.Null(result.ConfirmationToken);
+        Assert.Equal(storedPathKey, root.PathIdentityKey);
+        Assert.Equal(stored, root.DirectoryObjectIdentity);
+        identityResolver.VerifyAll();
+        semanticsResolver.VerifyAll();
+    }
+
+    [Fact]
+    public async Task ResolveAsync_NoPersistedPhysicalIdentity_WithWritableCurrentCapabilities_IsHealthy()
+    {
+        var path = Path.GetFullPath("root-storage-no-persisted-object-identity");
+        var root = BuildRoot(path, identity: null);
+        var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
+        identityResolver
+            .Setup(resolver => resolver.ResolveAsync(path, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DirectoryObjectIdentityResolution(
+                ManagedDirectoryIdentity.CurrentVersion,
+                "current-observation",
+                null));
+        var semanticsResolver = new Mock<IFileSystemSemanticsResolver>(MockBehavior.Strict);
+        semanticsResolver
+            .Setup(resolver => resolver.ResolveAsync(
+                path,
+                root.CaseSensitivityMode,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileSystemSemanticsResolution(
+                new FileSystemPathSemantics(
+                    FileSystemPathSemantics.CurrentHostDefault.Syntax,
+                    root.ResolvedCaseSensitivity),
+                PathIdentityState.Valid,
+                path));
+        var resolver = new RootFolderStorageHealthResolver(
+            identityResolver.Object,
+            semanticsResolver.Object,
+            readOnlyFileSystemProbe: _ => false);
+
+        var result = await resolver.ResolveAsync(root);
+
+        Assert.Equal(RootFolderStorageState.Healthy, result.State);
+        Assert.Equal(RootFolderStorageReason.None, result.Reason);
+        Assert.True(result.CanMutateFilesystem);
+        Assert.False(result.CanConfirmCurrentFolder);
+        Assert.Null(result.ConfirmationToken);
+        identityResolver.VerifyAll();
+        semanticsResolver.VerifyAll();
+    }
+
+    [Fact]
+    public async Task ResolveAsync_AuthorizedGenerationWithBehavioralAutoSemantics_AllowsGuardedMutation()
     {
         var path = Path.GetFullPath("root-storage-behavioral-auto-semantics");
         var root = BuildRoot(path, identity: "authorized");
         root.CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto;
         var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
         identityResolver
-            .Setup(resolver => resolver.ResolveExistingAsync(
+            .Setup(resolver => resolver.ResolveAsync(
                 path,
-                ManagedDirectoryIdentity.CurrentVersion,
-                "authorized",
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DirectoryObjectIdentityResolution(
                 ManagedDirectoryIdentity.CurrentVersion,
-                "authorized",
+                "current-observation",
                 null));
         var semanticsResolver = new Mock<IFileSystemSemanticsResolver>(MockBehavior.Strict);
         semanticsResolver
@@ -73,18 +268,15 @@ public sealed class RootFolderStorageHealthResolverTests : BaseTests
 
         var result = await resolver.ResolveAsync(root);
 
-        Assert.Equal(RootFolderStorageState.Limited, result.State);
-        Assert.Equal(RootFolderStorageReason.MutationSemanticsUnproven, result.Reason);
+        Assert.Equal(RootFolderStorageState.Healthy, result.State);
+        Assert.Equal(RootFolderStorageReason.None, result.Reason);
         Assert.True(result.CanReadFilesystem);
         Assert.True(result.CanScanFilesystem);
-        Assert.False(result.CanMutateFilesystem);
-        Assert.False(result.CanPublishAdditively);
-        Assert.False(result.CanRetireDurably);
-        Assert.False(result.CanRetireVerifiedSource);
-        Assert.Contains(
-            "Sensitive or Insensitive",
-            result.Message ?? string.Empty,
-            StringComparison.Ordinal);
+        Assert.True(result.CanMutateFilesystem);
+        Assert.True(result.CanPublishAdditively);
+        Assert.True(result.CanRetireSourceNow);
+        Assert.True(result.CanRetireVerifiedSource);
+        Assert.Null(result.ConfirmationToken);
         identityResolver.VerifyAll();
         semanticsResolver.VerifyAll();
     }
@@ -97,14 +289,12 @@ public sealed class RootFolderStorageHealthResolverTests : BaseTests
         root.CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto;
         var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
         identityResolver
-            .Setup(resolver => resolver.ResolveExistingAsync(
+            .Setup(resolver => resolver.ResolveAsync(
                 path,
-                ManagedDirectoryIdentity.CurrentVersion,
-                "authorized",
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DirectoryObjectIdentityResolution(
                 ManagedDirectoryIdentity.CurrentVersion,
-                "authorized",
+                "current-observation",
                 null));
         var semanticsResolver = new Mock<IFileSystemSemanticsResolver>(MockBehavior.Strict);
         semanticsResolver
@@ -140,14 +330,12 @@ public sealed class RootFolderStorageHealthResolverTests : BaseTests
         var root = BuildRoot(path, identity: "authorized");
         var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
         identityResolver
-            .Setup(resolver => resolver.ResolveExistingAsync(
+            .Setup(resolver => resolver.ResolveAsync(
                 path,
-                ManagedDirectoryIdentity.CurrentVersion,
-                "authorized",
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DirectoryObjectIdentityResolution(
                 ManagedDirectoryIdentity.CurrentVersion,
-                "authorized",
+                "current-observation",
                 null));
         var resolver = new RootFolderStorageHealthResolver(
             identityResolver.Object,
@@ -161,7 +349,7 @@ public sealed class RootFolderStorageHealthResolverTests : BaseTests
         Assert.True(result.CanScanFilesystem);
         Assert.False(result.CanMutateFilesystem);
         Assert.False(result.CanPublishAdditively);
-        Assert.False(result.CanRetireDurably);
+        Assert.False(result.CanRetireSourceNow);
         Assert.False(result.CanRetireVerifiedSource);
         Assert.Contains("read-only", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
         identityResolver.VerifyAll();
@@ -174,14 +362,12 @@ public sealed class RootFolderStorageHealthResolverTests : BaseTests
         var root = BuildRoot(path, identity: "authorized");
         var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
         identityResolver
-            .Setup(resolver => resolver.ResolveExistingAsync(
+            .Setup(resolver => resolver.ResolveAsync(
                 path,
-                ManagedDirectoryIdentity.CurrentVersion,
-                "authorized",
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DirectoryObjectIdentityResolution(
                 ManagedDirectoryIdentity.CurrentVersion,
-                "authorized",
+                "current-observation",
                 null));
         var resolver = new RootFolderStorageHealthResolver(
             identityResolver.Object,
@@ -198,16 +384,14 @@ public sealed class RootFolderStorageHealthResolverTests : BaseTests
     }
 
     [Fact]
-    public async Task ResolveAsync_AuthorizedGenerationMissing_ReturnsMissingWithoutConfirmation()
+    public async Task ResolveAsync_CurrentPathMissing_ReturnsMissingWithoutConfirmation()
     {
         var path = Path.GetFullPath("root-storage-missing");
         var root = BuildRoot(path, identity: "authorized");
         var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
         identityResolver
-            .Setup(resolver => resolver.ResolveExistingAsync(
+            .Setup(resolver => resolver.ResolveAsync(
                 path,
-                ManagedDirectoryIdentity.CurrentVersion,
-                "authorized",
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(DirectoryObjectIdentityResolution.Unavailable(
                 "Directory not found.",
@@ -227,20 +411,11 @@ public sealed class RootFolderStorageHealthResolverTests : BaseTests
     }
 
     [Fact]
-    public async Task ResolveAsync_AuthorizedGenerationReplaced_ReturnsChangedBoundToObservedGeneration()
+    public async Task ResolveAsync_CurrentPhysicalObservationChanges_DoesNotRequestConfirmation()
     {
         var path = Path.GetFullPath("root-storage-changed");
         var root = BuildRoot(path, identity: "authorized");
         var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
-        identityResolver
-            .Setup(resolver => resolver.ResolveExistingAsync(
-                path,
-                ManagedDirectoryIdentity.CurrentVersion,
-                "authorized",
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DirectoryObjectIdentityResolution.Unavailable(
-                "Identity mismatch.",
-                DirectoryObjectIdentityFailureKind.IdentityMismatch));
         identityResolver
             .Setup(resolver => resolver.ResolveAsync(path, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DirectoryObjectIdentityResolution(
@@ -253,29 +428,20 @@ public sealed class RootFolderStorageHealthResolverTests : BaseTests
 
         var result = await resolver.ResolveAsync(root);
 
-        Assert.Equal(RootFolderStorageState.Changed, result.State);
-        Assert.Equal(RootFolderStorageReason.IdentityMismatch, result.Reason);
-        Assert.False(result.CanMutateFilesystem);
-        Assert.True(result.CanConfirmCurrentFolder);
-        Assert.False(string.IsNullOrWhiteSpace(result.ConfirmationToken));
+        Assert.Equal(RootFolderStorageState.Healthy, result.State);
+        Assert.Equal(RootFolderStorageReason.None, result.Reason);
+        Assert.True(result.CanMutateFilesystem);
+        Assert.False(result.CanConfirmCurrentFolder);
+        Assert.Null(result.ConfirmationToken);
         identityResolver.VerifyAll();
     }
 
     [Fact]
-    public async Task ResolveAsync_LegacyWeakIdentity_AllowsScanAndExplicitIdentityUpgrade()
+    public async Task ResolveAsync_LegacyPersistedIdentity_DoesNotLimitCurrentCapabilities()
     {
         var path = Path.GetFullPath("root-storage-legacy-weak");
         var root = BuildRoot(path, identity: "legacy");
         var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
-        identityResolver
-            .Setup(resolver => resolver.ResolveExistingAsync(
-                path,
-                ManagedDirectoryIdentity.CurrentVersion,
-                "legacy",
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DirectoryObjectIdentityResolution.Unavailable(
-                "Legacy Linux identity requires upgrade.",
-                DirectoryObjectIdentityFailureKind.LegacyWeakIdentity));
         identityResolver
             .Setup(resolver => resolver.ResolveAsync(
                 path,
@@ -290,39 +456,32 @@ public sealed class RootFolderStorageHealthResolverTests : BaseTests
 
         var result = await resolver.ResolveAsync(root);
 
-        Assert.Equal(RootFolderStorageState.Limited, result.State);
-        Assert.Equal(RootFolderStorageReason.IdentityUnsupported, result.Reason);
+        Assert.Equal(RootFolderStorageState.Healthy, result.State);
+        Assert.Equal(RootFolderStorageReason.None, result.Reason);
         Assert.True(result.CanReadFilesystem);
         Assert.True(result.CanScanFilesystem);
-        Assert.False(result.CanMutateFilesystem);
-        Assert.False(result.CanPublishAdditively);
-        Assert.False(result.CanRetireVerifiedSource);
-        Assert.True(result.CanConfirmCurrentFolder);
-        Assert.False(string.IsNullOrWhiteSpace(result.ConfirmationToken));
+        Assert.True(result.CanMutateFilesystem);
+        Assert.True(result.CanPublishAdditively);
+        Assert.True(result.CanRetireVerifiedSource);
+        Assert.False(result.CanConfirmCurrentFolder);
+        Assert.Null(result.ConfirmationToken);
         identityResolver.VerifyAll();
     }
 
     [Fact]
-    public async Task ResolveAsync_LegacyWeakIdentityWithoutCurrentStrongIdentity_RemainsLimitedWithoutConfirmation()
+    public async Task ResolveAsync_CurrentIdentityUnsupported_DoesNotLimitWritableStorage()
     {
         var path = Path.GetFullPath("root-storage-legacy-weak-unsupported-current");
         var root = BuildRoot(path, identity: "legacy");
         var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
-        identityResolver
-            .Setup(resolver => resolver.ResolveExistingAsync(
-                path,
-                ManagedDirectoryIdentity.CurrentVersion,
-                "legacy",
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DirectoryObjectIdentityResolution.Unavailable(
-                "Generic FILEID_INO64_GEN evidence is no longer durable authority.",
-                DirectoryObjectIdentityFailureKind.LegacyWeakIdentity));
+        const string detail =
+            "The filesystem does not expose a durable file handle or inode generation for this object.";
         identityResolver
             .Setup(resolver => resolver.ResolveAsync(
                 path,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(DirectoryObjectIdentityResolution.Unavailable(
-                "The filesystem does not expose a durable file handle or inode generation for this object.",
+                detail,
                 DirectoryObjectIdentityFailureKind.IdentityUnsupported));
         var resolver = new RootFolderStorageHealthResolver(
             identityResolver.Object,
@@ -330,11 +489,12 @@ public sealed class RootFolderStorageHealthResolverTests : BaseTests
 
         var result = await resolver.ResolveAsync(root);
 
-        Assert.Equal(RootFolderStorageState.Limited, result.State);
-        Assert.Equal(RootFolderStorageReason.IdentityUnsupported, result.Reason);
+        Assert.Equal(RootFolderStorageState.Healthy, result.State);
+        Assert.Equal(RootFolderStorageReason.None, result.Reason);
+        Assert.Equal(detail, result.Detail);
         Assert.True(result.CanReadFilesystem);
         Assert.True(result.CanScanFilesystem);
-        Assert.False(result.CanMutateFilesystem);
+        Assert.True(result.CanMutateFilesystem);
         Assert.False(result.CanConfirmCurrentFolder);
         Assert.Null(result.ConfirmationToken);
         identityResolver.VerifyAll();
@@ -387,7 +547,7 @@ public sealed class RootFolderStorageHealthResolverTests : BaseTests
     }
 
     [Fact]
-    public async Task ResolveAsync_NoAuthorizedGeneration_ReturnsUnconfirmed()
+    public async Task ResolveAsync_NoPersistedPhysicalGeneration_WithPersistedPathSemantics_ReturnsHealthy()
     {
         var path = Path.GetFullPath("root-storage-unconfirmed");
         var root = BuildRoot(path, identity: null);
@@ -404,16 +564,16 @@ public sealed class RootFolderStorageHealthResolverTests : BaseTests
 
         var result = await resolver.ResolveAsync(root);
 
-        Assert.Equal(RootFolderStorageState.Unconfirmed, result.State);
-        Assert.Equal(RootFolderStorageReason.NoAuthorizedIdentity, result.Reason);
-        Assert.False(result.CanMutateFilesystem);
-        Assert.True(result.CanConfirmCurrentFolder);
-        Assert.False(string.IsNullOrWhiteSpace(result.ConfirmationToken));
+        Assert.Equal(RootFolderStorageState.Healthy, result.State);
+        Assert.Equal(RootFolderStorageReason.None, result.Reason);
+        Assert.True(result.CanMutateFilesystem);
+        Assert.False(result.CanConfirmCurrentFolder);
+        Assert.Null(result.ConfirmationToken);
         identityResolver.VerifyAll();
     }
 
     [Fact]
-    public async Task ResolveAsync_ReplacementAlsoChangesFilesystemSemantics_RemainsChangedButCannotConfirm()
+    public async Task ResolveAsync_PhysicalObservationChangesAndFilesystemSemanticsChange_FailsForSemantics()
     {
         var path = Path.GetFullPath("root-storage-replacement-semantics-changed");
         var root = BuildRoot(path, identity: "authorized");
@@ -423,66 +583,10 @@ public sealed class RootFolderStorageHealthResolverTests : BaseTests
             : FileSystemCaseSensitivity.Sensitive;
         var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
         identityResolver
-            .Setup(resolver => resolver.ResolveExistingAsync(
-                path,
-                ManagedDirectoryIdentity.CurrentVersion,
-                "authorized",
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DirectoryObjectIdentityResolution.Unavailable(
-                "Identity mismatch.",
-                DirectoryObjectIdentityFailureKind.IdentityMismatch));
-        identityResolver
             .Setup(resolver => resolver.ResolveAsync(path, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DirectoryObjectIdentityResolution(
                 ManagedDirectoryIdentity.CurrentVersion,
                 "replacement",
-                null));
-        var semanticsResolver = new Mock<IFileSystemSemanticsResolver>(MockBehavior.Strict);
-        semanticsResolver
-            .Setup(resolver => resolver.ResolveAsync(
-                path,
-                FileSystemCaseSensitivityMode.Auto,
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new FileSystemSemanticsResolution(
-                new FileSystemPathSemantics(
-                    FileSystemPathSemantics.CurrentHostDefault.Syntax,
-                    opposite),
-                PathIdentityState.Valid,
-                path));
-        var resolver = new RootFolderStorageHealthResolver(
-            identityResolver.Object,
-            semanticsResolver.Object);
-
-        var result = await resolver.ResolveAsync(root);
-
-        Assert.Equal(RootFolderStorageState.Changed, result.State);
-        Assert.Equal(RootFolderStorageReason.FilesystemSemanticsChanged, result.Reason);
-        Assert.False(result.CanMutateFilesystem);
-        Assert.False(result.CanConfirmCurrentFolder);
-        Assert.Null(result.ConfirmationToken);
-        identityResolver.VerifyAll();
-        semanticsResolver.VerifyAll();
-    }
-
-    [Fact]
-    public async Task ResolveAsync_PhysicalGenerationMatchesButFilesystemSemanticsChanged_RequiresPathRepair()
-    {
-        var path = Path.GetFullPath("root-storage-semantics-changed");
-        var root = BuildRoot(path, identity: "authorized");
-        root.CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto;
-        var opposite = root.ResolvedCaseSensitivity == FileSystemCaseSensitivity.Sensitive
-            ? FileSystemCaseSensitivity.Insensitive
-            : FileSystemCaseSensitivity.Sensitive;
-        var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
-        identityResolver
-            .Setup(resolver => resolver.ResolveExistingAsync(
-                path,
-                ManagedDirectoryIdentity.CurrentVersion,
-                "authorized",
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new DirectoryObjectIdentityResolution(
-                ManagedDirectoryIdentity.CurrentVersion,
-                "authorized",
                 null));
         var semanticsResolver = new Mock<IFileSystemSemanticsResolver>(MockBehavior.Strict);
         semanticsResolver
@@ -512,22 +616,58 @@ public sealed class RootFolderStorageHealthResolverTests : BaseTests
     }
 
     [Fact]
-    public async Task ResolveAsync_IdentityUnsupported_PreservesTechnicalFailureDetail()
+    public async Task ResolveAsync_CurrentPathAvailableButFilesystemSemanticsChanged_RequiresPathRepair()
+    {
+        var path = Path.GetFullPath("root-storage-semantics-changed");
+        var root = BuildRoot(path, identity: "authorized");
+        root.CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto;
+        var opposite = root.ResolvedCaseSensitivity == FileSystemCaseSensitivity.Sensitive
+            ? FileSystemCaseSensitivity.Insensitive
+            : FileSystemCaseSensitivity.Sensitive;
+        var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
+        identityResolver
+            .Setup(resolver => resolver.ResolveAsync(
+                path,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DirectoryObjectIdentityResolution(
+                ManagedDirectoryIdentity.CurrentVersion,
+                "current-observation",
+                null));
+        var semanticsResolver = new Mock<IFileSystemSemanticsResolver>(MockBehavior.Strict);
+        semanticsResolver
+            .Setup(resolver => resolver.ResolveAsync(
+                path,
+                FileSystemCaseSensitivityMode.Auto,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileSystemSemanticsResolution(
+                new FileSystemPathSemantics(
+                    FileSystemPathSemantics.CurrentHostDefault.Syntax,
+                    opposite),
+                PathIdentityState.Valid,
+                path));
+        var resolver = new RootFolderStorageHealthResolver(
+            identityResolver.Object,
+            semanticsResolver.Object);
+
+        var result = await resolver.ResolveAsync(root);
+
+        Assert.Equal(RootFolderStorageState.Unavailable, result.State);
+        Assert.Equal(RootFolderStorageReason.FilesystemSemanticsChanged, result.Reason);
+        Assert.False(result.CanMutateFilesystem);
+        Assert.False(result.CanConfirmCurrentFolder);
+        Assert.Null(result.ConfirmationToken);
+        identityResolver.VerifyAll();
+        semanticsResolver.VerifyAll();
+    }
+
+    [Fact]
+    public async Task ResolveAsync_IdentityUnsupported_IsDiagnosticOnlyForWritableStorage()
     {
         var path = Path.GetFullPath("root-storage-identity-unsupported");
         var root = BuildRoot(path, identity: "authorized");
         const string detail =
             "statx omitted birth time and name_to_handle_at returned operation not permitted.";
         var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
-        identityResolver
-            .Setup(resolver => resolver.ResolveExistingAsync(
-                path,
-                ManagedDirectoryIdentity.CurrentVersion,
-                "authorized",
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DirectoryObjectIdentityResolution.Unavailable(
-                detail,
-                DirectoryObjectIdentityFailureKind.IdentityUnsupported));
         identityResolver
             .Setup(resolver => resolver.ResolveAsync(
                 path,
@@ -541,38 +681,25 @@ public sealed class RootFolderStorageHealthResolverTests : BaseTests
 
         var result = await resolver.ResolveAsync(root);
 
-        Assert.Equal(RootFolderStorageState.Limited, result.State);
-        Assert.Equal(RootFolderStorageReason.IdentityUnsupported, result.Reason);
+        Assert.Equal(RootFolderStorageState.Healthy, result.State);
+        Assert.Equal(RootFolderStorageReason.None, result.Reason);
         Assert.Equal(detail, result.Detail);
-        Assert.Contains(
-            "read and scanned",
-            result.Message ?? string.Empty,
-            StringComparison.OrdinalIgnoreCase);
         Assert.True(result.CanReadFilesystem);
         Assert.True(result.CanScanFilesystem);
         Assert.True(result.CanPublishNewFiles);
-        Assert.False(result.CanMutateFilesystem);
+        Assert.True(result.CanMutateFilesystem);
         Assert.True(result.CanPublishAdditively);
-        Assert.False(result.CanRetireDurably);
+        Assert.True(result.CanRetireSourceNow);
         Assert.True(result.CanRetireVerifiedSource);
         identityResolver.VerifyAll();
     }
 
     [Fact]
-    public async Task ResolveAsync_UnsupportedPersistedIdentityWithCurrentStrongIdentity_RequiresConfirmationBeforeScan()
+    public async Task ResolveAsync_UnsupportedPersistedIdentity_DoesNotRequireConfirmation()
     {
         var path = Path.GetFullPath("root-storage-unsupported-persisted-identity");
         var root = BuildRoot(path, identity: "legacy-version");
         var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
-        identityResolver
-            .Setup(resolver => resolver.ResolveExistingAsync(
-                path,
-                ManagedDirectoryIdentity.CurrentVersion,
-                "legacy-version",
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DirectoryObjectIdentityResolution.Unavailable(
-                "Directory identity version is unsupported.",
-                DirectoryObjectIdentityFailureKind.IdentityUnsupported));
         identityResolver
             .Setup(resolver => resolver.ResolveAsync(
                 path,
@@ -587,15 +714,15 @@ public sealed class RootFolderStorageHealthResolverTests : BaseTests
 
         var result = await resolver.ResolveAsync(root);
 
-        Assert.Equal(RootFolderStorageState.Unconfirmed, result.State);
-        Assert.Equal(RootFolderStorageReason.IdentityUnsupported, result.Reason);
-        Assert.False(result.CanReadFilesystem);
-        Assert.False(result.CanScanFilesystem);
-        Assert.False(result.CanMutateFilesystem);
-        Assert.False(result.CanPublishAdditively);
-        Assert.False(result.CanRetireVerifiedSource);
-        Assert.True(result.CanConfirmCurrentFolder);
-        Assert.False(string.IsNullOrWhiteSpace(result.ConfirmationToken));
+        Assert.Equal(RootFolderStorageState.Healthy, result.State);
+        Assert.Equal(RootFolderStorageReason.None, result.Reason);
+        Assert.True(result.CanReadFilesystem);
+        Assert.True(result.CanScanFilesystem);
+        Assert.True(result.CanMutateFilesystem);
+        Assert.True(result.CanPublishAdditively);
+        Assert.True(result.CanRetireVerifiedSource);
+        Assert.False(result.CanConfirmCurrentFolder);
+        Assert.Null(result.ConfirmationToken);
         identityResolver.VerifyAll();
     }
 

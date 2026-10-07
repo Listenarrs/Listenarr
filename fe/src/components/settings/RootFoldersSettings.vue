@@ -53,34 +53,23 @@
                   <div class="folder-badges">
                     <Pill variant="success" v-if="folder.isDefault">Default</Pill>
                     <Pill v-if="folder.storageState === 'Healthy'" variant="success">Healthy</Pill>
-                    <Pill
-                      v-else-if="folder.storageReason === 'MutationSemanticsUnproven'"
-                      variant="warning"
-                    >
-                      Needs case setting
-                    </Pill>
-                    <Pill v-else-if="folder.storageState === 'Limited'" variant="warning">
+                    <Pill v-if="folder.storageState === 'Limited'" variant="warning">
                       Limited
                     </Pill>
-                    <Pill v-else-if="folder.storageState === 'Missing'" variant="warning"
-                      >Missing</Pill
-                    >
-                    <Pill v-else-if="folder.storageState === 'Changed'" variant="error">
-                      Folder changed
+                    <Pill v-if="folder.storageState === 'Missing'" variant="warning">Missing</Pill>
+                    <Pill v-if="folder.storageState === 'Changed'" variant="error">
+                      Storage rules changed
                     </Pill>
-                    <Pill v-else-if="folder.storageState === 'Unconfirmed'" variant="warning">
+                    <Pill v-if="folder.storageState === 'Unconfirmed'" variant="warning">
                       Needs confirmation
                     </Pill>
-                    <Pill v-else-if="folder.storageState === 'Unavailable'" variant="error">
+                    <Pill v-if="folder.storageState === 'Unavailable'" variant="error">
                       Unavailable
                     </Pill>
-                    <Pill v-else-if="folder.storageState === 'Initializing'" variant="subtle">
+                    <Pill v-if="folder.storageState === 'Initializing'" variant="subtle">
                       Initializing
                     </Pill>
-                    <Pill
-                      v-else-if="folder.storageState === 'InitializationFailed'"
-                      variant="error"
-                    >
+                    <Pill v-if="folder.storageState === 'InitializationFailed'" variant="error">
                       Initialization failed
                     </Pill>
                     <Pill v-else variant="subtle">{{ folder.resolvedCaseSensitivity }}</Pill>
@@ -114,7 +103,7 @@
                   v-if="folder.canConfirmCurrentFolder && folder.confirmationToken"
                   class="icon-button action-secondary"
                   @click="openFolderConfirmation(folder)"
-                  title="Confirm this folder"
+                  title="Confirm storage settings"
                   data-cy="confirm-root-folder"
                   :disabled="!!folder.activeRelocation"
                 >
@@ -144,36 +133,8 @@
               <PhFolder />
               <code>{{ folder.path }}</code>
             </div>
-            <div
-              v-if="needsMutationSemanticsConfirmation(folder)"
-              class="storage-guidance"
-              data-cy="mutation-semantics-guidance"
-            >
-              <PhWarningCircle class="storage-guidance-icon" />
-              <div class="storage-guidance-copy">
-                <strong>One storage setting needs confirmation</strong>
-                <span>
-                  Listenarr detected this root as
-                  {{ detectedCaseSettingLabel(folder) }}, but the storage cannot report that
-                  reliably enough for file moves and deletes.
-                </span>
-              </div>
-              <button
-                type="button"
-                class="btn btn-primary storage-guidance-action"
-                :disabled="confirmingSemanticsRootId === folder.id || !!folder.activeRelocation"
-                @click="confirmDetectedCaseSetting(folder)"
-              >
-                <PhSpinner v-if="confirmingSemanticsRootId === folder.id" class="ph-spin" />
-                {{
-                  confirmingSemanticsRootId === folder.id
-                    ? 'Saving...'
-                    : `Use detected setting: ${detectedCaseSettingLabel(folder)}`
-                }}
-              </button>
-            </div>
             <p
-              v-else-if="folder.storageState !== 'Healthy' && folder.storageMessage"
+              v-if="folder.storageState !== 'Healthy' && folder.storageMessage"
               class="storage-message"
             >
               {{ folder.storageMessage }}
@@ -183,12 +144,8 @@
               class="storage-message compatibility-publication-message"
               data-cy="compatibility-publication-message"
             >
-              Move policy:
-              {{
-                folder.weakStorageSourceCleanupPolicy === 'DeleteSourceAfterVerifiedCopy'
-                  ? 'Listenarr will copy and verify files before attempting protected source cleanup. Moves between configured roots require this option on both roots.'
-                  : 'Listenarr will copy files into this storage and retain the source; it will not attempt source cleanup.'
-              }}
+              Listenarr verifies copied files and removes sources only when it can do so safely.
+              Otherwise, sources are retained.
             </p>
             <details
               v-if="folder.storageState !== 'Healthy' && folder.storageDetail"
@@ -451,20 +408,20 @@
 
     <DeleteConfirmationModal
       :visible="rootToConfirm !== null"
-      title="Confirm library folder"
-      confirm-text="Confirm folder"
+      title="Confirm storage settings"
+      confirm-text="Confirm settings"
       @close="rootToConfirm = null"
       @confirm="executeFolderConfirmation"
     >
       <template #confirm-icon><PhShieldCheck /></template>
       <template #default>
         <p v-if="rootToConfirm?.storageState === 'Changed'">
-          The folder currently at this location is different from the folder Listenarr previously
-          used for <strong>{{ rootToConfirm?.name }}</strong
+          The filesystem path or case rules at this location changed since Listenarr last saved
+          <strong>{{ rootToConfirm?.name }}</strong
           >.
         </p>
         <p v-else>
-          Listenarr needs to confirm the folder currently configured for
+          Listenarr needs to save the current filesystem path and case behavior for
           <strong>{{ rootToConfirm?.name }}</strong> before using it for filesystem operations.
         </p>
         <p>
@@ -475,8 +432,8 @@
           >
         </p>
         <p>
-          Confirm only if this is the folder you want Listenarr to use. Confirming it does not move,
-          modify, or delete any files.
+          Confirm only if these storage settings match the location you want Listenarr to use.
+          Confirming them does not move, modify, or delete any files.
         </p>
       </template>
     </DeleteConfirmationModal>
@@ -514,12 +471,6 @@ import type {
   RootFolderRelocationSkipReasonCode,
 } from '@/types'
 import { signalRService } from '@/services/signalr'
-import {
-  applyDetectedMutationSemantics,
-  caseSensitivityLabel,
-  detectedMutationSemantics,
-  needsMutationSemanticsConfirmation,
-} from '@/composables/useMutationSemanticsConfirmation'
 
 interface Props {
   hideHeader?: boolean
@@ -539,7 +490,6 @@ const editingRoot = computed(() => editing.value as RootFolder | undefined)
 const toast = useToast()
 const retryingRelocationId = ref<string | null>(null)
 const abandoningRelocationId = ref<string | null>(null)
-const confirmingSemanticsRootId = ref<number | null>(null)
 const relocationToAbandon = ref<{
   relocationId: string
   rootName: string
@@ -597,21 +547,6 @@ function openAdd() {
 function scanUnmatched(folder: RootFolder) {
   scanningFolder.value = folder
   showUnmatchedModal.value = true
-}
-
-function detectedCaseSettingLabel(folder: RootFolder): string {
-  const detected = detectedMutationSemantics(folder)
-  return detected ? caseSensitivityLabel(detected) : 'unknown'
-}
-
-async function confirmDetectedCaseSetting(folder: RootFolder) {
-  if (!folder.id || confirmingSemanticsRootId.value !== null) return
-  confirmingSemanticsRootId.value = folder.id
-  try {
-    await applyDetectedMutationSemantics(folder)
-  } finally {
-    confirmingSemanticsRootId.value = null
-  }
 }
 
 function edit(r: { id?: number; name: string; path: string }) {
@@ -676,15 +611,15 @@ async function executeFolderConfirmation() {
       confirmation.path,
       confirmation.confirmationToken,
     )
-    toast.success('Root folder', 'Library folder confirmed')
+    toast.success('Root folder', 'Storage settings confirmed')
   } catch (e: unknown) {
     errorTracking.captureException(e as Error, {
       component: 'RootFoldersSettings',
       operation: 'confirmRootFolder',
     })
     toast.error(
-      'Folder confirmation failed',
-      (e as Error)?.message || 'Failed to confirm the current library folder',
+      'Storage confirmation failed',
+      (e as Error)?.message || 'Failed to confirm the current storage settings',
     )
   }
 }

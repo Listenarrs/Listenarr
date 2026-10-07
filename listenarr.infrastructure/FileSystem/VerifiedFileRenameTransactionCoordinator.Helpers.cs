@@ -1,4 +1,3 @@
-using System.ComponentModel;
 using Listenarr.Domain.Common;
 using Microsoft.EntityFrameworkCore;
 
@@ -215,37 +214,56 @@ public sealed partial class VerifiedFileRenameTransactionCoordinator
         CancellationToken cancellationToken)
     {
         var roots = await rootFolderRepository.GetAllAsync();
-        var sourceRoot = roots.SingleOrDefault(
-            root => root.Id == journal.SourceRootFolderId);
-        var destinationRoot = roots.SingleOrDefault(
-            root => root.Id == journal.DestinationRootFolderId);
-        if (sourceRoot == null || destinationRoot == null
-            || sourceRoot.StorageContractRevision
-                != journal.SourceStorageContractRevision
-            || destinationRoot.StorageContractRevision
-                != journal.DestinationStorageContractRevision)
+        var sourceRoot = journal.SourceRootFolderId > 0
+            ? roots.SingleOrDefault(root => root.Id == journal.SourceRootFolderId)
+            : null;
+        var destinationRoot = journal.DestinationRootFolderId > 0
+            ? roots.SingleOrDefault(
+                root => root.Id == journal.DestinationRootFolderId)
+            : null;
+
+        if ((journal.SourceRootFolderId > 0
+                && (sourceRoot == null
+                    || sourceRoot.StorageContractRevision
+                        != journal.SourceStorageContractRevision))
+            || (journal.DestinationRootFolderId > 0
+                && (destinationRoot == null
+                    || destinationRoot.StorageContractRevision
+                        != journal.DestinationStorageContractRevision)))
         {
             return RootContractValidation.Mismatch;
         }
 
         try
         {
-            var sourceHealth = await storageHealthResolver.ResolveAsync(
-                sourceRoot,
-                cancellationToken);
-            var destinationHealth = await storageHealthResolver.ResolveAsync(
-                destinationRoot,
-                cancellationToken);
-            if (!sourceHealth.CanRetireVerifiedSource
-                || !destinationHealth.CanPublishAdditively)
+            if (sourceRoot != null)
             {
-                return sourceHealth.State is RootFolderStorageState.Missing
-                        or RootFolderStorageState.Changed
-                    || destinationHealth.State is RootFolderStorageState.Missing
-                        or RootFolderStorageState.Changed
-                    ? RootContractValidation.Mismatch
-                    : RootContractValidation.Unavailable;
+                var sourceHealth = await storageHealthResolver.ResolveAsync(
+                    sourceRoot,
+                    cancellationToken);
+                if (!sourceHealth.CanRetireVerifiedSource)
+                {
+                    return sourceHealth.State is RootFolderStorageState.Missing
+                            or RootFolderStorageState.Changed
+                        ? RootContractValidation.Mismatch
+                        : RootContractValidation.Unavailable;
+                }
             }
+
+            if (destinationRoot != null)
+            {
+                var destinationHealth = await storageHealthResolver.ResolveAsync(
+                    destinationRoot,
+                    cancellationToken);
+                if (!destinationHealth.CanPublishAdditively)
+                {
+                    return destinationHealth.State is RootFolderStorageState.Missing
+                            or RootFolderStorageState.Changed
+                        ? RootContractValidation.Mismatch
+                        : RootContractValidation.Unavailable;
+                }
+            }
+
             return RootContractValidation.Valid;
         }
         catch (Exception exception) when (exception is
@@ -257,75 +275,9 @@ public sealed partial class VerifiedFileRenameTransactionCoordinator
     }
 
     private static PinnedDirectoryCreation.PinnedDirectoryAnchor
-        OpenOrCreateVerifiedDestinationParent(
-            RootFolder destinationRoot,
-            string destinationParentPath)
-    {
-        var persisted = RootFolderPathSemantics.ResolvePersisted(destinationRoot)
-            ?? throw new InvalidOperationException(
-                "The verified organize destination root has no persisted path semantics.");
-        if (persisted.DetectAmbiguousCaseMatches
-            || !FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
-                destinationRoot.Path,
-                out var rootPath,
-                out _)
-            || !FileSystemPathIdentity.IsSameOrInside(
-                destinationParentPath,
-                rootPath,
-                persisted.Semantics))
-        {
-            throw new InvalidOperationException(
-                "The verified organize destination parent is outside its configured root.");
-        }
-
-        var current = PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(rootPath);
-        try
-        {
-            var segments = ResolveDestinationHierarchySegments(
-                rootPath,
-                destinationParentPath,
-                persisted.Semantics);
-            if (segments.Count == 0)
-            {
-                return current;
-            }
-
-            foreach (var segment in segments)
-            {
-                PinnedDirectoryCreation.PinnedDirectoryAnchor next;
-                try
-                {
-                    next = current.OpenExistingChild(segment);
-                }
-                catch (Win32Exception exception) when (
-                    exception.NativeErrorCode is 2 or 3)
-                {
-                    using var creation = current.TryCreateChild(segment);
-                    next = creation.Created
-                        ? creation.OpenCreatedDirectoryAnchor()
-                        : current.OpenExistingChild(segment);
-                }
-
-                if (!next.VisiblePathMatches())
-                {
-                    next.Dispose();
-                    throw new InvalidOperationException(
-                        "The verified organize destination hierarchy changed during additive creation.");
-                }
-
-                current.Dispose();
-                current = next;
-            }
-
-            return current;
-        }
-        catch
-        {
-            current.Dispose();
-            throw;
-        }
-    }
-
+        OpenOrCreateVerifiedDestinationParent(RootFolder? destinationRoot, string destinationParentPath) =>
+        PinnedDirectoryCreation.OpenPinnedConfiguredHierarchy(
+            destinationRoot, destinationParentPath, createMissing: true);
     internal static IReadOnlyList<string> ResolveDestinationHierarchySegments(
         string rootPath,
         string destinationParentPath,
@@ -367,6 +319,9 @@ public sealed partial class VerifiedFileRenameTransactionCoordinator
         var fullPath = Path.GetFullPath(path);
         RootFolder? best = null;
         var bestLength = -1;
+        var unavailableLength = -1;
+        if (!FileSystemPathIdentity.TryDetectAbsoluteSyntaxForHost(fullPath, out var syntax))
+            throw new InvalidOperationException("The organize path syntax cannot be authorized.");
         foreach (var root in roots)
         {
             var persisted = RootFolderPathSemantics.ResolvePersisted(root);
@@ -376,14 +331,17 @@ public sealed partial class VerifiedFileRenameTransactionCoordinator
                     root.Path,
                     out var rootPath,
                     out _)
-                || string.IsNullOrWhiteSpace(rootPath)
-                || !FileSystemPathIdentity.IsSameOrInside(
-                    fullPath,
-                    rootPath,
-                    persisted.Value.Semantics))
+                || string.IsNullOrWhiteSpace(rootPath))
             {
+                if (FileSystemPathIdentity.StoredBoundaryMayContainPath(
+                        root.Path, fullPath, syntax, root.CaseSensitivityMode)
+                    || (!string.IsNullOrWhiteSpace(root.Path.Trim())
+                        && FileSystemPathIdentity.StoredBoundaryMayContainPath(
+                            root.Path.Trim(), fullPath, syntax, root.CaseSensitivityMode)))
+                    unavailableLength = Math.Max(unavailableLength, root.Path.Length);
                 continue;
             }
+            if (!FileSystemPathIdentity.IsSameOrInside(fullPath, rootPath, persisted.Value.Semantics)) continue;
 
             if (rootPath.Length > bestLength)
             {
@@ -392,6 +350,8 @@ public sealed partial class VerifiedFileRenameTransactionCoordinator
             }
         }
 
+        if (unavailableLength >= bestLength && unavailableLength >= 0)
+            throw new InvalidOperationException("The organize path overlaps an unresolved configured boundary.");
         return best;
     }
 }

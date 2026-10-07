@@ -152,16 +152,17 @@ public sealed partial class RootFolderRelocationService
             FileSystemCaseSensitivityMode targetMode,
             CancellationToken cancellationToken)
     {
-        if (_fileRegistrationRecoveryProbe == null)
-        {
-            return null;
-        }
-
         var sourceSemantics = await ResolveRecoveryBoundarySemanticsAsync(
             sourcePath,
             sourceMode,
             cancellationToken);
-        var sourceBlocker = sourceSemantics.HasValue
+        var renameProbe = new FileRenameRecoveryProbe(dbContextFactory);
+        if (sourceSemantics.HasValue
+            && await renameProbe.HasBlockingBoundaryAsync(sourcePath, sourceSemantics.Value, cancellationToken))
+        {
+            return RenameBoundaryConflict(sourcePath);
+        }
+        var sourceBlocker = _fileRegistrationRecoveryProbe != null && sourceSemantics.HasValue
             ? (await _fileRegistrationRecoveryProbe.GetBlockingBoundaryAsync(
                 sourcePath,
                 sourceSemantics.Value,
@@ -176,7 +177,12 @@ public sealed partial class RootFolderRelocationService
             targetPath,
             targetMode,
             cancellationToken);
-        var targetBlocker = targetSemantics.HasValue
+        if (targetSemantics.HasValue
+            && await renameProbe.HasBlockingBoundaryAsync(targetPath, targetSemantics.Value, cancellationToken))
+        {
+            return RenameBoundaryConflict(targetPath);
+        }
+        var targetBlocker = _fileRegistrationRecoveryProbe != null && targetSemantics.HasValue
             ? (await _fileRegistrationRecoveryProbe.GetBlockingBoundaryAsync(
                 targetPath,
                 targetSemantics.Value,
@@ -248,6 +254,22 @@ public sealed partial class RootFolderRelocationService
         var sourceSemantics =
             sourcePathSemantics.MetadataSourcePathSemantics?.Semantics
             ?? sourcePathSemantics.SourceOperationSemantics;
+        var renameProbe = new FileRenameRecoveryProbe(dbContextFactory);
+        if ((sourceSemantics.HasValue
+                && await renameProbe.HasBlockingBoundaryAsync(root.Path, sourceSemantics.Value, cancellationToken))
+            || await renameProbe.HasBlockingBoundaryAsync(targetPath, targetResolution.Semantics, cancellationToken)
+            || await db.VerifiedFileRenameJournals.AsNoTracking().AnyAsync(
+                journal => (journal.SourceRootFolderId == rootFolderId
+                        || journal.DestinationRootFolderId == rootFolderId)
+                    && journal.State != VerifiedFileRenameState.Completed
+                    && journal.State != VerifiedFileRenameState.CompletedSourceRetained
+                    && journal.State != VerifiedFileRenameState.RolledBack,
+                cancellationToken))
+        {
+            var conflict = RenameBoundaryConflict(root.Path);
+            throw new RootFolderPathChangeRejectedException(
+                conflict.Code, conflict.PublicMessage, conflict.Detail);
+        }
         FileRegistrationRecoveryBlocker? registrationBlocker = null;
         if (_fileRegistrationRecoveryProbe != null)
         {
@@ -288,6 +310,12 @@ public sealed partial class RootFolderRelocationService
         return targetIdentityKey;
     }
 
+    private static ExternalRecoveryConflict RenameBoundaryConflict(string path) =>
+        new(
+            "rename_recovery_pending",
+            "An interrupted organize operation owns this root boundary. Resolve its recovery before changing the root folder path.",
+            $"File organize recovery touches {LogRedaction.SanitizeFilePath(path)}.");
+
     private static ExternalRecoveryConflict RegistrationBoundaryConflict(
         string path,
         FileRegistrationRecoveryBlocker blocker) =>
@@ -316,6 +344,7 @@ public sealed partial class RootFolderRelocationService
                     || journal.Action == FileAction.Copy
                     || journal.Action == FileAction.HardlinkCopy)
                 && journal.State != FileMutationJournalState.Completed
+                && journal.State != FileMutationJournalState.CompletedSourceRetained
                 && journal.State != FileMutationJournalState.RolledBack)
             .Select(journal => journal.AudiobookId)
             .FirstOrDefaultAsync(cancellationToken);
@@ -336,7 +365,10 @@ public sealed partial class RootFolderRelocationService
                     || journal.AudiobookFileId
                         == FileMutationOwner.RegistrationCompanionFile
                     ? journal.State != FileMutationJournalState.Completed
-                    : journal.State != FileMutationJournalState.OwnerMetadataReconciled))
+                        && journal.State != FileMutationJournalState.CompletedSourceRetained
+                        && journal.State != FileMutationJournalState.RolledBack
+                    : journal.State != FileMutationJournalState.OwnerMetadataReconciled
+                        && journal.State != FileMutationJournalState.RolledBack))
             .Select(journal => journal.AudiobookId)
             .FirstOrDefaultAsync(cancellationToken);
         if (renameOwnerId.HasValue)
@@ -345,6 +377,22 @@ public sealed partial class RootFolderRelocationService
                 "rename_recovery_pending",
                 "An interrupted file organize operation still owns an audiobook under this root. Complete restart recovery before changing the root folder path.",
                 $"File rename recovery owns audiobook {renameOwnerId.Value} while this root-folder relocation is being prepared or retried.");
+        }
+
+        var verifiedRenameOwnerId = await db.VerifiedFileRenameJournals
+            .AsNoTracking()
+            .Where(journal => audiobookIds.Contains(journal.AudiobookId)
+                && journal.State != VerifiedFileRenameState.Completed
+                && journal.State != VerifiedFileRenameState.CompletedSourceRetained
+                && journal.State != VerifiedFileRenameState.RolledBack)
+            .Select(journal => (int?)journal.AudiobookId)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (verifiedRenameOwnerId.HasValue)
+        {
+            return new ExternalRecoveryConflict(
+                "rename_recovery_pending",
+                "An interrupted verified organize operation still owns an audiobook under this root. Complete recovery before changing the root folder path.",
+                $"Verified organize recovery owns audiobook {verifiedRenameOwnerId.Value}.");
         }
 
         var deletionOwnerId = await db.AudiobookDeletionIntents

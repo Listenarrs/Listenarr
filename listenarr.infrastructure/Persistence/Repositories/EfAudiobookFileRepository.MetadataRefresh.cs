@@ -31,9 +31,6 @@ public partial class EfAudiobookFileRepository
             && file.PathOwnershipKey == expectedFile.PathState.OwnershipKey
             && file.PathIdentityVersion == expectedFile.PathState.Version
             && file.PathIdentityState == expectedFile.PathState.State
-            && file.PhysicalObjectIdentity == expectedFile.PhysicalObjectIdentity
-            && file.PhysicalIdentityVersion == expectedFile.PhysicalIdentityVersion
-            && file.PhysicalIdentityObservedAtUtc == expectedFile.PhysicalIdentityObservedAtUtc
             && file.Audiobook != null
             && file.Audiobook.BasePath == expectedFile.BasePath);
         var duration = metadata.Duration.TotalSeconds;

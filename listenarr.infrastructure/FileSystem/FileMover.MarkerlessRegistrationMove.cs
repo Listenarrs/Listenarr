@@ -5,6 +5,61 @@ namespace Listenarr.Infrastructure.FileSystem;
 
 public partial class FileMover
 {
+
+    private static async Task<RegistrationPublicationMatchOutcome>
+        ProbeMarkerlessRegistrationContentAsync(
+            FileMoveGateLease gate,
+            FileMutationJournal journal,
+            CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!gate.DestinationParent.VisiblePathMatches())
+            {
+                return RegistrationPublicationMatchOutcome.Mismatch;
+            }
+
+            var outcome =
+                gate.DestinationParent.TryOpenExistingFileWithOutcome(
+                    gate.DestinationName,
+                    requireDeleteAccess: false,
+                    out var openedTarget);
+            using (openedTarget)
+            {
+                if (outcome == PinnedFileOpenOutcome.Unavailable)
+                {
+                    return RegistrationPublicationMatchOutcome.Unavailable;
+                }
+
+                if (outcome != PinnedFileOpenOutcome.Opened
+                    || openedTarget == null
+                    || !openedTarget.VisiblePathMatches())
+                {
+                    return RegistrationPublicationMatchOutcome.Mismatch;
+                }
+
+                return await MatchesMarkerlessTargetContentAsync(
+                    openedTarget,
+                    journal,
+                    cancellationToken)
+                        ? RegistrationPublicationMatchOutcome.Match
+                        : RegistrationPublicationMatchOutcome.Mismatch;
+            }
+        }
+        catch (Exception exception) when (exception is
+            IOException or UnauthorizedAccessException
+                or System.ComponentModel.Win32Exception)
+        {
+            return RegistrationPublicationMatchOutcome.Unavailable;
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or InvalidOperationException
+                or NotSupportedException or PathTooLongException)
+        {
+            return RegistrationPublicationMatchOutcome.Mismatch;
+        }
+    }
+
     private async Task<bool?> TryCompletePreparedMoveMarkerlessAsync(
         string source,
         string destination,
@@ -46,7 +101,8 @@ public partial class FileMover
         {
             return false;
         }
-        if (!FileMutationJournalLifecycle.MayRetireSource(journal.State)
+        if ((!FileMutationJournalLifecycle.MayRetireSource(journal.State)
+                && journal.State != FileMutationJournalState.CompletedSourceRetained)
             || !journal.AudiobookId.HasValue)
         {
             _logger.LogWarning(
@@ -54,223 +110,99 @@ public partial class FileMover
                 journal.OperationId);
             return false;
         }
-        if (string.IsNullOrWhiteSpace(journal.TargetPhysicalObjectIdentity)
-            || !registrationLease.MatchesPhysicalObjectIdentity(
-                journal.TargetPhysicalObjectIdentity)
-            || !string.Equals(
-                journal.SourcePhysicalObjectIdentity,
-                registrationLease.SourcePhysicalObjectIdentity,
-                StringComparison.Ordinal))
+        if (registrationLease is MarkerlessRegistrationPublicationLease liveLease
+            && journal.State != FileMutationJournalState.CompletedSourceRetained)
         {
-            await MarkMarkerlessRegistrationNeedsAttentionAsync(
+            return await CompleteLivePinnedMarkerlessMoveAsync(
+                source,
+                destination,
                 journal,
-                "The registration lease no longer identifies the journaled source and destination generations.",
+                liveLease,
                 cancellationToken);
-            return false;
-        }
-        var publicationMatch = ProbeCurrentPublication(registrationLease);
-        if (publicationMatch == RegistrationPublicationMatchOutcome.Unavailable)
-        {
-            return false;
-        }
-        if (publicationMatch == RegistrationPublicationMatchOutcome.Mismatch)
-        {
-            await MarkMarkerlessRegistrationNeedsAttentionAsync(
-                journal,
-                "The registration lease no longer identifies the journaled source and destination generations.",
-                cancellationToken);
-            return false;
         }
 
-        using var gate = await TryAcquireFileMoveGateAsync(
-            source,
-            destination,
-            allowExistingAliasForRecovery: true);
-        if (gate == null)
         {
-            return false;
-        }
-        if (!await JournalPathsMatchGateAsync(journal, gate))
-        {
-            throw new InvalidOperationException(
-                "The markerless registration move paths do not match the requested completion.");
-        }
-        if (!JournalParentGenerationsMatchGate(journal, gate))
-        {
-            await MarkMarkerlessRegistrationNeedsAttentionAsync(
-                journal,
-                "A markerless registration move parent directory changed physical generation while source retirement was interrupted.",
-                cancellationToken);
-            return false;
-        }
-
-        if (!await MarkerlessRegistrationTargetMatchesAsync(
-                gate,
-                journal,
-                cancellationToken))
-        {
-            await MarkMarkerlessRegistrationNeedsAttentionAsync(
-                journal,
-                "The registered destination changed before source retirement.",
-                cancellationToken);
-            return false;
-        }
-        publicationMatch = ProbeCurrentPublication(registrationLease);
-        if (publicationMatch == RegistrationPublicationMatchOutcome.Unavailable)
-        {
-            return false;
-        }
-        if (publicationMatch == RegistrationPublicationMatchOutcome.Mismatch)
-        {
-            await MarkMarkerlessRegistrationNeedsAttentionAsync(
-                journal,
-                "The registered destination changed before source retirement.",
-                cancellationToken);
-            return false;
-        }
-
-        if (journal.State is FileMutationJournalState.SourceDeleted
-            or FileMutationJournalState.Completed)
-        {
-            var sourceOpenOutcome = gate.SourceParent.TryOpenExistingFileWithOutcome(
-                gate.SourceName,
-                requireDeleteAccess: false,
-                out var recreatedSource);
-            using (recreatedSource)
+            // Every other lease lacks the original process-local source handle.
+            // Diagnostic strings cannot select a destructive completion path.
+            // This lease was reconstructed from an existing journal. Restart/retry
+            // may verify the committed target and observe whether the source still
+            // exists, but persisted state cannot recreate deletion authority.
+            var restartPublicationMatch =
+                ProbeCurrentPublication(registrationLease);
+            if (restartPublicationMatch
+                != RegistrationPublicationMatchOutcome.Match)
             {
-                if (sourceOpenOutcome == PinnedFileOpenOutcome.Unavailable)
-                {
-                    return false;
-                }
-                if (sourceOpenOutcome == PinnedFileOpenOutcome.Opened)
-                {
-                    await MarkMarkerlessRegistrationNeedsAttentionAsync(
-                        journal,
-                        "A source path was recreated after the registered source generation was deleted.",
-                        cancellationToken);
-                    return false;
-                }
-            }
-        }
-
-        if (journal.State == FileMutationJournalState.RegistrationCommitted)
-        {
-            journal = await _fileMutationJournalStore.AdvanceAsync(
-                journal.OperationId,
-                FileMutationJournalState.SourceDeletionAuthorized,
-                journal.TargetPhysicalObjectIdentity,
-                journal.AudiobookId,
-                error: null,
-                cancellationToken);
-        }
-
-        if (journal.State == FileMutationJournalState.SourceDeletionAuthorized)
-        {
-            var sourceOpenOutcome =
-                gate.SourceParent.TryOpenExistingFileForStableDeleteWithOutcome(
-                    gate.SourceName,
-                    out var sourceEntry);
-            using (sourceEntry)
-            {
-                if (sourceOpenOutcome == PinnedFileOpenOutcome.Unavailable)
-                {
-                    return false;
-                }
-                if (sourceOpenOutcome == PinnedFileOpenOutcome.Opened)
-                {
-                    if (!await MatchesMarkerlessSourceProofAsync(
-                            sourceEntry!,
-                            journal,
-                            cancellationToken))
-                    {
-                        await MarkMarkerlessRegistrationNeedsAttentionAsync(
-                            journal,
-                            "The registered move source was replaced before authorized deletion.",
-                            cancellationToken);
-                        return false;
-                    }
-                    if (BeforeMarkerlessRegistrationSourceDeleteForTestAsync != null)
-                    {
-                        await BeforeMarkerlessRegistrationSourceDeleteForTestAsync();
-                    }
-
-                    sourceEntry!.Delete(immediateWindows: true);
-                    gate.SourceParent.FlushDirectoryEntry();
-                    if (AfterMarkerlessMoveSourceDeletedBeforeStateForTestAsync != null)
-                    {
-                        await AfterMarkerlessMoveSourceDeletedBeforeStateForTestAsync();
-                    }
-                }
+                return false;
             }
 
-            if (!VisiblePathMatchesOrThrowUnavailable(
-                    gate.SourceParent,
-                    "The registered move source parent is temporarily unavailable before deletion can be recorded durably."))
+            using var recoveryGate = await TryAcquireFileMoveGateAsync(
+                source,
+                destination,
+                allowExistingAliasForRecovery: true);
+            if (recoveryGate == null
+                || !await JournalPathsMatchGateAsync(journal, recoveryGate))
+            {
+                return false;
+            }
+
+            using var recoveryTarget =
+                recoveryGate.DestinationParent.TryOpenExistingFile(
+                    recoveryGate.DestinationName,
+                    requireDeleteAccess: false);
+            if (recoveryTarget == null
+                || !recoveryTarget.VisiblePathMatches()
+                || !await MatchesMarkerlessTargetContentAsync(
+                    recoveryTarget,
+                    journal,
+                    cancellationToken))
             {
                 await MarkMarkerlessRegistrationNeedsAttentionAsync(
                     journal,
-                    "The registered move source parent changed before deletion could be recorded durably.",
+                    "The registered destination content changed before restart recovery.",
                     cancellationToken);
                 return false;
             }
 
-            journal = await _fileMutationJournalStore.AdvanceAsync(
-                journal.OperationId,
-                FileMutationJournalState.SourceDeleted,
-                journal.TargetPhysicalObjectIdentity,
-                journal.AudiobookId,
-                error: null,
-                cancellationToken);
-            if (AfterMarkerlessMoveSourceDeletedStateForTestAsync != null)
+            if (journal.State == FileMutationJournalState.CompletedSourceRetained)
             {
-                await AfterMarkerlessMoveSourceDeletedStateForTestAsync();
+                return true;
+            }
+
+            var sourceOutcome =
+                recoveryGate.SourceParent.TryOpenExistingFileWithOutcome(
+                    recoveryGate.SourceName,
+                    requireDeleteAccess: false,
+                    out var observedSource);
+            using (observedSource)
+            {
+                if (sourceOutcome == PinnedFileOpenOutcome.Unavailable)
+                {
+                    return false;
+                }
+
+                var terminalState =
+                    sourceOutcome == PinnedFileOpenOutcome.Opened
+                        ? FileMutationJournalState.CompletedSourceRetained
+                        : FileMutationJournalState.Completed;
+                var restartCompletionValidation =
+                    await _fileMutationJournalStore.AdvanceWithCommitValidationAsync(
+                        journal.OperationId,
+                        terminalState,
+                        journal.TargetPhysicalObjectIdentity,
+                        journal.AudiobookId,
+                        error: terminalState
+                            == FileMutationJournalState.CompletedSourceRetained
+                                ? "Source retained because live delete authority was lost across the operation boundary."
+                                : null,
+                        validationToken =>
+                            ProbeMarkerlessRegistrationContentAsync(
+                                recoveryGate,
+                                journal,
+                                validationToken),
+                        cancellationToken);
+                return restartCompletionValidation
+                    == RegistrationPublicationMatchOutcome.Match;
             }
         }
-
-        var completionValidation =
-            await _fileMutationJournalStore.AdvanceWithCommitValidationAsync(
-                journal.OperationId,
-                FileMutationJournalState.Completed,
-                journal.TargetPhysicalObjectIdentity,
-                journal.AudiobookId,
-                error: null,
-                async validationToken =>
-                {
-                    if (BeforeMarkerlessCompletedJournalCommitForTestAsync != null)
-                    {
-                        await BeforeMarkerlessCompletedJournalCommitForTestAsync();
-                    }
-
-                    var moveValidation = await ProbeMarkerlessMoveCompletionAsync(
-                        gate,
-                        journal,
-                        validationToken);
-                    if (moveValidation != RegistrationPublicationMatchOutcome.Match)
-                    {
-                        return moveValidation;
-                    }
-
-                    return ProbeCurrentPublication(registrationLease);
-                },
-                cancellationToken);
-        if (completionValidation == RegistrationPublicationMatchOutcome.Unavailable)
-        {
-            return false;
-        }
-        if (completionValidation != RegistrationPublicationMatchOutcome.Match)
-        {
-            await MarkMarkerlessRegistrationNeedsAttentionAsync(
-                journal,
-                "The registered move source, destination, or parent generation changed before completion could be committed.",
-                cancellationToken);
-            return false;
-        }
-        LogMutation(
-            FileMutationOutcome.Success,
-            FileAction.Move,
-            source,
-            destination,
-            "Retired the database-authorized markerless registration source");
-        return true;
     }
 }

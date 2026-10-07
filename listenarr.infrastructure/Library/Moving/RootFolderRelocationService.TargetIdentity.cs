@@ -73,25 +73,19 @@ public sealed partial class RootFolderRelocationService
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!string.IsNullOrWhiteSpace(unavailableReason)
-            || !target.MatchesManagedDirectoryIdentity(
-                expectedVersion,
-                expectedValue))
-        {
-            throw new InvalidOperationException(
-                "The managed directory no longer identifies its authorized physical generation.");
-        }
 
+        // Persisted directory identity is diagnostic only. Relocation finalization
+        // is authorized by the directory that is pinned and visible now.
         var visibility = target.ProbeVisiblePathMatch();
         if (visibility == RegistrationPublicationMatchOutcome.Unavailable)
         {
             throw new IOException(
-                "The managed directory is temporarily unavailable while its authorized physical generation is being verified.");
+                "The managed directory is temporarily unavailable while its current path is being verified.");
         }
         if (visibility != RegistrationPublicationMatchOutcome.Match)
         {
             throw new InvalidOperationException(
-                "The managed directory no longer identifies its authorized physical generation.");
+                "The managed directory changed while its current path was being verified.");
         }
     }
 
@@ -142,73 +136,74 @@ public sealed partial class RootFolderRelocationService
         root.DirectoryObjectIdentityUnavailableReason = identity.UnavailableReason;
     }
 
-    private Task<DirectoryObjectIdentityResolution>
+    private static TargetIdentityEnrollmentState
+        GetTargetIdentityEnrollmentState(
+            DirectoryObjectIdentityResolution identity) =>
+        identity.IsAvailable
+            ? TargetIdentityEnrollmentState.Authorized
+            : identity.FailureKind is
+                DirectoryObjectIdentityFailureKind.IdentityUnsupported
+                    or DirectoryObjectIdentityFailureKind.LegacyWeakIdentity
+                ? TargetIdentityEnrollmentState.NotRequired
+                : TargetIdentityEnrollmentState.Unavailable;
+
+    private async Task<DirectoryObjectIdentityResolution>
         ResolveOrEnrollDirectoryObjectIdentityAsync(
             string path,
             CancellationToken cancellationToken)
     {
-        if (_directoryObjectIdentityResolver != null)
+        DirectoryObjectIdentityResolution diagnostic;
+        try
         {
-            return _directoryObjectIdentityResolver.ResolveAsync(
-                path,
-                cancellationToken);
+            diagnostic = _directoryObjectIdentityResolver != null
+                ? await _directoryObjectIdentityResolver.ResolveAsync(path, cancellationToken)
+                : await ResolveMarkerlessDirectoryObjectIdentityAsync(path, cancellationToken);
+        }
+        catch (Exception exception) when (exception is
+            IOException or UnauthorizedAccessException
+                or InvalidOperationException or NotSupportedException
+                or System.ComponentModel.Win32Exception)
+        {
+            diagnostic = DirectoryObjectIdentityResolution.Unavailable(
+                exception.Message,
+                DirectoryObjectIdentityFailureKind.IdentityUnsupported);
         }
 
-        return ResolveMarkerlessDirectoryObjectIdentityAsync(
-            path,
-            expectedVersion: null,
-            expectedValue: null,
-            cancellationToken);
-    }
-
-    private Task<DirectoryObjectIdentityResolution>
-        ResolveExistingDirectoryObjectIdentityAsync(
-            string path,
-            int expectedVersion,
-            string expectedValue,
-            CancellationToken cancellationToken)
-    {
-        if (_directoryObjectIdentityResolver != null)
+        try
         {
-            return _directoryObjectIdentityResolver.ResolveExistingAsync(
-                path,
-                expectedVersion,
-                expectedValue,
-                cancellationToken);
+            // Optional diagnostic capture cannot determine target accessibility.
+            // Observe the current path independently; later publication/finalization
+            // acquires and retains its own live pin across the actual mutation.
+            using var current = PinTargetDirectoryGeneration(
+                path, null, null, null, cancellationToken);
+            return diagnostic.IsAvailable
+                ? diagnostic
+                : DirectoryObjectIdentityResolution.Unavailable(
+                    diagnostic.UnavailableReason ?? "Directory identity diagnostics are unavailable.",
+                    diagnostic.FailureKind == DirectoryObjectIdentityFailureKind.LegacyWeakIdentity
+                        ? DirectoryObjectIdentityFailureKind.LegacyWeakIdentity
+                        : DirectoryObjectIdentityFailureKind.IdentityUnsupported);
         }
-
-        return ResolveMarkerlessDirectoryObjectIdentityAsync(
-            path,
-            expectedVersion,
-            expectedValue,
-            cancellationToken);
+        catch (Exception exception) when (exception is
+            IOException or UnauthorizedAccessException
+                or InvalidOperationException or NotSupportedException
+                or System.ComponentModel.Win32Exception)
+        {
+            return DirectoryObjectIdentityResolution.Unavailable(
+                exception.Message,
+                ClassifyMarkerlessDirectoryIdentityFailure(exception));
+        }
     }
 
     private static Task<DirectoryObjectIdentityResolution>
         ResolveMarkerlessDirectoryObjectIdentityAsync(
             string path,
-            int? expectedVersion,
-            string? expectedValue,
             CancellationToken cancellationToken)
     {
         try
         {
             using var anchor = PinnedDirectoryCreation.OpenPinnedBoundary(path);
             cancellationToken.ThrowIfCancellationRequested();
-            if (expectedVersion.HasValue && expectedValue != null)
-            {
-                return Task.FromResult(
-                    anchor.MatchesManagedDirectoryIdentity(
-                        expectedVersion,
-                        expectedValue)
-                        ? new DirectoryObjectIdentityResolution(
-                            expectedVersion,
-                            expectedValue,
-                            null)
-                        : DirectoryObjectIdentityResolution.Unavailable(
-                            "The live directory no longer matches its persisted physical identity."));
-            }
-
             return Task.FromResult(CreateMarkerlessIdentity(anchor));
         }
         catch (Exception exception) when (exception is

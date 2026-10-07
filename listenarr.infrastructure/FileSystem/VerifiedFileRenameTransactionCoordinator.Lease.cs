@@ -284,10 +284,7 @@ public sealed partial class VerifiedFileRenameTransactionCoordinator
             && await sourceEntry.MatchesAsync(
                 sourceProof.Length,
                 sourceProof.Sha256,
-                cancellationToken)
-            && (!sourceProof.HasDurablePhysicalObjectIdentity
-                || sourceEntry.MatchesObjectIdentity(
-                    sourceProof.PhysicalObjectIdentity));
+                cancellationToken);
 
         private async Task<VerifiedFileRenameRetirementOutcome> RestoreQuarantinedSourceAsync(
             string originalSourceName,

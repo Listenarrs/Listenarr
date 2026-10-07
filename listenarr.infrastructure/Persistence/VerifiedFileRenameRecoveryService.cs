@@ -15,6 +15,7 @@ internal sealed partial class VerifiedFileRenameRecoveryService(
     ILogger<VerifiedFileRenameRecoveryService> logger)
     : IVerifiedFileRenameRecoveryService
 {
+    internal Action<string>? AfterContentReadForTest { get; set; }
     private enum ContentProbeOutcome
     {
         Match,
@@ -26,8 +27,6 @@ internal sealed partial class VerifiedFileRenameRecoveryService(
     public async Task ReconcileAsync(
         CancellationToken cancellationToken = default)
     {
-        await ThrowIfNeedsAttentionAsync(cancellationToken);
-
         await using var readDb = await dbContextFactory.CreateDbContextAsync(
             cancellationToken);
         var operationIds = await readDb.VerifiedFileRenameJournals
@@ -47,8 +46,6 @@ internal sealed partial class VerifiedFileRenameRecoveryService(
             cancellationToken.ThrowIfCancellationRequested();
             await ReconcileOperationAsync(operationId, cancellationToken);
         }
-
-        await ThrowIfNeedsAttentionAsync(cancellationToken);
     }
 
     private async Task ReconcileOperationAsync(
@@ -74,22 +71,39 @@ internal sealed partial class VerifiedFileRenameRecoveryService(
             return;
         }
 
+        var roots = await ResolveJournalRootsAsync(db, journal, cancellationToken);
+        if (roots == null) return;
         var sourceProbe = await ProbeContentAsync(
             journal.SourcePath,
+            roots.Value.Source,
             journal.SourceLength,
             journal.SourceSha256,
             cancellationToken);
         var targetProbe = await ProbeContentAsync(
             journal.DestinationPath,
+            roots.Value.Destination,
             journal.SourceLength,
             journal.SourceSha256,
             cancellationToken);
         var stagingProbe = await ProbePathExistsAsync(
             journal.StagingPath,
+            roots.Value.Destination,
             cancellationToken);
         var retirementProbe = await ProbePathExistsAsync(
             journal.RetirementPath,
+            roots.Value.Source,
             cancellationToken);
+
+        if (sourceProbe == ContentProbeOutcome.Unavailable
+            || targetProbe == ContentProbeOutcome.Unavailable
+            || stagingProbe == ContentProbeOutcome.Unavailable
+            || retirementProbe == ContentProbeOutcome.Unavailable)
+        {
+            logger.LogWarning(
+                "Verified organize recovery {OperationId} is waiting for storage availability",
+                journal.OperationId);
+            return;
+        }
 
         switch (journal.State)
         {
@@ -100,6 +114,10 @@ internal sealed partial class VerifiedFileRenameRecoveryService(
                         journal,
                         journal.SourcePath,
                         cancellationToken);
+                    if (ownerAtSource is null)
+                    {
+                        return;
+                    }
                     if (ownerAtSource == true
                         && sourceProbe == ContentProbeOutcome.Match
                         && targetProbe == ContentProbeOutcome.Missing
@@ -114,7 +132,7 @@ internal sealed partial class VerifiedFileRenameRecoveryService(
                     {
                         MarkNeedsAttention(
                             journal,
-                            "Verified organize was interrupted before target verification. Source/target artifacts were preserved because restart recovery cannot prove weak-storage physical generations by path or content alone.");
+                            "Verified organize was interrupted before target verification. Source/target artifacts were preserved because restart recovery cannot safely infer publication intent from the surviving paths and content alone.");
                     }
                     break;
                 }
@@ -125,6 +143,10 @@ internal sealed partial class VerifiedFileRenameRecoveryService(
                         journal,
                         journal.SourcePath,
                         cancellationToken);
+                    if (ownerAtSource is null)
+                    {
+                        return;
+                    }
                     if (ownerAtSource == true
                         && sourceProbe == ContentProbeOutcome.Match
                         && targetProbe == ContentProbeOutcome.Missing
@@ -161,6 +183,10 @@ internal sealed partial class VerifiedFileRenameRecoveryService(
                         journal,
                         journal.DestinationPath,
                         cancellationToken);
+                    if (ownerAtDestination is null)
+                    {
+                        return;
+                    }
                     if (ownerAtDestination != true
                         || targetProbe != ContentProbeOutcome.Match)
                     {
@@ -187,7 +213,7 @@ internal sealed partial class VerifiedFileRenameRecoveryService(
                     {
                         journal.State = VerifiedFileRenameState.CompletedSourceRetained;
                         journal.Error =
-                            "Owner metadata committed before restart; the old weak-storage source was retained because restart recovery has no durable physical-generation authority to delete it.";
+                            "Owner metadata committed before restart; the old source was retained because restart recovery cannot recreate source-retirement authority.";
                     }
                     break;
                 }
@@ -209,6 +235,10 @@ internal sealed partial class VerifiedFileRenameRecoveryService(
                         journal,
                         journal.DestinationPath,
                         cancellationToken);
+                    if (ownerAtDestination is null)
+                    {
+                        return;
+                    }
                     if (ownerAtDestination != true
                         || targetProbe != ContentProbeOutcome.Match)
                     {
@@ -257,6 +287,10 @@ internal sealed partial class VerifiedFileRenameRecoveryService(
                         journal,
                         journal.DestinationPath,
                         cancellationToken);
+                    if (ownerAtDestination is null)
+                    {
+                        return;
+                    }
                     if (ownerAtDestination != true
                         || targetProbe != ContentProbeOutcome.Match)
                     {
@@ -293,7 +327,7 @@ internal sealed partial class VerifiedFileRenameRecoveryService(
         if (journal.State == VerifiedFileRenameState.CompletedSourceRetained)
         {
             logger.LogWarning(
-                "Verified organize recovery {OperationId} completed with the old weak-storage source retained: {Reason}",
+                "Verified organize recovery {OperationId} completed with the old source retained: {Reason}",
                 journal.OperationId,
                 journal.Error);
         }
@@ -306,8 +340,9 @@ internal sealed partial class VerifiedFileRenameRecoveryService(
         }
     }
 
-    private static async Task<ContentProbeOutcome> ProbeContentAsync(
+    private async Task<ContentProbeOutcome> ProbeContentAsync(
         string path,
+        RootFolder? root,
         long expectedLength,
         string expectedSha256,
         CancellationToken cancellationToken)
@@ -323,25 +358,24 @@ internal sealed partial class VerifiedFileRenameRecoveryService(
                 return ContentProbeOutcome.Mismatch;
             }
 
-            using var parent = PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(
-                parentPath);
+            using var parent = PinnedDirectoryCreation.OpenPinnedConfiguredHierarchy(
+                root, parentPath,
+                createMissing: false);
             var outcome = parent.TryOpenExistingFileWithOutcome(
                 fileName,
                 requireDeleteAccess: false,
                 out var openedEntry);
             using var entry = openedEntry;
-            return outcome switch
-            {
-                PinnedFileOpenOutcome.NotFound => ContentProbeOutcome.Missing,
-                PinnedFileOpenOutcome.Unavailable => ContentProbeOutcome.Unavailable,
-                _ when entry == null || !entry.IsRegularFile() =>
-                    ContentProbeOutcome.Mismatch,
-                _ when await entry.MatchesAsync(
-                    expectedLength,
-                    expectedSha256,
-                    cancellationToken) => ContentProbeOutcome.Match,
-                _ => ContentProbeOutcome.Mismatch
-            };
+            if (outcome == PinnedFileOpenOutcome.NotFound) return ContentProbeOutcome.Missing;
+            if (outcome == PinnedFileOpenOutcome.Unavailable) return ContentProbeOutcome.Unavailable;
+            if (entry == null || !entry.IsRegularFile()) return ContentProbeOutcome.Mismatch;
+            var visibility = ProbeReadVisibility(parent, entry);
+            if (visibility != ContentProbeOutcome.Match) return visibility;
+            var matches = await entry.MatchesAsync(expectedLength, expectedSha256, cancellationToken);
+            AfterContentReadForTest?.Invoke(path);
+            visibility = ProbeReadVisibility(parent, entry);
+            return visibility != ContentProbeOutcome.Match ? visibility
+                : matches ? ContentProbeOutcome.Match : ContentProbeOutcome.Mismatch;
         }
         catch (Exception exception) when (
             FileSystemSafety.IsProvenMissingPathException(exception))
@@ -351,7 +385,8 @@ internal sealed partial class VerifiedFileRenameRecoveryService(
         catch (Exception exception) when (exception is
             IOException or UnauthorizedAccessException
                 or InvalidOperationException or NotSupportedException
-                or PathTooLongException or System.Security.SecurityException)
+                or PathTooLongException or System.Security.SecurityException
+                or System.ComponentModel.Win32Exception)
         {
             return ContentProbeOutcome.Unavailable;
         }
@@ -359,6 +394,7 @@ internal sealed partial class VerifiedFileRenameRecoveryService(
 
     private static async Task<ContentProbeOutcome> ProbePathExistsAsync(
         string path,
+        RootFolder? root,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -373,8 +409,9 @@ internal sealed partial class VerifiedFileRenameRecoveryService(
                 return ContentProbeOutcome.Mismatch;
             }
 
-            using var parent = PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(
-                parentPath);
+            using var parent = PinnedDirectoryCreation.OpenPinnedConfiguredHierarchy(
+                root, parentPath,
+                createMissing: false);
             var outcome = parent.TryOpenExistingFileWithOutcome(
                 fileName,
                 requireDeleteAccess: false,
@@ -395,28 +432,10 @@ internal sealed partial class VerifiedFileRenameRecoveryService(
         catch (Exception exception) when (exception is
             IOException or UnauthorizedAccessException
                 or InvalidOperationException or NotSupportedException
-                or PathTooLongException or System.Security.SecurityException)
+                or PathTooLongException or System.Security.SecurityException
+                or System.ComponentModel.Win32Exception)
         {
             return ContentProbeOutcome.Unavailable;
-        }
-    }
-
-    private async Task ThrowIfNeedsAttentionAsync(
-        CancellationToken cancellationToken)
-    {
-        await using var db = await dbContextFactory.CreateDbContextAsync(
-            cancellationToken);
-        var attentionId = await db.VerifiedFileRenameJournals
-            .AsNoTracking()
-            .Where(journal => journal.State == VerifiedFileRenameState.NeedsAttention)
-            .OrderBy(journal => journal.CreatedAt)
-            .ThenBy(journal => journal.OperationId)
-            .Select(journal => (Guid?)journal.OperationId)
-            .FirstOrDefaultAsync(cancellationToken);
-        if (attentionId.HasValue)
-        {
-            throw new InvalidOperationException(
-                $"Verified organize journal {attentionId.Value} requires operator repair before filesystem mutations can resume.");
         }
     }
 

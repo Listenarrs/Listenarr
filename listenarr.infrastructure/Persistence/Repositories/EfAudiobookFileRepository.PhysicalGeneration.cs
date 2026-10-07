@@ -164,6 +164,59 @@ public partial class EfAudiobookFileRepository
         return true;
     }
 
+
+    public async Task<bool> DeletePathStateAsync(
+        int fileId,
+        int audiobookId,
+        AudiobookFilePathState expectedPathState,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(expectedPathState);
+        var query = _db.AudiobookFiles.Where(candidate =>
+            candidate.Id == fileId
+            && candidate.AudiobookId == audiobookId
+            && candidate.Path == expectedPathState.StoredPath
+            && candidate.CanonicalPath == expectedPathState.CanonicalPath
+            && candidate.PathSyntax == expectedPathState.Syntax
+            && candidate.PathCaseSensitivity == expectedPathState.CaseSensitivity
+            && candidate.PathCaseSensitivityMode == expectedPathState.RequestedMode
+            && candidate.PathIdentityBoundary == expectedPathState.BoundaryPath
+            && candidate.PathIdentityLookupKey == expectedPathState.LookupKey
+            && candidate.PathOwnershipKey == expectedPathState.OwnershipKey
+            && candidate.PathIdentityVersion == expectedPathState.Version
+            && candidate.PathIdentityState == expectedPathState.State
+            && candidate.PathIdentityReason == expectedPathState.Reason);
+
+        var completionToken = RequestCancellationBoundary.EnterNonCancelablePhase(ct);
+        if (_db.Database.IsRelational())
+        {
+            var deleted = await query.ExecuteDeleteAsync(completionToken);
+            if (deleted != 1)
+            {
+                return false;
+            }
+
+            var tracked = _db.ChangeTracker.Entries<AudiobookFile>()
+                .FirstOrDefault(entry => entry.Entity.Id == fileId);
+            if (tracked != null)
+            {
+                tracked.State = EntityState.Detached;
+            }
+
+            return true;
+        }
+
+        var existing = await query.SingleOrDefaultAsync(ct);
+        if (existing == null)
+        {
+            return false;
+        }
+
+        _db.AudiobookFiles.Remove(existing);
+        await _db.SaveChangesAsync(completionToken);
+        return true;
+    }
+
     private void SynchronizeTrackedPhysicalGeneration(
         int fileId,
         AudiobookFile replacement)

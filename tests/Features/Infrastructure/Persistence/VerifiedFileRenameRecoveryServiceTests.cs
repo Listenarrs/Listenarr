@@ -9,6 +9,37 @@ namespace Listenarr.Tests.Features.Infrastructure.Persistence;
 [Trait("Category", "Infrastructure")]
 public sealed class VerifiedFileRenameRecoveryServiceTests : BaseTests
 {
+    [LinuxTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReconcileAsync_TargetReplacedDuringContentRead_PreservesArtifactsAndDoesNotClearFence(bool replaceParent)
+    {
+        var scenario = await CreateScenarioAsync(VerifiedFileRenameState.OwnerMetadataReconciled,
+            ownerAtDestination: true, createDestination: true);
+        var originalTarget = scenario.Destination + ".original";
+        var root = Path.GetDirectoryName(scenario.Destination)!;
+        var originalRoot = root + ".original";
+        var service = CreateService();
+        service.AfterContentReadForTest = path =>
+        {
+            if (path != scenario.Destination) return;
+            if (replaceParent)
+            {
+                Directory.Move(root, originalRoot);
+                Directory.CreateDirectory(root);
+                originalTarget = Path.Join(originalRoot, Path.GetFileName(scenario.Destination));
+            }
+            else File.Move(scenario.Destination, originalTarget);
+            File.WriteAllText(scenario.Destination, "foreign-target");
+        };
+        await service.ReconcileAsync();
+        Assert.Equal(VerifiedFileRenameState.NeedsAttention, (await GetJournalAsync(scenario.OperationId)).State);
+        Assert.Equal("verified-recovery-audio", await File.ReadAllTextAsync(originalTarget));
+        Assert.Equal("foreign-target", await File.ReadAllTextAsync(scenario.Destination));
+        var source = replaceParent ? Path.Join(originalRoot, Path.GetFileName(scenario.Source)) : scenario.Source;
+        Assert.Equal("verified-recovery-audio", await File.ReadAllTextAsync(source));
+    }
+
     [Fact]
     public async Task FileRenameRecoveryProbe_ActiveVerifiedJournal_BlocksUntilTerminalState()
     {
@@ -21,6 +52,9 @@ public sealed class VerifiedFileRenameRecoveryServiceTests : BaseTests
         var probe = new FileRenameRecoveryProbe(factory);
 
         Assert.True(await probe.HasBlockingAsync(scenario.AudiobookId));
+        Assert.True(await probe.HasBlockingBoundaryAsync(
+            Path.GetDirectoryName(scenario.Source)!,
+            FileSystemPathSemantics.CurrentHostDefault));
 
         await using (var db = await factory.CreateDbContextAsync())
         {
@@ -31,6 +65,9 @@ public sealed class VerifiedFileRenameRecoveryServiceTests : BaseTests
         }
 
         Assert.False(await probe.HasBlockingAsync(scenario.AudiobookId));
+        Assert.False(await probe.HasBlockingBoundaryAsync(
+            Path.GetDirectoryName(scenario.Source)!,
+            FileSystemPathSemantics.CurrentHostDefault));
     }
 
     [Fact]
@@ -79,8 +116,7 @@ public sealed class VerifiedFileRenameRecoveryServiceTests : BaseTests
             createDestination: true);
         var service = CreateService();
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.ReconcileAsync());
+        await service.ReconcileAsync();
 
         Assert.True(File.Exists(scenario.Source));
         Assert.True(File.Exists(scenario.Destination));
@@ -118,8 +154,7 @@ public sealed class VerifiedFileRenameRecoveryServiceTests : BaseTests
         File.Move(scenario.Source, scenario.RetirementPath);
         var service = CreateService();
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.ReconcileAsync());
+        await service.ReconcileAsync();
 
         Assert.False(File.Exists(scenario.Source));
         Assert.True(File.Exists(scenario.RetirementPath));
@@ -148,6 +183,33 @@ public sealed class VerifiedFileRenameRecoveryServiceTests : BaseTests
         Assert.Equal(
             VerifiedFileRenameState.CompletedSourceRetained,
             (await GetJournalAsync(scenario.OperationId)).State);
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_NeedsAttentionOperation_DoesNotBlockIndependentRecovery()
+    {
+        var blocked = await CreateScenarioAsync(
+            VerifiedFileRenameState.TargetVerified,
+            ownerAtDestination: false,
+            createDestination: true);
+        var recoverable = await CreateScenarioAsync(
+            VerifiedFileRenameState.OwnerMetadataReconciled,
+            ownerAtDestination: true,
+            createDestination: true);
+        var service = CreateService();
+
+        await service.ReconcileAsync();
+
+        Assert.Equal(
+            VerifiedFileRenameState.NeedsAttention,
+            (await GetJournalAsync(blocked.OperationId)).State);
+        Assert.Equal(
+            VerifiedFileRenameState.CompletedSourceRetained,
+            (await GetJournalAsync(recoverable.OperationId)).State);
+        Assert.True(File.Exists(blocked.Source));
+        Assert.True(File.Exists(blocked.Destination));
+        Assert.True(File.Exists(recoverable.Source));
+        Assert.True(File.Exists(recoverable.Destination));
     }
 
     [Fact]
@@ -192,10 +254,10 @@ public sealed class VerifiedFileRenameRecoveryServiceTests : BaseTests
                     ".listenarr-organize-" + operationId.ToString("N") + ".source"),
                 SourceLength = bytes.LongLength,
                 SourceSha256 = Convert.ToHexString(SHA256.HashData(bytes)),
-                SourceRootFolderId = 1,
-                SourceStorageContractRevision = 1,
-                DestinationRootFolderId = 1,
-                DestinationStorageContractRevision = 1,
+                SourceRootFolderId = 0,
+                SourceStorageContractRevision = 0,
+                DestinationRootFolderId = 0,
+                DestinationStorageContractRevision = 0,
                 State = VerifiedFileRenameState.OwnerMetadataReconciled
             });
             await db.SaveChangesAsync();
@@ -235,6 +297,47 @@ public sealed class VerifiedFileRenameRecoveryServiceTests : BaseTests
             It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
+    [Theory]
+    [InlineData(5)]
+    [InlineData(13)]
+    public async Task ReconcileAsync_NativeAccessFailure_DoesNotPoisonIndependentOrLaterRecovery(int errorCode)
+    {
+        var blocked = await CreateScenarioAsync(
+            VerifiedFileRenameState.OwnerMetadataReconciled,
+            ownerAtDestination: true,
+            createDestination: true);
+        var healthy = await CreateScenarioAsync(
+            VerifiedFileRenameState.OwnerMetadataReconciled,
+            ownerAtDestination: true,
+            createDestination: true);
+        var blockedParent = Path.GetDirectoryName(blocked.Source)!;
+        var service = CreateService();
+
+        using (ExclusiveDirectoryCreator.PushBeforeOpenParentHook(path =>
+        {
+            if (string.Equals(path, blockedParent, StringComparison.Ordinal))
+            {
+                throw new System.ComponentModel.Win32Exception(errorCode);
+            }
+        }))
+        {
+            await service.ReconcileAsync();
+        }
+
+        Assert.Equal(VerifiedFileRenameState.OwnerMetadataReconciled,
+            (await GetJournalAsync(blocked.OperationId)).State);
+        Assert.Equal(VerifiedFileRenameState.CompletedSourceRetained,
+            (await GetJournalAsync(healthy.OperationId)).State);
+        Assert.True(File.Exists(blocked.Source));
+        Assert.True(File.Exists(healthy.Source));
+
+        await service.ReconcileAsync();
+
+        Assert.Equal(VerifiedFileRenameState.CompletedSourceRetained,
+            (await GetJournalAsync(blocked.OperationId)).State);
+        Assert.True(File.Exists(blocked.Source));
+    }
+
     private VerifiedFileRenameRecoveryService CreateService() =>
         new(
             _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>(),
@@ -247,7 +350,8 @@ public sealed class VerifiedFileRenameRecoveryServiceTests : BaseTests
         bool ownerAtDestination,
         bool createDestination)
     {
-        var rootPath = FileService.GetTempDirectory("verified-organize-recovery");
+        var rootPath = FileService.GetTempDirectory(
+            "verified-organize-recovery-" + Guid.NewGuid().ToString("N"));
         var root = await AddAuthorizedRootAsync(rootPath);
         root.StorageContractRevision = 8;
         await _rootFolderRepository.UpdateAsync(root);

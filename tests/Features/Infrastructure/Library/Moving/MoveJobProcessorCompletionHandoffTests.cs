@@ -51,7 +51,7 @@ public partial class MoveJobProcessorTests
     }
 
     [WindowsFact]
-    public async Task ProcessJobAsync_TargetReplacementBlockedByCompletionLease_RetriesThenDetectsReplacement()
+    public async Task ProcessJobAsync_EquivalentTargetReplacementAfterRestart_ReconcilesByContentProof()
     {
         var source = FileService.GetTempDirectory("move-processor-history-target-src");
         await FileService.GetFileAsync(source, "book.m4b", "audio");
@@ -102,14 +102,17 @@ public partial class MoveJobProcessorTests
         await _provider.GetRequiredService<IMoveJobProcessor>()
             .ProcessJobAsync(retry, CancellationToken.None);
 
-        var blocked = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
-        Assert.Equal(MoveJobStatus.NeedsAttention, blocked.Status);
-        Assert.Empty(await _historyRepository.GetByCorrelationIdAsync($"move:{job.Id:N}"));
+        var completed = Assert.IsType<MoveJob>(await queue.GetJobAsync(job.Id));
+        Assert.Equal(MoveJobStatus.Completed, completed.Status);
+        Assert.Single(
+            await _historyRepository.GetByCorrelationIdAsync($"move:{job.Id:N}"),
+            entry => entry.EventType == "Moved");
         await using var verification = await _provider
             .GetRequiredService<IDbContextFactory<ListenArrDbContext>>()
             .CreateDbContextAsync();
-        Assert.False(await verification.MoveScanHandoffs.AsNoTracking()
-            .AnyAsync(candidate => candidate.MoveJobId == job.Id));
+        var handoff = await verification.MoveScanHandoffs.AsNoTracking()
+            .SingleAsync(candidate => candidate.MoveJobId == job.Id);
+        Assert.Equal(MoveScanHandoffStatus.Pending, handoff.Status);
     }
 
     [LinuxFact]
@@ -412,7 +415,7 @@ public partial class MoveJobProcessorTests
         Assert.True(scanQueue.Reader.TryRead(out var recoveredScan));
         Assert.Equal($"move:{job.Id:N}", recoveredScan.CorrelationId);
         Assert.NotNull(recoveredScan.MoveScanHandoffId);
-        Assert.True(recoveredScan.PhysicalIdentity.HasValue);
+        Assert.NotNull(recoveredScan.PathIdentity);
     }
 
     private sealed class ReplaceTargetBeforeCompletionHistory(string target)

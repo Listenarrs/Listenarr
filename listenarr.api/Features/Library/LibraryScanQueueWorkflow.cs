@@ -53,7 +53,6 @@ namespace Listenarr.Api.Features.Library
             Audiobook audiobook,
             string? requestedPath,
             PathIdentitySnapshot? pathIdentity,
-            ScanPathPhysicalIdentity? physicalIdentity,
             bool isAuthoritativeScope)
         {
             _filesystemMutationGate.EnsureReady();
@@ -70,7 +69,6 @@ namespace Listenarr.Api.Features.Library
                         audiobook,
                         requestedPath,
                         pathIdentity,
-                        physicalIdentity,
                         IsAuthoritativeScope: isAuthoritativeScope,
                         AuthorizationMode: string.IsNullOrWhiteSpace(requestedPath)
                             ? ScanAuthorizationMode.ResolveCurrentAudiobookPath

@@ -10,27 +10,25 @@ namespace Listenarr.Tests.Features.Infrastructure.FileSystem;
 public sealed class CompatibilitySourceCleanupCoordinatorTests : BaseTests
 {
     [Fact]
-    public async Task CompleteBatchAsync_ListenarrOwner_VerifiesAndRemovesSource()
+    public async Task CompleteBatchAsync_PersistedPublicationWithoutLiveProof_RetainsSource()
     {
         var scenario = await CreateScenarioAsync(CompatibilityCleanupOwner.Listenarr);
-        var service = CreateService(scenario.Factory);
+        for (var restart = 0; restart < 2; restart++)
+        {
+            var result = await CreateService(scenario.Factory)
+                .CompleteBatchAsync(scenario.BatchId, batchSucceeded: true);
 
-        var result = await service.CompleteBatchAsync(scenario.BatchId, batchSucceeded: true);
-
-        Assert.Equal(
-            CompatibilityBatchCleanupDisposition.RetiredByListenarr,
-            result.Disposition);
-        Assert.Equal(1, result.RemovedCount);
-        Assert.False(File.Exists(scenario.Source));
-        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Destination));
-        Assert.False(Directory.Exists(Path.Join(
-            Path.GetDirectoryName(scenario.Source)!,
-            ".listenarr-quarantine-" + scenario.BatchId.ToString("N"))));
-        var journal = await LoadJournalAsync(scenario);
-        Assert.Equal(CompatibilityFilePublicationState.Completed, journal.State);
-        Assert.Equal(
-            CompatibilitySourceDisposition.RetiredByListenarr,
-            journal.SourceDisposition);
+            Assert.Equal(CompatibilityBatchCleanupDisposition.Retained, result.Disposition);
+            Assert.Equal(0, result.RemovedCount);
+            Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Source));
+            Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Destination));
+            Assert.False(Directory.Exists(Path.Join(
+                Path.GetDirectoryName(scenario.Source)!,
+                ".listenarr-quarantine-" + scenario.BatchId.ToString("N"))));
+            var journal = await LoadJournalAsync(scenario);
+            Assert.Equal(CompatibilityFilePublicationState.Completed, journal.State);
+            Assert.Equal(CompatibilitySourceDisposition.Retained, journal.SourceDisposition);
+        }
     }
 
     [Fact]
@@ -83,7 +81,7 @@ public sealed class CompatibilitySourceCleanupCoordinatorTests : BaseTests
     }
 
     [Fact]
-    public async Task CompleteBatchAsync_ChangedPolicyRevision_RetainsSource()
+    public async Task CompleteBatchAsync_LegacyPolicyRevisionChange_DoesNotGrantCleanupAuthority()
     {
         var scenario = await CreateScenarioAsync(CompatibilityCleanupOwner.Listenarr);
         await using (var db = await scenario.Factory.CreateDbContextAsync())
@@ -96,11 +94,15 @@ public sealed class CompatibilitySourceCleanupCoordinatorTests : BaseTests
 
         var result = await service.CompleteBatchAsync(scenario.BatchId, batchSucceeded: true);
 
-        Assert.Equal(CompatibilityBatchCleanupDisposition.Retained, result.Disposition);
+        Assert.Equal(
+            CompatibilityBatchCleanupDisposition.Retained,
+            result.Disposition);
         Assert.True(File.Exists(scenario.Source));
         var journal = await LoadJournalAsync(scenario);
         Assert.Equal(CompatibilityFilePublicationState.Completed, journal.State);
-        Assert.Equal(CompatibilitySourceDisposition.Retained, journal.SourceDisposition);
+        Assert.Equal(
+            CompatibilitySourceDisposition.Retained,
+            journal.SourceDisposition);
     }
 
     [Fact]
@@ -185,43 +187,7 @@ public sealed class CompatibilitySourceCleanupCoordinatorTests : BaseTests
     }
 
     [Fact]
-    public async Task CompleteBatchAsync_FailureImmediatelyAfterQuarantineMove_RestoresSource()
-    {
-        var scenario = await CreateScenarioAsync(CompatibilityCleanupOwner.Listenarr);
-        var service = CreateService(scenario.Factory);
-        service.AfterSourceMovedToQuarantineForTest = () =>
-            throw new InvalidOperationException("Injected failure after quarantine rename.");
-
-        var result = await service.CompleteBatchAsync(scenario.BatchId, batchSucceeded: true);
-
-        Assert.Equal(CompatibilityBatchCleanupDisposition.Retained, result.Disposition);
-        Assert.True(File.Exists(scenario.Source));
-        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Source));
-        var journal = await LoadJournalAsync(scenario);
-        Assert.Equal(CompatibilityFilePublicationState.Completed, journal.State);
-        Assert.Equal(CompatibilitySourceDisposition.Retained, journal.SourceDisposition);
-    }
-
-    [Fact]
-    public async Task CompleteBatchAsync_DestinationChangesAfterQuarantine_RestoresSource()
-    {
-        var scenario = await CreateScenarioAsync(CompatibilityCleanupOwner.Listenarr);
-        var service = CreateService(scenario.Factory);
-        service.AfterBatchQuarantinedForTest = () =>
-            File.WriteAllText(scenario.Destination, "changed-after-quarantine");
-
-        var result = await service.CompleteBatchAsync(scenario.BatchId, batchSucceeded: true);
-
-        Assert.Equal(CompatibilityBatchCleanupDisposition.Retained, result.Disposition);
-        Assert.True(File.Exists(scenario.Source));
-        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Source));
-        var journal = await LoadJournalAsync(scenario);
-        Assert.Equal(CompatibilityFilePublicationState.Completed, journal.State);
-        Assert.Equal(CompatibilitySourceDisposition.Retained, journal.SourceDisposition);
-    }
-
-    [Fact]
-    public async Task CompleteBatchAsync_LaterDestinationChangesDuringDeletion_RestoresRemainingSource()
+    public async Task CompleteBatchAsync_MultipleCommittedPublications_RetainsEverySource()
     {
         var scenario = await CreateScenarioAsync(CompatibilityCleanupOwner.Listenarr);
         var secondSource = Path.Join(Path.GetDirectoryName(scenario.Source)!, "source-2.m4b");
@@ -259,20 +225,14 @@ public sealed class CompatibilitySourceCleanupCoordinatorTests : BaseTests
             await db.SaveChangesAsync();
         }
         var service = CreateService(scenario.Factory);
-        service.BeforeSourceDeleteForTest = journal =>
-        {
-            if (journal.OperationId == secondOperationId)
-            {
-                File.WriteAllText(secondDestination, "changed-during-delete");
-            }
-        };
-
         var result = await service.CompleteBatchAsync(scenario.BatchId, batchSucceeded: true);
 
-        Assert.Equal(CompatibilityBatchCleanupDisposition.PartialNeedsAttention, result.Disposition);
-        Assert.Equal(1, result.RemovedCount);
-        Assert.Equal(1, result.RetainedCount);
-        Assert.False(File.Exists(scenario.Source));
+        Assert.Equal(CompatibilityBatchCleanupDisposition.Retained, result.Disposition);
+        Assert.Equal(0, result.RemovedCount);
+        Assert.Equal(2, result.RetainedCount);
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Source));
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Destination));
+        Assert.Equal("audio-2", await File.ReadAllTextAsync(secondDestination));
         Assert.True(File.Exists(secondSource));
         Assert.Equal("audio-2", await File.ReadAllTextAsync(secondSource));
         await using var verification = await scenario.Factory.CreateDbContextAsync();
@@ -282,7 +242,7 @@ public sealed class CompatibilitySourceCleanupCoordinatorTests : BaseTests
         var secondJournal = await verification.CompatibilityFilePublicationJournals
             .AsNoTracking()
             .SingleAsync(journal => journal.OperationId == secondOperationId);
-        Assert.Equal(CompatibilitySourceDisposition.RetiredByListenarr, firstJournal.SourceDisposition);
+        Assert.Equal(CompatibilitySourceDisposition.Retained, firstJournal.SourceDisposition);
         Assert.Equal(CompatibilityFilePublicationState.Completed, firstJournal.State);
         Assert.Equal(CompatibilitySourceDisposition.Retained, secondJournal.SourceDisposition);
         Assert.Equal(CompatibilityFilePublicationState.Completed, secondJournal.State);

@@ -2,25 +2,17 @@ namespace Listenarr.Infrastructure.Library.Moving;
 
 internal sealed partial class AudiobookContentMoveService
 {
-    private async Task CopyMarkerlessTargetFilesAsync(
+    private async Task<bool> CopyMarkerlessTargetFilesAsync(
         AudiobookContentMoveRequest request,
         string source,
         string target,
         IReadOnlyCollection<MoveJobEntry> manifest,
         bool retainSource,
         MarkerlessTargetVerificationLease targetVerificationLease,
+        MarkerlessSourceRetirementLease sourceRetirementLease,
         CancellationToken cancellationToken)
     {
-        var endpoints = await GetEndpointObjectIdentitiesAsync(
-            request.JobId,
-            cancellationToken);
-        if (string.IsNullOrWhiteSpace(endpoints.SourceDirectoryObjectIdentity)
-            || string.IsNullOrWhiteSpace(endpoints.TargetDirectoryObjectIdentity))
-        {
-            throw new MoveNeedsAttentionException(
-                "Markerless copy requires persisted source and target endpoint generations.");
-        }
-
+        var adoptedPriorTarget = false;
         var files = manifest
             .Where(candidate => candidate.EntryType == MoveJobEntryType.File)
             .Where(IsPhysicalManifestEntry)
@@ -55,14 +47,12 @@ internal sealed partial class AudiobookContentMoveService
                 source,
                 sourceParentPath,
                 request.SourceSemantics,
-                endpoints.SourceDirectoryObjectIdentity,
                 sourceEndpoint: true);
             using var targetParent = OpenPinnedMoveDescendant(
                 request,
                 target,
                 targetParentPath,
                 request.TargetSemantics,
-                endpoints.TargetDirectoryObjectIdentity,
                 sourceEndpoint: false);
             using var existingTarget = targetParent.TryOpenExistingFile(
                 Path.GetFileName(targetPath),
@@ -73,11 +63,7 @@ internal sealed partial class AudiobookContentMoveService
 
             if (sourceEntry == null)
             {
-                if (retainSource)
-                {
-                    throw new MoveNeedsAttentionException(
-                        $"A source file disappeared during copy-and-retain publication: {entry.RelativePath}");
-                }
+
                 var wasVerified = entry.CopyState == MoveJobEntryCopyState.Verified;
                 if (existingTarget == null
                     || !await TryRecoverMarkerlessNativeRenameAsync(
@@ -90,6 +76,9 @@ internal sealed partial class AudiobookContentMoveService
                         $"Source file disappeared before markerless publication completed: {entry.RelativePath}");
                 }
 
+                // Recovery adopts content, never recreates source retirement authority.
+                // Other surviving entries must remain even if their current pins are valid.
+                adoptedPriorTarget = true;
                 if (!wasVerified)
                 {
                     completedWorkUnits += checked(GetProgressUnits(entry) * 2);
@@ -118,6 +107,7 @@ internal sealed partial class AudiobookContentMoveService
                     completedWorkUnits,
                     totalWorkUnits,
                     cancellationToken);
+                adoptedPriorTarget = true;
                 continue;
             }
 
@@ -160,7 +150,7 @@ internal sealed partial class AudiobookContentMoveService
                     request.LeaseToken,
                     entry.RelativePath,
                     entry.SourcePhysicalObjectIdentity
-                        ?? sourceEntry.GetObjectIdentity(),
+                        ?? PinnedDirectoryCreation.CaptureDiagnosticIdentity(sourceEntry.GetObjectIdentity),
                     observedProof.Sha256,
                     observedProof.LastWriteTimeUtc,
                     cancellationToken);
@@ -227,6 +217,7 @@ internal sealed partial class AudiobookContentMoveService
                     completedWorkUnits,
                     totalWorkUnits,
                     cancellationToken);
+                adoptedPriorTarget = true;
                 if (!wasVerified && entry.CopyState == MoveJobEntryCopyState.Verified)
                 {
                     completedWorkUnits += GetProgressUnits(entry);
@@ -260,9 +251,10 @@ internal sealed partial class AudiobookContentMoveService
             // the pinned read handle alone is not authority to publish a source whose
             // namespace entry was replaced after the rename observation.
             ValidateMarkerlessSourceEntry(request, entry, sourceEntry);
+            sourceRetirementLease.Add(entry.RelativePath, sourceEntry);
             using var created = targetParent.CreateNewFile(
                 Path.GetFileName(targetPath));
-            var targetIdentity = created.GetObjectIdentity();
+            var targetIdentity = PinnedDirectoryCreation.CaptureDiagnosticIdentity(created.GetObjectIdentity);
             try
             {
                 // The final-name entry must be namespace-durable before its physical
@@ -309,6 +301,11 @@ internal sealed partial class AudiobookContentMoveService
                 completedWorkUnits,
                 totalWorkUnits,
                 cancellationToken);
+            targetVerificationLease.Add(
+                entry.RelativePath,
+                created.OpenStableRegistrationCopy(),
+                entry.Length,
+                entry.Sha256!);
             completedWorkUnits += GetProgressUnits(entry);
             await ReportProgressAsync(
                 request,
@@ -320,6 +317,8 @@ internal sealed partial class AudiobookContentMoveService
                 "Copying",
                 cancellationToken);
         }
+
+        return adoptedPriorTarget;
     }
 
 }

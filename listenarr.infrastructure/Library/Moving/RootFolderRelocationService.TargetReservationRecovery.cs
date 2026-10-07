@@ -49,7 +49,10 @@ public sealed partial class RootFolderRelocationService
             return false;
         }
 
-        if (!identity.IsAvailable)
+        if (!identity.IsAvailable
+            && identity.FailureKind is not
+                (DirectoryObjectIdentityFailureKind.IdentityUnsupported
+                    or DirectoryObjectIdentityFailureKind.LegacyWeakIdentity))
         {
             return false;
         }
@@ -73,11 +76,12 @@ public sealed partial class RootFolderRelocationService
         persisted.TargetDirectoryObjectIdentityVersion =
             identity.Version;
         persisted.TargetDirectoryObjectIdentity = identity.Value;
-        persisted.TargetDirectoryObjectIdentityUnavailableReason = null;
+        persisted.TargetDirectoryObjectIdentityUnavailableReason =
+            identity.UnavailableReason;
         persisted.TargetIdentityEnrollmentState =
-            TargetIdentityEnrollmentState.Authorized;
+            GetTargetIdentityEnrollmentState(identity);
         persisted.Error =
-            "Target directory reservations were recovered and the relocation can be retried.";
+            "Target directory reservations were recovered and the relocation can be retried using current path authority.";
         persisted.UpdatedAt =
             timeProvider.GetUtcNow().UtcDateTime;
         await db.SaveChangesAsync(cancellationToken);

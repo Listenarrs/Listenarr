@@ -93,7 +93,7 @@ public sealed class MoveRecoveryPolicyTests : BaseTests
             MoveFailureKind.Unknown,
             MoveJobEntryCopyState.Verified,
             MoveJobEntryCleanupState.Deleted);
-        job.ExecutionProtocolVersion = MoveExecutionProtocol.MarkerlessDatabaseState;
+        job.ExecutionProtocolVersion = MoveExecutionProtocol.Current;
         job.SourceDirectoryCleanupState = MoveJobEntryCleanupState.Deleted;
         job.TargetDirectoryObjectIdentity = "target-generation";
         var targetSemantics = FileSystemPathSemantics.CurrentHostDefault;
@@ -121,7 +121,7 @@ public sealed class MoveRecoveryPolicyTests : BaseTests
     }
 
     [Fact]
-    public void ClassifyAudiobookJobs_MarkerlessNeedsAttentionUnknownWithoutExactTargetGeneration_IsOperatorRepairOnly()
+    public void ClassifyAudiobookJobs_MarkerlessNeedsAttentionUnknownWithoutExactTargetGeneration_IsRetryable()
     {
         var job = CreateJob(
             MoveJobStatus.NeedsAttention,
@@ -129,7 +129,7 @@ public sealed class MoveRecoveryPolicyTests : BaseTests
             MoveFailureKind.Unknown,
             MoveJobEntryCopyState.Verified,
             MoveJobEntryCleanupState.Deleted);
-        job.ExecutionProtocolVersion = MoveExecutionProtocol.MarkerlessDatabaseState;
+        job.ExecutionProtocolVersion = MoveExecutionProtocol.Current;
         job.SourceDirectoryCleanupState = MoveJobEntryCleanupState.Deleted;
         job.TargetDirectoryObjectIdentity = "expected-generation";
         var targetSemantics = FileSystemPathSemantics.CurrentHostDefault;
@@ -150,9 +150,9 @@ public sealed class MoveRecoveryPolicyTests : BaseTests
 
         var state = MoveRecoveryPolicy.ClassifyAudiobookJobs([job]);
 
-        Assert.Equal(MoveRecoveryDisposition.OperatorRepairRequired, state.Disposition);
+        Assert.Equal(MoveRecoveryDisposition.RetryAvailable, state.Disposition);
         Assert.True(state.BlocksFilesystemMutation);
-        Assert.False(state.CanRetry);
+        Assert.True(state.CanRetry);
     }
 
     [Fact]

@@ -39,8 +39,9 @@ public enum CompatibilityCleanupOwner
 
 /// <summary>
 /// Recovery state for publication on storage that cannot expose durable object
-/// generations. Protocol v1 is retain-only; protocol v2 can authorize verified,
-/// policy-gated source cleanup after registration commits for the entire batch.
+/// generations. Protocol v1 is retain-only. Protocol v2 also records historical
+/// verified-cleanup transitions; those facts cannot recreate source-delete authority.
+/// Current batch completion retains sources without their original live proof.
 /// </summary>
 public sealed class CompatibilityFilePublicationJournal
 {

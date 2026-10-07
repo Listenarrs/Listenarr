@@ -85,6 +85,15 @@ public partial class EfAudiobookFileRepository
                 AudiobookFileClaimOutcome.IdentityConflict,
                 Reason: "The audiobook file ownership claim conflicted with another persistence operation.");
         }
+        catch (Exception exception) when (exception is not (OutOfMemoryException or StackOverflowException))
+        {
+            // SaveChanges may assign a key before commit rolls back, or commit may
+            // succeed before acknowledgement fails. Later claims must reload durable
+            // state rather than retain either outcome in this request's identity map.
+            _db.Entry(file).State = EntityState.Detached;
+            _db.Entry(audiobook).State = EntityState.Detached;
+            throw;
+        }
     }
 
     public async Task<bool> ApplyBasePathAsync(
