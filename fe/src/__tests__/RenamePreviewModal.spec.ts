@@ -145,11 +145,12 @@ describe('RenamePreviewModal', () => {
       await flushPromises()
 
       expect(wrapper.get('.result-row.success').text()).toContain('Organized successfully')
-      if (sourceRetained) {
-        expect(wrapper.text()).toContain('original sources retained for 1 file.')
-      } else {
-        expect(wrapper.text()).not.toContain('original sources retained')
-      }
+      const expectedRetentionMessages = sourceRetained
+        ? ['original sources retained for 1 file.']
+        : []
+      expect(wrapper.text().match(/original sources retained[^.]*\./g) ?? []).toEqual(
+        expectedRetentionMessages,
+      )
       wrapper.unmount()
     },
   )
