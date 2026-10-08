@@ -45,7 +45,6 @@ public sealed partial class VerifiedFileRenameTransactionCoordinator
         }
 
         public Guid OperationId => _journal.OperationId;
-
         private ActiveVerifiedFileRenameLease OpenActive()
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -80,7 +79,6 @@ public sealed partial class VerifiedFileRenameTransactionCoordinator
                 sourceParent?.Dispose();
             }
         }
-
         public async Task<bool> RollBackAsync(CancellationToken cancellationToken = default)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -101,7 +99,6 @@ public sealed partial class VerifiedFileRenameTransactionCoordinator
                 return false;
             }
         }
-
         public async Task<VerifiedFileRenameRetirementOutcome> CompleteSourceRetirementAsync(
             CancellationToken cancellationToken = default)
         {
@@ -139,13 +136,11 @@ public sealed partial class VerifiedFileRenameTransactionCoordinator
                 return VerifiedFileRenameRetirementOutcome.NeedsAttention;
             }
         }
-
         public ValueTask DisposeAsync()
         {
             _disposed = true;
             return ValueTask.CompletedTask;
         }
-
         private sealed class SourceObservationChangedException : InvalidOperationException { }
     }
 
@@ -161,9 +156,7 @@ public sealed partial class VerifiedFileRenameTransactionCoordinator
         : IVerifiedFileRenameLease
     {
         private bool _disposed;
-
         public Guid OperationId => journal.OperationId;
-
         public async Task<bool> RollBackAsync(
             CancellationToken cancellationToken = default)
         {
