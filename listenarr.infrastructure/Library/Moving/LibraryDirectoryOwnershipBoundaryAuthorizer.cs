@@ -394,7 +394,12 @@ public sealed partial class LibraryDirectoryOwnershipBoundaryAuthorizer(
                         boundaryPath,
                         semantics))
                 {
-                    var relative = Path.GetRelativePath(boundaryPath, parentPath);
+                    if (!FileSystemPathIdentity.TryGetRelativePathWithinBase(
+                            boundaryPath, parentPath, semantics, out var relative))
+                    {
+                        throw new InvalidOperationException(
+                            "The authorized directory parent escaped its managed root boundary.");
+                    }
                     foreach (var segment in relative.Split(
                         [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
                         StringSplitOptions.RemoveEmptyEntries))

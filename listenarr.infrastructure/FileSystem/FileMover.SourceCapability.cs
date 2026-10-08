@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Listenarr.Domain.Common;
 
 namespace Listenarr.Infrastructure.FileSystem;
 
@@ -107,7 +108,10 @@ public partial class FileMover : IFilePublicationSourceCapability
         var current = authorization.BoundaryAnchor.Duplicate();
         try
         {
-            foreach (var segment in Path.GetRelativePath(managed.Root.Path, parent).Split(
+            if (!FileSystemPathIdentity.TryGetRelativePathWithinBase(
+                    managed.Root.Path, parent, managed.Semantics.Value, out var relative))
+                throw new InvalidOperationException("The source parent escaped its configured boundary.");
+            foreach (var segment in relative.Split(
                 [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
                 StringSplitOptions.RemoveEmptyEntries).Where(segment => segment != "."))
             {

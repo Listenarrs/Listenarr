@@ -170,7 +170,11 @@ public sealed class MoveSourceCleanupPolicyResolver(
         var current = boundary.Duplicate();
         try
         {
-            var relative = Path.GetRelativePath(root.Path, existingPath);
+            var semantics = RootFolderPathSemantics.ResolvePersisted(root)
+                ?? throw new InvalidOperationException("The move boundary has no persisted path semantics.");
+            if (!FileSystemPathIdentity.TryGetRelativePathWithinBase(
+                    root.Path, existingPath, semantics.Semantics, out var relative))
+                throw new InvalidOperationException("The move path escaped its configured boundary.");
             foreach (var segment in relative.Split(
                 [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
                 StringSplitOptions.RemoveEmptyEntries).Where(segment => segment != "."))
