@@ -85,6 +85,48 @@ public sealed class AudiobookFilesystemDeleteServiceTests : BaseTests
         }
     }
 
+    [NetworkStorageTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DeleteAsync_MountedOwnedDirectories_HonorsCaseAliases(bool aliasOwnership)
+    {
+        var mount = Environment.GetEnvironmentVariable(NetworkStorageTheoryAttribute.PathEnvironmentVariable)!;
+        var root = Directory.CreateDirectory(Path.Join(mount, "delete-owned-case-" + Guid.NewGuid().ToString("N"))).FullName;
+        try
+        {
+            var folder = Directory.CreateDirectory(Path.Join(root, "Book")).FullName;
+            var parent = Directory.CreateDirectory(Path.Join(folder, "Disc")).FullName;
+            var source = Path.Join(parent, "audio.m4b");
+            await File.WriteAllTextAsync(source, "audio");
+            var insensitive = Directory.Exists(Path.Join(root, "BOOK"));
+            var semantics = new FileSystemPathSemantics(FileSystemPathSyntax.Unix,
+                insensitive ? FileSystemCaseSensitivity.Insensitive : FileSystemCaseSensitivity.Sensitive);
+            await _provider.GetRequiredService<IRootFolderService>().CreateAsync(new RootFolderBuilder()
+                .WithPath(root).WithName("Owned directory case root")
+                .WithCaseSensitivityMode(insensitive ? FileSystemCaseSensitivityMode.Insensitive : FileSystemCaseSensitivityMode.Sensitive).Build());
+            var ownedFolder = aliasOwnership && insensitive ? Path.Join(root, "BOOK") : folder;
+            var ownedParent = aliasOwnership && insensitive ? Path.Join(ownedFolder, "DISC") : parent;
+            var ownership = _provider.GetRequiredService<ILibraryDirectoryOwnershipStore>();
+            foreach (var directory in new[] { ownedParent, ownedFolder })
+                await ownership.RecordCreatedAsync(new LibraryDirectoryOwnershipClaim(directory, semantics, "test"));
+            var book = new AudiobookBuilder()
+                .WithTitle("Owned directory case aliases").WithBasePath(folder).WithFilePath(source).Build();
+            book.Files = [AudiobookFile.CreateUnresolved(source)];
+            var audiobook = await _audiobookRepository.AddAsync(book);
+
+            var result = await _provider.GetRequiredService<IAudiobookFilesystemDeleteService>()
+                .DeleteAsync(audiobook, deleteFolder: true);
+
+            var remaining = await ownership.GetOwnedWithinAsync(folder, semantics);
+            Assert.True(result.DeletedFolder, string.Join("; ", result.Warnings)
+                + "; remaining claims: " + string.Join(", ", remaining.Select(item => item.CanonicalPath + ":" + item.State)));
+            Assert.Empty(remaining);
+            Assert.False(Directory.Exists(folder));
+            Assert.True(Directory.Exists(root));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
     [LinuxFact]
     public async Task DeleteAsync_NewNestedEntryAfterPreflight_RetainsUnexpectedFile()
     {

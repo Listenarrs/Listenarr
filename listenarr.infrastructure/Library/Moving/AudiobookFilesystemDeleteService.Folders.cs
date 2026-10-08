@@ -174,6 +174,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                     deleteTarget.OwnedDirectories,
                     originalTarget,
                     capturedTreeProofs,
+                    deleteTarget.Semantics,
                     cancellationToken))
             {
                 result.Warnings.Add(

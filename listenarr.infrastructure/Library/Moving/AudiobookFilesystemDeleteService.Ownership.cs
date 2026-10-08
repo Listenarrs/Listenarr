@@ -198,7 +198,9 @@ public sealed partial class AudiobookFilesystemDeleteService
                 cancellationToken);
             ownership.State = LibraryDirectoryOwnershipState.Removing;
         }
-        var directoryPath = ownership.CanonicalPath;
+        // Reopen the final entry using the live pin's spelling rather than a
+        // case alias from persisted ownership.
+        var directoryPath = originalDirectory.FullPath;
         BeforeOwnedDirectoryRetirementForTest?.Invoke(directoryPath);
         using var authorization = _ownershipAuthorizer == null
             ? throw new InvalidOperationException("Managed-root authorization is unavailable for owned directory retirement.")
@@ -316,14 +318,19 @@ public sealed partial class AudiobookFilesystemDeleteService
         IReadOnlyList<LibraryDirectoryOwnership> ownerships,
         PinnedDirectoryCreation.PinnedDirectoryAnchor originalTarget,
         CapturedDeleteTreeProofs capturedTreeProofs,
+        FileSystemPathSemantics semantics,
         CancellationToken cancellationToken = default)
     {
         foreach (var ownership in ownerships
             .OrderByDescending(candidate => candidate.CanonicalPath.Length))
         {
-            var relativePath = Path.GetRelativePath(originalTarget.FullPath, ownership.CanonicalPath);
+            // Native host comparisons can be case-sensitive while the configured
+            // mount is insensitive. Use the same contract as the captured proof keys.
+            if (!FileSystemPathIdentity.TryGetRelativePathWithinBase(
+                    originalTarget.FullPath, ownership.CanonicalPath, semantics, out var relativePath))
+                return false;
             if (!originalTarget.VisiblePathMatches()) return false;
-            if (relativePath == ".")
+            if (relativePath.Length == 0)
             {
                 if (!await RetireOwnedDirectoryAsync(ownership, originalTarget, cancellationToken)) return false;
                 continue;
