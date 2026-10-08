@@ -3,7 +3,8 @@ namespace Listenarr.Application.Downloads.Contracts
 {
     public sealed record DownloadImportOptions(
         bool ForceArchiveExtraction = false,
-        Guid? CompatibilityBatchId = null);
+        Guid? CompatibilityBatchId = null,
+        bool ForceCopyAndRetainSource = false);
 
     /// <summary>
     /// Download import responsible for processing a given download importation

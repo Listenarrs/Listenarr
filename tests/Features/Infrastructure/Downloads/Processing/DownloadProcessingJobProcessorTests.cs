@@ -20,6 +20,64 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Processing
         }
 
         [Fact]
+        public async Task ClientRetention_SurvivesStalePollSnapshotAndMetadataUpdates()
+        {
+            var download = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithAudiobook(await CreateAudiobook()).Build());
+            var stale = (await _downloadRepository.GetByIdAsync(download.Id))!;
+            download.SetMetadata(Download.ImportSourceRetentionRequiredMetadataKey, true);
+            await _downloadRepository.UpdateAsync(download);
+            stale.Progress = 100;
+            await _downloadRepository.UpdateAsync(stale);
+            await _downloadRepository.UpdateMetadataAsync(download.Id,
+                Download.ImportSourceRetentionRequiredMetadataKey, false);
+            Assert.Equal(bool.TrueString, (await _downloadRepository.GetByIdAsync(download.Id))!
+                .GetMetadataString(Download.ImportSourceRetentionRequiredMetadataKey));
+        }
+
+        [Theory]
+        [InlineData(false, false)]
+        [InlineData(null, false)]
+        [InlineData(true, true)]
+        [InlineData(true, false)]
+        public async Task Import_PersistsClientRetentionBeforePublication(bool? clientPermission, bool alreadyRetained)
+        {
+            var importService = new Mock<IDownloadImportService>(MockBehavior.Strict);
+            Init(builder => builder.WithSingleton<IDownloadImportService>(importService.Object));
+            var expectedRetention = clientPermission != true || alreadyRetained;
+            var sourceDirectory = FileService.GetTempDirectory("client-retention-processing");
+            var source = await FileService.GetFileAsync(sourceDirectory, "book.mp3", "audio");
+            downloadClientGatewayMock.SourceFiles = [source];
+            downloadClientGatewayMock.CanMoveFiles = clientPermission;
+            var audiobook = await CreateAudiobook();
+            var download = new DownloadBuilder().WithAudiobook(audiobook)
+                .WithDownloadClientConfiguration(await CreateDownloadClientConfiguration())
+                .WithPath(sourceDirectory).WithCompletedStatus(DateTime.UtcNow).Build();
+            if (alreadyRetained) download.SetMetadata(Download.ImportSourceRetentionRequiredMetadataKey, true);
+            download = await _downloadRepository.AddAsync(download);
+            importService.Setup(service => service.ImportDownloadFilesAsync(It.IsAny<Audiobook>(),
+                It.IsAny<List<string>>(), It.IsAny<CancellationToken>(), It.IsAny<DownloadImportOptions?>()))
+                .Returns(async (Audiobook _, List<string> files, CancellationToken _, DownloadImportOptions? options) =>
+                {
+                    Assert.Equal(expectedRetention, options!.ForceCopyAndRetainSource);
+                    var saved = (await _downloadRepository.GetByIdAsync(download.Id))!;
+                    Assert.Equal(expectedRetention, bool.TryParse(saved.GetMetadataString(
+                        Download.ImportSourceRetentionRequiredMetadataKey), out var retained) && retained);
+                    return new List<ImportResult> { ImportResult.ImportSuccess(FileAction.Move,
+                        expectedRetention ? FileAction.Copy : FileAction.Move,
+                        expectedRetention ? ImportSourceDisposition.Retained : ImportSourceDisposition.Retired,
+                        files[0], files[0], wasRegisteredToAudiobook: true) };
+                });
+            var job = await _downloadProcessingJobRepository.AddAsync(new DownloadProcessingJobBuilder().WithDownload(download).Build());
+            await _provider.GetRequiredService<DownloadProcessingJobProcessor>().ProcessQueueAsync(CancellationToken.None);
+            var savedJob = (await _downloadProcessingJobRepository.GetByIdAsync(job.Id))!;
+            Assert.True(savedJob.Status == ProcessingJobStatus.Completed, $"{savedJob.ErrorMessage}; {string.Join(" | ", savedJob.ProcessingLog)}");
+            Assert.Equal(expectedRetention.ToString(), (await _downloadRepository.GetByIdAsync(download.Id))!
+                .GetMetadataString(Download.SourceRetainedMetadataKey));
+            importService.VerifyAll();
+        }
+
+        [Fact]
         public async Task CompletedDownload_With_NoPathFails()
         {
             var download = await _downloadRepository.AddAsync(new DownloadBuilder()

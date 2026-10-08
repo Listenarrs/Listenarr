@@ -37,7 +37,8 @@ public partial class DownloadImportService
                         options,
                         recoveryReceipts,
                         compatibilityBatchId);
-                    if (compatibilitySourceCleanupCoordinator != null)
+                    if (compatibilitySourceCleanupCoordinator != null
+                        && options?.ForceCopyAndRetainSource != true)
                     {
                         var batchSucceeded = results.All(result =>
                             result.Success || string.IsNullOrWhiteSpace(result.SourcePath));

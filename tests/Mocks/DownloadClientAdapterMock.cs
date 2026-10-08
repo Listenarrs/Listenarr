@@ -127,8 +127,12 @@ namespace Listenarr.Tests.Mocks
 
         public Task<List<DownloadClientItem>> GetItemsAsync(DownloadClientConfiguration client, CancellationToken ct = default)
         {
-            return Task.FromResult(new List<DownloadClientItem>());
+            if (ItemsException != null) throw ItemsException;
+            return Task.FromResult(Items);
         }
+
+        public List<DownloadClientItem> Items { get; set; } = [];
+        public Exception? ItemsException { get; set; }
 
         public Task<bool> RemoveAsync(DownloadClientConfiguration client, string id, bool deleteFiles = false, CancellationToken ct = default)
         {

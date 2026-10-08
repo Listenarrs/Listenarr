@@ -37,6 +37,63 @@ namespace Listenarr.Tests.Features.Application.Downloads.Import
             await AddAuthorizedRootAsync(FileService.GetTempPath());
         }
 
+        [Theory]
+        [InlineData(1)]
+        [InlineData(2)]
+        public async Task Import_ClientOwnedMove_RetainsAudioAndCompanionsAcrossRecovery(int audioCount)
+        {
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithMoveFileOnCompleted().WithoutMetadataProcessing().Build());
+            var sourceDirectory = FileService.GetTempDirectory("client-owned-source");
+            var book = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithBasePath(FileService.GetTempDirectory("client-owned-library")).Build());
+            var sources = new List<string>();
+            for (var index = 0; index < audioCount; index++)
+                sources.Add(await FileService.GetFileAsync(sourceDirectory, $"Part {index + 1}.mp3", $"audio-{index}"));
+            sources.Add(await FileService.GetFileAsync(sourceDirectory, "cover.jpg", "cover"));
+            var originalBytes = sources.ToDictionary(path => path, File.ReadAllBytes);
+            var importer = _provider.GetRequiredService<IDownloadImportService>();
+            var options = new DownloadImportOptions(CompatibilityBatchId: Guid.NewGuid(), ForceCopyAndRetainSource: true);
+
+            var results = await importer.ImportDownloadFilesAsync(book, sources, options: options);
+
+            Assert.Equal(sources.Count, results.Count);
+            Assert.All(results, result =>
+            {
+                Assert.True(result.Success, result.Message);
+                Assert.Equal(FileAction.Move, result.RequestedAction);
+                Assert.Equal(FileAction.Copy, result.EffectiveAction);
+                Assert.Equal(ImportSourceDisposition.Retained, result.SourceDisposition);
+                Assert.Equal("download_client_source_retained", result.WarningCode);
+                Assert.Equal(originalBytes[result.SourcePath!], File.ReadAllBytes(result.FinalPath!));
+            });
+            Assert.Equal(audioCount, (await _audiobookFileRepository.GetByAudiobookIdAsync(book.Id)).Count);
+            await importer.ImportDownloadFilesAsync(book, sources, options: options);
+            Assert.Equal(audioCount, (await _audiobookFileRepository.GetByAudiobookIdAsync(book.Id)).Count);
+            foreach (var source in sources) Assert.Equal(originalBytes[source], File.ReadAllBytes(source));
+        }
+
+        [Fact]
+        public async Task Import_ClientOwnedArchive_RetainsOriginalPayload()
+        {
+            var inner = FileService.GetTempDirectory("client-archive-content");
+            await FileService.GetFileAsync(inner, "audio.mp3", "audio");
+            var archive = Path.Join(FileService.GetTempDirectory("client-archive-source"), "release.zip");
+            ZipFile.CreateFromDirectory(inner, archive);
+            var original = await File.ReadAllBytesAsync(archive);
+            var book = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithBasePath(FileService.GetTempDirectory("client-archive-library")).Build());
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithMoveFileOnCompleted().WithExtractArchive().WithoutMetadataProcessing().Build());
+
+            var results = await _provider.GetRequiredService<IDownloadImportService>().ImportDownloadFilesAsync(
+                book, [archive], options: new DownloadImportOptions(ForceCopyAndRetainSource: true));
+
+            Assert.All(results, result => Assert.True(result.Success, result.Message));
+            Assert.Single(await _audiobookFileRepository.GetByAudiobookIdAsync(book.Id));
+            Assert.Equal(original, await File.ReadAllBytesAsync(archive));
+        }
+
         public static TheoryData<string> PathSuffixes
         {
             get

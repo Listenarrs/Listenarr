@@ -12,8 +12,19 @@ public partial class DownloadImportService
         FilePublicationSourceProof sourceProof,
         Guid compatibilityBatchId,
         CompatibilityBatchManifest? compatibilityBatchManifest,
+        bool forceCopyAndRetainSource,
         CancellationToken cancellationToken)
     {
+        if (forceCopyAndRetainSource && requestedAction == FileAction.Move)
+        {
+            // Client ownership is stricter than filesystem cleanup capability.
+            // Additive publication persists retain-only recovery before copying bytes.
+            return FilePublicationPlan.Additive(requestedAction) with
+            {
+                ReasonCode = "download_client_source_retained",
+                Message = "Destination verified; original files retained because the download client has not released source ownership."
+            };
+        }
         var plan = filePublicationCapabilityResolver == null
             ? FilePublicationPlan.Durable(requestedAction)
             : await filePublicationCapabilityResolver.ResolveAsync(
@@ -118,24 +129,13 @@ public partial class DownloadImportService
         int audiobookId,
         Guid compatibilityBatchId,
         CompatibilityBatchManifest? compatibilityBatchManifest,
+        bool forceCopyAndRetainSource,
         CancellationToken cancellationToken)
     {
         expectedSourceProof.Validate();
-        var publicationPlan = filePublicationCapabilityResolver == null
-            ? FilePublicationPlan.Durable(action)
-            : await filePublicationCapabilityResolver.ResolveAsync(
-                action,
-                source,
-                destination,
-                expectedSourceProof,
-                cancellationToken,
-                compatibilityBatchId,
-                CompatibilityCleanupOwner.DownloadClient);
-        if (compatibilityBatchManifest.HasValue)
-        {
-            publicationPlan = publicationPlan.WithCompatibilityBatchManifest(
-                compatibilityBatchManifest.Value);
-        }
+        var publicationPlan = await ResolvePublicationPlanAsync(
+            action, source, destination, expectedSourceProof, compatibilityBatchId,
+            compatibilityBatchManifest, forceCopyAndRetainSource, cancellationToken);
         if (!publicationPlan.IsAllowed)
         {
             logger.LogWarning(

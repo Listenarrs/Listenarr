@@ -6,6 +6,7 @@ public partial class DownloadImportService
         ConsumeRecoveredImportsAsync(
             IReadOnlyCollection<string> requestedFiles,
             IReadOnlyList<FileRegistrationRecoveryReceipt> recoveryReceipts,
+            bool forceCopyAndRetainSource,
             CancellationToken cancellationToken)
     {
         var remainingFiles = requestedFiles.ToList();
@@ -52,7 +53,7 @@ public partial class DownloadImportService
                     receipt.SourcePath));
             var result = ImportResult.ImportSuccess(
                 FileAction.Move,
-                FileAction.Move,
+                forceCopyAndRetainSource && receipt.SourceRetained ? FileAction.Copy : FileAction.Move,
                 receipt.SourceRetained
                     ? ImportSourceDisposition.Retained
                     : ImportSourceDisposition.Retired,

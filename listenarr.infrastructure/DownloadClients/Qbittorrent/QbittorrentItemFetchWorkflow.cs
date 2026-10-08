@@ -48,6 +48,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 float globalMaxRatio = -1f;
                 bool globalMaxSeedingTimeEnabled = false;
                 long globalMaxSeedingTime = -1;
+                var seedPolicyKnown = false;
                 try
                 {
                     using var prefsResp = await httpClient.GetAsync($"{baseUrl}/api/v2/app/preferences", ct);
@@ -57,12 +58,17 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                         if (!string.IsNullOrWhiteSpace(prefsJson))
                         {
                             var prefs = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(prefsJson);
-                            if (prefs != null)
+                            if (prefs != null
+                                && prefs.ContainsKey("max_ratio_enabled")
+                                && prefs.ContainsKey("max_ratio")
+                                && prefs.ContainsKey("max_seeding_time_enabled")
+                                && prefs.ContainsKey("max_seeding_time"))
                             {
                                 globalMaxRatioEnabled = prefs.TryGetValue("max_ratio_enabled", out var mre) && mre.GetBoolean();
                                 globalMaxRatio = prefs.TryGetValue("max_ratio", out var mr) ? (float)mr.GetDouble() : -1f;
                                 globalMaxSeedingTimeEnabled = prefs.TryGetValue("max_seeding_time_enabled", out var mste) && mste.GetBoolean();
                                 globalMaxSeedingTime = prefs.TryGetValue("max_seeding_time", out var mst) ? mst.GetInt64() : -1;
+                                seedPolicyKnown = true;
                             }
                         }
                     }
@@ -87,14 +93,20 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
 
                 foreach (var torrent in torrents)
                 {
-                    items.Add(QbittorrentResponseMapper.MapDownloadClientItem(
+                    var item = QbittorrentResponseMapper.MapDownloadClientItem(
                         torrent,
                         client,
                         removeCompletedDownloads,
                         globalMaxRatioEnabled,
                         globalMaxRatio,
                         globalMaxSeedingTimeEnabled,
-                        globalMaxSeedingTime));
+                        globalMaxSeedingTime);
+                    if (!seedPolicyKnown)
+                    {
+                        item.CanMoveFiles = false;
+                        item.CanBeRemoved = false;
+                    }
+                    items.Add(item);
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)

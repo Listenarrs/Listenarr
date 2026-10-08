@@ -50,19 +50,38 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
         {
             ApplyActiveDeduplicationKey(download);
             await using var ctx = await _dbFactory.CreateDbContextAsync();
+            await using var transaction = ctx.Database.IsRelational()
+                ? await ctx.Database.BeginTransactionAsync() : null;
+            var current = await ctx.Downloads.AsNoTracking().SingleOrDefaultAsync(d => d.Id == download.Id);
+            if (current != null && bool.TryParse(current.GetMetadataString(
+                    Download.ImportSourceRetentionRequiredMetadataKey), out var retainSource) && retainSource)
+            {
+                // Pollers may hold older snapshots while import starts. Retention is
+                // monotonic for this download and must survive their subsequent saves.
+                download.SetMetadata(Download.ImportSourceRetentionRequiredMetadataKey, true);
+            }
             ctx.Downloads.Update(download);
             await ctx.SaveChangesAsync();
+            if (transaction != null) await transaction.CommitAsync();
         }
 
         public async Task UpdateMetadataAsync(string id, string key, object? value)
         {
             await using var ctx = await _dbFactory.CreateDbContextAsync();
+            await using var transaction = ctx.Database.IsRelational()
+                ? await ctx.Database.BeginTransactionAsync() : null;
             var d = await ctx.Downloads.FindAsync(id);
             if (d == null) return;
+            if (key == Download.ImportSourceRetentionRequiredMetadataKey
+                && bool.TryParse(d.GetMetadataString(key), out var retained) && retained)
+            {
+                return;
+            }
             if (d.Metadata == null) d.Metadata = new Dictionary<string, object>();
             d.Metadata[key] = value ?? string.Empty;
             ctx.Downloads.Update(d);
             await ctx.SaveChangesAsync();
+            if (transaction != null) await transaction.CommitAsync();
         }
 
         public async Task RemoveAsync(string id)

@@ -58,6 +58,7 @@ namespace Listenarr.Application.Downloads.Import
             var (remainingFiles, recoveredResults) = await ConsumeRecoveredImportsAsync(
                 files,
                 recoveryReceipts,
+                options?.ForceCopyAndRetainSource == true,
                 ct);
             files = remainingFiles;
             if (files.Count == 0)
@@ -97,6 +98,9 @@ namespace Listenarr.Application.Downloads.Import
             try
             {
                 var completedFileAction = settings.CompletedFileAction;
+                var forceCopyAndRetainSource = options?.ForceCopyAndRetainSource == true;
+                var operationScope = forceCopyAndRetainSource
+                    ? "download-import-retain-source" : "download-import";
 
                 if (settings.ExtractArchives || options?.ForceArchiveExtraction == true)
                 {
@@ -203,7 +207,7 @@ namespace Listenarr.Application.Downloads.Import
                                         destinationOwnershipBoundary,
                                         destinationSemantics,
                                         FileMoveOperationIdentity.CreateForPaths(
-                                            "download-import",
+                                            operationScope,
                                             audiobook.Id,
                                             completedFileAction,
                                             file,
@@ -215,6 +219,7 @@ namespace Listenarr.Application.Downloads.Import
                                         audiobook.Id,
                                         compatibilityBatchId,
                                         compatibilityBatchManifest,
+                                        forceCopyAndRetainSource,
                                         ct);
                                 if (companionPublication == null)
                                 {
@@ -405,7 +410,7 @@ namespace Listenarr.Application.Downloads.Import
                             }
 
                             var operationId = FileMoveOperationIdentity.CreateForPaths(
-                                "download-import",
+                                operationScope,
                                 audiobook.Id,
                                 completedFileAction,
                                 file,
@@ -420,6 +425,7 @@ namespace Listenarr.Application.Downloads.Import
                                 sourceProof.Value,
                                 compatibilityBatchId,
                                 compatibilityBatchManifest,
+                                forceCopyAndRetainSource,
                                 ct);
                             if (!publicationPlan.IsAllowed)
                             {

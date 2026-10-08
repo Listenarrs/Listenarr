@@ -137,6 +137,28 @@ namespace Listenarr.Application.Downloads.Common
             var adapter = ResolveAdapter(client);
             var item = await adapter.GetImportItemAsync(client, download, queueItem, null, ct);
 
+            // Completion does not release ownership of torrent payloads. Reuse the
+            // typed adapter's seed-limit policy rather than infer it from queue status.
+            item.CanMoveFiles = null;
+            var externalId = download.GetExternalId();
+            if (client.IsEnabled && !item.IsStaleSnapshot && !string.IsNullOrWhiteSpace(externalId))
+            {
+                try
+                {
+                    var liveItems = await adapter.GetItemsAsync(client, ct);
+                    var matches = liveItems.Where(candidate => string.Equals(
+                        candidate.DownloadId, externalId, StringComparison.OrdinalIgnoreCase)).ToList();
+                    if (matches.Count == 1 && matches[0].Status == DownloadItemStatus.Completed)
+                    {
+                        item.CanMoveFiles = matches[0].CanMoveFiles;
+                    }
+                }
+                catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
+                {
+                    logger.LogWarning(exception, "Client movement permission is unavailable for download {DownloadId}; sources will be retained", download.Id);
+                }
+            }
+
             return await TranslateQueueItemPathsAsync(client, item);
         }
 
