@@ -9,6 +9,82 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Scanning;
 [Trait("Category", "Infrastructure")]
 public sealed class AudiobookScanServiceTests : BaseTests
 {
+    [LinuxTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task ScanAsync_LargeFolder_ClosesDiscoveredFileAndDirectoryHandles(bool separateDirectories) =>
+        ScanLargeFolderAsync(FileService.GetTempDirectory("scan-service-bounded-handles"), separateDirectories);
+
+    [NetworkStorageTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ScanAsync_LargeMountedFolder_ClosesDiscoveredHandles(bool separateDirectories)
+    {
+        var mountPath = Environment.GetEnvironmentVariable(NetworkStorageTheoryAttribute.PathEnvironmentVariable)!;
+        var root = Directory.CreateDirectory(Path.Join(mountPath, "scan-bounded-handles-" + Guid.NewGuid().ToString("N"))).FullName;
+        try
+        {
+            await ScanLargeFolderAsync(root, separateDirectories);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private async Task ScanLargeFolderAsync(string root, bool separateDirectories)
+    {
+        const int fileCount = 600;
+        var bookDirectory = Directory.CreateDirectory(Path.Join(root, "Requested Book")).FullName;
+        for (var index = 0; index < fileCount; index++)
+        {
+            var parent = separateDirectories
+                ? Directory.CreateDirectory(Path.Join(bookDirectory, $"Disc {index:D4}")).FullName
+                : bookDirectory;
+            File.WriteAllText(Path.Join(parent, $"{index:D4}.m4b"), "audio");
+        }
+
+        var observedHandleCount = 0;
+        var fileService = new Mock<IAudiobookFileService>(MockBehavior.Strict);
+        fileService.Setup(service => service.EnsureAudiobookFileAsync(
+                It.IsAny<Audiobook>(),
+                It.IsAny<IAudiobookFileRegistrationLease>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<Audiobook, IAudiobookFileRegistrationLease, string?, CancellationToken>(
+                (_, lease, _, _) =>
+                {
+                    var scanHandles = Directory.EnumerateFiles("/proc/self/fd")
+                        .Count(path => new FileInfo(path).LinkTarget is { } target
+                            && (target == root || target.StartsWith(root + "/", StringComparison.Ordinal)));
+                    observedHandleCount = Math.Max(observedHandleCount, scanHandles);
+                    Assert.True(lease.MatchesCurrentPublication());
+                    Assert.Equal("audio", File.ReadAllText(lease.MetadataPath));
+                })
+            .ReturnsAsync(true);
+        _services.AddSingleton(fileService.Object);
+        Init();
+        var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+            .WithTitle("Requested Book").WithBasePath(bookDirectory).Build());
+        await _provider.GetRequiredService<IRootFolderService>().CreateAsync(new RootFolderBuilder()
+            .WithPath(root).WithName("Bounded scan root")
+            .WithCaseSensitivityMode(FileSystemCaseSensitivityMode.Sensitive).Build());
+        var authorization = await _provider.GetRequiredService<IScanPathAuthorizationService>()
+            .AuthorizeAsync(root);
+        Assert.True(authorization.IsAuthorized, authorization.Error);
+        var identity = Assert.IsType<PathIdentitySnapshot>(authorization.Identity);
+        var result = await _provider.GetRequiredService<IAudiobookScanService>()
+            .ScanAsync(new AudiobookScanCommand(audiobook.Id, root, identity));
+
+        Assert.True(result.IsComplete);
+        Assert.Equal(fileCount, result.AttributedFiles.Count);
+        Assert.Equal(fileCount, result.CreatedCount);
+        Assert.InRange(observedHandleCount, 1, 32);
+        fileService.Verify(service => service.EnsureAudiobookFileAsync(
+            It.IsAny<Audiobook>(), It.IsAny<IAudiobookFileRegistrationLease>(),
+            It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Exactly(fileCount));
+    }
+
     [Fact]
     public async Task ScanAsync_NestedDirectoryReplacedAfterDiscovery_PreservesTrackedRows()
     {

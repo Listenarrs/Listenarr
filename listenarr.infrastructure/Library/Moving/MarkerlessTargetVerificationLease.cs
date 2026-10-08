@@ -6,12 +6,14 @@ namespace Listenarr.Infrastructure.Library.Moving;
 internal sealed class MarkerlessTargetVerificationLease : IDisposable
 {
     private readonly Dictionary<string, TargetFileLease> _entries;
+    private readonly FileSystemPathSemantics _semantics;
     private PinnedDirectoryCreation.PinnedDirectoryAnchor? _targetRoot;
     private bool _disposed;
 
     public MarkerlessTargetVerificationLease(FileSystemPathSemantics semantics)
     {
         _entries = new Dictionary<string, TargetFileLease>(semantics.Comparer);
+        _semantics = semantics;
     }
 
     public bool IsEmpty => _targetRoot == null && _entries.Count == 0;
@@ -78,31 +80,52 @@ internal sealed class MarkerlessTargetVerificationLease : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
         ArgumentNullException.ThrowIfNull(entry);
-        if (!_entries.TryAdd(
-                relativePath,
-                new TargetFileLease(
-                    entry,
-                    expectedLength,
-                    expectedSha256?.ToUpperInvariant())))
+        // Consume and close the publication handle now, not at the end of the batch.
+        using (entry)
         {
-            throw new InvalidOperationException(
-                $"A target verification lease already exists for '{relativePath}'.");
+            if (!_entries.TryAdd(relativePath, new TargetFileLease(
+                    FilePublicationObservation.Capture(entry), expectedLength,
+                    expectedSha256?.ToUpperInvariant())))
+            {
+                throw new InvalidOperationException(
+                    $"A target verification lease already exists for '{relativePath}'.");
+            }
         }
     }
 
-    public bool TryGet(
-        string relativePath,
-        out PinnedDirectoryCreation.PinnedFileEntry? entry)
+    public bool Contains(string relativePath) => _entries.ContainsKey(relativePath);
+
+    public bool Matches(string relativePath, PinnedDirectoryCreation.PinnedFileEntry entry)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_entries.TryGetValue(relativePath, out var leased))
-        {
-            entry = leased.Entry;
-            return true;
-        }
+        return _entries.TryGetValue(relativePath, out var observed)
+            && observed.Observation.Matches(entry);
+    }
 
-        entry = null;
-        return false;
+    private PinnedDirectoryCreation.PinnedFileEntry OpenCurrent(string relativePath)
+    {
+        var root = _targetRoot ?? throw new IOException("The target root is unavailable.");
+        if (!FileSystemPathIdentity.TryGetRelativePathWithinBase(
+                root.FullPath, Path.Join(root.FullPath, relativePath), _semantics, out var relative))
+        {
+            throw new IOException("The verification entry is outside the target root.");
+        }
+        var segments = relative.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries);
+        var current = root.Duplicate();
+        try
+        {
+            foreach (var segment in segments[..^1])
+            {
+                var next = current.OpenExistingChild(segment);
+                current.Dispose();
+                current = next;
+            }
+            if (!root.VisiblePathMatches() || !current.VisiblePathMatches())
+                throw new IOException("The verification hierarchy changed.");
+            return current.OpenExistingFile(segments[^1], requireDeleteAccess: false);
+        }
+        finally { current.Dispose(); }
     }
 
     public async Task<RegistrationPublicationMatchOutcome>
@@ -123,20 +146,10 @@ internal sealed class MarkerlessTargetVerificationLease : IDisposable
             }
         }
 
-        foreach (var leased in _entries.Values)
+        foreach (var pair in _entries)
         {
+            var leased = pair.Value;
             cancellationToken.ThrowIfCancellationRequested();
-            var match = leased.Entry.ProbePublicPathMatch();
-            if (match == RegistrationPublicationMatchOutcome.Mismatch)
-            {
-                return RegistrationPublicationMatchOutcome.Mismatch;
-            }
-            if (match == RegistrationPublicationMatchOutcome.Unavailable)
-            {
-                sawUnavailable = true;
-                continue;
-            }
-
             if (!leased.ExpectedLength.HasValue
                 || string.IsNullOrWhiteSpace(leased.ExpectedSha256))
             {
@@ -145,7 +158,10 @@ internal sealed class MarkerlessTargetVerificationLease : IDisposable
 
             try
             {
-                await using var stream = leased.Entry.OpenReadStream(
+                using var entry = OpenCurrent(pair.Key);
+                if (!leased.Observation.Matches(entry))
+                    return RegistrationPublicationMatchOutcome.Mismatch;
+                await using var stream = entry.OpenReadStream(
                     bufferSize: 128 * 1024,
                     asynchronous: false);
                 if (stream.Length != leased.ExpectedLength.Value)
@@ -162,11 +178,18 @@ internal sealed class MarkerlessTargetVerificationLease : IDisposable
                 {
                     return RegistrationPublicationMatchOutcome.Mismatch;
                 }
-                if (leased.Entry.ProbePublicPathMatch()
+                if (entry.ProbePublicPathMatch()
                     != RegistrationPublicationMatchOutcome.Match)
                 {
                     return RegistrationPublicationMatchOutcome.Mismatch;
                 }
+            }
+            catch (FileNotFoundException) { return RegistrationPublicationMatchOutcome.Mismatch; }
+            catch (DirectoryNotFoundException) { return RegistrationPublicationMatchOutcome.Mismatch; }
+            catch (System.ComponentModel.Win32Exception exception) when (
+                OperatingSystem.IsWindows() ? exception.NativeErrorCode is 2 or 3 : exception.NativeErrorCode == 2)
+            {
+                return RegistrationPublicationMatchOutcome.Mismatch;
             }
             catch (OperationCanceledException)
             {
@@ -195,10 +218,6 @@ internal sealed class MarkerlessTargetVerificationLease : IDisposable
         _disposed = true;
         _targetRoot?.Dispose();
         _targetRoot = null;
-        foreach (var leased in _entries.Values)
-        {
-            leased.Entry.Dispose();
-        }
         _entries.Clear();
     }
 
@@ -222,16 +241,16 @@ internal sealed class MarkerlessTargetVerificationLease : IDisposable
     private sealed class TargetFileLease
     {
         public TargetFileLease(
-            PinnedDirectoryCreation.PinnedFileEntry entry,
+            FilePublicationObservation observation,
             long? expectedLength,
             string? expectedSha256)
         {
-            Entry = entry;
+            Observation = observation;
             ExpectedLength = expectedLength;
             ExpectedSha256 = expectedSha256;
         }
 
-        public PinnedDirectoryCreation.PinnedFileEntry Entry { get; }
+        public FilePublicationObservation Observation { get; }
         public long? ExpectedLength { get; set; }
         public string? ExpectedSha256 { get; set; }
     }

@@ -6,22 +6,33 @@ namespace Listenarr.Infrastructure.Library.Moving;
 
 public sealed partial class AudiobookFilesystemDeleteService
 {
+    // Preflight retains observations and content, never a handle per tree entry.
+    // Only the current traversal path and current mutation remain pinned.
     private sealed record DeleteTreeEntryProof(
-        PinnedDirectoryCreation.PinnedDirectoryAnchor? Directory,
-        PinnedDirectoryCreation.PinnedFileEntry? File) : IDisposable
+        string? DirectoryIdentity, DeleteFileContentProof? Content) : IDisposable
     {
+        public static DeleteTreeEntryProof CaptureDirectory(PinnedDirectoryCreation.PinnedDirectoryAnchor directory) =>
+            new(PinnedDirectoryCreation.CaptureDiagnosticIdentity(directory.GetDirectoryObjectIdentity), null);
+
+        public static DeleteTreeEntryProof CaptureFile(PinnedDirectoryCreation.PinnedFileEntry file,
+            DeleteFileContentProof? tracked)
+        {
+            if (tracked.HasValue) return new(null, tracked);
+            var observation = FilePublicationObservation.Capture(file);
+            using var stream = file.OpenReadStream(128 * 1024, asynchronous: false);
+            var length = stream.Length;
+            var hash = Convert.ToHexString(SHA256.HashData(stream));
+            return new(null, new DeleteFileContentProof(length, hash, observation));
+        }
+
         public bool Matches(PinnedDirectoryCreation.PinnedDirectoryAnchor current) =>
-            Directory != null && Directory.VisiblePathMatches()
-                && Directory.IdentifiesSameDirectory(current);
+            DirectoryIdentity != null && current.VisiblePathMatches()
+            && (DirectoryIdentity.Length == 0 || current.MatchesDirectoryObjectIdentity(DirectoryIdentity));
 
         public bool Matches(PinnedDirectoryCreation.PinnedFileEntry current) =>
-            File != null && File.VisiblePathMatches() && File.IdentifiesSameEntry(current);
+            Content.HasValue && PinnedFileMatchesContentProof(current, Content.Value);
 
-        public void Dispose()
-        {
-            File?.Dispose();
-            Directory?.Dispose();
-        }
+        public void Dispose() { }
     }
 
     private sealed class CapturedDeleteTreeProofs(IEqualityComparer<string> comparer)
@@ -29,33 +40,20 @@ public sealed partial class AudiobookFilesystemDeleteService
     {
         public void Capture(string relativePath, DeleteTreeEntryProof proof)
         {
-            if (TryAdd(relativePath, proof)) return;
-            proof.Dispose();
-            throw new InvalidOperationException("Recursive-delete preflight contains ambiguous entry paths.");
+            if (!TryAdd(relativePath, proof))
+                throw new InvalidOperationException("Recursive-delete preflight contains ambiguous entry paths.");
         }
 
-        public void Dispose()
-        {
-            foreach (var proof in Values) proof.Dispose();
-            Clear();
-        }
+        public void Dispose() => Clear();
     }
+
     private readonly record struct DeleteFileContentProof(
-        long Length,
-        string Sha256,
-        PinnedDirectoryCreation.PinnedFileEntry OriginalEntry);
+        long Length, string Sha256, FilePublicationObservation Observation);
 
     private sealed class CapturedDeleteContentProofs(IEqualityComparer<string> comparer)
         : Dictionary<string, DeleteFileContentProof>(comparer), IDisposable
     {
-        public void Dispose()
-        {
-            foreach (var proof in Values)
-            {
-                proof.OriginalEntry.Dispose();
-            }
-            Clear();
-        }
+        public void Dispose() => Clear();
     }
 
     private async Task<PinnedDirectoryCreation.PinnedDirectoryAnchor> OpenPinnedDeleteFileParentAsync(
@@ -132,6 +130,7 @@ public sealed partial class AudiobookFilesystemDeleteService
                     }
 
                     if (outcome != PinnedFileOpenOutcome.Opened || entry == null
+                        || !entry.IsRegularFile()
                         || !parent.VisiblePathMatches()
                         || !entry.VisiblePathMatches())
                     {
@@ -157,7 +156,7 @@ public sealed partial class AudiobookFilesystemDeleteService
                     proofs[trackedFilePath] = new DeleteFileContentProof(
                         length,
                         hash,
-                        entry.DuplicateForOperation());
+                        FilePublicationObservation.Capture(entry));
                 }
                 catch (Exception exception) when (
                     FileSystemSafety.IsProvenMissingPathException(exception))

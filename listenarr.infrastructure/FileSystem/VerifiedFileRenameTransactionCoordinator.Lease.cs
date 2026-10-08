@@ -4,7 +4,152 @@ namespace Listenarr.Infrastructure.FileSystem;
 
 public sealed partial class VerifiedFileRenameTransactionCoordinator
 {
-    private sealed class VerifiedFileRenameLease(
+    // A batch keeps only observations. Reopened mutation handles live for one
+    // rollback/retirement call, including quarantine and restoration on failure.
+    private sealed class VerifiedFileRenameLease : IVerifiedFileRenameLease
+    {
+        private readonly VerifiedFileRenameTransactionCoordinator _owner;
+        private readonly VerifiedFileRenameJournal _journal;
+        private readonly RootFolder? _sourceRoot;
+        private readonly RootFolder? _targetRoot;
+        private readonly FilePublicationObservation _sourceObservation;
+        private readonly FilePublicationObservation _targetObservation;
+        private readonly FilePublicationSourceProof _proof;
+        private readonly ILogger<VerifiedFileRenameTransactionCoordinator> _logger;
+        private bool _disposed;
+
+        internal VerifiedFileRenameLease(VerifiedFileRenameTransactionCoordinator owner,
+            VerifiedFileRenameJournal journal,
+            PinnedDirectoryCreation.PinnedDirectoryAnchor sourceParent,
+            PinnedDirectoryCreation.PinnedDirectoryAnchor destinationParent,
+            PinnedDirectoryCreation.PinnedFileEntry sourceEntry,
+            PinnedDirectoryCreation.PinnedFileEntry targetEntry,
+            FilePublicationSourceProof sourceProof,
+            ILogger<VerifiedFileRenameTransactionCoordinator> logger,
+            RootFolder? sourceRoot, RootFolder? targetRoot)
+        {
+            _owner = owner;
+            _journal = journal;
+            _sourceRoot = sourceRoot;
+            _targetRoot = targetRoot;
+            _proof = sourceProof;
+            _logger = logger;
+            // Ownership transfers only after this constructor succeeds. The caller
+            // disposes its preparation handles in its finally block on failure.
+            _sourceObservation = FilePublicationObservation.Capture(sourceEntry);
+            _targetObservation = FilePublicationObservation.Capture(targetEntry);
+            targetEntry.Dispose();
+            sourceEntry.Dispose();
+            destinationParent.Dispose();
+            sourceParent.Dispose();
+        }
+
+        public Guid OperationId => _journal.OperationId;
+
+        private ActiveVerifiedFileRenameLease OpenActive()
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var sourceParent = PinnedDirectoryCreation.OpenPinnedConfiguredHierarchy(
+                _sourceRoot, Path.GetDirectoryName(_journal.SourcePath)!, false);
+            PinnedDirectoryCreation.PinnedDirectoryAnchor? targetParent = null;
+            PinnedDirectoryCreation.PinnedFileEntry? source = null;
+            PinnedDirectoryCreation.PinnedFileEntry? target = null;
+            try
+            {
+                targetParent = PinnedDirectoryCreation.OpenPinnedConfiguredHierarchy(
+                    _targetRoot, Path.GetDirectoryName(_journal.DestinationPath)!, false);
+                target = targetParent.OpenExistingFileForStableDelete(Path.GetFileName(_journal.DestinationPath));
+                if (!_targetObservation.Matches(target))
+                    throw new InvalidOperationException("The observed organize target changed.");
+                source = sourceParent.OpenExistingFileForStableDelete(Path.GetFileName(_journal.SourcePath));
+                if (!_sourceObservation.Matches(source))
+                    throw new SourceObservationChangedException();
+                var active = new ActiveVerifiedFileRenameLease(_owner, _journal,
+                    sourceParent, targetParent, source, target, _proof, _logger);
+                sourceParent = null!;
+                targetParent = null;
+                source = null;
+                target = null;
+                return active;
+            }
+            finally
+            {
+                target?.Dispose();
+                source?.Dispose();
+                targetParent?.Dispose();
+                sourceParent?.Dispose();
+            }
+        }
+
+        public async Task<bool> RollBackAsync(CancellationToken cancellationToken = default)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var current = await _owner.GetJournalAsync(OperationId, cancellationToken);
+            if (current?.State == VerifiedFileRenameState.RolledBack) return true;
+            if (current?.State != VerifiedFileRenameState.TargetVerified) return false;
+            try
+            {
+                await using var active = OpenActive();
+                return await active.RollBackAsync(cancellationToken);
+            }
+            catch (Exception exception) when (exception is not (
+                OperationCanceledException or OutOfMemoryException or StackOverflowException))
+            {
+                await _owner.MarkNeedsAttentionAsync(OperationId,
+                    "Organize rollback could not revalidate the current source and target; both were preserved.",
+                    CancellationToken.None);
+                return false;
+            }
+        }
+
+        public async Task<VerifiedFileRenameRetirementOutcome> CompleteSourceRetirementAsync(
+            CancellationToken cancellationToken = default)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var current = await _owner.GetJournalAsync(OperationId, cancellationToken);
+            if (current?.State == VerifiedFileRenameState.Completed)
+                return VerifiedFileRenameRetirementOutcome.Completed;
+            if (current?.State == VerifiedFileRenameState.CompletedSourceRetained)
+                return VerifiedFileRenameRetirementOutcome.SourceRetained;
+            if (current?.State == VerifiedFileRenameState.SourceDeleted)
+            {
+                await _owner.AdvanceAsync(OperationId, VerifiedFileRenameState.Completed,
+                    error: null, cancellationToken);
+                return VerifiedFileRenameRetirementOutcome.Completed;
+            }
+            if (current?.State != VerifiedFileRenameState.OwnerMetadataReconciled)
+                return VerifiedFileRenameRetirementOutcome.NeedsAttention;
+            try
+            {
+                await using var active = OpenActive();
+                return await active.CompleteSourceRetirementAsync(cancellationToken);
+            }
+            catch (SourceObservationChangedException)
+            {
+                await _owner.MarkSourceRetainedAsync(OperationId,
+                    "The observed source changed before retirement; the source was retained.", CancellationToken.None);
+                return VerifiedFileRenameRetirementOutcome.SourceRetained;
+            }
+            catch (Exception exception) when (exception is not (
+                OperationCanceledException or OutOfMemoryException or StackOverflowException))
+            {
+                await _owner.MarkNeedsAttentionAsync(OperationId,
+                    "Organize cleanup could not revalidate the current source and target; both were preserved.",
+                    CancellationToken.None);
+                return VerifiedFileRenameRetirementOutcome.NeedsAttention;
+            }
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            _disposed = true;
+            return ValueTask.CompletedTask;
+        }
+
+        private sealed class SourceObservationChangedException : InvalidOperationException { }
+    }
+
+    private sealed class ActiveVerifiedFileRenameLease(
         VerifiedFileRenameTransactionCoordinator owner,
         VerifiedFileRenameJournal journal,
         PinnedDirectoryCreation.PinnedDirectoryAnchor sourceParent,

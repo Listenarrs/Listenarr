@@ -68,7 +68,7 @@ public partial class MoveJobProcessorTests
             _provider.GetRequiredService<ILogger<AudiobookContentMoveService>>(),
             _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>(),
             TimeProvider.System,
-            new ReplaceTargetBeforeCompletionHistory(target));
+            new FailCompletionHandoffOnce(CompletionHandoffFaultPoint.BeforeHistoryPersist));
         var processor = ActivatorUtilities.CreateInstance<MoveJobProcessor>(
             _provider,
             contentMoveService);
@@ -113,6 +113,35 @@ public partial class MoveJobProcessorTests
         var handoff = await verification.MoveScanHandoffs.AsNoTracking()
             .SingleAsync(candidate => candidate.MoveJobId == job.Id);
         Assert.Equal(MoveScanHandoffStatus.Pending, handoff.Status);
+    }
+
+    [Fact]
+    public async Task ProcessJobAsync_TargetReplacedBeforeCompletion_RevalidatesAndWritesNoCompletionRecords()
+    {
+        var source = FileService.GetTempDirectory("move-processor-reopened-target-src");
+        await FileService.GetFileAsync(source, "book.m4b", "audio");
+        var target = Path.Join(FileService.GetTempPath(), $"move-processor-reopened-target-{Guid.NewGuid():N}");
+        var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+        {
+            Title = "Reopened Target Replacement",
+            BasePath = source
+        });
+        var (queue, job) = await CreateQueuedMoveJobAsync(audiobook, target, source);
+        var service = new AudiobookContentMoveService(
+            _provider.GetRequiredService<ILogger<AudiobookContentMoveService>>(),
+            _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>(), TimeProvider.System,
+            new ReplaceTargetBeforeCompletionHistory(target));
+        var processor = ActivatorUtilities.CreateInstance<MoveJobProcessor>(_provider, service);
+
+        await processor.ProcessJobAsync(job, CancellationToken.None);
+
+        Assert.Equal(MoveJobStatus.NeedsAttention, (await queue.GetJobAsync(job.Id))?.Status);
+        Assert.Empty(await _historyRepository.GetByCorrelationIdAsync($"move:{job.Id:N}"));
+        await using var db = await _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>()
+            .CreateDbContextAsync();
+        Assert.False(await db.MoveScanHandoffs.AnyAsync(row => row.MoveJobId == job.Id));
+        Assert.Equal("audio", File.ReadAllText(Path.Join(target, "book.m4b")));
+        Assert.Equal("audio", File.ReadAllText(target + ".original.m4b"));
     }
 
     [LinuxFact]
@@ -435,7 +464,7 @@ public partial class MoveJobProcessorTests
             var file = Path.Join(target, "book.m4b");
             var lastWriteTimeUtc = File.GetLastWriteTimeUtc(file);
             var content = File.ReadAllBytes(file);
-            File.Delete(file);
+            File.Move(file, target + ".original.m4b");
             File.WriteAllBytes(file, content);
             File.SetLastWriteTimeUtc(file, lastWriteTimeUtc);
             _replaced = true;

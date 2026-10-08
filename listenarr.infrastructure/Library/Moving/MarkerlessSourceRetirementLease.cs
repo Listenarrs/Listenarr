@@ -2,48 +2,67 @@ using Listenarr.Domain.Common;
 
 namespace Listenarr.Infrastructure.Library.Moving;
 
-// Only the live copy invocation owns these original source handles. Durable journals
-// and restarted operations cannot construct this retirement authority.
+// Only the live copy invocation owns these process-local observations. Files and
+// directories are reopened at use; restart cannot reconstruct deletion permission.
 internal sealed class MarkerlessSourceRetirementLease(
     FileSystemPathSemantics semantics,
-    bool allowDirectoryRetirement) : IDisposable
+    bool allowDirectoryRetirement,
+    Func<string, PinnedDirectoryCreation.PinnedDirectoryAnchor> openDirectory) : IDisposable
 {
-    private readonly Dictionary<string, PinnedDirectoryCreation.PinnedFileEntry> _entries =
+    private readonly Dictionary<string, FilePublicationObservation> _entries =
         new(semantics.Comparer);
 
-    private readonly Dictionary<string, PinnedDirectoryCreation.PinnedDirectoryAnchor> _directories =
+    private readonly Dictionary<string, string> _directories =
         new(semantics.Comparer);
+
+    // Only the directory currently being retired stays open. Sibling count does
+    // not affect handle use; restart never reconstructs these observations.
+    private PinnedDirectoryCreation.PinnedDirectoryAnchor? _activeDirectory;
 
     public void AddDirectory(string path, PinnedDirectoryCreation.PinnedDirectoryAnchor original)
     {
-        var duplicate = original.Duplicate();
-        try { _directories.Add(path, duplicate); }
-        catch { duplicate.Dispose(); throw; }
+        if (allowDirectoryRetirement)
+            _directories.Add(path, PinnedDirectoryCreation.CaptureDiagnosticIdentity(original.GetDirectoryObjectIdentity));
     }
+
+    public bool HasDirectory(string path) => _directories.ContainsKey(path);
 
     public bool TryGetDirectory(string path, out PinnedDirectoryCreation.PinnedDirectoryAnchor? original)
     {
+        _activeDirectory?.Dispose();
+        _activeDirectory = null;
         original = null;
-        return allowDirectoryRetirement && _directories.TryGetValue(path, out original);
+        if (!allowDirectoryRetirement || !_directories.TryGetValue(path, out var identity))
+            return false;
+        var current = openDirectory(path);
+        try
+        {
+            if (!current.VisiblePathMatches()
+                || (!string.IsNullOrEmpty(identity) && !current.MatchesDirectoryObjectIdentity(identity)))
+            {
+                current.Dispose();
+                return false;
+            }
+            _activeDirectory = original = current;
+            return true;
+        }
+        catch
+        {
+            current.Dispose();
+            throw;
+        }
     }
 
     public PinnedDirectoryCreation.PinnedDirectoryAnchor PromoteDirectory(
-        string path,
-        PinnedDirectoryCreation.PinnedDirectoryAnchor publication)
+        string path, PinnedDirectoryCreation.PinnedDirectoryAnchor publication)
     {
-        if (!TryGetDirectory(path, out var original)
-            || original == null
-            || !original.VisiblePathMatches()
-            || !publication.VisiblePathMatches()
+        var original = _activeDirectory;
+        if (original == null || !semantics.Comparer.Equals(original.FullPath, path)
+            || !original.VisiblePathMatches() || !publication.VisiblePathMatches()
             || !original.IdentifiesSameDirectory(publication))
-        {
-            throw new MoveNeedsAttentionException("The original live directory publication changed.");
-        }
-
-        // Transfer the continuous proof to the publication handle before releasing
-        // the original observation handle, whose Windows share mode can deny removal.
+            throw new MoveNeedsAttentionException("The current directory publication changed.");
         var promoted = publication.Duplicate();
-        _directories[path] = promoted;
+        _activeDirectory = promoted;
         original.Dispose();
         return promoted;
     }
@@ -55,14 +74,14 @@ internal sealed class MarkerlessSourceRetirementLease(
             return null;
         }
 
-        var ancestors = new MarkerlessSourceRetirementLease(semantics, true);
+        var ancestors = new MarkerlessSourceRetirementLease(semantics, true, openDirectory);
         try
         {
             foreach (var pair in _directories.Where(pair =>
                 FileSystemPathIdentity.IsSameOrInside(source, pair.Key, semantics)
                 && !FileSystemPathIdentity.AreEquivalent(source, pair.Key, semantics)))
             {
-                ancestors.AddDirectory(pair.Key, pair.Value);
+                ancestors._directories.Add(pair.Key, pair.Value);
             }
             return ancestors;
         }
@@ -75,48 +94,27 @@ internal sealed class MarkerlessSourceRetirementLease(
 
     public void ReleaseDirectory(string path)
     {
-        if (_directories.Remove(path, out var original))
+        _directories.Remove(path);
+        if (_activeDirectory != null && semantics.Comparer.Equals(_activeDirectory.FullPath, path))
         {
-            original.Dispose();
+            _activeDirectory.Dispose();
+            _activeDirectory = null;
         }
     }
 
-    public void Add(string relativePath, PinnedDirectoryCreation.PinnedFileEntry original)
-    {
-        var duplicate = original.DuplicateForOperation();
-        try
-        {
-            _entries.Add(relativePath, duplicate);
-        }
-        catch
-        {
-            duplicate.Dispose();
-            throw;
-        }
-    }
+    public void Add(string relativePath, PinnedDirectoryCreation.PinnedFileEntry original) =>
+        _entries.Add(relativePath, FilePublicationObservation.Capture(original));
 
-    public bool TryGet(string relativePath, out PinnedDirectoryCreation.PinnedFileEntry? original) =>
-        _entries.TryGetValue(relativePath, out original);
+    public bool Matches(string relativePath, PinnedDirectoryCreation.PinnedFileEntry current) =>
+        _entries.TryGetValue(relativePath, out var observation) && observation.Matches(current);
 
-    public void Release(string relativePath)
-    {
-        if (_entries.Remove(relativePath, out var original))
-        {
-            original.Dispose();
-        }
-    }
+    public void Release(string relativePath) => _entries.Remove(relativePath);
 
     public void Dispose()
     {
-        foreach (var original in _entries.Values)
-        {
-            original.Dispose();
-        }
+        _activeDirectory?.Dispose();
+        _activeDirectory = null;
         _entries.Clear();
-        foreach (var original in _directories.Values)
-        {
-            original.Dispose();
-        }
         _directories.Clear();
     }
 }

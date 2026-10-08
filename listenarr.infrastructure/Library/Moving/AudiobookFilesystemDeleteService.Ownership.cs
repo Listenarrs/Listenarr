@@ -319,19 +319,30 @@ public sealed partial class AudiobookFilesystemDeleteService
             .OrderByDescending(candidate => candidate.CanonicalPath.Length))
         {
             var relativePath = Path.GetRelativePath(originalTarget.FullPath, ownership.CanonicalPath);
-            var originalDirectory = relativePath == "." ? originalTarget
-                : capturedTreeProofs.GetValueOrDefault(relativePath)?.Directory;
-            if (originalDirectory == null)
+            if (!originalTarget.VisiblePathMatches()) return false;
+            if (relativePath == ".")
             {
-                if (!await ReconcileAbsentOwnedDirectoryAsync(
-                        ownership, originalTarget, cancellationToken))
-                    return false;
+                if (!await RetireOwnedDirectoryAsync(ownership, originalTarget, cancellationToken)) return false;
                 continue;
             }
-            if (!await RetireOwnedDirectoryAsync(ownership, originalDirectory, cancellationToken))
+            var observation = capturedTreeProofs.GetValueOrDefault(relativePath);
+            if (observation == null)
             {
-                return false;
+                if (!await ReconcileAbsentOwnedDirectoryAsync(ownership, originalTarget, cancellationToken)) return false;
+                continue;
             }
+            if (_ownershipAuthorizer == null) return false;
+            using var authorization = await _ownershipAuthorizer.AuthorizeOwnershipAsync(ownership, cancellationToken);
+            using var publication = authorization.ParentAnchor.TryOpenExistingChildForPublication(
+                Path.GetFileName(ownership.CanonicalPath));
+            if (publication == null)
+            {
+                if (!await ReconcileAbsentOwnedDirectoryAsync(ownership, originalTarget, cancellationToken)) return false;
+                continue;
+            }
+            using var directory = publication.OpenCreatedDirectoryAnchor();
+            if (!observation.Matches(directory) || !originalTarget.VisiblePathMatches()
+                || !await RetireOwnedDirectoryAsync(ownership, directory, cancellationToken)) return false;
         }
 
         return true;

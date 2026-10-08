@@ -15,37 +15,22 @@ public sealed partial class RootFolderRelocationService
     private sealed class OwnershipMigrationTargetLease : IDisposable
     {
         private readonly OwnershipMigrationPlan _plan;
-        private readonly PinnedDirectoryCreation.PinnedDirectoryAnchor _parent;
-        private readonly PinnedDirectoryCreation.PinnedDirectoryAnchor _directory;
+        private readonly string _targetBoundary;
 
-        public OwnershipMigrationTargetLease(
-            OwnershipMigrationPlan plan,
-            string targetBoundary)
+        public OwnershipMigrationTargetLease(OwnershipMigrationPlan plan, string targetBoundary)
         {
             _plan = plan;
-            var targetParentPath = Path.GetDirectoryName(
-                plan.Target.CanonicalPath)
-                ?? throw new InvalidOperationException(
-                    "The migrated ownership target has no parent directory.");
-            _parent = OpenDirectoryParentWithinBoundary(
-                targetBoundary,
-                targetParentPath,
-                plan.Target.GetIdentity().Semantics);
-            try
-            {
-                _directory = _parent.OpenExistingChild(
-                    Path.GetFileName(plan.Target.CanonicalPath));
-                ValidateAndCapture();
-            }
-            catch
-            {
-                _parent.Dispose();
-                throw;
-            }
+            _targetBoundary = targetBoundary;
+            ValidateAndCapture();
         }
 
         public void ValidateAndCapture()
         {
+            var parentPath = Path.GetDirectoryName(_plan.Target.CanonicalPath)
+                ?? throw new InvalidOperationException("The ownership target has no parent.");
+            using var _parent = OpenDirectoryParentWithinBoundary(
+                _targetBoundary, parentPath, _plan.Target.GetIdentity().Semantics);
+            using var _directory = _parent.OpenExistingChild(Path.GetFileName(_plan.Target.CanonicalPath));
             var nativeIdentity = _directory.GetDirectoryObjectIdentity();
             if (!_directory.MatchesManagedDirectoryOwnershipIdentity(
                     _plan.Source.DirectoryObjectIdentityVersion,
@@ -72,8 +57,7 @@ public sealed partial class RootFolderRelocationService
 
         public void Dispose()
         {
-            _directory.Dispose();
-            _parent.Dispose();
+            // Observations own no handles between validation passes.
         }
     }
 

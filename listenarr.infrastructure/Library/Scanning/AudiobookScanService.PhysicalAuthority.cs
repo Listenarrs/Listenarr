@@ -38,7 +38,7 @@ internal sealed partial class AudiobookScanService
                 }
             }
 
-            var authority = new PinnedScanAuthority(anchors, command.ScanIdentity.Semantics);
+            var authority = new PinnedScanAuthority(anchors);
             authority.Validate(command);
             return authority;
         }
@@ -225,8 +225,7 @@ internal sealed partial class AudiobookScanService
             }
 
             var file = current.OpenExistingFileForStableRead(segments[^1]);
-            if (!file.VisiblePathMatches() || !file.IsRegularFile()
-                || (expectedIdentity != null && !authority.DiscoveredFileMatches(canonicalPath)))
+            if (!file.VisiblePathMatches() || !file.IsRegularFile())
             {
                 file.Dispose();
                 throw new InvalidOperationException(
@@ -299,8 +298,10 @@ internal sealed partial class AudiobookScanService
             {
                 return outcome == PinnedFileOpenOutcome.Opened
                     && opened != null
+                    && opened.IsRegularFile()
                     && opened.VisiblePathMatches()
-                    && authority.DiscoveredFileMatches(path);
+                    && (expectedIdentity == ScanFileDiscovery.PinnedPathOnlyIdentity
+                        || opened.MatchesObjectIdentity(expectedIdentity));
             }
         }
         catch (Exception exception) when (exception is
@@ -389,14 +390,15 @@ internal sealed partial class AudiobookScanService
         string directory,
         string expectedObjectIdentity)
     {
-        authority.ValidateDiscoveredDirectory(directory);
+        authority.Validate(command);
         using var current = OpenRelativeDirectory(
             authority.Root,
             command.ScanRoot,
             directory,
             command.ScanIdentity.Semantics);
-        authority.ValidateDiscoveredDirectory(directory);
-        if (!current.VisiblePathMatches())
+        if (!current.VisiblePathMatches()
+            || (expectedObjectIdentity != ScanFileDiscovery.PinnedPathOnlyIdentity
+                && !current.MatchesDirectoryObjectIdentity(expectedObjectIdentity)))
         {
             throw new InvalidOperationException(
                 "A scan directory changed or disappeared after discovery.");

@@ -2024,7 +2024,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
         }
 
         [WindowsFact]
-        public async Task MoveContentsAsync_MarkerlessNativeRename_HoldsStableContentProofThroughFinalVerification()
+        public async Task MoveContentsAsync_MarkerlessNativeRename_ReopensContentProofForFinalVerification()
         {
             var root = FileService.GetTempDirectory(
                 "content-move-markerless-stable-native-rename-root");
@@ -2069,14 +2069,12 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                     entry.SourcePhysicalObjectIdentity,
                     entry.TargetPhysicalObjectIdentity);
             }
-            Assert.ThrowsAny<Exception>(() =>
+            // The batch no longer holds every destination open between phases.
+            using (var writer = new FileStream(targetFile, FileMode.Open,
+                FileAccess.Write, FileShare.ReadWrite | FileShare.Delete))
             {
-                using var writer = new FileStream(
-                    targetFile,
-                    FileMode.Open,
-                    FileAccess.Write,
-                    FileShare.ReadWrite | FileShare.Delete);
-            });
+                Assert.True(writer.CanWrite);
+            }
 
             await service.FinalizeMoveAsync(
                 request,
@@ -2087,15 +2085,20 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 result,
                 CancellationToken.None);
 
-            Assert.ThrowsAny<Exception>(() =>
+            // The batch no longer holds every destination open between phases.
+            using (var writer = new FileStream(targetFile, FileMode.Open,
+                FileAccess.Write, FileShare.ReadWrite | FileShare.Delete))
             {
-                using var writer = new FileStream(
-                    targetFile,
-                    FileMode.Open,
-                    FileAccess.Write,
-                    FileShare.ReadWrite | FileShare.Delete);
-            });
-            result.TargetVerificationLease!.Dispose();
+                Assert.True(writer.CanWrite);
+            }
+            Assert.Equal(RegistrationPublicationMatchOutcome.Match,
+                await result.TargetVerificationLease!.ProbeCurrentPublicationsAsync(CancellationToken.None));
+            await File.WriteAllTextAsync(targetFile, "other");
+            Assert.Equal(RegistrationPublicationMatchOutcome.Mismatch,
+                await result.TargetVerificationLease.ProbeCurrentPublicationsAsync(CancellationToken.None));
+            await Assert.ThrowsAsync<MoveNeedsAttentionException>(() =>
+                service.VerifyFinalizedMoveAsync(request, CancellationToken.None, result.TargetVerificationLease));
+            result.TargetVerificationLease.Dispose();
             using (var writer = new FileStream(
                 targetFile,
                 FileMode.Open,
@@ -2104,7 +2107,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
             {
                 Assert.True(writer.CanWrite);
             }
-            Assert.Equal("audio", await File.ReadAllTextAsync(targetFile));
+            Assert.Equal("other", await File.ReadAllTextAsync(targetFile));
             AssertNoListenarrArtifacts(root);
         }
 
@@ -4311,18 +4314,9 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
             var exception = await Record.ExceptionAsync(() =>
                 service.MoveContentsAsync(request, CancellationToken.None));
             Assert.True(File.Exists(Path.Join(source, "book.m4b")));
-            if (OperatingSystem.IsWindows())
-            {
-                Assert.IsType<IOException>(exception);
-                Assert.Equal("audio", await File.ReadAllTextAsync(Path.Join(target, "book.m4b")));
-                Assert.False(Directory.Exists(target + ".original"));
-            }
-            else
-            {
-                Assert.IsType<MoveNeedsAttentionException>(exception);
-                Assert.False(File.Exists(Path.Join(target, "book.m4b")));
-                Assert.True(File.Exists(Path.Join(target + ".original", "book.m4b")));
-            }
+            Assert.IsType<MoveNeedsAttentionException>(exception);
+            Assert.False(File.Exists(Path.Join(target, "book.m4b")));
+            Assert.True(File.Exists(Path.Join(target + ".original", "book.m4b")));
         }
 
         private async Task ClaimOwnedDirectoriesAsync(params string[] directories)

@@ -238,7 +238,7 @@ public sealed partial class VerifiedFileRenameTransactionCoordinator(
                 sourceEntry,
                 targetEntry,
                 sourceProof,
-                logger);
+                logger, sourceRoot, destinationRoot);
             sourceParent = null;
             destinationParent = null;
             sourceEntry = null;

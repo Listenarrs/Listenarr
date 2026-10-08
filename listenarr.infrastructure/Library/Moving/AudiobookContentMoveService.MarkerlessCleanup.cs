@@ -342,14 +342,6 @@ internal sealed partial class AudiobookContentMoveService
                 $"A retained source file cannot be considered cleaned: {entry.RelativePath}");
         }
 
-        if (!sourceRetirementLease.TryGet(entry.RelativePath, out var originalSource)
-            || originalSource == null
-            || !originalSource.VisiblePathMatches())
-        {
-            await RetainMarkerlessSourceEntryAsync(request, entry, cancellationToken);
-            return;
-        }
-
         var sourceParentPath = Path.GetDirectoryName(sourcePath)
             ?? throw new MoveNeedsAttentionException(
                 "A markerless source file has no parent.");
@@ -362,10 +354,9 @@ internal sealed partial class AudiobookContentMoveService
             sourceParentPath,
             request.SourceSemantics,
             sourceEndpoint: true);
-        using var sourceEntry = sourceParent.OpenExistingFile(
-            Path.GetFileName(sourcePath),
-            requireDeleteAccess: true);
-        if (!originalSource.IdentifiesSameEntry(sourceEntry))
+        using var sourceEntry = sourceParent.OpenExistingFileForStableDelete(
+            Path.GetFileName(sourcePath));
+        if (!sourceRetirementLease.Matches(entry.RelativePath, sourceEntry))
         {
             await RetainMarkerlessSourceEntryAsync(request, entry, cancellationToken);
             return;
@@ -386,16 +377,12 @@ internal sealed partial class AudiobookContentMoveService
             targetParentPath,
             request.TargetSemantics,
             sourceEndpoint: false);
-        using var targetEntry = targetParent.OpenExistingFile(
-            Path.GetFileName(targetPath),
-            requireDeleteAccess: false);
-        if (!targetVerificationLease.TryGet(entry.RelativePath, out var originalTarget)
-            || originalTarget == null
-            || !originalTarget.IdentifiesSameEntry(targetEntry)
-            || !originalTarget.VisiblePathMatches())
+        using var targetEntry = targetParent.OpenExistingFileForVerificationLease(
+            Path.GetFileName(targetPath));
+        if (!targetVerificationLease.Matches(entry.RelativePath, targetEntry))
         {
             throw new MoveNeedsAttentionException(
-                $"The committed target publication changed before source deletion: {entry.RelativePath}");
+                $"The committed target changed before source deletion: {entry.RelativePath}");
         }
         ValidateMarkerlessTargetEntry(entry, targetEntry);
         if (!await PinnedFileMatchesManifestAsync(
@@ -443,8 +430,10 @@ internal sealed partial class AudiobookContentMoveService
             throw new MoveNeedsAttentionException(
                 $"The target file content changed after markerless deletion was authorized: {entry.RelativePath}");
         }
-        if (!originalSource.VisiblePathMatches()
-            || !originalTarget.VisiblePathMatches())
+        if (!sourceEntry.VisiblePathMatches()
+            || !targetEntry.VisiblePathMatches()
+            || !sourceParent.VisiblePathMatches()
+            || !targetParent.VisiblePathMatches())
         {
             throw new MoveNeedsAttentionException(
                 $"A live publication changed immediately before source deletion: {entry.RelativePath}");

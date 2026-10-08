@@ -87,11 +87,7 @@ internal sealed partial class AudiobookContentMoveService
                     $"A verified markerless target file is temporarily unavailable: {entry.RelativePath}");
             }
             ValidateMarkerlessTargetEntry(entry, file);
-            PinnedDirectoryCreation.PinnedFileEntry? leasedTargetEntry = null;
-            var hasProtectedContentProof = targetVerificationLease != null
-                && targetVerificationLease.TryGet(
-                    entry.RelativePath,
-                    out leasedTargetEntry);
+            var hasProtectedContentProof = targetVerificationLease?.Contains(entry.RelativePath) == true;
             if (string.IsNullOrWhiteSpace(entry.Sha256))
             {
                 throw new MoveNeedsAttentionException(
@@ -123,14 +119,10 @@ internal sealed partial class AudiobookContentMoveService
 
             if (hasProtectedContentProof)
             {
-                if (leasedTargetEntry == null
-                    || !PinnedFileVisibleOrThrowUnavailable(
-                        leasedTargetEntry,
-                        $"A protected markerless target generation is temporarily unavailable: {entry.RelativePath}")
-                    || !leasedTargetEntry.IdentifiesSameEntry(file))
+                if (!targetVerificationLease!.Matches(entry.RelativePath, file))
                 {
                     throw new MoveNeedsAttentionException(
-                        $"A protected markerless target generation changed after native publication: {entry.RelativePath}");
+                        $"A markerless target changed after publication: {entry.RelativePath}");
                 }
 
                 targetVerificationLease!.SetContentEvidence(

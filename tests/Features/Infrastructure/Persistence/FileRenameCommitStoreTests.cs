@@ -9,6 +9,58 @@ namespace Listenarr.Tests.Features.Infrastructure.Persistence;
 public sealed class FileRenameCommitStoreTests : BaseTests
 {
     [Fact]
+    public async Task CommitOwnerMetadataAsync_LargeDurableBatch_BoundsHandles()
+    {
+        await using var connection = new SqliteConnection("DataSource=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ListenArrDbContext>().UseSqlite(connection).Options;
+        await using var db = new ListenArrDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        var root = FileService.GetTempDirectory("rename-commit-bounded-handles");
+        var audiobook = new Audiobook { Title = "Large Rename Commit", BasePath = root };
+        db.Audiobooks.Add(audiobook);
+        await db.SaveChangesAsync();
+        var journals = new List<FileMutationJournal>();
+        for (var index = 0; index < 600; index++)
+        {
+            var destination = Path.Join(root, $"{index:D4}.m4b");
+            File.WriteAllText(destination, "audio");
+            var journal = CreateCompletedJournal(Guid.NewGuid(), audiobook.Id);
+            journal.SourcePath = Path.Join(root, $"old-{index:D4}.m4b");
+            journal.DestinationPath = destination;
+            journal.SourceLength = 5;
+            journal.TargetPhysicalObjectIdentity = GetFileIdentity(destination);
+            journal.SourcePhysicalObjectIdentity = journal.TargetPhysicalObjectIdentity;
+            journals.Add(journal);
+        }
+        db.FileMutationJournals.AddRange(journals);
+        await db.SaveChangesAsync();
+        var store = new FileRenameCommitStore(db, TimeProvider.System)
+        {
+            AfterSaveBeforeTargetRevalidationForTest = () =>
+            {
+                if (OperatingSystem.IsLinux())
+                {
+                    var handles = Directory.EnumerateFiles("/proc/self/fd").Count(path =>
+                        new FileInfo(path).LinkTarget is { } target
+                        && target.StartsWith(root + "/", StringComparison.Ordinal));
+                    Assert.InRange(handles, 0, 16);
+                }
+                foreach (var journal in journals)
+                {
+                    using var exclusive = File.Open(journal.DestinationPath,
+                        FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+                    Assert.Equal(5, exclusive.Length);
+                }
+            }
+        };
+        await store.CommitOwnerMetadataAsync(audiobook.Id,
+            journals.Select(journal => journal.OperationId).ToArray());
+        Assert.All(journals, journal => Assert.Equal(
+            FileMutationJournalState.OwnerMetadataReconciled, journal.State));
+    }
+
+    [Fact]
     public async Task CommitOwnerMetadataAsync_PersistsAudiobookAndJournalTerminalStateTogether()
     {
         await using var connection = new SqliteConnection("DataSource=:memory:");

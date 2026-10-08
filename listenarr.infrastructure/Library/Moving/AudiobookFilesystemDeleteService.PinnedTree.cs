@@ -28,8 +28,7 @@ namespace Listenarr.Infrastructure.Library.Moving
             PinnedDirectoryCreation.PinnedFileEntry file,
             DeleteFileContentProof proof)
         {
-            if (!proof.OriginalEntry.VisiblePathMatches()
-                || !proof.OriginalEntry.IdentifiesSameEntry(file))
+            if (!proof.Observation.Matches(file))
             {
                 return false;
             }
@@ -46,7 +45,6 @@ namespace Listenarr.Infrastructure.Library.Moving
                 hash,
                 proof.Sha256,
                 StringComparison.OrdinalIgnoreCase)
-                && proof.OriginalEntry.VisiblePathMatches()
                 && file.VisiblePathMatches();
         }
 
@@ -104,7 +102,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                             childPublication.OpenCreatedDirectoryAnchor();
                         preflightIdentities.Capture(Path.GetRelativePath(
                             rootAuthorization.FullPath,
-                            entryPath), new DeleteTreeEntryProof(child.Duplicate(), null));
+                            entryPath), DeleteTreeEntryProof.CaptureDirectory(child));
                         if (!TryValidatePinnedDirectoryTree(
                                 rootAuthorization,
                                 child,
@@ -121,10 +119,8 @@ namespace Listenarr.Infrastructure.Library.Moving
                     using var file = currentDirectory.OpenExistingFile(
                         entryName,
                         requireDeleteAccess: false);
-                    if (trackedContentProofs.TryGetValue(
-                            entryPath,
-                            out var expectedTrackedContent)
-                        && !PinnedFileMatchesContentProof(
+                    var hasTrackedContent = trackedContentProofs.TryGetValue(entryPath, out var expectedTrackedContent);
+                    if (hasTrackedContent && !PinnedFileMatchesContentProof(
                             file,
                             expectedTrackedContent))
                     {
@@ -135,7 +131,7 @@ namespace Listenarr.Infrastructure.Library.Moving
 
                     preflightIdentities.Capture(Path.GetRelativePath(
                         rootAuthorization.FullPath,
-                        entryPath), new DeleteTreeEntryProof(null, file.DuplicateForOperation()));
+                        entryPath), DeleteTreeEntryProof.CaptureFile(file, hasTrackedContent ? expectedTrackedContent : null));
                     if (!rootAuthorization.VisiblePathMatches()
                         || !currentDirectory.VisiblePathMatches()
                         || !file.VisiblePathMatches())
@@ -267,10 +263,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                         continue;
                     }
 
-                    var hasTrackedProof = trackedContentProofs.TryGetValue(entryPath, out var trackedProof);
-                    using var file = hasTrackedProof
-                        ? trackedProof.OriginalEntry.DuplicateForOperation()
-                        : currentDirectory.OpenExistingFile(entryName, requireDeleteAccess: true);
+                    using var file = currentDirectory.OpenExistingFileForStableDelete(entryName);
                     var relativeFile = Path.GetRelativePath(
                         rootAuthorization.FullPath,
                         entryPath);
@@ -298,12 +291,6 @@ namespace Listenarr.Infrastructure.Library.Moving
                     }
 
                     file.Delete(immediateWindows: true);
-                    if (hasTrackedProof)
-                    {
-                        // Its exact deletion is finished. Closing the original pin
-                        // also releases the child directory before Windows rmdir.
-                        trackedProof.OriginalEntry.Dispose();
-                    }
                     expectedFileIdentity.Dispose();
                     result.DeletedFiles++;
                     _logger.LogInformation(

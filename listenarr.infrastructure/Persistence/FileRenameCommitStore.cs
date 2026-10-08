@@ -36,7 +36,7 @@ public sealed class FileRenameCommitStore(
 
         var journals = new List<FileMutationJournal>();
         var verifiedJournals = new List<VerifiedFileRenameJournal>();
-        var targetLeases = new List<PinnedAudiobookFileRegistrationLease>();
+        var targetLeases = new List<Func<PinnedAudiobookFileRegistrationLease>>();
         var verifiedLeases = new List<VerifiedRenameCommitLease>();
         var originalJournalState = new Dictionary<Guid, (
             FileMutationJournalState State,
@@ -164,10 +164,6 @@ public sealed class FileRenameCommitStore(
             {
                 await ownedTransaction.DisposeAsync();
             }
-            foreach (var targetLease in targetLeases)
-            {
-                targetLease.Dispose();
-            }
             foreach (var verifiedLease in verifiedLeases)
             {
                 verifiedLease.Dispose();
@@ -178,7 +174,7 @@ public sealed class FileRenameCommitStore(
     private void PrepareDurableRenameCommit(
         int audiobookId,
         IReadOnlyCollection<FileMutationJournal> journals,
-        ICollection<PinnedAudiobookFileRegistrationLease> targetLeases,
+        ICollection<Func<PinnedAudiobookFileRegistrationLease>> targetLeases,
         IDictionary<Guid, (
             FileMutationJournalState State,
             string? Error,
@@ -206,10 +202,11 @@ public sealed class FileRenameCommitStore(
 
             originalJournalState[journal.OperationId] =
                 (journal.State, journal.Error, journal.UpdatedAt);
-            var targetLease = PinnedAudiobookFileRegistrationLease.Open(
+            using var targetLease = PinnedAudiobookFileRegistrationLease.Open(
                 journal.DestinationPath,
                 journal.TargetPhysicalObjectIdentity);
-            targetLeases.Add(targetLease);
+            targetLeases.Add(() => PinnedAudiobookFileRegistrationLease.Open(
+                journal.DestinationPath, journal.TargetPhysicalObjectIdentity));
             if (targetLease.ProbeCurrentPublication()
                 != RegistrationPublicationMatchOutcome.Match)
             {
@@ -349,10 +346,11 @@ public sealed class FileRenameCommitStore(
     }
 
     private static void EnsureTargetsStillMatch(
-        IReadOnlyCollection<PinnedAudiobookFileRegistrationLease> targetLeases)
+        IReadOnlyCollection<Func<PinnedAudiobookFileRegistrationLease>> targetLeases)
     {
-        foreach (var targetLease in targetLeases)
+        foreach (var reopen in targetLeases)
         {
+            using var targetLease = reopen();
             var match = targetLease.ProbeCurrentPublication();
             if (match == RegistrationPublicationMatchOutcome.Unavailable)
             {
@@ -379,28 +377,29 @@ public sealed class FileRenameCommitStore(
 
     private sealed class VerifiedRenameCommitLease : IDisposable
     {
-        private readonly PinnedDirectoryCreation.PinnedDirectoryAnchor _sourceParent;
-        private readonly PinnedDirectoryCreation.PinnedDirectoryAnchor _destinationParent;
-        private readonly PinnedDirectoryCreation.PinnedFileEntry _source;
-        private readonly PinnedDirectoryCreation.PinnedFileEntry _target;
-        private readonly long _length;
-        private readonly string _sha256;
+        private readonly VerifiedFileRenameJournal _journal;
+        private readonly RootFolder? _sourceRoot;
+        private readonly RootFolder? _targetRoot;
+        private readonly FilePublicationObservation _sourceObservation;
+        private readonly FilePublicationObservation _targetObservation;
         private bool _disposed;
 
         private VerifiedRenameCommitLease(
+            VerifiedFileRenameJournal journal, RootFolder? sourceRoot, RootFolder? targetRoot,
             PinnedDirectoryCreation.PinnedDirectoryAnchor sourceParent,
             PinnedDirectoryCreation.PinnedDirectoryAnchor destinationParent,
             PinnedDirectoryCreation.PinnedFileEntry source,
-            PinnedDirectoryCreation.PinnedFileEntry target,
-            long length,
-            string sha256)
+            PinnedDirectoryCreation.PinnedFileEntry target)
         {
-            _sourceParent = sourceParent;
-            _destinationParent = destinationParent;
-            _source = source;
-            _target = target;
-            _length = length;
-            _sha256 = sha256;
+            _journal = journal;
+            _sourceRoot = sourceRoot;
+            _targetRoot = targetRoot;
+            _sourceObservation = FilePublicationObservation.Capture(source);
+            _targetObservation = FilePublicationObservation.Capture(target);
+            target.Dispose();
+            source.Dispose();
+            destinationParent.Dispose();
+            sourceParent.Dispose();
         }
 
         public static VerifiedRenameCommitLease Open(
@@ -423,20 +422,16 @@ public sealed class FileRenameCommitStore(
                 destinationParent = PinnedDirectoryCreation.OpenPinnedConfiguredHierarchy(
                     destinationRoot, destinationParentPath,
                     createMissing: false);
-                // The caller still holds its original source retirement and writable
-                // target publication handles. Read-only verification must share those
-                // existing accesses; it acquires no independent retirement authority.
+                // Owner-commit verification opens one pair at a time and owns no
+                // retirement authority. Content and optional observations are checked
+                // again on each side of SaveChanges before the transaction commits.
                 source = sourceParent.OpenExistingFile(
                     Path.GetFileName(journal.SourcePath), requireDeleteAccess: false);
                 target = destinationParent.OpenExistingFile(
                     Path.GetFileName(journal.DestinationPath), requireDeleteAccess: false);
                 var lease = new VerifiedRenameCommitLease(
-                    sourceParent,
-                    destinationParent,
-                    source,
-                    target,
-                    journal.SourceLength,
-                    journal.SourceSha256);
+                    journal, sourceRoot, destinationRoot, sourceParent,
+                    destinationParent, source, target);
                 sourceParent = null!;
                 destinationParent = null;
                 source = null;
@@ -455,18 +450,18 @@ public sealed class FileRenameCommitStore(
         public async Task EnsureMatchesAsync(CancellationToken cancellationToken)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_source.ProbeVisiblePathMatch()
-                    != RegistrationPublicationMatchOutcome.Match
-                || _target.ProbeVisiblePathMatch()
-                    != RegistrationPublicationMatchOutcome.Match
-                || !await _source.MatchesAsync(
-                    _length,
-                    _sha256,
-                    cancellationToken)
-                || !await _target.MatchesAsync(
-                    _length,
-                    _sha256,
-                    cancellationToken))
+            using var sourceParent = PinnedDirectoryCreation.OpenPinnedConfiguredHierarchy(
+                _sourceRoot, Path.GetDirectoryName(_journal.SourcePath)!, false);
+            using var targetParent = PinnedDirectoryCreation.OpenPinnedConfiguredHierarchy(
+                _targetRoot, Path.GetDirectoryName(_journal.DestinationPath)!, false);
+            using var source = sourceParent.OpenExistingFile(
+                Path.GetFileName(_journal.SourcePath), requireDeleteAccess: false);
+            using var target = targetParent.OpenExistingFile(
+                Path.GetFileName(_journal.DestinationPath), requireDeleteAccess: false);
+            if (!_sourceObservation.Matches(source) || !_targetObservation.Matches(target)
+                || !await source.MatchesAsync(_journal.SourceLength, _journal.SourceSha256, cancellationToken)
+                || !await target.MatchesAsync(_journal.SourceLength, _journal.SourceSha256, cancellationToken)
+                || !sourceParent.VisiblePathMatches() || !targetParent.VisiblePathMatches())
             {
                 throw new InvalidOperationException(
                     "A verified organize source or target changed during owner-metadata commit.");
@@ -481,10 +476,7 @@ public sealed class FileRenameCommitStore(
             }
 
             _disposed = true;
-            _target.Dispose();
-            _source.Dispose();
-            _destinationParent.Dispose();
-            _sourceParent.Dispose();
+
         }
     }
 }

@@ -95,7 +95,8 @@ internal sealed partial class AudiobookContentMoveService
             request.SourceSemantics,
             allowDirectoryRetirement: physicalFiles.All(entry =>
                 entry.CopyState == MoveJobEntryCopyState.Pending
-                && string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity)));
+                && string.IsNullOrWhiteSpace(entry.TargetPhysicalObjectIdentity)),
+            path => OpenPinnedMoveBoundaryDescendant(request, path, request.SourceSemantics, sourceBoundary: true));
         await ReportProgressAsync(request, 3, "Capturing source", cancellationToken);
         await CaptureMarkerlessSourceIdentitiesAsync(
             request,

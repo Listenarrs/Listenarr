@@ -9,6 +9,83 @@ namespace Listenarr.Tests.Features.Infrastructure.FileSystem;
 [Trait("Category", "Infrastructure")]
 public sealed class VerifiedFileRenameTransactionCoordinatorTests : BaseTests
 {
+    [Fact]
+    public async Task PrepareCommitAndRetire_LargeBatch_BoundsHandles()
+    {
+        var scenario = await CreateScenarioAsync();
+        var coordinator = CreateCoordinator();
+        const int count = 600;
+        var files = new List<AudiobookFile>();
+        var members = new List<VerifiedFileRenameBatchMember>();
+        for (var index = 0; index < count; index++)
+        {
+            var source = Path.Join(scenario.Root.Path, $"old-{index:D4}.m4b");
+            var destination = Path.Join(scenario.Root.Path, "Author", "Book", $"new-{index:D4}.m4b");
+            File.WriteAllText(source, "verified-organize-audio");
+            var file = await _audiobookFileRepository.AddAsync(new AudiobookFile
+            {
+                AudiobookId = scenario.Audiobook.Id,
+                Path = source,
+                Size = scenario.SourceProof.Length,
+                Format = "m4b"
+            });
+            files.Add(file);
+            members.Add(new VerifiedFileRenameBatchMember(file.Id, source, destination));
+        }
+        var manifest = VerifiedFileRenameBatchManifest.Create(members);
+        var batchId = Guid.NewGuid();
+        var leases = new List<IVerifiedFileRenameLease>();
+        void AssertBoundedHandles()
+        {
+            if (!OperatingSystem.IsLinux()) return;
+            var handles = Directory.EnumerateFiles("/proc/self/fd")
+                .Count(path => new FileInfo(path).LinkTarget is { } target
+                    && target.StartsWith(scenario.Root.Path + "/", StringComparison.Ordinal));
+            Assert.InRange(handles, 0, 48);
+        }
+        try
+        {
+            foreach (var member in members)
+            {
+                var prepared = await coordinator.PrepareAsync(member.SourcePath, member.DestinationPath,
+                    Guid.NewGuid(), batchId, manifest, scenario.Audiobook.Id,
+                    member.AudiobookFileId, scenario.SourceProof);
+                Assert.True(prepared.Success, prepared.Error);
+                leases.Add(prepared.Lease!);
+                AssertBoundedHandles();
+            }
+            var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+            await using (var db = await factory.CreateDbContextAsync())
+            {
+                var ids = files.Select(file => file.Id).ToArray();
+                var tracked = await db.AudiobookFiles.Where(file => ids.Contains(file.Id)).ToListAsync();
+                foreach (var file in tracked)
+                    file.Path = members.Single(member => member.AudiobookFileId == file.Id).DestinationPath;
+                var store = new FileRenameCommitStore(db, TimeProvider.System)
+                {
+                    AfterSaveBeforeTargetRevalidationForTest = AssertBoundedHandles
+                };
+                await store.CommitOwnerMetadataAsync(scenario.Audiobook.Id,
+                    leases.Select(lease => lease.OperationId).ToArray());
+            }
+            foreach (var lease in leases)
+            {
+                Assert.Equal(VerifiedFileRenameRetirementOutcome.Completed,
+                    await lease.CompleteSourceRetirementAsync());
+                AssertBoundedHandles();
+            }
+            Assert.All(members, member =>
+            {
+                Assert.False(File.Exists(member.SourcePath));
+                Assert.Equal("verified-organize-audio", File.ReadAllText(member.DestinationPath));
+            });
+        }
+        finally
+        {
+            foreach (var lease in leases) await lease.DisposeAsync();
+        }
+    }
+
     [LinuxTheory]
     [InlineData(22)]
     [InlineData(38)]

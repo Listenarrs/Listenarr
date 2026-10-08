@@ -40,11 +40,15 @@ internal sealed partial class AudiobookContentMoveService
                 // ownership claim, an empty ancestor has no deletion authority.
                 return;
             }
-            if (liveAncestors == null
-                || !liveAncestors.TryGetDirectory(current, out var originalDirectory)
-                || originalDirectory == null)
+            if (liveAncestors == null || !liveAncestors.HasDirectory(current))
             {
                 return;
+            }
+            if (!liveAncestors.TryGetDirectory(current, out var originalDirectory)
+                || originalDirectory == null)
+            {
+                throw new MoveNeedsAttentionException(
+                    "The observed source ancestor changed before cleanup; both directories were retained.");
             }
             using var currentDirectory = OpenPinnedMoveBoundaryDescendant(
                 request, current, semantics, sourceBoundary: true);

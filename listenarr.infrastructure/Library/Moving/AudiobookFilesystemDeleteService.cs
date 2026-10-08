@@ -147,8 +147,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                     capturedTreeProofs,
                     result);
 
-                // Legacy Windows disposition completes on the last handle close.
-                // Release the captured file proofs before empty-folder cleanup.
+                // Content snapshots are no longer needed after per-file deletion.
                 trackedContentProofs.Dispose();
 
                 if (deleteFolder && contentsDeleted)
@@ -351,10 +350,11 @@ namespace Listenarr.Infrastructure.Library.Moving
                 using var parent =
                     await OpenPinnedDeleteFileParentAsync(
                         normalizedPath, semantics, cancellationToken);
-                // Keep the original preflight object pinned throughout this request.
-                // A same-content replacement is never a new deletion capability.
-                using var entry = expectedContentProof.OriginalEntry.DuplicateForOperation();
-                if (!await entry.MatchesAsync(
+                // Reopen under the current authorized boundary and hold only this
+                // entry through verification and deletion.
+                using var entry = parent.OpenExistingFileForStableDelete(fileName);
+                if (!expectedContentProof.Observation.Matches(entry)
+                    || !await entry.MatchesAsync(
                         expectedContentProof.Length,
                         expectedContentProof.Sha256,
                         cancellationToken)

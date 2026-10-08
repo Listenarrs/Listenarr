@@ -50,6 +50,9 @@ internal sealed partial class AudiobookScanService(
             diagnostics,
             cancellationToken);
 
+        // Keep only the authorized hierarchy pinned across discovery. Individual
+        // files and descendant directories close after inspection and reopen when
+        // needed; a scan-wide handle per entry would exhaust large libraries.
         var discovery = ScanFileDiscovery.Discover(
             fileSystem,
             command.ScanRoot,
@@ -60,9 +63,7 @@ internal sealed partial class AudiobookScanService(
             resolvedExistingPaths.Values,
             ownershipMap,
             pinnedAuthority.Root,
-            requireDurableGenerationProof: false,
-            directoryCaptured: pinnedAuthority.CaptureDirectory,
-            fileCaptured: pinnedAuthority.CaptureFile);
+            requireDurableGenerationProof: false);
         discovery = await EnrichWithMetadataAsync(
             command,
             pinnedAuthority,

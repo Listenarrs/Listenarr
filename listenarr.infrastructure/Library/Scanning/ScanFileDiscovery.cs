@@ -24,9 +24,7 @@ internal static partial class ScanFileDiscovery
         IReadOnlyCollection<string>? ownedPaths = null,
         IReadOnlyDictionary<string, int>? ownershipByCanonicalPath = null,
         PinnedDirectoryCreation.PinnedDirectoryAnchor? pinnedScanRoot = null,
-        bool requireDurableGenerationProof = true,
-        Action<PinnedDirectoryCreation.PinnedDirectoryAnchor>? directoryCaptured = null,
-        Action<PinnedDirectoryCreation.PinnedFileEntry>? fileCaptured = null)
+        bool requireDurableGenerationProof = true)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentException.ThrowIfNullOrWhiteSpace(scanRoot);
@@ -40,9 +38,7 @@ internal static partial class ScanFileDiscovery
             logger,
             semantics,
             pinnedScanRoot,
-            requireDurableGenerationProof,
-            directoryCaptured,
-            fileCaptured);
+            requireDurableGenerationProof);
         var issues = enumeration.Issues.ToList();
         var canonicalRoot = FileSystemPathIdentity.Canonicalize(
             scanRoot,
