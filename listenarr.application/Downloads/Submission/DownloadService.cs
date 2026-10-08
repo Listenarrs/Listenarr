@@ -150,7 +150,8 @@ namespace Listenarr.Application.Downloads.Submission
             List<SearchResult>? searchResults = null;
             foreach (var fallbackQuery in SearchQueryFallbacks.Expand(searchQuery, audiobook.Title))
             {
-                searchResults = await searchService.SearchAsync(fallbackQuery, isAutomaticSearch: true);
+                var category = fallbackQuery == searchQuery ? null : SearchQueryFallbacks.RetryCategory;
+                searchResults = await searchService.SearchAsync(fallbackQuery, category, isAutomaticSearch: true);
                 if (searchResults != null && searchResults.Any())
                 {
                     break;
