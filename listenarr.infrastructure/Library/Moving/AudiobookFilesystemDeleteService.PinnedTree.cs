@@ -244,12 +244,9 @@ namespace Listenarr.Infrastructure.Library.Moving
                         if (!isOwnedDirectory)
                         {
                             expectedChildIdentity.Dispose();
-                            if (!rootAuthorization.VisiblePathMatches()
-                                || !currentDirectory.VisiblePathMatches()
-                                || !child.VisiblePathMatches()
-                                || Directory
-                                    .EnumerateFileSystemEntries(entryPath)
-                                    .Any())
+                            if (!WaitForPinnedDirectoryEmpty(child, () =>
+                                    rootAuthorization.VisiblePathMatches()
+                                    && currentDirectory.VisiblePathMatches()))
                             {
                                 reason =
                                     "A nested directory changed before captured-generation deletion.";
@@ -308,6 +305,24 @@ namespace Listenarr.Infrastructure.Library.Moving
                 reason =
                     $"Captured-generation recursive deletion failed safely: {exception.GetType().Name}.";
                 return false;
+            }
+        }
+
+        private static bool WaitForPinnedDirectoryEmpty(
+            PinnedDirectoryCreation.PinnedDirectoryAnchor directory,
+            Func<bool> boundaryIsCurrent)
+        {
+            // NFS may briefly retain a silly-renamed file after its last handle
+            // closes. Wait for the filesystem to remove it; never delete or ignore
+            // unexpected entries, and revalidate the original pins on every retry.
+            var started = System.Diagnostics.Stopwatch.StartNew();
+            while (true)
+            {
+                if (!boundaryIsCurrent() || !directory.VisiblePathMatches()) return false;
+                if (!Directory.EnumerateFileSystemEntries(directory.FullPath).Any())
+                    return boundaryIsCurrent() && directory.VisiblePathMatches();
+                if (started.Elapsed >= TimeSpan.FromSeconds(1)) return false;
+                Thread.Sleep(25);
             }
         }
 

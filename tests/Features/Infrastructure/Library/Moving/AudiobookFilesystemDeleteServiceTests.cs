@@ -25,6 +25,99 @@ public sealed class AudiobookFilesystemDeleteServiceTests : BaseTests
         finally { Directory.Delete(root, recursive: true); }
     }
 
+    [NetworkStorageTheory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task DeleteAsync_MountedDirectory_WaitsForReleasedFileCleanup(bool nested, bool owned)
+    {
+        var mount = Environment.GetEnvironmentVariable(NetworkStorageTheoryAttribute.PathEnvironmentVariable)!;
+        var root = Directory.CreateDirectory(Path.Join(mount, "delete-release-" + Guid.NewGuid().ToString("N"))).FullName;
+        FileStream? heldRead = null;
+        Task? releaseTask = null;
+        try
+        {
+            await _provider.GetRequiredService<IRootFolderService>().CreateAsync(new RootFolderBuilder()
+                .WithPath(root).WithName("Delayed file cleanup root")
+                .WithCaseSensitivityMode(FileSystemCaseSensitivityMode.Sensitive).Build());
+            var folder = Directory.CreateDirectory(Path.Join(root, "Book")).FullName;
+            var parent = nested ? Directory.CreateDirectory(Path.Join(folder, "Disc")).FullName : folder;
+            var source = Path.Join(parent, "audio.m4b");
+            await File.WriteAllTextAsync(source, "audio");
+            if (owned)
+            {
+                var ownership = _provider.GetRequiredService<ILibraryDirectoryOwnershipStore>();
+                foreach (var directory in new[] { parent, folder }.Distinct())
+                    await ownership.RecordCreatedAsync(new LibraryDirectoryOwnershipClaim(
+                        directory, FileSystemPathSemantics.CurrentHostDefault, "test"));
+            }
+            var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+            {
+                Title = "Delayed file cleanup",
+                BasePath = folder,
+                FilePath = source,
+                Files = [AudiobookFile.CreateUnresolved(source)]
+            });
+            using var hook = PinnedFilesystemMutationHooks.PushBeforeUnixFileDeleteRevalidation(path =>
+            {
+                if (path != source || heldRead != null) return;
+                heldRead = File.Open(source, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                releaseTask = Task.Run(async () =>
+                {
+                    await Task.Delay(150);
+                    heldRead.Dispose();
+                });
+            });
+
+            var result = await _provider.GetRequiredService<IAudiobookFilesystemDeleteService>()
+                .DeleteAsync(audiobook, deleteFolder: true);
+
+            Assert.NotNull(releaseTask);
+            Assert.True(result.DeletedFolder, string.Join("; ", result.Warnings));
+            Assert.False(Directory.Exists(folder));
+            Assert.True(Directory.Exists(root));
+        }
+        finally
+        {
+            if (releaseTask != null) await releaseTask;
+            heldRead?.Dispose();
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [LinuxFact]
+    public async Task DeleteAsync_NewNestedEntryAfterPreflight_RetainsUnexpectedFile()
+    {
+        var root = FileService.GetTempDirectory("delete-unexpected-entry");
+        await _provider.GetRequiredService<IRootFolderService>().CreateAsync(new RootFolderBuilder()
+            .WithPath(root).WithName("Unexpected file root")
+            .WithCaseSensitivityMode(OperatingSystem.IsWindows()
+                ? FileSystemCaseSensitivityMode.Insensitive : FileSystemCaseSensitivityMode.Sensitive).Build());
+        var folder = Directory.CreateDirectory(Path.Join(root, "Book")).FullName;
+        var parent = Directory.CreateDirectory(Path.Join(folder, "Disc")).FullName;
+        var source = Path.Join(parent, "audio.m4b");
+        var unexpected = Path.Join(parent, "keep.txt");
+        await File.WriteAllTextAsync(source, "audio");
+        var audiobook = await _audiobookRepository.AddAsync(new Audiobook
+        {
+            Title = "Unexpected file",
+            BasePath = folder,
+            FilePath = source,
+            Files = [AudiobookFile.CreateUnresolved(source)]
+        });
+        var service = _provider.GetRequiredService<IAudiobookFilesystemDeleteService>();
+        using var hook = PinnedFilesystemMutationHooks.PushBeforeUnixFileDeleteRevalidation(path =>
+        {
+            if (path == source) File.WriteAllText(unexpected, "retain");
+        });
+        var result = await service.DeleteAsync(audiobook, deleteFolder: true);
+
+        Assert.False(result.DeletedFolder);
+        Assert.NotEmpty(result.Warnings);
+        Assert.Equal("retain", await File.ReadAllTextAsync(unexpected));
+        Assert.True(Directory.Exists(folder));
+    }
+
     private async Task DeleteLargeTreeAsync(string root, int count, bool siblingDirectories, bool owned)
     {
         await _provider.GetRequiredService<IRootFolderService>().CreateAsync(new RootFolderBuilder()

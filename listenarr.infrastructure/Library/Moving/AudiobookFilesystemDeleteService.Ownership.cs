@@ -31,7 +31,9 @@ public sealed partial class AudiobookFilesystemDeleteService
                 || !originalTarget.IdentifiesSameDirectory(current)
                 || !current.VisiblePathMatches()
                 || !authorization.ParentAnchor.VisiblePathMatches()
-                || Directory.EnumerateFileSystemEntries(current.FullPath).Any())
+                || !WaitForPinnedDirectoryEmpty(current, () =>
+                    originalTarget.VisiblePathMatches()
+                    && authorization.ParentAnchor.VisiblePathMatches()))
                 return false;
 
             publication.DeletePinnedEmptyDirectoryImmediately(name);
@@ -213,7 +215,8 @@ public sealed partial class AudiobookFilesystemDeleteService
                 || !directory.VisiblePathMatches()
                 || !originalDirectory.VisiblePathMatches()
                 || !originalDirectory.IdentifiesSameDirectory(directory)
-                || Directory.EnumerateFileSystemEntries(directoryPath).Any())
+                || !WaitForPinnedDirectoryEmpty(directory, () =>
+                    parent.VisiblePathMatches() && originalDirectory.VisiblePathMatches()))
             {
                 await _directoryOwnershipStore.RetainAsync(
                     ownership.Id,
