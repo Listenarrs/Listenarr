@@ -61,7 +61,14 @@ public sealed class DockerWeakStorageOrganiseContractTests : BaseTests
     }
 
     [NativeStorageIdentityFact]
-    public async Task VerifiedOrganise_TrackedFile_SucceedsOnMountedStorage()
+    public Task VerifiedOrganise_TrackedFile_SucceedsOnMountedStorage() =>
+        VerifyOrganiseOnMountedStorageAsync(forceFallback: false);
+
+    [NativeStorageIdentityFact]
+    public Task VerifiedOrganise_NoReplaceRenameUnsupported_SucceedsOnMountedStorage() =>
+        VerifyOrganiseOnMountedStorageAsync(forceFallback: true);
+
+    private async Task VerifyOrganiseOnMountedStorageAsync(bool forceFallback)
     {
         var mountPath = Environment.GetEnvironmentVariable(
             NativeStorageIdentityFactAttribute.PathEnvironmentVariable)!;
@@ -137,6 +144,12 @@ public sealed class DockerWeakStorageOrganiseContractTests : BaseTests
                 .WithFileNamingPattern("{Title}")
                 .Build());
 
+        if (forceFallback)
+        {
+            Assert.IsType<VerifiedFileRenameTransactionCoordinator>(
+                _provider.GetRequiredService<IVerifiedFileRenameTransactionCoordinator>())
+                .PublicationRenameErrorForTest = 22;
+        }
         var renameService = _provider.GetRequiredService<IRenameService>();
         var preview = Assert.Single(await renameService.PreviewRenameAsync([audiobook.Id]));
         var filePreview = Assert.Single(preview.FileRenames);

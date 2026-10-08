@@ -26,8 +26,11 @@ public partial class FileMover
         // A Move no longer requires the destination to share the source's
         // kernel identity. v3 publishes verified bytes, then retires the exact
         // source only while its live pinned entry is still held.
-        var requiresGenerationPreservingLink =
-            action == FileAction.HardlinkCopy;
+        using var sourceHandle = sourceEntry?.DuplicateHandleForOperation();
+        var requiresGenerationPreservingLink = action == FileAction.HardlinkCopy
+            && sourceHandle != null
+            && !ForceCopyForHardlinkForTest
+            && HardlinkIdentityCapability.CanVerify(sourceHandle);
 
         if (existingTarget != null)
         {
@@ -99,38 +102,23 @@ public partial class FileMover
                 publishedHardlink = sourceEntry.CreateHardLinkTo(
                     gate.DestinationParent,
                     gate.DestinationName);
-                captureCreatedTarget(publishedHardlink);
-                if (AfterMarkerlessRegistrationTargetCreatedBeforeStateForTestAsync != null)
-                {
-                    await AfterMarkerlessRegistrationTargetCreatedBeforeStateForTestAsync();
-                }
-                journal = await _fileMutationJournalStore!.AdvanceAsync(
-                    journal.OperationId,
-                    FileMutationJournalState.TargetIdentityPersisted,
-                    targetPhysicalObjectIdentity: null,
-                    audiobookId: null,
-                    error: null,
-                    cancellationToken);
-                if (AfterMarkerlessRegistrationTargetStateForTestAsync != null)
-                {
-                    await AfterMarkerlessRegistrationTargetStateForTestAsync();
-                }
-                return journal;
             }
             catch (Exception exception) when (exception is
-                IOException or Win32Exception or PlatformNotSupportedException)
+                IOException or Win32Exception or PlatformNotSupportedException or InvalidOperationException)
             {
-                if (action == FileAction.Move && !OperatingSystem.IsWindows())
+                using var failedTarget = gate.DestinationParent.TryOpenExistingFile(
+                    gate.DestinationName, requireDeleteAccess: false);
+                if (failedTarget != null)
                 {
-                    _logger.LogWarning(
-                        exception,
-                        "Markerless Unix move publication could not preserve the exact source generation with a hardlink: {Source} -> {Destination}",
-                        LogRedaction.SanitizeFilePath(gate.SourcePath),
-                        LogRedaction.SanitizeFilePath(gate.DestinationPath));
-                    throw new IOException(
-                        "The move source generation could not be published safely on this filesystem.",
-                        exception);
+                    // A link may have been created before verification failed.
+                    // Its presence is not authority to overwrite or remove it.
+                    await MarkMarkerlessRegistrationNeedsAttentionAsync(journal,
+                        "Hardlink publication could not verify the created destination; source and destination were preserved for repair.",
+                        cancellationToken);
+                    return await _fileMutationJournalStore!.GetAsync(journal.OperationId, cancellationToken)
+                        ?? throw new InvalidOperationException("The hardlink publication journal disappeared.");
                 }
+                if (exception is InvalidOperationException) throw;
 
                 _logger.LogInformation(
                     exception,
@@ -138,9 +126,20 @@ public partial class FileMover
                     LogRedaction.SanitizeFilePath(gate.SourcePath),
                     LogRedaction.SanitizeFilePath(gate.DestinationPath));
             }
-            finally
+            if (publishedHardlink != null)
             {
-                publishedHardlink?.Dispose();
+                using (publishedHardlink)
+                {
+                    captureCreatedTarget(publishedHardlink);
+                    if (AfterMarkerlessRegistrationTargetCreatedBeforeStateForTestAsync != null)
+                        await AfterMarkerlessRegistrationTargetCreatedBeforeStateForTestAsync();
+                    journal = await _fileMutationJournalStore!.AdvanceAsync(
+                        journal.OperationId, FileMutationJournalState.TargetIdentityPersisted,
+                        targetPhysicalObjectIdentity: null, audiobookId: null, error: null, cancellationToken);
+                    if (AfterMarkerlessRegistrationTargetStateForTestAsync != null)
+                        await AfterMarkerlessRegistrationTargetStateForTestAsync();
+                    return journal;
+                }
             }
         }
 

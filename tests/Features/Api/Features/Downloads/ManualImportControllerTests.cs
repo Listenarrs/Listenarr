@@ -19,6 +19,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Listenarr.Api.Dtos.ManualImport;
 using Listenarr.Application.Common.Exceptions;
 using Listenarr.Tests.Common;
+using Listenarr.Tests.Builders;
 using Microsoft.EntityFrameworkCore;
 
 namespace Listenarr.Tests.Features.Api.Features.Downloads
@@ -521,6 +522,55 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             recovery.VerifyAll();
             capability.VerifyAll();
             fileMover.VerifyNoOtherCalls();
+        }
+
+        [Theory]
+        [InlineData("ambiguous")]
+        [InlineData("alternate-spelling")]
+        [InlineData("unrelated-source")]
+        public async Task Start_MissingSourceWithUnusableReceipts_DoesNotGuessRecoveredSuccess(string scenario)
+        {
+            var destinationRoot = CreateTempDirectory("manual-invalid-receipt-destination");
+            var sourceDirectory = CreateTempDirectory("manual-invalid-receipt-source");
+            var source = Path.Join(sourceDirectory, "chapter.mp3");
+            Directory.Delete(sourceDirectory);
+            var destination = Path.Join(destinationRoot, "published.mp3");
+            await File.WriteAllTextAsync(destination, "published-audio");
+            var book = new AudiobookBuilder().WithId(51).WithTitle("Receipt Controls")
+                .WithBasePath(destinationRoot).Build();
+            var receipt = new FileRegistrationRecoveryReceipt(Guid.NewGuid(), book.Id,
+                source, destination, SourceRetained: false);
+            IReadOnlyList<FileRegistrationRecoveryReceipt> receipts = scenario switch
+            {
+                "ambiguous" => [receipt, receipt with { OperationId = Guid.NewGuid() }],
+                "alternate-spelling" => [receipt with { SourcePath = source.Replace("chapter.mp3", "CHAPTER.mp3", StringComparison.Ordinal) }],
+                "unrelated-source" => [receipt with { SourcePath = Path.Join(sourceDirectory, "other.mp3") }],
+                _ => throw new ArgumentOutOfRangeException(nameof(scenario))
+            };
+            var recovery = new Mock<IFileRegistrationRecoveryService>(MockBehavior.Strict);
+            recovery.Setup(service => service.ReconcileAudiobookWithReceiptsAsync(book.Id,
+                    It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(receipts);
+            var mover = new Mock<IFileMover>(MockBehavior.Strict);
+            var capability = new Mock<IFilePublicationSourceCapability>(MockBehavior.Strict);
+            var controller = GetController(book, new ApplicationSettings { OutputPath = destinationRoot },
+                fileMover: mover.Object, filePublicationSourceCapability: capability.Object,
+                registrationRecoveryServiceOverride: recovery.Object);
+
+            var result = await controller.Start(new ManualImportRequestDto
+            {
+                Path = sourceDirectory,
+                Mode = "interactive",
+                Action = FileAction.Move,
+                Items = [new ManualImportItemDto { FullPath = source, MatchedAudiobookId = book.Id }]
+            });
+
+            Assert.IsType<Microsoft.AspNetCore.Mvc.NotFoundObjectResult>(result.Result);
+            Assert.Equal("published-audio", await File.ReadAllTextAsync(destination));
+            Assert.False(Directory.Exists(sourceDirectory));
+            mover.VerifyNoOtherCalls();
+            capability.VerifyNoOtherCalls();
+            recovery.VerifyAll();
         }
 
         [Fact]

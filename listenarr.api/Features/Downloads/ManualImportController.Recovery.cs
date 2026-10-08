@@ -8,7 +8,7 @@ public partial class ManualImportController
     private async Task<ManualImportResultDto?> TryConsumeRecoveredManualImportAsync(
         ManualImportItemDto item,
         FileAction action,
-        FileSystemPathSemantics sourceSemantics,
+        FileSystemPathSemantics? sourceSemantics,
         IReadOnlyDictionary<int, IReadOnlyList<FileRegistrationRecoveryReceipt>> recoveryReceipts,
         ISet<Guid> consumedRecoveryOperationIds,
         ManualImportDestinationTracker destinationTracker,
@@ -111,7 +111,7 @@ public partial class ManualImportController
     private static bool RecoveredManualSourceMatches(
         string requestedPath,
         string recoveredSourcePath,
-        FileSystemPathSemantics sourceSemantics)
+        FileSystemPathSemantics? sourceSemantics)
     {
         if (string.Equals(
                 requestedPath,
@@ -123,10 +123,10 @@ public partial class ManualImportController
 
         try
         {
-            return FileSystemPathIdentity.AreEquivalent(
+            return sourceSemantics.HasValue && FileSystemPathIdentity.AreEquivalent(
                 requestedPath,
                 recoveredSourcePath,
-                sourceSemantics);
+                sourceSemantics.Value);
         }
         catch (Exception exception) when (exception is
             ArgumentException or InvalidOperationException

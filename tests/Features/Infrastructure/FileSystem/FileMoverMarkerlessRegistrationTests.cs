@@ -2146,6 +2146,43 @@ public sealed class FileMoverMarkerlessRegistrationTests : BaseTests
         AssertNoLibraryArtifacts(destinationParent);
     }
 
+    [Fact]
+    public async Task PrepareRegistration_UnverifiableHardlink_CopiesBeforeLinkCreationAndRetainsSource()
+    {
+        var scenario = await CreateScenarioAsync("hardlink-identity-fallback");
+        var mover = CreateMover(forceCopyForHardlink: true,
+            beforePinnedHardlinkCreation: () => throw new InvalidOperationException("Must not create a hardlink."));
+        using var lease = await mover.PrepareActionForRegistrationAsync(FileAction.HardlinkCopy,
+            scenario.Source, scenario.Destination, scenario.OperationId);
+
+        Assert.NotNull(lease);
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Destination));
+        lease.Dispose();
+        await File.WriteAllTextAsync(scenario.Destination, "separate-copy");
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Source));
+    }
+
+    [Fact]
+    public async Task PrepareRegistration_FailedHardlinkWithExistingTarget_PreservesFilesAndRecordsRepair()
+    {
+        var scenario = await CreateScenarioAsync("hardlink-unverified-target");
+        var mover = CreateMover(beforePinnedHardlinkCreation: async () =>
+        {
+            await File.WriteAllTextAsync(scenario.Destination, "foreign-target");
+            throw new IOException("Hardlink verification unavailable.");
+        });
+        using var lease = await mover.PrepareActionForRegistrationAsync(FileAction.HardlinkCopy,
+            scenario.Source, scenario.Destination, scenario.OperationId);
+
+        Assert.Null(lease);
+        await AssertJournalStateAsync(scenario.OperationId, FileMutationJournalState.NeedsAttention, null);
+        using var retry = await CreateMover().PrepareActionForRegistrationAsync(FileAction.HardlinkCopy,
+            scenario.Source, scenario.Destination, scenario.OperationId);
+        Assert.Null(retry);
+        Assert.Equal("foreign-target", await File.ReadAllTextAsync(scenario.Destination));
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Source));
+    }
+
     private FileMover CreateMover(
         Func<Task>? afterSourceDeletedBeforeState = null,
         Func<Task>? afterSourceDeletedState = null,
@@ -2162,7 +2199,8 @@ public sealed class FileMoverMarkerlessRegistrationTests : BaseTests
         ILogger<FileMover>? logger = null,
         IOptions<FileMoverOptions>? options = null,
         Func<Task>? afterRegistrationTargetState = null,
-        Func<Task>? afterRegistrationTargetWrittenBeforeVerifiedState = null)
+        Func<Task>? afterRegistrationTargetWrittenBeforeVerifiedState = null,
+        bool forceCopyForHardlink = false)
     {
         var factory = _provider.GetRequiredService<
             IDbContextFactory<ListenArrDbContext>>();
@@ -2178,6 +2216,7 @@ public sealed class FileMoverMarkerlessRegistrationTests : BaseTests
             FileMoveLockDirectoryForTest = FileService.GetTempDirectory(
                 "file-mover-markerless-registration-locks"),
             ForceCrossVolumeForTest = forceCrossVolume,
+            ForceCopyForHardlinkForTest = forceCopyForHardlink,
             ForceContentOnlySourceProofForTest = forceContentOnlySourceProof,
             BeforePinnedHardlinkCreationForTestAsync =
                 beforePinnedHardlinkCreation,

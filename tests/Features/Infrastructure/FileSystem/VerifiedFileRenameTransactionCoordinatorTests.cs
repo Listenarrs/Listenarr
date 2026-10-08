@@ -87,14 +87,18 @@ public sealed class VerifiedFileRenameTransactionCoordinatorTests : BaseTests
     }
 
     [LinuxTheory]
-    [InlineData(22)]
-    [InlineData(38)]
-    [InlineData(95)]
-    public async Task PrepareAsync_NoReplaceRenameUnsupported_PublishesPinnedHardlinkAndRollsBack(int nativeError)
+    [InlineData(22, false)]
+    [InlineData(38, false)]
+    [InlineData(95, false)]
+    [InlineData(22, true)]
+    [InlineData(38, true)]
+    [InlineData(95, true)]
+    public async Task PrepareAsync_NoReplaceRenameUnsupported_PublishesVerifiedTargetAndRollsBack(int nativeError, bool forceCopy)
     {
         var scenario = await CreateScenarioAsync();
         var coordinator = CreateCoordinator();
         coordinator.PublicationRenameErrorForTest = nativeError;
+        coordinator.ForceCopyForHardlinkForTest = forceCopy;
         var result = await coordinator.PrepareAsync(scenario.Source, scenario.Destination,
             scenario.OperationId, scenario.BatchId, scenario.Manifest, scenario.Audiobook.Id,
             scenario.AudiobookFile.Id, scenario.SourceProof);
@@ -109,12 +113,15 @@ public sealed class VerifiedFileRenameTransactionCoordinatorTests : BaseTests
         Assert.Equal(VerifiedFileRenameState.RolledBack, (await GetJournalAsync(scenario.OperationId)).State);
     }
 
-    [LinuxFact]
-    public async Task PrepareAsync_FallbackDestinationOccupied_PreservesForeignFileAndSource()
+    [LinuxTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PrepareAsync_FallbackDestinationOccupied_PreservesForeignFileAndSource(bool forceCopy)
     {
         var scenario = await CreateScenarioAsync();
         var coordinator = CreateCoordinator();
         coordinator.PublicationRenameErrorForTest = 22;
+        coordinator.ForceCopyForHardlinkForTest = forceCopy;
         coordinator.BeforeFallbackPublicationForTest = () => File.WriteAllText(scenario.Destination, "foreign");
         var result = await coordinator.PrepareAsync(scenario.Source, scenario.Destination,
             scenario.OperationId, scenario.BatchId, scenario.Manifest, scenario.Audiobook.Id,
@@ -127,12 +134,15 @@ public sealed class VerifiedFileRenameTransactionCoordinatorTests : BaseTests
         Assert.False(File.Exists(scenario.StagingPath));
     }
 
-    [LinuxFact]
-    public async Task PrepareAsync_InterruptedAfterFallbackLink_RestartRetainsBothNamesAndSource()
+    [LinuxTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PrepareAsync_InterruptedAfterFallbackPublication_RestartRetainsBothNamesAndSource(bool forceCopy)
     {
         var scenario = await CreateScenarioAsync();
         var coordinator = CreateCoordinator();
         coordinator.PublicationRenameErrorForTest = 22;
+        coordinator.ForceCopyForHardlinkForTest = forceCopy;
         coordinator.AfterFallbackPublicationForTest = () => throw new OperationCanceledException("Injected interruption after link.");
         await Assert.ThrowsAsync<OperationCanceledException>(() => coordinator.PrepareAsync(
             scenario.Source, scenario.Destination, scenario.OperationId, scenario.BatchId,
@@ -146,6 +156,59 @@ public sealed class VerifiedFileRenameTransactionCoordinatorTests : BaseTests
             Assert.Equal("verified-organize-audio", await File.ReadAllTextAsync(scenario.StagingPath));
             Assert.Equal(VerifiedFileRenameState.NeedsAttention, (await GetJournalAsync(scenario.OperationId)).State);
         }
+    }
+
+    [LinuxTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PrepareAsync_FallbackLinkUnverified_PreservesEvidenceAndRequiresRepair(bool nativeFailure)
+    {
+        var scenario = await CreateScenarioAsync();
+        var coordinator = CreateCoordinator();
+        coordinator.PublicationRenameErrorForTest = 22;
+        coordinator.AfterFallbackLinkCreatedForTest = () =>
+        {
+            if (nativeFailure) throw new System.ComponentModel.Win32Exception(5, "Injected post-link verification failure.");
+            File.Move(scenario.Destination, scenario.Destination + ".saved");
+            File.WriteAllText(scenario.Destination, "foreign destination");
+        };
+
+        var result = await coordinator.PrepareAsync(scenario.Source, scenario.Destination,
+            scenario.OperationId, scenario.BatchId, scenario.Manifest, scenario.Audiobook.Id,
+            scenario.AudiobookFile.Id, scenario.SourceProof);
+
+        Assert.False(result.Success);
+        Assert.Null(result.Lease);
+        Assert.Equal(nativeFailure ? "verified-organize-audio" : "foreign destination",
+            await File.ReadAllTextAsync(scenario.Destination));
+        if (!nativeFailure)
+            Assert.Equal("verified-organize-audio", await File.ReadAllTextAsync(scenario.Destination + ".saved"));
+        Assert.Equal("verified-organize-audio", await File.ReadAllTextAsync(scenario.StagingPath));
+        Assert.Equal("verified-organize-audio", await File.ReadAllTextAsync(scenario.Source));
+        Assert.Equal(VerifiedFileRenameState.NeedsAttention, (await GetJournalAsync(scenario.OperationId)).State);
+    }
+
+    [LinuxTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PrepareAsync_FallbackPublicationFails_RollsBackTargetAndOwnedStaging(bool forceCopy)
+    {
+        var scenario = await CreateScenarioAsync();
+        var coordinator = CreateCoordinator();
+        coordinator.PublicationRenameErrorForTest = 22;
+        coordinator.ForceCopyForHardlinkForTest = forceCopy;
+        coordinator.AfterFallbackPublicationForTest = () => throw new IOException("Injected publication failure.");
+
+        var result = await coordinator.PrepareAsync(scenario.Source, scenario.Destination,
+            scenario.OperationId, scenario.BatchId, scenario.Manifest, scenario.Audiobook.Id,
+            scenario.AudiobookFile.Id, scenario.SourceProof);
+
+        Assert.False(result.Success);
+        Assert.Null(result.Lease);
+        Assert.False(File.Exists(scenario.Destination));
+        Assert.False(File.Exists(scenario.StagingPath));
+        Assert.Equal("verified-organize-audio", await File.ReadAllTextAsync(scenario.Source));
+        Assert.Equal(VerifiedFileRenameState.RolledBack, (await GetJournalAsync(scenario.OperationId)).State);
     }
 
     [LinuxTheory]
@@ -168,12 +231,15 @@ public sealed class VerifiedFileRenameTransactionCoordinatorTests : BaseTests
         Assert.Equal(VerifiedFileRenameState.RolledBack, (await GetJournalAsync(scenario.OperationId)).State);
     }
 
-    [LinuxFact]
-    public async Task PrepareAsync_FallbackStagingReplaced_DoesNotDeleteReplacement()
+    [LinuxTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PrepareAsync_FallbackStagingReplaced_DoesNotDeleteReplacement(bool forceCopy)
     {
         var scenario = await CreateScenarioAsync();
         var coordinator = CreateCoordinator();
         coordinator.PublicationRenameErrorForTest = 22;
+        coordinator.ForceCopyForHardlinkForTest = forceCopy;
         coordinator.AfterFallbackPublicationForTest = () =>
         {
             File.Move(scenario.StagingPath, scenario.StagingPath + ".saved");
@@ -187,6 +253,7 @@ public sealed class VerifiedFileRenameTransactionCoordinatorTests : BaseTests
         Assert.Equal("verified-organize-audio", await File.ReadAllTextAsync(scenario.StagingPath + ".saved"));
         Assert.Equal("verified-organize-audio", await File.ReadAllTextAsync(scenario.Source));
         Assert.False(File.Exists(scenario.Destination));
+        Assert.Equal(VerifiedFileRenameState.NeedsAttention, (await GetJournalAsync(scenario.OperationId)).State);
     }
 
     [Theory]

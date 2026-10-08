@@ -172,7 +172,8 @@ public sealed partial class VerifiedFileRenameTransactionCoordinator
         Guid operationId,
         PinnedDirectoryCreation.PinnedDirectoryAnchor? destinationParent,
         PinnedDirectoryCreation.PinnedFileEntry? targetEntry,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool stagingNeedsAttention = false)
     {
         try
         {
@@ -191,11 +192,20 @@ public sealed partial class VerifiedFileRenameTransactionCoordinator
                 }
             }
 
-            await AdvanceAsync(
-                operationId,
-                VerifiedFileRenameState.RolledBack,
-                error: null,
-                cancellationToken);
+            if (stagingNeedsAttention)
+            {
+                await MarkNeedsAttentionAsync(operationId,
+                    "Verified organize fallback staging could not be removed safely; surviving files were preserved for repair.",
+                    cancellationToken);
+            }
+            else
+            {
+                await AdvanceAsync(
+                    operationId,
+                    VerifiedFileRenameState.RolledBack,
+                    error: null,
+                    cancellationToken);
+            }
         }
         catch (Exception exception) when (exception is not (
             OperationCanceledException or OutOfMemoryException

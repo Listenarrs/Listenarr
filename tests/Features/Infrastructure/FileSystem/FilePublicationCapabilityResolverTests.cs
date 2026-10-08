@@ -331,6 +331,41 @@ public sealed class FilePublicationCapabilityResolverTests : BaseTests
         health.VerifyAll();
     }
 
+    [Fact]
+    public async Task ResolveAsync_UnverifiableHardlink_SelectsCopyWithoutCleanupAuthority()
+    {
+        var root = BuildRoot();
+        var repository = new Mock<IRootFolderRepository>();
+        repository.Setup(service => service.GetAllAsync()).ReturnsAsync([root]);
+        var health = new Mock<IRootFolderStorageHealthResolver>();
+        health.Setup(service => service.ResolveAsync(root, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(StrongWritableObservation());
+        var resolver = new FilePublicationCapabilityResolver(repository.Object, health.Object)
+        {
+            HardlinkIdentityProbe = _ => false
+        };
+
+        var plan = await resolver.ResolveAsync(FileAction.HardlinkCopy,
+            Path.Join(root.Path, "source.mp3"), Path.Join(root.Path, "target.mp3"), ContentOnlyProof());
+
+        Assert.Equal(FileAction.HardlinkCopy, plan.RequestedAction);
+        Assert.Equal(FileAction.Copy, plan.EffectiveAction);
+        Assert.Equal(FilePublicationExecutionMode.AdditiveCopyRetainSource, plan.Mode);
+        Assert.Equal(FilePublicationSourceDisposition.Retained, plan.SourceDisposition);
+        Assert.Equal("hardlink_identity_unavailable", plan.ReasonCode);
+        Assert.Equal(CompatibilityCleanupOwner.None, plan.CleanupOwner);
+    }
+
+    [Theory]
+    [InlineData(0xff534d42u, false)]
+    [InlineData(0xfe534d42u, false)]
+    [InlineData(0xef53u, true)]
+    [InlineData(0x58465342u, true)]
+    public void HardlinkIdentity_FileSystemClassification(uint type, bool supported)
+    {
+        Assert.Equal(supported, HardlinkIdentityCapability.SupportsFileSystemType(type));
+    }
+
     private RootFolder BuildRoot()
     {
         var path = FileService.GetTempDirectory("publication-capability-root");

@@ -10,6 +10,8 @@ internal sealed class FilePublicationCapabilityResolver(
     IOptions<FileMoverOptions>? options = null)
     : IFilePublicationCapabilityResolver
 {
+    internal Func<string, bool> HardlinkIdentityProbe { get; init; } = HardlinkIdentityCapability.CanVerify;
+
     public async Task<FilePublicationPlan> ResolveAsync(
         FileAction requestedAction,
         string source,
@@ -78,7 +80,10 @@ internal sealed class FilePublicationCapabilityResolver(
             }
         }
 
+        var hardlinkIdentityUnavailable = requestedAction == FileAction.HardlinkCopy
+            && !HardlinkIdentityProbe(source);
         if (destinationHealth.CanMutateFilesystem
+            && !hardlinkIdentityUnavailable
             && (requestedAction != FileAction.Move || sourceCanBeRetired))
         {
             return FilePublicationPlan.Durable(requestedAction);
@@ -106,7 +111,13 @@ internal sealed class FilePublicationCapabilityResolver(
                 requestedAction,
                 "compatibility_publication_disabled",
                 "Compatibility publication is disabled by FileMover:WeakPublicationMode.")
-            : FilePublicationPlan.Additive(requestedAction);
+            : hardlinkIdentityUnavailable
+                ? FilePublicationPlan.Additive(requestedAction) with
+                {
+                    ReasonCode = "hardlink_identity_unavailable",
+                    Message = "The file was copied and the source retained because this storage cannot reliably verify hardlink identity."
+                }
+                : FilePublicationPlan.Additive(requestedAction);
     }
 
     private static RootFolder? FindContainingRoot(

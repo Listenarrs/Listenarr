@@ -21,6 +21,8 @@ public sealed partial class VerifiedFileRenameTransactionCoordinator(
     internal int? PublicationRenameErrorForTest { get; set; }
     internal Action? BeforeFallbackPublicationForTest { get; set; }
     internal Action? AfterFallbackPublicationForTest { get; set; }
+    internal bool ForceCopyForHardlinkForTest { get; set; }
+    internal Action? AfterFallbackLinkCreatedForTest { get; set; }
 
     public async Task<VerifiedFileRenamePreparationResult> PrepareAsync(
         string source,
@@ -154,6 +156,8 @@ public sealed partial class VerifiedFileRenameTransactionCoordinator(
         PinnedDirectoryCreation.PinnedFileEntry? sourceEntry = null;
         PinnedDirectoryCreation.PinnedFileEntry? targetEntry = null;
         var journalPersisted = false;
+        var ambiguousFallbackPublication = false;
+        var fallbackStagingNeedsAttention = false;
         try
         {
             sourceParent = PinnedDirectoryCreation.OpenPinnedConfiguredHierarchy(
@@ -194,16 +198,81 @@ public sealed partial class VerifiedFileRenameTransactionCoordinator(
                 && OperatingSystem.IsLinux()
                 && publish.NativeErrorCode is 22 or 38 or 95)
             {
-                // Some network filesystems reject RENAME_NOREPLACE. linkat still
-                // publishes atomically without replacing an occupied destination.
-                // Keep both live pins until the exact staging entry is removed.
+                // Some network filesystems reject RENAME_NOREPLACE. Use linkat
+                // only where link identity can be verified; otherwise create a
+                // new destination exclusively and verify its copied contents.
                 BeforeFallbackPublicationForTest?.Invoke();
                 var stagingEntry = targetEntry;
-                targetEntry = stagingEntry.CreateHardLinkTo(destinationParent, destinationName);
-                using (stagingEntry)
+                try
                 {
+                    using var stagingHandle = stagingEntry.DuplicateHandleForOperation();
+                    if (!ForceCopyForHardlinkForTest
+                        && HardlinkIdentityCapability.CanVerify(stagingHandle))
+                    {
+                        var linkCreated = false;
+                        try
+                        {
+                            targetEntry = stagingEntry.CreateHardLinkTo(destinationParent, destinationName,
+                                () =>
+                                {
+                                    linkCreated = true;
+                                    AfterFallbackLinkCreatedForTest?.Invoke();
+                                });
+                        }
+                        catch (Exception exception) when (exception is IOException or InvalidOperationException
+                            or System.ComponentModel.Win32Exception)
+                        {
+                            // A failed identity check can follow a successful
+                            // link syscall. Keep both names for explicit repair.
+                            if (linkCreated)
+                            {
+                                ambiguousFallbackPublication = true;
+                                using var failedTarget = destinationParent.TryOpenExistingFile(
+                                    destinationName, requireDeleteAccess: false);
+                                ambiguousFallbackPublication = failedTarget != null;
+                            }
+                            throw;
+                        }
+                    }
+                    else
+                    {
+                        try
+                        {
+                            targetEntry = destinationParent.CreateNewFile(destinationName);
+                        }
+                        catch (Exception exception) when (exception is IOException or InvalidOperationException
+                            or System.ComponentModel.Win32Exception { NativeErrorCode: not 17 })
+                        {
+                            // Creation can succeed before visibility verification
+                            // fails. Without a returned pin, preserve all evidence.
+                            ambiguousFallbackPublication = true;
+                            throw;
+                        }
+                        await CopyAndVerifyAsync(stagingEntry, targetEntry, sourceProof, cancellationToken);
+                    }
                     AfterFallbackPublicationForTest?.Invoke();
                     stagingEntry.Delete(immediateWindows: true);
+                }
+                catch (Exception exception) when (exception is not (
+                    OperationCanceledException or OutOfMemoryException or StackOverflowException))
+                {
+                    if (!ReferenceEquals(stagingEntry, targetEntry))
+                    {
+                        try
+                        {
+                            stagingEntry.Delete(immediateWindows: true);
+                        }
+                        catch (Exception cleanupException) when (cleanupException is not (
+                            OperationCanceledException or OutOfMemoryException or StackOverflowException))
+                        {
+                            fallbackStagingNeedsAttention = true;
+                        }
+                    }
+                    throw;
+                }
+                finally
+                {
+                    if (!ReferenceEquals(stagingEntry, targetEntry)) stagingEntry.Dispose();
                 }
                 publish = new PinnedDirectoryCreation.PinnedRenameAttempt(true, 0);
             }
@@ -257,11 +326,21 @@ public sealed partial class VerifiedFileRenameTransactionCoordinator(
                 destinationPath);
             if (journalPersisted)
             {
-                await TryRollbackPreparedTargetAsync(
-                    operationId,
-                    destinationParent,
-                    targetEntry,
-                    CancellationToken.None);
+                if (ambiguousFallbackPublication)
+                {
+                    await MarkNeedsAttentionAsync(operationId,
+                        "Fallback publication could not verify the organize destination; source and publication files were preserved for repair.",
+                        CancellationToken.None);
+                }
+                else
+                {
+                    await TryRollbackPreparedTargetAsync(
+                        operationId,
+                        destinationParent,
+                        targetEntry,
+                        CancellationToken.None,
+                        stagingNeedsAttention: fallbackStagingNeedsAttention);
+                }
             }
             return new VerifiedFileRenamePreparationResult(
                 false,

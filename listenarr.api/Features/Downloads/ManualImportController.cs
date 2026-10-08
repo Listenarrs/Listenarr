@@ -193,7 +193,7 @@ public partial class ManualImportController : ControllerBase
 
         cancellationToken.ThrowIfCancellationRequested();
         var sourceDirectory = Path.GetFullPath(request.Path);
-        if (!_fileSystem.DirectoryExists(sourceDirectory))
+        if (request.Action != FileAction.Move && !_fileSystem.DirectoryExists(sourceDirectory))
         {
             return NotFound(new { error = "Directory not found" });
         }
@@ -213,29 +213,16 @@ public partial class ManualImportController : ControllerBase
 
         try
         {
-            // Source ordering is resolved before waiting; destination authority is refreshed under the gate.
+            // Ordinal ordering here only determines lock inputs. It grants no path
+            // equivalence or write authority; fresh items resolve semantics under the gate.
             var rootFolders = await _rootFolderService.GetAllAsync();
-            var sourceSemantics = await ResolvePathSemanticsAsync(
-                sourceDirectory,
-                rootFolders,
-                "Source filesystem identity is unavailable.",
-                cancellationToken);
             var orderedItems = ManualImportPathPlanner.BuildOrderedItems(
                 request.Items,
-                sourceSemantics.Comparer);
-            var selectedAudioProfiles = request.IncludeCompanionFiles
-                && request.Action != FileAction.None
-                ? await _companionImporter.BuildAudioMatchProfilesAsync(
-                    orderedItems
-                        .Where(item => !string.IsNullOrWhiteSpace(item.FullPath))
-                        .Select(item => item.FullPath!)
-                        .Where(FileUtils.IsAudioFile),
-                    sourceSemantics.Comparer,
-                    cancellationToken)
-                : Array.Empty<FileUtils.AudioMatchProfile>();
+                StringComparer.Ordinal);
 
             _logger.LogDebug("Manual import batch: {ItemCount} items", orderedItems.Count);
             var stoppedByCancellation = false;
+            var missingSourceDirectory = false;
 
             await ExecuteWithAudiobookLocksAsync(
                 orderedItems.Select(item => item.MatchedAudiobookId),
@@ -251,6 +238,41 @@ public partial class ManualImportController : ControllerBase
                     var consumedRecoveryOperationIds = new HashSet<Guid>();
                     var planningDestinationResolutions =
                         new Dictionary<int, FileSystemSemanticsResolution>();
+                    var recoveredItems = new Dictionary<ManualImportItemDto, ManualImportResultDto>();
+                    foreach (var item in orderedItems)
+                    {
+                        operationToken.ThrowIfCancellationRequested();
+                        // A validated exact receipt does not need case observations
+                        // from a source folder emptied by the completed Move.
+                        var recovered = await TryConsumeRecoveredManualImportAsync(
+                            item, request.Action, null, recoveryReceipts,
+                            consumedRecoveryOperationIds, destinationTracker,
+                            rootFolders, operationToken);
+                        if (recovered != null) recoveredItems.Add(item, recovered);
+                    }
+                    var freshItems = orderedItems.Where(item => !recoveredItems.ContainsKey(item)).ToList();
+                    FileSystemPathSemantics? sourceSemantics = null;
+                    IReadOnlyCollection<FileUtils.AudioMatchProfile> selectedAudioProfiles = Array.Empty<FileUtils.AudioMatchProfile>();
+                    if (freshItems.Count > 0)
+                    {
+                        if (!_fileSystem.DirectoryExists(sourceDirectory))
+                        {
+                            missingSourceDirectory = true;
+                            return;
+                        }
+                        sourceSemantics = await ResolvePathSemanticsAsync(
+                            sourceDirectory, rootFolders,
+                            "Source filesystem identity is unavailable.", operationToken);
+                        orderedItems = ManualImportPathPlanner.BuildOrderedItems(request.Items, sourceSemantics.Value.Comparer);
+                        if (request.IncludeCompanionFiles && request.Action != FileAction.None)
+                        {
+                            selectedAudioProfiles = await _companionImporter.BuildAudioMatchProfilesAsync(
+                                freshItems.Where(item => !string.IsNullOrWhiteSpace(item.FullPath))
+                                    .Select(item => item.FullPath!).Where(FileUtils.IsAudioFile),
+                                sourceSemantics.Value.Comparer, operationToken);
+                        }
+                    }
+                    var freshResults = new List<ManualImportResultDto>();
                     try
                     {
                         foreach (var item in orderedItems)
@@ -264,7 +286,8 @@ public partial class ManualImportController : ControllerBase
                                 item.FullPath,
                                 item.MatchedAudiobookId,
                                 fileCount);
-                            var recoveredResult = await TryConsumeRecoveredManualImportAsync(
+                            var recoveredResult = recoveredItems.GetValueOrDefault(item)
+                                ?? await TryConsumeRecoveredManualImportAsync(
                                 item,
                                 request.Action,
                                 sourceSemantics,
@@ -288,7 +311,7 @@ public partial class ManualImportController : ControllerBase
                                 item,
                                 request.Action,
                                 sourceDirectory,
-                                sourceSemantics,
+                                sourceSemantics!.Value,
                                 destinationTracker,
                                 planningBasePaths,
                                 planningDestinationResolutions,
@@ -304,10 +327,11 @@ public partial class ManualImportController : ControllerBase
                                 result.DestinationPath,
                                 result.Error);
                             results.Add(result);
+                            freshResults.Add(result);
                         }
 
                         var companionPassSucceeded = true;
-                        if (request.IncludeCompanionFiles && request.Action != FileAction.None)
+                        if (freshResults.Count > 0 && request.IncludeCompanionFiles && request.Action != FileAction.None)
                         {
                             var companionPass = await _companionImporter.ImportWithOutcomeAsync(
                                 request.Action,
@@ -316,7 +340,7 @@ public partial class ManualImportController : ControllerBase
                                 sourceDirectory,
                                 selectedAudioProfiles,
                                 destinationTracker,
-                                sourceSemantics,
+                                sourceSemantics!.Value,
                                 planningDestinationResolutions,
                                 appSettings.ImportBlacklistExtensions,
                                 compatibilityBatchId,
@@ -340,7 +364,7 @@ public partial class ManualImportController : ControllerBase
                             ApplyCompatibilityCleanupResult(results, cleanup);
                         }
 
-                        if (request.Action != FileAction.None
+                        if (freshResults.Count > 0 && request.Action != FileAction.None
                             && request.CleanupEmptySourceFolders)
                         {
                             operationToken.ThrowIfCancellationRequested();
@@ -383,6 +407,7 @@ public partial class ManualImportController : ControllerBase
                 },
                 cancellationToken);
 
+            if (missingSourceDirectory) return NotFound(new { error = "Directory not found" });
             var successCount = results.Count(r => r.Success);
             _logger.LogInformation("Manual import batch completed: {SuccessCount}/{TotalCount} succeeded, usedDestinations: {DestinationCount}", successCount, results.Count, destinationTracker.Count);
             return Ok(new

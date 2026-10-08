@@ -1,5 +1,6 @@
 using Listenarr.Api.Dtos.ManualImport;
 using Listenarr.Tests.Common;
+using Listenarr.Tests.Builders;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using System.Data.Common;
@@ -29,14 +30,31 @@ public sealed class ManualImportMarkerlessRegistrationTests : BaseTests
     }
 
     [Theory]
-    [InlineData(FileAction.Move)]
-    [InlineData(FileAction.Copy)]
-    [InlineData(FileAction.HardlinkCopy)]
-    public async Task Start_JournalBackedAsinImport_DefersEnrichmentAndRetryConsumesOriginalReceipt(FileAction action)
+    [InlineData(FileAction.Move, false, false, false)]
+    [InlineData(FileAction.Copy, false, false, false)]
+    [InlineData(FileAction.HardlinkCopy, false, false, false)]
+    [InlineData(FileAction.Move, true, false, false)]
+    [InlineData(FileAction.Move, true, true, false)]
+    [InlineData(FileAction.Move, true, false, true)]
+    public async Task Start_JournalBackedAsinImport_DefersEnrichmentAndRetryConsumesOriginalReceipt(
+        FileAction action, bool unavailableEmptySourceSemantics, bool removeEmptySource, bool replaceDestination)
     {
         var outputRoot = FileService.GetTempDirectory("manual-journal-asin-output");
         var sourceRoot = FileService.GetTempDirectory("manual-journal-asin-source");
         var source = await FileService.GetFileAsync(sourceRoot, "incoming.mp3", "original-audio");
+        if (unavailableEmptySourceSemantics)
+        {
+            var originalResolver = _provider.GetRequiredService<IFileSystemSemanticsResolver>();
+            var resolver = new Mock<IFileSystemSemanticsResolver>();
+            resolver.Setup(service => service.ResolveAsync(It.IsAny<string>(),
+                    It.IsAny<FileSystemCaseSensitivityMode>(), It.IsAny<CancellationToken>()))
+                .Returns((string path, FileSystemCaseSensitivityMode mode, CancellationToken token) =>
+                    path == sourceRoot && (!Directory.Exists(sourceRoot) || !Directory.EnumerateFileSystemEntries(sourceRoot).Any())
+                        ? ValueTask.FromResult(new FileSystemSemanticsResolution(
+                            default, PathIdentityState.Unavailable, path, "Empty source case rules unavailable."))
+                        : originalResolver.ResolveAsync(path, mode, token));
+            Init(builder => builder.WithSingleton(_metadata.Object).WithSingleton(resolver.Object));
+        }
         await AddAuthorizedRootAsync(outputRoot);
         var settings = await _applicationSettingsRepository.GetAsync() ?? new ApplicationSettings();
         settings.OutputPath = outputRoot;
@@ -68,16 +86,78 @@ public sealed class ManualImportMarkerlessRegistrationTests : BaseTests
         Assert.Equal(1, firstPayload.GetProperty("importedCount").GetInt32());
         Assert.Contains("ASIN tagging was deferred", firstPayload.GetProperty("results")[0]
             .GetProperty("Warning").GetString());
-        var second = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>((await
-            ActivatorUtilities.CreateInstance<ManualImportController>(_provider).Start(request)).Result);
-        Assert.Equal(1, System.Text.Json.JsonSerializer.SerializeToElement(second.Value)
-            .GetProperty("importedCount").GetInt32());
-        var tracked = Assert.Single(await _audiobookFileRepository.GetByAudiobookIdAsync(book.Id));
-        Assert.Equal("original-audio", await File.ReadAllTextAsync(tracked.Path!));
+        if (removeEmptySource) Directory.Delete(sourceRoot);
+        if (replaceDestination)
+        {
+            var original = Assert.Single(await _audiobookFileRepository.GetByAudiobookIdAsync(book.Id));
+            await File.WriteAllTextAsync(original.Path!, "replacement-content");
+            var refused = (await ActivatorUtilities.CreateInstance<ManualImportController>(_provider).Start(request)).Result;
+            Assert.False(refused is Microsoft.AspNetCore.Mvc.OkObjectResult ok
+                && System.Text.Json.JsonSerializer.SerializeToElement(ok.Value).GetProperty("importedCount").GetInt32() > 0);
+            Assert.Equal("replacement-content", await File.ReadAllTextAsync(original.Path!));
+            Assert.Single(await _audiobookFileRepository.GetByAudiobookIdAsync(book.Id));
+        }
+        else
+        {
+            var second = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>((await
+                ActivatorUtilities.CreateInstance<ManualImportController>(_provider).Start(request)).Result);
+            Assert.Equal(1, System.Text.Json.JsonSerializer.SerializeToElement(second.Value)
+                .GetProperty("importedCount").GetInt32());
+            var tracked = Assert.Single(await _audiobookFileRepository.GetByAudiobookIdAsync(book.Id));
+            Assert.Equal("original-audio", await File.ReadAllTextAsync(tracked.Path!));
+        }
         Assert.Single(Directory.GetFiles(outputRoot, "*.mp3", SearchOption.AllDirectories));
         _metadata.Verify(service => service.WriteAsinTagAsync(
             It.IsAny<IAudiobookFileRegistrationLease>(), book.Asin), Times.Never);
     }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Start_CompletedMoveAndNewItem_RecoversOneAndPublishesOnlyNewSource(bool differentAudiobook)
+    {
+        var output = FileService.GetTempDirectory("mixed-retry-output");
+        var source = FileService.GetTempDirectory("mixed-retry-source");
+        await AddAuthorizedRootAsync(output);
+        var settings = await _applicationSettingsRepository.GetAsync() ?? new ApplicationSettings();
+        settings.OutputPath = output;
+        settings.FolderNamingPattern = "";
+        settings.FileNamingPattern = "{Title}";
+        settings.MultiFileNamingPattern = "{Title}-{DiskNumber:00}";
+        settings.EnableMetadataProcessing = false;
+        await _applicationSettingsRepository.SaveAsync(settings);
+        var book = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+            .WithTitle("Mixed Retry").WithBasePath(output).Build());
+        var firstSource = await FileService.GetFileAsync(source, "Part 1.mp3", "first-audio");
+        var request = new ManualImportRequestDto
+        {
+            Path = source,
+            Action = FileAction.Move,
+            Mode = "interactive",
+            IncludeCompanionFiles = true,
+            Items = [new ManualImportItemDto { FullPath = firstSource, MatchedAudiobookId = book.Id }]
+        };
+        var controller = ActivatorUtilities.CreateInstance<ManualImportController>(_provider);
+        Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>((await controller.Start(request)).Result);
+        var original = Assert.Single(await _audiobookFileRepository.GetByAudiobookIdAsync(book.Id));
+        var nextSource = await FileService.GetFileAsync(source, "Part 2.mp3", "second-audio");
+        var nextBook = differentAudiobook
+            ? await _audiobookRepository.AddAsync(new AudiobookBuilder().WithTitle("Different Book").WithBasePath(output).Build())
+            : book;
+        var companion = await FileService.GetFileAsync(source, "metadata.json", "companion");
+        request.Items.Add(new ManualImportItemDto { FullPath = nextSource, MatchedAudiobookId = nextBook.Id });
+
+        var response = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>((await controller.Start(request)).Result);
+        Assert.Equal(2, System.Text.Json.JsonSerializer.SerializeToElement(response.Value).GetProperty("importedCount").GetInt32());
+        var registered = (await _audiobookFileRepository.GetByAudiobookIdAsync(book.Id)).ToList();
+        if (differentAudiobook) registered.AddRange(await _audiobookFileRepository.GetByAudiobookIdAsync(nextBook.Id));
+        Assert.Equal(2, registered.Count);
+        Assert.Contains(registered, file => file.Id == original.Id && file.Path == original.Path);
+        Assert.Equal("first-audio", await File.ReadAllTextAsync(original.Path!));
+        Assert.Equal("second-audio", await File.ReadAllTextAsync(Assert.Single(registered, file => file.Id != original.Id).Path!));
+        Assert.Equal(differentAudiobook, File.Exists(companion));
+        Assert.Equal(!differentAudiobook, File.Exists(Path.Join(output, "metadata.json")));
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]

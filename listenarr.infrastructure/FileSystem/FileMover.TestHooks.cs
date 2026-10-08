@@ -2,6 +2,7 @@ namespace Listenarr.Infrastructure.FileSystem;
 
 public partial class FileMover
 {
+    internal bool ForceCopyForHardlinkForTest { get; init; }
     internal Func<string, string, Task>? AfterFileMoveEndpointsResolvedForTestAsync
     {
         get;
