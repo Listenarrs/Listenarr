@@ -188,7 +188,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                 }
 
                 searchQuery = candidate;
-                searchResults = await searchService.SearchAsync(candidate, isAutomaticSearch: true);
+                searchResults = await searchService.SearchAsync(candidate, SearchQueryFallbacks.RetryCategory, isAutomaticSearch: true);
             }
             _logger.LogInformation("Found {Count} raw search results for audiobook '{Title}'", searchResults.Count, audiobook.Title);
 

@@ -14,6 +14,10 @@ namespace Listenarr.Application.Downloads.Queue
 {
     public static partial class SearchQueryFallbacks
     {
+        // Retries drop the author, so we search only the Newznab audiobook category to keep a
+        // bare title such as "Ghosts" from matching music or video releases.
+        public const string RetryCategory = "3030";
+
         [GeneratedRegex(@"\s*[\(\[][^\)\]]*[\)\]]", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
         private static partial Regex EditionSuffix();
 
