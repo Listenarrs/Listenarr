@@ -152,5 +152,3 @@ public sealed class DockerSameFilesystemImportContractTests : BaseTests
         }
     }
 }
-
-
