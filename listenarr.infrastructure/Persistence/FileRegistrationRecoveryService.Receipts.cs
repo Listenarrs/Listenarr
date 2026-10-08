@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using Listenarr.Domain.Audiobooks.Enumerations;
 using Microsoft.EntityFrameworkCore;
 
@@ -53,7 +52,8 @@ public sealed partial class FileRegistrationRecoveryService
                     RegisteredPathMatches(file, journal.DestinationPath))
                 .ToList();
             if (matchingFiles.Count != 1
-                || !CompletedReceiptTargetIsStillPublished(journal))
+                || await ProbeRestartedPublicationTargetAsync(journal, cancellationToken)
+                    != RestartTargetProbe.Match)
             {
                 continue;
             }
@@ -69,64 +69,6 @@ public sealed partial class FileRegistrationRecoveryService
                 SourceLength: sourceRetained ? journal.SourceLength : null,
                 SourceSha256: sourceRetained ? journal.SourceSha256 : null));
             includedOperationIds.Add(journal.OperationId);
-        }
-    }
-
-    private static bool CompletedReceiptTargetIsStillPublished(
-        FileMutationJournal journal)
-    {
-        try
-        {
-            var parentPath = Path.GetDirectoryName(journal.DestinationPath);
-            var fileName = Path.GetFileName(journal.DestinationPath);
-            if (string.IsNullOrWhiteSpace(parentPath)
-                || string.IsNullOrWhiteSpace(fileName)
-                || string.IsNullOrWhiteSpace(journal.SourceSha256))
-            {
-                return false;
-            }
-
-            using var parent =
-                PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
-                    parentPath,
-                    createMissing: false);
-            using var file = parent.TryOpenExistingFile(
-                fileName,
-                requireDeleteAccess: false);
-            if (file == null
-                || !parent.VisiblePathMatches()
-                || !file.VisiblePathMatches()
-                || !file.IsRegularFile())
-            {
-                return false;
-            }
-
-            using var stream = file.OpenReadStream(
-                bufferSize: 81920,
-                asynchronous: false);
-            if (stream.Length != journal.SourceLength)
-            {
-                return false;
-            }
-
-            stream.Position = 0;
-            var hash = Convert.ToHexString(SHA256.HashData(stream));
-            return file.VisiblePathMatches()
-                && parent.VisiblePathMatches()
-                && string.Equals(
-                    hash,
-                    journal.SourceSha256,
-                    StringComparison.OrdinalIgnoreCase);
-        }
-        catch (Exception exception) when (exception is
-            FileNotFoundException or DirectoryNotFoundException
-                or IOException or UnauthorizedAccessException
-                or ArgumentException or InvalidOperationException or NotSupportedException
-                or PlatformNotSupportedException or PathTooLongException
-                or System.ComponentModel.Win32Exception
-                or System.Security.SecurityException)
-        {
-            return false;
         }
     }
 

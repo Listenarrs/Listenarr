@@ -10,11 +10,14 @@ namespace Listenarr.Tests.Features.Infrastructure.Persistence;
 public sealed class FileRegistrationLinkedRootRecoveryTests : BaseTests
 {
     [DirectoryLinkTheory]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
+    [InlineData(false, false, FileMutationJournalState.RegistrationCommitted)]
+    [InlineData(true, false, FileMutationJournalState.RegistrationCommitted)]
+    [InlineData(false, true, FileMutationJournalState.RegistrationCommitted)]
+    [InlineData(false, false, FileMutationJournalState.CompletedSourceRetained)]
+    [InlineData(true, false, FileMutationJournalState.CompletedSourceRetained)]
+    [InlineData(false, true, FileMutationJournalState.CompletedSourceRetained)]
     public async Task ReconcileAsync_LinkedConfiguredBoundary_VerifiesOnlyAuthorizedDescendants(
-        bool linkedDescendant, bool unavailableNestedRoot)
+        bool linkedDescendant, bool unavailableNestedRoot, FileMutationJournalState initialState)
     {
         var directory = FileService.GetTempDirectory("registration-linked-root-restart");
         var physical = Directory.CreateDirectory(Path.Join(directory, "physical")).FullName;
@@ -62,7 +65,7 @@ public sealed class FileRegistrationLinkedRootRecoveryTests : BaseTests
                 DestinationPath = destination,
                 SourceLength = 5,
                 SourceSha256 = Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(source))),
-                State = FileMutationJournalState.RegistrationCommitted,
+                State = initialState,
                 AudiobookId = audiobook.Id
             });
             await db.SaveChangesAsync();
@@ -75,12 +78,27 @@ public sealed class FileRegistrationLinkedRootRecoveryTests : BaseTests
             await recovery.ReconcileAsync();
             await using var db = await factory.CreateDbContextAsync();
             var journal = await db.FileMutationJournals.AsNoTracking().SingleAsync();
-            Assert.Equal(unavailableNestedRoot ? FileMutationJournalState.RegistrationCommitted
+            Assert.Equal(initialState == FileMutationJournalState.CompletedSourceRetained ? initialState
+                : unavailableNestedRoot ? FileMutationJournalState.RegistrationCommitted
                 : linkedDescendant ? FileMutationJournalState.NeedsAttention
                 : FileMutationJournalState.CompletedSourceRetained, journal.State);
             Assert.Equal(destination, (await db.AudiobookFiles.AsNoTracking().SingleAsync()).Path);
             Assert.Equal("audio", await File.ReadAllTextAsync(source));
             Assert.Equal("audio", await File.ReadAllTextAsync(destination));
+            if (initialState == FileMutationJournalState.CompletedSourceRetained
+                || (!linkedDescendant && !unavailableNestedRoot))
+            {
+                var receipts = await recovery.ReconcileAudiobookWithReceiptsAsync(
+                    journal.AudiobookId!.Value, [source]);
+                if (linkedDescendant || unavailableNestedRoot)
+                    Assert.Empty(receipts);
+                else
+                {
+                    var receipt = Assert.Single(receipts);
+                    Assert.Equal(destination, receipt.DestinationPath);
+                    Assert.True(receipt.SourceRetained);
+                }
+            }
         }
     }
 }
