@@ -42,6 +42,7 @@ namespace Listenarr.Api.Features.Library
         bool CanMutateFilesystem,
         bool CanRetireSource,
         bool CanRetireAfterVerifiedCopy,
+        // Legacy values retained in the response contract; not deletion authority.
         string WeakStorageSourceCleanupPolicy,
         int WeakStoragePolicyRevision,
         string? ConfirmationToken,
@@ -67,6 +68,7 @@ namespace Listenarr.Api.Features.Library
         string ExpectedCurrentPath,
         string ConfirmationToken);
 
+    /// <summary>Legacy setting update; does not grant or revoke source deletion.</summary>
     public sealed record RootFolderWeakStoragePolicyRequest(
         WeakStorageSourceCleanupPolicy Policy,
         int ExpectedRevision);

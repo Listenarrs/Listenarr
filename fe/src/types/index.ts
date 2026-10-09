@@ -332,7 +332,9 @@ export interface RootFolder {
   canMutateFilesystem?: boolean
   canRetireSource?: boolean
   canRetireAfterVerifiedCopy?: boolean
+  /** @deprecated Compatibility value only; use current storage capability fields. */
   weakStorageSourceCleanupPolicy?: 'RetainSource' | 'DeleteSourceAfterVerifiedCopy'
+  /** @deprecated Revision of the legacy setting; does not authorize source deletion. */
   weakStoragePolicyRevision?: number
   confirmationToken?: string | null
   activeRelocation?: RootFolderPathChangeResult | null

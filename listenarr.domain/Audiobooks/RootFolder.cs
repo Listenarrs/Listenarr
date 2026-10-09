@@ -62,6 +62,7 @@ namespace Listenarr.Domain.Audiobooks
 
         public DateTime? UpdatedAt { get; set; }
 
+        // Persisted for upgrade/API compatibility; not used to authorize source deletion.
         public WeakStorageSourceCleanupPolicy WeakStorageSourceCleanupPolicy { get; set; } =
             WeakStorageSourceCleanupPolicy.RetainSource;
 

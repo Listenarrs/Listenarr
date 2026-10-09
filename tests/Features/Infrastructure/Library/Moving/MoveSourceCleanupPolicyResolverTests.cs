@@ -7,8 +7,11 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving;
 [Trait("Category", "Infrastructure")]
 public sealed class MoveSourceCleanupPolicyResolverTests : BaseTests
 {
-    [Fact]
-    public async Task ResolveAsync_BothManagedRootsEnabled_AuthorizesVerifiedDeletion()
+    [Theory]
+    [InlineData(WeakStorageSourceCleanupPolicy.RetainSource)]
+    [InlineData(WeakStorageSourceCleanupPolicy.DeleteSourceAfterVerifiedCopy)]
+    public async Task ResolveAsync_HealthyManagedRoots_AuthorizesRegardlessOfLegacyPolicy(
+        WeakStorageSourceCleanupPolicy legacyPolicy)
     {
         var sourcePath = FileService.GetTempDirectory("move-policy-source");
         var targetPath = FileService.GetTempDirectory("move-policy-target");
@@ -20,7 +23,7 @@ public sealed class MoveSourceCleanupPolicyResolverTests : BaseTests
             targetPath,
             "Target",
             FileSystemCaseSensitivityMode.Sensitive);
-        await EnablePolicyAsync(sourceRoot.Id, targetRoot.Id);
+        await SetLegacyPolicyAsync(legacyPolicy, sourceRoot.Id, targetRoot.Id);
         var resolver = _provider.GetRequiredService<IMoveSourceCleanupPolicyResolver>();
 
         var authorization = await resolver.ResolveAsync(
@@ -35,7 +38,7 @@ public sealed class MoveSourceCleanupPolicyResolverTests : BaseTests
     }
 
     [Fact]
-    public async Task IsCurrentAsync_LegacyPolicyRevisionChanged_DoesNotRevokeCurrentCapability()
+    public async Task IsCurrentAsync_LegacyPolicyChanged_DoesNotRevokeCurrentCapability()
     {
         var sourcePath = FileService.GetTempDirectory("move-policy-drift-source");
         var targetPath = FileService.GetTempDirectory("move-policy-drift-target");
@@ -47,7 +50,6 @@ public sealed class MoveSourceCleanupPolicyResolverTests : BaseTests
             targetPath,
             "Target",
             FileSystemCaseSensitivityMode.Sensitive);
-        await EnablePolicyAsync(sourceRoot.Id, targetRoot.Id);
         var resolver = _provider.GetRequiredService<IMoveSourceCleanupPolicyResolver>();
         var authorization = await resolver.ResolveAsync(sourcePath, targetPath);
 
@@ -56,6 +58,8 @@ public sealed class MoveSourceCleanupPolicyResolverTests : BaseTests
             .CreateDbContextAsync())
         {
             var target = await db.RootFolders.SingleAsync(root => root.Id == targetRoot.Id);
+            target.WeakStorageSourceCleanupPolicy =
+                WeakStorageSourceCleanupPolicy.DeleteSourceAfterVerifiedCopy;
             target.WeakStoragePolicyRevision++;
             await db.SaveChangesAsync();
         }
@@ -76,7 +80,6 @@ public sealed class MoveSourceCleanupPolicyResolverTests : BaseTests
             targetPath,
             "Target",
             FileSystemCaseSensitivityMode.Sensitive);
-        await EnablePolicyAsync(sourceRoot.Id, targetRoot.Id);
         var resolver = _provider.GetRequiredService<IMoveSourceCleanupPolicyResolver>();
         var authorization = await resolver.ResolveAsync(sourcePath, targetPath);
 
@@ -105,7 +108,6 @@ public sealed class MoveSourceCleanupPolicyResolverTests : BaseTests
             targetPath,
             "Target",
             FileSystemCaseSensitivityMode.Sensitive);
-        await EnablePolicyAsync(sourceRoot.Id, targetRoot.Id);
         var health = new Mock<IRootFolderStorageHealthResolver>(MockBehavior.Strict);
         health.Setup(resolver => resolver.ResolveAsync(
                 It.Is<RootFolder>(root => root.Id == targetRoot.Id),
@@ -191,7 +193,6 @@ public sealed class MoveSourceCleanupPolicyResolverTests : BaseTests
             targetPath,
             "Target",
             FileSystemCaseSensitivityMode.Sensitive);
-        await EnablePolicyAsync(sourceRoot.Id, targetRoot.Id);
         var health = new Mock<IRootFolderStorageHealthResolver>(MockBehavior.Strict);
         health.Setup(resolver => resolver.ResolveAsync(
                 It.Is<RootFolder>(root => root.Id == targetRoot.Id),
@@ -233,7 +234,6 @@ public sealed class MoveSourceCleanupPolicyResolverTests : BaseTests
             targetPath,
             "Target",
             FileSystemCaseSensitivityMode.Sensitive);
-        await EnablePolicyAsync(sourceRoot.Id, targetRoot.Id);
         var health = new Mock<IRootFolderStorageHealthResolver>(MockBehavior.Strict);
         health.Setup(resolver => resolver.ResolveAsync(
                 It.Is<RootFolder>(root => root.Id == targetRoot.Id),
@@ -272,7 +272,6 @@ public sealed class MoveSourceCleanupPolicyResolverTests : BaseTests
         await File.WriteAllTextAsync(Path.Join(source, "source.m4b"), "source");
         await File.WriteAllTextAsync(Path.Join(foreign, "foreign.m4b"), "foreign");
         var configured = await AddAuthorizedRootAsync(linked, "Linked Policy Root", FileSystemCaseSensitivityMode.Sensitive);
-        await EnablePolicyAsync(configured.Id);
         if (linkedDescendant) Directory.CreateSymbolicLink(Path.Join(linked, "Destination"), foreign);
         var resolver = _provider.GetRequiredService<IMoveSourceCleanupPolicyResolver>();
 
@@ -304,7 +303,8 @@ public sealed class MoveSourceCleanupPolicyResolverTests : BaseTests
             CanMutateFilesystem: true,
             ConfirmationToken: null);
 
-    private async Task EnablePolicyAsync(params int[] rootFolderIds)
+    private async Task SetLegacyPolicyAsync(
+        WeakStorageSourceCleanupPolicy policy, params int[] rootFolderIds)
     {
         await using var db = await _provider
             .GetRequiredService<IDbContextFactory<ListenArrDbContext>>()
@@ -314,8 +314,7 @@ public sealed class MoveSourceCleanupPolicyResolverTests : BaseTests
             .ToListAsync();
         foreach (var root in roots)
         {
-            root.WeakStorageSourceCleanupPolicy =
-                WeakStorageSourceCleanupPolicy.DeleteSourceAfterVerifiedCopy;
+            root.WeakStorageSourceCleanupPolicy = policy;
             root.WeakStoragePolicyRevision = 1;
         }
         await db.SaveChangesAsync();

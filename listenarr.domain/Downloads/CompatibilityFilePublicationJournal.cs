@@ -57,9 +57,11 @@ public sealed class CompatibilityFilePublicationJournal
     public CompatibilityCleanupOwner CleanupOwner { get; set; } =
         CompatibilityCleanupOwner.None;
     public int? SourceRootFolderId { get; set; }
+    // Legacy revisions remain part of persisted claim matching, not cleanup authority.
     public int? SourcePolicyRevision { get; set; }
     public int? SourceStorageContractRevision { get; set; }
     public int? DestinationRootFolderId { get; set; }
+    // Current cleanup authority uses storage-contract revisions and live evidence.
     public int? DestinationPolicyRevision { get; set; }
     public int? DestinationStorageContractRevision { get; set; }
     public int? ExpectedBatchMemberCount { get; set; }

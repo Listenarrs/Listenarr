@@ -152,9 +152,11 @@ namespace Listenarr.Domain.Audiobooks
             MoveSourceCleanupMode.RetainSource;
         public bool ForceCopyAndRetainSource { get; set; }
         public int? SourceRootFolderId { get; set; }
+        // Legacy revision retained for persisted execution-contract compatibility.
         public int? SourcePolicyRevision { get; set; }
         public int? SourceStorageContractRevision { get; set; }
         public int? TargetRootFolderId { get; set; }
+        // Current cleanup authority uses storage-contract revisions and live evidence.
         public int? TargetPolicyRevision { get; set; }
         public int? TargetStorageContractRevision { get; set; }
         public ICollection<MoveJobEntry> Entries { get; set; } = new List<MoveJobEntry>();
