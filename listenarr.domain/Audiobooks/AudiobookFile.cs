@@ -162,6 +162,14 @@ namespace Listenarr.Domain.Audiobooks
         // Size in bytes
         public long? Size { get; set; }
 
+        /// <summary>
+        /// The size a Linux registration recorded before file registration
+        /// read the file behind the lease's /proc/self/fd metadata path: an
+        /// lstat of that magic link, a constant 64. A stored size equal to
+        /// this is treated as unknown and re-read.
+        /// </summary>
+        public const long ProcLinkLstatSize = 64;
+
         // Duration in seconds
         public double? DurationSeconds { get; set; }
 

@@ -30,7 +30,10 @@ public sealed class AudiobookFileServiceMetadataRefreshTests : BaseTests
             Assert.Equal(file.PhysicalIdentityVersion, persisted.PhysicalIdentityVersion);
             Assert.Equal(file.PhysicalIdentityObservedAtUtc, persisted.PhysicalIdentityObservedAtUtc);
             Assert.Equal(file.Source, persisted.Source);
-            Assert.Equal(file.Size, persisted.Size);
+            // The size is metadata, re-read from the lease along with the rest:
+            // the fixture's sentinel (what a proc-link lstat recorded) is replaced
+            // by the file's real length.
+            Assert.Equal("metadata test audio".Length, persisted.Size);
             Assert.Equal(222, persisted.DurationSeconds);
             Assert.Equal("refreshed-format", persisted.Format);
             Assert.Equal(48000, persisted.SampleRate);
@@ -313,6 +316,7 @@ public sealed class AudiobookFileServiceMetadataRefreshTests : BaseTests
         file.Codec = "existing-codec";
         file.Bitrate = 64000;
         file.Channels = 2;
+        file.Size = AudiobookFile.ProcLinkLstatSize;
         if (physicalIdentity != null)
         {
             file.ApplyPhysicalObjectIdentity(physicalIdentity, DateTime.UtcNow);

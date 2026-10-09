@@ -120,6 +120,48 @@ public sealed class EfAudiobookFileRepositoryTests : BaseTests
     }
 
     [Fact]
+    public async Task GetMissingMetadataAsync_ProcLinkSentinelOrMissingSize_IsACandidate()
+    {
+        // Rows registered on Linux before the proc-fd size fix carry Size = 64
+        // with otherwise complete metadata; the rescan job must pick them up so
+        // the metadata-only refresh re-reads the real length.
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        var library = OperatingSystem.IsWindows() ? "C:\\library" : "/library";
+        var separator = OperatingSystem.IsWindows() ? "\\" : "/";
+
+        await using var context = new ListenArrDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        var audiobook = new Audiobook { Title = "Sizes" };
+        context.Audiobooks.Add(audiobook);
+        AudiobookFile Complete(string name, long? size)
+        {
+            var file = AudiobookFile.CreateUnresolved($"{library}{separator}{name}.m4b");
+            file.Audiobook = audiobook;
+            file.DurationSeconds = 1234;
+            file.Format = "m4b";
+            file.SampleRate = 44100;
+            file.Size = size;
+            return file;
+        }
+        var sentinel = Complete("sentinel", AudiobookFile.ProcLinkLstatSize);
+        var missing = Complete("missing", null);
+        var correct = Complete("correct", 123_456_789);
+        context.AudiobookFiles.AddRange(sentinel, missing, correct);
+        await context.SaveChangesAsync();
+
+        var repository = new EfAudiobookFileRepository(context);
+        var candidates = await repository.GetMissingMetadataAsync(10);
+
+        Assert.Equal(
+            new[] { sentinel.Id, missing.Id },
+            candidates.Select(file => file.Id).OrderBy(id => id));
+    }
+
+    [Fact]
     public async Task GetMissingMetadataAsync_RelativeRowsUnderForeignBase_DoNotStarveHostRows()
     {
         var options = new DbContextOptionsBuilder<ListenArrDbContext>()

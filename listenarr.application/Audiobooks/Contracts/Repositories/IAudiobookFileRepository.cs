@@ -75,11 +75,14 @@ namespace Listenarr.Application.Audiobooks.Contracts.Repositories
         Task UpdateAsync(AudiobookFile file, CancellationToken ct = default);
         /// <summary>
         /// Update metadata only if the complete tracked ownership snapshot and base path still match.
-        /// Identity and ownership fields are never written by this operation.
+        /// Identity and ownership fields are never written by this operation. <paramref name="size"/>
+        /// is the byte length read from the same handle the metadata came from; null leaves the
+        /// stored size alone.
         /// </summary>
         Task<bool> RefreshMetadataAsync(
             AudiobookFileMetadataRefreshSnapshot expectedFile,
             AudioMetadata metadata,
+            long? size,
             CancellationToken ct = default);
         Task<bool> ReconcilePathIdentityAsync(
             int fileId,
