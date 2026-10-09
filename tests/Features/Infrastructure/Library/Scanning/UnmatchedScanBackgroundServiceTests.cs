@@ -284,14 +284,18 @@ public sealed class UnmatchedScanBackgroundServiceTests : BaseTests
         }
         else
         {
-            update.Callback<Guid, string, List<UnmatchedFileResult>?, string?>(
-                (_, status, results, error) =>
+            update.Callback<Guid, string, List<UnmatchedFileResult>?, string?, List<string>?>(
+                (_, status, results, error, warnings) =>
                 {
                     failedJob.Status = status;
                     failedJob.Error = error;
                     if (results != null)
                     {
                         failedJob.Results = results;
+                    }
+                    if (warnings != null)
+                    {
+                        failedJob.Warnings = warnings;
                     }
                 });
         }

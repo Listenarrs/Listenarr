@@ -28,7 +28,6 @@ public sealed class LibraryScanQueueWorkflowTests : BaseTests
                 new Audiobook { Id = 4400, Title = "Blocked scan" },
                 requestedPath: null,
                 pathIdentity: null,
-                physicalIdentity: null,
                 isAuthoritativeScope: true));
 
         Assert.Equal("filesystem_initializing", exception.Code);
@@ -55,7 +54,6 @@ public sealed class LibraryScanQueueWorkflowTests : BaseTests
             new Audiobook { Id = 4401, Title = "Queued scan" },
             requestedPath: null,
             pathIdentity: null,
-            physicalIdentity: null,
             isAuthoritativeScope: true);
 
         var accepted = Assert.IsType<AcceptedResult>(result);

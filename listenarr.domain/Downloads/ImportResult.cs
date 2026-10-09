@@ -112,12 +112,18 @@ namespace Listenarr.Domain.Downloads
             };
         }
 
-        public static ImportResult Skipped(string message)
+        public static ImportResult Skipped(
+            string message,
+            string? sourcePath = null)
         {
             return new ImportResult
             {
                 Success = true,
-                Message = message
+                Message = message,
+                SourcePath = sourcePath,
+                SourceDisposition = string.IsNullOrWhiteSpace(sourcePath)
+                    ? ImportSourceDisposition.Unchanged
+                    : ImportSourceDisposition.Retained
             };
         }
     }

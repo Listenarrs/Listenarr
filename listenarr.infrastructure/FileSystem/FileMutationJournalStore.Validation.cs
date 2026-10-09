@@ -14,12 +14,6 @@ internal sealed partial class EfFileMutationJournalStore
         }
         ArgumentException.ThrowIfNullOrWhiteSpace(claim.SourcePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(claim.DestinationPath);
-        ArgumentException.ThrowIfNullOrWhiteSpace(
-            claim.SourceParentDirectoryObjectIdentity);
-        ArgumentException.ThrowIfNullOrWhiteSpace(
-            claim.DestinationParentDirectoryObjectIdentity);
-        ArgumentException.ThrowIfNullOrWhiteSpace(
-            claim.SourcePhysicalObjectIdentity);
         if (claim.SourceLength < 0)
         {
             throw new ArgumentOutOfRangeException(nameof(claim));
@@ -64,16 +58,6 @@ internal sealed partial class EfFileMutationJournalStore
             || journal.Action != claim.Action
             || !sourcePathsMatch
             || !destinationPathsMatch
-            || !PinnedDirectoryCreation.ArePersistedObjectIdentitiesDurablyEquivalent(
-                journal.SourceParentDirectoryObjectIdentity,
-                claim.SourceParentDirectoryObjectIdentity)
-            || !PinnedDirectoryCreation.ArePersistedObjectIdentitiesDurablyEquivalent(
-                journal.DestinationParentDirectoryObjectIdentity,
-                claim.DestinationParentDirectoryObjectIdentity)
-            || !string.Equals(
-                journal.SourcePhysicalObjectIdentity,
-                claim.SourcePhysicalObjectIdentity,
-                StringComparison.Ordinal)
             || journal.SourceLength != claim.SourceLength
             || !string.Equals(
                 journal.SourceSha256,

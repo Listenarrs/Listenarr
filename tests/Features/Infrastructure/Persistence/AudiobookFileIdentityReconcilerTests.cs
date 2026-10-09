@@ -57,7 +57,7 @@ public sealed class AudiobookFileIdentityReconcilerTests : BaseTests
     }
 
     [Fact]
-    public async Task ReconcileAsync_LegacyBackfillAndChangedKnownGeneration_FailClosedWithoutAdoptingReplacement()
+    public async Task ReconcileAsync_PathIdentityOnly_DoesNotBackfillOrReplacePhysicalEvidence()
     {
         var root = FileService.GetTempDirectory("audiobook-file-identity-physical-backfill");
         var legacyPath = await FileService.GetFileAsync(root, "legacy.m4b", "legacy");
@@ -111,8 +111,8 @@ public sealed class AudiobookFileIdentityReconcilerTests : BaseTests
             .AsNoTracking()
             .OrderBy(file => file.AudiobookId)
             .ToListAsync();
-        Assert.False(string.IsNullOrWhiteSpace(files[0].PhysicalObjectIdentity));
-        Assert.NotNull(files[0].PhysicalIdentityObservedAtUtc);
+        Assert.Null(files[0].PhysicalObjectIdentity);
+        Assert.Null(files[0].PhysicalIdentityObservedAtUtc);
         Assert.Equal(PathIdentityState.Valid, files[0].PathIdentityState);
         Assert.Equal(knownPhysicalIdentity, files[1].PhysicalObjectIdentity);
         Assert.Equal(PathIdentityState.Valid, files[1].PathIdentityState);
@@ -264,7 +264,7 @@ public sealed class AudiobookFileIdentityReconcilerTests : BaseTests
     }
 
     [LinuxFact]
-    public async Task ReconcileAsync_ParentGenerationReplacedAfterPin_DoesNotValidateOldChildAgainstNewPath()
+    public async Task ReconcileAsync_VisibleGenerationChanged_DoesNotRefreshPersistedPhysicalIdentity()
     {
         var container = FileService.GetTempDirectory(
             "audiobook-file-identity-parent-replacement");
@@ -313,22 +313,11 @@ public sealed class AudiobookFileIdentityReconcilerTests : BaseTests
             new TestDbContextFactory(options),
             identityResolver.Object,
             NullLogger<AudiobookFileIdentityReconciler>.Instance);
-        var replaced = false;
-        reconciler.AfterPhysicalIdentityParentPinnedForTest = _ =>
-        {
-            if (replaced)
-            {
-                return;
-            }
-            replaced = true;
-            Directory.Move(root, displacedRoot);
-            Directory.CreateDirectory(root);
-            File.WriteAllText(Path.Join(root, "book.m4b"), "replacement");
-        };
+        Directory.Move(root, displacedRoot);
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Join(root, "book.m4b"), "replacement");
 
         var result = await reconciler.ReconcileAsync();
-
-        Assert.True(replaced);
         Assert.Equal(
             new AudiobookFileIdentityReconciliationResult(1, 1, 0, 0),
             result);

@@ -74,9 +74,6 @@ public sealed partial class LibraryMoveWorkflow
                     rootFolder.CaseSensitivityMode,
                     directoryIdentityResolver,
                     cancellationToken,
-                    rootFolder.DirectoryObjectIdentityVersion,
-                    rootFolder.DirectoryObjectIdentity,
-                    rootFolder.DirectoryObjectIdentityUnavailableReason,
                     RootFolderPathSemantics.ResolvePersisted(rootFolder),
                     isManagedRoot: true,
                     managedRootFolderId: rootFolder.Id);
@@ -154,13 +151,6 @@ public sealed partial class LibraryMoveWorkflow
                 return DestinationValidationResult(
                     "destination_filesystem_identity_unavailable",
                     "Destination filesystem identity is unavailable.",
-                    final);
-            }
-            if (!targetBoundary.DirectoryIdentity.IsAvailable)
-            {
-                return DestinationValidationResult(
-                    "destination_physical_identity_unavailable",
-                    "Destination root physical identity is unavailable or changed.",
                     final);
             }
             if (targetBoundary.ManagedRootFolderId is int targetRootFolderId)
@@ -250,8 +240,8 @@ public sealed partial class LibraryMoveWorkflow
                             unavailableManagedRoots))
                     {
                         throw new ApplicationValidationException(
-                            "source_physical_identity_unavailable",
-                            "Source root physical identity is unavailable or changed.");
+                            "source_filesystem_authority_unavailable",
+                            "Source root path or case-sensitivity authority is unavailable or changed.");
                     }
 
                     var sourceManagedBoundary = configuredManagedSourceRoot == null
@@ -261,7 +251,6 @@ public sealed partial class LibraryMoveWorkflow
                             allowedMoveRoots);
                     if (configuredManagedSourceRoot != null
                         && (sourceManagedBoundary == null
-                            || !sourceManagedBoundary.DirectoryIdentity.IsAvailable
                             || sourceManagedBoundary.Semantics.Syntax
                                 != manifest.SourceIdentity.Syntax
                             || sourceManagedBoundary.Semantics.CaseSensitivity
@@ -272,8 +261,8 @@ public sealed partial class LibraryMoveWorkflow
                                 sourceManagedBoundary.Semantics)))
                     {
                         throw new ApplicationValidationException(
-                            "source_physical_identity_unavailable",
-                            "Source root physical identity is unavailable or changed.");
+                            "source_filesystem_authority_unavailable",
+                            "Source root path or case-sensitivity authority is unavailable or changed.");
                     }
                     var sourceStorage = await ResolveReadableSourceStorageAsync(
                         sourceManagedBoundary,
@@ -367,35 +356,12 @@ public sealed partial class LibraryMoveWorkflow
                         }
                     }
 
-                    var sourceAuthorizationBoundary = sourceCleanupBoundary
-                        ?? sourceManagedBoundary?.Path
-                        ?? manifest.SourceIdentity.BoundaryPath;
-                    DirectoryObjectIdentityResolution sourceDirectoryIdentity;
-                    if (sourceManagedBoundary != null
-                        && FileSystemPathIdentity.AreEquivalent(
-                            sourceAuthorizationBoundary,
-                            sourceManagedBoundary.Path,
-                            sourceManagedBoundary.Semantics))
-                    {
-                        sourceDirectoryIdentity = sourceManagedBoundary.DirectoryIdentity;
-                    }
-                    else
-                    {
-                        sourceDirectoryIdentity = await directoryIdentityResolver.ResolveAsync(
-                            sourceAuthorizationBoundary,
-                            lockedToken);
-                    }
-                    if (!sourceDirectoryIdentity.IsAvailable)
-                    {
-                        throw new ApplicationValidationException(
-                            "source_physical_identity_unavailable",
-                            "Source root physical identity is unavailable or changed.");
-                    }
-
-                    // MoveJob.SourceCleanupBoundary also persists the path paired with the
-                    // source boundary-generation authorization. Keep the managed root path
-                    // even when ancestor cleanup is disabled; DeleteEmptySource remains the
-                    // independent switch that authorizes directory retirement.
+                    // MoveJob.SourceCleanupBoundary persists only the path/config
+                    // boundary. Each execution attempt pins that boundary live before any
+                    // mutation; no persisted directory object identity is required.
+                    // Keep the managed root path even when ancestor cleanup is disabled;
+                    // DeleteEmptySource remains the independent switch that authorizes
+                    // directory retirement.
                     var persistedSourceBoundary = sourceCleanupBoundary
                         ?? sourceManagedBoundary?.Path;
 
@@ -430,10 +396,6 @@ public sealed partial class LibraryMoveWorkflow
                             manifest.Entries,
                             final,
                             targetIdentity,
-                            sourceDirectoryIdentity.Version!.Value,
-                            sourceDirectoryIdentity.Value!,
-                            targetBoundary.DirectoryIdentity.Version!.Value,
-                            targetBoundary.DirectoryIdentity.Value!,
                             effectiveDeleteEmptySource,
                             persistedSourceBoundary,
                             SourceCleanupMode: sourceCleanupAuthorization.Mode,

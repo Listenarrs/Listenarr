@@ -8,7 +8,7 @@ public partial class ManualImportController
     private async Task<ManualImportResultDto?> TryConsumeRecoveredManualImportAsync(
         ManualImportItemDto item,
         FileAction action,
-        FileSystemPathSemantics sourceSemantics,
+        FileSystemPathSemantics? sourceSemantics,
         IReadOnlyDictionary<int, IReadOnlyList<FileRegistrationRecoveryReceipt>> recoveryReceipts,
         ISet<Guid> consumedRecoveryOperationIds,
         ManualImportDestinationTracker destinationTracker,
@@ -49,9 +49,16 @@ public partial class ManualImportController
         var sourceCapability = await _filePublicationSourceCapability.CheckAsync(
             receipt.SourcePath,
             cancellationToken);
-        if (sourceCapability.IsSupported
-            || sourceCapability.FailureKind
-                != FilePublicationSourceCapabilityFailureKind.Missing)
+        var sourceMatchesReceipt = receipt.SourceRetained
+            ? sourceCapability.IsSupported
+                && sourceCapability.SourceProof is { } sourceProof
+                && sourceProof.Length == receipt.SourceLength
+                && string.Equals(sourceProof.Sha256, receipt.SourceSha256,
+                    StringComparison.OrdinalIgnoreCase)
+            : !sourceCapability.IsSupported
+                && sourceCapability.FailureKind
+                    == FilePublicationSourceCapabilityFailureKind.Missing;
+        if (!sourceMatchesReceipt)
         {
             return null;
         }
@@ -92,14 +99,19 @@ public partial class ManualImportController
             Success = true,
             SourcePath = item.FullPath,
             DestinationPath = receipt.DestinationPath,
-            Audiobook = audiobook
+            Audiobook = audiobook,
+            RequestedAction = action.ToString(),
+            EffectiveAction = FileAction.Move.ToString(),
+            SourceDisposition = receipt.SourceRetained
+                ? FilePublicationSourceDisposition.Retained.ToString()
+                : FilePublicationSourceDisposition.Retired.ToString()
         };
     }
 
     private static bool RecoveredManualSourceMatches(
         string requestedPath,
         string recoveredSourcePath,
-        FileSystemPathSemantics sourceSemantics)
+        FileSystemPathSemantics? sourceSemantics)
     {
         if (string.Equals(
                 requestedPath,
@@ -111,10 +123,10 @@ public partial class ManualImportController
 
         try
         {
-            return FileSystemPathIdentity.AreEquivalent(
+            return sourceSemantics.HasValue && FileSystemPathIdentity.AreEquivalent(
                 requestedPath,
                 recoveredSourcePath,
-                sourceSemantics);
+                sourceSemantics.Value);
         }
         catch (Exception exception) when (exception is
             ArgumentException or InvalidOperationException

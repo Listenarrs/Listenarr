@@ -32,13 +32,6 @@ const filesystemReadinessMock = vi.hoisted(() => ({
   filesystemFailed: false,
 }))
 
-const mutationSemanticsMocks = vi.hoisted(() => ({
-  confirmDetectedMutationSemantics: vi.fn().mockResolvedValue('not-applicable'),
-  confirmMutationSemanticsForBlockedOperation: vi.fn().mockResolvedValue('not-applicable'),
-  findMutationSemanticsRoot: vi.fn().mockReturnValue(null),
-  refreshAudiobookFileIdentity: vi.fn().mockResolvedValue(undefined),
-}))
-
 const signalRMocks = vi.hoisted(() => {
   const state = {
     callback: null as ((job: MoveJobUpdate) => void) | null,
@@ -116,8 +109,6 @@ vi.mock('@/services/signalr', () => ({
   },
 }))
 
-vi.mock('@/composables/useMutationSemanticsConfirmation', () => mutationSemanticsMocks)
-
 import EditAudiobookModal from '@/components/domain/audiobook/EditAudiobookModal.vue'
 import MoveAudiobookModal from '@/components/feedback/MoveAudiobookModal.vue'
 
@@ -138,14 +129,6 @@ describe('EditAudiobookModal move options', () => {
     filesystemReadinessMock.filesystemInitializing = false
     filesystemReadinessMock.filesystemFailed = false
     signalRMocks.callback = null
-    mutationSemanticsMocks.confirmDetectedMutationSemantics
-      .mockReset()
-      .mockResolvedValue('not-applicable')
-    mutationSemanticsMocks.confirmMutationSemanticsForBlockedOperation
-      .mockReset()
-      .mockResolvedValue('not-applicable')
-    mutationSemanticsMocks.findMutationSemanticsRoot.mockReset().mockReturnValue(null)
-    mutationSemanticsMocks.refreshAudiobookFileIdentity.mockReset().mockResolvedValue(undefined)
     signalRMocks.onMoveJobUpdate.mockImplementation((callback: (job: MoveJobUpdate) => void) => {
       signalRMocks.callback = callback
       return signalRMocks.unsubscribe
@@ -536,203 +519,7 @@ describe('EditAudiobookModal move options', () => {
     expect(wrapper.emitted('saved')).toBeUndefined()
   })
 
-  it('preflights known mutation-limited roots before saving metadata or enqueueing the move', async () => {
-    const { apiService } = await import('@/services/api')
-    const networkRoot = {
-      id: 7,
-      name: 'Network Library',
-      path: 'C:\\root',
-      isDefault: true,
-      caseSensitivityMode: 'Auto',
-      resolvedCaseSensitivity: 'Sensitive',
-      storageState: 'Limited',
-      storageReason: 'MutationSemanticsUnproven',
-    }
-    mutationSemanticsMocks.findMutationSemanticsRoot
-      .mockReturnValueOnce(networkRoot)
-      .mockReturnValueOnce(null)
-    mutationSemanticsMocks.confirmDetectedMutationSemantics.mockResolvedValueOnce('retry')
-
-    const wrapper = mount(EditAudiobookModal, {
-      props: { isOpen: true, audiobook },
-      attachTo: document.body,
-      global: { plugins: [(await import('pinia')).createPinia()] },
-    })
-
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
-    ;(wrapper.vm as unknown).formData.title = 'Saved After Storage Confirmation'
-    await wrapper.vm.$nextTick()
-
-    const savePromise = (wrapper.vm as unknown).handleSave()
-    await new Promise((resolve) => setTimeout(resolve, 10))
-    const resolver = (wrapper.vm as unknown).moveConfirmResolver
-    if (resolver) resolver({ proceed: true, moveFiles: true, deleteEmptySource: true })
-    await savePromise
-
-    expect(mutationSemanticsMocks.confirmDetectedMutationSemantics).toHaveBeenCalledWith(
-      networkRoot,
-      'the move',
-    )
-    expect(
-      mutationSemanticsMocks.confirmMutationSemanticsForBlockedOperation,
-    ).not.toHaveBeenCalled()
-    expect(mutationSemanticsMocks.refreshAudiobookFileIdentity).toHaveBeenCalledWith(1)
-    expect(
-      mutationSemanticsMocks.refreshAudiobookFileIdentity.mock.invocationCallOrder[0],
-    ).toBeLessThan(vi.mocked(apiService.updateAudiobook).mock.invocationCallOrder[0])
-    expect(
-      mutationSemanticsMocks.confirmDetectedMutationSemantics.mock.invocationCallOrder[0],
-    ).toBeLessThan(mutationSemanticsMocks.refreshAudiobookFileIdentity.mock.invocationCallOrder[0])
-    expect(apiService.moveAudiobook).toHaveBeenCalledTimes(1)
-  })
-
-  it('confirms detected storage semantics and retries a blocked physical move once', async () => {
-    const { apiService } = await import('@/services/api')
-    const rejectedPath = 'C:\\root\\New Author\\New Book'
-    vi.mocked(apiService.moveAudiobook)
-      .mockRejectedValueOnce(
-        Object.assign(new Error('API error'), {
-          status: 400,
-          body: JSON.stringify({
-            code: 'destination_filesystem_mutation_unavailable',
-            field: 'destinationPath',
-            message: 'Automatic case semantics need confirmation.',
-            resolvedDestination: rejectedPath,
-          }),
-        }),
-      )
-      .mockResolvedValueOnce({ message: 'queued', jobId: 'job-retry', target: rejectedPath })
-    mutationSemanticsMocks.confirmMutationSemanticsForBlockedOperation.mockResolvedValueOnce(
-      'retry',
-    )
-
-    const wrapper = mount(EditAudiobookModal, {
-      props: { isOpen: true, audiobook },
-      attachTo: document.body,
-      global: { plugins: [(await import('pinia')).createPinia()] },
-    })
-
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
-    await wrapper.vm.$nextTick()
-
-    const savePromise = (wrapper.vm as unknown).handleSave()
-    await new Promise((resolve) => setTimeout(resolve, 10))
-    const resolver = (wrapper.vm as unknown).moveConfirmResolver
-    if (resolver) resolver({ proceed: true, moveFiles: true, deleteEmptySource: true })
-    await savePromise
-
-    expect(mutationSemanticsMocks.confirmMutationSemanticsForBlockedOperation).toHaveBeenCalledWith(
-      expect.any(Error),
-      { path: rejectedPath, operationLabel: 'the move' },
-    )
-    expect(mutationSemanticsMocks.refreshAudiobookFileIdentity).toHaveBeenCalledTimes(1)
-    expect(apiService.moveAudiobook).toHaveBeenCalledTimes(2)
-    expect(toastMocks.info).toHaveBeenCalledWith(
-      'Move queued',
-      expect.stringContaining('job-retry'),
-    )
-  })
-
-  it('can confirm destination and source semantics sequentially without looping', async () => {
-    const { apiService } = await import('@/services/api')
-    const destination = 'C:\\root\\New Author\\New Book'
-    const source = 'C:\\root\\Some Author\\Some Title'
-    vi.mocked(apiService.moveAudiobook)
-      .mockRejectedValueOnce(
-        Object.assign(new Error('destination blocked'), {
-          status: 400,
-          body: JSON.stringify({
-            code: 'destination_filesystem_mutation_unavailable',
-            field: 'destinationPath',
-            message: 'Destination semantics need confirmation.',
-          }),
-        }),
-      )
-      .mockRejectedValueOnce(
-        Object.assign(new Error('source blocked'), {
-          status: 400,
-          body: JSON.stringify({
-            code: 'source_filesystem_mutation_unavailable',
-            field: 'sourcePath',
-            message: 'Source semantics need confirmation.',
-          }),
-        }),
-      )
-      .mockResolvedValueOnce({ message: 'queued', jobId: 'job-both', target: destination })
-    mutationSemanticsMocks.confirmMutationSemanticsForBlockedOperation
-      .mockResolvedValueOnce('retry')
-      .mockResolvedValueOnce('retry')
-
-    const wrapper = mount(EditAudiobookModal, {
-      props: { isOpen: true, audiobook },
-      attachTo: document.body,
-      global: { plugins: [(await import('pinia')).createPinia()] },
-    })
-
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
-    await wrapper.vm.$nextTick()
-
-    const savePromise = (wrapper.vm as unknown).handleSave()
-    await new Promise((resolve) => setTimeout(resolve, 10))
-    const resolver = (wrapper.vm as unknown).moveConfirmResolver
-    if (resolver) resolver({ proceed: true, moveFiles: true, deleteEmptySource: true })
-    await savePromise
-
-    expect(mutationSemanticsMocks.refreshAudiobookFileIdentity).toHaveBeenCalledTimes(2)
-    expect(apiService.moveAudiobook).toHaveBeenCalledTimes(3)
-    expect(
-      mutationSemanticsMocks.confirmMutationSemanticsForBlockedOperation,
-    ).toHaveBeenNthCalledWith(1, expect.any(Error), {
-      path: destination,
-      operationLabel: 'the move',
-    })
-    expect(
-      mutationSemanticsMocks.confirmMutationSemanticsForBlockedOperation,
-    ).toHaveBeenNthCalledWith(2, expect.any(Error), { path: source, operationLabel: 'the move' })
-  })
-
-  it('automatically rescans a path-only source once before retrying the move', async () => {
-    const { apiService } = await import('@/services/api')
-    const destination = 'C:\\root\\New Author\\New Book'
-    vi.mocked(apiService.moveAudiobook)
-      .mockRejectedValueOnce(
-        Object.assign(new Error('source identity unavailable'), {
-          status: 409,
-          body: JSON.stringify({
-            code: 'move_source_unverified',
-            message: 'Tracked file has unresolved physical identity and must be rescanned.',
-          }),
-        }),
-      )
-      .mockResolvedValueOnce({ message: 'queued', jobId: 'job-after-scan', target: destination })
-
-    const wrapper = mount(EditAudiobookModal, {
-      props: { isOpen: true, audiobook },
-      attachTo: document.body,
-      global: { plugins: [(await import('pinia')).createPinia()] },
-    })
-
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
-    await wrapper.vm.$nextTick()
-
-    const savePromise = (wrapper.vm as unknown).handleSave()
-    await new Promise((resolve) => setTimeout(resolve, 10))
-    const resolver = (wrapper.vm as unknown).moveConfirmResolver
-    if (resolver) resolver({ proceed: true, moveFiles: true, deleteEmptySource: true })
-    await savePromise
-
-    expect(mutationSemanticsMocks.refreshAudiobookFileIdentity).toHaveBeenCalledTimes(1)
-    expect(apiService.moveAudiobook).toHaveBeenCalledTimes(2)
-    expect(
-      mutationSemanticsMocks.confirmMutationSemanticsForBlockedOperation,
-    ).not.toHaveBeenCalled()
-  })
-
-  it('stops quietly when storage confirmation for a blocked move is cancelled', async () => {
+  it('reports a blocked move without changing storage settings or retrying', async () => {
     const { apiService } = await import('@/services/api')
     const rejectedPath = 'C:\\root\\New Author\\New Book'
     vi.mocked(apiService.moveAudiobook).mockRejectedValueOnce(
@@ -741,13 +528,10 @@ describe('EditAudiobookModal move options', () => {
         body: JSON.stringify({
           code: 'destination_filesystem_mutation_unavailable',
           field: 'destinationPath',
-          message: 'Automatic case semantics need confirmation.',
+          message: 'The destination is not writable.',
           resolvedDestination: rejectedPath,
         }),
       }),
-    )
-    mutationSemanticsMocks.confirmMutationSemanticsForBlockedOperation.mockResolvedValueOnce(
-      'cancelled',
     )
 
     const wrapper = mount(EditAudiobookModal, {
@@ -767,7 +551,10 @@ describe('EditAudiobookModal move options', () => {
     await savePromise
 
     expect(apiService.moveAudiobook).toHaveBeenCalledTimes(1)
-    expect(toastMocks.error).not.toHaveBeenCalledWith('Invalid destination', expect.any(String))
+    expect(toastMocks.error).toHaveBeenCalledWith(
+      'Invalid destination',
+      'The destination is not writable.',
+    )
     expect(wrapper.emitted('saved')).toBeUndefined()
   })
 
@@ -810,43 +597,6 @@ describe('EditAudiobookModal move options', () => {
       'Invalid destination',
       'DestinationPath must be inside a configured root folder or output path',
     )
-    expect(wrapper.emitted('saved')).toBeUndefined()
-  })
-
-  it('shows the server source-manifest failure instead of directing the user to a nonexistent queue job', async () => {
-    const { apiService } = await import('@/services/api')
-    const manifestMessage =
-      'The audiobook has no validated tracked files. Rescan or repair it before moving files.'
-    const sourceManifestError = Object.assign(new Error('API error'), {
-      status: 400,
-      body: JSON.stringify({
-        code: 'move_source_unverified',
-        field: 'sourcePath',
-        message: manifestMessage,
-      }),
-    })
-    vi.mocked(apiService.moveAudiobook)
-      .mockRejectedValueOnce(sourceManifestError)
-      .mockRejectedValueOnce(sourceManifestError)
-    const wrapper = mount(EditAudiobookModal, {
-      props: { isOpen: true, audiobook },
-      attachTo: document.body,
-      global: { plugins: [(await import('pinia')).createPinia()] },
-    })
-
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
-    await wrapper.vm.$nextTick()
-
-    const savePromise = (wrapper.vm as unknown).handleSave()
-    await new Promise((resolve) => setTimeout(resolve, 10))
-    const resolver = (wrapper.vm as unknown).moveConfirmResolver
-    if (resolver) resolver({ proceed: true, moveFiles: true, deleteEmptySource: true })
-    await savePromise
-
-    expect(mutationSemanticsMocks.refreshAudiobookFileIdentity).toHaveBeenCalledTimes(1)
-    expect(apiService.moveAudiobook).toHaveBeenCalledTimes(2)
-    expect(toastMocks.error).toHaveBeenCalledWith('Move failed', manifestMessage)
     expect(wrapper.emitted('saved')).toBeUndefined()
   })
 

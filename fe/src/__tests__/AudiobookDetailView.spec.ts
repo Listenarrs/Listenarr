@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import { describe, it, beforeEach, expect, vi } from 'vitest'
 import { API_BASE_PATH } from '@/services/apiBase'
@@ -23,12 +23,12 @@ import { useLibraryStore } from '@/stores/library'
 import { useScanNotificationsStore } from '@/stores/scanNotifications'
 import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import { apiService, ensureImageCached } from '@/services/api'
-import { signalRService } from '@/services/signalr'
 import AudiobookDetailViewCmp from '@/views/library/AudiobookDetailView.vue'
 const routerPushMock = vi.fn()
+const routeParams = vi.hoisted(() => ({ id: '5' }))
 // Mock useRoute to provide params for the detail view
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ params: { id: '5' } }),
+  useRoute: () => ({ params: routeParams }),
   useRouter: () => ({ push: routerPushMock }),
 }))
 
@@ -38,6 +38,7 @@ vi.mock('@/services/api', () => ({
     getImageUrl: vi.fn((url: string) => url || 'https://via.placeholder.com/300x450?text=No+Image'),
     getQualityProfiles: vi.fn(async () => []),
     getLibrary: vi.fn(async () => []),
+    getAudiobook: vi.fn(async () => undefined),
     scanAudiobook: vi.fn(),
     getWeakStorageMissingFiles: vi.fn(async () => ({ items: [] })),
     confirmWeakStorageMissingFiles: vi.fn(),
@@ -64,6 +65,10 @@ describe('AudiobookDetailView image recache behavior', () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     vi.clearAllMocks()
+    routeParams.id = '5'
+    vi.mocked(apiService.getAudiobook)
+      .mockReset()
+      .mockResolvedValue(undefined as never)
   })
 
   it('calls ensureImageCached for the audiobook cover on load', async () => {
@@ -316,6 +321,94 @@ describe('AudiobookDetailView image recache behavior', () => {
     })
   })
 
+  it('keeps the newest audiobook detail response when terminal scans overlap', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useLibraryStore()
+    const initial = { id: 5, title: 'Initial details', files: [] }
+    store.audiobooks = [initial] as unknown as typeof store.audiobooks
+    const wrapper = mount(AudiobookDetailViewCmp, { global: { plugins: [pinia] } })
+    await flushPromises()
+    type Detail = Awaited<ReturnType<typeof apiService.getAudiobook>>
+    let resolveOlder!: (book: Detail) => void
+    let resolveNewer!: (book: Detail) => void
+    vi.mocked(apiService.getAudiobook)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOlder = resolve
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveNewer = resolve
+          }),
+      )
+    const scans = useScanNotificationsStore()
+    scans.registerManualScan('older-detail', 5)
+    scans.applyUpdate({ jobId: 'older-detail', audiobookId: 5, status: 'Completed' })
+    await flushPromises()
+    scans.registerManualScan('newer-detail', 5)
+    scans.applyUpdate({ jobId: 'newer-detail', audiobookId: 5, status: 'Completed' })
+    await flushPromises()
+
+    resolveNewer({
+      ...initial,
+      title: 'Newest details',
+      files: [{ id: 12, path: 'new.m4b' }],
+    } as Detail)
+    await flushPromises()
+    resolveOlder({
+      ...initial,
+      title: 'Obsolete details',
+      files: [{ id: 11, path: 'old.m4b' }],
+    } as Detail)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Newest details')
+    expect(wrapper.text()).not.toContain('Obsolete details')
+    const detail = (wrapper.vm as unknown as { audiobook: Detail }).audiobook
+    expect(detail?.files?.map((file) => file.id)).toEqual([12])
+    wrapper.unmount()
+  })
+
+  it.each(['route', 'unmount'] as const)(
+    'ignores a pending scan detail response after %s invalidates the view',
+    async (invalidate) => {
+      const pinia = createPinia()
+      setActivePinia(pinia)
+      const store = useLibraryStore()
+      const initial = { id: 5, title: 'Initial details', files: [] }
+      store.audiobooks = [initial] as unknown as typeof store.audiobooks
+      const wrapper = mount(AudiobookDetailViewCmp, { global: { plugins: [pinia] } })
+      await flushPromises()
+      type Detail = Awaited<ReturnType<typeof apiService.getAudiobook>>
+      let resolveDetail!: (book: Detail) => void
+      vi.mocked(apiService.getAudiobook).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveDetail = resolve
+          }),
+      )
+      const scans = useScanNotificationsStore()
+      scans.registerManualScan('obsolete-view', 5)
+      scans.applyUpdate({ jobId: 'obsolete-view', audiobookId: 5, status: 'Completed' })
+      await flushPromises()
+      const missingFileCalls = vi.mocked(apiService.getWeakStorageMissingFiles).mock.calls.length
+      const view = wrapper.vm as unknown as { audiobook: Detail }
+      if (invalidate === 'route') routeParams.id = '6'
+      else wrapper.unmount()
+
+      resolveDetail({ ...initial, title: 'Obsolete details' } as Detail)
+      await flushPromises()
+
+      expect(view.audiobook?.title).toBe('Initial details')
+      expect(apiService.getWeakStorageMissingFiles).toHaveBeenCalledTimes(missingFileCalls)
+      if (invalidate === 'route') wrapper.unmount()
+    },
+  )
+
   it('keeps the newest weak-storage missing-file response when refreshes overlap', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -329,10 +422,7 @@ describe('AudiobookDetailView image recache behavior', () => {
     const wrapper = mount(AudiobookDetailViewCmp, { global: { plugins: [pinia] } })
     await new Promise((resolve) => setTimeout(resolve, 10))
 
-    const scanCallback = vi.mocked(signalRService.onScanJobUpdate).mock.calls[0]?.[0] as
-      | ((job: { audiobookId: number; status: string }) => void)
-      | undefined
-    expect(scanCallback).toBeDefined()
+    const scanNotificationsStore = useScanNotificationsStore()
 
     let resolveOlder!: (value: {
       scanToken: string
@@ -349,8 +439,19 @@ describe('AudiobookDetailView image recache behavior', () => {
       .mockImplementationOnce(() => older)
       .mockImplementationOnce(() => newer)
 
-    scanCallback!({ audiobookId: 5, status: 'Completed' })
-    scanCallback!({ audiobookId: 5, status: 'Completed' })
+    scanNotificationsStore.registerManualScan('older-scan', 5)
+    scanNotificationsStore.applyUpdate({
+      jobId: 'older-scan',
+      audiobookId: 5,
+      status: 'Completed',
+    })
+    await new Promise((resolve) => setTimeout(resolve, 2))
+    scanNotificationsStore.registerManualScan('newer-scan', 5)
+    scanNotificationsStore.applyUpdate({
+      jobId: 'newer-scan',
+      audiobookId: 5,
+      status: 'Completed',
+    })
 
     resolveNewer({
       scanToken: 'new-token',

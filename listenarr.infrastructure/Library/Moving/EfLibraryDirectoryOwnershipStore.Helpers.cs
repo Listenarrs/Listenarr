@@ -7,31 +7,39 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
 {
     private static void ValidatePinnedOwnership(
         LibraryDirectoryOwnership ownership,
-        PinnedDirectoryCreation creation)
+        PinnedDirectoryCreation creation,
+        bool requirePersistedPhysicalIdentity)
     {
         using var directory = creation.OpenCreatedDirectoryAnchor();
         using var parent = creation.OpenParentDirectoryAnchor();
-        if (!directory.MatchesManagedDirectoryOwnershipIdentity(
-                ownership.DirectoryObjectIdentityVersion,
-                ownership.DirectoryObjectIdentity,
-                ownership.OwnershipToken)
+        if ((requirePersistedPhysicalIdentity
+                && !directory.MatchesManagedDirectoryOwnershipIdentity(
+                    ownership.DirectoryObjectIdentityVersion,
+                    ownership.DirectoryObjectIdentity,
+                    ownership.OwnershipToken))
             || !directory.VisiblePathMatches()
             || !parent.VisiblePathMatches())
         {
             throw new InvalidOperationException(
-                "The owned directory no longer matches its persisted physical identity.");
+                requirePersistedPhysicalIdentity
+                    ? "The newly claimed directory changed before ownership publication completed."
+                    : "The owned directory path changed while current ownership was being verified.");
         }
     }
 
     private async Task RevalidateCommittedOwnershipAsync(
         LibraryDirectoryOwnership ownership,
         PinnedDirectoryCreation creation,
+        bool requirePersistedPhysicalIdentity,
         CancellationToken cancellationToken)
     {
         try
         {
             AfterOwnershipCommitForTest?.Invoke();
-            ValidatePinnedOwnership(ownership, creation);
+            ValidatePinnedOwnership(
+                ownership,
+                creation,
+                requirePersistedPhysicalIdentity);
         }
         catch (Exception exception) when (exception is not (
             OutOfMemoryException or StackOverflowException))
@@ -91,10 +99,10 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
             CreationOperationId = claim.CreationOperationId,
             AudiobookId = claim.AudiobookId,
             ManagedRootFolderId = managedRootFolderId,
-            DirectoryObjectIdentityVersion = ManagedDirectoryIdentity.CurrentVersion,
-            DirectoryObjectIdentity = ManagedDirectoryIdentity.Create(
-                ownershipToken,
-                nativeDirectoryIdentity),
+            DirectoryObjectIdentityVersion = string.IsNullOrWhiteSpace(nativeDirectoryIdentity)
+                ? null : ManagedDirectoryIdentity.CurrentVersion,
+            DirectoryObjectIdentity = string.IsNullOrWhiteSpace(nativeDirectoryIdentity)
+                ? null : ManagedDirectoryIdentity.Create(ownershipToken, nativeDirectoryIdentity),
             DirectoryObjectIdentityUnavailableReason = managedRootFolderId.HasValue
                 ? null
                 : "The claim was not created through an authorized managed root.",
@@ -109,14 +117,9 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
         int? managedRootFolderId,
         IReadOnlyList<string> directoryObjectIdentities)
     {
+        _ = directoryObjectIdentities;
         if (!managedRootFolderId.HasValue
             || ownership.ManagedRootFolderId != managedRootFolderId
-            || !directoryObjectIdentities.Any(directoryObjectIdentity =>
-                ManagedDirectoryIdentity.Matches(
-                    ownership.DirectoryObjectIdentityVersion,
-                    ownership.DirectoryObjectIdentity,
-                    ownership.OwnershipToken,
-                    directoryObjectIdentity))
             || (ownership.State !=
                     LibraryDirectoryOwnershipState.Unavailable
                 && !string.IsNullOrWhiteSpace(

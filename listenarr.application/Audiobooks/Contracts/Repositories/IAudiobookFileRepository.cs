@@ -28,6 +28,32 @@ namespace Listenarr.Application.Audiobooks.Contracts.Repositories
         int AudiobookId,
         string? Path);
 
+    public sealed record AudiobookFilePhysicalGenerationSnapshot(
+        long? Size,
+        double? DurationSeconds,
+        string? Format,
+        string? Container,
+        string? Codec,
+        int? Bitrate,
+        int? SampleRate,
+        int? Channels,
+        string? Source,
+        string? PhysicalObjectIdentity,
+        int PhysicalIdentityVersion,
+        DateTime? PhysicalIdentityObservedAtUtc);
+
+    public sealed record AudiobookFileMetadataRefreshSnapshot(
+        int FileId,
+        int AudiobookId,
+        AudiobookFilePathState PathState,
+        string? BasePath)
+    {
+        public static AudiobookFileMetadataRefreshSnapshot Capture(
+            AudiobookFile file,
+            string? basePath) =>
+            new(file.Id, file.AudiobookId, file.CapturePathState(), basePath);
+    }
+
     public interface IAudiobookFileRepository
     {
         Task<AudiobookFile?> GetByIdAsync(int id, CancellationToken ct = default);
@@ -47,6 +73,21 @@ namespace Listenarr.Application.Audiobooks.Contracts.Repositories
             AudiobookFilePathIdentity identity,
             CancellationToken ct = default);
         Task UpdateAsync(AudiobookFile file, CancellationToken ct = default);
+        /// <summary>
+        /// Update metadata only if the complete tracked ownership snapshot and base path still match.
+        /// Identity and ownership fields are never written by this operation.
+        /// </summary>
+        Task<bool> RefreshMetadataAsync(
+            AudiobookFileMetadataRefreshSnapshot expectedFile,
+            AudioMetadata metadata,
+            CancellationToken ct = default);
+        Task<bool> ReconcilePathIdentityAsync(
+            int fileId,
+            int audiobookId,
+            AudiobookFilePathState expectedPathState,
+            string storedPath,
+            AudiobookFilePathIdentity identity,
+            CancellationToken ct = default);
         Task<bool> ReplacePhysicalGenerationAsync(
             int fileId,
             int audiobookId,
@@ -62,11 +103,31 @@ namespace Listenarr.Application.Audiobooks.Contracts.Repositories
             AudiobookFile replacement,
             AudiobookBasePathMutation basePathMutation,
             CancellationToken ct = default);
+        Task<bool> RestorePhysicalGenerationAsync(
+            int fileId,
+            int audiobookId,
+            string? expectedPath,
+            string? expectedPhysicalObjectIdentity,
+            AudiobookFilePhysicalGenerationSnapshot predecessor,
+            CancellationToken ct = default);
+        Task<bool> RestorePhysicalGenerationWithBasePathAsync(
+            int fileId,
+            int audiobookId,
+            string? expectedPath,
+            string? expectedPhysicalObjectIdentity,
+            AudiobookFilePhysicalGenerationSnapshot predecessor,
+            AudiobookBasePathMutation basePathMutation,
+            CancellationToken ct = default);
         Task<bool> DeletePhysicalGenerationAsync(
             int fileId,
             int audiobookId,
             string? expectedPath,
             string? expectedPhysicalObjectIdentity,
+            CancellationToken ct = default);
+        Task<bool> DeletePathStateAsync(
+            int fileId,
+            int audiobookId,
+            AudiobookFilePathState expectedPathState,
             CancellationToken ct = default);
         Task<bool> DeletePhysicalGenerationWithBasePathAsync(
             int fileId,

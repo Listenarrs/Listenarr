@@ -228,35 +228,13 @@ public sealed partial class RootFolderRelocationService
             return null;
         }
 
-        if (!relocation.TargetDirectoryObjectIdentityVersion.HasValue
-            || string.IsNullOrWhiteSpace(relocation.TargetDirectoryObjectIdentity))
-        {
-            relocation.Status = RootFolderRelocationStatus.NeedsAttention;
-            relocation.Error =
-                "The target directory no longer has persisted physical identity authorization.";
-            return null;
-        }
-
+        // Persisted target physical identity is legacy diagnostic state only.
+        // Finalization is authorized by the target path/semantics plus the live
+        // pinned directory that is visible now.
         var currentObjectIdentity =
-            await ResolveExistingDirectoryObjectIdentityAsync(
+            await ResolveOrEnrollDirectoryObjectIdentityAsync(
                 canonicalTargetPath,
-                relocation.TargetDirectoryObjectIdentityVersion.Value,
-                relocation.TargetDirectoryObjectIdentity,
                 cancellationToken);
-        if (!currentObjectIdentity.IsAvailable
-                || currentObjectIdentity.Version
-                    != relocation.TargetDirectoryObjectIdentityVersion
-                || !string.Equals(
-                    currentObjectIdentity.Value,
-                    relocation.TargetDirectoryObjectIdentity,
-                    StringComparison.Ordinal))
-        {
-            relocation.Status = RootFolderRelocationStatus.NeedsAttention;
-            relocation.Error =
-                "The target directory changed after the path change was authorized.";
-            return null;
-        }
-
         var targetGenerationLease = PinTargetDirectoryGeneration(
             canonicalTargetPath,
             currentObjectIdentity.Version,

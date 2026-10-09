@@ -17,7 +17,8 @@ public sealed partial class FileRegistrationRecoveryService
             .Where(candidate => candidate.OperationId == operationId)
             .Select(candidate => candidate.State)
             .SingleAsync(cancellationToken);
-        if (observedState == FileMutationJournalState.Completed)
+        if (FileMutationJournalLifecycle.ClearsRegistrationRecoveryBoundary(
+                observedState))
         {
             return false;
         }
@@ -90,7 +91,7 @@ public sealed partial class FileRegistrationRecoveryService
     private static ApplicationConflictException RecoveryPending(Guid operationId) =>
         new(
             "registration_recovery_pending",
-            $"A previously committed file import ({operationId}) is still retiring its original source file. Retry after the source file is no longer in use.");
+            $"A previously committed file import ({operationId}) is still completing its durable publication. Retry after recovery finishes.");
 
     private static ApplicationConflictException RepairRequired(Guid operationId) =>
         new(

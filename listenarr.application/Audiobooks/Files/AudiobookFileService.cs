@@ -340,7 +340,8 @@ namespace Listenarr.Application.Audiobooks.Files
                 fileRecord.Bitrate = meta?.BitRate;
                 fileRecord.SampleRate = meta?.SampleRate;
                 fileRecord.Channels = meta?.Channels;
-                if (registrationLease?.HasDurablePhysicalObjectIdentity == true)
+                if (registrationLease?.HasDurablePhysicalObjectIdentity == true
+                    && !IsScanOrMetadataSource(source))
                 {
                     fileRecord.ApplyPhysicalObjectIdentity(
                         registrationLease.PhysicalObjectIdentity,
@@ -436,6 +437,11 @@ namespace Listenarr.Application.Audiobooks.Files
                 return false;
             }
         }
+
+        private static bool IsScanOrMetadataSource(string? source) =>
+            !string.IsNullOrWhiteSpace(source)
+            && (source.Contains("scan", StringComparison.OrdinalIgnoreCase)
+                || source.Contains("metadata", StringComparison.OrdinalIgnoreCase));
 
         private static string ResolveAbsolutePath(string? path) =>
             string.IsNullOrWhiteSpace(path)

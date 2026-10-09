@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using System.Security.Cryptography;
 using Listenarr.Domain.Common;
 using Microsoft.Extensions.Logging;
 
@@ -23,11 +24,35 @@ namespace Listenarr.Infrastructure.Library.Moving
 {
     public sealed partial class AudiobookFilesystemDeleteService
     {
+        private static bool PinnedFileMatchesContentProof(
+            PinnedDirectoryCreation.PinnedFileEntry file,
+            DeleteFileContentProof proof)
+        {
+            if (!proof.Observation.Matches(file))
+            {
+                return false;
+            }
+            using var stream = file.OpenReadStream(
+                bufferSize: 128 * 1024,
+                asynchronous: false);
+            if (stream.Length != proof.Length)
+            {
+                return false;
+            }
+
+            var hash = Convert.ToHexString(SHA256.HashData(stream));
+            return string.Equals(
+                hash,
+                proof.Sha256,
+                StringComparison.OrdinalIgnoreCase)
+                && file.VisiblePathMatches();
+        }
+
         private static bool TryValidatePinnedDirectoryTree(
             PinnedDirectoryCreation.PinnedDirectoryAnchor rootAuthorization,
             PinnedDirectoryCreation.PinnedDirectoryAnchor currentDirectory,
-            IReadOnlyDictionary<string, string> trackedPhysicalObjectIdentities,
-            IDictionary<string, string> preflightIdentities,
+            IReadOnlyDictionary<string, DeleteFileContentProof> trackedContentProofs,
+            CapturedDeleteTreeProofs preflightIdentities,
             out string reason)
         {
             reason = string.Empty;
@@ -75,13 +100,13 @@ namespace Listenarr.Infrastructure.Library.Moving
                                 entryName);
                         using var child =
                             childPublication.OpenCreatedDirectoryAnchor();
-                        preflightIdentities[Path.GetRelativePath(
+                        preflightIdentities.Capture(Path.GetRelativePath(
                             rootAuthorization.FullPath,
-                            entryPath)] = child.GetDirectoryObjectIdentity();
+                            entryPath), DeleteTreeEntryProof.CaptureDirectory(child));
                         if (!TryValidatePinnedDirectoryTree(
                                 rootAuthorization,
                                 child,
-                                trackedPhysicalObjectIdentities,
+                                trackedContentProofs,
                                 preflightIdentities,
                                 out reason))
                         {
@@ -94,21 +119,19 @@ namespace Listenarr.Infrastructure.Library.Moving
                     using var file = currentDirectory.OpenExistingFile(
                         entryName,
                         requireDeleteAccess: false);
-                    var physicalObjectIdentity = file.GetObjectIdentity();
-                    if (trackedPhysicalObjectIdentities.TryGetValue(
-                            entryPath,
-                            out var expectedTrackedPhysicalObjectIdentity)
-                        && !file.MatchesObjectIdentity(
-                            expectedTrackedPhysicalObjectIdentity))
+                    var hasTrackedContent = trackedContentProofs.TryGetValue(entryPath, out var expectedTrackedContent);
+                    if (hasTrackedContent && !PinnedFileMatchesContentProof(
+                            file,
+                            expectedTrackedContent))
                     {
                         reason =
-                            "A tracked audiobook file physical generation changed before recursive-delete preflight.";
+                            "A tracked audiobook file content proof changed before recursive-delete preflight.";
                         return false;
                     }
 
-                    preflightIdentities[Path.GetRelativePath(
+                    preflightIdentities.Capture(Path.GetRelativePath(
                         rootAuthorization.FullPath,
-                        entryPath)] = physicalObjectIdentity;
+                        entryPath), DeleteTreeEntryProof.CaptureFile(file, hasTrackedContent ? expectedTrackedContent : null));
                     if (!rootAuthorization.VisiblePathMatches()
                         || !currentDirectory.VisiblePathMatches()
                         || !file.VisiblePathMatches())
@@ -137,7 +160,8 @@ namespace Listenarr.Infrastructure.Library.Moving
             PinnedDirectoryCreation.PinnedDirectoryAnchor currentDirectory,
             DeleteFolderTarget deleteTarget,
             IReadOnlySet<string> ownershipMarkerPaths,
-            IReadOnlyDictionary<string, string> preflightIdentities,
+            IReadOnlyDictionary<string, DeleteTreeEntryProof> preflightIdentities,
+            IReadOnlyDictionary<string, DeleteFileContentProof> trackedContentProofs,
             AudiobookFilesystemDeleteResult result,
             out string reason)
         {
@@ -192,8 +216,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                         if (!preflightIdentities.TryGetValue(
                                 relativeEntry,
                                 out var expectedChildIdentity)
-                            || !child.MatchesDirectoryObjectIdentity(
-                                expectedChildIdentity))
+                            || !expectedChildIdentity.Matches(child))
                         {
                             reason =
                                 "A directory generation changed after recursive-delete preflight.";
@@ -205,6 +228,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                                 deleteTarget,
                                 ownershipMarkerPaths,
                                 preflightIdentities,
+                                trackedContentProofs,
                                 result,
                                 out reason))
                         {
@@ -219,12 +243,10 @@ namespace Listenarr.Infrastructure.Library.Moving
                                     deleteTarget.Semantics));
                         if (!isOwnedDirectory)
                         {
-                            if (!rootAuthorization.VisiblePathMatches()
-                                || !currentDirectory.VisiblePathMatches()
-                                || !child.VisiblePathMatches()
-                                || Directory
-                                    .EnumerateFileSystemEntries(entryPath)
-                                    .Any())
+                            expectedChildIdentity.Dispose();
+                            if (!WaitForPinnedDirectoryEmpty(child, () =>
+                                    rootAuthorization.VisiblePathMatches()
+                                    && currentDirectory.VisiblePathMatches()))
                             {
                                 reason =
                                     "A nested directory changed before captured-generation deletion.";
@@ -238,16 +260,14 @@ namespace Listenarr.Infrastructure.Library.Moving
                         continue;
                     }
 
-                    using var file = currentDirectory.OpenExistingFile(
-                        entryName,
-                        requireDeleteAccess: true);
+                    using var file = currentDirectory.OpenExistingFileForStableDelete(entryName);
                     var relativeFile = Path.GetRelativePath(
                         rootAuthorization.FullPath,
                         entryPath);
                     if (!preflightIdentities.TryGetValue(
                             relativeFile,
                             out var expectedFileIdentity)
-                        || !file.MatchesObjectIdentity(expectedFileIdentity))
+                        || !expectedFileIdentity.Matches(file))
                     {
                         reason =
                             "A file generation changed after recursive-delete preflight.";
@@ -268,6 +288,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                     }
 
                     file.Delete(immediateWindows: true);
+                    expectedFileIdentity.Dispose();
                     result.DeletedFiles++;
                     _logger.LogInformation(
                         "Deleted audiobook file {Path}",
@@ -287,10 +308,30 @@ namespace Listenarr.Infrastructure.Library.Moving
             }
         }
 
+        private static bool WaitForPinnedDirectoryEmpty(
+            PinnedDirectoryCreation.PinnedDirectoryAnchor directory,
+            Func<bool> boundaryIsCurrent)
+        {
+            // NFS may briefly retain a silly-renamed file after its last handle
+            // closes. Wait for the filesystem to remove it; never delete or ignore
+            // unexpected entries, and revalidate the original pins on every retry.
+            var started = System.Diagnostics.Stopwatch.StartNew();
+            while (true)
+            {
+                if (!boundaryIsCurrent() || !directory.VisiblePathMatches()) return false;
+                if (!Directory.EnumerateFileSystemEntries(directory.FullPath).Any())
+                    return boundaryIsCurrent() && directory.VisiblePathMatches();
+                if (started.Elapsed >= TimeSpan.FromSeconds(1)) return false;
+                Thread.Sleep(25);
+            }
+        }
+
         private bool TryDeleteFolderContents(
             DeleteFolderTarget deleteTarget,
             PinnedDirectoryCreation.PinnedDirectoryAnchor targetAuthorization,
-            IReadOnlyDictionary<string, string> trackedPhysicalObjectIdentities,
+            IReadOnlyCollection<string> trackedFilePaths,
+            IReadOnlyDictionary<string, DeleteFileContentProof> trackedContentProofs,
+            CapturedDeleteTreeProofs preflightIdentities,
             AudiobookFilesystemDeleteResult result)
         {
             var folderPath = deleteTarget.FolderPath;
@@ -301,12 +342,10 @@ namespace Listenarr.Infrastructure.Library.Moving
 
             IReadOnlySet<string> ownershipMarkerPaths = new HashSet<string>(
                 deleteTarget.Semantics.Comparer);
-            var preflightIdentities = new Dictionary<string, string>(
-                deleteTarget.Semantics.Comparer);
             if (!TryValidatePinnedDirectoryTree(
                     targetAuthorization,
                     targetAuthorization,
-                    trackedPhysicalObjectIdentities,
+                    trackedContentProofs,
                     preflightIdentities,
                     out var reason))
             {
@@ -324,58 +363,69 @@ namespace Listenarr.Infrastructure.Library.Moving
                     ownership.CanonicalPath,
                     folderPath,
                     deleteTarget.Semantics));
-            if (!hasExactDirectoryOwnership)
+            foreach (var trackedFilePath in trackedFilePaths)
             {
-                foreach (var expected in trackedPhysicalObjectIdentities)
+                string relativePath;
+                try
                 {
-                    string relativePath;
-                    try
-                    {
-                        if (!FileSystemPathIdentity.IsSameOrInside(
-                                expected.Key,
-                                folderPath,
-                                deleteTarget.Semantics))
-                        {
-                            reason =
-                                "A tracked audiobook file is outside the unowned audiobook folder.";
-                            result.Warnings.Add(
-                                "Refused to recursively delete the audiobook folder because its tracked file generations could not bind the current folder.");
-                            _logger.LogWarning(
-                                "Blocked recursive audiobook delete preflight for {FolderPath}: {Reason}",
-                                LogRedaction.SanitizeFilePath(folderPath),
-                                LogRedaction.SanitizeText(reason));
-                            return false;
-                        }
-
-                        relativePath = Path.GetRelativePath(folderPath, expected.Key);
-                    }
-                    catch (Exception exception) when (exception is
-                        ArgumentException or InvalidOperationException
-                            or NotSupportedException or PathTooLongException)
-                    {
-                        reason = exception.Message;
-                        result.Warnings.Add(
-                            "Refused to recursively delete the audiobook folder because its tracked file generations could not bind the current folder.");
-                        _logger.LogWarning(
-                            exception,
-                            "Blocked recursive audiobook delete preflight because a tracked path could not be bound beneath {FolderPath}",
-                            LogRedaction.SanitizeFilePath(folderPath));
-                        return false;
-                    }
-
-                    if (!preflightIdentities.ContainsKey(relativePath))
+                    if (!FileSystemPathIdentity.IsSameOrInside(
+                            trackedFilePath,
+                            folderPath,
+                            deleteTarget.Semantics))
                     {
                         reason =
-                            "A tracked audiobook file generation is missing or changed in the unowned audiobook folder.";
+                            "A tracked audiobook file is outside the audiobook folder selected for deletion.";
                         result.Warnings.Add(
-                            "Refused to recursively delete the audiobook folder because a tracked file generation is missing or changed.");
+                            "Refused to recursively delete the audiobook folder because a tracked path escaped the selected folder.");
                         _logger.LogWarning(
                             "Blocked recursive audiobook delete preflight for {FolderPath}: {Reason}",
                             LogRedaction.SanitizeFilePath(folderPath),
                             LogRedaction.SanitizeText(reason));
                         return false;
                     }
+
+                    relativePath = Path.GetRelativePath(
+                        folderPath,
+                        trackedFilePath);
                 }
+                catch (Exception exception) when (exception is
+                    ArgumentException or InvalidOperationException
+                        or NotSupportedException or PathTooLongException)
+                {
+                    reason = exception.Message;
+                    result.Warnings.Add(
+                        "Refused to recursively delete the audiobook folder because a tracked path could not be bound beneath it.");
+                    _logger.LogWarning(
+                        exception,
+                        "Blocked recursive audiobook delete preflight because a tracked path could not be bound beneath {FolderPath}",
+                        LogRedaction.SanitizeFilePath(folderPath));
+                    return false;
+                }
+
+                var wasPresent = trackedContentProofs.ContainsKey(
+                    trackedFilePath);
+                var isPresent = preflightIdentities.ContainsKey(relativePath);
+                if (wasPresent != isPresent)
+                {
+                    reason =
+                        "A tracked audiobook path appeared or disappeared after live deletion proof was captured.";
+                    result.Warnings.Add(
+                        "Refused to recursively delete the audiobook folder because a tracked file changed during delete preflight.");
+                    _logger.LogWarning(
+                        "Blocked recursive audiobook delete preflight for {FolderPath}: {Reason}",
+                        LogRedaction.SanitizeFilePath(folderPath),
+                        LogRedaction.SanitizeText(reason));
+                    return false;
+                }
+            }
+
+            if (!hasExactDirectoryOwnership && trackedContentProofs.Count == 0)
+            {
+                reason =
+                    "The unowned audiobook folder has no live tracked-file content proof.";
+                result.Warnings.Add(
+                    "Refused to recursively delete the unowned audiobook folder because no live tracked file could bind the current folder.");
+                return false;
             }
 
             if (!TryDeletePinnedDirectoryContents(
@@ -384,6 +434,7 @@ namespace Listenarr.Infrastructure.Library.Moving
                     deleteTarget,
                     ownershipMarkerPaths,
                     preflightIdentities,
+                    trackedContentProofs,
                     result,
                     out reason))
             {

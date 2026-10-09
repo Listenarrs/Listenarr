@@ -92,13 +92,6 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
             throw new InvalidOperationException(
                 "The durable directory ownership claim changed before its cleanup state could be updated.");
         }
-        if (targetState == LibraryDirectoryOwnershipState.Removing
-            && !HasDestructiveIdentity(ownership))
-        {
-            throw new InvalidOperationException(
-                "The ownership claim has no physical identity authorization for removal.");
-        }
-
         ownership.State = targetState;
         if (clearOwnershipKey)
         {

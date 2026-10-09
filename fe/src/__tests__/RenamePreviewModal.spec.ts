@@ -97,6 +97,64 @@ describe('RenamePreviewModal', () => {
     expect(wrapper.find('.btn.btn-primary').text()).toContain('Organize 1')
   })
 
+  it.each([true, false])(
+    'shows source retention with a successful organize result (%s)',
+    async (sourceRetained) => {
+      vi.mocked(apiService.previewRename).mockResolvedValue([
+        {
+          audiobookId: 7,
+          audiobookTitle: 'Alchemised',
+          currentFolderPath: 'D:/old',
+          currentFolderSemantics,
+          newFolderPath: 'D:/new',
+          folderChanged: true,
+          hasChanges: true,
+          fileRenames: [
+            {
+              fileId: 71,
+              currentPath: 'D:/old/book.m4b',
+              newPath: 'D:/new/book.m4b',
+              changed: true,
+            },
+          ],
+        },
+      ])
+      vi.mocked(apiService.executeRename).mockResolvedValue([
+        {
+          audiobookId: 7,
+          success: true,
+          conflict: false,
+          renamedFiles: [
+            {
+              fileId: 71,
+              previousPath: 'D:/old/book.m4b',
+              newPath: 'D:/new/book.m4b',
+              success: true,
+              rolledBack: false,
+              sourceRetained,
+            },
+          ],
+        },
+      ])
+      const wrapper = mount(RenamePreviewModal, {
+        props: { visible: true, audiobookIds: [7] },
+        global: { plugins: [createFilesystemPinia('Ready')] },
+      })
+      await flushPromises()
+      await wrapper.get('.btn.btn-primary').trigger('click')
+      await flushPromises()
+
+      expect(wrapper.get('.result-row.success').text()).toContain('Organized successfully')
+      const expectedRetentionMessages = sourceRetained
+        ? ['original sources retained for 1 file.']
+        : []
+      expect(wrapper.text().match(/original sources retained[^.]*\./g) ?? []).toEqual(
+        expectedRetentionMessages,
+      )
+      wrapper.unmount()
+    },
+  )
+
   it('keeps preview available but disables organize while filesystem initialization is running', async () => {
     vi.mocked(apiService.previewRename).mockResolvedValue([
       {

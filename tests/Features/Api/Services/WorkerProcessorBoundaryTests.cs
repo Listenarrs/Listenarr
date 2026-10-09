@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using Listenarr.Tests.Common;
 using Microsoft.AspNetCore.SignalR;
 
@@ -85,11 +87,10 @@ namespace Listenarr.Tests.Features.Api.Services
                 .Setup(r => r.GetByIdAsync(file.Id, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(file);
             fileRepository
-                .Setup(r => r.DeletePhysicalGenerationAsync(
+                .Setup(r => r.DeletePathStateAsync(
                     file.Id,
                     file.AudiobookId,
-                    file.Path,
-                    file.PhysicalObjectIdentity,
+                    file.CapturePathState(),
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(true);
             var audiobookRepository = new Mock<IAudiobookRepository>();
@@ -122,11 +123,10 @@ namespace Listenarr.Tests.Features.Api.Services
 
             await processor.RunCycleAsync(CancellationToken.None);
 
-            fileRepository.Verify(r => r.DeletePhysicalGenerationAsync(
+            fileRepository.Verify(r => r.DeletePathStateAsync(
                 file.Id,
                 file.AudiobookId,
-                file.Path,
-                file.PhysicalObjectIdentity,
+                file.CapturePathState(),
                 It.IsAny<CancellationToken>()), Times.Once);
             metadataService.Verify(s => s.ExtractFileMetadataAsync(It.IsAny<string>()), Times.Never);
         }
@@ -279,8 +279,63 @@ namespace Listenarr.Tests.Features.Api.Services
             Assert.Equal("M4B", result.Format);
         }
 
+        [LinuxFact]
+        [SupportedOSPlatform("linux")]
+        public async Task UnmatchedScanProcessor_UnreadableChild_PreservesReadableResultsAndWarning()
+        {
+            Assert.NotEqual((uint)0, GetEffectiveUserId());
+
+            var root = FileService.GetTempDirectory("unmatched-processor-partial-root");
+            var readableDirectory = Path.Join(root, "Readable Book");
+            var unreadableDirectory = Path.Join(root, "Unreadable Book");
+            Directory.CreateDirectory(readableDirectory);
+            Directory.CreateDirectory(unreadableDirectory);
+            var readableFile = await FileService.GetFileAsync(
+                readableDirectory,
+                "Readable Book.m4b",
+                "audio");
+            await FileService.GetFileAsync(
+                unreadableDirectory,
+                "Unreadable Book.m4b",
+                "audio");
+            await AddAuthorizedRootAsync(root);
+            await CreateApplicationSettings();
+            var queue = new UnmatchedScanQueueService(
+                _provider.GetRequiredService<ILogger<UnmatchedScanQueueService>>(),
+                _provider.GetRequiredService<IFileSystemSemanticsResolver>());
+            CreateHubProxy<SettingsHub>(out var hubContext);
+            var processor = new UnmatchedScanProcessor(
+                queue,
+                _provider.GetRequiredService<IServiceScopeFactory>(),
+                _provider.GetRequiredService<ILogger<UnmatchedScanProcessor>>(),
+                hubContext.Object,
+                _provider.GetRequiredService<IFfmpegService>(),
+                _provider.GetRequiredService<IFileSystemSemanticsResolver>());
+            await queue.EnqueueAsync(root);
+            Assert.True(queue.Reader.TryRead(out var job));
+
+            var originalMode = File.GetUnixFileMode(unreadableDirectory);
+            File.SetUnixFileMode(unreadableDirectory, UnixFileMode.None);
+            try
+            {
+                await processor.ProcessJobAsync(job, CancellationToken.None);
+            }
+            finally
+            {
+                File.SetUnixFileMode(unreadableDirectory, originalMode);
+            }
+
+            Assert.True(queue.TryGetJob(job.Id, out var updatedJob));
+            Assert.Equal("Completed", updatedJob!.Status);
+            var result = Assert.Single(updatedJob.Results!);
+            Assert.Equal(readableFile, result.FullPath);
+            var warning = Assert.Single(updatedJob.Warnings);
+            Assert.Contains("could not be read", warning, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("preserved", warning, StringComparison.OrdinalIgnoreCase);
+        }
+
         [Fact]
-        public async Task UnmatchedScanProcessor_PinnedPathOnly_DoesNotReopenFilesForMetadataEnrichment()
+        public async Task UnmatchedScanProcessor_PinnedPathOnly_StillReadsPinnedMetadata()
         {
             var root = FileService.GetTempDirectory("unmatched-processor-limited-root");
             var bookDirectory = Path.Join(root, "Author", "2026 - Limited Book");
@@ -325,6 +380,8 @@ namespace Listenarr.Tests.Features.Api.Services
                 _provider.GetRequiredService<IFileSystemSemanticsResolver>());
             CreateHubProxy<SettingsHub>(out var hubContext);
             var ffmpeg = new Mock<IFfmpegService>(MockBehavior.Strict);
+            ffmpeg.Setup(service => service.GetFfprobePathAsync())
+                .ReturnsAsync((string?)null);
             var processor = new UnmatchedScanProcessor(
                 queue,
                 _provider.GetRequiredService<IServiceScopeFactory>(),
@@ -344,10 +401,18 @@ namespace Listenarr.Tests.Features.Api.Services
             Assert.Equal(expectedSize, result.Size);
             Assert.Equal("Limited Book", result.Title);
             Assert.Equal("Author", result.Author);
-            Assert.Null(result.Description);
-            Assert.Null(result.Narrator);
-            Assert.Null(result.CoverPath);
-            ffmpeg.VerifyNoOtherCalls();
+            Assert.Equal(
+                "filesystem-sidecar-description",
+                result.Description);
+            Assert.Equal(
+                "filesystem-sidecar-narrator",
+                result.Narrator);
+            Assert.Equal(
+                Path.Join(bookDirectory, "cover.jpg"),
+                result.CoverPath);
+            ffmpeg.Verify(
+                service => service.GetFfprobePathAsync(),
+                Times.Once);
             authorization.VerifyAll();
         }
 
@@ -418,6 +483,61 @@ namespace Listenarr.Tests.Features.Api.Services
 
             Assert.Equal("authorized description", parsed.Description);
             Assert.Equal("Authorized Narrator", parsed.Narrator);
+            Assert.Equal(coverPath, parsed.CoverPath);
+        }
+
+        [Fact]
+        public async Task UnmatchedScanProcessor_PinnedPathOnlyFolderMetadata_ReadsWithoutPhysicalIdentity()
+        {
+            var root = FileService.GetTempDirectory(
+                "unmatched-pinned-path-only-folder-metadata");
+            var bookDirectory = Path.Join(
+                root,
+                "Author",
+                "2026 - Weak Storage Book");
+            Directory.CreateDirectory(bookDirectory);
+            var audioPath = await FileService.GetFileAsync(
+                bookDirectory,
+                "Weak Storage Book.m4b",
+                "audio");
+            await File.WriteAllTextAsync(
+                Path.Join(bookDirectory, "desc.txt"),
+                "path-only description");
+            await File.WriteAllTextAsync(
+                Path.Join(bookDirectory, "reader.txt"),
+                "Path Only Narrator");
+            var coverPath = await FileService.GetFileAsync(
+                bookDirectory,
+                "cover.jpg",
+                "cover");
+            var semantics = FileSystemPathSemantics.CurrentHostDefault;
+            var canonicalBookDirectory = FileSystemPathIdentity.Canonicalize(
+                bookDirectory,
+                semantics.Syntax);
+            var canonicalAudioPath = FileSystemPathIdentity.Canonicalize(
+                audioPath,
+                semantics.Syntax);
+            var enumeration = new ScanFileDiscovery.EnumerationResult(
+                [canonicalAudioPath],
+                [canonicalBookDirectory],
+                new Dictionary<string, string>(semantics.Comparer),
+                new Dictionary<string, string>(semantics.Comparer),
+                new Dictionary<string, long>(semantics.Comparer)
+                {
+                    [canonicalAudioPath] = 5
+                },
+                []);
+            var parsed = new PathParsedMetadata();
+
+            await UnmatchedScanProcessor.ApplyPinnedFolderMetadataAsync(
+                parsed,
+                bookDirectory,
+                enumeration,
+                semantics,
+                CancellationToken.None);
+
+            Assert.Equal("path-only description", parsed.Description);
+            Assert.Equal("Path Only Narrator", parsed.Narrator);
             Assert.Equal(coverPath, parsed.CoverPath);
         }
 
@@ -648,7 +768,7 @@ namespace Listenarr.Tests.Features.Api.Services
         }
 
         [Fact]
-        public async Task UnmatchedScanProcessor_AuthorizedRootReplacedBeforeProcessing_FailsClosed()
+        public async Task UnmatchedScanProcessor_AuthorizedRootReplacedBeforeProcessing_UsesCurrentPathAuthority()
         {
             var parent = FileService.GetTempDirectory("unmatched-root-replacement-parent");
             var root = Path.Join(parent, "library");
@@ -677,14 +797,17 @@ namespace Listenarr.Tests.Features.Api.Services
                 "Replacement Book.m4b",
                 "replacement audio");
 
-            await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                processor.ProcessJobAsync(job, CancellationToken.None));
+            await processor.ProcessJobAsync(job, CancellationToken.None);
 
             Assert.True(File.Exists(replacementFile));
             Assert.True(queue.TryGetJob(job.Id, out var updatedJob));
-            Assert.Equal("Processing", updatedJob!.Status);
-            Assert.Null(updatedJob.Results);
+            Assert.Equal("Completed", updatedJob!.Status);
+            var result = Assert.Single(updatedJob.Results!);
+            Assert.Equal(replacementFile, result.FullPath);
         }
+
+        [DllImport("libc", EntryPoint = "geteuid")]
+        private static extern uint GetEffectiveUserId();
 
         private static Mock<IClientProxy> CreateHubProxy<THub>(out Mock<IHubContext<THub>> hubContext)
             where THub : Hub

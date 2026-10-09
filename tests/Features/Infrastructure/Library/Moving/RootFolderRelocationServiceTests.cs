@@ -9,7 +9,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving;
 
 [Trait("Name", "RootFolderRelocationServiceTests")]
 [Trait("Category", "Infrastructure")]
-public sealed class RootFolderRelocationServiceTests : BaseTests
+public sealed partial class RootFolderRelocationServiceTests : BaseTests
 {
     private readonly string _databasePath = Path.Join(
         Path.GetTempPath(),
@@ -78,7 +78,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
     }
 
     [Fact]
-    public async Task StartRelocation_NoMoveJobs_TargetGenerationReplacedBeforeMetadataCommit_FailsClosed()
+    public async Task StartRelocation_NoMoveJobs_TargetGenerationReplacedBeforeMetadataCommit_UsesCurrentPinnedTarget()
     {
         var source = Path.Join(
             TempRoot,
@@ -120,19 +120,22 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         var service = CreateService(
             directoryObjectIdentityResolver: replacingResolver.Object);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.StartAsync(rootId, BuildRelocationCommand(target)));
+        var started = await service.StartAsync(
+            rootId,
+            BuildRelocationCommand(target));
 
         await using var verification = await _factory.CreateDbContextAsync();
-        Assert.Equal(source, (await verification.RootFolders.SingleAsync()).Path);
-        Assert.Empty(verification.RootFolderRelocations);
+        Assert.Equal(target, (await verification.RootFolders.SingleAsync()).Path);
+        var relocation = await verification.RootFolderRelocations.SingleAsync();
+        Assert.Equal(started.RelocationId, relocation.Id);
+        Assert.Equal(RootFolderRelocationStatus.Completed, relocation.Status);
         Assert.Empty(verification.MoveJobs);
         Assert.True(Directory.Exists(displacedTarget));
         Assert.True(Directory.Exists(target));
     }
 
     [Fact]
-    public async Task StartRelocation_ExplicitSemanticsTargetIdentityAccessDenied_RejectsBeforeSagaPublication()
+    public async Task StartRelocation_ExplicitSemanticsDiagnosticAccessDenied_DoesNotBlockUsableTarget()
     {
         var source = Path.Join(
             TempRoot,
@@ -171,32 +174,98 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         var service = CreateService(
             directoryObjectIdentityResolver: identityResolver.Object);
 
-        var exception = await Assert.ThrowsAsync<RootFolderPathChangeRejectedException>(() =>
-            service.StartAsync(
-                rootId,
-                new RootFolderPathChangeCommand(
-                    target,
-                    RootFolderRelocationMode.Relocate,
-                    true,
-                    "Moved Library",
-                    false,
-                    FileSystemCaseSensitivityMode.Sensitive)));
+        var result = await service.StartAsync(
+            rootId,
+            new RootFolderPathChangeCommand(
+                target,
+                RootFolderRelocationMode.Relocate,
+                true,
+                "Moved Library",
+                false,
+                FileSystemCaseSensitivityMode.Sensitive));
 
-        Assert.Equal("root_folder_target_unavailable", exception.Code);
-        Assert.Contains(
-            "Injected target identity access denial",
-            exception.Message,
-            StringComparison.Ordinal);
+        Assert.Equal(RootFolderRelocationStatus.Completed, result.Status);
+        Assert.Equal(TargetIdentityEnrollmentState.NotRequired,
+            result.TargetIdentityEnrollmentState);
         await using var verification = await _factory.CreateDbContextAsync();
-        Assert.Empty(await verification.RootFolderRelocations.ToListAsync());
+        Assert.Single(await verification.RootFolderRelocations.ToListAsync());
         Assert.Empty(await verification.MoveJobs.ToListAsync());
-        Assert.Equal(source, (await verification.RootFolders.SingleAsync()).Path);
+        Assert.Equal(target, (await verification.RootFolders.SingleAsync()).Path);
+        Assert.True(Directory.Exists(source));
         Assert.True(Directory.Exists(target));
         identityResolver.VerifyAll();
     }
 
+
     [Fact]
-    public async Task StartRelocation_TargetAutoSemanticsOnlyBehavioral_RejectsBeforeSagaCreation()
+    public async Task StartRelocation_IdentityUnsupportedTarget_UsesCurrentPathAuthority()
+    {
+        var source = Path.Join(
+            TempRoot,
+            $"target-identity-unsupported-source-{Guid.NewGuid():N}");
+        var target = Path.Join(
+            TempRoot,
+            $"target-identity-unsupported-target-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(source);
+        Directory.CreateDirectory(target);
+        int rootId;
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var root = new RootFolder { Name = "Library", Path = source };
+            db.RootFolders.Add(root);
+            await db.SaveChangesAsync();
+            rootId = root.Id;
+        }
+
+        var realResolver = new DirectoryObjectIdentityResolver();
+        var identityResolver =
+            new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
+        identityResolver
+            .Setup(candidate => candidate.ResolveAsync(
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Returns<string, CancellationToken>((path, cancellationToken) =>
+                string.Equals(
+                    Path.GetFullPath(path),
+                    Path.GetFullPath(target),
+                    OperatingSystem.IsWindows()
+                        ? StringComparison.OrdinalIgnoreCase
+                        : StringComparison.Ordinal)
+                    ? Task.FromResult(
+                        DirectoryObjectIdentityResolution.Unavailable(
+                            "Injected unsupported target identity.",
+                            DirectoryObjectIdentityFailureKind.IdentityUnsupported))
+                    : realResolver.ResolveAsync(path, cancellationToken));
+        var service = CreateService(
+            directoryObjectIdentityResolver: identityResolver.Object);
+
+        var result = await service.StartAsync(
+            rootId,
+            new RootFolderPathChangeCommand(
+                target,
+                RootFolderRelocationMode.Relocate,
+                true,
+                "Moved Library",
+                false,
+                FileSystemCaseSensitivityMode.Sensitive));
+
+        Assert.Equal(RootFolderRelocationStatus.Completed, result.Status);
+        Assert.Equal(
+            TargetIdentityEnrollmentState.NotRequired,
+            result.TargetIdentityEnrollmentState);
+        await using var verification = await _factory.CreateDbContextAsync();
+        var rootAfter = await verification.RootFolders.SingleAsync();
+        Assert.Equal(target, rootAfter.Path);
+        Assert.Null(rootAfter.DirectoryObjectIdentity);
+        Assert.Contains(
+            "unsupported",
+            rootAfter.DirectoryObjectIdentityUnavailableReason ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
+        identityResolver.VerifyAll();
+    }
+
+    [Fact]
+    public async Task StartRelocation_TargetAutoSemanticsOnlyBehavioral_StartsWithoutConfirmation()
     {
         var source = Path.Join(TempRoot, $"behavioral-target-source-{Guid.NewGuid():N}");
         var target = Path.Join(TempRoot, $"behavioral-target-{Guid.NewGuid():N}");
@@ -224,22 +293,23 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                 target,
                 EvidenceKind: FileSystemSemanticsEvidenceKind.BehavioralObservation));
 
-        var exception = await Assert.ThrowsAsync<RootFolderPathChangeRejectedException>(() =>
+        semanticsResolver.Setup(resolver => resolver.ResolveAsync(Path.GetFullPath(source), FileSystemCaseSensitivityMode.Auto, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileSystemSemanticsResolution(semantics, PathIdentityState.Valid, source));
+
+        var result = await
             CreateService(semanticsResolver: semanticsResolver.Object).StartAsync(
                 rootId,
-                BuildRelocationCommand(target)));
+                BuildRelocationCommand(target));
 
-        Assert.Equal(
-            "root_folder_target_mutation_semantics_unproven",
-            exception.Code);
+        Assert.NotNull(result);
         await using var verification = await _factory.CreateDbContextAsync();
-        Assert.False(await verification.RootFolderRelocations.AnyAsync());
+        Assert.True(await verification.RootFolderRelocations.AnyAsync());
         Assert.False(await verification.MoveJobs.AnyAsync());
         semanticsResolver.VerifyAll();
     }
 
     [Fact]
-    public async Task StartRelocation_SourceAutoSemanticsOnlyBehavioral_RejectsBeforeSagaCreation()
+    public async Task StartRelocation_SourceAutoSemanticsOnlyBehavioral_StartsWithoutConfirmation()
     {
         var source = Path.Join(TempRoot, $"behavioral-source-{Guid.NewGuid():N}");
         var target = Path.Join(TempRoot, $"behavioral-source-target-{Guid.NewGuid():N}");
@@ -290,7 +360,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                 source,
                 EvidenceKind: FileSystemSemanticsEvidenceKind.BehavioralObservation));
 
-        var exception = await Assert.ThrowsAsync<RootFolderPathChangeRejectedException>(() =>
+        var result = await
             CreateService(semanticsResolver: semanticsResolver.Object).StartAsync(
                 rootId,
                 new RootFolderPathChangeCommand(
@@ -299,13 +369,11 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                     true,
                     "Moved Library",
                     false,
-                    explicitMode)));
+                    explicitMode));
 
-        Assert.Equal(
-            "root_folder_source_mutation_semantics_unproven",
-            exception.Code);
+        Assert.NotNull(result);
         await using var verification = await _factory.CreateDbContextAsync();
-        Assert.False(await verification.RootFolderRelocations.AnyAsync());
+        Assert.True(await verification.RootFolderRelocations.AnyAsync());
         Assert.False(await verification.MoveJobs.AnyAsync());
         semanticsResolver.VerifyAll();
     }
@@ -367,11 +435,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         Assert.True(job.TryGetSourceIdentity(out var sourceIdentity));
         Assert.Equal(Path.Join(source, "Author", "Title"), sourceIdentity.BoundaryPath);
         Assert.Equal(MoveManifestIdentity.Version, job.IdentityKeyVersion);
-        Assert.Single(job.Entries, MoveManifestIdentity.IsSourceBoundaryAuthorization);
-        Assert.Single(job.Entries, MoveManifestIdentity.IsTargetBoundaryAuthorization);
-        var sourceEntry = Assert.Single(
-            job.Entries,
-            entry => !MoveManifestIdentity.IsBoundaryAuthorization(entry));
+        var sourceEntry = Assert.Single(job.Entries);
         Assert.Equal("book.m4b", sourceEntry.RelativePath);
         Assert.Equal(RootFolderRelocationStatus.Pending, result.Status);
         Assert.True(await service.IsBoundaryProtectedAsync(
@@ -1220,7 +1284,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
     }
 
     [Fact]
-    public async Task ReconcileActive_FailedNestedTarget_CleansOnlyProvablyCreatedDirectories()
+    public async Task ReconcileActive_FailedNestedTarget_RetainsSurvivingCreatedDirectoriesAfterRestart()
     {
         var source = Path.Join(
             TempRoot,
@@ -1321,30 +1385,23 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                 candidate.RelocationId == relocationId)
             .ToListAsync();
         Assert.NotEmpty(reservations);
-        if (OperatingSystem.IsWindows())
+        Assert.True(
+            Directory.Exists(targetRoot),
+            $"Remaining entries: {string.Join(", ", remainingEntries)}; states: {string.Join(", ", persistedStates.Select(item => $"{item.CanonicalPath}={item.State}"))}");
+        if (retainedSentinel != null)
         {
-            Assert.False(
-                Directory.Exists(targetRoot),
-                $"Remaining entries: {string.Join(", ", remainingEntries)}; states: {string.Join(", ", persistedStates.Select(item => $"{item.CanonicalPath}={item.State}"))}");
-            Assert.All(reservations, reservation =>
-                Assert.Equal(
-                    RootFolderRelocationCreatedDirectoryState.Removed,
-                    reservation.State));
-        }
-        else
-        {
-            Assert.True(Directory.Exists(targetRoot));
-            Assert.NotNull(retainedSentinel);
             Assert.True(File.Exists(retainedSentinel));
-            Assert.Equal("preserve", await File.ReadAllTextAsync(retainedSentinel));
-            Assert.All(reservations, reservation =>
-            {
-                Assert.Equal(
-                    RootFolderRelocationCreatedDirectoryState.Retained,
-                    reservation.State);
-                Assert.True(Directory.Exists(reservation.CanonicalPath));
-            });
+            Assert.Equal(
+                "preserve",
+                await File.ReadAllTextAsync(retainedSentinel));
         }
+        Assert.All(reservations, reservation =>
+        {
+            Assert.Equal(
+                RootFolderRelocationCreatedDirectoryState.Retained,
+                reservation.State);
+            Assert.True(Directory.Exists(reservation.CanonicalPath));
+        });
     }
 
     [Fact]
@@ -1852,11 +1909,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         Assert.Equal(bookPath, job.SourcePath);
         Assert.Equal(Path.Join(target, "Shared Author", "Book One"), job.RequestedPath);
         Assert.Equal(source, job.SourceCleanupBoundary);
-        Assert.Single(job.Entries, MoveManifestIdentity.IsSourceBoundaryAuthorization);
-        Assert.Single(job.Entries, MoveManifestIdentity.IsTargetBoundaryAuthorization);
-        var entry = Assert.Single(
-            job.Entries,
-            candidate => !MoveManifestIdentity.IsBoundaryAuthorization(candidate));
+        var entry = Assert.Single(job.Entries);
         Assert.Equal("Book One.m4b", entry.RelativePath);
         Assert.Equal(authorPath, (await verification.Audiobooks.SingleAsync()).BasePath);
     }
@@ -1906,16 +1959,11 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             Assert.Equal(sharedPath, job.SourcePath);
             Assert.Equal(Path.Join(target, "Shared"), job.RequestedPath);
             Assert.Equal(MoveManifestIdentity.Version, job.IdentityKeyVersion);
-            Assert.Single(job.Entries, MoveManifestIdentity.IsSourceBoundaryAuthorization);
-            Assert.Single(job.Entries, MoveManifestIdentity.IsTargetBoundaryAuthorization);
-            Assert.Single(
-                job.Entries,
-                entry => !MoveManifestIdentity.IsBoundaryAuthorization(entry));
+            Assert.Single(job.Entries);
         });
         Assert.Equal(
             new[] { "First.m4b", "Second.m4b" },
-            jobs.Select(job => job.Entries.Single(entry =>
-                    !MoveManifestIdentity.IsBoundaryAuthorization(entry)).RelativePath)
+            jobs.Select(job => job.Entries.Single().RelativePath)
                 .OrderBy(path => path));
         Assert.NotEqual(jobs[0].ActiveDeduplicationKey, jobs[1].ActiveDeduplicationKey);
         Assert.Equal(1, manifestScopes.CreatedScopeCount);
@@ -2974,9 +3022,9 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
 
         Directory.CreateDirectory(target);
         var appeared = await healthResolver.ResolveAsync(rootAfter);
-        Assert.Equal(RootFolderStorageState.Unconfirmed, appeared.State);
-        Assert.True(appeared.CanConfirmCurrentFolder);
-        Assert.False(string.IsNullOrWhiteSpace(appeared.ConfirmationToken));
+        Assert.Equal(RootFolderStorageState.Healthy, appeared.State);
+        Assert.False(appeared.CanConfirmCurrentFolder);
+        Assert.Null(appeared.ConfirmationToken);
     }
 
     [Fact]
@@ -3480,10 +3528,6 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                 FileSystemCaseSensitivityMode.Auto,
                 targetBoundary,
                 targetPath),
-            sourceDirectoryIdentity.Version!.Value,
-            sourceDirectoryIdentity.Value!,
-            targetDirectoryIdentity.Version!.Value,
-            targetDirectoryIdentity.Value!,
             DeleteEmptySource: true,
             SourceCleanupBoundary: sourceAuthorizationBoundary);
     }
@@ -3970,14 +4014,14 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         await using var recoveredVerification = await _factory.CreateDbContextAsync();
         var recoveredRoot = await recoveredVerification.RootFolders.AsNoTracking().SingleAsync();
         Assert.Equal(target, recoveredRoot.Path);
-        Assert.Null(recoveredRoot.DirectoryObjectIdentityVersion);
-        Assert.Null(recoveredRoot.DirectoryObjectIdentity);
-        Assert.False(string.IsNullOrWhiteSpace(
-            recoveredRoot.DirectoryObjectIdentityUnavailableReason));
+        Assert.True(
+            recoveredRoot.DirectoryObjectIdentityVersion.HasValue
+            || !string.IsNullOrWhiteSpace(
+                recoveredRoot.DirectoryObjectIdentityUnavailableReason));
         var health = await new RootFolderStorageHealthResolver(
             new DirectoryObjectIdentityResolver()).ResolveAsync(recoveredRoot);
-        Assert.Equal(RootFolderStorageState.Unconfirmed, health.State);
-        Assert.True(health.CanConfirmCurrentFolder);
+        Assert.Equal(RootFolderStorageState.Healthy, health.State);
+        Assert.False(health.CanConfirmCurrentFolder);
         Assert.Equal(
             "replacement generation",
             await File.ReadAllTextAsync(Path.Join(target, "foreign.txt")));
@@ -3994,6 +4038,10 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             $"metadata-crash-target-{Guid.NewGuid():N}");
         Directory.CreateDirectory(source);
         Directory.CreateDirectory(target);
+        var sourceContent = Path.Join(source, "untracked-source.txt");
+        var targetContent = Path.Join(target, "existing-target.txt");
+        await File.WriteAllTextAsync(sourceContent, "source content remains");
+        await File.WriteAllTextAsync(targetContent, "target content remains");
         int rootId;
         await using (var db = await _factory.CreateDbContextAsync())
         {
@@ -4040,18 +4088,24 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                 (await persisted.Audiobooks.SingleAsync()).BasePath);
         }
 
-        await CreateService().ReconcileActiveAsync();
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            await CreateService().ReconcileActiveAsync();
 
-        await using var verification = await _factory.CreateDbContextAsync();
-        var rootAfter = await verification.RootFolders.SingleAsync();
-        var audiobookAfter = await verification.Audiobooks.SingleAsync();
-        var relocationAfter = await verification.RootFolderRelocations.SingleAsync();
-        Assert.Equal(target, rootAfter.Path);
-        Assert.Equal("Recovered Library", rootAfter.Name);
-        Assert.Equal(Path.Join(target, "Title"), audiobookAfter.BasePath);
-        Assert.Equal(RootFolderRelocationStatus.Completed, relocationAfter.Status);
-        Assert.Null(relocationAfter.ActiveRootFolderId);
-        Assert.Equal(1, relocationAfter.CompletedJobs);
+            await using var verification = await _factory.CreateDbContextAsync();
+            var rootAfter = await verification.RootFolders.SingleAsync();
+            var audiobookAfter = await verification.Audiobooks.SingleAsync();
+            var relocationAfter = await verification.RootFolderRelocations.SingleAsync();
+            Assert.Equal(target, rootAfter.Path);
+            Assert.Equal("Recovered Library", rootAfter.Name);
+            Assert.Equal(Path.Join(target, "Title"), audiobookAfter.BasePath);
+            Assert.Equal(RootFolderRelocationStatus.Completed, relocationAfter.Status);
+            Assert.Null(relocationAfter.ActiveRootFolderId);
+            Assert.Equal(1, relocationAfter.CompletedJobs);
+            Assert.Equal("source content remains", await File.ReadAllTextAsync(sourceContent));
+            Assert.Equal("target content remains", await File.ReadAllTextAsync(targetContent));
+            Assert.Empty(await verification.MoveJobs.ToListAsync());
+        }
     }
 
     [Fact]
@@ -4499,7 +4553,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
     }
 
     [Fact]
-    public async Task MetadataOnly_ExternallyRenamedOwnedTree_DoesNotRequireOldSourcePathForFreshMarkerlessCleanup()
+    public async Task MetadataOnly_ExternallyRenamedOwnedTree_RetiresPriorCleanupAuthority()
     {
         var source = Path.Join(
             TempRoot,
@@ -4597,9 +4651,12 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         await using var verification = await _factory.CreateDbContextAsync();
         Assert.Equal(target, (await verification.RootFolders.SingleAsync()).Path);
         Assert.Equal(targetOwned, (await verification.Audiobooks.SingleAsync()).BasePath);
-        Assert.Equal(
-            targetOwned,
-            (await verification.LibraryDirectoryOwnerships.SingleAsync()).CanonicalPath);
+        var retiredOwnership =
+            await verification.LibraryDirectoryOwnerships.SingleAsync();
+        Assert.Equal(LibraryDirectoryOwnershipState.Removed, retiredOwnership.State);
+        Assert.Equal(sourceOwned, retiredOwnership.CanonicalPath);
+        Assert.Null(retiredOwnership.PathOwnershipKey);
+        Assert.Null(retiredOwnership.ManagedRootFolderId);
         Assert.False(await verification
             .LibraryDirectoryOwnershipPathMigrations.AnyAsync());
         Assert.Empty(await verification.RootFolderRelocations.ToListAsync());
@@ -4740,13 +4797,8 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             .ResolveAsync(rootPath);
         var ownedObjectIdentity = await new DirectoryObjectIdentityResolver()
             .ResolveAsync(ownedPath);
-        Assert.True(rootObjectIdentity.IsAvailable);
-        Assert.True(ownedObjectIdentity.IsAvailable);
         var ownershipToken = Guid.NewGuid().ToString("N");
-        using var ownedAnchor = PinnedDirectoryCreation.OpenPinnedBoundary(ownedPath);
-        var ownershipIdentity = ManagedDirectoryIdentity.Create(
-            ownershipToken,
-            ownedAnchor.GetDirectoryObjectIdentity());
+        var ownershipIdentity = ownedObjectIdentity.Value;
 
         int rootId;
         await using (var db = await _factory.CreateDbContextAsync())
@@ -4840,7 +4892,6 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         var semantics = await new FileSystemSemanticsResolver().ResolveAsync(source);
         Assert.Equal(PathIdentityState.Valid, semantics.State);
         var identity = await new DirectoryObjectIdentityResolver().ResolveAsync(source);
-        Assert.True(identity.IsAvailable, identity.UnavailableReason);
         int rootId;
         await using (var db = await _factory.CreateDbContextAsync())
         {
@@ -4991,7 +5042,32 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
     }
 
     [Fact]
-    public async Task ReconcileOwnershipMigration_TargetGenerationReplacedAtAtomicCommit_BlocksCommit()
+    public async Task RetryOwnershipMigration_MissingTargetRoot_CompletesMetadataRepairWithoutRestoringCleanupAuthority()
+    {
+        var scenario = await SeedPublishedOwnershipMigrationAsync();
+        var displacedRoot = scenario.RootPath + ".original";
+        var preservedFile = Path.Join(scenario.OwnedPath, "preserved.m4b");
+        await File.WriteAllTextAsync(preservedFile, "preserved-audio");
+        Directory.Move(scenario.RootPath, displacedRoot);
+
+        var result = await CreateService().RetryAsync(scenario.RelocationId);
+
+        Assert.Equal(RootFolderRelocationStatus.Completed, result.Status);
+        Assert.False(Directory.Exists(scenario.RootPath));
+        Assert.Equal("preserved-audio", await File.ReadAllTextAsync(
+            Path.Join(displacedRoot, "Book", "preserved.m4b")));
+        await using var verification = await _factory.CreateDbContextAsync();
+        var rootAfter = await verification.RootFolders.SingleAsync();
+        var ownershipAfter = await verification.LibraryDirectoryOwnerships.SingleAsync();
+        Assert.Equal("Renamed Library", rootAfter.Name);
+        Assert.Null(rootAfter.DirectoryObjectIdentity);
+        Assert.Equal(LibraryDirectoryOwnershipState.Removed, ownershipAfter.State);
+        Assert.Null(ownershipAfter.PathOwnershipKey);
+        Assert.Null(ownershipAfter.ManagedRootFolderId);
+        Assert.False(await verification.LibraryDirectoryOwnershipPathMigrations.AnyAsync());
+    }
+    [Fact]
+    public async Task ReconcileOwnershipMigration_TargetGenerationReplacement_DoesNotRestoreCleanupAuthority()
     {
         var scenario = await SeedPublishedOwnershipMigrationAsync();
         var displacedPath = scenario.OwnedPath + ".original";
@@ -5002,31 +5078,27 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             Directory.CreateDirectory(scenario.OwnedPath);
         };
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.ReconcileActiveAsync());
+        await service.ReconcileActiveAsync();
 
         await using var verification = await _factory.CreateDbContextAsync();
         var ownershipAfter = await verification
             .LibraryDirectoryOwnerships.SingleAsync();
         var relocationAfter = await verification
             .RootFolderRelocations.SingleAsync();
-        Assert.True(await verification
+        Assert.False(await verification
             .LibraryDirectoryOwnershipPathMigrations.AnyAsync());
+        Assert.Equal(LibraryDirectoryOwnershipState.Removed, ownershipAfter.State);
+        Assert.Null(ownershipAfter.PathOwnershipKey);
+        Assert.Null(ownershipAfter.ManagedRootFolderId);
         Assert.Equal(
-            scenario.SourceOwnershipKey,
-            ownershipAfter.PathOwnershipKey);
-        Assert.Equal(
-            FileSystemCaseSensitivityMode.Auto,
-            ownershipAfter.PathCaseSensitivityMode);
-        Assert.Equal(
-            RootFolderRelocationStatus.Failed,
+            RootFolderRelocationStatus.Completed,
             relocationAfter.Status);
         Assert.True(Directory.Exists(displacedPath));
         Assert.True(Directory.Exists(scenario.OwnedPath));
     }
 
     [Fact]
-    public async Task ReconcileOwnershipMigration_TargetGenerationReplacedImmediatelyAfterCommit_MarksFailedRecovery()
+    public async Task ReconcileOwnershipMigration_TargetGenerationReplacedImmediatelyAfterCommit_DoesNotRestoreCleanupAuthority()
     {
         var scenario = await SeedPublishedOwnershipMigrationAsync();
         var displacedPath = scenario.OwnedPath + ".post-commit-original";
@@ -5037,8 +5109,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             Directory.CreateDirectory(scenario.OwnedPath);
         };
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.ReconcileActiveAsync());
+        await service.ReconcileActiveAsync();
 
         await using var verification = await _factory.CreateDbContextAsync();
         var ownershipAfter = await verification
@@ -5047,16 +5118,13 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             .RootFolderRelocations.SingleAsync();
         Assert.False(await verification
             .LibraryDirectoryOwnershipPathMigrations.AnyAsync());
+        Assert.Equal(LibraryDirectoryOwnershipState.Removed, ownershipAfter.State);
+        Assert.Null(ownershipAfter.PathOwnershipKey);
+        Assert.Null(ownershipAfter.ManagedRootFolderId);
         Assert.Equal(
-            scenario.TargetOwnershipKey,
-            ownershipAfter.PathOwnershipKey);
-        Assert.Equal(
-            RootFolderRelocationStatus.Failed,
+            RootFolderRelocationStatus.Completed,
             relocationAfter.Status);
-        Assert.Contains(
-            "metadata-only root repair recovery is blocked",
-            relocationAfter.Error,
-            StringComparison.OrdinalIgnoreCase);
+        Assert.Null(relocationAfter.Error);
         Assert.True(Directory.Exists(displacedPath));
         Assert.True(Directory.Exists(scenario.OwnedPath));
     }
@@ -5090,14 +5158,20 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         var secondRelocation = await verification.RootFolderRelocations
             .SingleAsync(candidate => candidate.Id == second.RelocationId);
         Assert.Equal(
+            LibraryDirectoryOwnershipState.Owned,
+            firstOwnership.State);
+        Assert.Equal(
             first.SourceOwnershipKey,
             firstOwnership.PathOwnershipKey);
+        Assert.NotNull(firstOwnership.ManagedRootFolderId);
         Assert.Equal(
             RootFolderRelocationStatus.Failed,
             firstRelocation.Status);
         Assert.Equal(
-            second.TargetOwnershipKey,
-            secondOwnership.PathOwnershipKey);
+            LibraryDirectoryOwnershipState.Removed,
+            secondOwnership.State);
+        Assert.Null(secondOwnership.PathOwnershipKey);
+        Assert.Null(secondOwnership.ManagedRootFolderId);
         Assert.Equal(
             RootFolderRelocationStatus.Completed,
             secondRelocation.Status);
@@ -5112,7 +5186,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
     }
 
     [DirectoryLinkFact]
-    public async Task MetadataOnly_LinkedSourceAndPhysicalTarget_PreservesPhysicalIdentityWithoutSidecars()
+    public async Task MetadataOnly_LinkedSourceAndPhysicalTarget_RetiresCleanupOwnershipWithoutSidecars()
     {
         var root = Path.Join(
             TempRoot,
@@ -5225,7 +5299,13 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             var ownershipAfter = await verification
                 .LibraryDirectoryOwnerships.SingleAsync();
             Assert.Equal(physicalRoot, rootAfter.Path);
-            Assert.Equal(physicalOwnedPath, ownershipAfter.CanonicalPath);
+            Assert.Equal(
+                LibraryDirectoryOwnershipState.Removed,
+                ownershipAfter.State);
+            Assert.Null(ownershipAfter.PathOwnershipKey);
+            Assert.Null(ownershipAfter.ManagedRootFolderId);
+            Assert.Equal(linkedOwnedPath, ownershipAfter.CanonicalPath);
+            Assert.True(Directory.Exists(physicalOwnedPath));
             Assert.True(ManagedDirectoryIdentity.Matches(
                 ownershipAfter.DirectoryObjectIdentityVersion,
                 ownershipAfter.DirectoryObjectIdentity,
@@ -5246,7 +5326,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
     }
 
     [DirectoryLinkFact]
-    public async Task MetadataOnly_PhysicalSourceAndLinkedTarget_PreservesPhysicalIdentityWithoutSidecars()
+    public async Task MetadataOnly_PhysicalSourceAndLinkedTarget_RetiresCleanupOwnershipWithoutSidecars()
     {
         var root = Path.Join(
             TempRoot,
@@ -5359,7 +5439,13 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             var ownershipAfter = await verification
                 .LibraryDirectoryOwnerships.SingleAsync();
             Assert.Equal(linkedRoot, rootAfter.Path);
-            Assert.Equal(linkedOwnedPath, ownershipAfter.CanonicalPath);
+            Assert.Equal(
+                LibraryDirectoryOwnershipState.Removed,
+                ownershipAfter.State);
+            Assert.Null(ownershipAfter.PathOwnershipKey);
+            Assert.Null(ownershipAfter.ManagedRootFolderId);
+            Assert.Equal(physicalOwnedPath, ownershipAfter.CanonicalPath);
+            Assert.True(Directory.Exists(linkedOwnedPath));
             Assert.True(ManagedDirectoryIdentity.Matches(
                 ownershipAfter.DirectoryObjectIdentityVersion,
                 ownershipAfter.DirectoryObjectIdentity,
@@ -6030,8 +6116,17 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         Assert.False(await service.IsAudiobookPathStateProtectedAsync(audiobookId));
     }
 
-    [Fact]
-    public async Task MetadataRepair_CompletedImportJournalWithoutFileOwner_DoesNotBlockCollisionRepair()
+    [Theory]
+    [InlineData(null, FileMutationJournalState.Completed)]
+    [InlineData(null, FileMutationJournalState.CompletedSourceRetained)]
+    [InlineData(FileMutationOwner.CompanionFile, FileMutationJournalState.CompletedSourceRetained)]
+    [InlineData(FileMutationOwner.RegistrationCompanionFile, FileMutationJournalState.CompletedSourceRetained)]
+    [InlineData(null, FileMutationJournalState.RolledBack)]
+    [InlineData(FileMutationOwner.CompanionFile, FileMutationJournalState.RolledBack)]
+    [InlineData(FileMutationOwner.RegistrationCompanionFile, FileMutationJournalState.RolledBack)]
+    [InlineData(0, FileMutationJournalState.RolledBack)]
+    public async Task MetadataRepair_TerminalPublication_DoesNotBlockCollisionRepair(
+        int? fileOwner, FileMutationJournalState state)
     {
         var source = Path.Join(
             Path.GetTempPath(),
@@ -6109,9 +6204,9 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
                 DestinationPath = Path.Join(audiobookBasePath, "book.mp3"),
                 SourcePhysicalObjectIdentity = "completed-import-source-generation",
                 SourceLength = 1,
-                State = FileMutationJournalState.Completed,
+                State = state,
                 AudiobookId = audiobookId,
-                AudiobookFileId = null,
+                AudiobookFileId = fileOwner,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             });
@@ -6128,8 +6223,8 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         Assert.True(await verification.FileMutationJournals
             .AnyAsync(journal =>
                 journal.OperationId == completedImportOperationId
-                && journal.State == FileMutationJournalState.Completed
-                && journal.AudiobookFileId == null));
+                && journal.State == state
+                && journal.AudiobookFileId == fileOwner));
         Assert.Single(await verification.AudiobookFiles
             .Where(file => file.AudiobookId == audiobookId)
             .ToListAsync());
@@ -6648,6 +6743,10 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         }
 
         var changedSemanticsResolver = new Mock<IFileSystemSemanticsResolver>();
+        changedSemanticsResolver.Setup(resolver => resolver.ResolveAsync(
+                It.IsAny<string>(), It.IsAny<FileSystemCaseSensitivityMode>(), It.IsAny<CancellationToken>()))
+            .Returns((string path, FileSystemCaseSensitivityMode mode, CancellationToken token) =>
+                new FileSystemSemanticsResolver().ResolveAsync(path, mode, token));
         changedSemanticsResolver.Setup(resolver => resolver.ResolveAsync(
                 target,
                 FileSystemCaseSensitivityMode.Auto,
@@ -7222,7 +7321,7 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
     }
 
     [Fact]
-    public async Task FinalizeCompletedRelocation_ReplacedTargetWithoutAuthorization_DoesNotCommitReplacement()
+    public async Task FinalizeCompletedRelocation_ReplacedTargetUsesCurrentPinnedTarget()
     {
         var (rootId, _, source, target) = await SeedRelocationScenarioAsync();
         var service = CreateService();
@@ -7248,8 +7347,8 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         var rootAfter = await verification.RootFolders.SingleAsync(root => root.Id == rootId);
         var relocationAfter = await verification.RootFolderRelocations
             .SingleAsync(relocation => relocation.Id == started.RelocationId);
-        Assert.Equal(source, rootAfter.Path);
-        Assert.Equal(RootFolderRelocationStatus.NeedsAttention, relocationAfter.Status);
+        Assert.Equal(target, rootAfter.Path);
+        Assert.Equal(RootFolderRelocationStatus.Completed, relocationAfter.Status);
         Assert.True(Directory.Exists(displacedTarget));
     }
 
@@ -7878,6 +7977,119 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
         Assert.Equal("Finalized Library", rootAfter.Name);
         Assert.Equal(RootFolderRelocationStatus.Completed, relocationAfter.Status);
         Assert.Null(relocationAfter.ActiveRootFolderId);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OnMoveJobStateChangedAsync_DuplicateCompletedNotification_PreservesFinalizedRoot(
+        bool editNameAfterCompletion)
+    {
+        var (rootId, _, _, target) = await SeedRelocationScenarioAsync();
+        var service = CreateService();
+        var started = await service.StartAsync(rootId, BuildRelocationCommand(target));
+        Guid jobId;
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var job = await db.MoveJobs.SingleAsync();
+            jobId = job.Id;
+            job.Status = MoveJobStatus.Completed;
+            job.ActiveDeduplicationKey = null;
+            var audiobook = await db.Audiobooks.SingleAsync();
+            audiobook.BasePath = job.RequestedPath;
+            await db.SaveChangesAsync();
+        }
+        await service.OnMoveJobStateChangedAsync(jobId);
+
+        string expectedName;
+        int expectedRevision;
+        DateTime? completedAt;
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var relocation = await db.RootFolderRelocations.SingleAsync();
+            Assert.Equal(RootFolderRelocationStatus.Completed, relocation.Status);
+            Assert.Null(relocation.ActiveRootFolderId);
+            completedAt = relocation.CompletedAt;
+            var root = await db.RootFolders.SingleAsync(root => root.Id == rootId);
+            if (editNameAfterCompletion)
+            {
+                root.Name = "User edited library";
+                await db.SaveChangesAsync();
+            }
+            expectedName = root.Name;
+            expectedRevision = root.StorageContractRevision;
+        }
+
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            await CreateService().OnMoveJobStateChangedAsync(jobId);
+            await using var db = await _factory.CreateDbContextAsync();
+            var root = await db.RootFolders.AsNoTracking().SingleAsync(root => root.Id == rootId);
+            var relocation = await db.RootFolderRelocations.AsNoTracking()
+                .SingleAsync(relocation => relocation.Id == started.RelocationId);
+            Assert.Equal(expectedName, root.Name);
+            Assert.Equal(target, root.Path);
+            Assert.Equal(expectedRevision, root.StorageContractRevision);
+            Assert.Equal(completedAt, relocation.CompletedAt);
+            Assert.Equal(RootFolderRelocationStatus.Completed, relocation.Status);
+            Assert.Null(relocation.ActiveRootFolderId);
+        }
+    }
+
+    [Fact]
+    public async Task OnMoveJobStateChangedAsync_InterruptedBeforeFinalizationCommit_RepeatedRecoveryCompletesOnce()
+    {
+        var (rootId, _, source, target) = await SeedRelocationScenarioAsync();
+        var service = CreateService();
+        var started = await service.StartAsync(rootId, BuildRelocationCommand(target));
+        Guid jobId;
+        int initialRevision;
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var job = await db.MoveJobs.SingleAsync();
+            jobId = job.Id;
+            job.Status = MoveJobStatus.Completed;
+            job.ActiveDeduplicationKey = null;
+            var audiobook = await db.Audiobooks.SingleAsync();
+            audiobook.BasePath = job.RequestedPath;
+            initialRevision = (await db.RootFolders.SingleAsync(root => root.Id == rootId))
+                .StorageContractRevision;
+            await db.SaveChangesAsync();
+        }
+        service.BeforeCompletedRelocationAtomicCommitForTest = _ =>
+            throw new IOException("Injected interruption before root finalization commit.");
+        await Assert.ThrowsAsync<IOException>(() => service.OnMoveJobStateChangedAsync(jobId));
+
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            var root = await db.RootFolders.AsNoTracking().SingleAsync(root => root.Id == rootId);
+            var relocation = await db.RootFolderRelocations.AsNoTracking().SingleAsync();
+            Assert.Equal(source, root.Path);
+            Assert.Equal(initialRevision, root.StorageContractRevision);
+            Assert.Equal(rootId, relocation.ActiveRootFolderId);
+            Assert.Null(relocation.CompletedAt);
+            Assert.NotEqual(RootFolderRelocationStatus.Completed, relocation.Status);
+            Assert.Equal(MoveJobStatus.Completed, (await db.MoveJobs.SingleAsync()).Status);
+        }
+
+        DateTime? completedAt = null;
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var recovery = CreateService();
+            await recovery.ReconcileActiveAsync();
+            await recovery.OnMoveJobStateChangedAsync(jobId);
+            await using var db = await _factory.CreateDbContextAsync();
+            var root = await db.RootFolders.AsNoTracking().SingleAsync(root => root.Id == rootId);
+            var relocation = await db.RootFolderRelocations.AsNoTracking()
+                .SingleAsync(relocation => relocation.Id == started.RelocationId);
+            Assert.Equal(target, root.Path);
+            Assert.Equal(initialRevision + 1, root.StorageContractRevision);
+            Assert.Equal(RootFolderRelocationStatus.Completed, relocation.Status);
+            Assert.Null(relocation.ActiveRootFolderId);
+            Assert.NotNull(relocation.CompletedAt);
+            completedAt ??= relocation.CompletedAt;
+            Assert.Equal(completedAt, relocation.CompletedAt);
+        }
     }
 
     [Fact]
@@ -8797,6 +9009,39 @@ public sealed class RootFolderRelocationServiceTests : BaseTests
             Path.Join(audiobook.BasePath!, "book.m4b"),
             source);
         return (root.Id, audiobook.Id, source, target);
+    }
+
+    [Theory]
+    [InlineData(VerifiedFileRenameState.Planned)]
+    [InlineData(VerifiedFileRenameState.NeedsAttention)]
+    public async Task MetadataOnly_ActiveVerifiedOrganizeRecovery_BlocksBeforePathRewrite(VerifiedFileRenameState state)
+    {
+        var (rootId, audiobookId, source, target) = await SeedRelocationScenarioAsync();
+        await using (var db = await _factory.CreateDbContextAsync())
+        {
+            db.VerifiedFileRenameJournals.Add(new VerifiedFileRenameJournal
+            {
+                OperationId = Guid.NewGuid(),
+                BatchId = Guid.NewGuid(),
+                AudiobookId = audiobookId,
+                SourcePath = Path.Join(source, "Author", "Title", "book.m4b"),
+                DestinationPath = Path.Join(source, "Author", "Title", "organized.m4b"),
+                State = state
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var exception = await Assert.ThrowsAsync<RootFolderPathChangeRejectedException>(() =>
+            CreateService().StartAsync(rootId, BuildRelocationCommand(target) with
+            {
+                Mode = RootFolderRelocationMode.MetadataOnly
+            }));
+
+        Assert.Equal("rename_recovery_pending", exception.Code);
+        await using var verification = await _factory.CreateDbContextAsync();
+        Assert.Equal(source, (await verification.RootFolders.SingleAsync(root => root.Id == rootId)).Path);
+        Assert.Empty(await verification.RootFolderRelocations.ToListAsync());
+        Assert.Empty(await verification.MoveJobs.ToListAsync());
     }
 
     private static RootFolderPathChangeCommand BuildRelocationCommand(string target) => new(

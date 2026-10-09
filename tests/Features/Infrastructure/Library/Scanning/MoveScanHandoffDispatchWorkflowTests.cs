@@ -190,7 +190,7 @@ public sealed class MoveScanHandoffDispatchWorkflowTests : BaseTests
     }
 
     [WindowsFact]
-    public async Task VerifyPublishedManifestAsync_HashlessNativeRenameReplacementGeneration_RequiresAttention()
+    public async Task VerifyPublishedManifestAsync_HashlessLegacyPublication_RequiresContentProof()
     {
         var target = FileService.GetTempDirectory("move-scan-native-replacement");
         var filePath = await FileService.GetFileAsync(
@@ -239,14 +239,13 @@ public sealed class MoveScanHandoffDispatchWorkflowTests : BaseTests
                 [entry],
                 FileSystemPathSemantics.CurrentHostDefault,
                 target,
-                boundaryIdentity,
                 CancellationToken.None));
 
-        Assert.Contains("generation", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("verification", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task TryDispatchPendingAsync_HashlessNativeRenameManifest_DispatchesByPhysicalGeneration()
+    public async Task TryDispatchPendingAsync_HashlessLegacyManifest_FailsWithoutContentProof()
     {
         var target = FileService.GetTempDirectory("move-scan-native-target");
         var filePath = await FileService.GetFileAsync(
@@ -302,6 +301,15 @@ public sealed class MoveScanHandoffDispatchWorkflowTests : BaseTests
                 It.IsAny<DateTimeOffset>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(claim);
+        handoffStore.Setup(store => store.ReleaseClaimAsync(
+                handoffId,
+                claim.LeaseOwner,
+                claim.LeaseGeneration,
+                It.Is<string?>(error => error != null
+                    && error.Contains("verification", StringComparison.OrdinalIgnoreCase)),
+                It.IsAny<DateTimeOffset>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
         var audiobookRepository = new Mock<IAudiobookRepository>(MockBehavior.Strict);
         audiobookRepository.Setup(repository => repository.GetPathReferenceSnapshotAsync(
                 claim.AudiobookId,
@@ -322,15 +330,7 @@ public sealed class MoveScanHandoffDispatchWorkflowTests : BaseTests
                 target,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(authorizationResult);
-        var scanJobId = Guid.NewGuid();
         var scanQueue = new Mock<IScanQueueService>(MockBehavior.Strict);
-        scanQueue.Setup(queue => queue.EnqueueMoveHandoffScanAsync(
-                It.Is<Audiobook>(audiobook =>
-                    audiobook.Id == claim.AudiobookId
-                    && audiobook.BasePath == target),
-                claim,
-                physicalIdentity))
-            .ReturnsAsync(scanJobId);
         using var provider = new ServiceCollection()
             .AddSingleton(audiobookRepository.Object)
             .AddSingleton(authorization.Object)
@@ -348,11 +348,18 @@ public sealed class MoveScanHandoffDispatchWorkflowTests : BaseTests
             NullLogger.Instance,
             CancellationToken.None);
 
-        Assert.Equal(MoveScanDispatchOutcome.Dispatched, result.Outcome);
-        Assert.Equal(scanJobId, result.ScanJobId);
+        Assert.Equal(MoveScanDispatchOutcome.Failed, result.Outcome);
+        Assert.Null(result.ScanJobId);
         authorization.Verify(service => service.AuthorizeAsync(
             target,
-            It.IsAny<CancellationToken>()), Times.Exactly(2));
-        scanQueue.VerifyAll();
+            It.IsAny<CancellationToken>()), Times.Once);
+        handoffStore.Verify(store => store.ReleaseClaimAsync(
+            handoffId,
+            claim.LeaseOwner,
+            claim.LeaseGeneration,
+            It.IsAny<string?>(),
+            It.IsAny<DateTimeOffset>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+        scanQueue.VerifyNoOtherCalls();
     }
 }

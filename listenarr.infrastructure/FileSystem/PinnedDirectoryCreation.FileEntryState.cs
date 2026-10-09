@@ -88,6 +88,36 @@ internal sealed partial class PinnedDirectoryCreation
             return DuplicateSafeHandle(_fileHandle);
         }
 
+        internal PinnedFileEntry DuplicateForOperation()
+        {
+            ThrowIfDisposed();
+            SafeFileHandle? parentHandle = null;
+            SafeFileHandle? fileHandle = null;
+            PinnedFileEntry? copy = null;
+            try
+            {
+                parentHandle = DuplicateSafeHandle(_parentHandle);
+                fileHandle = DuplicateSafeHandle(_fileHandle);
+                copy = new PinnedFileEntry(parentHandle, fileHandle,
+                    _parentPath, _fileName, _parentFollowsVisibleFinalLink);
+                parentHandle = null;
+                fileHandle = null;
+                if (!copy.VisiblePathMatches() || !IdentifiesSameEntry(copy))
+                {
+                    throw new InvalidOperationException(
+                        "The published destination changed while its live handle was retained.");
+                }
+                return copy;
+            }
+            catch
+            {
+                copy?.Dispose();
+                fileHandle?.Dispose();
+                parentHandle?.Dispose();
+                throw;
+            }
+        }
+
         internal PinnedFileEntry OpenStableRegistrationCopy()
         {
             ThrowIfDisposed();
@@ -97,9 +127,9 @@ internal sealed partial class PinnedDirectoryCreation
                     "The file generation changed before a stable registration lease could be acquired.");
             }
 
-            var expectedIdentity = GetObjectIdentity();
             if (OperatingSystem.IsWindows())
             {
+                var expectedIdentity = GetObjectIdentity();
                 _fileHandle.Dispose();
                 _fileHandle = OpenRelativeFileStableReadWindows(
                     _parentHandle,
@@ -133,11 +163,7 @@ internal sealed partial class PinnedDirectoryCreation
                 fileHandle = null;
 
                 if (!copy.VisiblePathMatches()
-                    || !IdentifiesSameEntry(copy)
-                    || !string.Equals(
-                        copy.GetObjectIdentity(),
-                        expectedIdentity,
-                        StringComparison.Ordinal))
+                    || !IdentifiesSameEntry(copy))
                 {
                     throw new InvalidOperationException(
                         "The stable registration lease did not capture the published file generation.");
@@ -157,6 +183,14 @@ internal sealed partial class PinnedDirectoryCreation
 
     internal sealed partial class PinnedDirectoryAnchor
     {
+        internal bool IdentifiesSameDirectory(PinnedDirectoryAnchor other)
+        {
+            ArgumentNullException.ThrowIfNull(other);
+            ThrowIfDisposed();
+            other.ThrowIfDisposed();
+            return HandlesIdentifySameDirectory(_handle, other._handle);
+        }
+
         internal PinnedFileOpenOutcome TryOpenExistingFileWithOutcome(
             string fileName,
             bool requireDeleteAccess,

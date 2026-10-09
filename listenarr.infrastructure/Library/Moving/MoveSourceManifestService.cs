@@ -45,7 +45,6 @@ internal sealed partial class MoveSourceManifestService(
             validated.Add(await ValidateFileAsync(
                 trackedFile.Id,
                 path,
-                trackedFile.PhysicalObjectIdentity,
                 includeContentHashes,
                 cancellationToken));
         }
@@ -143,7 +142,6 @@ internal sealed partial class MoveSourceManifestService(
     private async Task<ValidatedTrackedFile> ValidateFileAsync(
         int audiobookFileId,
         string path,
-        string? expectedPhysicalObjectIdentity,
         bool includeContentHash,
         CancellationToken cancellationToken)
     {
@@ -162,14 +160,8 @@ internal sealed partial class MoveSourceManifestService(
                 or System.ComponentModel.Win32Exception)
         {
             throw Unavailable(
-                $"Tracked file {audiobookFileId} is temporarily unavailable while its persisted physical identity is being verified.",
+                $"Tracked file {audiobookFileId} is temporarily unavailable while its live move proof is being verified.",
                 exception);
-        }
-
-        if (string.IsNullOrWhiteSpace(expectedPhysicalObjectIdentity))
-        {
-            throw Conflict(
-                $"Tracked file {audiobookFileId} has unresolved physical identity and must be rescanned before moving.");
         }
 
         var parentPath = Path.GetDirectoryName(path)
@@ -182,11 +174,6 @@ internal sealed partial class MoveSourceManifestService(
                 createMissing: false);
             using var file = parent.OpenExistingFileForStableRead(
                 Path.GetFileName(path));
-            if (!file.MatchesObjectIdentity(expectedPhysicalObjectIdentity))
-            {
-                throw Conflict(
-                    $"Tracked file {audiobookFileId} identifies a different physical file generation and must be rescanned before moving.");
-            }
 
             await using var stream = file.OpenReadStream(
                 bufferSize: 128 * 1024,
@@ -208,7 +195,6 @@ internal sealed partial class MoveSourceManifestService(
             }
             if (fileVisibility != RegistrationPublicationMatchOutcome.Match
                 || parentVisibility != RegistrationPublicationMatchOutcome.Match
-                || !file.MatchesObjectIdentity(expectedPhysicalObjectIdentity)
                 || stream.Length != length
                 || file.GetLastWriteTimeUtc() != lastWriteTimeUtc)
             {
@@ -238,7 +224,7 @@ internal sealed partial class MoveSourceManifestService(
                 or System.ComponentModel.Win32Exception)
         {
             throw Unavailable(
-                $"Tracked file {audiobookFileId} is temporarily unavailable while its persisted physical identity is being verified.",
+                $"Tracked file {audiobookFileId} is temporarily unavailable while its live move proof is being verified.",
                 exception);
         }
         catch (Exception exception) when (exception is
@@ -246,7 +232,7 @@ internal sealed partial class MoveSourceManifestService(
                 or NotSupportedException or PathTooLongException)
         {
             throw Conflict(
-                $"Tracked file {audiobookFileId} could not be pinned to its persisted physical identity: {exception.Message}");
+                $"Tracked file {audiobookFileId} could not be pinned for live move verification: {exception.Message}");
         }
     }
 

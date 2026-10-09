@@ -38,7 +38,9 @@ public static class FileMoveOperationIdentity
                 operationKind,
                 System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
             sourceKey,
-            sourceProof.PhysicalObjectIdentity,
+            sourceProof.ContentProof.Version.ToString(
+                System.Globalization.CultureInfo.InvariantCulture),
+            sourceProof.ContentProof.Algorithm,
             sourceProof.Length.ToString(System.Globalization.CultureInfo.InvariantCulture),
             sourceProof.Sha256,
             destinationKey);

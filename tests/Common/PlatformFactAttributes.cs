@@ -22,6 +22,114 @@ public sealed class LinuxFactAttribute : FactAttribute
     }
 }
 
+public sealed class NativeStorageIdentityFactAttribute : FactAttribute
+{
+    public const string PathEnvironmentVariable =
+        "LISTENARR_NATIVE_STORAGE_TEST_PATH";
+    public const string ExpectationEnvironmentVariable =
+        "LISTENARR_NATIVE_STORAGE_IDENTITY_EXPECTATION";
+
+    public NativeStorageIdentityFactAttribute()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Skip = "This test requires a native Linux storage mount.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                PathEnvironmentVariable))
+            || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                ExpectationEnvironmentVariable)))
+        {
+            Skip = "The native test runner did not provide a storage mount and identity expectation.";
+        }
+    }
+}
+
+public sealed class NativeWeakStorageFactAttribute : FactAttribute
+{
+    public NativeWeakStorageFactAttribute()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Skip = "This test requires a native Linux weak-storage mount.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                NativeStorageIdentityFactAttribute.PathEnvironmentVariable))
+            || !string.Equals(
+                Environment.GetEnvironmentVariable(
+                    NativeStorageIdentityFactAttribute.ExpectationEnvironmentVariable),
+                "generic-fid",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            Skip = "The native test runner did not provide a generic-FID weak-storage mount.";
+        }
+    }
+}
+
+public sealed class NativeStorageRemountFactAttribute : FactAttribute
+{
+    public const string PathEnvironmentVariable =
+        NativeStorageIdentityFactAttribute.PathEnvironmentVariable;
+    public const string StatePathEnvironmentVariable =
+        "LISTENARR_NATIVE_STORAGE_IDENTITY_STATE_PATH";
+    public const string PhaseEnvironmentVariable =
+        "LISTENARR_NATIVE_STORAGE_IDENTITY_PHASE";
+    public const string ExpectationEnvironmentVariable =
+        NativeStorageIdentityFactAttribute.ExpectationEnvironmentVariable;
+
+    public NativeStorageRemountFactAttribute()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Skip = "This test requires a native Linux storage mount.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                PathEnvironmentVariable))
+            || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                StatePathEnvironmentVariable))
+            || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                PhaseEnvironmentVariable))
+            || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                ExpectationEnvironmentVariable)))
+        {
+            Skip = "The native test runner did not provide the storage remount fixture state and identity expectation.";
+        }
+    }
+}
+
+public sealed class NativeWeakStorageRemountFactAttribute : FactAttribute
+{
+    public NativeWeakStorageRemountFactAttribute()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Skip = "This test requires a native Linux weak-storage remount fixture.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                NativeStorageRemountFactAttribute.PathEnvironmentVariable))
+            || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                NativeStorageRemountFactAttribute.StatePathEnvironmentVariable))
+            || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                NativeStorageRemountFactAttribute.PhaseEnvironmentVariable))
+            || !string.Equals(
+                Environment.GetEnvironmentVariable(
+                    NativeStorageRemountFactAttribute.ExpectationEnvironmentVariable),
+                "generic-fid",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            Skip = "The native test runner did not provide a generic-FID weak-storage remount fixture.";
+        }
+    }
+}
+
 public sealed class WindowsTheoryAttribute : TheoryAttribute
 {
     public WindowsTheoryAttribute()

@@ -17,8 +17,7 @@ public sealed partial class RootFolderRelocationService
             IReadOnlySet<int> skippedAudiobookIds,
             CancellationToken cancellationToken)
     {
-        var transfers = new List<OwnershipMigrationPlan>(plans.Count);
-        var retirements = new List<LibraryDirectoryOwnership>();
+        var retirements = new List<LibraryDirectoryOwnership>(plans.Count);
         foreach (var plan in plans)
         {
             var ownership = plan.Tracked;
@@ -27,37 +26,13 @@ public sealed partial class RootFolderRelocationService
                 throw new InvalidOperationException(
                     "Directory cleanup began before ownership migration recovery completed.");
             }
-            if (ownership.AudiobookId is int audiobookId
-                && skippedAudiobookIds.Contains(audiobookId))
-            {
-                retirements.Add(ownership);
-                continue;
-            }
-            if (ownership.State is LibraryDirectoryOwnershipState.Unavailable
-                or LibraryDirectoryOwnershipState.Conflict
-                or LibraryDirectoryOwnershipState.Removed
-                || plan.Source.DirectoryObjectIdentityVersion
-                    != ManagedDirectoryIdentity.CurrentVersion
-                || string.IsNullOrWhiteSpace(plan.Source.DirectoryObjectIdentity))
-            {
-                retirements.Add(ownership);
-                continue;
-            }
 
-            var targetGeneration = await ResolveExistingDirectoryObjectIdentityAsync(
-                plan.Target.CanonicalPath,
-                plan.Source.DirectoryObjectIdentityVersion!.Value,
-                plan.Source.DirectoryObjectIdentity!,
-                cancellationToken);
-            if (!targetGeneration.IsAvailable)
-            {
-                retirements.Add(ownership);
-                continue;
-            }
-
-            transfers.Add(plan);
+            // A recovered path-migration journal is descriptive only. A restart
+            // cannot recreate destructive directory ownership at the target.
+            retirements.Add(ownership);
         }
 
+        _ = skippedAudiobookIds;
         var journaledOwnershipIds = plans
             .Select(plan => plan.Tracked.Id)
             .ToHashSet();
@@ -74,12 +49,11 @@ public sealed partial class RootFolderRelocationService
                 "Directory cleanup began before metadata-only recovery completed.");
         }
 
-        // A committed metadata-only journal can transfer cleanup authority only
-        // for ownerships that have an explicit path-migration journal. Any
-        // unjournaled claim is conservatively retired during recovery.
+        // No metadata-only restart path transfers cleanup authority. Journaled
+        // and unjournaled claims are both retired conservatively.
         retirements.AddRange(unjournaledOwnerships);
         return new OwnershipMigrationPreparation(
-            transfers,
+            [],
             retirements.DistinctBy(ownership => ownership.Id).ToArray());
     }
 

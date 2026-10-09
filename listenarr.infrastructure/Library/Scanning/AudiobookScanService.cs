@@ -12,8 +12,7 @@ internal sealed partial class AudiobookScanService(
     IFileSystem fileSystem,
     IFileSystemSemanticsResolver semanticsResolver,
     IScanPathAuthorizationService pathAuthorizationService,
-    ILogger<AudiobookScanService> logger,
-    IWeakStorageScanCandidateStore? weakStorageScanCandidateStore = null)
+    ILogger<AudiobookScanService> logger)
     : IAudiobookScanService
 {
     public async Task<AudiobookScanResult> ScanAsync(
@@ -51,6 +50,9 @@ internal sealed partial class AudiobookScanService(
             diagnostics,
             cancellationToken);
 
+        // Keep only the authorized hierarchy pinned across discovery. Individual
+        // files and descendant directories close after inspection and reopen when
+        // needed; a scan-wide handle per entry would exhaust large libraries.
         var discovery = ScanFileDiscovery.Discover(
             fileSystem,
             command.ScanRoot,
@@ -61,7 +63,7 @@ internal sealed partial class AudiobookScanService(
             resolvedExistingPaths.Values,
             ownershipMap,
             pinnedAuthority.Root,
-            command.ScanPhysicalIdentity.HasDurableGenerationProof);
+            requireDurableGenerationProof: false);
         discovery = await EnrichWithMetadataAsync(
             command,
             pinnedAuthority,
@@ -173,7 +175,6 @@ internal sealed partial class AudiobookScanService(
             discovery.IsComplete,
             command.AllowReconciliation
                 && command.IsAuthoritativeScope
-                && command.ScanPhysicalIdentity.HasDurableGenerationProof
                 && discovery.CanReconcile,
             diagnostics);
     }
@@ -187,8 +188,7 @@ internal sealed partial class AudiobookScanService(
             command.ScanRoot,
             cancellationToken);
         if (!currentAuthorization.IsAuthorized
-            || !currentAuthorization.Identity.HasValue
-            || !currentAuthorization.PhysicalIdentity.HasValue)
+            || !currentAuthorization.Identity.HasValue)
         {
             throw new InvalidOperationException(
                 currentAuthorization.Error
@@ -203,13 +203,9 @@ internal sealed partial class AudiobookScanService(
                 "The configured scan-root authority changed after authorization.");
         }
 
-        if (command.ScanPhysicalIdentity
-            != currentAuthorization.PhysicalIdentity.Value)
-        {
-            throw new InvalidOperationException(
-                "The physical scan-root generation changed after authorization.");
-        }
-
+        // Persisted scan-path physical identity is legacy diagnostic
+        // information only. Current path semantics plus the live pinned hierarchy
+        // authorize this scan operation.
         if (!fileSystem.DirectoryExists(command.ScanRoot))
         {
             throw new DirectoryNotFoundException(
@@ -264,13 +260,13 @@ internal sealed partial class AudiobookScanService(
         {
             cancellationToken.ThrowIfCancellationRequested();
             await ValidateCommandAsync(command, cancellationToken);
-            ValidateDiscoveredPathParent(
-                command,
-                pinnedAuthority,
-                discovery,
-                filePath);
             try
             {
+                ValidateDiscoveredPathParent(
+                    command,
+                    pinnedAuthority,
+                    discovery,
+                    filePath);
                 using var registrationLease = OpenPinnedMetadataFile(
                     command,
                     pinnedAuthority,

@@ -914,17 +914,6 @@ class ApiService {
     })
   }
 
-  async updateRootFolderWeakStoragePolicy(
-    id: number,
-    policy: 'RetainSource' | 'DeleteSourceAfterVerifiedCopy',
-    expectedRevision: number,
-  ): Promise<RootFolder> {
-    return this.request<RootFolder>(`/rootfolders/${id}/weak-storage-policy`, {
-      method: 'PATCH',
-      body: JSON.stringify({ policy, expectedRevision }),
-    })
-  }
-
   async changeRootFolderPath(
     id: number,
     request: {

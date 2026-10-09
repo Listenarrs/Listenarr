@@ -40,6 +40,7 @@ namespace Listenarr.Domain.Downloads
     {
         public static string METADATA_EXTERNAL_ID_KEY = "ClientDownloadId";
         public const string SourceRetainedMetadataKey = "SourceRetained";
+        public const string ImportSourceRetentionRequiredMetadataKey = "ImportSourceRetentionRequired";
         public static int MaxImportAttempts = 3;
 
         public string Id { get; set; } = Guid.NewGuid().ToString();
@@ -348,6 +349,10 @@ namespace Listenarr.Domain.Downloads
         public DateTime? SnapshotRefreshedAt { get; set; }
         public bool CanPause { get; set; } = true;
         public bool CanRemove { get; set; } = true;
+
+        /// <summary>Fresh client permission to retire source files; null means unknown.</summary>
+        [JsonIgnore]
+        public bool? CanMoveFiles { get; set; }
         public int? Seeders { get; set; }
         public int? Leechers { get; set; }
         public double? Ratio { get; set; }

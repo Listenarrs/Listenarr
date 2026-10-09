@@ -40,8 +40,9 @@ namespace Listenarr.Api.Features.Library
         bool CanScanFilesystem,
         bool CanPublishNewFiles,
         bool CanMutateFilesystem,
-        bool CanRetireWithDurableIdentity,
+        bool CanRetireSource,
         bool CanRetireAfterVerifiedCopy,
+        // Legacy values retained in the response contract; not deletion authority.
         string WeakStorageSourceCleanupPolicy,
         int WeakStoragePolicyRevision,
         string? ConfirmationToken,
@@ -67,6 +68,7 @@ namespace Listenarr.Api.Features.Library
         string ExpectedCurrentPath,
         string ConfirmationToken);
 
+    /// <summary>Legacy setting update; does not grant or revoke source deletion.</summary>
     public sealed record RootFolderWeakStoragePolicyRequest(
         WeakStorageSourceCleanupPolicy Policy,
         int ExpectedRevision);
@@ -338,6 +340,18 @@ namespace Listenarr.Api.Features.Library
                     message = "The root folder confirmation request is invalid."
                 });
             }
+            catch (PlatformNotSupportedException)
+            {
+                return Conflict(new
+                {
+                    message = "The current storage cannot provide the live filesystem capabilities required to confirm this folder for mutation.",
+                    code = "root_folder_confirmation_unsupported"
+                });
+            }
+            catch (RootFolderRecoveryBlockedException exception)
+            {
+                return RegistrationRecoveryConflict(exception.Blocker);
+            }
             catch (InvalidOperationException)
             {
                 return Conflict(new
@@ -422,6 +436,7 @@ namespace Listenarr.Api.Features.Library
                 jobId = job.Id.ToString(),
                 status = job.Status,
                 error = UnmatchedScanPublicError.FromInternal(job.Error),
+                warnings = job.Warnings,
                 items = job.Results ?? new List<UnmatchedFileResult>()
             });
         }
@@ -468,11 +483,17 @@ namespace Listenarr.Api.Features.Library
                 return Ok(new
                 {
                     lastScannedAt = job.CompletedAt,
+                    warnings = job.Warnings,
                     items = filtered
                 });
             }
 
-            return Ok(new { lastScannedAt = (DateTime?)null, items = new List<UnmatchedFileResult>() });
+            return Ok(new
+            {
+                lastScannedAt = (DateTime?)null,
+                warnings = new List<string>(),
+                items = new List<UnmatchedFileResult>()
+            });
         }
 
     }

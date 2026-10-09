@@ -29,6 +29,30 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
 {
     public class QbittorrentAdapterTests : BaseTests
     {
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task GetItemsAsync_UnknownSeedPolicyCannotAuthorizeMovement(bool knownPolicy)
+        {
+            using var http = new HttpClient(new DelegatingHandlerMock((request, _) =>
+            {
+                var path = request.RequestUri!.AbsolutePath;
+                var response = path.EndsWith("/preferences")
+                    ? knownPolicy ? """{"max_ratio_enabled":true,"max_ratio":2,"max_seeding_time_enabled":false,"max_seeding_time":30}""" : "{}"
+                    : path.EndsWith("/login") ? "Ok."
+                    : """[{"hash":"EXACT","name":"Book","state":"stoppedUP","progress":1,"ratio":3,"ratio_limit":-2,"seeding_time_limit":-2}]""";
+                return Task.FromResult(MockUtils.GetCannedResponse(response));
+            }));
+            var factory = new Mock<IHttpClientFactory>();
+            factory.Setup(value => value.CreateClient(It.IsAny<string>())).Returns(http);
+            var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<QbittorrentAdapter>.Instance;
+            var workflow = new QbittorrentItemFetchWorkflow(factory.Object, new QbittorrentAuthSession(logger), logger, "qbittorrent");
+            var client = new DownloadClientConfiguration { Host = "localhost", Port = 8080, RemoveCompletedDownloads = "remove_and_delete" };
+            var item = Assert.Single(await workflow.GetItemsAsync(client));
+            Assert.Equal(knownPolicy, item.CanMoveFiles);
+            Assert.Equal(knownPolicy, item.CanBeRemoved);
+        }
+
         private DownloadClientConfiguration _client = null!;
 
         public override async Task InitializeAsync()

@@ -50,6 +50,7 @@ namespace Listenarr.Infrastructure.FileSystem
         private readonly IRootFolderRepository? _rootFolderRepository;
         private readonly IRootFolderStorageHealthResolver? _rootFolderStorageHealthResolver;
         private readonly WeakPublicationMode _weakPublicationMode;
+        private readonly LibraryDirectoryOwnershipBoundaryAuthorizer? _directoryBoundaryAuthorizer;
 
         public FileMover(
             ILogger<FileMover> logger,
@@ -73,6 +74,9 @@ namespace Listenarr.Infrastructure.FileSystem
                 ?? FileSystemMutationCapabilityProbe.ProbeReadOnlyDirectory;
             _rootFolderRepository = rootFolderRepository;
             _rootFolderStorageHealthResolver = rootFolderStorageHealthResolver;
+            _directoryBoundaryAuthorizer = dbContextFactory == null ? null
+                : new LibraryDirectoryOwnershipBoundaryAuthorizer(
+                    dbContextFactory, _semanticsResolver);
             _weakPublicationMode = options?.Value.WeakPublicationMode
                 ?? WeakPublicationMode.CopyAndRetainSource;
             _fileMutationJournalStore = dbContextFactory == null

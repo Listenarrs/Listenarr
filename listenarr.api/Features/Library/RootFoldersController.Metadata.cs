@@ -13,6 +13,13 @@ namespace Listenarr.Api.Features.Library;
 
 public partial class RootFoldersController
 {
+    /// <summary>Updates a deprecated setting retained for older API clients.</summary>
+    /// <remarks>
+    /// The value and revision are stored for compatibility only. Source deletion is
+    /// authorized by current storage capabilities and verified operation evidence,
+    /// independently of this setting. Use the root-folder capability fields instead.
+    /// </remarks>
+    [Obsolete("Compatibility only; this setting no longer controls source deletion.")]
     [HttpPatch("{id}/weak-storage-policy")]
     public async Task<IActionResult> PatchWeakStoragePolicy(
         int id,

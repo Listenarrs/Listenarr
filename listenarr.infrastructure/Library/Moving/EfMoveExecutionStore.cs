@@ -177,20 +177,10 @@ internal sealed partial class EfMoveExecutionStore(
                     targetSemantics,
                     "target",
                     cancellationToken);
-                await EnsureTargetBoundaryGenerationAuthorizedAsync(
-                    db,
-                    jobId,
-                    state.TargetIdentityBoundary,
-                    cancellationToken);
-                if (state.RelocationId.HasValue)
-                {
-                    await EnsureRelocationTargetGenerationAuthorizedAsync(
-                        db,
-                        state.RelocationId.Value,
-                        target,
-                        targetSemantics,
-                        cancellationToken);
-                }
+                // Persisted directory/object generations are legacy diagnostics
+                // only. Current path semantics plus the live pinned mutation operation
+                // authorize filesystem changes; remounts and inode/device changes do not
+                // invalidate an otherwise equivalent move boundary.
             },
             cancellationToken);
 

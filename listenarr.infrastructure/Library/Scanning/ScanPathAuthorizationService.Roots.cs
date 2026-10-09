@@ -13,10 +13,7 @@ internal sealed partial class ScanPathAuthorizationService
                 root.Path,
                 root.CaseSensitivityMode,
                 RequiresEnrollment: true,
-                RootFolderPathSemantics.ResolvePersisted(root),
-                root.DirectoryObjectIdentityVersion,
-                root.DirectoryObjectIdentity,
-                root.DirectoryObjectIdentityUnavailableReason))
+                RootFolderPathSemantics.ResolvePersisted(root)))
             .ToList();
         // RootFolders are the authoritative managed-storage boundaries. OutputPath is
         // retained only as a legacy fallback for databases that have not configured
@@ -31,10 +28,7 @@ internal sealed partial class ScanPathAuthorizationService
                     settings.OutputPath,
                     FileSystemCaseSensitivityMode.Auto,
                     RequiresEnrollment: false,
-                    PersistedSemantics: null,
-                    DirectoryObjectIdentityVersion: null,
-                    DirectoryObjectIdentity: null,
-                    DirectoryObjectIdentityUnavailableReason: null));
+                    PersistedSemantics: null));
             }
         }
 
@@ -129,10 +123,7 @@ internal sealed partial class ScanPathAuthorizationService
                 canonical,
                 resolution.Semantics,
                 candidate.RequestedMode,
-                candidate.RequiresEnrollment,
-                candidate.DirectoryObjectIdentityVersion,
-                candidate.DirectoryObjectIdentity,
-                candidate.DirectoryObjectIdentityUnavailableReason));
+                candidate.RequiresEnrollment));
         }
 
         return new AuthorizedRootSet(roots, unavailableRoots);

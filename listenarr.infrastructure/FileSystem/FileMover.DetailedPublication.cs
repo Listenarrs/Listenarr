@@ -52,25 +52,6 @@ public partial class FileMover
                 isCompanionFile);
         }
 
-        if (!expectedSourceProof.HasDurablePhysicalObjectIdentity)
-        {
-            const string message =
-                "Durable publication requires a durable source object identity.";
-            LogMutation(
-                FileMutationOutcome.Blocked,
-                plan.RequestedAction,
-                source,
-                destination,
-                message);
-            return new FilePublicationPreparationResult(
-                FilePublicationOutcome.Blocked,
-                plan.RequestedAction,
-                plan.EffectiveAction,
-                plan.SourceDisposition,
-                ReasonCode: "durable_source_identity_unavailable",
-                Message: message);
-        }
-
         var lease = await PrepareActionForRegistrationCoreAsync(
             plan.EffectiveAction,
             source,

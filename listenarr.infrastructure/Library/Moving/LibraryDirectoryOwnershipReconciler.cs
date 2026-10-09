@@ -94,15 +94,11 @@ public sealed class LibraryDirectoryOwnershipReconciler(
                     continue;
                 }
                 using var directory = publication.OpenCreatedDirectoryAnchor();
-                if (ownership.DirectoryObjectIdentityVersion
-                    != ManagedDirectoryIdentity.CurrentVersion
-                    || !directory.MatchesManagedDirectoryOwnershipIdentity(
-                        ownership.DirectoryObjectIdentityVersion,
-                        ownership.DirectoryObjectIdentity,
-                        ownership.OwnershipToken))
+                if (!directory.VisiblePathMatches()
+                    || !authorization.ParentAnchor.VisiblePathMatches())
                 {
                     throw new InvalidOperationException(
-                        "The persisted directory ownership identity is not the current supported generation.");
+                        "The owned directory or its parent changed during current path observation.");
                 }
 
                 await using var authorityTransaction = db.Database.IsRelational()
@@ -118,15 +114,11 @@ public sealed class LibraryDirectoryOwnershipReconciler(
                 ownership.UpdatedAt = DateTime.UtcNow;
                 await db.SaveChangesAsync(cancellationToken);
                 AfterOwnershipAuthoritySavedForTest?.Invoke(ownership);
-                if (!directory.MatchesManagedDirectoryOwnershipIdentity(
-                        ownership.DirectoryObjectIdentityVersion,
-                        ownership.DirectoryObjectIdentity,
-                        ownership.OwnershipToken)
-                    || !directory.VisiblePathMatches()
+                if (!directory.VisiblePathMatches()
                     || !authorization.ParentAnchor.VisiblePathMatches())
                 {
                     throw new InvalidOperationException(
-                        "The directory ownership generation changed before reconciled destructive authority committed.");
+                        "The owned directory or its parent changed before reconciled path ownership committed.");
                 }
                 if (authorityTransaction != null)
                 {

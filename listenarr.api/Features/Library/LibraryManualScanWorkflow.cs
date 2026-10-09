@@ -123,12 +123,11 @@ namespace Listenarr.Api.Features.Library
                 });
             }
 
-            if (!pathResolution.PathIdentity.HasValue
-                || !pathResolution.PhysicalIdentity.HasValue)
+            if (!pathResolution.PathIdentity.HasValue)
             {
                 return new ObjectResult(new
                 {
-                    message = "Scan path identity is unavailable"
+                    message = "Scan path authority is unavailable"
                 })
                 {
                     StatusCode = StatusCodes.Status409Conflict
@@ -144,7 +143,6 @@ namespace Listenarr.Api.Features.Library
                 audiobook,
                 scanRoot,
                 pathResolution.PathIdentity,
-                pathResolution.PhysicalIdentity,
                 isAuthoritative);
             if (queuedResult != null)
             {
@@ -165,7 +163,6 @@ namespace Listenarr.Api.Features.Library
                         audiobook.Id,
                         scanRoot,
                         pathResolution.PathIdentity.Value,
-                        pathResolution.PhysicalIdentity.Value,
                         AllowReconciliation: true,
                         IsAuthoritativeScope: isAuthoritative,
                         Source: "Manual Scan"),

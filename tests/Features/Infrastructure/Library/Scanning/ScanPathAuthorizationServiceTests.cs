@@ -55,15 +55,6 @@ public sealed class ScanPathAuthorizationServiceTests : BaseTests
             .ReturnsAsync(new ApplicationSettings());
         var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
         identityResolver
-            .Setup(resolver => resolver.ResolveExistingAsync(
-                configuredRoot,
-                root.DirectoryObjectIdentityVersion!.Value,
-                root.DirectoryObjectIdentity!,
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DirectoryObjectIdentityResolution.Unavailable(
-                "The filesystem does not expose a durable file handle or inode generation.",
-                DirectoryObjectIdentityFailureKind.IdentityUnsupported));
-        identityResolver
             .Setup(resolver => resolver.ResolveAsync(
                 configuredRoot,
                 It.IsAny<CancellationToken>()))
@@ -81,7 +72,6 @@ public sealed class ScanPathAuthorizationServiceTests : BaseTests
             configurationService.Object,
             rootFolderService.Object,
             _provider.GetRequiredService<IFileSystemSemanticsResolver>(),
-            identityResolver.Object,
             new CapturingScanAuthorizationLogger());
 
         var result = await service.AuthorizeAsync(scanRoot);
@@ -93,11 +83,11 @@ public sealed class ScanPathAuthorizationServiceTests : BaseTests
             result.PhysicalIdentity.Value.ProofKind);
         Assert.False(result.PhysicalIdentity.Value.HasDurableGenerationProof);
         rootFolderService.VerifyAll();
-        identityResolver.VerifyAll();
+        identityResolver.VerifyNoOtherCalls();
     }
 
     [Fact]
-    public async Task AuthorizeAsync_UnsupportedPersistedIdentityWithCurrentStrongIdentity_RequiresReconfirmation()
+    public async Task AuthorizeAsync_UnsupportedPersistedIdentity_DoesNotBecomeScanAuthority()
     {
         var configuredRoot = FileService.GetTempDirectory(
             "scan-authorization-unsupported-persisted-root");
@@ -112,15 +102,6 @@ public sealed class ScanPathAuthorizationServiceTests : BaseTests
             .ReturnsAsync(new ApplicationSettings());
         var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
         identityResolver
-            .Setup(resolver => resolver.ResolveExistingAsync(
-                configuredRoot,
-                root.DirectoryObjectIdentityVersion!.Value,
-                root.DirectoryObjectIdentity!,
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DirectoryObjectIdentityResolution.Unavailable(
-                "Directory identity version is unsupported.",
-                DirectoryObjectIdentityFailureKind.IdentityUnsupported));
-        identityResolver
             .Setup(resolver => resolver.ResolveAsync(
                 configuredRoot,
                 It.IsAny<CancellationToken>()))
@@ -128,24 +109,34 @@ public sealed class ScanPathAuthorizationServiceTests : BaseTests
                 ManagedDirectoryIdentity.CurrentVersion,
                 "current-strong-root",
                 null));
+        identityResolver
+            .Setup(resolver => resolver.ResolveAsync(
+                scanRoot,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DirectoryObjectIdentityResolution(
+                ManagedDirectoryIdentity.CurrentVersion,
+                "current-strong-scan-root",
+                null));
         var service = new ScanPathAuthorizationService(
             configurationService.Object,
             rootFolderService.Object,
             _provider.GetRequiredService<IFileSystemSemanticsResolver>(),
-            identityResolver.Object,
             new CapturingScanAuthorizationLogger());
 
         var result = await service.AuthorizeAsync(scanRoot);
 
-        Assert.False(result.IsAuthorized);
-        Assert.Equal(ScanPathAuthorizationFailure.IdentityUnavailable, result.Failure);
-        Assert.Null(result.PhysicalIdentity);
+        Assert.True(result.IsAuthorized, result.Error);
+        Assert.True(result.PhysicalIdentity.HasValue);
+        Assert.Equal(
+            ScanPathPhysicalProofKind.PinnedPathOnly,
+            result.PhysicalIdentity.Value.ProofKind);
+        Assert.False(result.PhysicalIdentity.Value.HasDurableGenerationProof);
         rootFolderService.VerifyAll();
-        identityResolver.VerifyAll();
+        identityResolver.VerifyNoOtherCalls();
     }
 
     [Fact]
-    public async Task AuthorizeAsync_LegacyWeakRootIdentity_UsesPinnedPathOnlyProof()
+    public async Task AuthorizeAsync_LegacyWeakRootIdentity_DoesNotBecomeScanAuthority()
     {
         var configuredRoot = FileService.GetTempDirectory(
             "scan-authorization-legacy-weak-root");
@@ -166,15 +157,6 @@ public sealed class ScanPathAuthorizationServiceTests : BaseTests
         Assert.True(liveScanRootIdentity.IsAvailable, liveScanRootIdentity.UnavailableReason);
         var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
         identityResolver
-            .Setup(resolver => resolver.ResolveExistingAsync(
-                configuredRoot,
-                root.DirectoryObjectIdentityVersion!.Value,
-                root.DirectoryObjectIdentity!,
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DirectoryObjectIdentityResolution.Unavailable(
-                "Legacy Linux identity requires upgrade.",
-                DirectoryObjectIdentityFailureKind.LegacyWeakIdentity));
-        identityResolver
             .Setup(resolver => resolver.ResolveAsync(
                 configuredRoot,
                 It.IsAny<CancellationToken>()))
@@ -188,7 +170,6 @@ public sealed class ScanPathAuthorizationServiceTests : BaseTests
             configurationService.Object,
             rootFolderService.Object,
             _provider.GetRequiredService<IFileSystemSemanticsResolver>(),
-            identityResolver.Object,
             new CapturingScanAuthorizationLogger());
 
         var result = await service.AuthorizeAsync(scanRoot);
@@ -200,7 +181,54 @@ public sealed class ScanPathAuthorizationServiceTests : BaseTests
             result.PhysicalIdentity.Value.ProofKind);
         Assert.False(result.PhysicalIdentity.Value.HasDurableGenerationProof);
         rootFolderService.VerifyAll();
-        identityResolver.VerifyAll();
+        identityResolver.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task AuthorizeAsync_LegacyWeakRootIdentityStillUnsupported_UsesPinnedPathOnlyProof()
+    {
+        var configuredRoot = FileService.GetTempDirectory(
+            "scan-authorization-legacy-weak-unsupported-root");
+        var scanRoot = Path.Join(configuredRoot, "Book");
+        Directory.CreateDirectory(scanRoot);
+        var root = await AddAuthorizedRootAsync(configuredRoot);
+        var rootFolderService = new Mock<IRootFolderService>(MockBehavior.Strict);
+        rootFolderService.Setup(service => service.GetAllAsync())
+            .ReturnsAsync([root]);
+        var configurationService = new Mock<IConfigurationService>(MockBehavior.Strict);
+        configurationService.Setup(service => service.GetApplicationSettingsAsync())
+            .ReturnsAsync(new ApplicationSettings());
+        var identityResolver = new Mock<IDirectoryObjectIdentityResolver>(MockBehavior.Strict);
+        identityResolver
+            .Setup(resolver => resolver.ResolveAsync(
+                configuredRoot,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DirectoryObjectIdentityResolution.Unavailable(
+                "The filesystem exposes only generic weak identity evidence.",
+                DirectoryObjectIdentityFailureKind.IdentityUnsupported));
+        identityResolver
+            .Setup(resolver => resolver.ResolveAsync(
+                scanRoot,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DirectoryObjectIdentityResolution.Unavailable(
+                "The filesystem exposes only generic weak identity evidence.",
+                DirectoryObjectIdentityFailureKind.IdentityUnsupported));
+        var service = new ScanPathAuthorizationService(
+            configurationService.Object,
+            rootFolderService.Object,
+            _provider.GetRequiredService<IFileSystemSemanticsResolver>(),
+            new CapturingScanAuthorizationLogger());
+
+        var result = await service.AuthorizeAsync(scanRoot);
+
+        Assert.True(result.IsAuthorized, result.Error);
+        Assert.True(result.PhysicalIdentity.HasValue);
+        Assert.Equal(
+            ScanPathPhysicalProofKind.PinnedPathOnly,
+            result.PhysicalIdentity.Value.ProofKind);
+        Assert.False(result.PhysicalIdentity.Value.HasDurableGenerationProof);
+        rootFolderService.VerifyAll();
+        identityResolver.VerifyNoOtherCalls();
     }
 
     [LinuxFact]
@@ -235,7 +263,6 @@ public sealed class ScanPathAuthorizationServiceTests : BaseTests
             configurationService.Object,
             rootFolderService.Object,
             _provider.GetRequiredService<IFileSystemSemanticsResolver>(),
-            _provider.GetRequiredService<IDirectoryObjectIdentityResolver>(),
             new CapturingScanAuthorizationLogger());
 
         var result = await service.AuthorizeAsync(scanRoot);
@@ -270,7 +297,6 @@ public sealed class ScanPathAuthorizationServiceTests : BaseTests
             configurationService.Object,
             rootFolderService.Object,
             _provider.GetRequiredService<IFileSystemSemanticsResolver>(),
-            _provider.GetRequiredService<IDirectoryObjectIdentityResolver>(),
             new CapturingScanAuthorizationLogger());
 
         var result = await service.AuthorizeAsync(scanRoot);
@@ -300,7 +326,6 @@ public sealed class ScanPathAuthorizationServiceTests : BaseTests
             configurationService.Object,
             rootFolderService.Object,
             _provider.GetRequiredService<IFileSystemSemanticsResolver>(),
-            _provider.GetRequiredService<IDirectoryObjectIdentityResolver>(),
             new CapturingScanAuthorizationLogger());
 
         var result = await service.AuthorizeAsync(scanRoot);
@@ -335,7 +360,6 @@ public sealed class ScanPathAuthorizationServiceTests : BaseTests
             configurationService.Object,
             rootFolderService.Object,
             _provider.GetRequiredService<IFileSystemSemanticsResolver>(),
-            _provider.GetRequiredService<IDirectoryObjectIdentityResolver>(),
             new CapturingScanAuthorizationLogger());
 
         var result = await service.ResolveDefaultAsync(preferredPath: null);
@@ -405,7 +429,6 @@ public sealed class ScanPathAuthorizationServiceTests : BaseTests
             configurationService.Object,
             rootFolderService.Object,
             _provider.GetRequiredService<IFileSystemSemanticsResolver>(),
-            _provider.GetRequiredService<IDirectoryObjectIdentityResolver>(),
             logger);
 
         var result = await service.AuthorizeAsync(scanRoot);
@@ -495,7 +518,7 @@ public sealed class ScanPathAuthorizationServiceTests : BaseTests
     }
 
     [Fact]
-    public async Task AuthorizeAsync_EnrolledRootReplacedAfterIdentityCheck_IsRejected()
+    public async Task AuthorizeAsync_RootReplacementDuringLivePin_UsesCurrentPinnedPath()
     {
         var parent = FileService.GetTempDirectory(
             "scan-authorization-root-race");
@@ -506,6 +529,7 @@ public sealed class ScanPathAuthorizationServiceTests : BaseTests
         await AddAuthorizedRootAsync(configuredRoot);
         var service = _provider.GetRequiredService<IScanPathAuthorizationService>();
         var rootOpenCount = 0;
+        var replacementBlocked = false;
         var semantics = FileSystemPathSemantics.CurrentHostDefault;
         using var hook = ExclusiveDirectoryCreator.PushBeforeOpenParentHook(path =>
         {
@@ -522,23 +546,47 @@ public sealed class ScanPathAuthorizationServiceTests : BaseTests
                 return;
             }
 
-            Directory.Move(configuredRoot, displacedRoot);
-            Directory.CreateDirectory(scanRoot);
+            try
+            {
+                Directory.Move(configuredRoot, displacedRoot);
+                Directory.CreateDirectory(scanRoot);
+            }
+            catch (Exception exception) when (
+                exception is UnauthorizedAccessException or IOException)
+            {
+                replacementBlocked = true;
+            }
         });
 
         var result = await service.AuthorizeAsync(scanRoot);
 
-        Assert.False(result.IsAuthorized);
-        Assert.Equal(
-            ScanPathAuthorizationFailure.IdentityUnavailable,
-            result.Failure);
-        Assert.Null(result.PhysicalIdentity);
-        Assert.True(Directory.Exists(Path.Join(displacedRoot, "Book")));
-        Assert.True(Directory.Exists(scanRoot));
+        if (result.IsAuthorized)
+        {
+            Assert.True(result.PhysicalIdentity.HasValue);
+            Assert.Equal(
+                ScanPathPhysicalProofKind.PinnedPathOnly,
+                result.PhysicalIdentity.Value.ProofKind);
+        }
+        else
+        {
+            Assert.Equal(
+                ScanPathAuthorizationFailure.IdentityUnavailable,
+                result.Failure);
+            Assert.Null(result.PhysicalIdentity);
+        }
+
+        // The injection may be blocked before the move, or may move the old
+        // tree and recreate/partially recreate the visible path. Authorization
+        // does not persist either generation; the consuming scan re-pins the
+        // current path before reading it.
+        Assert.True(
+            Directory.Exists(scanRoot)
+            || Directory.Exists(displacedRoot)
+            || replacementBlocked);
     }
 
     [Fact]
-    public async Task AuthorizeAsync_ReplacedEnrolledRoot_IsRejected()
+    public async Task AuthorizeAsync_ReplacedPersistedRoot_UsesCurrentPathWithoutGenerationAuthority()
     {
         var parent = FileService.GetTempDirectory("scan-authorization-root-replacement");
         var configuredRoot = Path.Join(parent, "library");
@@ -554,11 +602,12 @@ public sealed class ScanPathAuthorizationServiceTests : BaseTests
         Directory.CreateDirectory(scanRoot);
         var replacement = await service.AuthorizeAsync(scanRoot);
 
-        Assert.False(replacement.IsAuthorized);
+        Assert.True(replacement.IsAuthorized, replacement.Error);
+        Assert.True(replacement.PhysicalIdentity.HasValue);
         Assert.Equal(
-            ScanPathAuthorizationFailure.IdentityUnavailable,
-            replacement.Failure);
-        Assert.Null(replacement.PhysicalIdentity);
+            ScanPathPhysicalIdentity.PinnedPathOnly(),
+            replacement.PhysicalIdentity.Value);
+        Assert.Equal(original.PhysicalIdentity, replacement.PhysicalIdentity);
         Assert.True(Directory.Exists(Path.Join(displacedRoot, "Book")));
         Assert.True(Directory.Exists(scanRoot));
     }

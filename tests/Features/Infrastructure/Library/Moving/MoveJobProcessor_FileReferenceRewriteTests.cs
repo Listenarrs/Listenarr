@@ -128,12 +128,6 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 audiobook,
                 chapterPath,
                 FileService.GetTempPath());
-            var originalPhysicalIdentities = (await _audiobookFileRepository
-                    .GetByAudiobookIdAsync(audiobook.Id))
-                .ToDictionary(
-                    file => file.Path!,
-                    file => file.PhysicalObjectIdentity!,
-                    StringComparer.Ordinal);
             var (queue, job) = await EnqueueProductionManifestMoveAsync(
                 audiobook,
                 target);
@@ -160,10 +154,8 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
             var movedChapterPath = Path.Join(target, "extras", "chapter2.mp3");
             var movedBook = Assert.Single(updatedFiles, file => file.Path == movedBookPath);
             var movedChapter = Assert.Single(updatedFiles, file => file.Path == movedChapterPath);
-            Assert.Equal(GetPhysicalObjectIdentity(movedBookPath), movedBook.PhysicalObjectIdentity);
-            Assert.Equal(GetPhysicalObjectIdentity(movedChapterPath), movedChapter.PhysicalObjectIdentity);
-            Assert.Equal(originalPhysicalIdentities[bookPath], movedBook.PhysicalObjectIdentity);
-            Assert.Equal(originalPhysicalIdentities[chapterPath], movedChapter.PhysicalObjectIdentity);
+            Assert.Null(movedBook.PhysicalObjectIdentity);
+            Assert.Null(movedChapter.PhysicalObjectIdentity);
             Assert.DoesNotContain(
                 updatedFiles,
                 file => file.Path?.StartsWith(source, StringComparison.Ordinal) == true);
@@ -206,10 +198,6 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
                 manifest.Entries,
                 target,
                 targetIdentity,
-                sourceDirectoryIdentity.Version!.Value,
-                sourceDirectoryIdentity.Value!,
-                targetDirectoryIdentity.Version!.Value,
-                targetDirectoryIdentity.Value!,
                 DeleteEmptySource: true));
             var job = Assert.IsType<MoveJob>(
                 await queue.GetJobAsync(jobId));

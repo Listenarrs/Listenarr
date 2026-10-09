@@ -1,3 +1,4 @@
+using Listenarr.Domain.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -14,6 +15,8 @@ internal sealed class CompatibilityFilePublicationRecoveryService(
     ILogger<CompatibilityFilePublicationRecoveryService> logger)
     : ICompatibilityFilePublicationRecoveryService
 {
+    internal Action? BeforeQuarantineRestoreForTest { get; set; }
+
     public async Task ReconcileAsync(
         CancellationToken cancellationToken = default)
     {
@@ -34,6 +37,8 @@ internal sealed class CompatibilityFilePublicationRecoveryService(
             cancellationToken.ThrowIfCancellationRequested();
             await ReconcileOperationAsync(operationId, cancellationToken);
         }
+
+        await RecoverManifestedBatchesAsync(cancellationToken);
     }
 
     private async Task ReconcileOperationAsync(
@@ -90,12 +95,9 @@ internal sealed class CompatibilityFilePublicationRecoveryService(
                 CompatibilityFilePublicationState.SourceQuarantined or
                 CompatibilityFilePublicationState.SourceDeleted)
         {
-            ReconcileInterruptedCleanup(journal);
+            await ReconcileInterruptedCleanupAsync(context, journal, cancellationToken);
         }
-        else if (!ContentMatches(
-            journal.DestinationPath,
-            journal.TargetLength ?? journal.SourceLength,
-            journal.TargetSha256 ?? journal.SourceSha256))
+        else if (!await TargetContentMatchesAsync(context, journal, cancellationToken))
         {
             MarkNeedsAttention(
                 journal,
@@ -123,9 +125,20 @@ internal sealed class CompatibilityFilePublicationRecoveryService(
                     == CompatibilityFilePublicationProtocol.Current
                 && journal.CleanupOwner != CompatibilityCleanupOwner.None)
             {
-                // The original batch must decide whether every publication succeeded.
-                // Startup recovery cannot reconstruct that manifest, so it revokes
-                // destructive authority and completes retain-only.
+                if (journal.BatchId.HasValue
+                    && journal.ExpectedBatchMemberCount.HasValue
+                    && !string.IsNullOrWhiteSpace(
+                        journal.ExpectedBatchSourceManifestSha256))
+                {
+                    // A sealed manifest can be revalidated after every operation-level
+                    // recovery pass completes. Leave this journal committed so the
+                    // batch coordinator can decide the whole batch atomically.
+                    return;
+                }
+
+                // Released verified-cleanup journals predate persisted manifests.
+                // Without a durable expected-member set, startup cannot prove that
+                // another source should have produced a journal, so fail closed.
                 journal.SourceDisposition = CompatibilitySourceDisposition.Retained;
                 journal.State = CompatibilityFilePublicationState.Completed;
                 journal.Error = "Interrupted compatibility batch recovered retain-only.";
@@ -147,13 +160,91 @@ internal sealed class CompatibilityFilePublicationRecoveryService(
         await context.SaveChangesAsync(cancellationToken);
     }
 
-    private void ReconcileInterruptedCleanup(
-        CompatibilityFilePublicationJournal journal)
+    private async Task RecoverManifestedBatchesAsync(
+        CancellationToken cancellationToken)
     {
-        if (!ContentMatches(
-                journal.DestinationPath,
-                journal.TargetLength ?? journal.SourceLength,
-                journal.TargetSha256 ?? journal.SourceSha256))
+        await using var context = await dbContextFactory.CreateDbContextAsync(
+            cancellationToken);
+        var batchIds = await context.CompatibilityFilePublicationJournals
+            .AsNoTracking()
+            .Where(journal =>
+                journal.BatchId.HasValue
+                && journal.State == CompatibilityFilePublicationState.RegistrationCommitted
+                && journal.CleanupOwner != CompatibilityCleanupOwner.None
+                && journal.ExpectedBatchMemberCount.HasValue
+                && journal.ExpectedBatchSourceManifestSha256 != null)
+            .Select(journal => journal.BatchId!.Value)
+            .Distinct()
+            .OrderBy(batchId => batchId)
+            .ToListAsync(cancellationToken);
+
+        foreach (var batchId in batchIds)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var journals = await context.CompatibilityFilePublicationJournals
+                .AsNoTracking()
+                .Where(journal => journal.BatchId == batchId)
+                .ToListAsync(cancellationToken);
+            var incompleteSealedBatch = journals.Count > 0
+                && journals.All(journal =>
+                    journal.ExpectedBatchMemberCount.HasValue
+                    && journal.ExpectedBatchMemberCount.Value > 0
+                    && !string.IsNullOrWhiteSpace(
+                        journal.ExpectedBatchSourceManifestSha256))
+                && journals.Select(journal => journal.ExpectedBatchMemberCount!.Value)
+                    .Distinct()
+                    .Count() == 1
+                && journals.Select(journal => journal.ExpectedBatchSourceManifestSha256)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Count() == 1
+                && journals[0].ExpectedBatchMemberCount!.Value > journals.Count;
+            if (incompleteSealedBatch)
+            {
+                logger.LogInformation(
+                    "Manifested compatibility batch {BatchId} is incomplete at startup ({ObservedCount}/{ExpectedCount}); leaving committed members pending for retry",
+                    batchId,
+                    journals.Count,
+                    journals[0].ExpectedBatchMemberCount!.Value);
+                continue;
+            }
+
+            if (journals.Any(journal =>
+                    journal.State
+                        != CompatibilityFilePublicationState.RegistrationCommitted))
+            {
+                logger.LogWarning(
+                    "Manifested compatibility batch {BatchId} has mixed recovery state and was left scoped for operation-level reconciliation",
+                    batchId);
+                continue;
+            }
+
+            var tracked = await context.CompatibilityFilePublicationJournals
+                .Where(journal => journal.BatchId == batchId
+                    && journal.State
+                        == CompatibilityFilePublicationState.RegistrationCommitted)
+                .ToListAsync(cancellationToken);
+            foreach (var journal in tracked)
+            {
+                journal.SourceDisposition =
+                    CompatibilitySourceDisposition.Retained;
+                journal.State = CompatibilityFilePublicationState.Completed;
+                journal.Error =
+                    "Verified publication recovered after restart; source cleanup authority was lost, so the source was retained.";
+                journal.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
+            }
+            await context.SaveChangesAsync(cancellationToken);
+            logger.LogInformation(
+                "Recovered manifested compatibility batch {BatchId} retain-only after restart",
+                batchId);
+        }
+    }
+
+    private async Task ReconcileInterruptedCleanupAsync(
+        ListenArrDbContext context,
+        CompatibilityFilePublicationJournal journal,
+        CancellationToken cancellationToken)
+    {
+        if (!await TargetContentMatchesAsync(context, journal, cancellationToken))
         {
             MarkNeedsAttention(
                 journal,
@@ -199,18 +290,40 @@ internal sealed class CompatibilityFilePublicationRecoveryService(
         }
         if (!sourceMatches && quarantineMatches)
         {
+            BeforeQuarantineRestoreForTest?.Invoke();
             try
             {
                 var quarantinePath = journal.QuarantinePath!;
                 using var quarantineParent =
-                    PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(
-                        Path.GetDirectoryName(quarantinePath)!);
+                    PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                        Path.GetDirectoryName(quarantinePath)!,
+                        createMissing: false);
                 using var sourceParent =
-                    PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(
-                        Path.GetDirectoryName(journal.SourcePath)!);
+                    PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                        Path.GetDirectoryName(journal.SourcePath)!,
+                        createMissing: false);
                 using var quarantined = quarantineParent.OpenExistingFileForStableDelete(
                     Path.GetFileName(quarantinePath));
+                if (!quarantined.MatchesAsync(
+                        journal.SourceLength, journal.SourceSha256, CancellationToken.None)
+                        .GetAwaiter().GetResult()
+                    || !quarantined.VisiblePathMatches()
+                    || !quarantineParent.VisiblePathMatches()
+                    || !sourceParent.VisiblePathMatches())
+                {
+                    throw new InvalidOperationException(
+                        "The quarantined source changed before restoration.");
+                }
                 quarantined.MoveTo(sourceParent, Path.GetFileName(journal.SourcePath));
+                if (!quarantined.MatchesAsync(
+                        journal.SourceLength, journal.SourceSha256, CancellationToken.None)
+                        .GetAwaiter().GetResult()
+                    || !quarantined.VisiblePathMatches()
+                    || !sourceParent.VisiblePathMatches())
+                {
+                    throw new InvalidOperationException(
+                        "The restored source changed before recovery completion.");
+                }
                 quarantineParent.FlushDirectoryEntry();
                 sourceParent.FlushDirectoryEntry();
                 journal.SourceDisposition = CompatibilitySourceDisposition.Retained;
@@ -251,27 +364,71 @@ internal sealed class CompatibilityFilePublicationRecoveryService(
             reason);
     }
 
-    private static bool ContentMatches(
-        string path,
-        long length,
-        string sha256)
+    private static async Task<bool> TargetContentMatchesAsync(
+        ListenArrDbContext context,
+        CompatibilityFilePublicationJournal journal,
+        CancellationToken cancellationToken)
     {
-        try
+        RootFolder? root = null;
+        if (journal.DestinationRootFolderId is int rootId)
         {
-            using var file = new FileStream(
-                Path.GetFullPath(path),
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.Read,
-                bufferSize: 128 * 1024,
-                FileOptions.SequentialScan);
-            if (file.Length != length)
+            root = await context.RootFolders.AsNoTracking()
+                .SingleOrDefaultAsync(candidate => candidate.Id == rootId, cancellationToken);
+            if (root == null
+                || (journal.DestinationStorageContractRevision.HasValue
+                    && root.StorageContractRevision != journal.DestinationStorageContractRevision.Value))
             {
                 return false;
             }
-            var actual = Convert.ToHexString(
-                System.Security.Cryptography.SHA256.HashData(file));
-            return string.Equals(actual, sha256, StringComparison.Ordinal);
+            var persisted = RootFolderPathSemantics.ResolvePersisted(root);
+            if (persisted == null || persisted.Value.DetectAmbiguousCaseMatches) return false;
+            var current = await new FileSystemSemanticsResolver().ResolveAsync(
+                root.Path, root.CaseSensitivityMode, cancellationToken);
+            if (current.State != PathIdentityState.Valid
+                || current.Semantics != persisted.Value.Semantics) return false;
+        }
+
+        return ContentMatches(journal.DestinationPath,
+            journal.TargetLength ?? journal.SourceLength,
+            journal.TargetSha256 ?? journal.SourceSha256,
+            root);
+    }
+
+    private static bool ContentMatches(
+        string path,
+        long length,
+        string sha256,
+        RootFolder? configuredRoot = null)
+    {
+        try
+        {
+            var fullPath = Path.GetFullPath(path);
+            var parentPath = Path.GetDirectoryName(fullPath);
+            var fileName = Path.GetFileName(fullPath);
+            if (string.IsNullOrWhiteSpace(parentPath)
+                || string.IsNullOrWhiteSpace(fileName))
+            {
+                return false;
+            }
+
+            // Only the journal's current configured target boundary may follow
+            // links. Descendants, unmanaged sources, and quarantine stay no-follow.
+            using var parent = PinnedDirectoryCreation.OpenPinnedConfiguredHierarchy(
+                configuredRoot,
+                parentPath,
+                createMissing: false);
+            var outcome = parent.TryOpenExistingFileWithOutcome(
+                fileName,
+                requireDeleteAccess: false,
+                out var openedFile);
+            using var file = openedFile;
+            return outcome == PinnedFileOpenOutcome.Opened
+                && file != null
+                && file.IsRegularFile()
+                && file.MatchesAsync(length, sha256, CancellationToken.None)
+                    .GetAwaiter().GetResult()
+                && parent.VisiblePathMatches()
+                && file.VisiblePathMatches();
         }
         catch (Exception exception) when (exception is not (
             OutOfMemoryException or StackOverflowException))

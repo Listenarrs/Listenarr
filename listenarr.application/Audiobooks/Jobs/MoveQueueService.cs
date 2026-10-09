@@ -117,29 +117,13 @@ namespace Listenarr.Application.Audiobooks.Jobs
                     $"The source mutation boundary is invalid: {sourceAuthorizationReason}");
             }
 
-            if (command.SourceBoundaryDirectoryObjectIdentityVersion <= 0
-                || string.IsNullOrWhiteSpace(
-                    command.SourceBoundaryDirectoryObjectIdentity)
-                || command.TargetBoundaryDirectoryObjectIdentityVersion <= 0
-                || string.IsNullOrWhiteSpace(
-                    command.TargetBoundaryDirectoryObjectIdentity))
-            {
-                throw new InvalidOperationException(
-                    "A physical move requires durable source- and target-boundary generation authorization.");
-            }
-
             var persistedSourceBoundary = command.SourceCleanupBoundary == null
                 ? null
                 : sourceAuthorizationBoundary;
+            // v3 persists path/content/config evidence only. Boundary object identity
+            // is acquired fresh by each live execution attempt and is never durable
+            // mutation authority.
             var persistedEntries = manifest.Entries.ToList();
-            persistedEntries.Add(
-                MoveManifestIdentity.CreateSourceBoundaryAuthorization(
-                    command.SourceBoundaryDirectoryObjectIdentityVersion,
-                    command.SourceBoundaryDirectoryObjectIdentity));
-            persistedEntries.Add(
-                MoveManifestIdentity.CreateTargetBoundaryAuthorization(
-                    command.TargetBoundaryDirectoryObjectIdentityVersion,
-                    command.TargetBoundaryDirectoryObjectIdentity));
             var deduplicationKey = MoveManifestIdentity.CreateDeduplicationKey(
                 command.AudiobookId,
                 source,

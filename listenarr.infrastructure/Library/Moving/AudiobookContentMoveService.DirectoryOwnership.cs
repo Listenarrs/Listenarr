@@ -28,70 +28,10 @@ internal sealed partial class AudiobookContentMoveService
                 "The move target changed type or became a link before durable ownership could be loaded.");
         }
 
-        await TryRetireReplacedMarkerlessTargetOwnershipAsync(
-            request,
-            request.Target,
-            cancellationToken);
-
         var ownership = await LoadValidatedTargetDirectoryOwnershipAsync(
             request,
             cancellationToken);
         return request with { TargetDirectoryOwnership = ownership };
-    }
-
-    private async Task TryRetireReplacedMarkerlessTargetOwnershipAsync(
-        AudiobookContentMoveRequest request,
-        string target,
-        CancellationToken cancellationToken)
-    {
-        if (!TryGetMarkerlessPathAttributes(target, out var targetAttributes))
-        {
-            return;
-        }
-        if ((targetAttributes & FileAttributes.Directory) == 0
-            || (targetAttributes & FileAttributes.ReparsePoint) != 0)
-        {
-            throw new MoveNeedsAttentionException(
-                "The markerless target changed type or became a link while ownership replacement was being reconciled.");
-        }
-
-        var endpoints = await GetEndpointObjectIdentitiesAsync(
-            request.JobId,
-            cancellationToken);
-        if (string.IsNullOrWhiteSpace(endpoints.TargetDirectoryObjectIdentity))
-        {
-            return;
-        }
-
-        try
-        {
-            _ = await directoryOwnershipStore
-                .TryRetireReplacedByMarkerlessMoveAsync(
-                    target,
-                    request.TargetSemantics,
-                    request.JobId,
-                    endpoints.TargetDirectoryObjectIdentity,
-                    cancellationToken);
-        }
-        catch (Exception exception) when (
-            FileSystemSafety.IsProvenMissingPathException(exception))
-        {
-            throw new MoveNeedsAttentionException(
-                $"The markerless target ownership replacement disappeared while it was being reconciled: {exception.Message}");
-        }
-        catch (Exception exception) when (exception is
-            IOException or UnauthorizedAccessException
-                or System.ComponentModel.Win32Exception)
-        {
-            throw;
-        }
-        catch (Exception exception) when (exception is
-            ArgumentException or InvalidOperationException
-                or NotSupportedException or PathTooLongException)
-        {
-            throw new MoveNeedsAttentionException(
-                $"The markerless target ownership replacement could not be reconciled safely: {exception.Message}");
-        }
     }
 
     private async Task<LibraryDirectoryOwnership?> LoadValidatedTargetDirectoryOwnershipAsync(
@@ -157,11 +97,10 @@ internal sealed partial class AudiobookContentMoveService
                 sourceBoundary: false);
             using var directory = parent.OpenExistingChild(
                 Path.GetFileName(ownership.CanonicalPath));
-            if (!directory.MatchesManagedDirectoryOwnershipIdentity(
-                    ownership.DirectoryObjectIdentityVersion,
-                    ownership.DirectoryObjectIdentity,
-                    ownership.OwnershipToken)
-                || !PinnedDirectoryVisibleOrThrowUnavailable(
+            // Stored ownership identity is diagnostic. Path ownership and the live
+            // no-follow pin authorize additive publication; the invocation retains
+            // target verification leases to reject substitution before owner commit.
+            if (!PinnedDirectoryVisibleOrThrowUnavailable(
                     directory,
                     "The target directory is temporarily unavailable while its ownership generation is being verified.")
                 || !PinnedDirectoryVisibleOrThrowUnavailable(
@@ -169,7 +108,7 @@ internal sealed partial class AudiobookContentMoveService
                     "The target directory parent is temporarily unavailable while ownership is being verified."))
             {
                 throw new InvalidOperationException(
-                    "The target directory no longer matches its persisted physical ownership generation.");
+                    "The target directory changed while its current ownership path was being verified.");
             }
         }
         catch (Exception exception) when (
@@ -261,7 +200,8 @@ internal sealed partial class AudiobookContentMoveService
         string source,
         string target,
         LibraryDirectoryOwnership ownership,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        PinnedDirectoryCreation.PinnedDirectoryAnchor? originalDirectory = null)
     {
         var ownershipKey = ownership.PathOwnershipKey
             ?? throw new MoveNeedsAttentionException(
@@ -280,7 +220,8 @@ internal sealed partial class AudiobookContentMoveService
             source,
             target,
             ownership,
-            cancellationToken);
+            cancellationToken,
+            originalDirectory);
     }
 
     private async Task RetainMarkerlessOwnedDirectoryIfRemovingAsync(
@@ -309,7 +250,8 @@ internal sealed partial class AudiobookContentMoveService
         string source,
         string target,
         LibraryDirectoryOwnership ownership,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        PinnedDirectoryCreation.PinnedDirectoryAnchor? originalDirectory = null)
     {
         var ownershipKey = ownership.PathOwnershipKey
             ?? throw new MoveNeedsAttentionException(
@@ -325,7 +267,8 @@ internal sealed partial class AudiobookContentMoveService
             outcome = LibraryDirectoryOwnershipRemoval.RemoveEmptyDirectory(
                 ownership,
                 authorization.ParentAnchor,
-                cancellationToken);
+                cancellationToken,
+                originalDirectory);
         }
         catch (InvalidOperationException exception)
         {

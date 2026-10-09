@@ -30,55 +30,61 @@ internal sealed class LibraryFilesystemStartupReconciliationService(
         {
             phase = "FileRegistrationOwnerAdoption";
             readiness.MarkRunning(phase);
-            await RunScopedAsync<IFileRegistrationRecoveryService>(
+            await RunScopedPhaseAsync<IFileRegistrationRecoveryService>(phase,
                 static (service, token) => service.AdoptCommittedAnonymousAsync(token),
                 stoppingToken);
 
             phase = "RootFolderObjectIdentities";
             readiness.MarkRunning(phase);
-            await RunScopedAsync<IRootFolderObjectIdentityReconciler>(
+            await RunScopedPhaseAsync<IRootFolderObjectIdentityReconciler>(phase,
                 static (service, token) => service.ReconcileAsync(token),
                 stoppingToken);
 
             phase = "RootFolderRelocations";
             readiness.MarkRunning(phase);
-            await RunScopedAsync<IRootFolderRelocationService>(
+            await RunScopedPhaseAsync<IRootFolderRelocationService>(phase,
                 static (service, token) => service.ReconcileActiveAsync(token),
                 stoppingToken);
 
             phase = "LibraryDirectoryOwnership";
             readiness.MarkRunning(phase);
-            await RunScopedAsync<ILibraryDirectoryOwnershipReconciler>(
+            await RunScopedPhaseAsync<ILibraryDirectoryOwnershipReconciler>(phase,
                 static (service, token) => service.ReconcileAsync(token),
                 stoppingToken);
 
             phase = "AudiobookDeletionRecovery";
             readiness.MarkRunning(phase);
-            await RunScopedAsync<IAudiobookDeletionIntentReconciler>(
+            await RunScopedPhaseAsync<IAudiobookDeletionIntentReconciler>(phase,
                 static (service, token) => service.ReconcileAsync(token),
                 stoppingToken);
 
             phase = "FileRegistrationRecovery";
             readiness.MarkRunning(phase);
-            await RunScopedAsync<IFileRegistrationRecoveryService>(
+            await RunScopedPhaseAsync<IFileRegistrationRecoveryService>(phase,
                 static (service, token) => service.ReconcileAsync(token),
                 stoppingToken);
 
             phase = "CompatibilityFilePublicationRecovery";
             readiness.MarkRunning(phase);
-            await RunScopedAsync<ICompatibilityFilePublicationRecoveryService>(
+            await RunScopedPhaseAsync<ICompatibilityFilePublicationRecoveryService>(phase,
+                static (service, token) => service.ReconcileAsync(token),
+                stoppingToken);
+
+            phase = "VerifiedFileRenameRecovery";
+            readiness.MarkRunning(phase);
+            await RunScopedPhaseAsync<IVerifiedFileRenameRecoveryService>(phase,
                 static (service, token) => service.ReconcileAsync(token),
                 stoppingToken);
 
             phase = "FileRenameRecovery";
             readiness.MarkRunning(phase);
-            await RunScopedAsync<IFileRenameRecoveryReconciler>(
+            await RunScopedPhaseAsync<IFileRenameRecoveryReconciler>(phase,
                 static (service, token) => service.ReconcileAsync(token),
                 stoppingToken);
 
             phase = "AudiobookFileIdentities";
             readiness.MarkRunning(phase);
-            await RunScopedAsync<IAudiobookFileIdentityReconciler>(
+            await RunScopedPhaseAsync<IAudiobookFileIdentityReconciler>(phase,
                 async (service, token) =>
                 {
                     fileIdentityResult = await service.ReconcileAsync(token);
@@ -120,13 +126,43 @@ internal sealed class LibraryFilesystemStartupReconciliationService(
             phase);
     }
 
-    private async Task RunScopedAsync<TService>(
+    private async Task RunScopedPhaseAsync<TService>(
+        string phase,
         Func<TService, CancellationToken, Task> action,
         CancellationToken cancellationToken)
         where TService : notnull
     {
-        using var scope = scopeFactory.CreateScope();
-        var service = scope.ServiceProvider.GetRequiredService<TService>();
-        await action(service, cancellationToken);
+        try
+        {
+            using var scope = scopeFactory.CreateScope();
+            var service = scope.ServiceProvider.GetRequiredService<TService>();
+            await action(service, cancellationToken);
+        }
+        catch (OperationCanceledException exception) when (
+            !cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(
+                exception,
+                "Library filesystem startup reconciliation phase {Phase} was canceled locally; the failure remains scoped and startup will continue",
+                phase);
+        }
+        catch (Exception exception) when (
+            IsOperationScopedReconciliationFailure(exception))
+        {
+            logger.LogWarning(
+                exception,
+                "Library filesystem startup reconciliation phase {Phase} could not reconcile one or more filesystem objects; the failure remains scoped and startup will continue",
+                phase);
+        }
     }
+
+    private static bool IsOperationScopedReconciliationFailure(
+        Exception exception) =>
+        exception is Listenarr.Application.Common.Exceptions.ApplicationConflictException
+            or IOException
+            or UnauthorizedAccessException
+            or NotSupportedException
+            or PlatformNotSupportedException
+            or System.ComponentModel.Win32Exception
+            or System.Security.SecurityException;
 }

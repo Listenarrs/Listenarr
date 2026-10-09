@@ -119,15 +119,15 @@ describe('RootFoldersSettings', () => {
     await wrapper.vm.$nextTick()
   })
 
-  it('offers a one-click detected case setting for mutation-limited network storage', async () => {
+  it('does not request or save a case override for automatically detected network storage', async () => {
     const unprovenRoot: RootFolder = {
       ...rootFolder(null),
       caseSensitivityMode: 'Auto',
       resolvedCaseSensitivity: 'Sensitive',
-      storageState: 'Limited',
-      storageReason: 'MutationSemanticsUnproven',
-      storageMessage: 'Automatic case semantics need confirmation.',
-      canMutateFilesystem: false,
+      storageState: 'Healthy',
+      storageReason: 'None',
+      storageMessage: undefined,
+      canMutateFilesystem: true,
     }
     vi.mocked(apiService.getRootFolders).mockResolvedValue([unprovenRoot])
     const pinia = createReadyPinia()
@@ -135,29 +135,10 @@ describe('RootFoldersSettings', () => {
     await flushPromises()
 
     const store = useRootFoldersStore()
-    const update = vi.spyOn(store, 'update').mockResolvedValue({
-      ...unprovenRoot,
-      caseSensitivityMode: 'Sensitive',
-      storageState: 'Healthy',
-      storageReason: 'None',
-      canMutateFilesystem: true,
-    })
-
-    expect(wrapper.text()).toContain('Needs case setting')
-    expect(wrapper.text()).toContain('Use detected setting: case-sensitive')
-
-    await wrapper.get('[data-cy="mutation-semantics-guidance"] button').trigger('click')
-    await flushPromises()
-
-    expect(update).toHaveBeenCalledWith(
-      unprovenRoot.id,
-      expect.objectContaining({
-        id: unprovenRoot.id,
-        path: unprovenRoot.path,
-        caseSensitivityMode: 'Sensitive',
-      }),
-      { expectedCurrentPath: unprovenRoot.path },
-    )
+    const update = vi.spyOn(store, 'update')
+    expect(wrapper.find('[data-cy="mutation-semantics-guidance"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Use detected setting')
+    expect(update).not.toHaveBeenCalled()
   })
 
   it('presents partial metadata repair as an actionable progress panel', async () => {
@@ -384,7 +365,7 @@ describe('RootFoldersSettings', () => {
     wrapper.unmount()
   })
 
-  it('states that weak-storage moves copy and retain the source', async () => {
+  it('explains automatic safe source cleanup on limited storage', async () => {
     vi.mocked(apiService.getRootFolders).mockResolvedValue([
       {
         ...rootFolder(null),
@@ -400,8 +381,9 @@ describe('RootFoldersSettings', () => {
     await flushPromises()
 
     const policy = wrapper.get('[data-cy="compatibility-publication-message"]')
-    expect(policy.text()).toContain('will copy files into this storage and retain the source')
-    expect(policy.text()).toContain('will not attempt source cleanup')
+    expect(policy.text()).toContain('verifies copied files')
+    expect(policy.text()).toContain('removes sources only when it can do so safely')
+    expect(policy.text()).toContain('Otherwise, sources are retained.')
     wrapper.unmount()
   })
 
@@ -438,12 +420,12 @@ describe('RootFoldersSettings', () => {
     expect(wrapper.find('[data-cy="confirm-root-folder"]').exists()).toBe(false)
   })
 
-  it('confirms the exact observed folder generation only when confirmation is available', async () => {
+  it('confirms changed storage semantics only when confirmation is available', async () => {
     const folder = {
       ...rootFolder(null),
       storageState: 'Changed' as const,
-      storageReason: 'IdentityMismatch' as const,
-      storageMessage: 'The folder at this location changed.',
+      storageReason: 'FilesystemSemanticsChanged' as const,
+      storageMessage: 'The filesystem rules for this storage changed.',
       canConfirmCurrentFolder: true,
       canMutateFilesystem: false,
       confirmationToken: 'observation-token',
@@ -454,14 +436,14 @@ describe('RootFoldersSettings', () => {
     const wrapper = mount(RootFoldersSettings, { global: { plugins: [pinia] } })
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Folder changed')
+    expect(wrapper.text()).toContain('Storage rules changed')
     const action = wrapper.get('[data-cy="confirm-root-folder"]')
     await action.trigger('click')
 
     const displayedPath = wrapper.get('[data-testid="root-folder-confirmation-path"]')
     expect(displayedPath.element.textContent).toBe(folder.path)
     const confirm = wrapper.get('.modal-delete-button')
-    expect(confirm.text()).toContain('Confirm folder')
+    expect(confirm.text()).toContain('Confirm settings')
     await confirm.trigger('click')
     await flushPromises()
 

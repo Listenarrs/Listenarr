@@ -65,6 +65,8 @@ public sealed class LibraryFilesystemStartupReconciliationServiceTests : BaseTes
                 order.Add("rename");
                 return Task.CompletedTask;
             });
+        var verifiedRename = new StubVerifiedRenameRecoveryService(
+            () => order.Add("verified-rename"));
         var compatibility = new StubCompatibilityRecoveryService(
             () => order.Add("compatibility"));
         var files = new Mock<IAudiobookFileIdentityReconciler>(MockBehavior.Strict);
@@ -83,7 +85,8 @@ public sealed class LibraryFilesystemStartupReconciliationServiceTests : BaseTes
             deletion.Object,
             registration.Object,
             rename.Object,
-            compatibility);
+            compatibility,
+            verifiedRename);
         var readiness = new LibraryFilesystemReadiness();
         var service = new LibraryFilesystemStartupReconciliationService(
             provider.GetRequiredService<IServiceScopeFactory>(),
@@ -111,6 +114,7 @@ public sealed class LibraryFilesystemStartupReconciliationServiceTests : BaseTes
                 "deletion",
                 "registration-recover",
                 "compatibility",
+                "verified-rename",
                 "rename",
                 "files"
             ],
@@ -119,7 +123,7 @@ public sealed class LibraryFilesystemStartupReconciliationServiceTests : BaseTes
     }
 
     [Fact]
-    public async Task ReconciliationFailure_MarksFilesystemFailedWithoutEscapingHostedService()
+    public async Task FilesystemObjectFailure_RemainsScopedAndStartupContinues()
     {
         var root = new Mock<IRootFolderObjectIdentityReconciler>(MockBehavior.Strict);
         root.Setup(service => service.ReconcileAsync(It.IsAny<CancellationToken>()))
@@ -131,6 +135,8 @@ public sealed class LibraryFilesystemStartupReconciliationServiceTests : BaseTes
         ownership.Setup(service => service.ReconcileAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new IOException("injected ownership failure"));
         var files = new Mock<IAudiobookFileIdentityReconciler>(MockBehavior.Strict);
+        files.Setup(service => service.ReconcileAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AudiobookFileIdentityReconciliationResult(0, 0, 0, 0));
 
         using var provider = BuildProvider(root.Object, relocation.Object, ownership.Object, files.Object);
         var readiness = new LibraryFilesystemReadiness();
@@ -143,14 +149,60 @@ public sealed class LibraryFilesystemStartupReconciliationServiceTests : BaseTes
         await service.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(5));
         await service.StopAsync(CancellationToken.None);
 
-        Assert.Equal(LibraryFilesystemInitializationStatus.Failed, readiness.Current.Status);
-        Assert.Equal("LibraryDirectoryOwnership", readiness.Current.Phase);
-        Assert.Equal("filesystem_initialization_failed", readiness.Current.ErrorCode);
-        files.Verify(service => service.ReconcileAsync(It.IsAny<CancellationToken>()), Times.Never);
+        Assert.True(
+            readiness.Current.IsReady,
+            $"Status={readiness.Current.Status}; Phase={readiness.Current.Phase}; Error={readiness.Current.ErrorCode}");
+        Assert.Null(readiness.Current.ErrorCode);
+        files.Verify(service => service.ReconcileAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task ReconcilerLocalCancellation_MarksFilesystemFailedWithoutStoppingHost()
+    public async Task OperationConflict_RemainsScopedAndStartupContinues()
+    {
+        var root = new Mock<IRootFolderObjectIdentityReconciler>(MockBehavior.Strict);
+        root.Setup(service => service.ReconcileAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var relocation = new Mock<IRootFolderRelocationService>(MockBehavior.Strict);
+        relocation.Setup(service => service.ReconcileActiveAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new Listenarr.Application.Common.Exceptions.ApplicationConflictException(
+                "relocation_needs_attention",
+                "One relocation requires operator attention."));
+        var ownership = new Mock<ILibraryDirectoryOwnershipReconciler>(MockBehavior.Strict);
+        ownership.Setup(service => service.ReconcileAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var files = new Mock<IAudiobookFileIdentityReconciler>(MockBehavior.Strict);
+        files.Setup(service => service.ReconcileAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AudiobookFileIdentityReconciliationResult(0, 0, 0, 0));
+
+        using var provider = BuildProvider(
+            root.Object,
+            relocation.Object,
+            ownership.Object,
+            files.Object);
+        var readiness = new LibraryFilesystemReadiness();
+        var service = new LibraryFilesystemStartupReconciliationService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            readiness,
+            NullLogger<LibraryFilesystemStartupReconciliationService>.Instance);
+
+        await service.StartAsync(CancellationToken.None);
+        await service.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(5));
+        await service.StopAsync(CancellationToken.None);
+
+        Assert.True(
+            readiness.Current.IsReady,
+            $"Status={readiness.Current.Status}; Phase={readiness.Current.Phase}; Error={readiness.Current.ErrorCode}");
+        Assert.Null(readiness.Current.ErrorCode);
+        ownership.Verify(
+            candidate => candidate.ReconcileAsync(It.IsAny<CancellationToken>()),
+            Times.Once);
+        files.Verify(
+            candidate => candidate.ReconcileAsync(It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ReconcilerLocalCancellation_RemainsScopedAndStartupContinues()
     {
         var root = new Mock<IRootFolderObjectIdentityReconciler>(MockBehavior.Strict);
         root.Setup(service => service.ReconcileAsync(It.IsAny<CancellationToken>()))
@@ -159,7 +211,11 @@ public sealed class LibraryFilesystemStartupReconciliationServiceTests : BaseTes
         relocation.Setup(service => service.ReconcileActiveAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new TaskCanceledException("injected reconciliation timeout"));
         var ownership = new Mock<ILibraryDirectoryOwnershipReconciler>(MockBehavior.Strict);
+        ownership.Setup(service => service.ReconcileAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
         var files = new Mock<IAudiobookFileIdentityReconciler>(MockBehavior.Strict);
+        files.Setup(service => service.ReconcileAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AudiobookFileIdentityReconciliationResult(0, 0, 0, 0));
 
         using var provider = BuildProvider(root.Object, relocation.Object, ownership.Object, files.Object);
         var readiness = new LibraryFilesystemReadiness();
@@ -172,11 +228,55 @@ public sealed class LibraryFilesystemStartupReconciliationServiceTests : BaseTes
         await service.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(5));
         await service.StopAsync(CancellationToken.None);
 
-        Assert.Equal(LibraryFilesystemInitializationStatus.Failed, readiness.Current.Status);
-        Assert.Equal("RootFolderRelocations", readiness.Current.Phase);
-        Assert.Equal("filesystem_initialization_failed", readiness.Current.ErrorCode);
-        ownership.Verify(service => service.ReconcileAsync(It.IsAny<CancellationToken>()), Times.Never);
-        files.Verify(service => service.ReconcileAsync(It.IsAny<CancellationToken>()), Times.Never);
+        Assert.True(
+            readiness.Current.IsReady,
+            $"Status={readiness.Current.Status}; Phase={readiness.Current.Phase}; Error={readiness.Current.ErrorCode}");
+        Assert.Null(readiness.Current.ErrorCode);
+        ownership.Verify(service => service.ReconcileAsync(It.IsAny<CancellationToken>()), Times.Once);
+        files.Verify(service => service.ReconcileAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task GlobalInvariantFailure_MarksFilesystemFailed()
+    {
+        var root = new Mock<IRootFolderObjectIdentityReconciler>(MockBehavior.Strict);
+        root.Setup(service => service.ReconcileAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var relocation = new Mock<IRootFolderRelocationService>(MockBehavior.Strict);
+        relocation.Setup(service => service.ReconcileActiveAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var ownership = new Mock<ILibraryDirectoryOwnershipReconciler>(MockBehavior.Strict);
+        ownership.Setup(service => service.ReconcileAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException(
+                "injected global invariant failure"));
+        var files = new Mock<IAudiobookFileIdentityReconciler>(MockBehavior.Strict);
+
+        using var provider = BuildProvider(
+            root.Object,
+            relocation.Object,
+            ownership.Object,
+            files.Object);
+        var readiness = new LibraryFilesystemReadiness();
+        var service = new LibraryFilesystemStartupReconciliationService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            readiness,
+            NullLogger<LibraryFilesystemStartupReconciliationService>.Instance);
+
+        await service.StartAsync(CancellationToken.None);
+        await service.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(5));
+        await service.StopAsync(CancellationToken.None);
+
+        Assert.Equal(
+            LibraryFilesystemInitializationStatus.Failed,
+            readiness.Current.Status);
+        Assert.Equal("LibraryDirectoryOwnership", readiness.Current.Phase);
+        Assert.Equal(
+            "filesystem_initialization_failed",
+            readiness.Current.ErrorCode);
+        files.Verify(
+            candidate => candidate.ReconcileAsync(
+                It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]
@@ -219,7 +319,8 @@ public sealed class LibraryFilesystemStartupReconciliationServiceTests : BaseTes
         IAudiobookDeletionIntentReconciler? deletion = null,
         IFileRegistrationRecoveryService? registration = null,
         IFileRenameRecoveryReconciler? rename = null,
-        ICompatibilityFilePublicationRecoveryService? compatibility = null) =>
+        ICompatibilityFilePublicationRecoveryService? compatibility = null,
+        IVerifiedFileRenameRecoveryService? verifiedRename = null) =>
         new ServiceCollection()
             .AddScoped(_ => root)
             .AddScoped(_ => relocation)
@@ -233,12 +334,25 @@ public sealed class LibraryFilesystemStartupReconciliationServiceTests : BaseTes
                 service.ReconcileAsync(It.IsAny<CancellationToken>()) == Task.CompletedTask))
             .AddScoped(_ => compatibility
                 ?? new StubCompatibilityRecoveryService())
+            .AddScoped<IVerifiedFileRenameRecoveryService>(_ => verifiedRename
+                ?? new StubVerifiedRenameRecoveryService())
             .AddScoped(_ => files)
             .BuildServiceProvider(new ServiceProviderOptions
             {
                 ValidateScopes = true,
                 ValidateOnBuild = true
             });
+
+    private sealed class StubVerifiedRenameRecoveryService(Action? onRun = null)
+        : IVerifiedFileRenameRecoveryService
+    {
+        public Task ReconcileAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            onRun?.Invoke();
+            return Task.CompletedTask;
+        }
+    }
 
     private sealed class StubCompatibilityRecoveryService(Action? onRun = null)
         : ICompatibilityFilePublicationRecoveryService

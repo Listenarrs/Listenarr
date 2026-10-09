@@ -66,6 +66,14 @@ namespace Listenarr.Infrastructure.Library.Moving
             }
 
             var ownedParent = parentOwnership.Ownership;
+            using var originalAuthor = await PinOwnedDirectoryForRetirementAsync(
+                ownedParent, cancellationToken);
+            if (originalAuthor == null)
+            {
+                result.DeletedParentFolder = await ReconcileAbsentOwnedDirectoryAsync(
+                    ownedParent, originalTarget: null, cancellationToken);
+                return;
+            }
             try
             {
                 ValidateOwnedDirectoryForDelete(ownedParent);
@@ -127,6 +135,7 @@ namespace Listenarr.Infrastructure.Library.Moving
             {
                 result.DeletedParentFolder = await RetireOwnedDirectoryAsync(
                     ownedParent,
+                    originalAuthor,
                     cancellationToken);
             }
             catch (Exception exception) when (exception is

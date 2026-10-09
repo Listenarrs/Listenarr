@@ -271,9 +271,7 @@ public sealed partial class ManualImportCompanionImporter
                     destinationPath,
                     destinationResolution.Semantics);
                 var publicationPlan = _filePublicationCapabilityResolver == null
-                    ? sourceProof.HasDurablePhysicalObjectIdentity
-                        ? FilePublicationPlan.Durable(action)
-                        : FilePublicationPlan.Additive(action)
+                    ? FilePublicationPlan.Durable(action)
                     : await _filePublicationCapabilityResolver.ResolveAsync(
                         action,
                         companionFile,
@@ -332,7 +330,7 @@ public sealed partial class ManualImportCompanionImporter
                 {
                     await _directoryOwnershipStore.EnsureAdditiveHierarchyAsync(
                         destinationDirectory,
-                        destinationRoot,
+                        destinationResolution.BoundaryPath,
                         destinationResolution.Semantics,
                         cancellationToken);
                 }
@@ -340,7 +338,7 @@ public sealed partial class ManualImportCompanionImporter
                 {
                     await _directoryOwnershipStore.EnsureCreatedHierarchyAsync(
                         destinationDirectory,
-                        destinationRoot,
+                        destinationResolution.BoundaryPath,
                         destinationResolution.Semantics,
                         "manual-import-companion",
                         operationId,

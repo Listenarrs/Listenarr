@@ -10,6 +10,8 @@ internal sealed class FilePublicationCapabilityResolver(
     IOptions<FileMoverOptions>? options = null)
     : IFilePublicationCapabilityResolver
 {
+    internal Func<string, bool> HardlinkIdentityProbe { get; init; } = HardlinkIdentityCapability.CanVerify;
+
     public async Task<FilePublicationPlan> ResolveAsync(
         FileAction requestedAction,
         string source,
@@ -52,7 +54,9 @@ internal sealed class FilePublicationCapabilityResolver(
         }
 
         RootFolder? sourceRoot = null;
-        var sourceCanBeRetired = sourceProof.HasDurablePhysicalObjectIdentity;
+        // Retirement is a current-operation capability decision. The source
+        // content proof does not need a persisted kernel identity.
+        var sourceCanBeRetired = true;
         var sourceCanBeRetiredAfterVerifiedCopy = true;
         if (requestedAction == FileAction.Move)
         {
@@ -62,7 +66,7 @@ internal sealed class FilePublicationCapabilityResolver(
                 var sourceHealth = await storageHealthResolver.ResolveAsync(
                     sourceRoot,
                     cancellationToken);
-                sourceCanBeRetired &= sourceHealth.CanRetireDurably;
+                sourceCanBeRetired &= sourceHealth.CanRetireSourceNow;
                 sourceCanBeRetiredAfterVerifiedCopy =
                     sourceHealth.CanRetireVerifiedSource;
             }
@@ -76,8 +80,10 @@ internal sealed class FilePublicationCapabilityResolver(
             }
         }
 
-        if (sourceProof.HasDurablePhysicalObjectIdentity
-            && destinationHealth.CanMutateFilesystem
+        var hardlinkIdentityUnavailable = requestedAction == FileAction.HardlinkCopy
+            && !HardlinkIdentityProbe(source);
+        if (destinationHealth.CanMutateFilesystem
+            && !hardlinkIdentityUnavailable
             && (requestedAction != FileAction.Move || sourceCanBeRetired))
         {
             return FilePublicationPlan.Durable(requestedAction);
@@ -87,20 +93,15 @@ internal sealed class FilePublicationCapabilityResolver(
             && compatibilityBatchId is Guid batchId
             && batchId != Guid.Empty
             && cleanupOwner != CompatibilityCleanupOwner.None
-            && sourceCanBeRetiredAfterVerifiedCopy
-            && destinationRoot.WeakStorageSourceCleanupPolicy
-                == WeakStorageSourceCleanupPolicy.DeleteSourceAfterVerifiedCopy
-            && (sourceRoot == null
-                || sourceRoot.WeakStorageSourceCleanupPolicy
-                    == WeakStorageSourceCleanupPolicy.DeleteSourceAfterVerifiedCopy))
+            && sourceCanBeRetiredAfterVerifiedCopy)
         {
             return FilePublicationPlan.VerifiedCleanup(
                 batchId,
                 cleanupOwner,
                 sourceRoot?.Id,
-                sourceRoot?.WeakStoragePolicyRevision,
+                null,
                 destinationRoot.Id,
-                destinationRoot.WeakStoragePolicyRevision,
+                null,
                 sourceRoot?.StorageContractRevision,
                 destinationRoot.StorageContractRevision);
         }
@@ -110,7 +111,13 @@ internal sealed class FilePublicationCapabilityResolver(
                 requestedAction,
                 "compatibility_publication_disabled",
                 "Compatibility publication is disabled by FileMover:WeakPublicationMode.")
-            : FilePublicationPlan.Additive(requestedAction);
+            : hardlinkIdentityUnavailable
+                ? FilePublicationPlan.Additive(requestedAction) with
+                {
+                    ReasonCode = "hardlink_identity_unavailable",
+                    Message = "The file was copied and the source retained because this storage cannot reliably verify hardlink identity."
+                }
+                : FilePublicationPlan.Additive(requestedAction);
     }
 
     private static RootFolder? FindContainingRoot(
@@ -120,6 +127,11 @@ internal sealed class FilePublicationCapabilityResolver(
         var fullPath = Path.GetFullPath(path);
         RootFolder? best = null;
         var bestLength = -1;
+        var unavailableLength = -1;
+        if (!FileSystemPathIdentity.TryDetectAbsoluteSyntaxForHost(fullPath, out var syntax))
+        {
+            return null;
+        }
         foreach (var root in roots)
         {
             var persisted = RootFolderPathSemantics.ResolvePersisted(root);
@@ -128,8 +140,15 @@ internal sealed class FilePublicationCapabilityResolver(
                 || !FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
                     root.Path,
                     out var rootPath,
-                    out _)
-                || !FileSystemPathIdentity.IsSameOrInside(
+                    out _))
+            {
+                if (UnresolvedRootMayContainPath(root, fullPath, syntax))
+                {
+                    unavailableLength = Math.Max(unavailableLength, root.Path.Trim().Length);
+                }
+                continue;
+            }
+            if (!FileSystemPathIdentity.IsSameOrInside(
                     fullPath,
                     rootPath,
                     persisted.Value.Semantics))
@@ -144,7 +163,7 @@ internal sealed class FilePublicationCapabilityResolver(
             }
         }
 
-        return best;
+        return unavailableLength >= bestLength && unavailableLength >= 0 ? null : best;
     }
 
     private static bool MayOverlapUnresolvedRoot(
@@ -172,16 +191,24 @@ internal sealed class FilePublicationCapabilityResolver(
                 continue;
             }
 
-            if (FileSystemPathIdentity.AmbiguousStoredBoundaryMayContainPath(
-                    root.Path,
-                    fullPath,
-                    pathSyntax,
-                    root.CaseSensitivityMode))
+            if (UnresolvedRootMayContainPath(root, fullPath, pathSyntax))
             {
                 return true;
             }
         }
 
         return false;
+    }
+
+    private static bool UnresolvedRootMayContainPath(
+        RootFolder root, string path, FileSystemPathSyntax syntax)
+    {
+        if (string.IsNullOrWhiteSpace(root.Path)) return false;
+        // Contextual spelling is used only to block fallback. It never selects
+        // a root or authorizes a trimmed persisted boundary.
+        return FileSystemPathIdentity.AmbiguousStoredBoundaryMayContainPath(
+            root.Path, path, syntax, root.CaseSensitivityMode)
+            || FileSystemPathIdentity.AmbiguousStoredBoundaryMayContainPath(
+                root.Path.Trim(), path, syntax, root.CaseSensitivityMode);
     }
 }

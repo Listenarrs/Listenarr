@@ -85,15 +85,25 @@ internal sealed partial class AudiobookContentMoveService
 
     private async Task EnsureCurrentExecutionProtocolAsync(
         Guid jobId,
+        MoveLeaseToken leaseToken,
         CancellationToken cancellationToken)
     {
-        var version = await GetExecutionProtocolVersionAsync(jobId, cancellationToken);
+        var version =
+            await executionStore.EnsureCurrentOrUpgradeLegacyExecutionProtocolAsync(
+                jobId,
+                leaseToken,
+                cancellationToken);
         if (!MoveExecutionProtocol.IsCurrent(version))
         {
             throw new MoveNeedsAttentionException(
-                "This move job does not use the current durable database execution protocol.");
+                "This move job predates operation-evidence recovery and cannot be upgraded safely.");
         }
     }
+
+    private Task<MoveJobPhase> GetJobPhaseAsync(
+        Guid jobId,
+        CancellationToken cancellationToken) =>
+        executionStore.GetJobPhaseAsync(jobId, cancellationToken);
 
     private Task<List<MoveJobEntry>> LoadManifestAsync(
         Guid jobId,

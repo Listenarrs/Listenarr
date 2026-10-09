@@ -424,7 +424,7 @@ public sealed class MoveSourceManifestServiceTests : BaseTests
     }
 
     [Fact]
-    public async Task BuildAsync_ReplacedTrackedPhysicalGeneration_FailsClosed()
+    public async Task BuildAsync_StaleTrackedPhysicalIdentity_UsesCurrentPinnedContent()
     {
         var root = FileService.GetTempDirectory("move-manifest-replaced-generation");
         var path = await FileService.GetFileAsync(root, "Book.m4b", "original");
@@ -464,18 +464,25 @@ public sealed class MoveSourceManifestServiceTests : BaseTests
                 replacement.GetObjectIdentity());
         }
 
-        var exception = await Assert.ThrowsAsync<ApplicationConflictException>(() =>
-            _provider.GetRequiredService<IMoveSourceManifestService>()
-                .BuildAsync(audiobook));
+        var manifest = await _provider
+            .GetRequiredService<IMoveSourceManifestService>()
+            .BuildAsync(audiobook);
 
-        Assert.Equal("move_source_unverified", exception.Code);
-        Assert.Contains("physical", exception.Message, StringComparison.OrdinalIgnoreCase);
+        var current = Assert.Single(
+            manifest.Entries,
+            entry => entry.EntryType == MoveJobEntryType.File);
         Assert.Equal("replacement", await File.ReadAllTextAsync(path));
         Assert.Equal("original", await File.ReadAllTextAsync(displaced));
+        Assert.Equal(new FileInfo(path).Length, current.Length);
+        Assert.Equal(
+            Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(
+                    await File.ReadAllBytesAsync(path))),
+            current.Sha256);
     }
 
     [Fact]
-    public async Task BuildAsync_MissingTrackedPhysicalIdentity_FailsClosed()
+    public async Task BuildAsync_MissingTrackedPhysicalIdentity_UsesLiveContentProof()
     {
         var root = FileService.GetTempDirectory("move-manifest-missing-physical");
         var path = await FileService.GetFileAsync(root, "Book.m4b", "audio");
@@ -497,13 +504,20 @@ public sealed class MoveSourceManifestServiceTests : BaseTests
         tracked.ApplyPathIdentity(path, identity);
         await _audiobookFileRepository.AddAsync(tracked);
 
-        var exception = await Assert.ThrowsAsync<ApplicationConflictException>(() =>
-            _provider.GetRequiredService<IMoveSourceManifestService>()
-                .BuildAsync(audiobook));
+        var manifest = await _provider
+            .GetRequiredService<IMoveSourceManifestService>()
+            .BuildAsync(audiobook);
 
-        Assert.Equal("move_source_unverified", exception.Code);
-        Assert.Contains("physical identity", exception.Message, StringComparison.OrdinalIgnoreCase);
+        var current = Assert.Single(
+            manifest.Entries,
+            entry => entry.EntryType == MoveJobEntryType.File);
         Assert.True(File.Exists(path));
+        Assert.Equal(new FileInfo(path).Length, current.Length);
+        Assert.Equal(
+            Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(
+                    await File.ReadAllBytesAsync(path))),
+            current.Sha256);
     }
 
     [Fact]

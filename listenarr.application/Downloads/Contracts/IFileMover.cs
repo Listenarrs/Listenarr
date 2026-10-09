@@ -40,6 +40,15 @@ namespace Listenarr.Application.Downloads.Contracts
             && RegistrationLease != null;
     }
 
+    public enum UncommittedPublicationRollbackOutcome
+    {
+        RolledBack,
+        AlreadyTerminal,
+        OwnershipCommitted,
+        Pending,
+        NeedsAttention
+    }
+
     /// <summary>
     /// Handles file manipulation within a destination hierarchy that has already
     /// been established by the caller. Implementations must not create missing
@@ -158,5 +167,12 @@ namespace Listenarr.Application.Downloads.Contracts
             string destination,
             IAudiobookFileRegistrationLease registrationLease,
             Guid operationId);
+
+        /// <summary>
+        /// Compensates an anonymous, verified registration publication by removing
+        /// only its pinned target generation while retaining the exact source.
+        /// </summary>
+        Task<UncommittedPublicationRollbackOutcome>
+            RollbackUncommittedRegistrationAsync(Guid operationId);
     }
 }

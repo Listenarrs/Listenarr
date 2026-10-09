@@ -12,6 +12,7 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
     private readonly Func<int, bool>? _prepareCleanupRecovery;
     private readonly Func<int, bool>? _commitRegistration;
     private readonly Func<bool>? _completePublication;
+    private readonly bool _supportsMetadataWrite;
     private int? _cleanupRecoveryAudiobookId;
     private bool _cleanupRecoveryPrepared;
     private bool _registrationCommitted;
@@ -25,6 +26,7 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
         string metadataPath,
         string physicalObjectIdentity,
         bool hasDurablePhysicalObjectIdentity,
+        bool supportsMetadataWrite,
         string? sourcePhysicalObjectIdentity,
         Func<int, bool>? prepareCleanupRecovery,
         Func<bool>? completePublication,
@@ -39,6 +41,7 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
         MetadataPath = metadataPath;
         PhysicalObjectIdentity = physicalObjectIdentity;
         HasDurablePhysicalObjectIdentity = hasDurablePhysicalObjectIdentity;
+        _supportsMetadataWrite = supportsMetadataWrite;
         SourcePhysicalObjectIdentity = sourcePhysicalObjectIdentity;
     }
 
@@ -46,6 +49,7 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
     public string MetadataPath { get; }
     public string PhysicalObjectIdentity { get; }
     public bool HasDurablePhysicalObjectIdentity { get; }
+    public bool SupportsMetadataWrite => _supportsMetadataWrite;
     public string? SourcePhysicalObjectIdentity { get; }
 
     public Stream OpenMetadataReadStream()
@@ -59,10 +63,10 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
     public Stream OpenMetadataWriteStream()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (!HasDurablePhysicalObjectIdentity)
+        if (!SupportsMetadataWrite)
         {
             throw new NotSupportedException(
-                "Pinned path-only registration leases do not authorize metadata writes.");
+                "This pinned registration lease does not authorize metadata writes.");
         }
 
         return _file.OpenIndependentWriteStream(
@@ -96,6 +100,38 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
             prepareCleanupRecovery,
             completePublication,
             commitRegistration);
+    }
+
+    internal static PinnedAudiobookFileRegistrationLease OpenForMetadataRead(
+        string publicPath,
+        string? expectedPhysicalObjectIdentity)
+    {
+        if (OperatingSystem.IsLinux()
+            && PhysicalObjectIdentitySafety.IsKnownWeak(expectedPhysicalObjectIdentity))
+        {
+            return OpenPinnedPathOnly(publicPath);
+        }
+
+        try
+        {
+            return Open(publicPath, expectedPhysicalObjectIdentity);
+        }
+        catch (PlatformNotSupportedException) when (OperatingSystem.IsLinux())
+        {
+            return OpenPinnedPathOnly(publicPath);
+        }
+    }
+
+    private static PinnedAudiobookFileRegistrationLease OpenPinnedPathOnly(
+        string publicPath)
+    {
+        var canonicalPath = Path.GetFullPath(publicPath);
+        var parentPath = Path.GetDirectoryName(canonicalPath)
+            ?? throw new InvalidOperationException("The metadata path has no parent directory.");
+        using var parent = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+            parentPath, createMissing: false);
+        var file = parent.OpenExistingFileForStableRead(Path.GetFileName(canonicalPath));
+        return CreatePinnedPathOnly(file, canonicalPath);
     }
 
     internal static PinnedAudiobookFileRegistrationLease Create(
@@ -138,6 +174,7 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
                     canonicalPath,
                     physicalObjectIdentity,
                     hasDurablePhysicalObjectIdentity: true,
+                    supportsMetadataWrite: true,
                     sourcePhysicalObjectIdentity,
                     prepareCleanupRecovery,
                     completePublication,
@@ -165,6 +202,7 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
                     metadataPath,
                     physicalObjectIdentity,
                     hasDurablePhysicalObjectIdentity: true,
+                    supportsMetadataWrite: true,
                     sourcePhysicalObjectIdentity,
                     prepareCleanupRecovery,
                     completePublication,
@@ -188,19 +226,14 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
         PinnedDirectoryCreation.PinnedFileEntry file,
         string publicPath,
         Func<int, bool>? commitRegistration = null,
-        Func<bool>? completePublication = null)
+        Func<bool>? completePublication = null,
+        bool supportsMetadataWrite = false)
     {
         ArgumentNullException.ThrowIfNull(file);
         ArgumentException.ThrowIfNullOrWhiteSpace(publicPath);
         Microsoft.Win32.SafeHandles.SafeFileHandle? stableHandle = null;
         try
         {
-            if (!OperatingSystem.IsLinux())
-            {
-                throw new PlatformNotSupportedException(
-                    "Pinned path-only registration is supported only on Linux storage without durable generation identity.");
-            }
-
             var canonicalPath = Path.GetFullPath(publicPath);
             var visibility = file.ProbeVisiblePathMatch();
             if (visibility == RegistrationPublicationMatchOutcome.Unavailable)
@@ -214,13 +247,31 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
                     "The audiobook file changed before pinned path-only registration.");
             }
 
-            stableHandle = file.DuplicateHandleForOperation();
-            var metadataPath = FormattableString.Invariant(
-                $"/proc/{Environment.ProcessId}/fd/{stableHandle.DangerousGetHandle().ToInt32()}");
-            if (!File.Exists(metadataPath))
+            string metadataPath;
+            if (OperatingSystem.IsWindows())
+            {
+                // Keep the pinned file entry alive for before/after publication
+                // validation. Windows metadata readers use the canonical public path.
+                metadataPath = canonicalPath;
+            }
+            else if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+            {
+                stableHandle = file.DuplicateHandleForOperation();
+                var descriptor = stableHandle.DangerousGetHandle().ToInt32();
+                metadataPath = OperatingSystem.IsLinux()
+                    ? FormattableString.Invariant(
+                        $"/proc/{Environment.ProcessId}/fd/{descriptor}")
+                    : FormattableString.Invariant($"/dev/fd/{descriptor}");
+                if (!File.Exists(metadataPath))
+                {
+                    throw new PlatformNotSupportedException(
+                        "The platform does not expose a stable metadata path for the pinned file descriptor.");
+                }
+            }
+            else
             {
                 throw new PlatformNotSupportedException(
-                    "The Linux proc filesystem is unavailable for stable metadata extraction.");
+                    "Pinned path-only registration is supported only on Windows, Linux, and macOS.");
             }
 
             var result = new PinnedAudiobookFileRegistrationLease(
@@ -230,6 +281,7 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
                 metadataPath,
                 $"scan-pinned:{Guid.NewGuid():N}",
                 hasDurablePhysicalObjectIdentity: false,
+                supportsMetadataWrite,
                 sourcePhysicalObjectIdentity: null,
                 prepareCleanupRecovery: null,
                 completePublication,

@@ -33,8 +33,38 @@ public sealed class FileMoverMarkerlessRenameTests : BaseTests
         AssertNoLibraryArtifacts(scenario.Root);
     }
 
+    [Fact]
+    public async Task MoveFilePreservingPhysicalIdentityAsync_LegacyDiagnostic_DoesNotAuthorizeOrBlockFreshRename()
+    {
+        var scenario = await CreateScenarioAsync();
+        Assert.True(await CreateMover().MoveFilePreservingPhysicalIdentityAsync(
+            scenario.Source,
+            scenario.Destination,
+            "legacy-other-client-observation",
+            scenario.OperationId));
+        Assert.False(File.Exists(scenario.Source));
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Destination));
+    }
+
+    [LinuxFact]
+    public async Task MoveFilePreservingPhysicalIdentityAsync_SourceReplacedAfterPlanning_PreservesBothFiles()
+    {
+        var scenario = await CreateScenarioAsync();
+        var retained = scenario.Source + ".original";
+        var mover = CreateMover(afterJournalPlanned: async () =>
+        {
+            File.Move(scenario.Source, retained);
+            await File.WriteAllTextAsync(scenario.Source, "audio");
+        });
+        Assert.False(await mover.MoveFilePreservingPhysicalIdentityAsync(
+            scenario.Source, scenario.Destination, scenario.SourceIdentity, scenario.OperationId));
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Source));
+        Assert.Equal("audio", await File.ReadAllTextAsync(retained));
+        Assert.False(File.Exists(scenario.Destination));
+    }
+
     [WindowsFact]
-    public async Task MoveFilePreservingPhysicalIdentityAsync_CaseAliasRetryUsesSameDurableJournal()
+    public async Task MoveFilePreservingPhysicalIdentityAsync_CaseAliasRetryRetainsSurvivingSource()
     {
         var scenario = await CreateScenarioAsync();
         var interrupted = CreateMover(
@@ -48,23 +78,23 @@ public sealed class FileMoverMarkerlessRenameTests : BaseTests
                 scenario.SourceIdentity,
                 scenario.OperationId));
 
-        Assert.True(await CreateMover().MoveFilePreservingPhysicalIdentityAsync(
+        Assert.False(await CreateMover().MoveFilePreservingPhysicalIdentityAsync(
             scenario.Source.ToUpperInvariant(),
             scenario.Destination.ToUpperInvariant(),
             scenario.SourceIdentity,
             scenario.OperationId));
 
-        Assert.False(File.Exists(scenario.Source));
-        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Destination));
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Source));
+        Assert.False(File.Exists(scenario.Destination));
         await AssertJournalStateAsync(
             scenario.OperationId,
-            FileMutationJournalState.Completed,
-            scenario.SourceIdentity);
+            FileMutationJournalState.NeedsAttention,
+            targetIdentity: null);
         AssertNoLibraryArtifacts(scenario.Root);
     }
 
     [Fact]
-    public async Task MoveFilePreservingPhysicalIdentityAsync_CrashAfterJournalPlanResumes()
+    public async Task MoveFilePreservingPhysicalIdentityAsync_CrashAfterJournalPlan_RetainsSurvivingSource()
     {
         var scenario = await CreateScenarioAsync();
         var interrupted = CreateMover(
@@ -86,22 +116,22 @@ public sealed class FileMoverMarkerlessRenameTests : BaseTests
             targetIdentity: null);
         AssertNoLibraryArtifacts(scenario.Root);
 
-        Assert.True(await CreateMover().MoveFilePreservingPhysicalIdentityAsync(
+        Assert.False(await CreateMover().MoveFilePreservingPhysicalIdentityAsync(
             scenario.Source,
             scenario.Destination,
             scenario.SourceIdentity,
             scenario.OperationId));
-        Assert.False(File.Exists(scenario.Source));
-        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Destination));
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Source));
+        Assert.False(File.Exists(scenario.Destination));
         await AssertJournalStateAsync(
             scenario.OperationId,
-            FileMutationJournalState.Completed,
-            scenario.SourceIdentity);
+            FileMutationJournalState.NeedsAttention,
+            targetIdentity: null);
         AssertNoLibraryArtifacts(scenario.Root);
     }
 
     [Fact]
-    public async Task MoveFilePreservingPhysicalIdentityAsync_CrashAfterNativeRenameResumesFromIdentity()
+    public async Task MoveFilePreservingPhysicalIdentityAsync_CrashAfterNativeRename_ReconcilesContentDespiteChangedDiagnostics()
     {
         var scenario = await CreateScenarioAsync();
         var interrupted = CreateMover(
@@ -125,16 +155,29 @@ public sealed class FileMoverMarkerlessRenameTests : BaseTests
             FileMutationJournalState.Planned,
             targetIdentity: null);
         AssertNoLibraryArtifacts(scenario.Root);
+        var factory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var journal = await db.FileMutationJournals.SingleAsync(
+                candidate => candidate.OperationId == scenario.OperationId);
+            journal.SourceParentDirectoryObjectIdentity = "legacy-source-parent";
+            journal.DestinationParentDirectoryObjectIdentity = "legacy-target-parent";
+            journal.SourcePhysicalObjectIdentity = "legacy-source-object";
+            journal.TargetPhysicalObjectIdentity = "legacy-target-object";
+            await db.SaveChangesAsync();
+        }
 
         Assert.True(await CreateMover().MoveFilePreservingPhysicalIdentityAsync(
             scenario.Source,
             scenario.Destination,
             scenario.SourceIdentity,
             scenario.OperationId));
+        Assert.False(File.Exists(scenario.Source));
+        Assert.Equal("audio", await File.ReadAllTextAsync(scenario.Destination));
         await AssertJournalStateAsync(
             scenario.OperationId,
             FileMutationJournalState.Completed,
-            scenario.SourceIdentity);
+            "legacy-target-object");
         AssertNoLibraryArtifacts(scenario.Root);
     }
 

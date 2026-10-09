@@ -73,44 +73,15 @@ public sealed partial class RootFolderRelocationService
                 ValidatePlannedReservationParent(
                     reservation,
                     parent);
-                // A directory visible while its reservation is still only Planned
-                // cannot be proven as Listenarr-created after a crash without writing
-                // sidecar evidence into the library. Preserve it as retained instead.
-                RetainObservedReservation(
-                    reservation,
-                    directory);
-                await db.SaveChangesAsync(cancellationToken);
-                continue;
-            }
-            else
-            {
-                ValidateReservationDirectoryIdentity(
-                    reservation,
-                    directory);
             }
 
-            if (Directory.EnumerateFileSystemEntries(canonicalPath).Any()
-                || !ReservationPathMatchesOrThrowUnavailable(
-                    directory,
-                    "The reserved relocation directory is temporarily unavailable during cleanup.")
-                || !ReservationPathMatchesOrThrowUnavailable(
-                    parent,
-                    "The reserved relocation directory parent is temporarily unavailable during cleanup."))
-            {
-                reservation.State =
-                    RootFolderRelocationCreatedDirectoryState.Retained;
-                reservation.UpdatedAt =
-                    timeProvider.GetUtcNow().UtcDateTime;
-                await db.SaveChangesAsync(cancellationToken);
-                continue;
-            }
-
-            publication.DeletePinnedEmptyDirectoryImmediately(
-                Path.GetFileName(canonicalPath));
-            reservation.State =
-                RootFolderRelocationCreatedDirectoryState.Removed;
-            reservation.UpdatedAt =
-                timeProvider.GetUtcNow().UtcDateTime;
+            // This is restart reconciliation. Persisted reservation state and
+            // directory identity are historical evidence only; neither recreates
+            // authority to remove a directory after the live operation ended.
+            // Any surviving path is therefore retained, even when it is empty.
+            RetainObservedReservation(
+                reservation,
+                directory);
             await db.SaveChangesAsync(cancellationToken);
         }
     }

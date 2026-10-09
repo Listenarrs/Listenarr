@@ -12,7 +12,6 @@ public partial class DownloadImportService
         string destinationOwnershipBoundary,
         FileSystemPathSemantics destinationSemantics,
         Guid operationId,
-        string? expectedRegisteredPhysicalObjectIdentity,
         FilePublicationSourceProof sourceProof,
         Audiobook audiobook,
         AudiobookFileOwnershipCheckResult ownership,
@@ -25,7 +24,6 @@ public partial class DownloadImportService
             destinationOwnershipBoundary,
             destinationSemantics,
             operationId,
-            expectedRegisteredPhysicalObjectIdentity,
             sourceProof,
             audiobook.Id,
             cancellationToken);
@@ -38,21 +36,12 @@ public partial class DownloadImportService
                 destination);
         }
 
-        var registered = publicationPlan.Mode is
-                FilePublicationExecutionMode.AdditiveCopyRetainSource or
-                FilePublicationExecutionMode.CompatibilityCopyVerifiedCleanup
-                ? await audiobookFileService.RegisterCompatibilityPublicationAsync(
-                    audiobook,
-                    ownership,
-                    registrationLease,
-                    "download",
-                    cancellationToken)
-                : await RegisterPublishedImportAsync(
-                    audiobook,
-                    ownership,
-                    registrationLease,
-                    "download",
-                    cancellationToken);
+        var registered = await RegisterPublishedImportAsync(
+            audiobook,
+            ownership,
+            registrationLease,
+            "download",
+            cancellationToken);
         if (!registered)
         {
             return CreatePublicationFailureResult(

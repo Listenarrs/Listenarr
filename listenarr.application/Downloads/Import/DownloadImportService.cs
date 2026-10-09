@@ -58,6 +58,7 @@ namespace Listenarr.Application.Downloads.Import
             var (remainingFiles, recoveredResults) = await ConsumeRecoveredImportsAsync(
                 files,
                 recoveryReceipts,
+                options?.ForceCopyAndRetainSource == true,
                 ct);
             files = remainingFiles;
             if (files.Count == 0)
@@ -97,6 +98,9 @@ namespace Listenarr.Application.Downloads.Import
             try
             {
                 var completedFileAction = settings.CompletedFileAction;
+                var forceCopyAndRetainSource = options?.ForceCopyAndRetainSource == true;
+                var operationScope = forceCopyAndRetainSource
+                    ? "download-import-retain-source" : "download-import";
 
                 if (settings.ExtractArchives || options?.ForceArchiveExtraction == true)
                 {
@@ -140,30 +144,15 @@ namespace Listenarr.Application.Downloads.Import
                 var orderedFiles = plannedAudioFiles.Select(p => p.FullPath)
                     .Concat(sourceFiles.Where(f => !planByPath.ContainsKey(f)))
                     .ToList();
+                var compatibilityBatchManifest =
+                    completedFileAction == FileAction.Move && orderedFiles.Count > 0
+                        ? CompatibilityBatchManifest.Create(orderedFiles)
+                        : (CompatibilityBatchManifest?)null;
 
                 try
                 {
-                    string? bestExisting = null;
-                    QualityProfile? abProfile = audiobook.QualityProfile;
-                    if (audiobook.Files != null && audiobook.Files.Count != 0)
-                    {
-                        foreach (var f in audiobook.Files)
-                        {
-                            string q = string.Empty;
-                            if (!string.IsNullOrEmpty(f.Format)) q = f.Format;
-                            if (f.Bitrate.HasValue)
-                            {
-                                var kb = f.Bitrate.Value / 1000;
-                                if (kb >= 320) q = "MP3 320kbps";
-                                else if (kb >= 256) q = "MP3 256kbps";
-                                else if (kb >= 192) q = "MP3 192kbps";
-                                else if (kb >= 128) q = "MP3 128kbps";
-                            }
-                            if (string.IsNullOrEmpty(q) && !string.IsNullOrEmpty(f.Path)) q = ImportQualityEvaluator.Determine(null, f.Path);
-                            if (string.IsNullOrEmpty(bestExisting)) bestExisting = q;
-                            else if (!string.IsNullOrEmpty(q) && !string.IsNullOrEmpty(bestExisting) && abProfile != null && ImportQualityEvaluator.IsAcceptable(q, bestExisting, abProfile)) bestExisting = q;
-                        }
-                    }
+                    var abProfile = audiobook.QualityProfile;
+                    var bestExisting = ResolveBestExistingQuality(audiobook, abProfile);
 
                     foreach (var file in orderedFiles)
                     {
@@ -177,7 +166,9 @@ namespace Listenarr.Application.Downloads.Import
                             var hasSuccessfulAudioImport = results.Any(r => r.Success && !string.IsNullOrWhiteSpace(r.FinalPath) && !string.IsNullOrWhiteSpace(r.SourcePath) && FileUtils.IsAudioFile(r.SourcePath!));
                             if (!hasSuccessfulAudioImport || string.IsNullOrWhiteSpace(audiobook.BasePath))
                             {
-                                results.Add(ImportResult.Skipped("No successful audio import in batch"));
+                                results.Add(ImportResult.Skipped(
+                                    "No successful audio import in batch",
+                                    file));
                                 logger.LogDebug("ImportFilesFromDirectory: Skipping companion file {File} because no successful audio import was recorded for the batch", file);
                                 continue;
                             }
@@ -216,7 +207,7 @@ namespace Listenarr.Application.Downloads.Import
                                         destinationOwnershipBoundary,
                                         destinationSemantics,
                                         FileMoveOperationIdentity.CreateForPaths(
-                                            "download-import",
+                                            operationScope,
                                             audiobook.Id,
                                             completedFileAction,
                                             file,
@@ -227,6 +218,8 @@ namespace Listenarr.Application.Downloads.Import
                                         sourceProof.Value,
                                         audiobook.Id,
                                         compatibilityBatchId,
+                                        compatibilityBatchManifest,
+                                        forceCopyAndRetainSource,
                                         ct);
                                 if (companionPublication == null)
                                 {
@@ -282,7 +275,9 @@ namespace Listenarr.Application.Downloads.Import
                             {
                                 if (audiobook.Files != null && audiobook.Files.Count != 0 && !ImportQualityEvaluator.IsAcceptable(candidateQuality, bestExisting, abProfile))
                                 {
-                                    results.Add(ImportResult.Skipped($"candidate quality '{candidateQuality}' is not better than existing '{bestExisting}'"));
+                                    results.Add(ImportResult.Skipped(
+                                        $"candidate quality '{candidateQuality}' is not better than existing '{bestExisting}'",
+                                        file));
                                     logger.LogInformation($"Skipping import of file {file} for audiobook {audiobook.Id} because candidate quality '{candidateQuality}' is not better than existing '{bestExisting}'");
                                     continue;
                                 }
@@ -379,16 +374,10 @@ namespace Listenarr.Application.Downloads.Import
                                     AudiobookFileOwnershipCheckOutcome.Available or
                                     AudiobookFileOwnershipCheckOutcome.AlreadyOwnedByAudiobook)
                                 {
-                                    if (destinationReservation.ReusesExistingFile
-                                        && !sourceProof.Value.HasDurablePhysicalObjectIdentity
-                                        && ownership.Outcome
-                                            == AudiobookFileOwnershipCheckOutcome.Available)
-                                    {
-                                        // Matching bytes are not an ownership claim.
-                                        // Preserve the existing path and plan another suffix.
-                                        usedDestinations.Add(destination);
-                                        continue;
-                                    }
+                                    // A byte-identical existing destination can be
+                                    // adopted by this audiobook when no other owner
+                                    // claims it. Content proof, not persisted kernel
+                                    // identity, establishes idempotent publication.
                                     break;
                                 }
 
@@ -421,7 +410,7 @@ namespace Listenarr.Application.Downloads.Import
                             }
 
                             var operationId = FileMoveOperationIdentity.CreateForPaths(
-                                "download-import",
+                                operationScope,
                                 audiobook.Id,
                                 completedFileAction,
                                 file,
@@ -435,6 +424,8 @@ namespace Listenarr.Application.Downloads.Import
                                 destination,
                                 sourceProof.Value,
                                 compatibilityBatchId,
+                                compatibilityBatchManifest,
+                                forceCopyAndRetainSource,
                                 ct);
                             if (!publicationPlan.IsAllowed)
                             {
@@ -452,7 +443,6 @@ namespace Listenarr.Application.Downloads.Import
                                     destinationOwnershipBoundary,
                                     destinationSemantics,
                                     operationId,
-                                    ownership.ExistingFile?.PhysicalObjectIdentity,
                                     sourceProof.Value,
                                     audiobook,
                                     ownership,

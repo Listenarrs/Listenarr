@@ -84,7 +84,7 @@ namespace Listenarr.Domain.Audiobooks
 
     public static class MoveIdentityProtocol
     {
-        public const int Current = 2;
+        public const int Current = 3;
     }
 
     public static class MoveExecutionProtocol
@@ -92,7 +92,8 @@ namespace Listenarr.Domain.Audiobooks
         public const int PreDurableReleased = 0;
         public const int TargetBoundaryMarkerlessDatabaseState = 1;
         public const int MarkerlessDatabaseState = 2;
-        public const int Current = MarkerlessDatabaseState;
+        public const int OperationEvidence = 3;
+        public const int Current = OperationEvidence;
 
         public static bool IsCurrent(int version) => version == Current;
     }
@@ -151,9 +152,11 @@ namespace Listenarr.Domain.Audiobooks
             MoveSourceCleanupMode.RetainSource;
         public bool ForceCopyAndRetainSource { get; set; }
         public int? SourceRootFolderId { get; set; }
+        // Legacy revision retained for persisted execution-contract compatibility.
         public int? SourcePolicyRevision { get; set; }
         public int? SourceStorageContractRevision { get; set; }
         public int? TargetRootFolderId { get; set; }
+        // Current cleanup authority uses storage-contract revisions and live evidence.
         public int? TargetPolicyRevision { get; set; }
         public int? TargetStorageContractRevision { get; set; }
         public ICollection<MoveJobEntry> Entries { get; set; } = new List<MoveJobEntry>();
