@@ -65,6 +65,7 @@
               <select id="type" v-model="formData.type" required @change="onTypeChange">
                 <option value="qbittorrent">qBittorrent</option>
                 <option value="transmission">Transmission</option>
+                <option value="deluge">Deluge</option>
                 <option value="sabnzbd">SABnzbd</option>
                 <option value="nzbget">NZBGet</option>
               </select>
@@ -116,18 +117,22 @@
               </Checkbox>
             </div>
 
-            <div class="form-group" v-if="formData.type === 'transmission'">
+            <div
+              class="form-group"
+              v-if="formData.type === 'transmission' || formData.type === 'deluge'"
+            >
               <label for="urlBase">URL Base</label>
               <input
                 id="urlBase"
                 v-model="formData.urlBase"
                 type="text"
-                placeholder="/transmission/rpc"
+                :placeholder="formData.type === 'deluge' ? '/deluge' : '/transmission/rpc'"
               />
-              <small
-                >RPC path for the Transmission endpoint. Default is <code>/transmission/rpc</code>.
-                Some seedbox providers use a custom path (e.g. <code>/rpc</code>).</small
-              >
+              <small>{{
+                formData.type === 'deluge'
+                  ? 'Optional reverse proxy prefix for Deluge Web. The JSON-RPC endpoint will be /json under this path.'
+                  : 'RPC path for the Transmission endpoint. Default is /transmission/rpc. Some seedbox providers use a custom path (e.g. /rpc).'
+              }}</small>
             </div>
           </FormSection>
 
@@ -404,7 +409,7 @@ const testing = ref(false)
 
 const defaultFormData = {
   name: '',
-  type: 'qbittorrent' as 'qbittorrent' | 'transmission' | 'sabnzbd' | 'nzbget',
+  type: 'qbittorrent' as 'qbittorrent' | 'transmission' | 'deluge' | 'sabnzbd' | 'nzbget',
   host: '',
   port: 8080,
   username: '',
@@ -469,6 +474,7 @@ const getHostPlaceholder = () => {
   const placeholders: Record<string, string> = {
     qbittorrent: 'qbittorrent.tld.com',
     transmission: 'transmission.tld.com',
+    deluge: 'deluge.tld.com',
     sabnzbd: 'sabnzbd.tld.com',
     nzbget: 'nzbget.tld.com',
   }
@@ -479,6 +485,7 @@ const getPortPlaceholder = () => {
   const ports: Record<string, number> = {
     qbittorrent: 8080,
     transmission: 9091,
+    deluge: 8112,
     sabnzbd: 8080,
     nzbget: 6789,
   }
@@ -489,6 +496,7 @@ const getPortHelpText = () => {
   const hints: Record<string, string> = {
     transmission:
       'RPC port (default: 9091). This is not the web UI port if you changed it separately.',
+    deluge: 'Deluge Web UI port (default: 8112). The adapter uses Deluge Web JSON-RPC at /json.',
     qbittorrent: 'Web UI port (default: 8080). Found in qBittorrent → Options → Web UI.',
     sabnzbd: 'Web interface port (default: 8080). Found in SABnzbd → Config → General.',
     nzbget: 'Web interface port (default: 6789). Found in NZBGet → Settings → Connection.',
@@ -500,6 +508,9 @@ const getCategoryHelp = () => {
   if (isUsenet.value) {
     return 'Adding a category specific to Listenarr avoids conflicts with unrelated non-Listenarr downloads. Using a category is optional, but strongly recommended.'
   }
+  if (formData.value.type === 'deluge') {
+    return 'Adding a category specific to Listenarr avoids conflicts with unrelated downloads. Deluge category support requires the Label plugin to be enabled.'
+  }
   return 'Adding a category specific to Listenarr avoids conflicts with unrelated downloads.'
 }
 
@@ -508,6 +519,7 @@ const onTypeChange = () => {
   const defaultPorts: Record<string, number> = {
     qbittorrent: 8080,
     transmission: 9091,
+    deluge: 8112,
     sabnzbd: 8080,
     nzbget: 6789,
   }
@@ -518,6 +530,8 @@ const onTypeChange = () => {
     formData.value.password = ''
   } else {
     formData.value.apiKey = ''
+    if (formData.value.type === 'deluge' && !formData.value.category)
+      formData.value.category = 'listenarr'
   }
 }
 
@@ -593,7 +607,8 @@ const testConnection = async () => {
         ...(formData.value.type === 'sabnzbd' && formData.value.apiKey
           ? { apiKey: formData.value.apiKey }
           : {}),
-        ...(formData.value.type === 'transmission' && formData.value.urlBase
+        ...((formData.value.type === 'transmission' || formData.value.type === 'deluge') &&
+        formData.value.urlBase
           ? { urlBase: formData.value.urlBase }
           : {}),
         ...(formData.value.category && { category: formData.value.category }),
@@ -653,7 +668,8 @@ const handleSubmit = async () => {
         ...(formData.value.type === 'sabnzbd' && formData.value.apiKey
           ? { apiKey: formData.value.apiKey }
           : {}),
-        ...(formData.value.type === 'transmission' && formData.value.urlBase
+        ...((formData.value.type === 'transmission' || formData.value.type === 'deluge') &&
+        formData.value.urlBase
           ? { urlBase: formData.value.urlBase }
           : {}),
         ...(formData.value.category && { category: formData.value.category }),

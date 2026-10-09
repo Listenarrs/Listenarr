@@ -49,22 +49,13 @@ namespace Listenarr.Application.Downloads.Processing
         public DownloadHashRetrievalService(
             ILogger<DownloadHashRetrievalService> logger,
             IDownloadHistoryRepository historyRepository,
-            IDownloadClientAdapter qbittorrentAdapter,
-            IDownloadClientAdapter transmissionAdapter,
-            IDownloadClientAdapter sabnzbdAdapter,
-            IDownloadClientAdapter nzbgetAdapter)
+            IEnumerable<IDownloadClientAdapter> adapters)
         {
             _logger = logger;
             _historyRepository = historyRepository;
-
-            // Map adapters by protocol type
-            _adapters = new Dictionary<string, IDownloadClientAdapter>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["qbittorrent"] = qbittorrentAdapter,
-                ["transmission"] = transmissionAdapter,
-                ["sabnzbd"] = sabnzbdAdapter,
-                ["nzbget"] = nzbgetAdapter
-            };
+            _adapters = adapters
+                .Where(a => !string.IsNullOrWhiteSpace(a.ClientType))
+                .ToDictionary(a => a.ClientType, StringComparer.OrdinalIgnoreCase);
         }
 
         /// <summary>

@@ -44,14 +44,12 @@ namespace Listenarr.Tests.Features.Application.Downloads.Processing
             // Mock a single adapter for qBittorrent
             _mockAdapter = new Mock<IDownloadClientAdapter>();
             _mockAdapter.Setup(a => a.Protocol).Returns(DownloadProtocol.Torrent);
+            _mockAdapter.Setup(a => a.ClientType).Returns("qbittorrent");
 
             _service = new DownloadHashRetrievalService(
                 _mockLogger.Object,
                 _historyRepository,
-                _mockAdapter.Object,
-                _mockAdapter.Object,
-                _mockAdapter.Object,
-                _mockAdapter.Object);
+                [_mockAdapter.Object]);
         }
 
         [Fact]

@@ -300,5 +300,49 @@ namespace Listenarr.Domain.Common
 
             return Path.Join(basePath, relativePath);
         }
+
+        /// <summary>
+        /// Combines an external base path (e.g. save_path reported by a remote download client)
+        /// with a relative child path (e.g. name or file path) without applying host OS path semantics.
+        /// Preserves the path separator style (Unix '/' vs Windows '\') of the external filesystem identity.
+        /// </summary>
+        public static string CombineExternalPath(string? basePath, string? candidatePath)
+        {
+            var baseStr = (basePath ?? string.Empty).Trim();
+            var candidateStr = (candidatePath ?? string.Empty).Trim();
+
+            if (string.IsNullOrEmpty(baseStr))
+            {
+                return candidateStr;
+            }
+
+            if (string.IsNullOrEmpty(candidateStr))
+            {
+                return baseStr;
+            }
+
+            var isWindowsRemote = baseStr.Contains('\\')
+                || candidateStr.Contains('\\')
+                || Regex.IsMatch(baseStr, @"^[A-Za-z]:");
+
+            var remoteSep = isWindowsRemote ? '\\' : '/';
+
+            if (candidateStr.StartsWith('/')
+                || candidateStr.StartsWith('\\')
+                || Regex.IsMatch(candidateStr, @"^[A-Za-z]:"))
+            {
+                return isWindowsRemote ? candidateStr.Replace('/', '\\') : candidateStr.Replace('\\', '/');
+            }
+
+            var normalizedCandidate = isWindowsRemote
+                ? candidateStr.Replace('/', '\\').TrimStart('\\')
+                : candidateStr.Replace('\\', '/').TrimStart('/');
+
+            var trimmedBase = baseStr.TrimEnd('/', '\\');
+
+            return string.IsNullOrEmpty(trimmedBase)
+                ? normalizedCandidate
+                : trimmedBase + remoteSep + normalizedCandidate;
+        }
     }
 }

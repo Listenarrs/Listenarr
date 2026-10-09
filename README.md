@@ -33,7 +33,7 @@ Listenarr is a fast, feature-rich, cross-platform audiobook management server. B
 - [x] **First-class responsive web interface** that works great on any device (phone, tablet, desktop)
 - [x] **Rich metadata support** with automatic enrichment from Audible and Amazon
 - [x] **External API integration** for searching across multiple torrent and NZB indexers simultaneously
-- [x] **Download management** with support for popular clients (qBittorrent, Transmission, SABnzbd, NZBGet)
+- [x] **Download management** with support for popular clients (qBittorrent, Transmission, Deluge, SABnzbd, NZBGet)
 - [x] **Real-time monitoring** of download progress and status
 - [x] **Intelligent file organization** with customizable naming patterns
 - [ ] **Full localization support** Soon™️
@@ -386,6 +386,7 @@ Supported download clients:
 
 - **qBittorrent** - Popular torrent client with web UI
 - **Transmission** - Cross-platform torrent client
+- **Deluge** - Torrent client via Deluge Web JSON-RPC
 - **SABnzbd** - Usenet downloader
 - **NZBGet** - Efficient usenet client
 
