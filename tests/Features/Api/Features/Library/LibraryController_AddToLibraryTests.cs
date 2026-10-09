@@ -121,6 +121,36 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
+        public async Task AddToLibrary_DestinationIsConfiguredRoot_PlansFolderUnderRootInsteadOfClaimingIt()
+        {
+            // A destination equal to a configured root folder is a root
+            // selection. Persisting the root itself as BasePath makes the
+            // destination guard reject every later add aimed at that root and
+            // sends the book's eventual import loose into the library root.
+            var controller = _provider.GetRequiredService<LibraryController>();
+
+            var result = await controller.AddToLibrary(new LibraryController.AddToLibraryRequest
+            {
+                Metadata = new AudibleBookMetadata
+                {
+                    Title = "Root Selection Probe",
+                    Authors = ["Rooted Author"]
+                },
+                DestinationPath = tempRoot,
+                Monitored = true
+            });
+
+            Assert.IsType<OkObjectResult>(result);
+            var audiobook = Assert.Single(await _audiobookRepository.GetAllAsync());
+            Assert.NotEqual(
+                Path.GetFullPath(tempRoot),
+                Path.GetFullPath(audiobook.BasePath!));
+            Assert.Equal(
+                Path.GetFullPath(Path.Join(tempRoot, "Rooted Author")),
+                Path.GetFullPath(audiobook.BasePath!));
+        }
+
+        [Fact]
         public async Task AddToLibrary_ConcurrentIdentifierlessSameDestination_CommitsExactlyOnce()
         {
             var destination = Path.Join(tempRoot, "Identifierless", "Book");

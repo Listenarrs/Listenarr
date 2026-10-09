@@ -60,6 +60,37 @@ public partial class LibraryAddService
                     normalizedRequestedBaseDirectory);
             }
 
+            if (IsExactlyAllowedDestinationRoot(
+                    normalizedRequestedBaseDirectory,
+                    allowedDestinationRoots))
+            {
+                // A destination that IS a root folder is a root selection, not
+                // the audiobook's folder. No audiobook may claim a root as its
+                // own BasePath: the destination guard rejects every later add
+                // aimed at that root, and imports would land files loose at the
+                // library root. Plan the book's folder under the chosen root
+                // exactly as an omitted destination plans it under the default.
+                settings ??= await _configurationService.GetApplicationSettingsAsync();
+                var plannedBasePath = Path.Join(
+                    normalizedRequestedBaseDirectory,
+                    _fileNamingService.ApplyNamingPattern(
+                        settings.FolderNamingPattern,
+                        metadata));
+                if (!FileUtils.TryNormalizeUserProvidedDirectoryPathForCurrentOs(
+                    plannedBasePath,
+                    out var normalizedPlannedBasePath,
+                    out var plannedValidationReason,
+                    rejectParentTraversal: true))
+                {
+                    return ValidationFailure(
+                        "destination_path_invalid",
+                        $"Generated library destination is invalid: {plannedValidationReason}",
+                        plannedBasePath);
+                }
+
+                normalizedRequestedBaseDirectory = normalizedPlannedBasePath;
+            }
+
             audiobook.BasePath = normalizedRequestedBaseDirectory;
         }
         else
@@ -130,5 +161,31 @@ public partial class LibraryAddService
                 "destination_path_blocked",
                 destinationBlockingReason,
                 audiobook.BasePath);
+    }
+
+    private static bool IsExactlyAllowedDestinationRoot(
+        string normalizedDestination,
+        IReadOnlyCollection<string> allowedDestinationRoots)
+    {
+        // Exact canonical spelling is the conservative test here: the root
+        // selection this rewrites always arrives as the root's stored path. A
+        // case-alias spelling of a root simply skips subfolder planning and
+        // falls through to the destination guard, exactly as before.
+        var canonicalDestination = FileSystemPathIdentity
+            .TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                normalizedDestination,
+                out var normalized,
+                out _)
+            ? normalized
+            : normalizedDestination;
+        return allowedDestinationRoots.Any(root => string.Equals(
+            FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                root,
+                out var canonicalRoot,
+                out _)
+                ? canonicalRoot
+                : root,
+            canonicalDestination,
+            StringComparison.Ordinal));
     }
 }
