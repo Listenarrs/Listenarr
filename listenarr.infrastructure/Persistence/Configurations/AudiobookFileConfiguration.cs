@@ -1,6 +1,7 @@
 using Listenarr.Domain.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace Listenarr.Infrastructure.Persistence.Configurations;
 
@@ -30,6 +31,15 @@ public sealed class AudiobookFileConfiguration : IEntityTypeConfiguration<Audiob
         builder.Property(file => file.PathIdentityVersion).HasDefaultValue(1);
         builder.Property(file => file.PhysicalObjectIdentity).HasMaxLength(512);
         builder.Property(file => file.PhysicalIdentityVersion).HasDefaultValue(1);
+        // PhysicalIdentityObservedAtUtc is UTC-by-contract
+        // (AudiobookFile.ApplyPhysicalObjectIdentity rejects any other kind), but
+        // SQLite has no DateTimeKind and materializes DateTime as Unspecified.
+        // Restore the invariant at the persistence boundary so consumers never
+        // see a loaded entity that violates its own contract.
+        builder.Property(file => file.PhysicalIdentityObservedAtUtc)
+            .HasConversion(new ValueConverter<DateTime, DateTime>(
+                value => value,
+                value => DateTime.SpecifyKind(value, DateTimeKind.Utc)));
 
         builder.HasIndex(file => file.PathIdentityLookupKey);
         builder.HasIndex(file => file.PathOwnershipKey)
