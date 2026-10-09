@@ -41,7 +41,7 @@ namespace Listenarr.Application.Search.Indexers.MyAnonamouse
                 }
                 catch (Exception caughtEx) when (caughtEx is not OperationCanceledException && caughtEx is not OutOfMemoryException && caughtEx is not StackOverflowException)
                 {
-                    System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                    // Nothing is logged here: this URL builder is static with no logger; the mam_id is used as stored when it will not unescape.
                 }
 
                 var separator = downloadUrl.Contains('?') ? '&' : '?';

@@ -59,7 +59,7 @@ namespace Listenarr.Infrastructure.Configuration.Paths
             }
             catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
             {
-                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                logger.LogWarning(exception, "Could not invalidate the remote path mapping cache for client {ClientId} after a create; the previous mapping may still be served", saved.DownloadClientId);
             }
 
             return saved;
@@ -87,7 +87,7 @@ namespace Listenarr.Infrastructure.Configuration.Paths
             try { cache.Remove($"rpm_client_{saved.DownloadClientId}"); }
             catch (Exception caughtEx_2) when (caughtEx_2 is not OperationCanceledException && caughtEx_2 is not OutOfMemoryException && caughtEx_2 is not StackOverflowException)
             {
-                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                logger.LogWarning(caughtEx_2, "Could not invalidate the remote path mapping cache for client {ClientId} after an update; the previous mapping may still be served", saved.DownloadClientId);
             }
 
             return saved;
@@ -109,7 +109,7 @@ namespace Listenarr.Infrastructure.Configuration.Paths
                 try { cache.Remove($"rpm_client_{existing.DownloadClientId}"); }
                 catch (Exception caughtEx_3) when (caughtEx_3 is not OperationCanceledException && caughtEx_3 is not OutOfMemoryException && caughtEx_3 is not StackOverflowException)
                 {
-                    System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                    logger.LogWarning(caughtEx_3, "Could not invalidate the remote path mapping cache for client {ClientId} after a delete; the deleted mapping may still be served", existing.DownloadClientId);
                 }
             }
 

@@ -44,7 +44,7 @@ namespace Listenarr.Application.Downloads.Queue
             }
             catch (Exception caughtEx) when (caughtEx is not OperationCanceledException && caughtEx is not OutOfMemoryException && caughtEx is not StackOverflowException)
             {
-                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                // Nothing is logged here: these metric helpers take only IAppMetricsService; a dropped metric must not pull a logger into the call.
             }
         }
 
@@ -56,7 +56,7 @@ namespace Listenarr.Application.Downloads.Queue
             }
             catch (Exception caughtEx) when (caughtEx is not OperationCanceledException && caughtEx is not OutOfMemoryException && caughtEx is not StackOverflowException)
             {
-                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                // Nothing is logged here: these metric helpers take only IAppMetricsService; a dropped metric must not pull a logger into the call.
             }
         }
     }

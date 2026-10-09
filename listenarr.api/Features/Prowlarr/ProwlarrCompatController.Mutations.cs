@@ -31,7 +31,7 @@ namespace Listenarr.Api.Features.Prowlarr
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                 {
-                    System.Diagnostics.Debug.WriteLine($"ProwlarrCompatController payload logging failed (PUT indexer): {ex.Message}");
+                    // Nothing is logged here: the call that failed is the logging call itself.
                 }
 
                 if (payload.ValueKind != System.Text.Json.JsonValueKind.Object)
@@ -86,7 +86,7 @@ namespace Listenarr.Api.Features.Prowlarr
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
-                System.Diagnostics.Debug.WriteLine($"ProwlarrCompatController payload logging failed (POST indexers): {ex.Message}");
+                // Nothing is logged here: the call that failed is the logging call itself.
             }
 
             if (HttpContext?.Response != null) HttpContext.Response.ContentType = "application/json";
@@ -219,7 +219,7 @@ namespace Listenarr.Api.Features.Prowlarr
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
-                System.Diagnostics.Debug.WriteLine($"ProwlarrCompatController payload logging failed (single indexer POST): {ex.Message}");
+                // Nothing is logged here: the call that failed is the logging call itself.
             }
 
             if (HttpContext?.Response != null) HttpContext.Response.ContentType = "application/json";

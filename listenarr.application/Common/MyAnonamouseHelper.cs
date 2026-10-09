@@ -79,8 +79,7 @@ namespace Listenarr.Application.Common
             }
             catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException)
             {
-                // Swallow parsing errors; this helper is best-effort
-                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                // Nothing is logged here: MyAnonamouseHelper is a static helper with no logger; the caller receives null and treats the cookie as absent.
             }
 
             return null;
@@ -126,8 +125,7 @@ namespace Listenarr.Application.Common
             }
             catch (Exception caughtEx_3) when (caughtEx_3 is not OperationCanceledException && caughtEx_3 is not OutOfMemoryException && caughtEx_3 is not StackOverflowException)
             {
-                // Ignore malformed host
-                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                // Nothing is logged here: MyAnonamouseHelper is a static helper with no logger; a malformed host simply gets no www alias cookie.
             }
 
             return container;

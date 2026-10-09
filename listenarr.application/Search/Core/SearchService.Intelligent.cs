@@ -27,13 +27,13 @@ namespace Listenarr.Application.Search.Core
                 try { _logger.LogInformation("Parsed prefixes: ASIN={Asin}, ISBN={Isbn}, AUTHOR={Author}, TITLE={Title}", asinVal, isbnVal, authorVal, titleVal); }
                 catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException)
                 {
-                    System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                    // Nothing is logged here: the call that failed is the logging call itself.
                 }
 
                 try { _logger.LogInformation("[DBG] Determined searchType='{SearchType}'", searchType); }
                 catch (Exception caughtEx_2) when (caughtEx_2 is not OperationCanceledException && caughtEx_2 is not OutOfMemoryException && caughtEx_2 is not StackOverflowException)
                 {
-                    System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                    // Nothing is logged here: the call that failed is the logging call itself.
                 }
 
                 // Try Audible-first for various search types. If Audible returns results,
@@ -190,7 +190,7 @@ namespace Listenarr.Application.Search.Core
                                 try { candidateDropReasons[(!string.IsNullOrWhiteSpace(ol.Asin) ? ol.Asin : ol.Id)] = "enriched_from_openlibrary"; }
                                 catch (Exception caughtEx_7) when (caughtEx_7 is not OperationCanceledException && caughtEx_7 is not OutOfMemoryException && caughtEx_7 is not StackOverflowException)
                                 {
-                                    System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                    _logger.LogDebug(caughtEx_7, "Could not record the OpenLibrary enrichment reason; the result is still added");
                                 }
                                 _logger.LogInformation("Added OpenLibrary-derived enriched result: Title='{Title}', Artist='{Artist}'", ol.Title, ol.Artist);
                             }
@@ -246,7 +246,7 @@ namespace Listenarr.Application.Search.Core
                     try { r.Score = (int)Math.Round(scoredResult.Score * 100.0); }
                     catch (Exception caughtEx_8) when (caughtEx_8 is not OperationCanceledException && caughtEx_8 is not OutOfMemoryException && caughtEx_8 is not StackOverflowException)
                     {
-                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                        _logger.LogDebug(caughtEx_8, "Could not attach a score to result {Asin}; it keeps whatever score it already had", r.Asin);
                     }
 
                     scored.Add(scoredResult);

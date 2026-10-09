@@ -58,7 +58,7 @@ namespace Listenarr.Application.Security.Redaction
                 }
                 catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException)
                 {
-                    System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                    // Nothing is logged here: the exception can carry the very value being redacted.
                 }
             }
 
@@ -99,7 +99,7 @@ namespace Listenarr.Application.Security.Redaction
                 }
                 catch (Exception caughtEx_2) when (caughtEx_2 is not OperationCanceledException && caughtEx_2 is not OutOfMemoryException && caughtEx_2 is not StackOverflowException)
                 {
-                    System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                    // Nothing is logged here: the exception can carry the very value being redacted.
                 }
             }
 
@@ -122,6 +122,86 @@ namespace Listenarr.Application.Security.Redaction
             catch (Exception caughtEx_3) when (caughtEx_3 is not OperationCanceledException && caughtEx_3 is not OutOfMemoryException && caughtEx_3 is not StackOverflowException)
             {
                 // If URL parsing fails, return sanitized placeholder
+                return "[invalid-url]";
+            }
+        }
+
+        // Sanitize a notification webhook URL for logging. Keeps scheme, host and port; drops
+        // userinfo and the whole query string (same as SanitizeUrl); and for providers whose
+        // credential lives in the path rather than the query, masks the segments that carry it
+        // instead of dropping the whole path.
+        public static string SanitizeWebhookUrl(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url))
+                return "[empty-url]";
+
+            try
+            {
+                var uri = new Uri(url);
+                var portSuffix = uri.IsDefaultPort ? string.Empty : $":{uri.Port}";
+                var authority = $"{uri.Scheme}://{uri.Host}{portSuffix}";
+                var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+                // Telegram: /bot<token>/<method> - mask the token segment, keep the method.
+                if (uri.Host.Equals("api.telegram.org", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (segments.Length > 0 && segments[0].StartsWith("bot", StringComparison.OrdinalIgnoreCase))
+                    {
+                        segments[0] = "bot<redacted>";
+                    }
+
+                    return $"{authority}/{string.Join('/', segments)}";
+                }
+
+                // Discord: /api/webhooks/<id>/<token> - keep the "webhooks" segment, mask what follows.
+                // discordapp.com is the legacy webhook domain; Discord still accepts it, and a
+                // webhook URL saved before the rename to discord.com would still use it.
+                if (uri.Host.Equals("discord.com", StringComparison.OrdinalIgnoreCase)
+                    || uri.Host.EndsWith(".discord.com", StringComparison.OrdinalIgnoreCase)
+                    || uri.Host.Equals("discordapp.com", StringComparison.OrdinalIgnoreCase)
+                    || uri.Host.EndsWith(".discordapp.com", StringComparison.OrdinalIgnoreCase))
+                {
+                    var webhooksIndex = Array.FindIndex(segments, s => s.Equals("webhooks", StringComparison.OrdinalIgnoreCase));
+                    if (webhooksIndex >= 0)
+                    {
+                        for (var i = webhooksIndex + 1; i < segments.Length; i++)
+                        {
+                            segments[i] = "<redacted>";
+                        }
+                    }
+
+                    return $"{authority}/{string.Join('/', segments)}";
+                }
+
+                // Slack: /services/<team>/<bot>/<token> - mask everything after "services".
+                if (uri.Host.Equals("hooks.slack.com", StringComparison.OrdinalIgnoreCase))
+                {
+                    var servicesIndex = Array.FindIndex(segments, s => s.Equals("services", StringComparison.OrdinalIgnoreCase));
+                    if (servicesIndex >= 0)
+                    {
+                        for (var i = servicesIndex + 1; i < segments.Length; i++)
+                        {
+                            segments[i] = "<redacted>";
+                        }
+                    }
+
+                    return $"{authority}/{string.Join('/', segments)}";
+                }
+
+                // Pushbullet's legacy pushbullet://TOKEN format (NotificationService.Webhooks.cs)
+                // puts the access token where a URI's host would be, so it is already sitting in
+                // `authority` built above. Drop the whole authority rather than keep it.
+                if (uri.Scheme.Equals("pushbullet", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "pushbullet://<redacted>";
+                }
+
+                // Everything else (e.g. Pushover, NTFY): the credential lives in the query
+                // string, already dropped above, so the path can be kept as-is.
+                return $"{authority}{uri.AbsolutePath}";
+            }
+            catch (Exception caughtEx_5) when (caughtEx_5 is not OperationCanceledException && caughtEx_5 is not OutOfMemoryException && caughtEx_5 is not StackOverflowException)
+            {
                 return "[invalid-url]";
             }
         }

@@ -70,7 +70,7 @@ namespace Listenarr.Application.Search.Core
                         }
                         catch (Exception caughtEx) when (caughtEx is not OperationCanceledException && caughtEx is not OutOfMemoryException && caughtEx is not StackOverflowException)
                         {
-                            System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                            logger.LogDebug(caughtEx, "Could not score candidate {Asin} for the final disposition record; both scores stay at zero", asin);
                         }
 
                         if (string.Equals(containmentMode, "Strict", StringComparison.OrdinalIgnoreCase))
@@ -123,7 +123,7 @@ namespace Listenarr.Application.Search.Core
             }
             catch (Exception caughtEx) when (caughtEx is not OperationCanceledException && caughtEx is not OutOfMemoryException && caughtEx is not StackOverflowException)
             {
-                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                // Nothing is logged here: TrySetDropReason is static and shared; the disposition record simply omits this reason.
             }
         }
     }
