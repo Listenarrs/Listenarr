@@ -395,6 +395,195 @@ namespace Listenarr.Tests.Features.Application.Configuration.Core
         }
 
         [Fact]
+        public async Task SaveStartupConfig_RedactedSecrets_KeepStoredValues()
+        {
+            // GET /configuration/startupconfig hands a redaction-gated caller
+            // ApiResponseRedactor.RedactedValue in place of the API key and the
+            // SSL certificate password, and the settings screen posts that same
+            // document back on save. The sentinel must be read as "unchanged",
+            // not written to config.json on top of the real secret.
+            var stored = new StartupConfig
+            {
+                AuthenticationRequired = "false",
+                ApiKey = "stored-api-key",
+                SslCertPassword = "stored-cert-password",
+                Port = 5000,
+            };
+
+            var startupConfigService = new Mock<IStartupConfigService>();
+            startupConfigService.Setup(s => s.GetConfig()).Returns(stored);
+            StartupConfig? saved = null;
+            startupConfigService.Setup(s => s.SaveAsync(It.IsAny<StartupConfig>()))
+                .Callback<StartupConfig>(c => saved = c)
+                .Returns(Task.CompletedTask);
+
+            Init(b => b.WithSingleton(startupConfigService.Object));
+            var svc = _provider.GetRequiredService<IConfigurationService>();
+
+            // Build the incoming payload the way the API actually produces it,
+            // so the test exercises the real redaction sentinel rather than a
+            // hand-written copy of it.
+            var incoming = ApiResponseRedactor.RedactStartupConfig(stored);
+            Assert.Equal(ApiResponseRedactor.RedactedValue, incoming.ApiKey);
+            Assert.Equal(ApiResponseRedactor.RedactedValue, incoming.SslCertPassword);
+
+            await svc.SaveStartupConfigAsync(incoming);
+
+            Assert.NotNull(saved);
+            Assert.Equal("stored-api-key", saved!.ApiKey);
+            Assert.Equal("stored-cert-password", saved.SslCertPassword);
+        }
+
+        [Fact]
+        public async Task SaveStartupConfig_NewSecrets_ReplaceStoredValues()
+        {
+            // Control for the test above. The sentinel check must not degrade
+            // into "never update these fields": an operator who types a new API
+            // key or a new certificate password still has to be able to save it.
+            var stored = new StartupConfig
+            {
+                AuthenticationRequired = "false",
+                ApiKey = "stored-api-key",
+                SslCertPassword = "stored-cert-password",
+            };
+
+            var startupConfigService = new Mock<IStartupConfigService>();
+            startupConfigService.Setup(s => s.GetConfig()).Returns(stored);
+            StartupConfig? saved = null;
+            startupConfigService.Setup(s => s.SaveAsync(It.IsAny<StartupConfig>()))
+                .Callback<StartupConfig>(c => saved = c)
+                .Returns(Task.CompletedTask);
+
+            Init(b => b.WithSingleton(startupConfigService.Object));
+            var svc = _provider.GetRequiredService<IConfigurationService>();
+
+            await svc.SaveStartupConfigAsync(new StartupConfig
+            {
+                AuthenticationRequired = "false",
+                ApiKey = "rotated-api-key",
+                SslCertPassword = "rotated-cert-password",
+            });
+
+            Assert.NotNull(saved);
+            Assert.Equal("rotated-api-key", saved!.ApiKey);
+            Assert.Equal("rotated-cert-password", saved.SslCertPassword);
+        }
+
+        [Fact]
+        public async Task SaveStartupConfig_BlankOrAbsentSecrets_AreWrittenThroughUnchanged()
+        {
+            // Second control. Only the sentinel is special-cased; blank keeps
+            // the meaning it has always had on this path, which is clear the
+            // value. Preserving on blank as well would take away the operator's
+            // way of removing an API key or a certificate password.
+            var stored = new StartupConfig
+            {
+                AuthenticationRequired = "false",
+                ApiKey = "stored-api-key",
+                SslCertPassword = "stored-cert-password",
+            };
+
+            var startupConfigService = new Mock<IStartupConfigService>();
+            startupConfigService.Setup(s => s.GetConfig()).Returns(stored);
+            var savedConfigs = new List<StartupConfig>();
+            startupConfigService.Setup(s => s.SaveAsync(It.IsAny<StartupConfig>()))
+                .Callback<StartupConfig>(savedConfigs.Add)
+                .Returns(Task.CompletedTask);
+
+            Init(b => b.WithSingleton(startupConfigService.Object));
+            var svc = _provider.GetRequiredService<IConfigurationService>();
+
+            await svc.SaveStartupConfigAsync(new StartupConfig
+            {
+                AuthenticationRequired = "false",
+                ApiKey = string.Empty,
+                SslCertPassword = string.Empty,
+            });
+            await svc.SaveStartupConfigAsync(new StartupConfig
+            {
+                AuthenticationRequired = "false",
+                ApiKey = null,
+                SslCertPassword = null,
+            });
+
+            Assert.Equal(2, savedConfigs.Count);
+            Assert.Equal(string.Empty, savedConfigs[0].ApiKey);
+            Assert.Equal(string.Empty, savedConfigs[0].SslCertPassword);
+            Assert.Null(savedConfigs[1].ApiKey);
+            Assert.Null(savedConfigs[1].SslCertPassword);
+        }
+
+        [Fact]
+        public async Task SaveApplicationSettings_RedactedSecrets_KeepStoredValues()
+        {
+            // Same round trip on the settings row. ProwlarrApiKeyEncrypted was
+            // already guarded; the rest of what RedactApplicationSettings covers
+            // was not, so the sentinel reached the database.
+            var svc = _provider.GetRequiredService<IConfigurationService>();
+
+            var seed = await svc.GetApplicationSettingsAsync();
+            seed.WebhookUrl = "https://example.test/global-hook";
+            seed.DiscordBotToken = "stored-discord-token";
+            seed.Webhooks =
+            [
+                new() { Id = "webhook-1", Name = "First", Url = "https://example.test/one", Type = "Zapier" },
+                new() { Id = "webhook-2", Name = "Second", Url = "https://example.test/two", Type = "Slack" },
+            ];
+            await svc.SaveApplicationSettingsAsync(seed);
+
+            var current = await svc.GetApplicationSettingsAsync();
+            var incoming = ApiResponseRedactor.RedactApplicationSettings(current);
+            Assert.Equal(ApiResponseRedactor.RedactedValue, incoming.WebhookUrl);
+            Assert.Equal(ApiResponseRedactor.RedactedValue, incoming.DiscordBotToken);
+            Assert.All(incoming.Webhooks!, w => Assert.Equal(ApiResponseRedactor.RedactedValue, w.Url));
+
+            await svc.SaveApplicationSettingsAsync(incoming);
+
+            var stored = await _applicationSettingsRepository.GetAsync();
+            Assert.NotNull(stored);
+            Assert.Equal("https://example.test/global-hook", stored!.WebhookUrl);
+            Assert.Equal("stored-discord-token", stored.DiscordBotToken);
+            Assert.NotNull(stored.Webhooks);
+            Assert.Equal(
+                "https://example.test/one",
+                stored.Webhooks!.Single(w => w.Id == "webhook-1").Url);
+            Assert.Equal(
+                "https://example.test/two",
+                stored.Webhooks!.Single(w => w.Id == "webhook-2").Url);
+        }
+
+        [Fact]
+        public async Task SaveApplicationSettings_NewSecrets_ReplaceStoredValues()
+        {
+            // Control for the test above, on the settings row this time.
+            var svc = _provider.GetRequiredService<IConfigurationService>();
+
+            var seed = await svc.GetApplicationSettingsAsync();
+            seed.WebhookUrl = "https://example.test/global-hook";
+            seed.DiscordBotToken = "stored-discord-token";
+            seed.Webhooks =
+            [
+                new() { Id = "webhook-1", Name = "First", Url = "https://example.test/one", Type = "Zapier" },
+            ];
+            await svc.SaveApplicationSettingsAsync(seed);
+
+            var incoming = await svc.GetApplicationSettingsAsync();
+            incoming.WebhookUrl = "https://example.test/changed-hook";
+            incoming.DiscordBotToken = "rotated-discord-token";
+            incoming.Webhooks!.Single(w => w.Id == "webhook-1").Url = "https://example.test/changed-one";
+
+            await svc.SaveApplicationSettingsAsync(incoming);
+
+            var stored = await _applicationSettingsRepository.GetAsync();
+            Assert.NotNull(stored);
+            Assert.Equal("https://example.test/changed-hook", stored!.WebhookUrl);
+            Assert.Equal("rotated-discord-token", stored.DiscordBotToken);
+            Assert.Equal(
+                "https://example.test/changed-one",
+                stored.Webhooks!.Single(w => w.Id == "webhook-1").Url);
+        }
+
+        [Fact]
         public async Task SaveStartupConfig_SkipsAdminCheck_WhenAuthDisabled()
         {
             // Carveout check: the admin-count query only fires when auth is

@@ -164,6 +164,41 @@ namespace Listenarr.Application.Configuration.Core
                         settings.EnabledNotificationTriggers = existing.EnabledNotificationTriggers;
                     if (settings.Webhooks == null)
                         settings.Webhooks = existing.Webhooks;
+
+                    // The other fields RedactApplicationSettings covers need the
+                    // same sentinel check as ProwlarrApiKeyEncrypted above. A
+                    // redaction-gated caller is handed RedactedValue for each of
+                    // them by the GET and posts it back verbatim, so without this
+                    // the sentinel overwrites the stored secret. Blank is left
+                    // alone here for the same reason as above: clearing a webhook
+                    // URL or a bot token has to stay possible.
+                    if (string.Equals(settings.WebhookUrl, ApiResponseRedactor.RedactedValue, StringComparison.Ordinal))
+                    {
+                        settings.WebhookUrl = existing.WebhookUrl;
+                    }
+
+                    if (string.Equals(settings.DiscordBotToken, ApiResponseRedactor.RedactedValue, StringComparison.Ordinal))
+                    {
+                        settings.DiscordBotToken = existing.DiscordBotToken;
+                    }
+
+                    if (settings.Webhooks != null && existing.Webhooks != null)
+                    {
+                        foreach (var webhook in settings.Webhooks)
+                        {
+                            if (!string.Equals(webhook.Url, ApiResponseRedactor.RedactedValue, StringComparison.Ordinal))
+                            {
+                                continue;
+                            }
+
+                            var storedWebhook = existing.Webhooks
+                                .FirstOrDefault(candidate => string.Equals(candidate.Id, webhook.Id, StringComparison.Ordinal));
+                            if (storedWebhook != null)
+                            {
+                                webhook.Url = storedWebhook.Url;
+                            }
+                        }
+                    }
                 }
 
                 if (!string.IsNullOrWhiteSpace(settings.OutputPath)
@@ -357,6 +392,35 @@ namespace Listenarr.Application.Configuration.Core
         {
             try
             {
+                var currentConfig = startupConfigService.GetConfig();
+
+                // The GET that populates the settings screen replaces each
+                // secret with ApiResponseRedactor.RedactedValue for callers the
+                // redaction gate does not exempt, and the screen posts that same
+                // document straight back when the operator saves. Treat the
+                // sentinel as "unchanged" and keep what is already stored, the
+                // way SaveApplicationSettingsAsync and
+                // SaveProwlarrImportSettingsAsync already do for the Prowlarr
+                // key. Without this the literal sentinel lands in config.json
+                // and the real value is gone.
+                //
+                // Only the sentinel is special-cased. A blank or absent field
+                // still means what it has always meant here, which is clear the
+                // value, so an operator who empties the API key box can still
+                // do so.
+                if (config != null && currentConfig != null)
+                {
+                    if (string.Equals(config.ApiKey, ApiResponseRedactor.RedactedValue, StringComparison.Ordinal))
+                    {
+                        config.ApiKey = currentConfig.ApiKey;
+                    }
+
+                    if (string.Equals(config.SslCertPassword, ApiResponseRedactor.RedactedValue, StringComparison.Ordinal))
+                    {
+                        config.SslCertPassword = currentConfig.SslCertPassword;
+                    }
+                }
+
                 // Defense-in-depth backstop against the auth-enable lockout.
                 // SaveApplicationSettingsAsync's throw-on-failure (above) only
                 // covers the case where admin credentials were *supplied* but
@@ -378,7 +442,6 @@ namespace Listenarr.Application.Configuration.Core
                 // management path, not here.
                 if (config != null && config.IsAuthenticationEnabled())
                 {
-                    var currentConfig = startupConfigService.GetConfig();
                     var wasAuthEnabled = currentConfig?.IsAuthenticationEnabled() == true;
                     if (!wasAuthEnabled)
                     {
