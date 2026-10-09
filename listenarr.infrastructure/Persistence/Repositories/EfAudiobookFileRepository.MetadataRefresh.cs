@@ -8,6 +8,7 @@ public partial class EfAudiobookFileRepository
     public async Task<bool> RefreshMetadataAsync(
         AudiobookFileMetadataRefreshSnapshot expectedFile,
         AudioMetadata metadata,
+        long? size,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(expectedFile);
@@ -52,7 +53,9 @@ public partial class EfAudiobookFileRepository
                     .SetProperty(file => file.SampleRate, file =>
                         metadata.SampleRate > 0 ? metadata.SampleRate : file.SampleRate)
                     .SetProperty(file => file.Channels, file =>
-                        metadata.Channels > 0 ? metadata.Channels : file.Channels),
+                        metadata.Channels > 0 ? metadata.Channels : file.Channels)
+                    .SetProperty(file => file.Size, file =>
+                        size > 0 ? size : file.Size),
                 completionToken);
             if (updated != 1)
             {
@@ -82,6 +85,7 @@ public partial class EfAudiobookFileRepository
         existing.Bitrate = metadata.BitRate > 0 ? metadata.BitRate : existing.Bitrate;
         existing.SampleRate = metadata.SampleRate > 0 ? metadata.SampleRate : existing.SampleRate;
         existing.Channels = metadata.Channels > 0 ? metadata.Channels : existing.Channels;
+        existing.Size = size > 0 ? size : existing.Size;
         var nonRelationalCompletionToken = RequestCancellationBoundary.EnterNonCancelablePhase(ct);
         await _db.SaveChangesAsync(nonRelationalCompletionToken);
         return true;

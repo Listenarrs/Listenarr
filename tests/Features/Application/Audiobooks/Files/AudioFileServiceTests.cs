@@ -916,6 +916,93 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Files
             Assert.Equal(persistedIdentity, persisted.PhysicalObjectIdentity);
         }
 
+        // On Linux a pinned lease's MetadataPath is a /proc/self/fd/<n> magic
+        // link, and lstat on that link reports the LINK's size (a constant
+        // 64), not the file's. FileSystemInfo.Length is an lstat, so sizing
+        // the registration from it persisted Size = 64 for every file. A plain
+        // file standing in for the link cannot reproduce that, so these tests
+        // use a real pinned lease and first prove the quirk is present.
+
+        [LinuxFact]
+        public async Task EnsureAudiobookFileAsync_PinnedLease_RecordsTheRealFileLength()
+        {
+            var testFile = await FileService.GetTempFileAsync(
+                $"proc-fd-size-{Guid.NewGuid():N}.m4b");
+            var content = new byte[12_345];
+            Random.Shared.NextBytes(content);
+            await File.WriteAllBytesAsync(testFile, content);
+            _audiobook.BasePath = Path.GetDirectoryName(testFile);
+            await _audiobookRepository.UpdateAsync(_audiobook);
+            var service = _provider.GetRequiredService<IAudiobookFileService>();
+
+            using var lease = PinnedAudiobookFileRegistrationLease.Open(testFile);
+            AssertMetadataPathIsAProcLinkWhoseLstatSizeDisagrees(lease, content.Length);
+
+            Assert.True(await service.EnsureAudiobookFileAsync(_audiobook, lease, "initial"));
+
+            var file = Assert.Single(
+                await _audiobookFileRepository.GetByAudiobookIdAsync(_audiobook.Id));
+            Assert.Equal(content.Length, file.Size);
+        }
+
+        [LinuxFact]
+        public async Task RefreshPhysicalGenerationAsync_PinnedLease_RecordsTheReplacementsRealLength()
+        {
+            var testFile = await FileService.GetTempFileAsync(
+                $"proc-fd-size-refresh-{Guid.NewGuid():N}.m4b");
+            await File.WriteAllBytesAsync(testFile, new byte[4_321]);
+            _audiobook.BasePath = Path.GetDirectoryName(testFile);
+            await _audiobookRepository.UpdateAsync(_audiobook);
+            var service = _provider.GetRequiredService<IAudiobookFileService>();
+            using (var initialLease = PinnedAudiobookFileRegistrationLease.Open(testFile))
+            {
+                Assert.True(await service.EnsureAudiobookFileAsync(_audiobook, initialLease, "initial"));
+            }
+
+            var predecessor = Assert.Single(
+                await _audiobookFileRepository.GetByAudiobookIdAsync(_audiobook.Id));
+            Assert.Equal(4_321, predecessor.Size);
+
+            // A new generation lands at the same path: a different object with
+            // a different length.
+            var replacement = new byte[98_765];
+            Random.Shared.NextBytes(replacement);
+            var staging = testFile + ".new";
+            await File.WriteAllBytesAsync(staging, replacement);
+            File.Move(staging, testFile, overwrite: true);
+
+            using var replacementLease = PinnedAudiobookFileRegistrationLease.Open(testFile);
+            AssertMetadataPathIsAProcLinkWhoseLstatSizeDisagrees(replacementLease, replacement.Length);
+
+            var refreshed = await service.RefreshPhysicalGenerationAsync(
+                _audiobook,
+                predecessor.Id,
+                predecessor.PhysicalObjectIdentity,
+                replacementLease,
+                "replacement");
+
+            Assert.True(refreshed);
+            var persisted = Assert.Single(
+                await _audiobookFileRepository.GetByAudiobookIdAsync(_audiobook.Id));
+            Assert.Equal(predecessor.Id, persisted.Id);
+            Assert.Equal(replacement.Length, persisted.Size);
+        }
+
+        /// <summary>
+        /// The test's own setup must reproduce the quirk it guards against:
+        /// the lease's metadata path is a proc magic link and lstat'ing it
+        /// (what <see cref="FileInfo.Length"/> does) does NOT give the file's
+        /// length — otherwise a passing test proves nothing.
+        /// </summary>
+        private static void AssertMetadataPathIsAProcLinkWhoseLstatSizeDisagrees(
+            IAudiobookFileRegistrationLease lease,
+            long realLength)
+        {
+            Assert.StartsWith("/proc/", lease.MetadataPath, StringComparison.Ordinal);
+            var lstatLength = new FileInfo(lease.MetadataPath).Length;
+            Assert.NotEqual(realLength, lstatLength);
+        }
+
         [Fact]
         public async Task RefreshPhysicalGenerationAsync_PublicationChangesAfterDatabaseUpdate_RestoresPredecessor()
         {

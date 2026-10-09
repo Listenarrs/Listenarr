@@ -103,8 +103,14 @@ public partial class AudiobookFileService
             return false;
         }
 
+        // The size comes from the same lease the metadata was read through —
+        // never from an lstat of the metadata path, which on Linux is the
+        // /proc/self/fd link's own size (see TryGetRegisteredFileLength).
         return await audiobookFileRepository.RefreshMetadataAsync(
-            expectedFile, metadata, cancellationToken);
+            expectedFile,
+            metadata,
+            TryGetRegisteredFileLength(lease.MetadataPath),
+            cancellationToken);
     }
 
     private async Task<bool> CanRefreshOwnedMetadataAsync(
