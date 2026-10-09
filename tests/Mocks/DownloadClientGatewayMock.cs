@@ -89,7 +89,7 @@ namespace Listenarr.Tests.Mocks
             return Task.FromResult(queueItem);
         }
 
-        public async Task<List<Download>> FetchDownloadsAsync(DownloadClientConfiguration client, List<Download> downloads, CancellationToken cancellationToken = default)
+        public async Task<List<Download>> FetchDownloadsAsync(DownloadClientConfiguration client, List<Download> downloads, CancellationToken cancellationToken = default, ISet<string>? reportedDownloadIds = null)
         {
             RegisterMethodCall(nameof(FetchDownloadsAsync));
 

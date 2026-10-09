@@ -65,7 +65,10 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
                 CompletedFileAction = FileAction.Move,
                 AllowedFileExtensions = [".m4b", ".mp3"],
                 EnabledNotificationTriggers = [],
-                WebhookUrl = string.Empty
+                WebhookUrl = string.Empty,
+                // Walks the whole chain in one pass on the real clock, so finalization has to
+                // start as soon as the client reports completion.
+                DownloadCompletionStabilitySeconds = 0
             };
 
             var metadataMock = new Mock<IMetadataService>();
@@ -129,8 +132,8 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
                     }
                 ]);
             gatewayMock
-                .Setup(g => g.FetchDownloadsAsync(It.IsAny<DownloadClientConfiguration>(), It.IsAny<List<Download>>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((DownloadClientConfiguration client, List<Download> downloads, CancellationToken _) =>
+                .Setup(g => g.FetchDownloadsAsync(It.IsAny<DownloadClientConfiguration>(), It.IsAny<List<Download>>(), It.IsAny<CancellationToken>(), It.IsAny<ISet<string>?>()))
+                .ReturnsAsync((DownloadClientConfiguration client, List<Download> downloads, CancellationToken _, ISet<string>? _) =>
                 {
                     return [.. downloads.Select(download => {
                         _downloadRepository.UpdateAsync(download.Completed());
