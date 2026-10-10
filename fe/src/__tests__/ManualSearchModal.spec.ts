@@ -137,6 +137,38 @@ describe('ManualSearchModal.vue', () => {
     expect(anchor.attributes('href')).toBe('https://indexer/info/123')
   })
 
+  it('never links the title to a download URL, even if resultUrl carries it', async () => {
+    const wrapper = mount(ManualSearchModal, {
+      props: { isOpen: true, audiobook: null },
+      global: { stubs },
+    })
+    const vm = wrapper.vm as unknown as {
+      results: ManualSearchResult[]
+      qualityScores?: QualityScoresMap
+    }
+
+    const downloadUrl = 'https://prowlarr.local/11/download?apikey=k&link=abc'
+    setResultsOnVm(vm, [
+      {
+        id: downloadUrl,
+        title: 'Only a download link',
+        downloadType: 'Usenet',
+        // Pre-fix bug shape: the result/source fields all carry the download URL.
+        resultUrl: downloadUrl,
+        sourceLink: downloadUrl,
+        nzbUrl: downloadUrl,
+        source: 'NZBgeek',
+        size: 100,
+      },
+    ])
+
+    await nextTick()
+
+    // With no real details page, the title is plain text — never a link to the download.
+    expect(wrapper.find('a.title-text').exists()).toBe(false)
+    expect(wrapper.find('.title-text').text()).toContain('Only a download link')
+  })
+
   it('uses canonical result URL for DDL title links and hides invalid age', async () => {
     const wrapper = mount(ManualSearchModal, {
       props: { isOpen: true, audiobook: null },
