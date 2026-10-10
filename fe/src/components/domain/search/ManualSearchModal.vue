@@ -807,10 +807,18 @@ function getSourceType(result: SearchResult): string {
 }
 
 function getResultLink(result: SearchResult): string | undefined {
-  const candidates = [result.resultUrl, result.sourceLink, result.productUrl, result.id]
+  // The title links to the indexer's details/source page only (like Sonarr) — clicking it
+  // should open the page in a new tab, never download the release. Exclude any candidate that
+  // is actually a download URL, and don't fall back to `id` (which can be the download link).
+  const downloadUrls = new Set(
+    [result.torrentUrl, result.nzbUrl, result.magnetLink, result.downloadReference]
+      .map((value) => (typeof value === 'string' ? value.trim() : ''))
+      .filter((value) => value.length > 0),
+  )
+  const candidates = [result.resultUrl, result.sourceLink, result.productUrl]
   return candidates
     .map((value) => (typeof value === 'string' ? value.trim() : ''))
-    .find((value) => /^https?:\/\//i.test(value))
+    .find((value) => /^https?:\/\//i.test(value) && !downloadUrls.has(value))
 }
 
 function getSortableDateValue(date?: Date | string): number {

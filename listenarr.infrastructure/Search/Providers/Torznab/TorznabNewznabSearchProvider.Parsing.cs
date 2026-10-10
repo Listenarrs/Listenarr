@@ -303,6 +303,28 @@ public partial class TorznabNewznabSearchProvider : IIndexerSearchProvider
                         }
                     }
 
+                    // The indexer's human-readable details page (the "source" link shown on the
+                    // result title) comes from <comments>, falling back to <guid> when it is an
+                    // http(s) URL. The <link>/<enclosure> below is the download, not a page to
+                    // view, so it must never become the result/source link.
+                    var detailsUrl = item.Element("comments")?.Value?.Trim();
+                    if (string.IsNullOrEmpty(detailsUrl))
+                    {
+                        var guidVal = item.Element("guid")?.Value?.Trim();
+                        if (!string.IsNullOrEmpty(guidVal)
+                            && (guidVal.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                                || guidVal.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
+                        {
+                            detailsUrl = guidVal;
+                        }
+                    }
+                    if (!string.IsNullOrEmpty(detailsUrl)
+                        && Uri.IsWellFormedUriString(detailsUrl, UriKind.Absolute))
+                    {
+                        result.SourceLink = detailsUrl;
+                        result.ResultUrl = detailsUrl;
+                    }
+
                     // If no magnet link found in attributes, check link element
                     var linkElem = item.Element("link")?.Value;
                     if (!string.IsNullOrEmpty(linkElem))
@@ -313,12 +335,9 @@ public partial class TorznabNewznabSearchProvider : IIndexerSearchProvider
                         }
                         else
                         {
-                            // Use the link element as the canonical indexer page when possible
-                            if (Uri.IsWellFormedUriString(linkElem, UriKind.Absolute))
-                            {
-                                result.ResultUrl = linkElem;
-                            }
-
+                            // The <link> is the download URL, not a viewable page, so it feeds
+                            // only the torrent/nzb download — the result/source link comes from
+                            // <comments>/<guid> above.
                             // If torrentUrl is empty, prefer the link
                             if (string.IsNullOrEmpty(result.TorrentUrl) && !linkElem.StartsWith("magnet:") && !isUsenet)
                             {
