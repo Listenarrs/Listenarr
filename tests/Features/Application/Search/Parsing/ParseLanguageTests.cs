@@ -31,6 +31,21 @@ namespace Listenarr.Tests.Features.Application.Search.Parsing
         [InlineData("Book Title FR", "French")]
         [InlineData("[FRE] Bar", "French")]
         [InlineData("No language here", null)]
+        // Non-English codes and full/native names are now recognized.
+        [InlineData("Colleen.Hoover.-.Verity.Moerkt.Bedrag-AUDiOBOOK-WEB-DK-2026-CRAViNGS.iNT", "Danish")]
+        [InlineData("Some Title - DAN", "Danish")]
+        [InlineData("Some.Title.Dansk.M4B", "Danish")]
+        [InlineData("Ein Deutsch Hoerbuch", "German")]
+        [InlineData("Title [SWE]", "Swedish")]
+        [InlineData("Title.Svenska.M4B", "Swedish")]
+        [InlineData("Title - Italiano", "Italian")]
+        // Ambiguous short codes only count inside brackets/parens...
+        [InlineData("Some Title [IT]", "Italian")]
+        [InlineData("Book (NO)", "Norwegian")]
+        // ...never as a bare scene tag, so these must NOT be mistaken for a language.
+        [InlineData("Verity-AUDiOBOOK-WEB-SE-2023-CRAViNGS", null)]
+        [InlineData("Great book, it is", null)]
+        [InlineData("Say no more", null)]
         public void ParseLanguageFromText_RecognizesCodes(string input, string? expected)
         {
             var result = SearchResultAttributeParser.ParseLanguageFromText(input);
