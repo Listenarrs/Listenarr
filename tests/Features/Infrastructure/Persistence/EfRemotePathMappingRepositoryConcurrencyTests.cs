@@ -10,6 +10,7 @@
 
 using System.Data.Common;
 using Listenarr.Infrastructure.Persistence.Repositories;
+using Listenarr.Tests.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 
@@ -17,7 +18,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Persistence;
 
 [Trait("Name", "EfRemotePathMappingRepositoryConcurrencyTests")]
 [Trait("Category", "RemotePathMapping")]
-public sealed class EfRemotePathMappingRepositoryConcurrencyTests : IAsyncLifetime
+public sealed class EfRemotePathMappingRepositoryConcurrencyTests : BaseTests
 {
     private const string ClientId = "client-under-poll";
 
@@ -25,8 +26,9 @@ public sealed class EfRemotePathMappingRepositoryConcurrencyTests : IAsyncLifeti
         Path.Join(Path.GetTempPath(), "listenarr-tests", $"rpm-concurrency-{Guid.NewGuid():N}.db");
     private string _connectionString = null!;
 
-    public async Task InitializeAsync()
+    public override async Task InitializeAsync()
     {
+        await base.InitializeAsync();
         Directory.CreateDirectory(Path.GetDirectoryName(_databasePath)!);
         _connectionString = $"Data Source={_databasePath};Pooling=False";
 
@@ -44,7 +46,7 @@ public sealed class EfRemotePathMappingRepositoryConcurrencyTests : IAsyncLifeti
         await db.SaveChangesAsync();
     }
 
-    public Task DisposeAsync()
+    public override async Task DisposeAsync()
     {
         try
         {
@@ -58,7 +60,7 @@ public sealed class EfRemotePathMappingRepositoryConcurrencyTests : IAsyncLifeti
             // Best-effort temp cleanup.
         }
 
-        return Task.CompletedTask;
+        await base.DisposeAsync();
     }
 
     [Fact]
