@@ -2,6 +2,7 @@
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2026 Listenarr Contributors
  */
+using Listenarr.Domain.Notifications;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -28,7 +29,7 @@ public partial class ScanJobProcessor
             }
 
             await notificationService.SendNotificationAsync(
-                "book-available",
+                NotificationTriggers.BookAvailable,
                 new
                 {
                     id = audiobook.Id,

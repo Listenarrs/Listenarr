@@ -1,3 +1,4 @@
+using Listenarr.Domain.Notifications;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Audiobooks.Catalog;
@@ -84,14 +85,26 @@ public partial class LibraryAddService
             asin = audiobook.Asin,
             publisher = audiobook.Publisher,
             year = audiobook.PublishYear,
-            imageUrl = audiobook.ImageUrl
+            imageUrl = audiobook.ImageUrl,
+            monitored = audiobook.Monitored
         };
 
         await _notificationService.SendNotificationAsync(
-            "book-added",
+            NotificationTriggers.BookAdded,
             data,
             settings.WebhookUrl,
             settings.EnabledNotificationTriggers);
+
+        // A monitored book is "wanted" (eligible for acquisition). Fire the dedicated trigger so
+        // integrations can subscribe to "wanted" specifically without inspecting the monitored flag.
+        if (audiobook.Monitored)
+        {
+            await _notificationService.SendNotificationAsync(
+                NotificationTriggers.BookWanted,
+                data,
+                settings.WebhookUrl,
+                settings.EnabledNotificationTriggers);
+        }
     }
 
     private static History CreateHistoryEntry(
