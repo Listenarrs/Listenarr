@@ -42,6 +42,11 @@ namespace Listenarr.Application.Common.Contracts
         Task RunCycleAsync(CancellationToken cancellationToken);
     }
 
+    public interface IStaleBlockedDownloadCleanupProcessor
+    {
+        Task RunCycleAsync(CancellationToken cancellationToken);
+    }
+
     public interface IScanJobProcessor
     {
         Task ProcessJobAsync(ScanJob job, CancellationToken cancellationToken);
