@@ -314,6 +314,61 @@ public sealed class ScanFileDiscoveryTests : BaseTests, IDisposable
             && issue.Path == link);
     }
 
+    [Fact]
+    public void FindMatchingAudioFiles_FolderDropsLeadingThe_StillMatches()
+    {
+        var requested = CreateAudioFile(
+            "Karla McLaren",
+            "Language of Emotions",
+            "Language of Emotions.m4b");
+        var audiobook = new AudiobookBuilder()
+            .WithTitle("The Language of Emotions")
+            .WithAuthor("Karla McLaren")
+            .Build();
+
+        var result = Discover(audiobook);
+
+        var found = Assert.Single(result);
+        Assert.Equal(requested, found);
+    }
+
+    [Fact]
+    public void FindMatchingAudioFiles_FolderAddsLeadingArticle_StillMatches()
+    {
+        var requested = CreateAudioFile(
+            "Gabor Mate",
+            "The Myth of Normal",
+            "The Myth of Normal.m4b");
+        var audiobook = new AudiobookBuilder()
+            .WithTitle("Myth of Normal")
+            .WithAuthor("Gabor Mate")
+            .Build();
+
+        var result = Discover(audiobook);
+
+        var found = Assert.Single(result);
+        Assert.Equal(requested, found);
+    }
+
+    [Fact]
+    public void FindMatchingAudioFiles_ArticleToleranceDoesNotCrossLinkSiblingBooks()
+    {
+        // Same author, two books that both start with "The". Article-insensitivity
+        // must still compare the full remaining title, so only the requested book
+        // is attributed -- it must not collapse "The Reckoning" onto "The Awakening".
+        var requested = CreateAudioFile("Shared Author", "The Reckoning", "The Reckoning.m4b");
+        _ = CreateAudioFile("Shared Author", "The Awakening", "The Awakening.m4b");
+        var audiobook = new AudiobookBuilder()
+            .WithTitle("The Reckoning")
+            .WithAuthor("Shared Author")
+            .Build();
+
+        var result = Discover(audiobook);
+
+        var found = Assert.Single(result);
+        Assert.Equal(requested, found);
+    }
+
     private List<string> Discover(Audiobook audiobook) =>
         DiscoverResult(audiobook).AttributedFiles.ToList();
 
