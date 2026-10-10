@@ -241,5 +241,11 @@ namespace Listenarr.Tests.Features.Infrastructure.Configuration.Paths
 
             Assert.Equal(Path.Join(localPath, "Author", "book.m4b"), translated);
         }
+
+        // The concurrency regression for GetByClientIdAsync lives in
+        // EfRemotePathMappingRepositoryConcurrencyTests, which uses a SQLite-backed
+        // command interceptor to guarantee the reads genuinely overlap. The InMemory
+        // provider used here completes reads synchronously as Task.WhenAll enumerates
+        // them, so a burst scheduled on it cannot prove the per-operation context fix.
     }
 }
