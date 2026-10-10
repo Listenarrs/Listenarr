@@ -359,6 +359,7 @@ public sealed class FilePublicationCapabilityResolverTests : BaseTests
     [Theory]
     [InlineData(0xff534d42u, false)]
     [InlineData(0xfe534d42u, false)]
+    [InlineData(0x65735546u, false)]
     [InlineData(0xef53u, true)]
     [InlineData(0x58465342u, true)]
     public void HardlinkIdentity_FileSystemClassification(uint type, bool supported)
