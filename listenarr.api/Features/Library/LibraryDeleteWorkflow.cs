@@ -40,7 +40,6 @@ namespace Listenarr.Api.Features.Library
         private readonly ILibraryFilesystemMutationGate _filesystemMutationGate;
         private readonly IRootFolderService _rootFolderService;
         private readonly IRootFolderStorageHealthResolver _storageHealthResolver;
-        private readonly IAudiobookFileIdentityReconciler _fileIdentityReconciler;
         private readonly IBookLifecycleNotifier _lifecycleNotifier;
         private readonly ILogger<LibraryDeleteWorkflow> _logger;
 
