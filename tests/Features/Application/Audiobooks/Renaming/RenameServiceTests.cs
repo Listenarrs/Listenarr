@@ -1190,6 +1190,95 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
             Assert.Equal(NormalizePath(targetPath), NormalizePath(saved.Files!.Single().Path));
         }
 
+        private async Task<(RenameResult Result, string SourceFolder, string TargetFolder, string TargetPath, string DbName)> RenameWithWholeFolderMoveAsync(
+            bool targetFolderExists)
+        {
+            var libraryRoot = Path.Join(_tempRoot, "library");
+            var sourceFolder = Path.Join(libraryRoot, "Old");
+            var targetFolder = Path.Join(libraryRoot, "Author", "Book");
+            Directory.CreateDirectory(sourceFolder);
+            if (targetFolderExists)
+            {
+                Directory.CreateDirectory(targetFolder);
+            }
+
+            var sourcePath = Path.Join(sourceFolder, "01 old-name.mp3");
+            var targetPath = Path.Join(targetFolder, "001 - Book.mp3");
+            await File.WriteAllTextAsync(sourcePath, "audio");
+            await File.WriteAllTextAsync(Path.Join(sourceFolder, "cover.jpg"), "cover");
+
+            var settings = new ApplicationSettings
+            {
+                OutputPath = libraryRoot,
+                FolderNamingPattern = "{Author}/{Title}",
+                FileNamingPattern = "{Title}"
+            };
+
+            var (service, db, dbName) = BuildService(settings);
+            db.Audiobooks.Add(new Audiobook
+            {
+                Id = 6,
+                Title = "Book",
+                Authors = new List<string> { "Author" },
+                BasePath = sourceFolder,
+                FilePath = sourcePath,
+                Files = new List<AudiobookFile> { CreateTrackedFile(61, 6, sourcePath) }
+            });
+            await db.SaveChangesAsync();
+
+            RenameService.MoveWholeFolderEnabled = true;
+            try
+            {
+                var results = await service.ExecuteRenameAsync(new List<RenameOperation>
+                {
+                    new()
+                    {
+                        AudiobookId = 6,
+                        CurrentFolderPath = sourceFolder,
+                        CurrentFolderSemantics = ExpectedSemantics(sourceFolder),
+                        NewFolderPath = targetFolder,
+                        FileRenames = new List<FileRenameOperation>
+                        {
+                            new() { FileId = 61, CurrentPath = sourcePath, NewPath = targetPath }
+                        }
+                    }
+                });
+                return (Assert.Single(results), sourceFolder, targetFolder, targetPath, dbName);
+            }
+            finally
+            {
+                RenameService.MoveWholeFolderEnabled = false;
+            }
+        }
+
+        [Fact]
+        public async Task ExecuteRename_WholeFolderMove_RenamesFolderThenFilesAndCarriesCompanions()
+        {
+            var (result, sourceFolder, targetFolder, targetPath, dbName) = await RenameWithWholeFolderMoveAsync(targetFolderExists: false);
+
+            Assert.True(result.Success);
+            Assert.False(Directory.Exists(sourceFolder));
+            Assert.Equal("audio", await File.ReadAllTextAsync(targetPath));
+            Assert.Equal("cover", await File.ReadAllTextAsync(Path.Join(targetFolder, "cover.jpg")));
+            Assert.Null(Assert.Single(result.RenamedFiles).OperationId);
+
+            await using var verifyDb = CreateContext(dbName);
+            var saved = await verifyDb.Audiobooks.Include(a => a.Files).SingleAsync(a => a.Id == 6);
+            Assert.Equal(NormalizePath(targetFolder), NormalizePath(saved.BasePath));
+            Assert.Equal(NormalizePath(targetPath), NormalizePath(saved.Files!.Single().Path));
+        }
+
+        [Fact]
+        public async Task ExecuteRename_WholeFolderMove_ExistingTargetFolder_FallsBackToPerFileOrganize()
+        {
+            var (result, sourceFolder, _, targetPath, _) = await RenameWithWholeFolderMoveAsync(targetFolderExists: true);
+
+            Assert.True(result.Success);
+            Assert.True(File.Exists(targetPath));
+            Assert.True(Directory.Exists(sourceFolder));
+            Assert.NotNull(Assert.Single(result.RenamedFiles).OperationId);
+        }
+
         [Theory]
         [InlineData(false)]
         [InlineData(true)]
