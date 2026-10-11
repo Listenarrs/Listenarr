@@ -1267,7 +1267,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
         }
 
         [Fact]
-        public async Task ExecuteRename_FolderChange_LeavesBlacklistedCompanionsAndFolder()
+        public async Task ExecuteRename_FolderChange_RemovesOldFolderHoldingOnlyBlacklistedLeftovers()
         {
             var (result, sourceFolder, targetFolder) = await RenameBookWithCompanionsAsync(
                 new List<string> { ".nfo" },
@@ -1275,8 +1275,22 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
 
             Assert.True(result.Success);
             Assert.True(File.Exists(Path.Join(targetFolder, "cover.jpg")));
-            Assert.True(File.Exists(Path.Join(sourceFolder, "book.nfo")));
             Assert.False(File.Exists(Path.Join(targetFolder, "book.nfo")));
+            Assert.False(Directory.Exists(sourceFolder));
+        }
+
+        [Fact]
+        public async Task ExecuteRename_FolderChange_KeepsOldFolderWhenANonBlacklistedFileRemains()
+        {
+            var (result, sourceFolder, targetFolder) = await RenameBookWithCompanionsAsync(
+                new List<string> { ".nfo" },
+                new Dictionary<string, string> { ["cover.jpg"] = "old cover", ["book.nfo"] = "nfo" },
+                new Dictionary<string, string> { ["cover.jpg"] = "kept cover" });
+
+            Assert.True(result.Success);
+            Assert.Equal("kept cover", await File.ReadAllTextAsync(Path.Join(targetFolder, "cover.jpg")));
+            Assert.True(File.Exists(Path.Join(sourceFolder, "cover.jpg")));
+            Assert.True(File.Exists(Path.Join(sourceFolder, "book.nfo")));
         }
 
         [Fact]
