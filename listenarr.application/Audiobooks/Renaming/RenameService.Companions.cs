@@ -26,7 +26,8 @@ public partial class RenameService
     /// Carries the non-audio companions (cover.jpg, metadata.json, ...) left in the previous
     /// folder after a folder-changing organize, mirroring what manual import already does.
     /// Runs only when every tracked file left the previous folder, honours the import
-    /// blacklist, never overwrites, and removes the previous folder once it is empty.
+    /// blacklist, never overwrites, and removes the previous folder once nothing but
+    /// blacklisted files is left in it.
     /// </summary>
     private async Task MoveCompanionFilesAfterRenameAsync(
         string? previousFolder,
@@ -101,14 +102,33 @@ public partial class RenameService
 
         try
         {
-            if (_fileSystem.DirectoryExists(previous) && !_fileSystem.EnumerateFileSystemEntries(previous).Any())
+            if (!_fileSystem.DirectoryExists(previous) || _fileSystem.EnumerateDirectories(previous).Any())
             {
-                _fileSystem.DeleteDirectory(previous, recursive: false);
+                return;
             }
+
+            // Leftovers the user blacklisted are files they do not want in the library, so they do not keep
+            // the folder alive. Anything else (audio, a companion that could not move, hidden or unknown
+            // files) keeps the folder and its content untouched.
+            var leftovers = _fileSystem.EnumerateFiles(previous, "*", SearchOption.TopDirectoryOnly).ToList();
+            if (leftovers.Any(file => FileUtils.IsAudioFile(file)
+                    || !FileUtils.IsBlacklistedFile(file, settings.ImportBlacklistExtensions)
+                    || !_fileSystem.TryValidateMutationTarget(file, allowedRoots, out _, out _)))
+            {
+                return;
+            }
+
+            foreach (var leftover in leftovers)
+            {
+                _fileSystem.DeleteFile(leftover);
+                _logger.LogInformation("Removed blacklisted leftover {FilePath} from the previous folder after organize", leftover);
+            }
+
+            _fileSystem.DeleteDirectory(previous, recursive: false);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            _logger.LogDebug(ex, "Could not remove empty previous folder {Folder} after organize", previous);
+            _logger.LogDebug(ex, "Could not remove previous folder {Folder} after organize", previous);
         }
     }
 }
