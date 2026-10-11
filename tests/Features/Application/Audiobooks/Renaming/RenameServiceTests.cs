@@ -1191,11 +1191,12 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
         }
 
         private async Task<(RenameResult Result, string SourceFolder, string TargetFolder, string TargetPath, string DbName)> RenameWithWholeFolderMoveAsync(
-            bool targetFolderExists)
+            bool targetFolderExists,
+            bool sameFolder = false)
         {
             var libraryRoot = Path.Join(_tempRoot, "library");
             var sourceFolder = Path.Join(libraryRoot, "Old");
-            var targetFolder = Path.Join(libraryRoot, "Author", "Book");
+            var targetFolder = sameFolder ? sourceFolder : Path.Join(libraryRoot, "Author", "Book");
             Directory.CreateDirectory(sourceFolder);
             if (targetFolderExists)
             {
@@ -1252,7 +1253,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
         }
 
         [Fact]
-        public async Task ExecuteRename_WholeFolderMove_RenamesFolderThenFilesAndCarriesCompanions()
+        public async Task ExecuteRename_WholeFolderMove_RenamesFilesIntoNewFolderAndCarriesCompanions()
         {
             var (result, sourceFolder, targetFolder, targetPath, dbName) = await RenameWithWholeFolderMoveAsync(targetFolderExists: false);
 
@@ -1265,6 +1266,22 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
             await using var verifyDb = CreateContext(dbName);
             var saved = await verifyDb.Audiobooks.Include(a => a.Files).SingleAsync(a => a.Id == 6);
             Assert.Equal(NormalizePath(targetFolder), NormalizePath(saved.BasePath));
+            Assert.Equal(NormalizePath(targetPath), NormalizePath(saved.Files!.Single().Path));
+        }
+
+        [Fact]
+        public async Task ExecuteRename_WholeFolderMove_SameFolder_RenamesFilesInPlaceWithoutCopy()
+        {
+            var (result, sourceFolder, _, targetPath, dbName) = await RenameWithWholeFolderMoveAsync(targetFolderExists: false, sameFolder: true);
+
+            Assert.True(result.Success);
+            Assert.Equal("audio", await File.ReadAllTextAsync(targetPath));
+            Assert.False(File.Exists(Path.Join(sourceFolder, "01 old-name.mp3")));
+            Assert.Equal("cover", await File.ReadAllTextAsync(Path.Join(sourceFolder, "cover.jpg")));
+            Assert.Null(Assert.Single(result.RenamedFiles).OperationId);
+
+            await using var verifyDb = CreateContext(dbName);
+            var saved = await verifyDb.Audiobooks.Include(a => a.Files).SingleAsync(a => a.Id == 6);
             Assert.Equal(NormalizePath(targetPath), NormalizePath(saved.Files!.Single().Path));
         }
 
