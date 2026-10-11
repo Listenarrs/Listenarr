@@ -405,6 +405,17 @@ namespace Listenarr.Application.Audiobooks.Renaming
                     }
 
                     await AddHistoryAsync(audiobook, result);
+
+                    if (folderRequested)
+                    {
+                        await MoveCompanionFilesAfterRenameAsync(
+                            operation.CurrentFolderPath,
+                            operation.NewFolderPath,
+                            settings,
+                            allowedRoots,
+                            semantics,
+                            result);
+                    }
                 }
 
                 return result;
