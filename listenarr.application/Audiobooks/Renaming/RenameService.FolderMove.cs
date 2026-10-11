@@ -30,11 +30,13 @@ public partial class RenameService
         bool.TryParse(Environment.GetEnvironmentVariable("LISTENARR_ORGANIZE_MOVE_WHOLE_FOLDER"), out var enabled) && enabled;
 
     /// <summary>
-    /// When every tracked file of the book moves from its folder to the same new folder, renames the
-    /// folder itself and then renames files in place. Files keep their physical identity (no copy), so
-    /// external tools tracking the folder (Audiobookshelf) see a rename, and companions follow the book.
-    /// Returns false, with the filesystem unchanged, when the shortcut does not apply or fails; the
-    /// caller then runs the regular per-file organize.
+    /// When every tracked file of the book moves from its folder to the same folder (new or unchanged),
+    /// renames the files instead of copying them. They keep their physical identity (no copy), and the
+    /// other top-level files (companions) follow the book. The folder itself is never renamed: on
+    /// rclone/pCloud WebDAV a renamed folder is listed again before the remote applies the move and stays
+    /// empty in the mount cache, while file renames keep the cache coherent. The emptied previous folder
+    /// is removed. Returns false, with the filesystem unchanged, when the shortcut does not apply or fails;
+    /// the caller then runs the regular per-file organize.
     /// </summary>
     private async Task<bool> TryMoveWholeFolderAsync(
         Audiobook audiobook,
@@ -55,22 +57,27 @@ public partial class RenameService
         var fileOperations = operation.FileRenames ?? new List<FileRenameOperation>();
         if (fileOperations.Count == 0
             || string.IsNullOrWhiteSpace(oldFolder)
-            || string.IsNullOrWhiteSpace(newFolder)
-            || PathsEqual(oldFolder, newFolder, semantics)
-            || FileSystemPathIdentity.IsSameOrInside(newFolder, oldFolder, semantics)
-            || FileSystemPathIdentity.IsSameOrInside(oldFolder, newFolder, semantics)
-            || !IsPathWithinAllowedRoots(newFolder, allowedRoots, semantics)
-            || !_fileSystem.TryValidateMutationTarget(oldFolder, allowedRoots, out _, out _)
-            || !_fileSystem.TryValidateMutationTarget(newFolder, allowedRoots, out _, out _)
-            || !_fileSystem.DirectoryExists(oldFolder)
-            || _fileSystem.DirectoryExists(newFolder)
-            || _fileSystem.FileExists(newFolder)
-            || _fileSystem.EnumerateDirectories(oldFolder).Any())
+            || string.IsNullOrWhiteSpace(newFolder))
         {
             return false;
         }
 
-        var plan = new List<(FileRenameOperation Operation, AudiobookFile? DbFile, string Moved, string Target)>();
+        var sameFolder = PathsEqual(oldFolder, newFolder, semantics);
+        if (!IsPathWithinAllowedRoots(newFolder, allowedRoots, semantics)
+            || !_fileSystem.TryValidateMutationTarget(oldFolder, allowedRoots, out _, out _)
+            || !_fileSystem.TryValidateMutationTarget(newFolder, allowedRoots, out _, out _)
+            || !_fileSystem.DirectoryExists(oldFolder)
+            || _fileSystem.EnumerateDirectories(oldFolder).Any()
+            || (!sameFolder
+                && (FileSystemPathIdentity.IsSameOrInside(newFolder, oldFolder, semantics)
+                    || FileSystemPathIdentity.IsSameOrInside(oldFolder, newFolder, semantics)
+                    || _fileSystem.DirectoryExists(newFolder)
+                    || _fileSystem.FileExists(newFolder))))
+        {
+            return false;
+        }
+
+        var plan = new List<(FileRenameOperation Operation, AudiobookFile? DbFile, string Source, string Target)>();
         foreach (var fileOperation in fileOperations)
         {
             var source = NormalizePath(fileOperation.CurrentPath);
@@ -85,30 +92,55 @@ public partial class RenameService
                 return false;
             }
 
-            plan.Add((fileOperation, dbFile, NormalizePath(Path.Join(newFolder, Path.GetFileName(source))), target));
+            plan.Add((fileOperation, dbFile, source, target));
         }
 
-        var renamedInside = new List<(string From, string To)>();
-        var folderMoved = false;
+        if (plan.Select(step => step.Target).Distinct(StringComparer.Ordinal).Count() != plan.Count)
+        {
+            return false;
+        }
+
+        var moved = new List<(string From, string To)>();
+        var createdFolder = false;
+        var removedOldFolder = false;
         try
         {
-            var parent = Path.GetDirectoryName(newFolder);
-            if (!string.IsNullOrWhiteSpace(parent) && !_fileSystem.DirectoryExists(parent))
+            if (!sameFolder)
             {
-                _fileSystem.CreateDirectory(parent);
+                _fileSystem.CreateDirectory(newFolder);
+                createdFolder = true;
             }
 
-            _fileSystem.MoveDirectory(oldFolder, newFolder);
-            folderMoved = true;
-            foreach (var step in plan.Where(step => !PathsEqual(step.Moved, step.Target, semantics)))
+            foreach (var step in plan.Where(step => !PathsEqual(step.Source, step.Target, semantics)))
             {
                 if (_fileSystem.FileExists(step.Target))
                 {
                     throw new IOException($"Organize target already exists: {step.Target}");
                 }
 
-                _fileSystem.MoveFile(step.Moved, step.Target);
-                renamedInside.Add((step.Moved, step.Target));
+                _fileSystem.MoveFile(step.Source, step.Target);
+                moved.Add((step.Source, step.Target));
+            }
+
+            if (!sameFolder)
+            {
+                // Companions follow the book, as they would with a folder rename.
+                foreach (var file in _fileSystem.EnumerateFiles(oldFolder, "*", SearchOption.TopDirectoryOnly).ToList())
+                {
+                    var destination = NormalizePath(Path.Join(newFolder, Path.GetFileName(file)));
+                    if (!_fileSystem.FileExists(destination))
+                    {
+                        _fileSystem.MoveFile(file, destination);
+                        moved.Add((NormalizePath(file), destination));
+                    }
+                }
+
+                if (!_fileSystem.EnumerateFiles(oldFolder, "*", SearchOption.TopDirectoryOnly).Any()
+                    && !_fileSystem.EnumerateDirectories(oldFolder).Any())
+                {
+                    _fileSystem.DeleteDirectory(oldFolder, recursive: false);
+                    removedOldFolder = true;
+                }
             }
 
             var identities = new List<AudiobookFilePathIdentity>();
@@ -146,7 +178,7 @@ public partial class RenameService
             }
 
             _logger.LogInformation(
-                "Organized audiobook {AudiobookId} by moving its folder {OldFolder} to {NewFolder}",
+                "Organized audiobook {AudiobookId} by renaming its files from {OldFolder} to {NewFolder}",
                 audiobook.Id,
                 oldFolder,
                 newFolder);
@@ -154,22 +186,29 @@ public partial class RenameService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            _logger.LogWarning(ex, "Whole-folder organize of audiobook {AudiobookId} failed; reverting and organizing file by file", audiobook.Id);
+            _logger.LogWarning(ex, "Folder organize of audiobook {AudiobookId} by renames failed; reverting and organizing file by file", audiobook.Id);
             try
             {
-                for (var index = renamedInside.Count - 1; index >= 0; index--)
+                if (removedOldFolder)
                 {
-                    _fileSystem.MoveFile(renamedInside[index].To, renamedInside[index].From);
+                    _fileSystem.CreateDirectory(oldFolder);
                 }
 
-                if (folderMoved)
+                for (var index = moved.Count - 1; index >= 0; index--)
                 {
-                    _fileSystem.MoveDirectory(newFolder, oldFolder);
+                    _fileSystem.MoveFile(moved[index].To, moved[index].From);
+                }
+
+                if (createdFolder
+                    && !_fileSystem.EnumerateFiles(newFolder, "*", SearchOption.TopDirectoryOnly).Any()
+                    && !_fileSystem.EnumerateDirectories(newFolder).Any())
+                {
+                    _fileSystem.DeleteDirectory(newFolder, recursive: false);
                 }
             }
             catch (Exception revertException) when (revertException is IOException or UnauthorizedAccessException)
             {
-                _logger.LogCritical(revertException, "Could not revert whole-folder organize of audiobook {AudiobookId}", audiobook.Id);
+                _logger.LogCritical(revertException, "Could not revert folder organize of audiobook {AudiobookId}", audiobook.Id);
                 throw;
             }
 

@@ -295,8 +295,7 @@ namespace Listenarr.Application.Audiobooks.Renaming
                 var result = new RenameResult { AudiobookId = operation.AudiobookId };
                 executionResult = result;
                 var audiobookRollbackState = CaptureAudiobookPathRollbackState(audiobook);
-                var movedWholeFolder = folderRequested
-                    && await TryMoveWholeFolderAsync(
+                var movedWholeFolder = await TryMoveWholeFolderAsync(
                         audiobook,
                         operation,
                         currentBasePath,
