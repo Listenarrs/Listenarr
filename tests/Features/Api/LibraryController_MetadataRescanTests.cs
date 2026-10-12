@@ -121,6 +121,70 @@ namespace Listenarr.Tests.Features.Api
         }
 
         [Fact]
+        public async Task RescanMetadata_StoresContributorNamesWithoutTheirRoleSuffix()
+        {
+            var metadataMock = new Mock<IAudiobookMetadataService>();
+            metadataMock
+                .Setup(m => m.GetMetadataAsync("B0ROLESUFX", "us", false))
+                .ReturnsAsync(new AudiobookMetadataEnvelope(
+                    new AudibleBookResponse
+                    {
+                        Asin = "B0ROLESUFX",
+                        Title = "Provider Title",
+                        Authors = new List<AudibleAuthor>
+                        {
+                            new() { Name = "Sample Author" },
+                            new() { Name = "Sample Translator - translator" }
+                        }
+                    },
+                    "Audible",
+                    "https://audible.com"));
+            var factory = _factory.WithWebHostBuilder(builder =>
+            {
+                builder.ConfigureServices(services =>
+                {
+                    services.RemoveAll<IAudiobookMetadataService>();
+                    services.AddSingleton(metadataMock.Object);
+                });
+            });
+            int audiobookId;
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                var audiobook = new Audiobook
+                {
+                    Title = "Catalog Title",
+                    Authors = new List<string> { "Sample Author", "Sample Translator - translator" },
+                    Asin = "B0ROLESUFX",
+                    ExternalIdentifiers =
+                    [
+                        new AudiobookExternalIdentifier
+                        {
+                            Type = AudiobookExternalIdentifierType.Asin,
+                            ValueRaw = "B0ROLESUFX",
+                            ValueNormalized = "B0ROLESUFX",
+                            Region = "us",
+                            IsPrimary = true,
+                            Source = AudiobookExternalIdentifierSource.Manual
+                        }
+                    ]
+                };
+                db.Audiobooks.Add(audiobook);
+                await db.SaveChangesAsync();
+                audiobookId = audiobook.Id;
+            }
+
+            using var client = factory.CreateClient();
+            var response = await PostRescanAsync(client, audiobookId);
+
+            Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+            using var verificationScope = factory.Services.CreateScope();
+            var verification = verificationScope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+            var updated = await verification.Audiobooks.SingleAsync(book => book.Id == audiobookId);
+            Assert.Equal(new[] { "Sample Author", "Sample Translator" }, updated.Authors);
+        }
+
+        [Fact]
         public async Task RescanMetadata_UsesIdentifiersAndUpdatesAudiobook()
         {
             var metadataMock = new Mock<IAudiobookMetadataService>();
