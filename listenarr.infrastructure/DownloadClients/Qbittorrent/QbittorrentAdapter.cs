@@ -74,8 +74,16 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
             _importItemResolver = new QbittorrentImportItemResolver(logger);
         }
 
-        public Task<(bool Success, string Message)> TestConnectionAsync(DownloadClientConfiguration client, CancellationToken ct = default)
-            => _connectionTester.TestConnectionAsync(client, ct);
+        public async Task<(bool Success, string Message)> TestConnectionAsync(DownloadClientConfiguration client, CancellationToken ct = default)
+        {
+            var result = await _connectionTester.TestConnectionAsync(client, ct);
+            if (result.Success)
+            {
+                QbittorrentAuthSession.ClearRejectedLogin(client);
+            }
+
+            return result;
+        }
 
         public Task<DownloadClientSubmissionResult> AddAsync(
             DownloadClientConfiguration client,
