@@ -7,6 +7,7 @@ public sealed partial class LibraryMetadataRescanWorkflow
     private async Task<MetadataRescanApplyResult> ApplyMetadataRescanResultAsync(
         int audiobookId,
         AudibleBookMetadata metadata,
+        string? resolvedRegion,
         string expectedMetadataState,
         CancellationToken cancellationToken)
     {
@@ -38,7 +39,8 @@ public sealed partial class LibraryMetadataRescanWorkflow
 
         if (legacyIdentifierFieldsTouched)
         {
-            AudiobookIdentifierMapper.SyncImportedIdentifiersFromLegacyFields(audiobook);
+            // Keep the region the metadata was found in, or the next rescan starts from 'us' again.
+            AudiobookIdentifierMapper.SyncImportedIdentifiersFromLegacyFields(audiobook, resolvedRegion);
         }
 
         cancellationToken.ThrowIfCancellationRequested();

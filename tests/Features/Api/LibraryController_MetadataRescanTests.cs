@@ -248,6 +248,87 @@ namespace Listenarr.Tests.Features.Api
         }
 
         [Fact]
+        public async Task RescanMetadata_KeepsTheRegionOfTheImportedAsinIdentifier()
+        {
+            var metadataMock = new Mock<IAudiobookMetadataService>();
+            metadataMock
+                .Setup(m => m.GetMetadataAsync("B077XZC72T", "fr", false))
+                .ReturnsAsync(new AudiobookMetadataEnvelope(
+                    new AudibleBookResponse
+                    {
+                        Asin = "B077XZC72T",
+                        Title = "Dragons et serpents",
+                        Subtitle = "Les cités des Anciens 1",
+                        Authors = new List<AudibleAuthor> { new() { Name = "Robin Hobb" } },
+                        Narrators = new List<AudibleNarrator> { new() { Name = "Raphaël Mathon" } },
+                        Language = "French",
+                        Isbn = "9782290000007"
+                    },
+                    "Audible",
+                    "https://api.audible.com"));
+
+            var factory = _factory.WithWebHostBuilder(builder =>
+            {
+                builder.ConfigureServices(services =>
+                {
+                    services.RemoveAll<IAudiobookMetadataService>();
+                    services.AddSingleton(metadataMock.Object);
+                    services.RemoveAll<IAsinLookupService>();
+                    services.AddSingleton(new Mock<IAsinLookupService>().Object);
+                });
+            });
+
+            int audiobookId;
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                var audiobook = new Audiobook
+                {
+                    Title = "Dragons et serpents",
+                    Authors = new List<string> { "Robin Hobb" },
+                    Monitored = true,
+                    Asin = "B077XZC72T",
+                    ExternalIdentifiers = new List<AudiobookExternalIdentifier>
+                    {
+                        new()
+                        {
+                            Type = AudiobookExternalIdentifierType.Asin,
+                            ValueRaw = "B077XZC72T",
+                            ValueNormalized = "B077XZC72T",
+                            Region = "fr",
+                            IsPrimary = true,
+                            Source = AudiobookExternalIdentifierSource.Imported
+                        }
+                    }
+                };
+
+                db.Audiobooks.Add(audiobook);
+                await db.SaveChangesAsync();
+                audiobookId = audiobook.Id;
+            }
+
+            var response = await PostRescanAsync(factory.CreateClient(), audiobookId);
+            Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                var updated = await db.Audiobooks
+                    .Include(a => a.ExternalIdentifiers)
+                    .FirstAsync(a => a.Id == audiobookId);
+
+                // The ISBN proves the imported identifiers were rebuilt by this rescan.
+                Assert.Contains(updated.ExternalIdentifiers!, i =>
+                    i.Type == AudiobookExternalIdentifierType.Isbn && i.ValueNormalized == "9782290000007");
+                var asin = Assert.Single(updated.ExternalIdentifiers!, i => i.Type == AudiobookExternalIdentifierType.Asin);
+                Assert.Equal("fr", asin.Region);
+            }
+
+            metadataMock.Verify(m => m.GetMetadataAsync("B077XZC72T", "fr", false), Times.Once);
+            metadataMock.Verify(m => m.GetMetadataAsync("B077XZC72T", "us", false), Times.Never);
+        }
+
+        [Fact]
         public async Task RescanMetadata_PublishesImageOnlyAfterMetadataCommit()
         {
             const string asin = "B0IMGORDER";
