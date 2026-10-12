@@ -42,10 +42,15 @@ namespace Listenarr.Tests.Features.Application.Search.Parsing
         // Ambiguous short codes only count inside brackets/parens...
         [InlineData("Some Title [IT]", "Italian")]
         [InlineData("Book (NO)", "Norwegian")]
-        // ...never as a bare scene tag, so these must NOT be mistaken for a language.
-        [InlineData("Verity-AUDiOBOOK-WEB-SE-2023-CRAViNGS", null)]
+        // ...or in the release-tag position (delimited code directly before the year), which is
+        // how audiobook scene releases encode language (parallel to the Danish WEB-DK-2026).
+        [InlineData("Colleen Hoover - Verity-AUDiOBOOK-WEB-SE-2023-CRAViNGS iNT-xpost", "Swedish")]
+        [InlineData("Some.Book-WEB-IT-2021-GROUP", "Italian")]
+        [InlineData("Another-WEB-NO-2019-GRP", "Norwegian")]
+        // ...but a bare ambiguous code with no year/bracket context must NOT be a language.
         [InlineData("Great book, it is", null)]
         [InlineData("Say no more", null)]
+        [InlineData("Verity-AUDiOBOOK-WEB-SE-CRAViNGS", null)]
         public void ParseLanguageFromText_RecognizesCodes(string input, string? expected)
         {
             var result = SearchResultAttributeParser.ParseLanguageFromText(input);
