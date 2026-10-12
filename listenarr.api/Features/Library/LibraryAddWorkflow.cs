@@ -97,6 +97,7 @@ namespace Listenarr.Api.Features.Library
                 return new ConflictObjectResult(new { message = result.Message, audiobook = result.Audiobook });
             }
 
+            StartAutoSearchAfterAdd(result.Audiobook, request.AutoSearch);
             return new OkObjectResult(new { message = result.Message, audiobook = result.Audiobook });
         }
 
@@ -235,6 +236,7 @@ namespace Listenarr.Api.Features.Library
             _logger.LogInformation("Added audiobook '{Title}' (ASIN: {Asin}) to library with Monitored={Monitored}, QualityProfileId={QualityProfileId}, AutoSearch={AutoSearch}",
                 audiobook.Title, audiobook.Asin, request.Monitored, audiobook.QualityProfileId, request.AutoSearch);
 
+            StartAutoSearchAfterAdd(audiobook, request.AutoSearch);
             return new OkObjectResult(new { message = "Audiobook added to library successfully", audiobook });
         }
 

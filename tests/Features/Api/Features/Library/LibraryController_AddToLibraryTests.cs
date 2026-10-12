@@ -509,6 +509,72 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             }
         }
 
+        // "Search for downloads immediately" is its own option, next to "Monitor for new releases" rather
+        // than under it: ticking it searches right away whether or not the book is monitored.
+        [Theory]
+        [InlineData(true, true, true)]
+        [InlineData(true, false, true)]
+        [InlineData(false, true, false)]
+        [InlineData(false, false, false)]
+        public async Task AddToLibrary_AutoSearch_SearchesRightAfterTheAddRegardlessOfMonitored(
+            bool autoSearch,
+            bool monitored,
+            bool expectSearch)
+        {
+            var downloads = new Mock<IDownloadService>();
+            downloads
+                .Setup(service => service.SearchAndDownloadAsync(It.IsAny<int>()))
+                .ReturnsAsync(new SearchAndDownloadResult { Success = true, Message = "queued" });
+            await ReinitializeAsync(builder => builder.WithSingleton(downloads.Object));
+
+            var result = await _provider.GetRequiredService<LibraryController>().AddToLibrary(
+                new LibraryController.AddToLibraryRequest
+                {
+                    Metadata = new AudibleBookMetadata { Title = "Bazaar", Authors = ["Stephen King"] },
+                    Monitored = monitored,
+                    AutoSearch = autoSearch
+                });
+
+            Assert.IsType<OkObjectResult>(result);
+            var audiobook = Assert.Single(await _audiobookRepository.GetAllAsync());
+            Assert.Equal(monitored, audiobook.Monitored);
+            var pending = _provider.GetRequiredService<LibraryAddWorkflow>().AutoSearchTask;
+            if (pending != null)
+            {
+                await pending.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+
+            Assert.Equal(expectSearch, pending != null);
+            downloads.Verify(
+                service => service.SearchAndDownloadAsync(audiobook.Id),
+                expectSearch ? Times.Once() : Times.Never());
+        }
+
+        [Fact]
+        public async Task AddToLibrary_AutoSearchFailure_DoesNotFailTheCommittedAdd()
+        {
+            var downloads = new Mock<IDownloadService>();
+            downloads
+                .Setup(service => service.SearchAndDownloadAsync(It.IsAny<int>()))
+                .ThrowsAsync(new HttpRequestException("indexers unavailable"));
+            await ReinitializeAsync(builder => builder.WithSingleton(downloads.Object));
+
+            var result = await _provider.GetRequiredService<LibraryController>().AddToLibrary(
+                new LibraryController.AddToLibraryRequest
+                {
+                    Metadata = new AudibleBookMetadata { Title = "Bazaar", Authors = ["Stephen King"] },
+                    Monitored = false,
+                    AutoSearch = true
+                });
+
+            Assert.IsType<OkObjectResult>(result);
+            Assert.Single(await _audiobookRepository.GetAllAsync());
+            var pending = _provider.GetRequiredService<LibraryAddWorkflow>().AutoSearchTask;
+            Assert.NotNull(pending);
+            await pending!.WaitAsync(TimeSpan.FromSeconds(10));
+            downloads.Verify(service => service.SearchAndDownloadAsync(It.IsAny<int>()), Times.Once);
+        }
+
         [Fact]
         public async Task AddToLibrary_PostCommitWebhookFailure_DoesNotFailCommittedAdd()
         {
