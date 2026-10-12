@@ -73,6 +73,15 @@ public partial class TorznabNewznabSearchProvider : IIndexerSearchProvider
             _logger.LogInformation("Indexer {Name} returned {Count} results", indexer.Name, results.Count);
             return results;
         }
+        catch (OperationCanceledException ex) when (HttpClientTimeoutClassifier.IsHttpClientTimeout(ex))
+        {
+            // The client's own timeout, not a caller cancelling: report it as this
+            // indexer's failure so the fan-out keeps the other indexers' results.
+            _logger.LogWarning(
+                "Indexer {Name} did not answer within {TimeoutSeconds}s; treating as no results",
+                indexer.Name, _httpClient.Timeout.TotalSeconds);
+            return new List<IndexerSearchResult>();
+        }
         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
         {
             _logger.LogError(ex, "Error searching Torznab/Newznab indexer {Name}", indexer.Name);

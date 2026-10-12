@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Application.Common;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Search.Indexers.Common;
@@ -227,6 +228,17 @@ public class IndexerSearchWorkflow
             }
 
             return providerResults;
+        }
+        catch (OperationCanceledException ex) when (HttpClientTimeoutClassifier.IsHttpClientTimeout(ex))
+        {
+            // HttpClient.Timeout surfaces as a TaskCanceledException, which the
+            // "is not OperationCanceledException" clauses up the whole call chain let
+            // through — so one slow indexer used to abort the entire search (live: a
+            // 60s TorrentDownload response turned a Wanted-page search into a 500 and
+            // discarded the three indexers that had already answered). Nobody cancelled
+            // this search; it is a per-indexer failure like any other.
+            _logger.LogWarning("Indexer {Name} timed out; continuing with the other indexers", indexer.Name);
+            return new List<IndexerSearchResult>();
         }
         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
         {
