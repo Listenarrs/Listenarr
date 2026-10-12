@@ -166,5 +166,25 @@ namespace Listenarr.Tests.Features.Application.Security.Redaction
 
             Assert.Equal("https://example.com/some/harmless/path", sanitized);
         }
+
+        [Fact]
+        public void SanitizeWebhookUrl_GenericUrl_MasksPathTokenThatIsAlsoAnEnvironmentSecret()
+        {
+            var token = "generic-path-token-not-a-real-secret";
+            var previous = Environment.GetEnvironmentVariable("TOKEN");
+            try
+            {
+                Environment.SetEnvironmentVariable("TOKEN", token);
+
+                var sanitized = LogRedaction.SanitizeWebhookUrl($"https://example.com/hooks/{token}?x=1");
+
+                Assert.DoesNotContain(token, sanitized, StringComparison.OrdinalIgnoreCase);
+                Assert.Equal("https://example.com/hooks/<redacted>", sanitized);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("TOKEN", previous);
+            }
+        }
     }
 }

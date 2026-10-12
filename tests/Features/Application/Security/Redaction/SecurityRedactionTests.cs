@@ -311,5 +311,49 @@ namespace Listenarr.Tests.Features.Application.Security.Redaction
             Assert.DoesNotContain(token, errorLog);
             Assert.Contains("api/webhooks", errorLog);
         }
+
+        [Fact]
+        public async Task NotificationService_GenericWebhookLog_MasksPathTokenThatIsAlsoAnEnvironmentSecret()
+        {
+            var token = "generic-path-token-not-a-real-secret";
+            var webhookUrl = $"https://example.com/hooks/{token}";
+            var previous = Environment.GetEnvironmentVariable("TOKEN");
+
+            try
+            {
+                Environment.SetEnvironmentVariable("TOKEN", token);
+
+                var handler = new Mock<HttpMessageHandler>();
+                handler
+                    .Protected()
+                    .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+                    .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("ok") });
+
+                using var httpClient = new HttpClient(handler.Object);
+
+                var mockConfigService = new Mock<IConfigurationService>();
+                mockConfigService.Setup(x => x.GetStartupConfigAsync()).ReturnsAsync(new StartupConfig { UrlBase = "https://listenarr.example.com" });
+
+                var services = new ServiceCollection();
+                services.AddSingleton<INotificationPayloadBuilder, NotificationPayloadBuilderAdapter>();
+                var payloadBuilder = services.BuildServiceProvider().GetRequiredService<INotificationPayloadBuilder>();
+
+                var capturedLogs = new List<string>();
+                var mockLogger = CreateCapturingLogger(capturedLogs);
+
+                var service = new NotificationService(httpClient, mockLogger.Object, mockConfigService.Object, payloadBuilder, Mock.Of<IRequestContextAccessor>());
+
+                await service.SendNotificationAsync("book-added", new { id = 1, title = "Generic Test" }, webhookUrl, new List<string> { "book-added" });
+
+                var sendLog = Assert.Single(capturedLogs, l => l.Contains("Sending Generic POST", StringComparison.Ordinal));
+                Assert.DoesNotContain(token, sendLog);
+                // The generic path is still kept; only the known secret is masked.
+                Assert.Contains("https://example.com/hooks/<redacted>", sendLog);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("TOKEN", previous);
+            }
+        }
     }
 }
