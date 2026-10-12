@@ -429,7 +429,10 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Quality
                 Format = "mp3",
                 Quality = "320",
                 Language = "English",
-                DownloadType = "torrent",
+                // Capitalised, which is what every indexer parser actually writes. This fixture
+                // used to say "torrent", a value no producer emits, so it exercised a comparison
+                // the field could never satisfy in the field.
+                DownloadType = "Torrent",
                 Seeders = null,
                 PublishedDate = DateTime.UtcNow.ToString("o")
             };
@@ -437,6 +440,82 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Quality
             var score = await service.ScoreSearchResult(result, profile);
             Assert.Contains(score.RejectionReasons, r => r.Contains("Not enough seeders"));
             Assert.True(score.TotalScore < 0, "Result should be rejected when seeders are missing and profile requires minimum seeders");
+        }
+
+        [Fact]
+        public async Task ZeroSeederTorrent_IsRejected_WhateverCasingTheIndexerUsedForTheProtocol()
+        {
+            // The reported case: a profile requiring seeders, and zero-seed torrents accepted
+            // anyway. The protocol comparison was ordinal against a lowercase literal while the
+            // parsers all write "Torrent", so the gate never fired. Both casings are asserted
+            // because the field's casing is the indexer's choice, not ours.
+            var service = CreateService();
+
+            foreach (var downloadType in new[] { "Torrent", "torrent", "TORRENT" })
+            {
+                var profile = new QualityProfile
+                {
+                    PreferredFormats = new System.Collections.Generic.List<string>(),
+                    PreferredWords = new System.Collections.Generic.List<string>(),
+                    MustNotContain = new System.Collections.Generic.List<string>(),
+                    MustContain = new System.Collections.Generic.List<string>(),
+                    PreferredLanguages = new System.Collections.Generic.List<string>(),
+                    MinimumSeeders = 1,
+                    MaximumAge = 3650
+                };
+
+                var result = new SearchResult
+                {
+                    Title = "Dead torrent",
+                    Format = "mp3",
+                    Quality = "320",
+                    Language = "English",
+                    DownloadType = downloadType,
+                    Seeders = 0,
+                    PublishedDate = DateTime.UtcNow.ToString("o")
+                };
+
+                var score = await service.ScoreSearchResult(result, profile);
+
+                Assert.True(
+                    score.TotalScore < 0,
+                    $"A zero-seed torrent reported as '{downloadType}' should be rejected");
+                Assert.Contains(score.RejectionReasons, r => r.Contains("Not enough seeders"));
+            }
+        }
+
+        [Fact]
+        public async Task UsenetResult_IsNotSubjectToTheSeederRequirement()
+        {
+            // Usenet has no seeders and reports null. Making the protocol check case-insensitive
+            // must not start rejecting Usenet results, which would be a far worse regression than
+            // the defect being fixed.
+            var service = CreateService();
+            var profile = new QualityProfile
+            {
+                PreferredFormats = new System.Collections.Generic.List<string>(),
+                PreferredWords = new System.Collections.Generic.List<string>(),
+                MustNotContain = new System.Collections.Generic.List<string>(),
+                MustContain = new System.Collections.Generic.List<string>(),
+                PreferredLanguages = new System.Collections.Generic.List<string>(),
+                MinimumSeeders = 5,
+                MaximumAge = 3650
+            };
+
+            var result = new SearchResult
+            {
+                Title = "A usenet post",
+                Format = "mp3",
+                Quality = "320",
+                Language = "English",
+                DownloadType = "Usenet",
+                Seeders = null,
+                PublishedDate = DateTime.UtcNow.ToString("o")
+            };
+
+            var score = await service.ScoreSearchResult(result, profile);
+
+            Assert.DoesNotContain(score.RejectionReasons, r => r.Contains("Not enough seeders"));
         }
 
         [Fact]
