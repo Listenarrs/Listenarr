@@ -82,6 +82,26 @@ describe('AddLibraryModal editable metadata', () => {
     })
   })
 
+  it('fetches metadata in the configured region when the book has none', async () => {
+    apiMocks.getApplicationSettings.mockResolvedValue({
+      outputPath: 'C:\\root',
+      defaultSearchRegion: 'fr',
+    })
+    mount(AddLibraryModal, {
+      props: {
+        visible: true,
+        book: { ...fakeBook, region: undefined },
+      },
+      attachTo: document.body,
+      global: {
+        plugins: [createPinia()],
+      },
+    })
+
+    await flushPromises()
+    expect(apiMocks.getAudibleMetadata).toHaveBeenCalledWith('B001234567', 'fr')
+  })
+
   it('previews and submits edited metadata instead of the original source metadata', async () => {
     const wrapper = mount(AddLibraryModal, {
       props: {

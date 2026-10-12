@@ -485,6 +485,7 @@ import {
 import { formatDate } from '@/utils/searchResultFormatting'
 import { stripHtmlAndNormalize } from '@/utils/textUtils'
 import { usePathLengthCheck } from '@/composables/usePathLengthCheck'
+import { normalizeSearchRegion } from '@/utils/languageMapping'
 
 interface Props {
   visible: boolean
@@ -1084,7 +1085,12 @@ const seedPreview = async () => {
       try {
         const resp = await apiService.getAudibleMetadata<
           AudibleMetadataResponse | Partial<Audible>
-        >(bookSnapshot.asin, bookSnapshot.region)
+        >(
+          bookSnapshot.asin,
+          // The result's own region first, then the configured one (the API would default to 'us')
+          bookSnapshot.region ||
+            normalizeSearchRegion(configStore.applicationSettings?.defaultSearchRegion),
+        )
         if (!isCurrentSeed(generation)) return
         const payload = (resp && typeof resp === 'object' ? resp : {}) as
           | AudibleMetadataResponse
