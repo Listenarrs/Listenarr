@@ -125,6 +125,7 @@ export interface SearchResult extends BaseSearchResult {
   productUrl?: string // Direct link to Amazon/Audible product page
   isEnriched?: boolean
   metadataSource?: string // Which metadata API enriched this result
+  region?: string // Audible region the result was found in (e.g. 'fr', 'us')
   // Audible-style fields
   authors?: AudibleAuthor[]
   narrators?: AudibleNarrator[]
