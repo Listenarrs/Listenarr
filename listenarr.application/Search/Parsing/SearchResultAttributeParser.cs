@@ -152,8 +152,34 @@ public static class SearchResultAttributeParser
         if (bracketed != null) return bracketed;
 
         // Elsewhere only trust unambiguous tokens, so a bare scene tag like "-SE-" is not
-        // read as a language.
-        return MatchLanguageToken(normalized, LanguageCodes, bracketedOnly: false);
+        // read as a language on its own.
+        var standalone = MatchLanguageToken(normalized, LanguageCodes, bracketedOnly: false);
+        if (standalone != null) return standalone;
+
+        // Audiobook scene releases encode the language as a delimited 2-letter code immediately
+        // before the year, e.g. "...AUDiOBOOK-WEB-SE-2023-GROUP" (Swedish) or "...-DK-2026-..."
+        // (Danish). In that specific position the otherwise-ambiguous short codes (SE/IT/NO/PT)
+        // are languages, so accept them when they sit between delimiters and are followed by a
+        // 4-digit year — which avoids matching ordinary words like "it"/"no" elsewhere.
+        return MatchReleaseTagLanguage(normalized, AllLanguageCodes);
+    }
+
+    private static string? MatchReleaseTagLanguage(
+        string normalized,
+        IReadOnlyDictionary<string, string> codes)
+    {
+        var alternation = string.Join("|", codes.Keys.OrderByDescending(k => k.Length).Select(Regex.Escape));
+        if (alternation.Length == 0)
+        {
+            return null;
+        }
+
+        // <delimiter><code><delimiter><19xx|20xx year>
+        var pattern = $@"(?<=[-._ ])(?<tok>{alternation})(?=[-._ ](?:19|20)\d{{2}}(?:\b|[-._ ]))";
+        var match = Regex.Match(normalized, pattern, RegexOptions.IgnoreCase);
+        return match.Success && codes.TryGetValue(match.Groups["tok"].Value, out var language)
+            ? language
+            : null;
     }
 
     private static string? MatchLanguageToken(
