@@ -7,6 +7,28 @@ Listenarr is moving toward a layered backend where each project has a clear job:
 - `listenarr.infrastructure` owns concrete adapters for technical concerns: EF Core and SQLite persistence, filesystem work, external HTTP clients, metadata/tagging libraries, HTML scraping/parsing, image inspection, cache implementations, SignalR infrastructure, and downloader integrations.
 - `listenarr.api` is the composition and hosting layer. It wires dependency injection, controllers, middleware, Swagger/OpenAPI, auth policy, and request pipeline behavior.
 
+## Contents
+
+- [Vertical feature structure](#vertical-feature-structure)
+- [Current layering decision](#current-decision)
+- [Compatibility and migration boundary](#compatibility-and-migration-boundary)
+- [Boundary cleanup](#boundary-cleanup)
+- [API startup composition](#api-startup-composition)
+- [User-provided filesystem paths](#user-provided-filesystem-paths)
+- [Durable library move contracts](#durable-library-move-contracts)
+  - [Persisted filesystem identity](#persisted-filesystem-identity)
+  - [Target scaffolding ownership](#target-scaffolding-ownership)
+  - [Durable library-directory ownership](#durable-library-directory-ownership)
+  - [Filesystem mutation threat boundary](#filesystem-mutation-threat-boundary)
+  - [Durable audiobook deletion](#durable-audiobook-deletion)
+  - [Durable completion and realtime publication](#durable-completion-and-realtime-publication)
+  - [Durable move-to-scan handoff](#durable-move-to-scan-handoff)
+- [Audiobook file ownership and rename coordination](#audiobook-file-ownership-and-rename-coordination)
+- [Background worker ownership](#background-worker-ownership)
+- [Download queue visibility](#download-queue-visibility)
+- [Download client adapter slicing](#download-client-adapter-slicing)
+- [Migration direction](#migration-direction)
+
 ## Vertical Feature Structure
 
 Active backend code is organized first by feature ownership and then by technical role:
