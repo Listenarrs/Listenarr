@@ -47,6 +47,7 @@ public sealed class AutomaticSearchScoringService(
         }
         // Every candidate is scored. The quality service sorts its output; associate by reference.
         var quality = await qualityService.ScoreSearchResults(results, profile);
+        SeriesPositionMismatchRule.Apply(book, quality);
         cancellationToken.ThrowIfCancellationRequested();
         var associatedQuality = new Dictionary<SearchResult, QualityScore?>(ReferenceEqualityComparer.Instance);
         foreach (var score in quality)

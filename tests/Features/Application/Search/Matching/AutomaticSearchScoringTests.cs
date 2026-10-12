@@ -188,6 +188,20 @@ public sealed class AutomaticSearchScoringTests : BaseTests
         Assert.DoesNotContain("complete_title_and_credit", batch.Candidates[0].RejectionReasons);
     }
 
+    [Fact]
+    public async Task ReleaseNamingAnotherBookOfTheSeriesIsRejected()
+    {
+        var other = Result("Primal Hunter T05", "Zogarth");
+        var quality = new Mock<IQualityProfileService>();
+        quality.Setup(q => q.ScoreSearchResults(It.IsAny<List<SearchResult>>(), It.IsAny<QualityProfile>()))
+            .ReturnsAsync([new QualityScore { SearchResult = other, TotalScore = 100 }]);
+        var scorer = New(quality);
+        var book = new Audiobook { Title = "Primal Hunter", Authors = ["Zogarth"], Series = "Primal Hunter", SeriesNumber = "6" };
+        var batch = await scorer.ScoreAsync(book, [other], new());
+        Assert.Contains(batch.Candidates[0].RejectionReasons, r => r.StartsWith("Release is book 5 of the series", StringComparison.Ordinal));
+        Assert.Null(scorer.SelectBest(batch));
+    }
+
     private static AutomaticSearchScoringService New(Mock<IQualityProfileService> quality) =>
         new(quality.Object, Mock.Of<IAudiobookRepository>(), NullLogger<AutomaticSearchScoringService>.Instance, TestAnnotationCatalog.CreateProvider());
 }
