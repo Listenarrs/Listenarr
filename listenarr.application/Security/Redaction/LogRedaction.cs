@@ -129,8 +129,21 @@ namespace Listenarr.Application.Security.Redaction
         // Sanitize a notification webhook URL for logging. Keeps scheme, host and port; drops
         // userinfo and the whole query string (same as SanitizeUrl); and for providers whose
         // credential lives in the path rather than the query, masks the segments that carry it
-        // instead of dropping the whole path.
+        // instead of dropping the whole path. Any known environment secret left in the result
+        // (e.g. a token in a generic URL's path) is masked as well.
         public static string SanitizeWebhookUrl(string? url)
+        {
+            var sanitized = SanitizeWebhookUrlStructure(url);
+
+            foreach (var secret in GetSensitiveValuesFromEnvironment())
+            {
+                sanitized = Regex.Replace(sanitized, Regex.Escape(secret), "<redacted>", RegexOptions.IgnoreCase);
+            }
+
+            return sanitized;
+        }
+
+        private static string SanitizeWebhookUrlStructure(string? url)
         {
             if (string.IsNullOrWhiteSpace(url))
                 return "[empty-url]";
