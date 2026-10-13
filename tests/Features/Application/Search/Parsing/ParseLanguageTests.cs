@@ -33,7 +33,6 @@ namespace Listenarr.Tests.Features.Application.Search.Parsing
         [InlineData("No language here", null)]
         // Non-English codes and full/native names are now recognized.
         [InlineData("Colleen.Hoover.-.Verity.Moerkt.Bedrag-AUDiOBOOK-WEB-DK-2026-CRAViNGS.iNT", "Danish")]
-        [InlineData("Some Title - DAN", "Danish")]
         [InlineData("Some.Title.Dansk.M4B", "Danish")]
         [InlineData("Ein Deutsch Hoerbuch", "German")]
         [InlineData("Title [SWE]", "Swedish")]
@@ -51,6 +50,19 @@ namespace Listenarr.Tests.Features.Application.Search.Parsing
         [InlineData("Great book, it is", null)]
         [InlineData("Say no more", null)]
         [InlineData("Verity-AUDiOBOOK-WEB-SE-CRAViNGS", null)]
+        // A name-like alias (DAN/NOR/EL) with no bracket/scene-tag context is NOT a language;
+        // otherwise an author's first name ("Dan") would win over the real release tag.
+        [InlineData("Some Title - DAN", null)]
+        // Regression (PR #1031 review): the author's first name must not beat the release's
+        // own language tag. "Dan Brown ...-WEB-DE-2017" is German (the DE scene tag), and
+        // "Dan Brown ... Eng" is English (the ENG tag) — neither is Danish.
+        [InlineData("Dan Brown - Origin-AUDiOBOOK-WEB-DE-2017-CRAViNGS", "German")]
+        [InlineData("Dan Brown, The Lost Symbol Audiobook Eng MP3", "English")]
+        // Regression: an ordinary title word immediately before a year is not a scene tag.
+        [InlineData("Stephen King - It 1986", null)]
+        [InlineData("Book No 2022", null)]
+        // Regression: a qualified scene tag beats an ordinary word in the book title.
+        [InlineData("French.Lessons-AUDiOBOOK-WEB-SE-2023-GRP", "Swedish")]
         public void ParseLanguageFromText_RecognizesCodes(string input, string? expected)
         {
             var result = SearchResultAttributeParser.ParseLanguageFromText(input);

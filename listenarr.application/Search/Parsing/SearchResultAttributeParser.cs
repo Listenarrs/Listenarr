@@ -30,14 +30,14 @@ public static class SearchResultAttributeParser
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             { "ENG", "English" }, { "EN", "English" }, { "English", "English" },
-            { "DAN", "Danish" }, { "DA", "Danish" }, { "DK", "Danish" }, { "Danish", "Danish" }, { "Dansk", "Danish" },
+            { "DA", "Danish" }, { "DK", "Danish" }, { "Danish", "Danish" }, { "Dansk", "Danish" },
             { "DUT", "Dutch" }, { "NLD", "Dutch" }, { "NL", "Dutch" }, { "Dutch", "Dutch" }, { "Nederlands", "Dutch" },
             { "GER", "German" }, { "DEU", "German" }, { "DE", "German" }, { "German", "German" }, { "Deutsch", "German" },
             { "FRE", "French" }, { "FRA", "French" }, { "FR", "French" }, { "French", "French" }, { "Francais", "French" }, { "Français", "French" },
             { "SPA", "Spanish" }, { "ES", "Spanish" }, { "Spanish", "Spanish" }, { "Espanol", "Spanish" }, { "Español", "Spanish" }, { "Castellano", "Spanish" },
             { "ITA", "Italian" }, { "Italian", "Italian" }, { "Italiano", "Italian" },
             { "SWE", "Swedish" }, { "SV", "Swedish" }, { "Swedish", "Swedish" }, { "Svenska", "Swedish" },
-            { "NOR", "Norwegian" }, { "NB", "Norwegian" }, { "Norwegian", "Norwegian" }, { "Norsk", "Norwegian" },
+            { "NB", "Norwegian" }, { "Norwegian", "Norwegian" }, { "Norsk", "Norwegian" },
             { "FIN", "Finnish" }, { "FI", "Finnish" }, { "Finnish", "Finnish" }, { "Suomi", "Finnish" },
             { "POR", "Portuguese" }, { "Portuguese", "Portuguese" }, { "Portugues", "Portuguese" }, { "Português", "Portuguese" },
             { "POL", "Polish" }, { "PL", "Polish" }, { "Polish", "Polish" }, { "Polski", "Polish" },
@@ -47,18 +47,22 @@ public static class SearchResultAttributeParser
             { "CES", "Czech" }, { "CZE", "Czech" }, { "CS", "Czech" }, { "CZ", "Czech" }, { "Czech", "Czech" },
             { "HUN", "Hungarian" }, { "HU", "Hungarian" }, { "Hungarian", "Hungarian" }, { "Magyar", "Hungarian" },
             { "TUR", "Turkish" }, { "TR", "Turkish" }, { "Turkish", "Turkish" },
-            { "ELL", "Greek" }, { "GRE", "Greek" }, { "EL", "Greek" }, { "Greek", "Greek" },
+            { "ELL", "Greek" }, { "GRE", "Greek" }, { "Greek", "Greek" },
             { "KOR", "Korean" }, { "KO", "Korean" }, { "Korean", "Korean" },
             { "ISL", "Icelandic" }, { "Icelandic", "Icelandic" },
         };
 
-    // Short codes that are also ordinary words ("it", "no", "se", "pt") — trusted only
-    // inside [brackets] or (parentheses), never as a bare title token, so a scene tag like
-    // "-SE-" is not mistaken for Swedish.
+    // Tokens that are also ordinary words or names — the short codes ("it", "no", "se",
+    // "pt") and the name-like aliases ("DAN" as in "Dan Brown", "NOR", "EL") — are trusted
+    // only inside [brackets]/(parentheses) or in the delimited-before-the-year scene-tag
+    // position, never as a bare title token. This stops an author's name or a stray word
+    // from being read as the release language (e.g. "Dan Brown ...-WEB-DE-2017" is German,
+    // not Danish).
     private static readonly IReadOnlyDictionary<string, string> AmbiguousLanguageCodes =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             { "IT", "Italian" }, { "NO", "Norwegian" }, { "SE", "Swedish" }, { "PT", "Portuguese" },
+            { "DAN", "Danish" }, { "NOR", "Norwegian" }, { "EL", "Greek" },
         };
 
     private static readonly IReadOnlyDictionary<string, string> AllLanguageCodes =
@@ -151,17 +155,20 @@ public static class SearchResultAttributeParser
         var bracketed = MatchLanguageToken(normalized, AllLanguageCodes, bracketedOnly: true);
         if (bracketed != null) return bracketed;
 
-        // Elsewhere only trust unambiguous tokens, so a bare scene tag like "-SE-" is not
-        // read as a language on its own.
-        var standalone = MatchLanguageToken(normalized, LanguageCodes, bracketedOnly: false);
-        if (standalone != null) return standalone;
+        // Audiobook scene releases encode the language as a code wedged tightly between scene
+        // delimiters immediately before the year, e.g. "...AUDiOBOOK-WEB-SE-2023-GROUP"
+        // (Swedish) or "...-DK-2026-..." (Danish). That is the release's own language label,
+        // so it is checked BEFORE the standalone pass — otherwise an ordinary word in the book
+        // title ("French.Lessons-...-WEB-SE-2023") would override the release tag. Requiring the
+        // tight scene delimiters (no spaces) keeps human titles like "It 1986" / "Book No 2022"
+        // from being mistaken for a scene tag.
+        var sceneTag = MatchReleaseTagLanguage(normalized, AllLanguageCodes);
+        if (sceneTag != null) return sceneTag;
 
-        // Audiobook scene releases encode the language as a delimited 2-letter code immediately
-        // before the year, e.g. "...AUDiOBOOK-WEB-SE-2023-GROUP" (Swedish) or "...-DK-2026-..."
-        // (Danish). In that specific position the otherwise-ambiguous short codes (SE/IT/NO/PT)
-        // are languages, so accept them when they sit between delimiters and are followed by a
-        // 4-digit year — which avoids matching ordinary words like "it"/"no" elsewhere.
-        return MatchReleaseTagLanguage(normalized, AllLanguageCodes);
+        // Elsewhere only trust unambiguous tokens. The ambiguous short codes and the name-like
+        // aliases (DAN/NOR/EL) are excluded here so an author's name or a stray word ("Dan
+        // Brown", "it", "no") is not read as a language on its own.
+        return MatchLanguageToken(normalized, LanguageCodes, bracketedOnly: false);
     }
 
     private static string? MatchReleaseTagLanguage(
@@ -174,8 +181,10 @@ public static class SearchResultAttributeParser
             return null;
         }
 
-        // <delimiter><code><delimiter><19xx|20xx year>
-        var pattern = $@"(?<=[-._ ])(?<tok>{alternation})(?=[-._ ](?:19|20)\d{{2}}(?:\b|[-._ ]))";
+        // <scene-delimiter><code><scene-delimiter><19xx|20xx year>. The delimiters are the
+        // tight scene characters (-._) only — a plain space is excluded so an ordinary title
+        // word before a year ("It 1986", "Book No 2022") is not accepted as a scene tag.
+        var pattern = $@"(?<=[-._])(?<tok>{alternation})(?=[-._](?:19|20)\d{{2}}(?:\b|[-._ ]))";
         var match = Regex.Match(normalized, pattern, RegexOptions.IgnoreCase);
         return match.Success && codes.TryGetValue(match.Groups["tok"].Value, out var language)
             ? language
