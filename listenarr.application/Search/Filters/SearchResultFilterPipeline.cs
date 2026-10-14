@@ -38,14 +38,16 @@ public class SearchResultFilterPipeline
     /// </summary>
     /// <param name="results">Results to filter</param>
     /// <param name="logFilteredResults">Whether to log filtered results</param>
+    /// <param name="audiobook">Optional audiobook context so context-aware filters
+    /// (e.g., title-relevance) can use it; otherwise they fail open.</param>
     /// <returns>Filtered list with unwanted results removed</returns>
-    public List<SearchResult> ApplyFilters(List<SearchResult> results, bool logFilteredResults = true)
+    public List<SearchResult> ApplyFilters(List<SearchResult> results, bool logFilteredResults = true, Audiobook? audiobook = null)
     {
         var filtered = new List<SearchResult>();
 
         foreach (var result in results)
         {
-            var matchingFilter = _filters.FirstOrDefault(f => f.ShouldFilter(result));
+            var matchingFilter = _filters.FirstOrDefault(f => f.ShouldFilter(result, audiobook));
             bool shouldFilter = matchingFilter != null;
             string? filterReason = matchingFilter?.FilterReason;
 

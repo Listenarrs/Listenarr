@@ -59,6 +59,7 @@ public static class ListenarrWorkflowRegistration
         services.AddScoped<IndexerSearchWorkflow>();
         services.AddScoped<ISearchResultFilter, KindleEditionFilter>();
         services.AddScoped<ISearchResultFilter, AudiobookOnlyFilter>();
+        services.AddScoped<ISearchResultFilter, RelevanceFilter>();
         services.AddScoped<ISearchResultFilter, PromotionalTitleFilter>();
         services.AddScoped<ISearchResultFilter, ProductLikeTitleFilter>();
         services.AddScoped<ISearchResultFilter, MissingInformationFilter>();
