@@ -39,7 +39,8 @@ export interface LibraryImportItem {
   fileCount: number
   // Match state
   selectedMatch: SearchResult | null
-  hasSearched: boolean // true once auto-search was attempted
+  hasSearched: boolean // true once auto-search completed and returned an answer
+  searchFailed: boolean // true when the lookup errored (rate limit, network) - not "no match"
   isSearching: boolean // currently in-flight
   // Selection
   selected: boolean
@@ -89,6 +90,7 @@ function unmatchedToImportItem(item: UnmatchedFileItem): LibraryImportItem {
     fileCount: item.fileCount,
     selectedMatch: null,
     hasSearched: false,
+    searchFailed: false,
     isSearching: false,
     selected: false,
   }
@@ -143,6 +145,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   const action = ref<'none' | 'move' | 'hardlink/copy'>('none')
   const monitor = ref<'none' | 'all'>('all')
   const metadataFetchCount = ref(0)
+  const metadataFailureCount = ref(0)
   const importErrors = ref<string[]>([])
 
   // ─── Computed ────────────────────────────────────────────────────────────────
@@ -151,6 +154,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   const selectedCount = computed(() => itemList.value.filter((i) => i.selected).length)
   const hasUnprocessedItems = computed(() => itemList.value.some((i) => !i.hasSearched))
   const processedCount = computed(() => itemList.value.filter((i) => i.hasSearched).length)
+  const failedCount = computed(() => itemList.value.filter((i) => i.searchFailed).length)
   const matchedCount = computed(() => itemList.value.filter((i) => i.selectedMatch).length)
 
   // ─── Scan ─────────────────────────────────────────────────────────────────
@@ -173,6 +177,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
             ...unmatchedToImportItem(item),
             selectedMatch: existing.selectedMatch,
             hasSearched: existing.hasSearched,
+            searchFailed: existing.searchFailed,
             isSearching: false,
             selected: existing.selected,
           }
@@ -181,6 +186,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
             ...unmatchedToImportItem(item),
             selectedMatch: p.selectedMatch,
             hasSearched: p.hasSearched,
+            searchFailed: p.searchFailed ?? false,
             isSearching: false,
             selected: p.selected,
           }
@@ -305,6 +311,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   type PersistedEntry = {
     selectedMatch: SearchResult | null
     hasSearched: boolean
+    searchFailed?: boolean
     selected: boolean
   }
 
@@ -319,6 +326,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
       state[path] = {
         selectedMatch: item.selectedMatch,
         hasSearched: item.hasSearched,
+        searchFailed: item.searchFailed,
         selected: item.selected,
       }
     }
@@ -347,6 +355,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     lookupQueue.value = unsearched
     isProcessing.value = true
     metadataFetchCount.value = 0
+    metadataFailureCount.value = 0
     processNext()
   }
 
@@ -386,18 +395,24 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
             ...current,
             isSearching: false,
             hasSearched: true,
+            searchFailed: false,
             selectedMatch: first,
             selected: first !== null,
           },
         }
         _persistMatches()
       } catch {
+        // A failed lookup is not an answer. Leaving hasSearched false keeps the row in the
+        // unprocessed set so re-running Start Matching retries it, instead of recording a
+        // rate-limited request as a book that simply is not on Audible.
+        metadataFailureCount.value++
         const current = items.value[id]
         if (current)
           items.value = {
             ...items.value,
-            [id]: { ...current, isSearching: false, hasSearched: true },
+            [id]: { ...current, isSearching: false, searchFailed: true },
           }
+        _persistMatches()
       }
     }
     isProcessing.value = false
@@ -595,6 +610,8 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     action,
     monitor,
     metadataFetchCount,
+    metadataFailureCount,
+    failedCount,
     importErrors,
     // Computed
     itemList,
