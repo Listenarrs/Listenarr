@@ -121,6 +121,29 @@
                 </label>
 
                 <div class="repair-fields">
+                  <label class="repair-field">
+                    <span>ASIN</span>
+                    <input
+                      v-model="row.asin"
+                      type="text"
+                      class="form-input"
+                      data-testid="repair-asin"
+                      @input="onAsinTyped(row)"
+                    />
+                  </label>
+                  <label class="repair-field">
+                    <span>Region</span>
+                    <select
+                      v-model="row.region"
+                      class="form-select"
+                      data-testid="repair-region"
+                      @change="onRegionEdited(row)"
+                    >
+                      <option v-for="o in regionOptionsFor(row)" :key="o.value" :value="o.value">
+                        {{ o.label }}
+                      </option>
+                    </select>
+                  </label>
                   <label class="repair-field repair-field-name">
                     <span>Name</span>
                     <input
@@ -132,34 +155,11 @@
                       @keydown.enter.prevent="search(row)"
                     />
                   </label>
-                  <label class="repair-field">
-                    <span>Region</span>
-                    <select
-                      v-model="row.region"
-                      class="form-select"
-                      data-testid="repair-region"
-                      @change="onRegionEdited(row)"
-                    >
-                      <option v-for="o in searchRegionOptions" :key="o.value" :value="o.value">
-                        {{ o.label }}
-                      </option>
-                    </select>
-                  </label>
-                  <label class="repair-field">
-                    <span>ASIN</span>
-                    <input
-                      v-model="row.asin"
-                      type="text"
-                      class="form-input"
-                      data-testid="repair-asin"
-                      @input="onAsinTyped(row)"
-                    />
-                  </label>
                   <button
                     type="button"
                     class="btn btn-secondary repair-search-btn"
                     data-testid="repair-search"
-                    :disabled="row.searching || !row.query.trim()"
+                    :disabled="row.searching || !searchTerm(row)"
                     @click="search(row)"
                   >
                     <PhSpinner v-if="row.searching" class="ph-spin" :size="14" />
@@ -321,6 +321,8 @@ interface RepairResult {
   detail: string
 }
 
+const ASIN_PATTERN = /^[A-Z0-9]{10}$/i
+
 const props = withDefaults(
   defineProps<{
     visible?: boolean
@@ -339,6 +341,9 @@ const emit = defineEmits<{
 }>()
 
 const configStore = useConfigurationStore()
+const configuredRegion = ref('us')
+// Catalogue used when the configured one has no record, as in the rest of the matching
+const FALLBACK_REGION = 'us'
 const loading = ref(false)
 const executing = ref(false)
 const finished = ref(false)
@@ -350,6 +355,15 @@ const progress = ref(0)
 const selectedRows = computed(() => rows.value.filter((r) => r.selected))
 const selectedCount = computed(() => selectedRows.value.length)
 const repairedIds = computed(() => results.value.filter((r) => r.success).map((r) => r.id))
+
+// Only the regions the matching uses: the configured one and the US fallback. A region a book already
+// has (set before, or by hand) stays available for that book so it can be shown and reverted.
+function regionOptionsFor(row: RepairRow) {
+  const allowed = new Set(
+    [configuredRegion.value, FALLBACK_REGION, row.initial.region].filter(Boolean),
+  )
+  return searchRegionOptions.filter((o) => allowed.has(o.value))
+}
 
 function regionLabel(region: string): string {
   return searchRegionOptions.find((o) => o.value === region)?.label ?? region
@@ -387,7 +401,7 @@ async function load() {
   rows.value = []
   try {
     if (!configStore.applicationSettings) await configStore.loadApplicationSettings()
-    const configuredRegion = normalizeSearchRegion(
+    configuredRegion.value = normalizeSearchRegion(
       configStore.applicationSettings?.defaultSearchRegion,
     )
     rows.value = await Promise.all(
@@ -405,11 +419,11 @@ async function load() {
           currentRegion: asin?.region ?? '',
           identifiers: ids.identifiers ?? [],
           query: book.title ?? '',
-          region: asin?.region || configuredRegion,
+          region: asin?.region || configuredRegion.value,
           asin: asin?.value ?? book.asin ?? '',
           initial: {
             query: book.title ?? '',
-            region: asin?.region || configuredRegion,
+            region: asin?.region || configuredRegion.value,
             asin: asin?.value ?? book.asin ?? '',
           },
           selected: true,
@@ -428,16 +442,25 @@ async function load() {
   }
 }
 
+// What Search looks up: an ASIN typed for this book first (it is what gets saved), otherwise the
+// name, which may itself be an ASIN. The ASIN of the old match is never searched: it's the book
+// being replaced.
+function searchTerm(row: RepairRow): string {
+  const asin = row.asin.trim().toUpperCase()
+  if (row.chosen && ASIN_PATTERN.test(asin) && asin !== row.currentAsin.toUpperCase()) return asin
+  return row.query.trim()
+}
+
 async function search(row: RepairRow) {
-  const query = row.query.trim()
-  if (!query) return
+  const term = searchTerm(row)
+  if (!term) return
   row.searching = true
   try {
-    const isAsin = /^[A-Z0-9]{10}$/i.test(query)
+    const isAsin = ASIN_PATTERN.test(term)
     const found = await apiService.advancedSearch(
       isAsin
-        ? { asin: query.toUpperCase(), region: row.region, cap: 5 }
-        : { title: query, region: row.region, cap: 8 },
+        ? { asin: term.toUpperCase(), region: row.region, cap: 5 }
+        : { title: term, region: row.region, cap: 8 },
     )
     // An ASIN the catalogue doesn't sell comes back as an empty stub without a title
     row.results = (found ?? []).filter((r) => r.asin && r.title)
@@ -550,8 +573,7 @@ async function repair() {
     progress.value++
     try {
       if (asinChanged(row)) {
-        if (!/^[A-Z0-9]{10}$/i.test(row.asin.trim()))
-          throw new Error('The ASIN must be 10 characters')
+        if (!ASIN_PATTERN.test(row.asin.trim())) throw new Error('The ASIN must be 10 characters')
         await apiService.updateAudiobookIdentifiers(row.id, identifiersWithPrimaryAsin(row))
       }
       const rescanned = await rescan(row.id)
@@ -684,7 +706,7 @@ watch(
 
 .repair-fields {
   display: grid;
-  grid-template-columns: minmax(10rem, 2fr) minmax(8rem, 1fr) minmax(8rem, 1fr) auto;
+  grid-template-columns: minmax(8rem, 1fr) minmax(8rem, 1fr) minmax(10rem, 2fr) auto;
   gap: 0.5rem;
   align-items: end;
   margin-top: 0.75rem;

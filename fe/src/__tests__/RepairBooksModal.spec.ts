@@ -244,6 +244,68 @@ describe('RepairBooksModal', () => {
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeUndefined()
   })
 
+  it('searches the ASIN typed for the book first, to show which book it is', async () => {
+    apiMocks.advancedSearch.mockResolvedValue([
+      { asin: 'B0BK9W82PQ', title: 'Primal Hunter 4', language: 'english', region: 'us' },
+    ])
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await row(wrapper).get('[data-testid="repair-region"]').setValue('us')
+    await row(wrapper).get('[data-testid="repair-asin"]').setValue('B0BK9W82PQ')
+    await row(wrapper).get('[data-testid="repair-search"]').trigger('click')
+    await flushPromises()
+
+    expect(apiMocks.advancedSearch).toHaveBeenCalledWith({
+      asin: 'B0BK9W82PQ',
+      region: 'us',
+      cap: 5,
+    })
+    expect(row(wrapper).text()).toContain('Primal Hunter 4')
+  })
+
+  it('never searches the ASIN of the old match: it searches the name instead', async () => {
+    apiMocks.advancedSearch.mockResolvedValue([])
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await row(wrapper).get('[data-testid="repair-search"]').trigger('click')
+    await flushPromises()
+
+    expect(apiMocks.advancedSearch).toHaveBeenCalledWith({
+      title: 'Primal Hunter, Vol. 7',
+      region: 'fr',
+      cap: 8,
+    })
+  })
+
+  it('only offers the configured region and the US fallback', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+
+    const options = row(wrapper)
+      .findAll('[data-testid="repair-region"] option')
+      .map((o) => (o.element as HTMLOptionElement).value)
+    expect(options.sort()).toEqual(['fr', 'us'])
+  })
+
+  it("keeps a book's existing other region available so it can be shown and reverted", async () => {
+    apiMocks.getAudiobookIdentifiers.mockResolvedValue({
+      audiobookId: 7,
+      identifiers: [{ ...frenchAsin, region: 'uk' }],
+    })
+    const wrapper = mountModal()
+    await flushPromises()
+
+    const options = row(wrapper)
+      .findAll('[data-testid="repair-region"] option')
+      .map((o) => (o.element as HTMLOptionElement).value)
+    expect(options.sort()).toEqual(['fr', 'uk', 'us'])
+    expect(
+      (row(wrapper).get('[data-testid="repair-region"]').element as HTMLSelectElement).value,
+    ).toBe('uk')
+  })
+
   it('only rescans when the ASIN and region are unchanged', async () => {
     const wrapper = mountModal()
     await flushPromises()
