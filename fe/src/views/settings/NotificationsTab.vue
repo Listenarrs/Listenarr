@@ -319,7 +319,7 @@
           <FormSection title="Triggers" :icon="PhBell">
             <div class="webhook-triggers triggers-grid">
               <CheckboxCard
-                v-for="t in ['book-added', 'book-downloading', 'book-available', 'book-completed']"
+                v-for="t in orderedTriggerList"
                 :key="t"
                 :modelValue="webhookForm.triggers.includes(t)"
                 @update:modelValue="onToggleTriggerValue(t, $event)"
@@ -477,6 +477,15 @@ const webhookFormErrors = reactive({
 const testingWebhookConfig = ref(false)
 const savingWebhook = ref(false)
 
+// Backend-served lifecycle-trigger catalog (single source of truth). Seeded with the historical
+// set so the form still renders if the request fails; replaced on mount by GET /notifications/triggers.
+const availableTriggers = ref<Array<{ id: string; name: string; description: string }>>([
+  { id: 'book-added', name: 'Book Added', description: '' },
+  { id: 'book-downloading', name: 'Download Started', description: '' },
+  { id: 'book-available', name: 'Available', description: '' },
+  { id: 'book-completed', name: 'Completed', description: '' },
+])
+
 // Computed
 const isWebhookFormValid = computed(() => {
   if (!webhookForm.name.trim() || webhookForm.type === '') return false
@@ -517,10 +526,18 @@ function generateUUID(): string {
 
 const getTriggerIcon = (trigger: string) => {
   const iconMap: Record<string, unknown> = {
-    'book-added': PhPlus,
+    'book-wanted': PhBell,
+    'book-grabbed': PhDownloadSimple,
     'book-downloading': PhDownloadSimple,
+    'book-download-completed': PhCheckCircle,
+    'book-imported': PhCircleWavyCheck,
     'book-available': PhCheckCircle,
     'book-completed': PhCircleWavyCheck,
+    'book-download-failed': PhXCircle,
+    'book-import-failed': PhXCircle,
+    'book-added': PhPlus,
+    'book-renamed': PhPencil,
+    'book-deleted': PhTrash,
   }
   return iconMap[trigger] || PhBell
 }
@@ -549,15 +566,18 @@ const getTriggerClass = (trigger: string): string => {
   return classMap[trigger] || ''
 }
 
-// Return triggers in a consistent display order
-const orderedTriggerList = ['book-added', 'book-downloading', 'book-available', 'book-completed']
+// Display order follows the backend catalog (falls back to the seeded list before it loads).
+const orderedTriggerList = computed(() => availableTriggers.value.map((t) => t.id))
 
 const orderedTriggers = (triggers: string[] | undefined) => {
   if (!triggers || triggers.length === 0) return []
-  return orderedTriggerList.filter((t) => triggers.includes(t))
+  return orderedTriggerList.value.filter((t) => triggers.includes(t))
 }
 
 const formatTriggerName = (trigger: string): string => {
+  const fromCatalog = availableTriggers.value.find((t) => t.id === trigger)?.name
+  if (fromCatalog) return fromCatalog
+  // Fallback labels for any id not present in the catalog.
   const nameMap: Record<string, string> = {
     'book-added': 'Book Added',
     'book-downloading': 'Download Started',
@@ -1015,9 +1035,21 @@ const persistWebhooks = async () => {
 }
 
 // Initialize webhooks from settings
-onMounted(() => {
+onMounted(async () => {
   if (props.settings?.webhooks) {
     webhooks.value = props.settings.webhooks
+  }
+  try {
+    const triggers = await apiService.getNotificationTriggers()
+    if (Array.isArray(triggers) && triggers.length > 0) {
+      availableTriggers.value = triggers
+    }
+  } catch (err) {
+    // Non-fatal: keep the seeded fallback list so the form remains usable offline.
+    errorTracking.captureException(err, {
+      component: 'NotificationsTab',
+      operation: 'getNotificationTriggers',
+    })
   }
 })
 

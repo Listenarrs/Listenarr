@@ -1,3 +1,5 @@
+using Listenarr.Domain.Notifications;
+
 namespace Listenarr.Api.Features.Library
 {
     public sealed partial class LibraryAddWorkflow
@@ -24,13 +26,24 @@ namespace Listenarr.Api.Features.Library
                     asin = audiobook.Asin,
                     publisher = audiobook.Publisher,
                     year = audiobook.PublishYear,
-                    imageUrl = audiobook.ImageUrl
+                    imageUrl = audiobook.ImageUrl,
+                    monitored = audiobook.Monitored
                 };
                 await _notificationService.SendNotificationAsync(
-                    "book-added",
+                    NotificationTriggers.BookAdded,
                     data,
                     settings.WebhookUrl,
                     settings.EnabledNotificationTriggers);
+
+                // A monitored book is "wanted"; fire the dedicated trigger too.
+                if (audiobook.Monitored)
+                {
+                    await _notificationService.SendNotificationAsync(
+                        NotificationTriggers.BookWanted,
+                        data,
+                        settings.WebhookUrl,
+                        settings.EnabledNotificationTriggers);
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException
                 && ex is not OutOfMemoryException

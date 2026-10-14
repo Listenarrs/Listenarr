@@ -860,6 +860,15 @@ class ApiService {
     })
   }
 
+  // Backend-served catalog of notification lifecycle triggers (single source of truth).
+  async getNotificationTriggers(): Promise<
+    Array<{ id: string; name: string; description: string }>
+  > {
+    return this.request<Array<{ id: string; name: string; description: string }>>(
+      '/notifications/triggers',
+    )
+  }
+
   // Application Settings
   async getApplicationSettings(): Promise<ApplicationSettings> {
     return this.request<ApplicationSettings>('/configuration/settings')
