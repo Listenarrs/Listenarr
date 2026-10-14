@@ -46,7 +46,9 @@ internal static class HardlinkIdentityCapability
     internal static bool SupportsFileSystemType(uint type) =>
         // CIFS can allocate distinct client inode numbers for two names of one
         // server object. Neither SMB version nor serverino proves link equality.
-        type is not (0xff534d42 or 0xfe534d42);
+        // FUSE (0x65735546) covers userspace mounts such as rclone, sshfs or s3fs:
+        // many reject link() outright and none guarantees a stable link identity.
+        type is not (0xff534d42 or 0xfe534d42 or 0x65735546);
 
     [DllImport("libc", EntryPoint = "fstatfs", SetLastError = true)]
     private static extern int FStatFs(int descriptor, IntPtr buffer);
