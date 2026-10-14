@@ -80,9 +80,13 @@ export function useToast() {
       push('info', title, message, timeoutMs),
     success: (title: string, message: string, timeoutMs?: number) =>
       push('success', title, message, timeoutMs),
-    warning: (title: string, message: string, timeoutMs?: number) =>
+    // Warnings and errors are sticky by default (timeoutMs = 0): they carry
+    // information the user needs to act on — a 5s auto-dismiss too often vanishes
+    // before it can be read. They're dismissed via the toast's close button.
+    // Callers can still pass an explicit timeout to opt back into auto-dismiss.
+    warning: (title: string, message: string, timeoutMs = 0) =>
       push('warning', title, message, timeoutMs),
-    error: (title: string, message: string, timeoutMs?: number) =>
+    error: (title: string, message: string, timeoutMs = 0) =>
       push('error', title, message, timeoutMs),
   }
 }
