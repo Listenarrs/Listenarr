@@ -135,7 +135,7 @@
                     <span>Region</span>
                     <select
                       v-model="row.region"
-                      class="form-select"
+                      class="form-input"
                       data-testid="repair-region"
                       @change="onRegionEdited(row)"
                     >
