@@ -25,7 +25,7 @@ namespace Listenarr.Application.Search.Filters
     {
         public string FilterReason => "missing_author_or_title";
 
-        public bool ShouldFilter(SearchResult result)
+        public bool ShouldFilter(SearchResult result, Audiobook? audiobook = null)
         {
             return string.IsNullOrWhiteSpace(result.Artist) || string.IsNullOrWhiteSpace(result.Title);
         }

@@ -28,8 +28,14 @@ public interface ISearchResultFilter
     /// Determines if the result should be filtered out (excluded).
     /// </summary>
     /// <param name="result">The search result to evaluate</param>
+    /// <param name="audiobook">
+    /// The audiobook the search is for, when known. Context-aware filters (e.g.
+    /// relevance) use it to judge a result against a specific target; filters that
+    /// don't need it ignore it. When null (manual search, per-result enrichment),
+    /// context-aware filters must fail open and keep the result.
+    /// </param>
     /// <returns>True if the result should be filtered out, false to keep it</returns>
-    bool ShouldFilter(SearchResult result);
+    bool ShouldFilter(SearchResult result, Audiobook? audiobook = null);
 
     /// <summary>
     /// Reason why the result was filtered (for logging/debugging).

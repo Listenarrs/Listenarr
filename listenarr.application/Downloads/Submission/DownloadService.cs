@@ -17,6 +17,7 @@
  */
 
 using Listenarr.Application.Common;
+using Listenarr.Application.Search.Filters;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Downloads.Submission
@@ -28,6 +29,7 @@ namespace Listenarr.Application.Downloads.Submission
         ILogger<DownloadService> logger,
         IQualityProfileService qualityProfileService,
         ISearchService searchService,
+        SearchResultFilterPipeline filterPipeline,
         IDownloadClientGateway clientGateway,
         IDownloadQueueService downloadQueueService,
         INotificationService notificationService,
@@ -158,6 +160,8 @@ namespace Listenarr.Application.Downloads.Submission
                 };
             }
 
+            // Reject results irrelevant to this audiobook before scoring (an empty set falls through below).
+            searchResults = filterPipeline.ApplyFilters(searchResults, audiobook: audiobook);
             // Score results against quality profile
             var scoredResults = await qualityProfileService.ScoreSearchResults(searchResults, audiobook.QualityProfile);
 

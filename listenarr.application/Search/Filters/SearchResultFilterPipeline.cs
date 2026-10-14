@@ -38,14 +38,15 @@ public class SearchResultFilterPipeline
     /// </summary>
     /// <param name="results">Results to filter</param>
     /// <param name="logFilteredResults">Whether to log filtered results</param>
+    /// <param name="audiobook">The audiobook the search is for, when known — passed to context-aware filters.</param>
     /// <returns>Filtered list with unwanted results removed</returns>
-    public List<SearchResult> ApplyFilters(List<SearchResult> results, bool logFilteredResults = true)
+    public List<SearchResult> ApplyFilters(List<SearchResult> results, bool logFilteredResults = true, Audiobook? audiobook = null)
     {
         var filtered = new List<SearchResult>();
 
         foreach (var result in results)
         {
-            var matchingFilter = _filters.FirstOrDefault(f => f.ShouldFilter(result));
+            var matchingFilter = _filters.FirstOrDefault(f => f.ShouldFilter(result, audiobook));
             bool shouldFilter = matchingFilter != null;
             string? filterReason = matchingFilter?.FilterReason;
 
@@ -69,9 +70,9 @@ public class SearchResultFilterPipeline
     /// <summary>
     /// Checks if a single result would be filtered.
     /// </summary>
-    public bool WouldFilter(SearchResult result, out string? filterReason)
+    public bool WouldFilter(SearchResult result, out string? filterReason, Audiobook? audiobook = null)
     {
-        foreach (var filter in _filters.Where(f => f.ShouldFilter(result)))
+        foreach (var filter in _filters.Where(f => f.ShouldFilter(result, audiobook)))
         {
             filterReason = filter.FilterReason;
             return true;

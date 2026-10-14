@@ -27,7 +27,7 @@ public class AudiobookOnlyFilter : ISearchResultFilter
 {
     public string FilterReason => "non_audiobook_filtered";
 
-    public bool ShouldFilter(SearchResult result)
+    public bool ShouldFilter(SearchResult result, Audiobook? audiobook = null)
     {
         // If enriched with a metadata source, prefer that metadata only when the
         // metadata source is a trusted audio provider or the enriched metadata
