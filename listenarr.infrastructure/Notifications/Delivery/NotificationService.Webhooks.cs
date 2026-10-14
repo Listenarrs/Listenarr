@@ -81,6 +81,8 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
                 }
 #pragma warning restore CA1031
 
+                // Discord handled; do not fall through to the generic sender (would double-post).
+                return;
             }
 
             // NTFY-specific handling (https://docs.ntfy.sh/publish/)
@@ -139,6 +141,8 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
                     _logger.LogError(ex, "Invalid operation while sending NTFY notification to {WebhookUrl}", LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment()));
                 }
 
+                // NTFY handled; do not fall through to the generic sender (would double-post).
+                return;
             }
 
             // Pushover (https://pushover.net/api)
