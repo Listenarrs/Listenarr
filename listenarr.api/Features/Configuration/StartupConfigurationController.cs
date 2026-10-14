@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using System.Text.RegularExpressions;
 using Listenarr.Api.Attributes;
 using Listenarr.Api.Dtos;
 using Microsoft.AspNetCore.Authorization;
@@ -26,7 +27,7 @@ namespace Listenarr.Api.Features.Configuration
     [ApiController]
     [Route("api/v{version:apiVersion}/configuration")]
     [RequireAdminOrApiKey]
-    public class StartupConfigurationController : ControllerBase
+    public partial class StartupConfigurationController : ControllerBase
     {
         private readonly IConfigurationService _configurationService;
         private readonly IStartupConfigService _startupConfigService;
@@ -88,11 +89,22 @@ namespace Listenarr.Api.Features.Configuration
         [Tags("Settings")]
         [HttpPost("startupconfig")]
         [ProducesResponseType(typeof(StartupConfig), 200)]
+        [ProducesResponseType(400)]
         [ProducesResponseType(401)]
         [ProducesResponseType(403)]
         [ProducesResponseType(500)]
         public async Task<ActionResult<StartupConfig>> SaveStartupConfig([FromBody] StartupConfig config)
         {
+            if (!IsValidUrlBase(config.UrlBase))
+            {
+                var stored = await _configurationService.GetStartupConfigAsync();
+                if (!UrlBaseUnchanged(stored?.UrlBase, config.UrlBase))
+                {
+                    _logger.LogWarning("Rejected a startup config whose UrlBase is a full URL rather than a path.");
+                    return BadRequest(new { error = InvalidUrlBaseMessage });
+                }
+            }
+
             config.ApiVersion = NormalizeStartupApiVersion(config.ApiVersion);
             await _configurationService.SaveStartupConfigAsync(config);
             var savedConfig = await _configurationService.GetStartupConfigAsync();
@@ -108,6 +120,40 @@ namespace Listenarr.Api.Features.Configuration
             }
 
             return Ok(savedConfig);
+        }
+
+        internal const string InvalidUrlBaseMessage = "Must be a valid URL path (ie: '/listenarr')";
+
+        /// <summary>
+        /// A full URL in <c>UrlBase</c> is stored happily and then ignored at startup, because the
+        /// path base is a path. Sonarr, Radarr and Readarr all refuse it at the controller with
+        /// <c>ValidUrlBase</c>; this is the same rule and the same message.
+        /// </summary>
+        internal static bool IsValidUrlBase(string? urlBase)
+        {
+            if (string.IsNullOrWhiteSpace(urlBase))
+            {
+                return true;
+            }
+
+            return !AbsoluteUrlBase().IsMatch(urlBase.Trim());
+        }
+
+        [GeneratedRegex(@"^/?https?://[-_a-z0-9.]+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
+        private static partial Regex AbsoluteUrlBase();
+
+        /// <summary>
+        /// An absolute UrlBase already on disk predates ApplicationUrl and was, until this
+        /// setting existed, the only way to put images in outbound notifications. SettingsView
+        /// round-trips the whole stored startup config on every save, so rejecting that stored
+        /// value outright here would lock an install that already has one out of every future
+        /// Settings save, including fields that have nothing to do with UrlBase. Leaving the
+        /// value exactly as it was is let through; submitting a different absolute value is
+        /// still rejected.
+        /// </summary>
+        internal static bool UrlBaseUnchanged(string? storedUrlBase, string? submittedUrlBase)
+        {
+            return string.Equals(storedUrlBase?.Trim(), submittedUrlBase?.Trim(), StringComparison.Ordinal);
         }
 
         private string NormalizeStartupApiVersion(string? configuredApiVersion)
