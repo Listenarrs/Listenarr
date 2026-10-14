@@ -21,21 +21,40 @@ namespace Listenarr.Application.Downloads.Queue
         [GeneratedRegex(@"\s*[\(\[][^\)\]]*[\)\]]", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
         private static partial Regex EditionSuffix();
 
-        public static IReadOnlyList<string> Expand(string primaryQuery, string? title)
+        public static IReadOnlyList<string> RetryQueries(string primaryQuery, string? title)
         {
-            var candidates = new List<string> { primaryQuery };
-
-            if (!string.IsNullOrWhiteSpace(title))
+            if (string.IsNullOrWhiteSpace(title))
             {
-                candidates.Add(title);
-                candidates.Add(EditionSuffix().Replace(title, string.Empty));
+                return [];
             }
 
-            return candidates
-                .Select(c => c?.Trim() ?? string.Empty)
-                .Where(c => !string.IsNullOrEmpty(c))
+            return new[] { title, EditionSuffix().Replace(title, string.Empty) }
+                .Select(retry => retry.Trim())
+                .Where(retry => retry.Length > 0 && !retry.Equals(primaryQuery.Trim(), StringComparison.OrdinalIgnoreCase))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
+        }
+
+        public static async Task<(string Query, List<SearchResult> Results)> SearchAsync(
+            ISearchService searchService,
+            string primaryQuery,
+            string? title)
+        {
+            var results = await searchService.SearchAsync(primaryQuery, isAutomaticSearch: true);
+            var query = primaryQuery;
+
+            foreach (var retry in RetryQueries(primaryQuery, title))
+            {
+                if (results.Count > 0)
+                {
+                    break;
+                }
+
+                query = retry;
+                results = await searchService.SearchAsync(retry, RetryCategory, isAutomaticSearch: true);
+            }
+
+            return (query, results);
         }
     }
 }

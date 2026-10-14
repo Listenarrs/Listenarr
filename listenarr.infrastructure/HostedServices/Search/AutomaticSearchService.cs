@@ -179,17 +179,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             _logger.LogInformation("Searching for audiobook '{Title}' with query: {Query}", audiobook.Title, searchQuery);
 
             // Search for results
-            var searchResults = await searchService.SearchAsync(searchQuery, isAutomaticSearch: true);
-            foreach (var candidate in SearchQueryFallbacks.Expand(searchQuery, audiobook.Title))
-            {
-                if (searchResults.Count > 0)
-                {
-                    break;
-                }
-
-                searchQuery = candidate;
-                searchResults = await searchService.SearchAsync(candidate, SearchQueryFallbacks.RetryCategory, isAutomaticSearch: true);
-            }
+            (searchQuery, var searchResults) = await SearchQueryFallbacks.SearchAsync(searchService, searchQuery, audiobook.Title);
             _logger.LogInformation("Found {Count} raw search results for audiobook '{Title}'", searchResults.Count, audiobook.Title);
 
             // Broadcast detailed debug info about the raw search results to help diagnose automatic search failures
