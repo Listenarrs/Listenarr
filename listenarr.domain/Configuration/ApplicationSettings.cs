@@ -237,5 +237,19 @@ namespace Listenarr.Domain.Configuration
         /// Preferred default language filter for Add New searches.
         /// </summary>
         public string DefaultSearchLanguage { get; set; } = "english";
+
+        /// <summary>
+        /// When enabled, a background service periodically checks domain-rotating indexers
+        /// (e.g. Anna's Archive, AudioBookBay) and switches to a working mirror if the
+        /// current domain is unreachable.
+        /// </summary>
+        public bool EnableIndexerDomainRotation { get; set; } = true;
+
+        /// <summary>
+        /// Optional JSON blob supplying extra candidate mirror domains per indexer Implementation.
+        /// Format: {"AnnasArchive": ["annas-archive.xyz"], "AudioBookBay": ["audiobookbay.example"]}
+        /// Merged with the built-in seed list; duplicates are ignored.
+        /// </summary>
+        public string? IndexerMirrorOverridesJson { get; set; }
     }
 }

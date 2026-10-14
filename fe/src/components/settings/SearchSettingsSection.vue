@@ -66,6 +66,13 @@
         title="Enable OpenLibrary Searching"
         description="Include OpenLibrary title augmentation and lookups when performing intelligent searches."
       />
+
+      <CheckboxCard
+        :modelValue="settings.enableIndexerDomainRotation ?? true"
+        @update:modelValue="updateEnableIndexerDomainRotation"
+        title="Enable Indexer Domain Rotation"
+        description="Automatically switch domain-rotating indexers (Anna's Archive, AudioBookBay) to a working mirror when the current domain becomes unreachable. Checked every 6 hours."
+      />
     </div>
   </div>
 </template>
@@ -95,6 +102,10 @@ function updateField(field: keyof ApplicationSettings, value: unknown) {
 
 function updateEnableOpenLibrarySearch(value: boolean) {
   updateField('enableOpenLibrarySearch', value)
+}
+
+function updateEnableIndexerDomainRotation(value: boolean) {
+  updateField('enableIndexerDomainRotation', value)
 }
 
 const defaultSearchRegion = computed(() =>
