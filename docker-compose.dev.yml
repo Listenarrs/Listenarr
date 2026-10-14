@@ -1,0 +1,53 @@
+# Dev environment: source bind-mounted, both servers in one container so vite's
+# proxy to http://localhost:4545 keeps working unchanged.
+#
+#   docker compose -f docker-compose.dev.yml up --build
+#
+services:
+  listenarr-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "4545:4545"   # API
+      - "5173:5173"   # Vite
+    volumes:
+      - .:/src
+      # Point LISTENARR_DEV_LIBRARY at a folder of audiobooks to scan; defaults to ./dev-library
+      - ${LISTENARR_DEV_LIBRARY:-./dev-library}:/audiobooks
+
+      # Host build output is macOS-targeted (osx-arm64/osx-x64) and would poison
+      # the Linux build. Mask every artifact directory with container-only volumes.
+      - dev-obj-api:/src/listenarr.api/obj
+      - dev-bin-api:/src/listenarr.api/bin
+      - dev-obj-app:/src/listenarr.application/obj
+      - dev-bin-app:/src/listenarr.application/bin
+      - dev-obj-dom:/src/listenarr.domain/obj
+      - dev-bin-dom:/src/listenarr.domain/bin
+      - dev-obj-inf:/src/listenarr.infrastructure/obj
+      - dev-bin-inf:/src/listenarr.infrastructure/bin
+      - dev-obj-tst:/src/tests/obj
+      - dev-bin-tst:/src/tests/bin
+
+      # node_modules built for darwin must not leak into the container.
+      - dev-node-root:/src/node_modules
+      - dev-node-fe:/src/fe/node_modules
+
+      # Container keeps its own database/config so it never fights the host instance.
+      - dev-config:/src/.env
+    command: ["sh", "/src/docker/dev-entrypoint.sh"]
+
+volumes:
+  dev-obj-api: {}
+  dev-bin-api: {}
+  dev-obj-app: {}
+  dev-bin-app: {}
+  dev-obj-dom: {}
+  dev-bin-dom: {}
+  dev-obj-inf: {}
+  dev-bin-inf: {}
+  dev-obj-tst: {}
+  dev-bin-tst: {}
+  dev-node-root: {}
+  dev-node-fe: {}
+  dev-config: {}
