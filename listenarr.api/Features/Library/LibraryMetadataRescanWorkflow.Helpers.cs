@@ -21,7 +21,16 @@ namespace Listenarr.Api.Features.Library
                 if (seen.Add(normalized)) ordered.Add(normalized);
             }
 
+            // A region recorded on the ASIN is the catalogue the book was matched in (or that the user
+            // chose): only that one is tried, so a rescan never moves the book to another catalogue on
+            // its own. Without a region (older data, or an ASIN found through an ISBN), the US and UK
+            // catalogues are tried as before.
             AddOrdered(preferredRegion);
+            if (ordered.Count > 0)
+            {
+                return ordered;
+            }
+
             AddOrdered("us");
             AddOrdered("uk");
 
