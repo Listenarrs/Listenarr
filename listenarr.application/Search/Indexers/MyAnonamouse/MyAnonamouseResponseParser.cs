@@ -331,7 +331,8 @@ namespace Listenarr.Application.Search.Indexers.MyAnonamouse
                             }
                         }
 
-                        var downloadUrl = MyAnonamouseDownloadUrlBuilder.Build(dlHash, id, indexer);
+                        var isAlreadyFreeleech = MyAnonamouseDownloadUrlBuilder.IsAlreadyFreeleech(item);
+                        var downloadUrl = MyAnonamouseDownloadUrlBuilder.Build(dlHash, id, indexer, isAlreadyFreeleech);
 
                         // Preserve raw language code for later flagging/flags list
                         string rawLangCode = string.Empty;
