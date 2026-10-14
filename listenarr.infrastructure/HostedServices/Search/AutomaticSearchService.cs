@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Application.Notifications.Progress;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -75,6 +76,8 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             var searchService = scope.ServiceProvider.GetRequiredService<ISearchService>();
             var qualityProfileService = scope.ServiceProvider.GetRequiredService<IQualityProfileService>();
             var downloadService = scope.ServiceProvider.GetRequiredService<IDownloadService>();
+            // Optional: drives the live search-activity indicator (sidebar).
+            var searchProgressReporter = scope.ServiceProvider.GetService<SearchProgressReporter>();
 
             // Get all monitored audiobooks that haven't been searched in the last 6 hours
             var cutoffTime = DateTime.UtcNow.AddHours(-6);
@@ -85,6 +88,10 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             if (!monitoredAudiobooks.Any())
             {
                 _logger.LogInformation("No audiobooks require automatic search at this time");
+                if (searchProgressReporter != null)
+                {
+                    await searchProgressReporter.BroadcastAutomaticAsync("Search idle", "idle", addToFeed: false);
+                }
                 return;
             }
 
@@ -103,6 +110,16 @@ namespace Listenarr.Infrastructure.HostedServices.Search
 
                     downloadsQueued += downloadsQueuedForBook;
                     processedCount++;
+
+                    // Per-book outcome for the live activity indicator. Best-effort —
+                    // never let a notification failure interrupt the sweep.
+                    if (searchProgressReporter != null)
+                    {
+                        var (outcomeMessage, outcomeStage) = downloadsQueuedForBook > 0
+                            ? ($"Grabbed {downloadsQueuedForBook} release(s) for {audiobook.Title}", "grabbed")
+                            : ($"No results for {audiobook.Title}", "no_results");
+                        await searchProgressReporter.BroadcastAutomaticAsync(outcomeMessage, outcomeStage, audiobook.Id, audiobook.Asin);
+                    }
 
                     // Update last search time
                     audiobook.LastSearchTime = DateTime.UtcNow;
@@ -127,6 +144,13 @@ namespace Listenarr.Infrastructure.HostedServices.Search
 
             _logger.LogInformation("Automatic search cycle completed. Processed {ProcessedCount} audiobooks, queued {DownloadsQueued} total downloads",
                 processedCount, downloadsQueued);
+
+            // Sweep finished — the live indicator returns to idle until the next cycle.
+            if (searchProgressReporter != null)
+            {
+                await searchProgressReporter.BroadcastAutomaticAsync(
+                    $"Search idle — last sweep processed {processedCount} book(s)", "idle", addToFeed: false);
+            }
         }
 
         private async Task<int> ProcessAudiobookAsync(

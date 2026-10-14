@@ -29,6 +29,7 @@ public class IndexerSearchWorkflow
     private readonly IndexerAdditionalSettingsParser _additionalSettingsParser;
     private readonly TorznabResponseParser _torznabResponseParser;
     private readonly ILogger<IndexerSearchWorkflow> _logger;
+    private readonly SearchProgressReporter? _searchProgressReporter;
 
     public IndexerSearchWorkflow(
         HttpClient httpClient,
@@ -37,7 +38,8 @@ public class IndexerSearchWorkflow
         IEnumerable<IIndexerSearchProvider> searchProviders,
         IndexerAdditionalSettingsParser additionalSettingsParser,
         ILogger<IndexerSearchWorkflow> logger,
-        IHtmlTextExtractor? htmlTextExtractor = null)
+        IHtmlTextExtractor? htmlTextExtractor = null,
+        SearchProgressReporter? searchProgressReporter = null)
     {
         _httpClient = httpClient;
         _configurationService = configurationService;
@@ -46,6 +48,7 @@ public class IndexerSearchWorkflow
         _additionalSettingsParser = additionalSettingsParser;
         _logger = logger;
         _torznabResponseParser = new TorznabResponseParser(httpClient, logger, htmlTextExtractor);
+        _searchProgressReporter = searchProgressReporter;
     }
 
     public async Task<List<IndexerSearchResult>> SearchIndexersAsync(
@@ -60,6 +63,16 @@ public class IndexerSearchWorkflow
         var indexers = await _indexerRepository.GetEnabledAsync(isAutomaticSearch);
 
         _logger.LogInformation("Searching {Count} enabled indexers for query: {Query}", indexers.Count, query);
+
+        // Surface the background sweep's per-book activity to the live UI
+        // indicator (sidebar). Transient stage — not added to the recent-outcomes
+        // feed; the per-book outcome from the automatic-search sweep is.
+        // Best-effort: a notification hiccup must never affect the search.
+        if (isAutomaticSearch && _searchProgressReporter != null)
+        {
+            await _searchProgressReporter.BroadcastAutomaticAsync(
+                $"Searching {indexers.Count} indexers for {query}", "searching", addToFeed: false);
+        }
 
         if (!indexers.Any())
         {
