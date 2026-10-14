@@ -238,7 +238,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                     Metadata = new AudibleBookMetadata
                     {
                         Title = "Different Book",
-                        Asin = "DIFFERENT-ASIN",
+                        Asin = "B0DIFFERNT",
                         Author = "Different Author"
                     },
                     DestinationPath = destination,
@@ -332,6 +332,45 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 CreateRequest(Path.Join(tempRoot, "Edition B"))));
 
             Assert.Equal(2, (await _audiobookRepository.GetAllAsync()).Count);
+        }
+
+        [Theory]
+        [InlineData("erg")]
+        [InlineData("B0BK9W82PQ1")]
+        [InlineData("B0BK9W-2PQ")]
+        public async Task AddToLibrary_MalformedAsin_IsRejectedWithoutAddingTheBook(string asin)
+        {
+            var controller = _provider.GetRequiredService<LibraryController>();
+            var before = (await _audiobookRepository.GetAllAsync()).Count;
+
+            var result = await controller.AddToLibrary(new LibraryController.AddToLibraryRequest
+            {
+                Metadata = new AudibleBookMetadata { Title = "Hand-edited ASIN", Asin = asin },
+                DestinationPath = Path.Join(tempRoot, "Hand-edited ASIN"),
+                Monitored = true
+            });
+
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            Assert.Contains("asin_invalid", badRequest.Value?.ToString() ?? string.Empty, StringComparison.Ordinal);
+            Assert.Equal(before, (await _audiobookRepository.GetAllAsync()).Count);
+        }
+
+        [Theory]
+        [InlineData("B0BK9W82PQ")]
+        [InlineData("2821124945")]
+        [InlineData("")]
+        public async Task AddToLibrary_WellFormedOrMissingAsin_IsAccepted(string asin)
+        {
+            var controller = _provider.GetRequiredService<LibraryController>();
+
+            var result = await controller.AddToLibrary(new LibraryController.AddToLibraryRequest
+            {
+                Metadata = new AudibleBookMetadata { Title = $"ASIN '{asin}'", Asin = asin },
+                DestinationPath = Path.Join(tempRoot, $"ASIN {asin}"),
+                Monitored = true
+            });
+
+            Assert.IsType<OkObjectResult>(result);
         }
 
         [Fact]
@@ -908,7 +947,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         [Fact]
         public async Task AddToLibrary_ImagePreparationFailure_UsesFallbackAndCommitsHistory()
         {
-            const string asin = "B000FALLBACK";
+            const string asin = "B0FALLBACK";
             const string imageUrl = "https://example.com/fallback.jpg";
             imageCacheServiceMock
                 .Setup(service => service.DownloadAndCacheImageAsync(imageUrl, asin))
@@ -954,7 +993,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                     Metadata = new AudibleBookMetadata
                     {
                         Title = "Invalid Destination",
-                        Asin = "B000INVALID",
+                        Asin = "B0DESTPATH",
                         ImageUrl = imageUrl1,
                         Authors = ["External Author"]
                     },

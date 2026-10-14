@@ -102,6 +102,32 @@ describe('AddLibraryModal editable metadata', () => {
     expect(apiMocks.getAudibleMetadata).toHaveBeenCalledWith('B001234567', 'fr')
   })
 
+  it('shows the ASIN and its region read-only and submits them unchanged', async () => {
+    const wrapper = mount(AddLibraryModal, {
+      props: { visible: true, book: fakeBook },
+      attachTo: document.body,
+      global: { plugins: [createPinia()] },
+    })
+    await flushPromises()
+
+    await wrapper.get('button.metadata-toggle-btn').trigger('click')
+    await flushPromises()
+
+    const asinField = wrapper
+      .findAll('.metadata-edit-grid .detail-item')
+      .find((item) => item.find('.label').text() === 'ASIN')
+    expect(asinField, 'Expected the ASIN field in the editor').toBeTruthy()
+    expect(asinField!.find('input').exists()).toBe(false)
+    expect(asinField!.get('[data-testid="metadata-asin"]').text()).toBe('B001234567 (Germany (DE))')
+
+    await wrapper.get('button.btn-primary').trigger('click')
+    await flushPromises()
+    expect(apiMocks.addToLibrary).toHaveBeenCalledWith(
+      expect.objectContaining({ asin: 'B001234567', region: 'de' }),
+      expect.any(Object),
+    )
+  })
+
   it('previews and submits edited metadata instead of the original source metadata', async () => {
     const wrapper = mount(AddLibraryModal, {
       props: {

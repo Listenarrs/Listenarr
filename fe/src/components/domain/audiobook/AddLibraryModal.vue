@@ -351,9 +351,11 @@
                       placeholder="Comma-separated genres"
                     />
                   </div>
+                  <!-- The ASIN and its region come from the search: a wrong book is fixed with
+                       another search (or a repair after the add), not by editing its identifier -->
                   <div class="detail-item">
                     <span class="label">ASIN</span>
-                    <input v-model="editableMetadata.asin" type="text" class="form-input" />
+                    <span class="value" data-testid="metadata-asin">{{ asinWithRegion }}</span>
                   </div>
                   <div class="detail-item">
                     <span class="label">ISBN</span>
@@ -928,6 +930,13 @@ const retryRegionOptions = computed(() =>
 function regionLabel(region: string): string {
   return searchRegionOptions.find((o) => o.value === region)?.label ?? region
 }
+
+const asinWithRegion = computed(() => {
+  const asin = trimToUndefined(editableMetadata.value?.asin)
+  if (!asin) return '—'
+  const region = trimToUndefined(editableMetadata.value?.region)
+  return region ? `${asin} (${regionLabel(region)})` : asin
+})
 
 const imageSrc = computed(() => {
   // prefer resolvedImageUrl passed from parent

@@ -60,12 +60,25 @@ namespace Listenarr.Api.Features.Library
 
         public Task<IActionResult> AddAsync(
             LibraryController.AddToLibraryRequest request,
-            CancellationToken cancellationToken = default) =>
-            _libraryAddService != null
+            CancellationToken cancellationToken = default)
+        {
+            // A book is only added with no ASIN or a well-formed one: an ASIN typed by hand that isn't
+            // one can never be looked up again, so Rescan metadata could never repair the book
+            var asin = request.Metadata?.Asin;
+            if (!string.IsNullOrWhiteSpace(asin) && !ImageIdentifierHelper.LooksLikeAsin(asin))
+            {
+                return Task.FromResult<IActionResult>(DestinationValidationResult(
+                    "asin_invalid",
+                    "An ASIN has 10 letters or digits.",
+                    field: "metadata.asin"));
+            }
+
+            return _libraryAddService != null
                 ? AddWithServiceAsync(request, cancellationToken)
                 : _mutationCoordinator.ExecuteExclusiveAsync(
                     _ => AddCoreAsync(request),
                     cancellationToken);
+        }
 
         private async Task<IActionResult> AddWithServiceAsync(
             LibraryController.AddToLibraryRequest request,
