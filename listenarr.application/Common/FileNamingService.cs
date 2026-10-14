@@ -97,8 +97,7 @@ namespace Listenarr.Application.Common
             }
             catch (Exception caughtEx_2) when (caughtEx_2 is not OperationCanceledException && caughtEx_2 is not OutOfMemoryException && caughtEx_2 is not StackOverflowException)
             {
-                // If paths are invalid, fall back to configured folder pattern
-                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                _logger.LogDebug(caughtEx_2, "Could not compare the requested output root with the configured one; using the configured folder pattern");
             }
 
             var variables = BuildVariables(metadata);
@@ -111,8 +110,7 @@ namespace Listenarr.Application.Common
             }
             catch (Exception caughtEx_3) when (caughtEx_3 is not OperationCanceledException && caughtEx_3 is not OutOfMemoryException && caughtEx_3 is not StackOverflowException)
             {
-                // ignore logging errors
-                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                // Nothing is logged here: the call that failed is the logging call itself.
             }
 
             string relativePath;
