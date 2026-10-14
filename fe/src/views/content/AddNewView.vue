@@ -1329,7 +1329,9 @@ const errorMessage = ref('')
 const showAddLibraryModal = ref(false)
 const selectedBookForLibrary = ref<AudibleBookMetadata>({} as AudibleBookMetadata)
 
-// Local storage keys for persisting search results
+// Session storage keys for the last search: it survives going to a book and back, not closing the
+// tab, so a later visit doesn't open on an old search
+
 const RESULTS_KEY = 'listenarr.addNewResults'
 const SEARCH_TYPE_KEY = 'listenarr.addNewSearchType'
 const TITLE_RESULTS_COUNT_KEY = 'listenarr.addNewTitleResultsCount'
@@ -1337,10 +1339,29 @@ const ASIN_FILTERING_KEY = 'listenarr.addNewAsinFiltering'
 const RESOLVED_ASINS_KEY = 'listenarr.addNewResolvedAsins'
 const ADDED_ASINS_KEY = 'listenarr.addNewAddedAsins'
 const ADDED_OLIDS_KEY = 'listenarr.addNewAddedOLIDs'
+// The query, region and language the results belong to, restored with them
+const SEARCH_CONTEXT_KEY = 'listenarr.addNewSearchContext'
+type SearchContext = { query?: string; region?: string; language?: string }
+let restoredSearchContext: SearchContext | null = null
 
-// Initialize search results from localStorage
+// Earlier versions kept all of this in localStorage, where it outlived the session: drop it
 try {
-  const storedResults = localStorage.getItem(RESULTS_KEY)
+  for (const key of [
+    RESULTS_KEY,
+    SEARCH_TYPE_KEY,
+    TITLE_RESULTS_COUNT_KEY,
+    ASIN_FILTERING_KEY,
+    RESOLVED_ASINS_KEY,
+    ADDED_ASINS_KEY,
+    ADDED_OLIDS_KEY,
+  ]) {
+    localStorage.removeItem(key)
+  }
+} catch {}
+
+// Initialize search results from sessionStorage
+try {
+  const storedResults = sessionStorage.getItem(RESULTS_KEY)
   if (storedResults) {
     const parsed = JSON.parse(storedResults)
     if (parsed.audibleResult) audibleResult.value = parsed.audibleResult
@@ -1348,31 +1369,37 @@ try {
     if (parsed.isbnResult) isbnResult.value = parsed.isbnResult
   }
 
-  const storedSearchType = localStorage.getItem(SEARCH_TYPE_KEY)
+  const storedSearchType = sessionStorage.getItem(SEARCH_TYPE_KEY)
   if (storedSearchType) {
     searchType.value = storedSearchType as 'asin' | 'title' | 'isbn' | null
   }
 
-  const storedCount = localStorage.getItem(TITLE_RESULTS_COUNT_KEY)
+  const storedCount = sessionStorage.getItem(TITLE_RESULTS_COUNT_KEY)
   if (storedCount) {
     totalTitleResultsCount.value = parseInt(storedCount, 10)
   }
 
-  const storedFiltering = localStorage.getItem(ASIN_FILTERING_KEY)
+  const storedFiltering = sessionStorage.getItem(ASIN_FILTERING_KEY)
   if (storedFiltering) {
     asinFilteringApplied.value = storedFiltering === 'true'
   }
 
-  const storedResolved = localStorage.getItem(RESOLVED_ASINS_KEY)
+  const storedResolved = sessionStorage.getItem(RESOLVED_ASINS_KEY)
   if (storedResolved) {
     resolvedAsins.value = JSON.parse(storedResolved)
   }
 
-  const storedAdded = localStorage.getItem(ADDED_ASINS_KEY)
+  const storedAdded = sessionStorage.getItem(ADDED_ASINS_KEY)
   if (storedAdded) {
     addedAsins.value = new Set(JSON.parse(storedAdded))
   }
-  const storedAddedOl = localStorage.getItem(ADDED_OLIDS_KEY)
+  const storedContext = sessionStorage.getItem(SEARCH_CONTEXT_KEY)
+  if (storedContext) {
+    restoredSearchContext = JSON.parse(storedContext) as SearchContext
+    searchQuery.value = restoredSearchContext.query ?? ''
+  }
+
+  const storedAddedOl = sessionStorage.getItem(ADDED_OLIDS_KEY)
   if (storedAddedOl) {
     try {
       addedOpenLibraryIds.value = new Set(JSON.parse(storedAddedOl))
@@ -1382,7 +1409,7 @@ try {
   logger.warn('Failed to restore persisted state:', error)
 }
 
-// Watch search results changes and persist to localStorage
+// Watch search results changes and persist to sessionStorage
 watch([audibleResult, titleResults, isbnResult], () => {
   try {
     const results = {
@@ -1390,25 +1417,25 @@ watch([audibleResult, titleResults, isbnResult], () => {
       titleResults: titleResults.value,
       isbnResult: isbnResult.value,
     }
-    localStorage.setItem(RESULTS_KEY, JSON.stringify(results))
+    sessionStorage.setItem(RESULTS_KEY, JSON.stringify(results))
   } catch {}
 })
 
 watch(searchType, (v) => {
   try {
-    localStorage.setItem(SEARCH_TYPE_KEY, v || '')
+    sessionStorage.setItem(SEARCH_TYPE_KEY, v || '')
   } catch {}
 })
 
 watch(totalTitleResultsCount, (v) => {
   try {
-    localStorage.setItem(TITLE_RESULTS_COUNT_KEY, v.toString())
+    sessionStorage.setItem(TITLE_RESULTS_COUNT_KEY, v.toString())
   } catch {}
 })
 
 watch(asinFilteringApplied, (v) => {
   try {
-    localStorage.setItem(ASIN_FILTERING_KEY, v.toString())
+    sessionStorage.setItem(ASIN_FILTERING_KEY, v.toString())
   } catch {}
 })
 
@@ -1416,7 +1443,7 @@ watch(
   resolvedAsins,
   (v) => {
     try {
-      localStorage.setItem(RESOLVED_ASINS_KEY, JSON.stringify(v))
+      sessionStorage.setItem(RESOLVED_ASINS_KEY, JSON.stringify(v))
     } catch {}
   },
   { deep: true },
@@ -1426,7 +1453,7 @@ watch(
   addedAsins,
   (v) => {
     try {
-      localStorage.setItem(ADDED_ASINS_KEY, JSON.stringify(Array.from(v)))
+      sessionStorage.setItem(ADDED_ASINS_KEY, JSON.stringify(Array.from(v)))
     } catch {}
   },
   { deep: true },
@@ -1436,7 +1463,7 @@ watch(
   addedOpenLibraryIds,
   (v) => {
     try {
-      localStorage.setItem(ADDED_OLIDS_KEY, JSON.stringify(Array.from(v)))
+      sessionStorage.setItem(ADDED_OLIDS_KEY, JSON.stringify(Array.from(v)))
     } catch {}
   },
   { deep: true },
@@ -1451,6 +1478,11 @@ watch(currentAdvancedPage, () => {
       window.scrollTo({ top: elementTop - 125, behavior: 'smooth' })
     }
   })
+})
+watch([searchQuery, searchLanguage, preferredSearchLanguage], ([query, region, language]) => {
+  try {
+    sessionStorage.setItem(SEARCH_CONTEXT_KEY, JSON.stringify({ query, region, language }))
+  } catch {}
 })
 
 // Computed properties
@@ -3320,11 +3352,17 @@ onMounted(async () => {
 
   const defaultRegion = normalizeSearchRegion(configStore.applicationSettings?.defaultSearchRegion)
   const defaultLanguage = configStore.applicationSettings?.defaultSearchLanguage
-  searchLanguage.value = defaultRegion
-  preferredSearchLanguage.value =
-    typeof defaultLanguage === 'string' && defaultLanguage.trim()
-      ? normalizePreferredSearchLanguage(defaultLanguage)
-      : getPrimaryPreferredSearchLanguageForRegion(defaultRegion)
+  // Coming back to a search of this session: show it with the region and language it was made in
+  if (restoredSearchContext?.region && restoredSearchContext.language) {
+    searchLanguage.value = normalizeSearchRegion(restoredSearchContext.region)
+    preferredSearchLanguage.value = normalizePreferredSearchLanguage(restoredSearchContext.language)
+  } else {
+    searchLanguage.value = defaultRegion
+    preferredSearchLanguage.value =
+      typeof defaultLanguage === 'string' && defaultLanguage.trim()
+        ? normalizePreferredSearchLanguage(defaultLanguage)
+        : getPrimaryPreferredSearchLanguageForRegion(defaultRegion)
+  }
 
   // Audible integration removed: no auth status to check
 
