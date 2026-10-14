@@ -2,6 +2,11 @@ namespace Listenarr.Infrastructure.FileSystem;
 
 internal sealed partial class PinnedDirectoryCreation
 {
+    // Observability: incremented whenever an immediate directory deletion has to fall back to
+    // delete-on-close because the filesystem rejected POSIX immediate semantics (e.g. SMB).
+    // Lets tests confirm the degraded path actually engaged on a given mount.
+    internal static long DirectoryImmediateDeleteDegradedToDeleteOnCloseCount;
+
     internal static PinnedDirectoryCreation OpenExistingForPublication(
         string parentPath,
         string childName)
@@ -125,6 +130,7 @@ internal sealed partial class PinnedDirectoryCreation
             // duplicate of _directoryHandle would keep cleanup tied to the original file
             // object's lifetime and could leave a child delete-pending while its parent is
             // deleted immediately afterwards.
+            var degradedToDeleteOnClose = false;
             using (var deletionHandle = OpenRelativeDirectoryWindows(
                 _parentHandle,
                 currentName,
@@ -137,9 +143,20 @@ internal sealed partial class PinnedDirectoryCreation
                         "The directory changed before immediate pinned deletion.");
                 }
 
-                DeleteOpenedFileImmediatelyWindows(
-                    deletionHandle,
-                    allowLegacyFallback: false);
+                if (!TryDeleteOpenedDirectoryImmediatelyWindows(deletionHandle))
+                {
+                    // Filesystems without POSIX immediate-delete support (SMB reports errors
+                    // 1/50/87) cannot unlink a directory while a handle is still open. Degrade
+                    // to delete-on-close and take ownership of the pinned handle: the entry is
+                    // removed only once EVERY handle closes, and both handles hold
+                    // FILE_SHARE_DELETE, so the final close (deletionHandle, as this block
+                    // exits) finalizes the unlink before the method returns.
+                    DeleteOpenedFileWindows(deletionHandle);
+                    _directoryHandle.Dispose();
+                    degradedToDeleteOnClose = true;
+                    System.Threading.Interlocked.Increment(
+                        ref DirectoryImmediateDeleteDegradedToDeleteOnCloseCount);
+                }
             }
 
             try
@@ -148,6 +165,16 @@ internal sealed partial class PinnedDirectoryCreation
                     _parentHandle,
                     currentName,
                     currentPath);
+                if (degradedToDeleteOnClose)
+                {
+                    // The pinned handle was closed to finalize the delete-on-close, so the
+                    // namespace must no longer resolve. A directory still visible here is
+                    // unproven — our own delete-pending entry held by a foreign handle, or a
+                    // fresh generation — so immediate deletion cannot be confirmed.
+                    throw new System.ComponentModel.Win32Exception(
+                        145,
+                        "The verified empty directory remained visible after delete-on-close retirement.");
+                }
                 if (HandlesIdentifySameDirectory(_directoryHandle, visible))
                 {
                     throw new System.ComponentModel.Win32Exception(
