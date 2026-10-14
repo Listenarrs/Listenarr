@@ -132,12 +132,14 @@ namespace Listenarr.Application.Downloads.Submission
 
             if (audiobook.QualityProfile == null)
             {
-                logger.LogWarning("Audiobook '{Title}' has no quality profile assigned", audiobook.Title);
-                return new SearchAndDownloadResult
-                {
-                    Success = false,
-                    Message = "Audiobook has no quality profile assigned"
-                };
+                // No profile on the book — fall back to the default so a wanted book is still
+                // searchable (assigned in-memory only; the search flow never persists it).
+                audiobook.QualityProfile = await qualityProfileService.GetDefaultAsync();
+            }
+            if (audiobook.QualityProfile == null)
+            {
+                logger.LogWarning("Audiobook '{Title}' has no quality profile and no default is configured", audiobook.Title);
+                return new SearchAndDownloadResult { Success = false, Message = "Audiobook has no quality profile assigned" };
             }
 
             // Build search query from audiobook metadata
