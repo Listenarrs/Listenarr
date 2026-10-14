@@ -682,6 +682,52 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             Assert.Equal(System.Text.Json.JsonValueKind.Array, arr.ValueKind);
             Assert.True(arr.GetArrayLength() > 0, "Series-only search should return at least one book");
         }
+        [Fact]
+        [Trait("Method", "SearchAudibleSeries")]
+        public async Task SearchAudibleSeries_ProjectsProviderItemsOntoTheTypedContract()
+        {
+            var stubAudible = new StubAudibleService
+            {
+                SeriesResponseToReturn = new List<SeriesLookupItem>
+                {
+                    new()
+                    {
+                        Asin = "SER123",
+                        Name = "The Empyrean",
+                        Region = "us",
+                        Description = "Dragons.",
+                        Image = "https://example.invalid/empyrean.jpg"
+                    },
+                    // Nameless entries cannot be monitored, so they must not reach the client.
+                    new() { Asin = "SER999", Name = "  " }
+                }
+            };
+            var controller = CreateController(audibleService: stubAudible);
+
+            var result = await controller.SearchAudibleSeries("empyrean");
+
+            var payload = Assert.IsType<List<AudibleSeriesSearchItem>>(
+                Assert.IsType<OkObjectResult>(result.Result).Value);
+            var item = Assert.Single(payload);
+            Assert.Equal("SER123", item.Asin);
+            Assert.Equal("The Empyrean", item.Name);
+            Assert.Equal("us", item.Region);
+            Assert.Equal("https://example.invalid/empyrean.jpg", item.Image);
+        }
+
+        [Fact]
+        [Trait("Method", "SearchAudibleSeries")]
+        public async Task SearchAudibleSeries_UnexpectedProviderShape_ReturnsEmptyRatherThanLeakingIt()
+        {
+            var stubAudible = new StubAudibleService { SeriesResponseToReturn = "not a series list" };
+            var controller = CreateController(audibleService: stubAudible);
+
+            var result = await controller.SearchAudibleSeries("empyrean");
+
+            var payload = Assert.IsType<List<AudibleSeriesSearchItem>>(
+                Assert.IsType<OkObjectResult>(result.Result).Value);
+            Assert.Empty(payload);
+        }
     }
 
     internal class StubAudibleService : AudibleService

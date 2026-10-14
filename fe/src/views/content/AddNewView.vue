@@ -18,7 +18,7 @@
 <template>
   <div class="add-new-view">
     <div class="page-header">
-      <h1><PhPlusCircle /> Add New Audiobook</h1>
+      <h1><PhPlusCircle /> Add Audiobooks &amp; Series</h1>
     </div>
 
     <!-- Unified Search -->
@@ -44,6 +44,7 @@
               >
               <p class="search-help">
                 Enter an ASIN (e.g., B08G9PRS1K) or search by title and author.<br />
+                Use <strong>Advanced</strong> to search by series or ISBN.
               </p>
             </div>
             <form
@@ -192,6 +193,9 @@
                     class="form-input"
                     @keydown.enter.prevent="performAdvancedSearch"
                   />
+                  <div class="form-hint">
+                    <div>Returns matching series you can monitor, plus the books in them.</div>
+                  </div>
                 </div>
               </div>
 
@@ -694,16 +698,76 @@
             </div>
             <div class="result-info">
               <h3>
-                {{ safeText(book.title) }}
+                <button
+                  v-if="libraryIdFor(book) !== null"
+                  type="button"
+                  class="entity-link result-title-link"
+                  title="Open this audiobook in your library"
+                  @click="openAudiobook(libraryIdFor(book) as number)"
+                >
+                  {{ safeText(book.title) }}
+                </button>
+                <template v-else>{{ safeText(book.title) }}</template>
               </h3>
               <p v-if="book.searchResult?.subtitle" class="result-subtitle">
                 {{ safeText(book.searchResult.subtitle) }}
               </p>
-              <p class="result-author">by {{ formatAuthors(book) }}</p>
+              <p class="result-author">
+                by
+                <span
+                  v-for="(authorName, i) in authorNamesFor(book)"
+                  :key="authorName"
+                  class="entity-chip"
+                >
+                  <button
+                    type="button"
+                    class="entity-link"
+                    @click="openCollection('author', authorName)"
+                  >
+                    {{ authorName }}
+                  </button>
+                  <button
+                    type="button"
+                    class="series-badge monitor-badge"
+                    :class="{ monitoring: isMonitored('author', authorName) }"
+                    :disabled="isMonitorBusy('author', authorName)"
+                    :title="
+                      isMonitored('author', authorName)
+                        ? `Stop monitoring ${authorName}`
+                        : `Monitor ${authorName} and add any books you are missing`
+                    "
+                    @click="toggleMonitor('author', authorName)"
+                  >
+                    <PhArrowClockwise v-if="isMonitorBusy('author', authorName)" class="ph-spin" />
+                    <component
+                      v-else
+                      :is="isMonitored('author', authorName) ? PhEye : PhEyeSlash"
+                    />
+                    {{ isMonitored('author', authorName) ? 'Monitoring' : 'Monitor' }}
+                  </button>
+                  <span v-if="i < authorNamesFor(book).length - 1">, </span>
+                </span>
+                <span v-if="authorNamesFor(book).length === 0">{{ formatAuthors(book) }}</span>
+              </p>
 
               <!-- Audiobook metadata from enriched results -->
-              <p v-if="book.searchResult?.narrator" class="result-narrator">
-                Narrated by {{ book.searchResult.narrator }}
+              <p v-if="narratorNamesFor(book).length > 0" class="result-narrator">
+                Narrated by
+                <span
+                  v-for="(narratorName, i) in narratorNamesFor(book)"
+                  :key="narratorName"
+                  class="entity-chip"
+                >
+                  <button
+                    type="button"
+                    class="entity-link"
+                    :title="`Browse audiobooks narrated by ${narratorName}`"
+                    @click="openCollection('narrator', narratorName)"
+                  >
+                    {{ narratorName }}
+                  </button>
+                  <span v-if="i < narratorNamesFor(book).length - 1">,</span>
+                </span>
               </p>
 
               <div class="result-stats">
@@ -736,8 +800,10 @@
                 "
                 class="result-series"
               >
-                <span
-                  class="series-badge"
+                <button
+                  type="button"
+                  class="series-badge series-badge-link"
+                  @click="openCollection('series', seriesNamesFor(book)[0] as string)"
                   :title="
                     Array.isArray(book.searchResult?.seriesList) &&
                     book.searchResult.seriesList.some(
@@ -764,7 +830,25 @@
                   }}<span v-if="book.searchResult?.seriesNumber">
                     #{{ book.searchResult.seriesNumber }}</span
                   >
-                </span>
+                </button>
+                <button
+                  v-for="seriesName in seriesNamesFor(book)"
+                  :key="seriesName"
+                  type="button"
+                  class="series-badge monitor-badge"
+                  :class="{ monitoring: isMonitored('series', seriesName) }"
+                  :disabled="isMonitorBusy('series', seriesName)"
+                  :title="
+                    isMonitored('series', seriesName)
+                      ? `Stop monitoring ${seriesName}`
+                      : `Monitor ${seriesName} and add any books you are missing`
+                  "
+                  @click="toggleMonitor('series', seriesName)"
+                >
+                  <PhArrowClockwise v-if="isMonitorBusy('series', seriesName)" class="ph-spin" />
+                  <component v-else :is="isMonitored('series', seriesName) ? PhEye : PhEyeSlash" />
+                  {{ isMonitored('series', seriesName) ? 'Monitoring' : 'Monitor' }}
+                </button>
               </div>
 
               <!-- Metadata badges -->
@@ -974,6 +1058,8 @@ import {
   PhScissors,
   PhCaretLeft,
   PhCaretRight,
+  PhEye,
+  PhEyeSlash,
 } from '@phosphor-icons/vue'
 import { useRoute, useRouter } from 'vue-router'
 import type {
@@ -984,6 +1070,8 @@ import type {
   AudibleNarrator,
   AudibleGenre,
   AudibleSearchResult,
+  MonitorAuthorResponse,
+  MonitorSeriesResponse,
 } from '@/types'
 import { apiService } from '@/services/api'
 import { getPlaceholderUrl } from '@/utils/placeholder'
@@ -1255,6 +1343,193 @@ const emptyStateTitleMessage = computed(() => {
 
 // Pagination / candidate limits for advanced results
 const resultsPerPage = ref<number>(50)
+
+// ─── Monitor authors and series from any result ─────────────────────────────
+// Monitor toggles live on the result cards so an author or series can be monitored
+// from any search, rather than only when the library already contains one of
+// their books. Monitoring status is a local database read, so it is safe to
+// resolve one per distinct name.
+type MonitorKind = 'author' | 'series'
+
+const monitoredIds = ref<Record<string, number>>({})
+const monitorBusy = ref<Record<string, boolean>>({})
+
+function monitorKey(kind: MonitorKind, name: string): string {
+  return `${kind}:${name.trim().toLowerCase()}`
+}
+
+function isMonitored(kind: MonitorKind, name: string): boolean {
+  return !!monitoredIds.value[monitorKey(kind, name)]
+}
+
+function isMonitorBusy(kind: MonitorKind, name: string): boolean {
+  return !!monitorBusy.value[monitorKey(kind, name)]
+}
+
+function authorNamesFor(book: TitleSearchResult): string[] {
+  const raw = Array.isArray(book.author_name)
+    ? book.author_name
+    : typeof book.author_name === 'string'
+      ? [book.author_name]
+      : [book.searchResult?.artist ?? '']
+  return dedupeNames(raw)
+}
+
+function seriesNamesFor(book: TitleSearchResult): string[] {
+  const list = Array.isArray(book.searchResult?.seriesList) ? book.searchResult.seriesList : []
+  const single = typeof book.searchResult?.series === 'string' ? [book.searchResult.series] : []
+  return dedupeNames([...list, ...single] as unknown[]).map(stripSeriesPosition)
+}
+
+/**
+ * Series entries often carry this book's position, e.g. "Harry Potter #1". The
+ * position belongs to the book, not the series, so it must not reach a
+ * collection route or a monitoring request - monitoring "Harry Potter #1" would
+ * register a series that does not exist.
+ */
+function stripSeriesPosition(name: string): string {
+  return name.replace(/\s*#\s*[\d.]+\s*$/, '').trim()
+}
+
+function narratorNamesFor(book: TitleSearchResult): string[] {
+  const list = Array.isArray(book.searchResult?.narrators) ? book.searchResult.narrators : []
+  if (list.length > 0) return dedupeNames(list as unknown[])
+  // Enriched results often carry a single pre-joined string instead of an array.
+  const joined = typeof book.searchResult?.narrator === 'string' ? book.searchResult.narrator : ''
+  return dedupeNames(joined.split(','))
+}
+
+function dedupeNames(values: unknown[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const value of values) {
+    // Providers return either bare strings or { name } objects depending on the
+    // endpoint, so accept both rather than silently dropping the object form.
+    const raw =
+      typeof value === 'string'
+        ? value
+        : value &&
+            typeof value === 'object' &&
+            typeof (value as { name?: unknown }).name === 'string'
+          ? (value as { name: string }).name
+          : null
+    if (raw === null) continue
+    const trimmed = raw.trim()
+    if (!trimmed || trimmed.toLowerCase() === 'unknown author') continue
+    const key = trimmed.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(trimmed)
+  }
+  return out
+}
+
+async function refreshMonitorStates(books: TitleSearchResult[]): Promise<void> {
+  const wanted = new Map<string, { kind: MonitorKind; name: string }>()
+  for (const book of books) {
+    for (const name of authorNamesFor(book))
+      wanted.set(monitorKey('author', name), { kind: 'author', name })
+    for (const name of seriesNamesFor(book))
+      wanted.set(monitorKey('series', name), { kind: 'series', name })
+  }
+  if (wanted.size === 0) return
+
+  const region = normalizeSearchRegion(searchLanguage.value)
+  const resolved: Record<string, number> = {}
+  await Promise.all(
+    Array.from(wanted.entries()).map(async ([key, entry]) => {
+      try {
+        if (entry.kind === 'author') {
+          const status = await apiService.getAuthorMonitoringStatus(entry.name, region, 'all')
+          if (status.isMonitored && status.monitoredAuthor)
+            resolved[key] = status.monitoredAuthor.id
+        } else {
+          const status = await apiService.getSeriesMonitoringStatus(entry.name, region, 'all')
+          if (status.isMonitored && status.monitoredSeries)
+            resolved[key] = status.monitoredSeries.id
+        }
+      } catch {
+        /* unknown state reads as not monitored */
+      }
+    }),
+  )
+  monitoredIds.value = { ...monitoredIds.value, ...resolved }
+}
+
+async function toggleMonitor(kind: MonitorKind, name: string): Promise<void> {
+  const key = monitorKey(kind, name)
+  if (monitorBusy.value[key]) return
+  monitorBusy.value = { ...monitorBusy.value, [key]: true }
+
+  try {
+    const region = normalizeSearchRegion(searchLanguage.value)
+    const existingId = monitoredIds.value[key]
+
+    if (existingId) {
+      if (kind === 'author') await apiService.unmonitorAuthor(existingId)
+      else await apiService.unmonitorSeries(existingId)
+      const remaining = { ...monitoredIds.value }
+      delete remaining[key]
+      monitoredIds.value = remaining
+      toast.success(
+        `Stopped monitoring ${name}`,
+        `"${name}" will no longer be checked for new books.`,
+      )
+      return
+    }
+
+    const response =
+      kind === 'author'
+        ? await apiService.monitorAuthor({ name, region, language: 'all' })
+        : await apiService.monitorSeries({ name, region, language: 'all' })
+    const id =
+      kind === 'author'
+        ? (response as MonitorAuthorResponse).monitoredAuthor.id
+        : (response as MonitorSeriesResponse).monitoredSeries.id
+    monitoredIds.value = { ...monitoredIds.value, [key]: id }
+
+    const added = response.addedCount ?? 0
+    toast.success(
+      `Monitoring ${name}`,
+      added > 0
+        ? `Added ${added} audiobook${added === 1 ? '' : 's'} you were missing.`
+        : 'No new audiobooks needed to be added.',
+    )
+  } catch (e) {
+    toast.error('Could not update monitoring', e instanceof Error ? e.message : String(e))
+  } finally {
+    const stillBusy = { ...monitorBusy.value }
+    delete stillBusy[key]
+    monitorBusy.value = stillBusy
+  }
+}
+
+function libraryIdFor(book: TitleSearchResult): number | null {
+  const asin = getAsin(book)
+  if (!asin) return null
+  const match = libraryStore.audiobooks.find(
+    (a) => typeof a.asin === 'string' && a.asin.toLowerCase() === asin.toLowerCase(),
+  )
+  return match ? match.id : null
+}
+
+function openAudiobook(id: number): void {
+  router.push(`/audiobooks/${id}`)
+}
+
+function openCollection(kind: MonitorKind | 'narrator', name: string): void {
+  router.push(`/collection/${kind}/${encodeURIComponent(name)}`)
+}
+
+// Watching the results covers every path that populates them - fresh searches,
+// pagination, and restore-from-cache - rather than each call site individually.
+watch(
+  titleResults,
+  (books) => {
+    if (books.length > 0) void refreshMonitorStates(books)
+  },
+  { immediate: true },
+)
 const currentAdvancedPage = ref<number>(1)
 
 const totalPages = computed(() =>
@@ -4106,6 +4381,52 @@ select.form-input:focus {
 }
 
 /* Results */
+.result-title-link {
+  font: inherit;
+  color: inherit;
+}
+
+.result-title-link:hover {
+  color: var(--accent-color, #3b82f6);
+}
+
+.entity-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-right: 0.4rem;
+}
+
+.entity-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent-color, #3b82f6);
+  cursor: pointer;
+  text-align: left;
+}
+
+.entity-link:hover {
+  text-decoration: underline;
+}
+
+.monitor-badge {
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-size: 0.78rem;
+  padding: 0.2rem 0.55rem;
+}
+
+.monitor-badge:disabled {
+  cursor: default;
+}
+
+.monitor-badge.monitoring {
+  color: var(--accent-color, #3b82f6);
+  border-color: var(--accent-color, #3b82f6);
+}
+
 .search-results h2 {
   color: white;
   margin-bottom: 1.5rem;
@@ -4215,11 +4536,9 @@ select.form-input:focus {
   margin: 0;
   font-style: italic;
   font-size: 0.9rem;
-  display: -webkit-box;
-  -webkit-line-clamp: 1;
-  line-clamp: 1;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  /* Full-cast titles list a dozen narrators; wrapping beats hiding all but the first. */
+  display: block;
+  overflow-wrap: anywhere;
 }
 
 .result-stats {
