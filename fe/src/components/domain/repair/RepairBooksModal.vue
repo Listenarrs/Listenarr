@@ -356,13 +356,19 @@ const selectedRows = computed(() => rows.value.filter((r) => r.selected))
 const selectedCount = computed(() => selectedRows.value.length)
 const repairedIds = computed(() => results.value.filter((r) => r.success).map((r) => r.id))
 
-// Only the regions the matching uses: the configured one and the US fallback. A region a book already
-// has (set before, or by hand) stays available for that book so it can be shown and reverted.
+// Every Audible region stays available, ordered by usefulness: the book's current region first,
+// then the configured one and the US fallback, then the others alphabetically.
 function regionOptionsFor(row: RepairRow) {
-  const allowed = new Set(
-    [configuredRegion.value, FALLBACK_REGION, row.initial.region].filter(Boolean),
+  const first = [row.initial.region, configuredRegion.value, FALLBACK_REGION].filter(
+    (r, i, list) => r && list.indexOf(r) === i,
   )
-  return searchRegionOptions.filter((o) => allowed.has(o.value))
+  const head = first
+    .map((r) => searchRegionOptions.find((o) => o.value === r))
+    .filter((o): o is (typeof searchRegionOptions)[number] => Boolean(o))
+  const rest = searchRegionOptions
+    .filter((o) => !first.includes(o.value))
+    .sort((x, y) => x.label.localeCompare(y.label))
+  return [...head, ...rest]
 }
 
 function regionLabel(region: string): string {

@@ -279,17 +279,7 @@ describe('RepairBooksModal', () => {
     })
   })
 
-  it('only offers the configured region and the US fallback', async () => {
-    const wrapper = mountModal()
-    await flushPromises()
-
-    const options = row(wrapper)
-      .findAll('[data-testid="repair-region"] option')
-      .map((o) => (o.element as HTMLOptionElement).value)
-    expect(options.sort()).toEqual(['fr', 'us'])
-  })
-
-  it("keeps a book's existing other region available so it can be shown and reverted", async () => {
+  it("offers every region: the book's current one, then the configured one and US, then the rest alphabetically", async () => {
     apiMocks.getAudiobookIdentifiers.mockResolvedValue({
       audiobookId: 7,
       identifiers: [{ ...frenchAsin, region: 'uk' }],
@@ -300,10 +290,33 @@ describe('RepairBooksModal', () => {
     const options = row(wrapper)
       .findAll('[data-testid="repair-region"] option')
       .map((o) => (o.element as HTMLOptionElement).value)
-    expect(options.sort()).toEqual(['fr', 'uk', 'us'])
+    expect(options.slice(0, 3)).toEqual(['uk', 'fr', 'us'])
+    const labels = row(wrapper)
+      .findAll('[data-testid="repair-region"] option')
+      .slice(3)
+      .map((o) => o.text())
+    expect(labels).toEqual([...labels].sort((x, y) => x.localeCompare(y)))
+    expect(options.length).toBeGreaterThan(3)
     expect(
       (row(wrapper).get('[data-testid="repair-region"]').element as HTMLSelectElement).value,
     ).toBe('uk')
+  })
+
+  it('searches in the region picked from the full list', async () => {
+    apiMocks.advancedSearch.mockResolvedValue([])
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await row(wrapper).get('[data-testid="repair-region"]').setValue('de')
+    await row(wrapper).get('[data-testid="repair-query"]').setValue('Primal Hunter 4')
+    await row(wrapper).get('[data-testid="repair-search"]').trigger('click')
+    await flushPromises()
+
+    expect(apiMocks.advancedSearch).toHaveBeenCalledWith({
+      title: 'Primal Hunter 4',
+      region: 'de',
+      cap: 8,
+    })
   })
 
   it('only rescans when the ASIN and region are unchanged', async () => {
