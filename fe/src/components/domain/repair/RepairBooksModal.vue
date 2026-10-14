@@ -100,10 +100,23 @@
                     />
                     <span class="repair-title">{{ row.title || `Audiobook #${row.id}` }}</span>
                   </span>
-                  <span class="repair-meta">
-                    {{ row.authors.join(', ') || 'Unknown author' }} ·
-                    {{ row.currentAsin || 'no ASIN' }}
-                    <template v-if="row.currentRegion"> ({{ row.currentRegion }})</template>
+                  <span class="repair-header-right">
+                    <span class="repair-meta">
+                      {{ row.authors.join(', ') || 'Unknown author' }} ·
+                      {{ row.currentAsin || 'no ASIN' }}
+                      <template v-if="row.currentRegion"> ({{ row.currentRegion }})</template>
+                    </span>
+                    <button
+                      type="button"
+                      class="btn btn-secondary repair-revert-btn"
+                      title="Revert"
+                      aria-label="Revert to the values before your changes"
+                      data-testid="repair-revert"
+                      :disabled="!isEdited(row)"
+                      @click.prevent.stop="revert(row)"
+                    >
+                      <PhArrowCounterClockwise :size="14" />
+                    </button>
                   </span>
                 </label>
 
@@ -115,12 +128,18 @@
                       type="text"
                       class="form-input"
                       data-testid="repair-query"
+                      @input="onNameEdited(row)"
                       @keydown.enter.prevent="search(row)"
                     />
                   </label>
                   <label class="repair-field">
                     <span>Region</span>
-                    <select v-model="row.region" class="form-select" data-testid="repair-region">
+                    <select
+                      v-model="row.region"
+                      class="form-select"
+                      data-testid="repair-region"
+                      @change="onRegionEdited(row)"
+                    >
                       <option v-for="o in searchRegionOptions" :key="o.value" :value="o.value">
                         {{ o.label }}
                       </option>
@@ -133,6 +152,7 @@
                       type="text"
                       class="form-input"
                       data-testid="repair-asin"
+                      @input="onAsinTyped(row)"
                     />
                   </label>
                   <button
@@ -148,6 +168,13 @@
                   </button>
                 </div>
 
+                <p v-if="row.asinCleared" class="repair-hint" data-testid="repair-asin-cleared">
+                  ASIN cleared: it belonged to the previous match. Search and pick the right book,
+                  or type its ASIN.
+                </p>
+                <p v-else-if="needsPick(row)" class="repair-hint" data-testid="repair-needs-pick">
+                  Pick the right book (or type its ASIN) before repairing.
+                </p>
                 <p v-if="row.searched && !row.results.length" class="repair-empty">
                   No result in {{ regionLabel(row.region) }}.
                 </p>
@@ -213,7 +240,7 @@
             type="button"
             class="btn btn-primary"
             data-testid="repair-confirm"
-            :disabled="loading || executing || selectedCount === 0"
+            :disabled="loading || executing || selectedCount === 0 || selectedRows.some(needsPick)"
             @click="repair"
           >
             <PhSpinner v-if="executing" class="ph-spin" :size="16" />
@@ -245,6 +272,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import {
+  PhArrowCounterClockwise,
   PhCheckCircle,
   PhCheckSquare,
   PhFolderOpen,
@@ -276,6 +304,11 @@ interface RepairRow {
   region: string
   asin: string
   selected: boolean
+  // Values when the modal opened, restored by Revert
+  initial: { query: string; region: string; asin: string }
+  // The ASIN the user chose for this region (picked from the results or typed); null = still the old match
+  chosen: { asin: string; region: string } | null
+  asinCleared: boolean
   searching: boolean
   searched: boolean
   results: SearchResult[]
@@ -374,7 +407,14 @@ async function load() {
           query: book.title ?? '',
           region: asin?.region || configuredRegion,
           asin: asin?.value ?? book.asin ?? '',
+          initial: {
+            query: book.title ?? '',
+            region: asin?.region || configuredRegion,
+            asin: asin?.value ?? book.asin ?? '',
+          },
           selected: true,
+          chosen: null,
+          asinCleared: false,
           searching: false,
           searched: false,
           results: [],
@@ -412,7 +452,56 @@ async function search(row: RepairRow) {
 function pick(row: RepairRow, result: SearchResult) {
   row.asin = (result.asin ?? '').toUpperCase()
   if (result.region) row.region = result.region
+  row.chosen = { asin: row.asin, region: row.region }
+  row.asinCleared = false
   row.selected = true
+}
+
+function clearOldAsin(row: RepairRow) {
+  if (row.asin) {
+    row.asin = ''
+    row.asinCleared = true
+  }
+}
+
+// A new name means another book: the ASIN of the previous match no longer applies
+function onNameEdited(row: RepairRow) {
+  if (!row.chosen) clearOldAsin(row)
+}
+
+// ASINs differ from one Audible market to another: keep the ASIN only if it was chosen for this region
+function onRegionEdited(row: RepairRow) {
+  if (!row.chosen || row.chosen.region !== row.region) {
+    row.chosen = null
+    clearOldAsin(row)
+  }
+}
+
+function onAsinTyped(row: RepairRow) {
+  row.chosen = row.asin.trim() ? { asin: row.asin.trim().toUpperCase(), region: row.region } : null
+  row.asinCleared = false
+}
+
+function isEdited(row: RepairRow): boolean {
+  return (
+    row.query !== row.initial.query ||
+    row.region !== row.initial.region ||
+    row.asin !== row.initial.asin
+  )
+}
+
+function revert(row: RepairRow) {
+  row.query = row.initial.query
+  row.region = row.initial.region
+  row.asin = row.initial.asin
+  row.chosen = null
+  row.asinCleared = false
+  row.results = []
+  row.searched = false
+}
+
+function needsPick(row: RepairRow): boolean {
+  return row.selected && asinChanged(row) && !row.asin.trim()
 }
 
 function asinChanged(row: RepairRow): boolean {
@@ -422,20 +511,23 @@ function asinChanged(row: RepairRow): boolean {
   )
 }
 
+// The new ASIN becomes the primary one. Identifiers that came from the previous match (provider or
+// import) are dropped: an ISBN of the wrong book would let the rescan find it again. Manual ones stay.
 function identifiersWithPrimaryAsin(row: RepairRow): AudiobookExternalIdentifierInput[] {
   const asin = row.asin.trim().toUpperCase()
-  const others = row.identifiers
+  const manual = row.identifiers
+    .filter((i) => i.source === 'Manual')
     .filter((i) => !(i.type === 'Asin' && i.value.toUpperCase() === asin))
     .map((i) => ({
       type: i.type,
       value: i.value,
       region: i.type === 'Asin' ? i.region || null : null,
       isPrimary: i.type === 'Asin' ? false : Boolean(i.isPrimary),
-      source: i.source || 'Manual',
+      source: 'Manual' as const,
     }))
   return [
     { type: 'Asin', value: asin, region: row.region, isPrimary: true, source: 'Manual' },
-    ...others,
+    ...manual,
   ]
 }
 
@@ -570,6 +662,21 @@ watch(
   font-weight: 600;
 }
 
+.repair-header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.repair-revert-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+}
+
 .repair-meta {
   font-size: 0.8rem;
   opacity: 0.75;
@@ -594,6 +701,12 @@ watch(
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
+}
+
+.repair-hint {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+  color: #ffb74d;
 }
 
 .repair-empty {
