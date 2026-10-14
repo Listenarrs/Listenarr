@@ -37,6 +37,13 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             return string.Join(" ", parts);
         }
 
+        /// <summary>
+        /// A looser query using only the title, for the automatic-search title-only fallback
+        /// when the full "Title Author Series" query returns nothing.
+        /// </summary>
+        public string BuildTitleOnlySearchQuery(Audiobook audiobook)
+            => audiobook.Title ?? string.Empty;
+
         public bool IsTorrentResult(SearchResult result)
         {
             if (!string.IsNullOrEmpty(result.DownloadType))
