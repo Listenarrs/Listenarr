@@ -53,6 +53,18 @@ namespace Listenarr.Tests.Features.Application.Search.Audible
             Assert.False(AudibleTitleMatcher.Matches(DragonsEtSerpents, query));
         }
 
+        [Theory]
+        [InlineData("Arsène Lupin contre Herlock Sholmès", "Arsène Lupin 1", "Arsène Lupin contre Herlock Sholmès (Arsène Lupin 1)", true)]
+        [InlineData("Arsène Lupin contre Herlock Sholmès", "Arsène Lupin 1", "Arsene Lupin contre Herlock Sholmes - Arsène Lupin 1", true)]
+        [InlineData("Arsène Lupin contre Herlock Sholmès", "Arsène Lupin 10", "Arsène Lupin contre Herlock Sholmès (Arsène Lupin 1)", false)]
+        [InlineData("Dragons et serpents", "Les cités des Anciens 10", "Dragons et serpents (Les cités des Anciens 1)", false)]
+        public void Combined_title_and_subtitle_match_whole_words_only(string title, string subtitle, string query, bool expected)
+        {
+            var book = new AudibleSearchResult { Asin = "B00U6GTQ6C", Title = title, Subtitle = subtitle };
+
+            Assert.Equal(expected, AudibleTitleMatcher.Matches(book, query));
+        }
+
         [Fact]
         public void Normalizes_case_accents_and_punctuation()
         {
