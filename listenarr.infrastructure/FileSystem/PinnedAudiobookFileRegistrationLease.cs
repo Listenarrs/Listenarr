@@ -69,7 +69,9 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
                 "This pinned registration lease does not authorize metadata writes.");
         }
 
-        return _file.OpenIndependentWriteStream(
+        // Read+write, because the only consumer is a tag library that parses the container it
+        // is about to rewrite through this same stream.
+        return _file.OpenIndependentReadWriteStream(
             bufferSize: 128 * 1024,
             asynchronous: false);
     }
