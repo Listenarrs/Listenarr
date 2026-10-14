@@ -65,6 +65,39 @@ namespace Listenarr.Tests.Features.Application.Search.Audible
             Assert.Equal(expected, AudibleTitleMatcher.Matches(book, query));
         }
 
+        [Theory]
+        [InlineData("Primal Hunter 4", true)]
+        [InlineData("Primal Hunter, Tome 4", true)]
+        [InlineData("Primal Hunter 14", false)]
+        [InlineData("Primal Hunter 5", false)]
+        public void Matches_every_word_of_the_search_across_title_subtitle_and_series(string query, bool expected)
+        {
+            // audible.fr's French edition of book 4: the number is only in the subtitle and the series
+            var book = new AudibleSearchResult
+            {
+                Asin = "B0FXXVV42J",
+                Title = "Primal Hunter",
+                Subtitle = "Primal Hunter, Tome 4",
+                Series = [new AudibleSeries { Name = "Primal Hunter", Position = "4" }],
+            };
+
+            Assert.Equal(expected, AudibleTitleMatcher.Matches(book, query));
+        }
+
+        [Fact]
+        public void Matches_the_series_position_when_the_title_and_subtitle_have_no_number()
+        {
+            var book = new AudibleSearchResult
+            {
+                Asin = "B0H95C9XJJ",
+                Title = "Primal Hunter",
+                Series = [new AudibleSeries { Name = "Primal Hunter", Position = "6" }],
+            };
+
+            Assert.True(AudibleTitleMatcher.Matches(book, "Primal Hunter 6"));
+            Assert.False(AudibleTitleMatcher.Matches(book, "Primal Hunter 4"));
+        }
+
         [Fact]
         public void Normalizes_case_accents_and_punctuation()
         {
