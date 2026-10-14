@@ -217,6 +217,58 @@ public sealed partial class PinnedDirectoryCreationTests : BaseTests
         Assert.False(Directory.Exists(statePath));
     }
 
+    [WindowsNetworkStorageFact]
+    public void DeletePinnedEmptyDirectoryImmediately_NetworkStorage_RemovesDirectory()
+    {
+        var providedRoot = Path.GetFullPath(
+            Environment.GetEnvironmentVariable(
+                NetworkStorageTheoryAttribute.PathEnvironmentVariable)
+            ?? throw new InvalidOperationException(
+                "A network filesystem path was not provided."));
+        var scenarioRoot = Path.Join(
+            providedRoot,
+            $"listenarr-smb-immediate-delete-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(scenarioRoot);
+        var child = Path.Join(scenarioRoot, "Book");
+        Directory.CreateDirectory(child);
+        var degradeBefore = Interlocked.Read(
+            ref PinnedDirectoryCreation
+                .DirectoryImmediateDeleteDegradedToDeleteOnCloseCount);
+        try
+        {
+            using var anchor =
+                PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(scenarioRoot);
+            using var publication = anchor.OpenExistingChildForPublication("Book");
+
+            // Before the fix this threw Win32Exception(87) on SMB because POSIX immediate
+            // deletion is unsupported and the legacy fallback was disabled for directories.
+            publication.DeletePinnedEmptyDirectoryImmediately("Book");
+
+            Assert.False(Directory.Exists(child));
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(scenarioRoot, recursive: true);
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException)
+            {
+                // Best-effort cleanup on externally supplied network storage.
+            }
+        }
+
+        var degradeAfter = Interlocked.Read(
+            ref PinnedDirectoryCreation
+                .DirectoryImmediateDeleteDegradedToDeleteOnCloseCount);
+        // On SMB the POSIX immediate unlink is rejected, so the delete must have taken the
+        // delete-on-close degrade path — this proves the fallback engaged on this mount.
+        Assert.True(
+            degradeAfter > degradeBefore,
+            "Expected the immediate directory delete to degrade to delete-on-close on SMB.");
+    }
+
     [Fact]
     public void PublishCreatedDirectoryAs_EmptyDirectory_PublishesWithinPinnedParent()
     {
