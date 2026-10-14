@@ -109,7 +109,7 @@ namespace Listenarr.Application.Search.Core
 
                 // Step 2: Collect candidates from OpenLibrary (and other non-scraping sources)
                 var candidateCollection = await _asinCandidateCollector.CollectCandidatesAsync(
-                    query, skipOpenLibrary, ct);
+                    query, skipOpenLibrary, ct, titleVal, authorVal);
 
                 var asinCandidates = candidateCollection.AsinCandidates;
                 var asinToRawResult = candidateCollection.AsinToRawResult;
