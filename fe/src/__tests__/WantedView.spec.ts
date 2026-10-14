@@ -29,6 +29,7 @@ vi.mock('@/services/api', () => ({
   apiService: {
     getImageUrl: vi.fn((url: string) => url || 'https://via.placeholder.com/300x450?text=No+Image'),
     getQualityProfiles: vi.fn(async () => []),
+    getDownloads: vi.fn(async () => []),
     searchAndDownload: vi.fn(async () => ({ success: true, indexerUsed: 'MockIndexer' })),
   },
   // Also expose the named helper so tests can import it directly
@@ -94,7 +95,7 @@ describe('WantedView image recache behavior', () => {
     libraryStore.fetchLibrary = vi.fn(async () => undefined)
 
     const downloadsStore = useDownloadsStore()
-    downloadsStore.downloads = [
+    const fixtureDownloads = [
       {
         id: 'd-pending',
         title: 'Pending Book',
@@ -118,6 +119,10 @@ describe('WantedView image recache behavior', () => {
         metadata: {},
       },
     ] as ReturnType<typeof useDownloadsStore>['downloads']
+    downloadsStore.downloads = fixtureDownloads
+    vi.mocked(apiService.getDownloads).mockResolvedValueOnce(
+      fixtureDownloads as unknown as ReturnType<typeof apiService.getDownloads>,
+    )
 
     const wrapper = mount(WantedView, { global: { plugins: [pinia] } })
     await new Promise((r) => setTimeout(r, 10))
@@ -222,7 +227,7 @@ describe('WantedView - Search All (Issue #936)', () => {
       { id: 101, title: 'Downloading Book', monitored: true, files: [] },
     ] as unknown as ReturnType<typeof useLibraryStore>['audiobooks']
 
-    downloadsStore.downloads = [
+    const fixtureDownloads = [
       {
         id: 'd-1',
         title: 'Downloading Book',
@@ -235,6 +240,10 @@ describe('WantedView - Search All (Issue #936)', () => {
         metadata: {},
       },
     ] as ReturnType<typeof useDownloadsStore>['downloads']
+    downloadsStore.downloads = fixtureDownloads
+    vi.mocked(apiService.getDownloads).mockResolvedValueOnce(
+      fixtureDownloads as unknown as ReturnType<typeof apiService.getDownloads>,
+    )
 
     const wrapper = mount(WantedView, { global: { plugins: [pinia] } })
     await flushPromises()
@@ -308,7 +317,7 @@ describe('WantedView - Search All (Issue #936)', () => {
       { id: 2, title: 'Book 2', monitored: true, files: [] },
     ] as unknown as ReturnType<typeof useLibraryStore>['audiobooks']
 
-    downloadsStore.downloads = [
+    const fixtureDownloads = [
       {
         id: 'd-2',
         title: 'Book 2',
@@ -321,6 +330,10 @@ describe('WantedView - Search All (Issue #936)', () => {
         metadata: {},
       },
     ] as ReturnType<typeof useDownloadsStore>['downloads']
+    downloadsStore.downloads = fixtureDownloads
+    vi.mocked(apiService.getDownloads).mockResolvedValueOnce(
+      fixtureDownloads as unknown as ReturnType<typeof apiService.getDownloads>,
+    )
 
     const wrapper = mount(WantedView, { global: { plugins: [pinia] } })
     await flushPromises()
@@ -369,5 +382,52 @@ describe('WantedView - Search All (Issue #936)', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('hydrates downloads store on mount and excludes active downloads from fresh Wanted load', async () => {
+    vi.mocked(apiService.getDownloads).mockResolvedValueOnce([
+      {
+        id: 'd-1',
+        title: 'Downloading Book',
+        status: 'Downloading',
+        progress: 50,
+        totalSize: 1000,
+        downloadedSize: 500,
+        audiobookId: 101,
+        startedAt: new Date().toISOString(),
+        metadata: {},
+      },
+    ] as unknown as ReturnType<typeof apiService.getDownloads>)
+
+    libraryStore.audiobooks = [
+      { id: 101, title: 'Downloading Book', monitored: true, files: [] },
+      { id: 102, title: 'Missing Book', monitored: true, files: [] },
+    ] as unknown as ReturnType<typeof useLibraryStore>['audiobooks']
+
+    downloadsStore.downloads = []
+
+    const wrapper = mount(WantedView, { global: { plugins: [pinia] } })
+    await flushPromises()
+
+    expect(apiService.getDownloads).toHaveBeenCalled()
+    expect(downloadsStore.downloads).toHaveLength(1)
+
+    const searchAllBtn = wrapper.findAll('button').find((b) => b.text().includes('Search All'))
+    expect(searchAllBtn).toBeDefined()
+    expect(searchAllBtn!.attributes('disabled')).toBeUndefined()
+
+    await searchAllBtn!.trigger('click')
+    await flushPromises()
+
+    const confirmModal = wrapper.findComponent({ name: 'ConfirmModal' })
+    expect(confirmModal.exists()).toBe(true)
+    expect(confirmModal.props('visible')).toBe(true)
+    expect(confirmModal.props('message')).toContain('1')
+
+    await confirmModal.vm.$emit('confirm')
+    await flushPromises()
+
+    expect(apiService.searchAndDownload).toHaveBeenCalledWith(102)
+    expect(apiService.searchAndDownload).not.toHaveBeenCalledWith(101)
   })
 })

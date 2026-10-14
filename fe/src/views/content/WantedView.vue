@@ -352,6 +352,8 @@ onMounted(async () => {
     await libraryStore.fetchLibrary()
   }
   await configurationStore.loadQualityProfiles()
+  // Issue #936: Hydrate downloads store on mount so active downloads are excluded on fresh loads
+  await downloadsStore.loadDownloads()
 
   await syncWantedLayout()
 })
