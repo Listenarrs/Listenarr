@@ -2115,6 +2115,11 @@ const handleUnifiedSearchResults = async (results: SearchResult[] | null | undef
       return
     }
 
+    // Drop the previous search's results, or they stay on screen under the new query
+    titleResults.value = []
+    audibleResult.value = null
+    allAudibleResults.value = []
+    totalTitleResultsCount.value = 0
     searchStatus.value = ''
     searchError.value = ''
     toast.info('No results found', 'Search')

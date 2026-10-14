@@ -608,6 +608,47 @@ describe('AddNewView pagination', () => {
     scrollSpy.mockRestore()
   })
 
+  it('clears the previous results when a new search returns nothing', async () => {
+    const apiModule = await import('@/services/api')
+    const apiService = apiModule.apiService as unknown as { searchAudibleByTitleAndAuthor?: Mock }
+    apiService.searchAudibleByTitleAndAuthor?.mockResolvedValueOnce({
+      totalResults: 1,
+      results: [
+        {
+          asin: 'B000999',
+          title: 'Dune Simple',
+          authors: [{ name: 'Frank Herbert' }],
+          language: 'english',
+        },
+      ],
+    })
+
+    const router = createTestRouter()
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    const vm = wrapper.vm as unknown as {
+      searchQuery?: string
+      performSearch?: () => Promise<void>
+      titleResults?: unknown[]
+    }
+
+    vm.searchQuery = 'Dune Simple'
+    await vm.performSearch()
+    await flushPromises()
+    expect(vm.titleResults.length).toBe(1)
+    expect(wrapper.text()).toContain('Found 1 Book')
+
+    apiService.searchAudibleByTitleAndAuthor?.mockResolvedValueOnce({
+      totalResults: 0,
+      results: [],
+    })
+    vm.searchQuery = 'testwkledjhfg'
+    await vm.performSearch()
+    await flushPromises()
+
+    expect(vm.titleResults.length).toBe(0)
+    expect(wrapper.text()).not.toContain('Found 1 Book')
+  })
+
   it('maps runtime from runtimeLengthMin (minutes) and keeps as minutes', async () => {
     const apiModule = await import('@/services/api')
     const apiService = apiModule.apiService as unknown as { searchAudibleByTitleAndAuthor?: Mock }
