@@ -462,20 +462,78 @@ describe('library import store', () => {
     expect(store.items['/incoming/AlterWorld/01.mp3']?.selectedMatch?.region).toBe('fr')
   })
 
-  it('falls back to the US catalogue when nothing is found in the configured region', async () => {
+  it('searches the configured region only and never switches catalogues on its own', async () => {
     const { useLibraryImportStore } = await import('@/stores/libraryImport')
     const store = useLibraryImportStore()
-    advancedSearch
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ title: 'AlterWorld', asin: 'B00XXXXXXX', authors: [] }])
+    advancedSearch.mockResolvedValue([])
     store.items = { '/incoming/AlterWorld/01.mp3': unsearchedItem('/incoming/AlterWorld/01.mp3') }
 
     store.startProcessing()
     await vi.waitFor(() => expect(store.isProcessing).toBe(false))
 
-    expect(advancedSearch).toHaveBeenNthCalledWith(1, expect.objectContaining({ region: 'fr' }))
-    expect(advancedSearch).toHaveBeenNthCalledWith(2, expect.objectContaining({ region: 'us' }))
-    expect(store.items['/incoming/AlterWorld/01.mp3']?.selectedMatch?.region).toBe('us')
+    expect(advancedSearch).toHaveBeenCalledTimes(1)
+    expect(advancedSearch).toHaveBeenCalledWith(expect.objectContaining({ region: 'fr' }))
+    expect(store.items['/incoming/AlterWorld/01.mp3']?.selectedMatch).toBeNull()
+  })
+
+  it('treats empty "Unknown Title" stubs as no result', async () => {
+    const { useLibraryImportStore } = await import('@/stores/libraryImport')
+    const store = useLibraryImportStore()
+    advancedSearch.mockResolvedValue([{ asin: 'B0BK9W82PQ', authors: [] }])
+    store.items = {
+      '/incoming/PH4/01.mp3': unsearchedItem('/incoming/PH4/01.mp3', 'B0BK9W82PQ'),
+    }
+
+    store.startProcessing()
+    await vi.waitFor(() => expect(store.isProcessing).toBe(false))
+
+    expect(store.items['/incoming/PH4/01.mp3']?.selectedMatch).toBeNull()
+  })
+
+  it('searches the region the user picked and tags the results with it', async () => {
+    const { useLibraryImportStore } = await import('@/stores/libraryImport')
+    const store = useLibraryImportStore()
+    advancedSearch.mockResolvedValue([
+      { title: 'Primal Hunter 4', asin: 'B0BK9W82PQ', authors: [] },
+      { asin: 'B0ZZZZZZZZ' },
+    ])
+
+    const results = await store.searchInRegion({ title: 'The Primal Hunter 4', cap: 5 }, 'us')
+
+    expect(advancedSearch).toHaveBeenCalledWith({
+      title: 'The Primal Hunter 4',
+      cap: 5,
+      region: 'us',
+    })
+    expect(results).toEqual([expect.objectContaining({ asin: 'B0BK9W82PQ', region: 'us' })])
+  })
+
+  it('keeps the configured region for a saved match that has none', async () => {
+    const { useLibraryImportStore } = await import('@/stores/libraryImport')
+    const store = useLibraryImportStore()
+    getAudibleMetadata.mockResolvedValue({ authors: [{ name: 'D. Rus' }], narrators: [] })
+    store.items = {
+      '/incoming/AlterWorld/01.mp3': {
+        ...unsearchedItem('/incoming/AlterWorld/01.mp3'),
+        // saved before regions were recorded
+        selectedMatch: {
+          title: 'AlterWorld',
+          asin: 'B0H9MD3W8Q',
+          authors: [],
+        } as unknown as SearchResult,
+        hasSearched: true,
+        selected: true,
+      },
+    }
+    store.action = 'none'
+
+    await store.importSelected('/media/audiobooks')
+
+    expect(getAudibleMetadata).toHaveBeenCalledWith('B0H9MD3W8Q', 'fr')
+    expect(addToLibrary).toHaveBeenCalledWith(
+      expect.objectContaining({ region: 'fr' }),
+      expect.anything(),
+    )
   })
 
   it('fetches full metadata from the region the match came from', async () => {

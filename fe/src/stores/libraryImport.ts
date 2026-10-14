@@ -67,13 +67,14 @@ function pickBestMatch(results: SearchResult[], detectedAuthor?: string): Search
   return scored.find((s) => s.match)?.r ?? results[0] ?? null
 }
 
-// Audible catalogue used when a book is not found in the configured region.
-const FALLBACK_REGION = 'us'
-
 type AdvancedSearchParams = Parameters<typeof apiService.advancedSearch>[0]
 
-function tagRegion(results: SearchResult[], region: string): SearchResult[] {
-  return results.map((result) => ({ ...result, region: result.region || region }))
+// Keep usable results only (Audible answers an ASIN it doesn't sell in that market with an empty
+// stub: an ASIN but no title) and tag each one with the region it came from.
+function usableInRegion(results: SearchResult[], region: string): SearchResult[] {
+  return results
+    .filter((result) => !(result.asin && !result.title))
+    .map((result) => ({ ...result, region: result.region || region }))
 }
 
 function normalizeGenres(genres: unknown): string[] | undefined {
@@ -359,15 +360,16 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     return normalizeSearchRegion(configStore.applicationSettings?.defaultSearchRegion)
   }
 
-  // Search the configured Audible region first, then the US catalogue when nothing is found there.
-  // Results are tagged with the region they came from, so the import fetches their full metadata
-  // (authors, narrators) from the same catalogue instead of defaulting to the US one.
-  async function _searchWithRegionFallback(params: AdvancedSearchParams): Promise<SearchResult[]> {
-    const region = await _configuredRegion()
-    const results = await apiService.advancedSearch({ ...params, region })
-    if (results.length > 0 || region === FALLBACK_REGION) return tagRegion(results, region)
-    const fallback = await apiService.advancedSearch({ ...params, region: FALLBACK_REGION })
-    return tagRegion(fallback, FALLBACK_REGION)
+  // Search one Audible region: the one given (picked by the user) or the configured one. There is no
+  // automatic switch to another catalogue. Results are tagged with their region, so the import
+  // fetches their full metadata (authors, narrators) from the same catalogue and keeps that region.
+  async function searchInRegion(
+    params: AdvancedSearchParams,
+    region?: string,
+  ): Promise<SearchResult[]> {
+    const searchRegion = region || (await _configuredRegion())
+    const results = await apiService.advancedSearch({ ...params, region: searchRegion })
+    return usableInRegion(results, searchRegion)
   }
 
   // ─── Queue Processing ─────────────────────────────────────────────────────
@@ -406,7 +408,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
       try {
         const searchParams = buildLibraryImportSearchParams(item, 5)
         const byAsin = !!searchParams.asin
-        const results = await _searchWithRegionFallback(searchParams)
+        const results = await searchInRegion(searchParams)
         metadataFetchCount.value++
         // ASIN results are authoritative — take the first result directly without author comparison
         const first = byAsin ? (results[0] ?? null) : pickBestMatch(results, item.detectedAuthor)
@@ -436,15 +438,16 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
 
   // ─── Per-row manual search ────────────────────────────────────────────────
 
-  async function searchItem(id: string, query: string) {
+  async function searchItem(id: string, query: string, region?: string) {
     const item = items.value[id]
     if (!item) return
 
     items.value[id] = { ...item, isSearching: true }
     try {
       const isAsin = /^[A-Z0-9]{10}$/i.test(query.trim())
-      const results = await _searchWithRegionFallback(
+      const results = await searchInRegion(
         isAsin ? { asin: query.trim(), cap: 5 } : { title: query, cap: 5 },
+        region,
       )
       items.value[id] = { ...items.value[id], isSearching: false, hasSearched: true }
       return results
@@ -495,7 +498,9 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   // Search results often have authors: [{ asin, name: undefined }] — the full
   // metadata fetch is the only way to get real author/narrator names.
   async function _enrichMetadata(match: SearchResult): Promise<AudibleBookMetadata> {
-    const base = matchToMetadata(match)
+    // A match saved before regions were recorded has none: use (and keep) the configured region
+    const region = match.region || (await _configuredRegion())
+    const base = { ...matchToMetadata(match), region }
     if (!match.asin) return base
     try {
       type AudiblePayload = {
@@ -504,7 +509,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
       }
       const resp = await apiService.getAudibleMetadata<
         { source?: string; metadata?: AudiblePayload } | AudiblePayload
-      >(match.asin, match.region || (await _configuredRegion()))
+      >(match.asin, region)
       const raw: AudiblePayload =
         resp && 'metadata' in resp && resp.metadata ? resp.metadata : (resp as AudiblePayload)
       const enrichedAuthors = (raw.authors ?? []).map((a) => a?.name ?? '').filter(Boolean)
@@ -640,6 +645,8 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     stopProcessing,
     processNext,
     searchItem,
+    searchInRegion,
+    configuredRegion: _configuredRegion,
     selectMatch,
     clearMatch,
     toggleSelect,
