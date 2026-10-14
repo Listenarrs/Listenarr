@@ -37,7 +37,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
         {
             try
             {
-                var baseUrl = DownloadClientUriBuilder.BuildAuthority(client);
+                var baseUrl = QBittorrentHelpers.BuildBaseUrl(client);
 
                 using var http = _httpClientFactory.CreateClient(_clientType);
                 using var resp = await http.GetAsync($"{baseUrl}/api/v2/app/version", ct);
@@ -67,6 +67,10 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
             catch (TaskCanceledException)
             {
                 return (false, "Connection timed out.");
+            }
+            catch (QbittorrentException exception)
+            {
+                return (false, exception.Message);
             }
             catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
             {
