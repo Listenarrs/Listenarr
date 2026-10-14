@@ -1142,7 +1142,12 @@ async function lookupMetadata(
   if (!metadata || typeof metadata !== 'object') return { found: true, enriched: null, source }
   // Audible answers an ASIN it doesn't sell in that market with an empty stub: ASIN, no title
   if (metadata.asin && !metadata.title) return { found: false, enriched: null }
-  const enrichedMeta = mapAudibleToAudible(metadata, source, fallbackBook)
+  // The record's region, else the region this request found it in: never the book's own region,
+  // which may be the catalogue that just failed
+  const enrichedMeta = {
+    ...mapAudibleToAudible(metadata, source, fallbackBook),
+    region: metadata.region || region,
+  }
   // Sanitize seriesNumber to filter out the string "null"
   if (enrichedMeta.seriesNumber === 'null') {
     enrichedMeta.seriesNumber = undefined
@@ -1165,7 +1170,7 @@ const retryMetadataLookup = async () => {
     return
   }
   metadataLookupFailed.value = false
-  enriched.value = { ...result.enriched, region: result.enriched.region || region }
+  enriched.value = result.enriched
   metadataSource.value = result.source || null
   replaceEditableMetadata(enriched.value)
   await refreshPreviewFromMetadata(true, generation)

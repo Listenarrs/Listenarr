@@ -128,6 +128,47 @@ describe('AddLibraryModal when the configured region has no record for the ASIN'
     )
   })
 
+  it('keeps the region of the lookup when the response has no top-level region', async () => {
+    // e.g. a book from "Scan for unmatched files": no region of its own, found in the configured one
+    apiMocks.getAudibleMetadata.mockResolvedValue({
+      metadata: { ...usRecord.metadata, title: 'L’étroit chemin', region: undefined },
+      source: 'Audible',
+    })
+    const wrapper = mountModal()
+    await flushPromises()
+
+    expect(apiMocks.getAudibleMetadata).toHaveBeenCalledWith('B008DFUGCQ', 'fr')
+    await wrapper.get('button.btn-primary').trigger('click')
+    await flushPromises()
+    expect(apiMocks.addToLibrary).toHaveBeenCalledWith(
+      expect.objectContaining({ region: 'fr' }),
+      expect.any(Object),
+    )
+  })
+
+  it('keeps the region that found the book, not the one that failed, when the response has none', async () => {
+    apiMocks.getAudibleMetadata
+      .mockRejectedValueOnce(notFound)
+      .mockResolvedValueOnce({ metadata: { ...usRecord.metadata, region: undefined } })
+    const wrapper = mount(AddLibraryModal, {
+      props: { visible: true, book: { ...bookFromFiles, region: 'fr' } },
+      attachTo: document.body,
+      global: { plugins: [createPinia()] },
+    })
+    await flushPromises()
+
+    await wrapper.get('[data-testid="metadata-retry-region"]').setValue('us')
+    await wrapper.get('[data-testid="metadata-retry"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('button.btn-primary').trigger('click')
+    await flushPromises()
+    expect(apiMocks.addToLibrary).toHaveBeenCalledWith(
+      expect.objectContaining({ region: 'us' }),
+      expect.any(Object),
+    )
+  })
+
   it('keeps warning when the other region has no record either', async () => {
     apiMocks.getAudibleMetadata.mockRejectedValue(notFound)
     const wrapper = mountModal()
