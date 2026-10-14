@@ -1190,6 +1190,122 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Renaming
             Assert.Equal(NormalizePath(targetPath), NormalizePath(saved.Files!.Single().Path));
         }
 
+        private async Task<(RenameResult Result, string SourceFolder, string TargetFolder)> RenameBookWithCompanionsAsync(
+            List<string> importBlacklist,
+            Dictionary<string, string> sourceCompanions,
+            Dictionary<string, string>? existingTargetFiles = null)
+        {
+            var libraryRoot = Path.Join(_tempRoot, "library");
+            var sourceFolder = Path.Join(libraryRoot, "Old");
+            var targetFolder = Path.Join(libraryRoot, "Author", "Book");
+            Directory.CreateDirectory(sourceFolder);
+            var sourcePath = Path.Join(sourceFolder, "old-name.m4b");
+            await File.WriteAllTextAsync(sourcePath, "audio");
+            foreach (var (name, content) in sourceCompanions)
+            {
+                await File.WriteAllTextAsync(Path.Join(sourceFolder, name), content);
+            }
+
+            if (existingTargetFiles != null)
+            {
+                Directory.CreateDirectory(targetFolder);
+                foreach (var (name, content) in existingTargetFiles)
+                {
+                    await File.WriteAllTextAsync(Path.Join(targetFolder, name), content);
+                }
+            }
+
+            var settings = new ApplicationSettings
+            {
+                OutputPath = libraryRoot,
+                FolderNamingPattern = "{Author}/{Title}",
+                FileNamingPattern = "{Title}",
+                ImportBlacklistExtensions = importBlacklist
+            };
+
+            var (service, db, _) = BuildService(settings);
+            db.Audiobooks.Add(new Audiobook
+            {
+                Id = 5,
+                Title = "Book",
+                Authors = new List<string> { "Author" },
+                BasePath = sourceFolder,
+                FilePath = sourcePath,
+                Files = new List<AudiobookFile> { CreateTrackedFile(51, 5, sourcePath) }
+            });
+            await db.SaveChangesAsync();
+
+            var results = await service.ExecuteRenameAsync(new List<RenameOperation>
+            {
+                new()
+                {
+                    AudiobookId = 5,
+                    CurrentFolderPath = sourceFolder,
+                    CurrentFolderSemantics = ExpectedSemantics(sourceFolder),
+                    NewFolderPath = targetFolder,
+                    FileRenames = new List<FileRenameOperation>
+                    {
+                        new() { FileId = 51, CurrentPath = sourcePath, NewPath = Path.Join(targetFolder, "Book.m4b") }
+                    }
+                }
+            });
+
+            return (Assert.Single(results), sourceFolder, targetFolder);
+        }
+
+        [Fact]
+        public async Task ExecuteRename_FolderChange_MovesCompanionFilesAndRemovesEmptyOldFolder()
+        {
+            var (result, sourceFolder, targetFolder) = await RenameBookWithCompanionsAsync(
+                new List<string>(),
+                new Dictionary<string, string> { ["cover.jpg"] = "cover", ["metadata.json"] = "{}" });
+
+            Assert.True(result.Success);
+            Assert.Equal("cover", await File.ReadAllTextAsync(Path.Join(targetFolder, "cover.jpg")));
+            Assert.Equal("{}", await File.ReadAllTextAsync(Path.Join(targetFolder, "metadata.json")));
+            Assert.False(Directory.Exists(sourceFolder));
+        }
+
+        [Fact]
+        public async Task ExecuteRename_FolderChange_RemovesOldFolderHoldingOnlyBlacklistedLeftovers()
+        {
+            var (result, sourceFolder, targetFolder) = await RenameBookWithCompanionsAsync(
+                new List<string> { ".nfo" },
+                new Dictionary<string, string> { ["cover.jpg"] = "cover", ["book.nfo"] = "nfo" });
+
+            Assert.True(result.Success);
+            Assert.True(File.Exists(Path.Join(targetFolder, "cover.jpg")));
+            Assert.False(File.Exists(Path.Join(targetFolder, "book.nfo")));
+            Assert.False(Directory.Exists(sourceFolder));
+        }
+
+        [Fact]
+        public async Task ExecuteRename_FolderChange_KeepsOldFolderWhenANonBlacklistedFileRemains()
+        {
+            var (result, sourceFolder, targetFolder) = await RenameBookWithCompanionsAsync(
+                new List<string> { ".nfo" },
+                new Dictionary<string, string> { ["cover.jpg"] = "old cover", ["book.nfo"] = "nfo" },
+                new Dictionary<string, string> { ["cover.jpg"] = "kept cover" });
+
+            Assert.True(result.Success);
+            Assert.Equal("kept cover", await File.ReadAllTextAsync(Path.Join(targetFolder, "cover.jpg")));
+            Assert.True(File.Exists(Path.Join(sourceFolder, "cover.jpg")));
+            Assert.True(File.Exists(Path.Join(sourceFolder, "book.nfo")));
+        }
+
+        [Fact]
+        public async Task ExecuteRename_FolderChange_NeverOverwritesExistingCompanion()
+        {
+            var (result, sourceFolder, targetFolder) = await RenameBookWithCompanionsAsync(
+                new List<string>(),
+                new Dictionary<string, string> { ["cover.jpg"] = "old cover" },
+                new Dictionary<string, string> { ["cover.jpg"] = "kept cover" });
+
+            Assert.True(result.Success);
+            Assert.Equal("kept cover", await File.ReadAllTextAsync(Path.Join(targetFolder, "cover.jpg")));
+            Assert.Equal("old cover", await File.ReadAllTextAsync(Path.Join(sourceFolder, "cover.jpg")));
+        }
+
         [Theory]
         [InlineData(false)]
         [InlineData(true)]
