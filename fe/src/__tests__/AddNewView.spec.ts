@@ -38,6 +38,7 @@ describe('AddNewView pagination', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     window.localStorage.clear()
+    window.sessionStorage.clear()
     const apiModule = await import('@/services/api')
     const apiService = apiModule.apiService as unknown as {
       getApplicationSettings?: Mock
@@ -261,6 +262,87 @@ describe('AddNewView pagination', () => {
     expect(vm.searchLanguage).toBe('de')
     expect(vm.preferredSearchLanguage).toBe('polish')
     expect((wrapper.find('select#region-select').element as HTMLSelectElement).value).toBe('de')
+  })
+
+  it('restores a search of this session with its query, region and language', async () => {
+    const apiModule = await import('@/services/api')
+    const apiService = apiModule.apiService as unknown as { getApplicationSettings?: Mock }
+    apiService.getApplicationSettings?.mockResolvedValue({
+      defaultSearchRegion: 'de',
+      defaultSearchLanguage: 'german',
+    })
+    window.sessionStorage.setItem(
+      'listenarr.addNewResults',
+      JSON.stringify({ titleResults: [{ key: 'B000999', title: 'Dune Simple' }] }),
+    )
+    window.sessionStorage.setItem('listenarr.addNewSearchType', 'title')
+    window.sessionStorage.setItem('listenarr.addNewTitleResultsCount', '1')
+    window.sessionStorage.setItem(
+      'listenarr.addNewSearchContext',
+      JSON.stringify({ query: 'Dune', region: 'fr', language: 'french' }),
+    )
+
+    const router = createTestRouter()
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      searchQuery?: string
+      searchLanguage?: string
+      preferredSearchLanguage?: string
+      titleResults?: unknown[]
+    }
+    expect(vm.titleResults?.length).toBe(1)
+    expect(vm.searchQuery).toBe('Dune')
+    expect(vm.searchLanguage).toBe('fr')
+    expect(vm.preferredSearchLanguage).toBe('french')
+    expect((wrapper.find('select#region-select').element as HTMLSelectElement).value).toBe('fr')
+  })
+
+  it('does not show results an earlier version left in localStorage, and drops them', async () => {
+    window.localStorage.setItem(
+      'listenarr.addNewResults',
+      JSON.stringify({ titleResults: [{ key: 'B000999', title: 'Old Search' }] }),
+    )
+    window.localStorage.setItem('listenarr.addNewTitleResultsCount', '16')
+
+    const router = createTestRouter()
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as { titleResults?: unknown[] }
+    expect(vm.titleResults?.length).toBe(0)
+    expect(wrapper.text()).not.toContain('Found 16 Books')
+    expect(window.localStorage.getItem('listenarr.addNewResults')).toBeNull()
+    expect(window.localStorage.getItem('listenarr.addNewTitleResultsCount')).toBeNull()
+  })
+
+  it('keeps the query, region and language of a search for this session only', async () => {
+    const apiModule = await import('@/services/api')
+    const apiService = apiModule.apiService as unknown as { getApplicationSettings?: Mock }
+    apiService.getApplicationSettings?.mockResolvedValue({ defaultSearchRegion: 'fr' })
+    vi.spyOn(apiModule.apiService, 'advancedSearch').mockResolvedValue([])
+
+    const router = createTestRouter()
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      searchQuery?: string
+      performSearch?: () => Promise<void>
+    }
+
+    vm.searchQuery = 'Dune'
+    await vm.performSearch?.()
+    await flushPromises()
+
+    expect(
+      JSON.parse(window.sessionStorage.getItem('listenarr.addNewSearchContext') ?? '{}'),
+    ).toEqual({
+      query: 'Dune',
+      region: 'fr',
+      language: 'french',
+    })
+    expect(window.localStorage.getItem('listenarr.addNewSearchContext')).toBeNull()
   })
 
   it('defaults language to the region primary language when no language is configured', async () => {
