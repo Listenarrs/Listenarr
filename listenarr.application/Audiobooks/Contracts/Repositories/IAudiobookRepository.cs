@@ -65,6 +65,23 @@ namespace Listenarr.Application.Audiobooks.Contracts.Repositories
         Task<SeriesCacheEntry> UpsertCachedSeriesAsync(SeriesCacheEntry seriesCacheEntry);
         Task<Audiobook> AddAsync(Audiobook audiobook);
         Task<bool> UpdateAsync(Audiobook audiobook);
+
+        /// <summary>
+        /// Books the automatic metadata backfill should look up next: they hold
+        /// files, carry an ASIN or ISBN to look up by, have at least one core text
+        /// field blank, and were not attempted since <paramref name="retryBeforeUtc"/>.
+        /// Never-attempted books come first, then the longest-ago attempts.
+        /// </summary>
+        Task<List<Audiobook>> GetMetadataBackfillCandidatesAsync(
+            int max,
+            DateTime retryBeforeUtc,
+            CancellationToken ct = default);
+
+        /// <summary>
+        /// Targeted single-column write of <see cref="Audiobook.MetadataBackfillAttemptedAt"/>
+        /// so a lookup that found nothing is still recorded without re-saving the row.
+        /// </summary>
+        Task SetMetadataBackfillAttemptedAtAsync(int audiobookId, DateTime attemptedAtUtc, CancellationToken ct = default);
         Task<bool> RewritePathReferencesAsync(
             int audiobookId,
             string? sourceBasePath,
