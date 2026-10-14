@@ -24,7 +24,8 @@ namespace Listenarr.Application.Search.Audible
     /// Decides whether an Audible catalogue entry matches a searched title. Folder and tag titles
     /// often carry the subtitle or series in brackets ("Dragons et serpents (Les cités des Anciens 1)")
     /// while Audible splits it into title and subtitle, so the comparison also runs on
-    /// "title subtitle" with punctuation, case and accents ignored.
+    /// "title subtitle" with punctuation, case and accents ignored. That comparison works on whole
+    /// words, so "Arsène Lupin 1" does not match a book subtitled "Arsène Lupin 10".
     /// </summary>
     internal static class AudibleTitleMatcher
     {
@@ -42,7 +43,7 @@ namespace Listenarr.Application.Search.Audible
             }
 
             var full = Normalize($"{book.Title} {book.Subtitle}");
-            return full.Length > 0 && full.Contains(query, StringComparison.Ordinal);
+            return full.Length > 0 && $" {full} ".Contains($" {query} ", StringComparison.Ordinal);
         }
 
         private static bool Contains(string? value, string title) =>
