@@ -72,7 +72,7 @@
     "patch-package": "^8.0.1",
     "prettier": "^3.8.4",
     "rollup-plugin-visualizer": "^7.0.1",
-    "start-server-and-test": "^3.0.9",
+    "start-server-and-test": "^3.0.11",
     "typescript": "^6.0.3",
     "vite": "^8.0.16",
     "vitest": "^4.1.8",
