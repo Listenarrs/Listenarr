@@ -76,7 +76,7 @@
     "typescript": "^6.0.3",
     "vite": "^8.0.16",
     "vitest": "^4.1.8",
-    "vue-tsc": "^3.3.4"
+    "vue-tsc": "^3.3.5"
   },
   "overrides": {
     "ajv": "^8.18.0",
