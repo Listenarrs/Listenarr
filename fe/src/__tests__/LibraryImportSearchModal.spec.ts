@@ -15,7 +15,8 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { apiService } from '@/services/api'
 import type { SearchResult } from '@/types'
@@ -32,6 +33,10 @@ vi.mock('@/composables/useProtectedImages', () => ({
 describe('LibraryImportSearchModal', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    setActivePinia(createPinia())
+    vi.spyOn(apiService, 'getApplicationSettings').mockResolvedValue({
+      defaultSearchRegion: 'fr',
+    } as unknown as Awaited<ReturnType<typeof apiService.getApplicationSettings>>)
     vi.spyOn(apiService, 'advancedSearch').mockResolvedValue([
       {
         asin: 'B000APXZHK',
@@ -114,5 +119,50 @@ describe('LibraryImportSearchModal', () => {
       '/placeholder.svg',
     )
     expect(wrapper.find('img').attributes('src')).toBe('https://example.com/protected.jpg')
+  })
+
+  it('searches the configured region first, then the region the user picks, which the match keeps', async () => {
+    const search = vi.mocked(apiService.advancedSearch)
+    const wrapper = mount(LibraryImportSearchModal, {
+      props: {
+        item: {
+          id: '/incoming/PH4/01.mp3',
+          fullPath: '/incoming/PH4/01.mp3',
+          sourceFiles: ['/incoming/PH4/01.mp3'],
+          folderPath: '/incoming/PH4',
+          relativePath: 'PH4',
+          folderName: 'Primal Hunter 4',
+          detectedTitle: 'The Primal Hunter 4',
+          detectedAuthor: 'Zogarth',
+          format: 'MP3',
+          fileCount: 1,
+          selectedMatch: null,
+          hasSearched: false,
+          isSearching: false,
+          selected: false,
+        },
+      },
+    })
+    await flushPromises()
+    expect(search).toHaveBeenLastCalledWith(expect.objectContaining({ region: 'fr' }))
+    expect(
+      (wrapper.get('[data-testid="find-match-region"]').element as HTMLSelectElement).value,
+    ).toBe('fr')
+
+    search.mockResolvedValue([
+      {
+        asin: 'B0BK9W82PQ',
+        title: 'Primal Hunter 4',
+        authors: [{ name: 'Zogarth' }],
+      } as unknown as SearchResult,
+    ])
+    await wrapper.get('[data-testid="find-match-region"]').setValue('us')
+    await flushPromises()
+    expect(search).toHaveBeenLastCalledWith(expect.objectContaining({ region: 'us' }))
+
+    await wrapper.get('.result-item').trigger('click')
+    expect(wrapper.emitted('select')?.[0]?.[0]).toEqual(
+      expect.objectContaining({ asin: 'B0BK9W82PQ', region: 'us' }),
+    )
   })
 })

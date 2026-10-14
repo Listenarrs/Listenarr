@@ -35,6 +35,20 @@
             />
           </div>
           <div class="search-input-row">
+            <label class="region-label" for="find-match-region">Region</label>
+            <select
+              id="find-match-region"
+              v-model="region"
+              class="form-input region-select"
+              data-testid="find-match-region"
+              @change="runSearch"
+            >
+              <option v-for="o in regionOptions" :key="o.value" :value="o.value">
+                {{ o.label }}
+              </option>
+            </select>
+          </div>
+          <div class="search-input-row">
             <input
               v-model="authorQuery"
               class="form-input search-input"
@@ -80,7 +94,8 @@
         </div>
 
         <div v-else-if="hasSearched && !isSearching" class="no-results">
-          No results for "{{ searchQuery }}"{{ authorQuery ? ` by "${authorQuery}"` : '' }}
+          No results for "{{ searchQuery }}"{{ authorQuery ? ` by "${authorQuery}"` : '' }} in
+          {{ regionLabel(region) }}
         </div>
 
         <div v-else-if="!hasSearched && !isSearching" class="hint-text">
@@ -92,12 +107,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { PhSpinner } from '@phosphor-icons/vue'
 import { Modal, ModalHeader, ModalBody } from '@/components/feedback'
-import { apiService } from '@/services/api'
 import { useProtectedImages } from '@/composables/useProtectedImages'
-import type { LibraryImportItem } from '@/stores/libraryImport'
+import { useLibraryImportStore, type LibraryImportItem } from '@/stores/libraryImport'
+import { orderedSearchRegionOptions, searchRegionOptions } from '@/utils/languageMapping'
 import {
   buildLibraryImportInitialAuthor,
   buildLibraryImportInitialQuery,
@@ -125,10 +140,23 @@ const authorQuery = ref(buildLibraryImportInitialAuthor(props.item))
 const searchResults = ref<SearchResult[]>([])
 const isSearching = ref(false)
 const hasSearched = ref(false)
+const store = useLibraryImportStore()
+// The configured region by default; the user can pick another one, which the selected match keeps
+const configuredRegion = ref('')
+const region = ref(props.item.selectedMatch?.region ?? '')
+const regionOptions = computed(() =>
+  orderedSearchRegionOptions([props.item.selectedMatch?.region, configuredRegion.value, 'us']),
+)
+
+function regionLabel(value: string): string {
+  return searchRegionOptions.find((o) => o.value === value)?.label ?? value
+}
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 
 onMounted(async () => {
+  configuredRegion.value = await store.configuredRegion()
+  if (!region.value) region.value = configuredRegion.value
   await nextTick()
   inputEl.value?.focus()
   inputEl.value?.select()
@@ -150,7 +178,7 @@ async function runSearch() {
     const params = isAsin
       ? { asin: q, cap: 5 }
       : { title: q, author: authorQuery.value.trim() || undefined, cap: 5 }
-    searchResults.value = await apiService.advancedSearch(params)
+    searchResults.value = await store.searchInRegion(params, region.value || undefined)
     hasSearched.value = true
   } finally {
     isSearching.value = false
@@ -174,6 +202,15 @@ function select(result: SearchResult) {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+}
+
+.region-label {
+  font-size: 0.8rem;
+  color: #888;
+}
+
+.region-select {
+  flex: 1;
 }
 
 .search-input-row {
