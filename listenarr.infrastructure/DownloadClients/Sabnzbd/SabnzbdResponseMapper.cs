@@ -27,14 +27,19 @@ internal static class SabnzbdResponseMapper
         DownloadClientConfiguration client,
         JsonElement slot,
         string configuredCategory,
-        double speed)
+        double speed,
+        ISet<string>? monitoredIds = null)
     {
         var nzoId = GetString(slot, "nzo_id");
         var filename = GetString(slot, "filename", "Unknown");
         var status = GetString(slot, "status", "Unknown");
         var category = GetString(slot, "cat");
 
-        if (!DownloadClientCategoryFilter.Matches(configuredCategory, category))
+        // Category filtering scopes untracked discovery; it must never hide a job we
+        // grabbed. SABnzbd silently reassigns unknown categories to Default, so a slot
+        // whose nzo_id we track is reconciled by download ID regardless of its category.
+        var isTracked = monitoredIds is not null && !string.IsNullOrEmpty(nzoId) && monitoredIds.Contains(nzoId);
+        if (!isTracked && !DownloadClientCategoryFilter.Matches(configuredCategory, category))
             return null;
 
         var sizeMb = GetDouble(slot, "mb");
@@ -85,14 +90,18 @@ internal static class SabnzbdResponseMapper
         DownloadClientConfiguration client,
         JsonElement slot,
         string configuredCategory,
-        ISet<string> existingNzoIds)
+        ISet<string> existingNzoIds,
+        ISet<string>? monitoredIds = null)
     {
         var nzoId = GetString(slot, "nzo_id");
         if (string.IsNullOrEmpty(nzoId) || existingNzoIds.Contains(nzoId))
             return null;
 
         var histCategory = GetString(slot, "category");
-        if (!DownloadClientCategoryFilter.Matches(configuredCategory, histCategory))
+        // See MapQueueSlotToQueueItem: a tracked job reassigned to Default by SABnzbd
+        // must still be reconciled by download ID, not hidden by the category filter.
+        var isTracked = monitoredIds is not null && monitoredIds.Contains(nzoId);
+        if (!isTracked && !DownloadClientCategoryFilter.Matches(configuredCategory, histCategory))
             return null;
 
         var histStatus = GetString(slot, "status");

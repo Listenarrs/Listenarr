@@ -422,5 +422,133 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Sabnzbd
             Assert.Equal(expected, item!.Status);
             Assert.Equal("/downloads/book", item.ContentPath);
         }
+
+        [Fact]
+        public void QueueSlot_InDifferentCategory_ButTracked_IsReturned()
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(
+                """
+                {
+                  "nzo_id": "sab-tracked-1",
+                  "filename": "Book Folder",
+                  "status": "Downloading",
+                  "percentage": "40",
+                  "mb": "100",
+                  "mbleft": "60",
+                  "cat": "*"
+                }
+                """);
+
+            var item = SabnzbdResponseMapper.MapQueueSlotToQueueItem(
+                _client,
+                document.RootElement,
+                "audiobooks",
+                speed: 0,
+                monitoredIds: new HashSet<string> { "sab-tracked-1" });
+
+            Assert.NotNull(item);
+            Assert.Equal("sab-tracked-1", item!.Id);
+        }
+
+        [Fact]
+        public void QueueSlot_InDifferentCategory_NotTracked_IsFiltered()
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(
+                """
+                {
+                  "nzo_id": "sab-untracked-1",
+                  "filename": "Book Folder",
+                  "status": "Downloading",
+                  "percentage": "40",
+                  "mb": "100",
+                  "mbleft": "60",
+                  "cat": "*"
+                }
+                """);
+
+            var item = SabnzbdResponseMapper.MapQueueSlotToQueueItem(
+                _client,
+                document.RootElement,
+                "audiobooks",
+                speed: 0,
+                monitoredIds: new HashSet<string>());
+
+            Assert.Null(item);
+        }
+
+        [Fact]
+        public void HistorySlot_InDifferentCategory_ButTracked_IsReturned()
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(
+                """{"nzo_id":"sab-tracked-2","name":"Book","status":"Completed","category":"*","storage":"/downloads/book"}""");
+
+            var item = SabnzbdResponseMapper.MapHistorySlotToQueueItem(
+                _client,
+                document.RootElement,
+                "audiobooks",
+                new HashSet<string>(),
+                monitoredIds: new HashSet<string> { "sab-tracked-2" });
+
+            Assert.NotNull(item);
+            Assert.Equal("sab-tracked-2", item!.Id);
+        }
+
+        [Fact]
+        public void HistorySlot_InDifferentCategory_NotTracked_IsFiltered()
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(
+                """{"nzo_id":"sab-untracked-2","name":"Book","status":"Completed","category":"*","storage":"/downloads/book"}""");
+
+            var item = SabnzbdResponseMapper.MapHistorySlotToQueueItem(
+                _client,
+                document.RootElement,
+                "audiobooks",
+                new HashSet<string>(),
+                monitoredIds: new HashSet<string>());
+
+            Assert.Null(item);
+        }
+
+        [Fact]
+        public async Task TestConnectionAsync_CategoryMissingFromSabnzbd_ReturnsAdvisoryPass()
+        {
+            sabnzbdApiMock.Categories = ["*", "Default"];
+            var client = new DownloadClientConfigurationBuilder()
+                .WithHost("http://192.168.50.111/sab")
+                .WithPort(8080)
+                .WithoutSsl()
+                .WithApiKey("secret")
+                .WithType("sabnzbd")
+                .WithSettings("category", "audiobooks")
+                .Build();
+
+            var gateway = _provider.GetRequiredService<IDownloadClientGateway>();
+            var (success, message) = await gateway.TestConnectionAsync(client);
+
+            Assert.True(success);
+            Assert.Contains("does not exist", message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("audiobooks", message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public async Task TestConnectionAsync_CategoryPresentInSabnzbd_ReturnsCleanPass()
+        {
+            sabnzbdApiMock.Categories = ["*", "Default", "audiobooks"];
+            var client = new DownloadClientConfigurationBuilder()
+                .WithHost("http://192.168.50.111/sab")
+                .WithPort(8080)
+                .WithoutSsl()
+                .WithApiKey("secret")
+                .WithType("sabnzbd")
+                .WithSettings("category", "audiobooks")
+                .Build();
+
+            var gateway = _provider.GetRequiredService<IDownloadClientGateway>();
+            var (success, message) = await gateway.TestConnectionAsync(client);
+
+            Assert.True(success);
+            Assert.Contains("connected", message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("does not exist", message, StringComparison.OrdinalIgnoreCase);
+        }
     }
 }
