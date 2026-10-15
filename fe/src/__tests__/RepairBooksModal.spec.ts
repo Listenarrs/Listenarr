@@ -63,6 +63,27 @@ const manualIsbn = {
   source: 'Manual',
 }
 
+const englishPh4 = {
+  asin: 'B0BK9W82PQ',
+  title: 'Primal Hunter 4',
+  authors: [{ name: 'Zogarth' }],
+  language: 'english',
+  region: 'us',
+}
+
+// An Audible catalogue per region: ASIN lookups only find what that region sells
+function catalogue(byRegion: Record<string, Array<Record<string, unknown>>>) {
+  apiMocks.advancedSearch.mockImplementation(
+    async ({ asin, region }: { asin?: string; region?: string }) => {
+      const books = byRegion[region ?? ''] ?? []
+      return asin ? books.filter((b) => b.asin === asin) : books
+    },
+  )
+}
+
+const inputValue = (wrapper: ReturnType<typeof mountModal>, testid: string) =>
+  (row(wrapper).get(`[data-testid="${testid}"]`).element as HTMLInputElement).value
+
 function mountModal(ids = [7]) {
   return mount(RepairBooksModal, {
     props: { visible: true, audiobookIds: ids },
@@ -100,7 +121,7 @@ describe('RepairBooksModal', () => {
     vi.useRealTimers()
   })
 
-  it('lists each book with its current ASIN and region, the name prefilled for searching', async () => {
+  it('lists each book with its current ASIN and region, the title and author prefilled for searching', async () => {
     const wrapper = mountModal()
     await flushPromises()
 
@@ -109,6 +130,7 @@ describe('RepairBooksModal', () => {
     expect(
       (row(wrapper).get('[data-testid="repair-query"]').element as HTMLInputElement).value,
     ).toBe('Primal Hunter, Vol. 7')
+    expect(inputValue(wrapper, 'repair-author')).toBe('Zogarth')
     expect(
       (row(wrapper).get('[data-testid="repair-region"]').element as HTMLSelectElement).value,
     ).toBe('fr')
@@ -135,6 +157,7 @@ describe('RepairBooksModal', () => {
 
     expect(apiMocks.advancedSearch).toHaveBeenCalledWith({
       title: 'The Primal Hunter 4',
+      author: 'Zogarth',
       region: 'us',
       cap: 8,
     })
@@ -150,11 +173,13 @@ describe('RepairBooksModal', () => {
     apiMocks.getAudiobook
       .mockResolvedValueOnce(mismatched)
       .mockResolvedValueOnce({ ...mismatched, title: 'Primal Hunter 4' })
+    catalogue({ us: [englishPh4] })
     const wrapper = mountModal()
     await flushPromises()
 
     await row(wrapper).get('[data-testid="repair-region"]').setValue('us')
     await row(wrapper).get('[data-testid="repair-asin"]').setValue('B0BK9W82PQ')
+    await flushPromises()
     await wrapper.get('[data-testid="repair-confirm"]').trigger('click')
     await flushPromises()
 
@@ -167,26 +192,63 @@ describe('RepairBooksModal', () => {
     expect(wrapper.text()).toContain('B0BK9W82PQ · us')
   })
 
-  it('clears the old ASIN when the region changes and waits for a pick before repairing', async () => {
-    apiMocks.advancedSearch.mockResolvedValue([
-      { asin: 'B0BK9W82PQ', title: 'Primal Hunter 4', language: 'english', region: 'us' },
-    ])
+  it('looks the ASIN up again when the region changes, and blocks the repair when that region has no record', async () => {
+    catalogue({ us: [englishPh4] })
     const wrapper = mountModal()
     await flushPromises()
 
     await row(wrapper).get('[data-testid="repair-region"]').setValue('us')
-    expect(
-      (row(wrapper).get('[data-testid="repair-asin"]').element as HTMLInputElement).value,
-    ).toBe('')
-    expect(row(wrapper).find('[data-testid="repair-asin-cleared"]').exists()).toBe(true)
+    await flushPromises()
+
+    expect(apiMocks.advancedSearch).toHaveBeenCalledWith({
+      asin: 'B0HM45F8MW',
+      region: 'us',
+      cap: 5,
+    })
+    expect(row(wrapper).get('[data-testid="repair-asin-not-found"]').text()).toContain('B0HM45F8MW')
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
 
     await row(wrapper).get('[data-testid="repair-search"]').trigger('click')
     await flushPromises()
     await row(wrapper).get('[data-testid="repair-result"]').trigger('click')
 
-    expect(row(wrapper).find('[data-testid="repair-asin-cleared"]').exists()).toBe(false)
+    expect(row(wrapper).find('[data-testid="repair-asin-not-found"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('keeps the ASIN and fills the title and author when the new region has it', async () => {
+    catalogue({
+      uk: [{ ...englishPh4, asin: 'B0HM45F8MW', title: 'Primal Hunter 7', region: 'uk' }],
+    })
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await row(wrapper).get('[data-testid="repair-region"]').setValue('uk')
+    await flushPromises()
+
+    expect(inputValue(wrapper, 'repair-asin')).toBe('B0HM45F8MW')
+    expect(inputValue(wrapper, 'repair-query')).toBe('Primal Hunter 7')
+    expect(inputValue(wrapper, 'repair-author')).toBe('Zogarth')
+    expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeUndefined()
+
+    await wrapper.get('[data-testid="repair-confirm"]').trigger('click')
+    await flushPromises()
+    expect(apiMocks.updateAudiobookIdentifiers).toHaveBeenCalledWith(
+      7,
+      expect.arrayContaining([
+        expect.objectContaining({ value: 'B0HM45F8MW', region: 'uk', isPrimary: true }),
+      ]),
+    )
+  })
+
+  it('clears the old ASIN when the author changes', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await row(wrapper).get('[data-testid="repair-author"]').setValue('Someone Else')
+
+    expect(inputValue(wrapper, 'repair-asin')).toBe('')
+    expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
   })
 
   it('clears the old ASIN when the name changes', async () => {
@@ -244,27 +306,46 @@ describe('RepairBooksModal', () => {
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeUndefined()
   })
 
-  it('searches the ASIN typed for the book first, to show which book it is', async () => {
-    apiMocks.advancedSearch.mockResolvedValue([
-      { asin: 'B0BK9W82PQ', title: 'Primal Hunter 4', language: 'english', region: 'us' },
-    ])
+  it('looks a typed ASIN up in the selected region and fills the title and author', async () => {
+    catalogue({ us: [englishPh4] })
     const wrapper = mountModal()
     await flushPromises()
 
     await row(wrapper).get('[data-testid="repair-region"]').setValue('us')
+    await flushPromises()
     await row(wrapper).get('[data-testid="repair-asin"]').setValue('B0BK9W82PQ')
-    await row(wrapper).get('[data-testid="repair-search"]').trigger('click')
     await flushPromises()
 
-    expect(apiMocks.advancedSearch).toHaveBeenCalledWith({
+    expect(apiMocks.advancedSearch).toHaveBeenLastCalledWith({
       asin: 'B0BK9W82PQ',
       region: 'us',
       cap: 5,
     })
-    expect(row(wrapper).text()).toContain('Primal Hunter 4')
+    expect(inputValue(wrapper, 'repair-query')).toBe('Primal Hunter 4')
+    expect(inputValue(wrapper, 'repair-author')).toBe('Zogarth')
+    expect(row(wrapper).find('[data-testid="repair-asin-not-found"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeUndefined()
   })
 
-  it('never searches the ASIN of the old match: it searches the name instead', async () => {
+  it('blocks the repair when a typed ASIN has no record in the selected region', async () => {
+    catalogue({ us: [englishPh4] })
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await row(wrapper).get('[data-testid="repair-asin"]').setValue('B0BK9W82PQ')
+    await flushPromises()
+
+    expect(apiMocks.advancedSearch).toHaveBeenLastCalledWith({
+      asin: 'B0BK9W82PQ',
+      region: 'fr',
+      cap: 5,
+    })
+    expect(row(wrapper).get('[data-testid="repair-asin-not-found"]').text()).toContain('France')
+    expect(inputValue(wrapper, 'repair-query')).toBe('Primal Hunter, Vol. 7')
+    expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('searches the title and author, never the ASIN of the old match', async () => {
     apiMocks.advancedSearch.mockResolvedValue([])
     const wrapper = mountModal()
     await flushPromises()
@@ -272,8 +353,10 @@ describe('RepairBooksModal', () => {
     await row(wrapper).get('[data-testid="repair-search"]').trigger('click')
     await flushPromises()
 
+    expect(apiMocks.advancedSearch).toHaveBeenCalledTimes(1)
     expect(apiMocks.advancedSearch).toHaveBeenCalledWith({
       title: 'Primal Hunter, Vol. 7',
+      author: 'Zogarth',
       region: 'fr',
       cap: 8,
     })
@@ -312,8 +395,9 @@ describe('RepairBooksModal', () => {
     await row(wrapper).get('[data-testid="repair-search"]').trigger('click')
     await flushPromises()
 
-    expect(apiMocks.advancedSearch).toHaveBeenCalledWith({
+    expect(apiMocks.advancedSearch).toHaveBeenLastCalledWith({
       title: 'Primal Hunter 4',
+      author: 'Zogarth',
       region: 'de',
       cap: 8,
     })
@@ -347,17 +431,20 @@ describe('RepairBooksModal', () => {
     expect(wrapper.find('.result-row.success').exists()).toBe(true)
   })
 
-  it('reports an invalid ASIN without touching the book', async () => {
+  it('flags a malformed ASIN and does not repair the book', async () => {
     const wrapper = mountModal()
     await flushPromises()
 
     await row(wrapper).get('[data-testid="repair-asin"]').setValue('B0BK9')
-    await wrapper.get('[data-testid="repair-confirm"]').trigger('click')
     await flushPromises()
 
+    expect(row(wrapper).get('[data-testid="repair-asin-invalid"]').text()).toContain('10 letters')
+    expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-testid="repair-confirm"]').trigger('click')
+    await flushPromises()
     expect(apiMocks.updateAudiobookIdentifiers).not.toHaveBeenCalled()
     expect(apiMocks.rescanAudiobookMetadata).not.toHaveBeenCalled()
-    expect(wrapper.get('.result-row.error').text()).toContain('10 characters')
   })
 
   it('offers to organize the repaired books', async () => {
