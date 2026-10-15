@@ -435,10 +435,10 @@ describe('library import store', () => {
     expect(advancedSearch).toHaveBeenCalledWith({
       title: 'Jack of Shadows',
       author: 'Roger Zelazny',
-      cap: 5,
+      cap: 8,
       region: 'fr',
     })
-    expect(advancedSearch).toHaveBeenCalledWith({ title: 'Primal Hunter 4', cap: 5, region: 'fr' })
+    expect(advancedSearch).toHaveBeenCalledWith({ title: 'Primal Hunter 4', cap: 8, region: 'fr' })
     expect(store.items['C:\\incoming\\Zelazny\\Jack of Shadows.mp3']?.selectedMatch?.title).toBe(
       'Jack of Shadows',
     )
@@ -461,7 +461,7 @@ describe('library import store', () => {
     store.startProcessing()
     await vi.waitFor(() => expect(store.isProcessing).toBe(false))
 
-    expect(advancedSearch).toHaveBeenCalledWith({ title: 'not a match', cap: 5, region: 'fr' })
+    expect(advancedSearch).toHaveBeenCalledWith({ title: 'not a match', cap: 8, region: 'fr' })
     expect(store.items['/incoming/not a match.mp3']?.selectedMatch).toBeNull()
     expect(store.items['/incoming/not a match.mp3']?.hasSearched).toBe(true)
   })
@@ -527,24 +527,6 @@ describe('library import store', () => {
     await vi.waitFor(() => expect(store.isProcessing).toBe(false))
 
     expect(store.items['/incoming/PH4/01.mp3']?.selectedMatch).toBeNull()
-  })
-
-  it('searches the region the user picked and tags the results with it', async () => {
-    const { useLibraryImportStore } = await import('@/stores/libraryImport')
-    const store = useLibraryImportStore()
-    advancedSearch.mockResolvedValue([
-      { title: 'Primal Hunter 4', asin: 'B0BK9W82PQ', authors: [] },
-      { asin: 'B0ZZZZZZZZ' },
-    ])
-
-    const results = await store.searchInRegion({ title: 'The Primal Hunter 4', cap: 5 }, 'us')
-
-    expect(advancedSearch).toHaveBeenCalledWith({
-      title: 'The Primal Hunter 4',
-      cap: 5,
-      region: 'us',
-    })
-    expect(results).toEqual([expect.objectContaining({ asin: 'B0BK9W82PQ', region: 'us' })])
   })
 
   it('keeps the configured region for a saved match that has none', async () => {

@@ -15,6 +15,9 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+import type { RecordQuery } from '@/utils/audibleRecordSearch'
+import type { SearchResult } from '@/types'
+
 export interface LibraryImportSearchCandidate {
   fullPath: string
   folderName: string
@@ -105,40 +108,34 @@ export function buildLibraryImportTitle(
   return cleanBookName(name.trim(), item.detectedAuthor)
 }
 
-export function buildLibraryImportInitialQuery(item: LibraryImportSearchCandidate): string {
+// What Start Matching searches for a row, and what Find Match opens with: the ASIN read from the
+// files, otherwise the cleaned folder or file name with the author read from the tags
+export function buildLibraryImportQuery(item: LibraryImportSearchCandidate): RecordQuery {
   const asin = item.detectedAsin?.trim()
-  if (asin) return asin
-
-  return buildLibraryImportTitle(item)
+  if (asin) return { asin }
+  const author = item.detectedAuthor?.trim()
+  return { title: buildLibraryImportTitle(item), ...(author ? { author } : {}) }
 }
 
-export function buildLibraryImportInitialAuthor(item: LibraryImportSearchCandidate): string {
-  if (item.detectedAsin?.trim()) return ''
-  return item.detectedAuthor?.trim() ?? ''
-}
-
-export function buildLibraryImportSearchParams(
-  item: LibraryImportSearchCandidate,
-  cap: number,
-): {
-  asin?: string
-  title?: string
-  author?: string
-  cap: number
-} {
-  const asin = item.detectedAsin?.trim()
-  if (asin) {
-    return { asin, cap }
+// The result Start Matching takes, or none. A result found by ASIN is the book. A result found by
+// name must fit the name (Audible's keyword search also returns unrelated books); among those, the
+// first one whose author fits the author read from the files, else the first one.
+export function pickAutoMatch(
+  results: SearchResult[],
+  query: RecordQuery,
+  detectedAuthor?: string,
+): SearchResult | null {
+  if (query.asin) return results[0] ?? null
+  const fitting = results.filter((r) => titleFitsSearch(query.title ?? '', r))
+  const needle = detectedAuthor?.trim().toLowerCase()
+  if (needle) {
+    const byAuthor = fitting.find((r) => {
+      const name = (r.authors?.[0]?.name ?? '').toLowerCase()
+      return name && (name.includes(needle) || needle.includes(name))
+    })
+    if (byAuthor) return byAuthor
   }
-
-  const title = buildLibraryImportInitialQuery(item)
-  const author = buildLibraryImportInitialAuthor(item) || undefined
-
-  return {
-    title,
-    ...(author ? { author } : {}),
-    cap,
-  }
+  return fitting[0] ?? null
 }
 
 // Words of a title, ignoring case, accents and punctuation; numbers lose their leading zeros so

@@ -65,12 +65,34 @@ export function createRecordSearchState(init: {
   }
 }
 
-// An Audible result is usable only with a title (an ASIN the catalogue doesn't sell in that market
-// comes back as an empty stub); each one is tagged with the region it was found in
+// How many results a search asks for: the same for Start Matching, Find Match and Repair
+export const TITLE_SEARCH_CAP = 8
+export const ASIN_SEARCH_CAP = 5
+
+// What to search: an ASIN, or a title with an optional author
+export type RecordQuery = { asin?: string; title?: string; author?: string }
+
+// A result is usable only with a title (an ASIN the catalogue doesn't sell in that market comes back
+// as an empty stub: an ASIN, no title); each one is tagged with the region it was found in
 function usableInRegion(found: SearchResult[] | undefined, region: string): SearchResult[] {
   return (found ?? [])
-    .filter((r) => r.asin && r.title)
+    .filter((r) => Boolean(r.title))
     .map((r) => ({ ...r, region: r.region || region }))
+}
+
+// The one Audible search behind Start Matching, Find Match and Repair: an ASIN is looked up as such,
+// otherwise the title (and author) is searched, in one region only
+export async function findRecords(query: RecordQuery, region: string): Promise<SearchResult[]> {
+  const asin = query.asin?.trim().toUpperCase()
+  const title = query.title?.trim() ?? ''
+  const author = query.author?.trim()
+  if (!asin && !title) return []
+  const found = await apiService.advancedSearch(
+    asin
+      ? { asin, region, cap: ASIN_SEARCH_CAP }
+      : { title, ...(author ? { author } : {}), region, cap: TITLE_SEARCH_CAP },
+  )
+  return usableInRegion(found, region)
 }
 
 export function firstAuthor(result: SearchResult): string {
@@ -124,16 +146,12 @@ function cancelLookup(state: RecordSearchState) {
 export async function searchRecords(state: RecordSearchState) {
   const term = state.query.trim()
   if (!term) return
-  const region = state.region
-  const author = state.author.trim()
   state.searching = true
   try {
-    const found = await apiService.advancedSearch(
-      ASIN_PATTERN.test(term)
-        ? { asin: term.toUpperCase(), region, cap: 5 }
-        : { title: term, ...(author ? { author } : {}), region, cap: 8 },
+    state.results = await findRecords(
+      ASIN_PATTERN.test(term) ? { asin: term } : { title: term, author: state.author },
+      state.region,
     )
-    state.results = usableInRegion(found, region)
   } catch {
     state.results = []
   } finally {
@@ -154,7 +172,7 @@ export async function lookupAsin(state: RecordSearchState): Promise<SearchResult
   state.lookingUp = true
   let found: SearchResult[] = []
   try {
-    found = usableInRegion(await apiService.advancedSearch({ asin, region, cap: 5 }), region)
+    found = await findRecords({ asin }, region)
   } catch {
     found = []
   }

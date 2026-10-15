@@ -17,11 +17,10 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
-  buildLibraryImportInitialAuthor,
-  buildLibraryImportInitialQuery,
-  buildLibraryImportSearchParams,
+  buildLibraryImportQuery,
   buildLibraryImportTitle,
   cleanBookName,
+  pickAutoMatch,
   titleFitsSearch,
 } from '@/utils/libraryImportSearch'
 
@@ -37,12 +36,9 @@ describe('library import search helpers', () => {
     }
 
     expect(buildLibraryImportTitle(item)).toBe('Jack of Shadows')
-    expect(buildLibraryImportInitialQuery(item)).toBe('Jack of Shadows')
-    expect(buildLibraryImportInitialAuthor(item)).toBe('Roger Zelazny')
-    expect(buildLibraryImportSearchParams(item, 5)).toEqual({
+    expect(buildLibraryImportQuery(item)).toEqual({
       title: 'Jack of Shadows',
       author: 'Roger Zelazny',
-      cap: 5,
     })
   })
 
@@ -55,8 +51,7 @@ describe('library import search helpers', () => {
       detectedTitle: 'The Primal Hunter',
     }
 
-    expect(buildLibraryImportInitialQuery(item)).toBe('Primal Hunter 4')
-    expect(buildLibraryImportSearchParams(item, 5)).toEqual({ title: 'Primal Hunter 4', cap: 5 })
+    expect(buildLibraryImportQuery(item)).toEqual({ title: 'Primal Hunter 4' })
   })
 
   it('uses the file count when the file list is not known', () => {
@@ -74,11 +69,7 @@ describe('library import search helpers', () => {
       folderName: 'The Land',
     }
 
-    expect(buildLibraryImportInitialQuery(item)).toBe('The Land 3')
-    expect(buildLibraryImportSearchParams(item, 5)).toEqual({
-      title: 'The Land 3',
-      cap: 5,
-    })
+    expect(buildLibraryImportQuery(item)).toEqual({ title: 'The Land 3' })
   })
 
   it('still prioritizes asin over title and author', () => {
@@ -90,12 +81,7 @@ describe('library import search helpers', () => {
       detectedAsin: 'B0DQR9D4YG',
     }
 
-    expect(buildLibraryImportInitialQuery(item)).toBe('B0DQR9D4YG')
-    expect(buildLibraryImportInitialAuthor(item)).toBe('')
-    expect(buildLibraryImportSearchParams(item, 5)).toEqual({
-      asin: 'B0DQR9D4YG',
-      cap: 5,
-    })
+    expect(buildLibraryImportQuery(item)).toEqual({ asin: 'B0DQR9D4YG' })
   })
 
   it('accepts a result only when its title fits the searched name', () => {
@@ -158,5 +144,32 @@ describe('library import search helpers', () => {
         detectedAuthor: 'Zogarth',
       }),
     ).toBe('Primal Hunter, Tome 4')
+  })
+
+  it('auto-picks a result found by ASIN, else the first fitting one, preferring the tag author', () => {
+    const perfect = {
+      asin: 'B0CY5SRLQQ',
+      title: 'The Perfect Match',
+      authors: [{ name: 'Lyla Mars' }],
+    }
+    const ph4fr = {
+      asin: 'B0FXXVV42J',
+      title: 'Primal Hunter',
+      subtitle: 'Primal Hunter, Tome 4',
+      authors: [{ name: 'Zogarth' }],
+    }
+    const ph4other = {
+      asin: 'B0OTHER004',
+      title: 'Primal Hunter, Tome 4',
+      authors: [{ name: 'Someone' }],
+    }
+
+    expect(pickAutoMatch([perfect], { asin: 'B0CY5SRLQQ' })).toBe(perfect)
+    expect(pickAutoMatch([perfect], { title: 'not a match' })).toBeNull()
+    expect(pickAutoMatch([ph4other, ph4fr], { title: 'Primal Hunter, Tome 4' }, 'Zogarth')).toBe(
+      ph4fr,
+    )
+    expect(pickAutoMatch([ph4other, ph4fr], { title: 'Primal Hunter, Tome 4' })).toBe(ph4other)
+    expect(pickAutoMatch([], { title: 'Primal Hunter, Tome 4' })).toBeNull()
   })
 })

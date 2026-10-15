@@ -117,7 +117,7 @@
       in {{ regionLabel(state.region) }}.
     </p>
     <ul v-if="state.results.length" class="record-results">
-      <li v-for="result in state.results" :key="result.asin">
+      <li v-for="(result, index) in state.results" :key="result.asin ?? `${index}-${result.title}`">
         <button
           type="button"
           class="record-result"

@@ -20,7 +20,8 @@ import { ref, computed } from 'vue'
 import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import { logger } from '@/utils/logger'
-import { buildLibraryImportSearchParams, titleFitsSearch } from '@/utils/libraryImportSearch'
+import { buildLibraryImportQuery, pickAutoMatch } from '@/utils/libraryImportSearch'
+import { findRecords } from '@/utils/audibleRecordSearch'
 import { normalizeSearchRegion, searchRegionOptions } from '@/utils/languageMapping'
 import { useConfigurationStore } from '@/stores/configuration'
 import type { SearchResult, AudibleBookMetadata, UnmatchedFileItem } from '@/types'
@@ -55,36 +56,12 @@ function extractFolderName(relativePath: string): string {
   return parts[parts.length - 1] ?? relativePath
 }
 
-// From a list of search results, prefer the one whose author best matches detectedAuthor.
-// Falls back to results[0] when no author info is available on either side.
-function pickBestMatch(results: SearchResult[], detectedAuthor?: string): SearchResult | null {
-  if (!results.length) return null
-  if (!detectedAuthor) return results[0] ?? null
-  const needle = detectedAuthor.toLowerCase()
-  const scored = results.map((r) => {
-    const resultAuthor = (r.authors?.[0]?.name ?? '').toLowerCase()
-    const match = resultAuthor && (resultAuthor.includes(needle) || needle.includes(resultAuthor))
-    return { r, match }
-  })
-  return scored.find((s) => s.match)?.r ?? results[0] ?? null
-}
-
 // The Audible catalogue has no usable record for the match's ASIN in its region: the book must not
 // be imported without it, the user picks the match (and its region) again
 class MatchRecordNotFoundError extends Error {}
 
 function regionLabel(region: string): string {
   return searchRegionOptions.find((o) => o.value === region)?.label ?? region
-}
-
-type AdvancedSearchParams = Parameters<typeof apiService.advancedSearch>[0]
-
-// Keep usable results only (Audible answers an ASIN it doesn't sell in that market with an empty
-// stub: an ASIN but no title) and tag each one with the region it came from.
-function usableInRegion(results: SearchResult[], region: string): SearchResult[] {
-  return results
-    .filter((result) => !(result.asin && !result.title))
-    .map((result) => ({ ...result, region: result.region || region }))
 }
 
 function normalizeGenres(genres: unknown): string[] | undefined {
@@ -375,18 +352,6 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     return normalizeSearchRegion(configStore.applicationSettings?.defaultSearchRegion)
   }
 
-  // Search one Audible region: the one given (picked by the user) or the configured one. There is no
-  // automatic switch to another catalogue. Results are tagged with their region, so the import
-  // fetches their full metadata (authors, narrators) from the same catalogue and keeps that region.
-  async function searchInRegion(
-    params: AdvancedSearchParams,
-    region?: string,
-  ): Promise<SearchResult[]> {
-    const searchRegion = region || (await _configuredRegion())
-    const results = await apiService.advancedSearch({ ...params, region: searchRegion })
-    return usableInRegion(results, searchRegion)
-  }
-
   // ─── Queue Processing ─────────────────────────────────────────────────────
 
   function startProcessing() {
@@ -421,19 +386,11 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
       items.value = { ...items.value, [id]: { ...item, isSearching: true } }
 
       try {
-        const searchParams = buildLibraryImportSearchParams(item, 5)
-        const byAsin = !!searchParams.asin
-        const results = await searchInRegion(searchParams)
+        // Same query and search as Find Match, in the configured region (no switch to another one)
+        const query = buildLibraryImportQuery(item)
+        const results = await findRecords(query, await _configuredRegion())
         metadataFetchCount.value++
-        // ASIN results are authoritative — take the first result directly without author comparison.
-        // A search by name only keeps results whose title fits it: Audible's keyword search also
-        // returns unrelated books, and the first one would be taken as the match.
-        const first = byAsin
-          ? (results[0] ?? null)
-          : pickBestMatch(
-              results.filter((r) => titleFitsSearch(searchParams.title ?? '', r)),
-              item.detectedAuthor,
-            )
+        const first = pickAutoMatch(results, query, item.detectedAuthor)
         const current = items.value[id]!
         items.value = {
           ...items.value,
@@ -456,27 +413,6 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
       }
     }
     isProcessing.value = false
-  }
-
-  // ─── Per-row manual search ────────────────────────────────────────────────
-
-  async function searchItem(id: string, query: string, region?: string) {
-    const item = items.value[id]
-    if (!item) return
-
-    items.value[id] = { ...item, isSearching: true }
-    try {
-      const isAsin = /^[A-Z0-9]{10}$/i.test(query.trim())
-      const results = await searchInRegion(
-        isAsin ? { asin: query.trim(), cap: 5 } : { title: query, cap: 5 },
-        region,
-      )
-      items.value[id] = { ...items.value[id], isSearching: false, hasSearched: true }
-      return results
-    } catch {
-      items.value[id] = { ...items.value[id], isSearching: false }
-      return []
-    }
   }
 
   // ─── Match management ─────────────────────────────────────────────────────
@@ -699,8 +635,6 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     startProcessing,
     stopProcessing,
     processNext,
-    searchItem,
-    searchInRegion,
     configuredRegion: _configuredRegion,
     selectMatch,
     clearMatch,
