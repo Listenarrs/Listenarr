@@ -360,6 +360,19 @@
                     </div>
                   </div>
                   <div class="detail-item">
+                    <span class="label">Region</span>
+                    <select
+                      v-model="editableMetadata.region"
+                      class="form-input"
+                      data-testid="metadata-region"
+                    >
+                      <option v-if="!editableMetadata.region" :value="undefined">Not set</option>
+                      <option v-for="o in metadataRegionOptions" :key="o.value" :value="o.value">
+                        {{ o.label }}
+                      </option>
+                    </select>
+                  </div>
+                  <div class="detail-item">
                     <span class="label">ISBN</span>
                     <input v-model="editableMetadata.isbn" type="text" class="form-input" />
                   </div>
@@ -702,10 +715,14 @@ function cloneMetadata(source: AudibleBookMetadata): AudibleBookMetadata {
   }
 }
 
+// The book's region as loaded (not as edited), so the region list keeps its order while editing
+const bookRegion = ref<string | undefined>()
+
 function replaceEditableMetadata(metadata: AudibleBookMetadata) {
   suppressMetadataEditTracking = true
   try {
     editableMetadata.value = cloneMetadata(metadata)
+    bookRegion.value = trimToUndefined(metadata.region)
   } finally {
     suppressMetadataEditTracking = false
   }
@@ -925,6 +942,16 @@ const retryRegion = ref('')
 const retryRegionOptions = computed(() =>
   orderedSearchRegionOptions([
     metadataLookupRegion.value,
+    normalizeSearchRegion(configStore.applicationSettings?.defaultSearchRegion),
+    'us',
+  ]),
+)
+
+// The Audible catalogue the ASIN belongs to, saved with it and used by rescans: editable with the
+// ASIN. The book's region first, then the configured one and US, as in Find Match
+const metadataRegionOptions = computed(() =>
+  orderedSearchRegionOptions([
+    bookRegion.value,
     normalizeSearchRegion(configStore.applicationSettings?.defaultSearchRegion),
     'us',
   ]),

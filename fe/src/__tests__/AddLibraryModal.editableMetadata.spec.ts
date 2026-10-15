@@ -149,6 +149,38 @@ describe('AddLibraryModal editable metadata', () => {
     )
   })
 
+  it('submits a region changed by hand with the ASIN', async () => {
+    apiMocks.getApplicationSettings.mockResolvedValue({
+      outputPath: 'C:\\root',
+      defaultSearchRegion: 'fr',
+    })
+    const { wrapper } = await openAsinField()
+
+    const regionField = wrapper
+      .findAll('.metadata-edit-grid .detail-item')
+      .find((item) => item.find('.label').text() === 'Region')
+    expect(regionField, 'Expected the Region field in the editor').toBeTruthy()
+    const select = regionField!.get<HTMLSelectElement>('select[data-testid="metadata-region"]')
+    expect(select.element.value).toBe('de')
+    const order = () => select.findAll('option').map((o) => o.attributes('value'))
+    // the book's region, then the configured one, then US, then the others alphabetically
+    expect(order().slice(0, 3)).toEqual(['de', 'fr', 'us'])
+
+    await select.setValue('us')
+    expect(order().slice(0, 3), 'the list keeps its order while editing').toEqual([
+      'de',
+      'fr',
+      'us',
+    ])
+    await wrapper.get('button.btn-primary').trigger('click')
+    await flushPromises()
+    expect(apiMocks.getAudibleMetadata).toHaveBeenCalledTimes(1)
+    expect(apiMocks.addToLibrary).toHaveBeenCalledWith(
+      expect.objectContaining({ asin: 'B001234567', region: 'us' }),
+      expect.any(Object),
+    )
+  })
+
   it('previews and submits edited metadata instead of the original source metadata', async () => {
     const wrapper = mount(AddLibraryModal, {
       props: {
