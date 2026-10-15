@@ -210,6 +210,14 @@ namespace Listenarr.Api.Features.Search
             try
             {
                 var audible = await _audibleService.GetBookMetadataAsync(req.Asin, region, true, language);
+                if (audible != null && string.IsNullOrWhiteSpace(audible.Title))
+                {
+                    // Audible answers an ASIN it doesn't sell in this market with an empty record: there is
+                    // no book to offer here, rather than an "Unknown Title" result that could be picked as a match
+                    _logger.LogInformation("No Audible record for ASIN {Asin} in region {Region}", req.Asin, region);
+                    return StructuredSearchWorkflowResult.Ok(new List<SearchResult>());
+                }
+
                 if (audible != null)
                 {
                     var metadata = _metadataConverters.ConvertAudibleToMetadata(audible, req.Asin, source: "Audible");

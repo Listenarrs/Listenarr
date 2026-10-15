@@ -21,6 +21,8 @@ import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import { logger } from '@/utils/logger'
 import { buildLibraryImportSearchParams } from '@/utils/libraryImportSearch'
+import { normalizeSearchRegion, searchRegionOptions } from '@/utils/languageMapping'
+import { useConfigurationStore } from '@/stores/configuration'
 import type { SearchResult, AudibleBookMetadata, UnmatchedFileItem } from '@/types'
 
 export interface LibraryImportItem {
@@ -41,6 +43,8 @@ export interface LibraryImportItem {
   selectedMatch: SearchResult | null
   hasSearched: boolean // true once auto-search was attempted
   isSearching: boolean // currently in-flight
+  // Why the last import dropped the match (its Audible record could not be found)
+  matchError?: string
   // Selection
   selected: boolean
 }
@@ -63,6 +67,24 @@ function pickBestMatch(results: SearchResult[], detectedAuthor?: string): Search
     return { r, match }
   })
   return scored.find((s) => s.match)?.r ?? results[0] ?? null
+}
+
+// The Audible catalogue has no usable record for the match's ASIN in its region: the book must not
+// be imported without it, the user picks the match (and its region) again
+class MatchRecordNotFoundError extends Error {}
+
+function regionLabel(region: string): string {
+  return searchRegionOptions.find((o) => o.value === region)?.label ?? region
+}
+
+type AdvancedSearchParams = Parameters<typeof apiService.advancedSearch>[0]
+
+// Keep usable results only (Audible answers an ASIN it doesn't sell in that market with an empty
+// stub: an ASIN but no title) and tag each one with the region it came from.
+function usableInRegion(results: SearchResult[], region: string): SearchResult[] {
+  return results
+    .filter((result) => !(result.asin && !result.title))
+    .map((result) => ({ ...result, region: result.region || region }))
 }
 
 function normalizeGenres(genres: unknown): string[] | undefined {
@@ -128,6 +150,7 @@ function matchToMetadata(result: SearchResult): AudibleBookMetadata {
     narrators: result.narrators?.map((n) => n.name ?? '').filter(Boolean),
     publishYear: result.releaseDate?.substring(0, 4) ?? result.publishDate?.substring(0, 4),
     metadataSource: result.metadataSource,
+    region: result.region,
   }
 }
 
@@ -175,6 +198,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
             hasSearched: existing.hasSearched,
             isSearching: false,
             selected: existing.selected,
+            matchError: existing.matchError,
           }
         } else if (p) {
           newItems[item.fullPath] = {
@@ -183,6 +207,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
             hasSearched: p.hasSearched,
             isSearching: false,
             selected: p.selected,
+            matchError: p.matchError,
           }
         } else {
           newItems[item.fullPath] = unmatchedToImportItem(item)
@@ -294,6 +319,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
             selectedMatch: existing.selectedMatch,
             hasSearched: existing.hasSearched,
             selected: existing.selected,
+            matchError: existing.matchError,
           }
         : fresh
     }
@@ -306,6 +332,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     selectedMatch: SearchResult | null
     hasSearched: boolean
     selected: boolean
+    matchError?: string
   }
 
   function _storageKey(folderId: number): string {
@@ -320,6 +347,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
         selectedMatch: item.selectedMatch,
         hasSearched: item.hasSearched,
         selected: item.selected,
+        matchError: item.matchError,
       }
     }
     try {
@@ -337,6 +365,26 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     } catch {
       return {}
     }
+  }
+
+  // ─── Region-aware search ──────────────────────────────────────────────────
+
+  async function _configuredRegion(): Promise<string> {
+    const configStore = useConfigurationStore()
+    if (!configStore.applicationSettings) await configStore.loadApplicationSettings()
+    return normalizeSearchRegion(configStore.applicationSettings?.defaultSearchRegion)
+  }
+
+  // Search one Audible region: the one given (picked by the user) or the configured one. There is no
+  // automatic switch to another catalogue. Results are tagged with their region, so the import
+  // fetches their full metadata (authors, narrators) from the same catalogue and keeps that region.
+  async function searchInRegion(
+    params: AdvancedSearchParams,
+    region?: string,
+  ): Promise<SearchResult[]> {
+    const searchRegion = region || (await _configuredRegion())
+    const results = await apiService.advancedSearch({ ...params, region: searchRegion })
+    return usableInRegion(results, searchRegion)
   }
 
   // ─── Queue Processing ─────────────────────────────────────────────────────
@@ -375,7 +423,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
       try {
         const searchParams = buildLibraryImportSearchParams(item, 5)
         const byAsin = !!searchParams.asin
-        const results = await apiService.advancedSearch(searchParams)
+        const results = await searchInRegion(searchParams)
         metadataFetchCount.value++
         // ASIN results are authoritative — take the first result directly without author comparison
         const first = byAsin ? (results[0] ?? null) : pickBestMatch(results, item.detectedAuthor)
@@ -405,15 +453,16 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
 
   // ─── Per-row manual search ────────────────────────────────────────────────
 
-  async function searchItem(id: string, query: string) {
+  async function searchItem(id: string, query: string, region?: string) {
     const item = items.value[id]
     if (!item) return
 
     items.value[id] = { ...item, isSearching: true }
     try {
       const isAsin = /^[A-Z0-9]{10}$/i.test(query.trim())
-      const results = await apiService.advancedSearch(
+      const results = await searchInRegion(
         isAsin ? { asin: query.trim(), cap: 5 } : { title: query, cap: 5 },
+        region,
       )
       items.value[id] = { ...items.value[id], isSearching: false, hasSearched: true }
       return results
@@ -428,7 +477,13 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   function selectMatch(id: string, match: SearchResult) {
     const item = items.value[id]
     if (!item) return
-    items.value[id] = { ...item, selectedMatch: match, hasSearched: true, selected: true }
+    items.value[id] = {
+      ...item,
+      selectedMatch: match,
+      hasSearched: true,
+      selected: true,
+      matchError: undefined,
+    }
     _persistMatches()
   }
 
@@ -464,27 +519,39 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   // Search results often have authors: [{ asin, name: undefined }] — the full
   // metadata fetch is the only way to get real author/narrator names.
   async function _enrichMetadata(match: SearchResult): Promise<AudibleBookMetadata> {
-    const base = matchToMetadata(match)
+    // A match saved before regions were recorded has none: use (and keep) the configured region
+    const region = match.region || (await _configuredRegion())
+    const base = { ...matchToMetadata(match), region }
     if (!match.asin) return base
+    const notFound = new MatchRecordNotFoundError(
+      `Audible ${regionLabel(region)} has no record for ${match.asin}. ` +
+        'Use "Search for a match" to pick the book again, in the right region.',
+    )
+    type AudiblePayload = {
+      asin?: string
+      title?: string
+      authors?: { name?: string }[]
+      narrators?: { name?: string }[]
+    }
+    let resp: { source?: string; metadata?: AudiblePayload } | AudiblePayload
     try {
-      type AudiblePayload = {
-        authors?: { name?: string }[]
-        narrators?: { name?: string }[]
-      }
-      const resp = await apiService.getAudibleMetadata<
+      resp = await apiService.getAudibleMetadata<
         { source?: string; metadata?: AudiblePayload } | AudiblePayload
-      >(match.asin)
-      const raw: AudiblePayload =
-        resp && 'metadata' in resp && resp.metadata ? resp.metadata : (resp as AudiblePayload)
-      const enrichedAuthors = (raw.authors ?? []).map((a) => a?.name ?? '').filter(Boolean)
-      const enrichedNarrators = (raw.narrators ?? []).map((n) => n?.name ?? '').filter(Boolean)
-      return {
-        ...base,
-        ...(enrichedAuthors.length > 0 ? { authors: enrichedAuthors } : {}),
-        ...(enrichedNarrators.length > 0 ? { narrators: enrichedNarrators } : {}),
-      }
-    } catch {
-      return base
+      >(match.asin, region)
+    } catch (e: unknown) {
+      if ((e as { status?: number })?.status === 404) throw notFound
+      throw new Error(`Audible metadata lookup failed: ${(e as Error)?.message ?? 'unknown error'}`)
+    }
+    const raw: AudiblePayload =
+      (resp && 'metadata' in resp && resp.metadata ? resp.metadata : (resp as AudiblePayload)) ?? {}
+    // Audible answers an ASIN it doesn't sell in that market with an empty stub: ASIN, no title
+    if (raw.asin && !raw.title) throw notFound
+    const enrichedAuthors = (raw.authors ?? []).map((a) => a?.name ?? '').filter(Boolean)
+    const enrichedNarrators = (raw.narrators ?? []).map((n) => n?.name ?? '').filter(Boolean)
+    return {
+      ...base,
+      ...(enrichedAuthors.length > 0 ? { authors: enrichedAuthors } : {}),
+      ...(enrichedNarrators.length > 0 ? { narrators: enrichedNarrators } : {}),
     }
   }
 
@@ -573,6 +640,23 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
         _persistMatches()
         imported++
       } catch (e) {
+        if (e instanceof MatchRecordNotFoundError) {
+          // Leave the row unresolved, with the reason, rather than import a book with no metadata
+          const current = items.value[item.id]
+          if (current) {
+            items.value = {
+              ...items.value,
+              [item.id]: {
+                ...current,
+                selectedMatch: null,
+                hasSearched: true,
+                selected: false,
+                matchError: e.message,
+              },
+            }
+            _persistMatches()
+          }
+        }
         const msg = `${item.folderName}: ${(e as Error)?.message ?? 'Import failed'}`
         importErrors.value.push(msg)
         logger.debug('[libraryImport] Import error:', msg)
@@ -609,6 +693,8 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     stopProcessing,
     processNext,
     searchItem,
+    searchInRegion,
+    configuredRegion: _configuredRegion,
     selectMatch,
     clearMatch,
     toggleSelect,

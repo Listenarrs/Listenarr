@@ -82,6 +82,105 @@ describe('AddLibraryModal editable metadata', () => {
     })
   })
 
+  it('fetches metadata in the configured region when the book has none', async () => {
+    apiMocks.getApplicationSettings.mockResolvedValue({
+      outputPath: 'C:\\root',
+      defaultSearchRegion: 'fr',
+    })
+    mount(AddLibraryModal, {
+      props: {
+        visible: true,
+        book: { ...fakeBook, region: undefined },
+      },
+      attachTo: document.body,
+      global: {
+        plugins: [createPinia()],
+      },
+    })
+
+    await flushPromises()
+    expect(apiMocks.getAudibleMetadata).toHaveBeenCalledWith('B001234567', 'fr')
+  })
+
+  async function openAsinField() {
+    const wrapper = mount(AddLibraryModal, {
+      props: { visible: true, book: fakeBook },
+      attachTo: document.body,
+      global: { plugins: [createPinia()] },
+    })
+    await flushPromises()
+
+    await wrapper.get('button.metadata-toggle-btn').trigger('click')
+    await flushPromises()
+
+    const asinField = wrapper
+      .findAll('.metadata-edit-grid .detail-item')
+      .find((item) => item.find('.label').text() === 'ASIN')
+    expect(asinField, 'Expected the ASIN field in the editor').toBeTruthy()
+    return { wrapper, asinField: asinField! }
+  }
+
+  it('refuses to add a book whose ASIN was edited into a malformed one', async () => {
+    const { wrapper, asinField } = await openAsinField()
+
+    await asinField.get('input').setValue('erg')
+    await flushPromises()
+
+    expect(asinField.get('.path-validation-error').text()).toContain('10 letters or digits')
+    const addButton = wrapper.get('button.btn-primary')
+    expect(addButton.attributes('disabled')).toBeDefined()
+    await addButton.trigger('click')
+    await flushPromises()
+    expect(apiMocks.addToLibrary).not.toHaveBeenCalled()
+  })
+
+  it('submits an ASIN corrected by hand', async () => {
+    const { wrapper, asinField } = await openAsinField()
+
+    await asinField.get('input').setValue('B009876543')
+    await flushPromises()
+
+    expect(asinField.find('.path-validation-error').exists()).toBe(false)
+    await wrapper.get('button.btn-primary').trigger('click')
+    await flushPromises()
+    expect(apiMocks.addToLibrary).toHaveBeenCalledWith(
+      expect.objectContaining({ asin: 'B009876543' }),
+      expect.any(Object),
+    )
+  })
+
+  it('submits a region changed by hand with the ASIN', async () => {
+    apiMocks.getApplicationSettings.mockResolvedValue({
+      outputPath: 'C:\\root',
+      defaultSearchRegion: 'fr',
+    })
+    const { wrapper } = await openAsinField()
+
+    const regionField = wrapper
+      .findAll('.metadata-edit-grid .detail-item')
+      .find((item) => item.find('.label').text() === 'Region')
+    expect(regionField, 'Expected the Region field in the editor').toBeTruthy()
+    const select = regionField!.get<HTMLSelectElement>('select[data-testid="metadata-region"]')
+    expect(select.element.value).toBe('de')
+    const order = () => select.findAll('option').map((o) => o.attributes('value'))
+    // the book's region, then the configured one, then US, then the others alphabetically
+    expect(order().slice(0, 3)).toEqual(['de', 'fr', 'us'])
+
+    await select.setValue('us')
+    expect(order().slice(0, 3), 'the list keeps its order while editing').toEqual([
+      'de',
+      'fr',
+      'us',
+    ])
+    await wrapper.get('button.btn-primary').trigger('click')
+    await flushPromises()
+    expect(apiMocks.getAudibleMetadata).toHaveBeenCalledTimes(1)
+    expect(apiMocks.addToLibrary).toHaveBeenCalledWith(
+      expect.objectContaining({ asin: 'B001234567', region: 'us' }),
+      expect.any(Object),
+    )
+  })
+
   it('previews and submits edited metadata instead of the original source metadata', async () => {
     const wrapper = mount(AddLibraryModal, {
       props: {
