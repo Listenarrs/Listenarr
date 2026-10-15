@@ -26,6 +26,9 @@ const advancedSearch = vi.fn()
 const scanUnmatchedFiles = vi.fn()
 const getUnmatchedResults = vi.fn()
 const getSavedUnmatchedFiles = vi.fn()
+const getAudibleMetadata = vi.fn()
+const getApplicationSettings = vi.fn()
+const matchLibraryImportItem = vi.fn()
 let unmatchedScanHandler:
   | ((payload: { jobId: string; error?: string }) => void | Promise<void>)
   | null = null
@@ -36,10 +39,12 @@ vi.mock('@/services/api', () => ({
     updateAudiobook,
     startManualImport,
     advancedSearch,
-    getAudibleMetadata: vi.fn(),
+    getAudibleMetadata,
+    getApplicationSettings,
     scanUnmatchedFiles,
     getUnmatchedResults,
     getSavedUnmatchedFiles,
+    matchLibraryImportItem,
   },
 }))
 
@@ -70,6 +75,8 @@ describe('library import store', () => {
     startManualImport.mockResolvedValue({ importedCount: 3, totalCount: 3, results: [] })
     advancedSearch.mockResolvedValue([])
     getSavedUnmatchedFiles.mockResolvedValue({ items: [], lastScannedAt: null })
+    getApplicationSettings.mockResolvedValue({ defaultSearchRegion: 'fr' })
+    getAudibleMetadata.mockResolvedValue({})
   })
 
   it('submits every grouped source file during import', async () => {
@@ -378,46 +385,241 @@ describe('library import store', () => {
     expect(store.scanWarnings).toEqual(['One path could not be read and was skipped.'])
   })
 
-  it('prefers detected title and author for automatic matching before folder fallback', async () => {
+  function unsearchedItem(id: string, detectedAsin?: string) {
+    return {
+      id,
+      fullPath: id,
+      sourceFiles: [id],
+      folderPath: '/incoming/AlterWorld',
+      relativePath: 'AlterWorld',
+      folderName: 'AlterWorld',
+      detectedTitle: 'AlterWorld',
+      detectedAsin,
+      format: 'MP3',
+      fileCount: 1,
+      selectedMatch: null,
+      hasSearched: false,
+      isSearching: false,
+      selected: false,
+    }
+  }
+
+  it('sends the query the server computed for each row, in the configured region, and takes its match', async () => {
     const { useLibraryImportStore } = await import('@/stores/libraryImport')
     const store = useLibraryImportStore()
-
-    advancedSearch.mockResolvedValue([
-      {
-        title: 'Jack of Shadows',
-        authors: [{ name: 'Roger Zelazny' }],
-      },
-    ])
-
+    matchLibraryImportItem.mockImplementation(async (query: { title?: string }) => ({
+      query,
+      candidates: [],
+      match:
+        query.title === 'Primal Hunter, Tome 4'
+          ? { title: 'Primal Hunter', asin: 'B0FXXVV42J', region: 'fr' }
+          : null,
+    }))
     store.items = {
-      'C:\\incoming\\Chapter 01.mp3': {
-        id: 'C:\\incoming\\Chapter 01.mp3',
-        fullPath: 'C:\\incoming\\Chapter 01.mp3',
-        sourceFiles: ['C:\\incoming\\Chapter 01.mp3'],
-        folderPath: 'C:\\incoming',
-        relativePath: 'test-import',
-        folderName: 'test-import',
-        detectedTitle: 'Jack of Shadows',
-        detectedAuthor: 'Roger Zelazny',
-        format: 'MP3',
-        fileCount: 1,
-        selectedMatch: null,
-        hasSearched: false,
-        isSearching: false,
-        selected: false,
+      '/incoming/PH4/01.mp3': {
+        ...unsearchedItem('/incoming/PH4/01.mp3'),
+        searchQuery: { title: 'Primal Hunter, Tome 4', author: 'Zogarth' },
+      },
+      '/incoming/not a match.mp3': {
+        ...unsearchedItem('/incoming/not a match.mp3'),
+        searchQuery: { title: 'not a match' },
       },
     }
 
     store.startProcessing()
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await vi.waitFor(() => expect(store.isProcessing).toBe(false))
 
-    expect(advancedSearch).toHaveBeenCalledWith({
-      title: 'Jack of Shadows',
-      author: 'Roger Zelazny',
-      cap: 5,
-    })
-    expect(store.items['C:\\incoming\\Chapter 01.mp3']?.selectedMatch?.title).toBe(
-      'Jack of Shadows',
+    expect(matchLibraryImportItem).toHaveBeenCalledWith(
+      { title: 'Primal Hunter, Tome 4', author: 'Zogarth' },
+      'fr',
+    )
+    expect(matchLibraryImportItem).toHaveBeenCalledWith({ title: 'not a match' }, 'fr')
+    expect(advancedSearch).not.toHaveBeenCalled()
+    const ph4 = store.items['/incoming/PH4/01.mp3']
+    expect(ph4?.selectedMatch).toEqual(
+      expect.objectContaining({ asin: 'B0FXXVV42J', region: 'fr' }),
+    )
+    expect(ph4?.selected).toBe(true)
+    const other = store.items['/incoming/not a match.mp3']
+    expect(other?.selectedMatch).toBeNull()
+    expect(other?.hasSearched).toBe(true)
+  })
+
+  it('falls back to the folder name and tag author for a scan without a query', async () => {
+    const { useLibraryImportStore } = await import('@/stores/libraryImport')
+    const store = useLibraryImportStore()
+    matchLibraryImportItem.mockResolvedValue({ query: {}, candidates: [], match: null })
+    store.items = {
+      '/incoming/AlterWorld/01.mp3': {
+        ...unsearchedItem('/incoming/AlterWorld/01.mp3'),
+        detectedAuthor: 'D. Rus',
+      },
+    }
+
+    store.startProcessing()
+    await vi.waitFor(() => expect(store.isProcessing).toBe(false))
+
+    expect(matchLibraryImportItem).toHaveBeenCalledWith(
+      { title: 'AlterWorld', author: 'D. Rus' },
+      'fr',
+    )
+  })
+
+  it('leaves the row without a match when the match request fails', async () => {
+    const { useLibraryImportStore } = await import('@/stores/libraryImport')
+    const store = useLibraryImportStore()
+    matchLibraryImportItem.mockRejectedValue(new Error('Network down'))
+    store.items = { '/incoming/AlterWorld/01.mp3': unsearchedItem('/incoming/AlterWorld/01.mp3') }
+
+    store.startProcessing()
+    await vi.waitFor(() => expect(store.isProcessing).toBe(false))
+
+    const row = store.items['/incoming/AlterWorld/01.mp3']
+    expect(row?.selectedMatch).toBeNull()
+    expect(row?.isSearching).toBe(false)
+  })
+
+  it('keeps the configured region for a saved match that has none', async () => {
+    const { useLibraryImportStore } = await import('@/stores/libraryImport')
+    const store = useLibraryImportStore()
+    getAudibleMetadata.mockResolvedValue({ authors: [{ name: 'D. Rus' }], narrators: [] })
+    store.items = {
+      '/incoming/AlterWorld/01.mp3': {
+        ...unsearchedItem('/incoming/AlterWorld/01.mp3'),
+        // saved before regions were recorded
+        selectedMatch: {
+          title: 'AlterWorld',
+          asin: 'B0H9MD3W8Q',
+          authors: [],
+        } as unknown as SearchResult,
+        hasSearched: true,
+        selected: true,
+      },
+    }
+    store.action = 'none'
+
+    await store.importSelected('/media/audiobooks')
+
+    expect(getAudibleMetadata).toHaveBeenCalledWith('B0H9MD3W8Q', 'fr')
+    expect(addToLibrary).toHaveBeenCalledWith(
+      expect.objectContaining({ region: 'fr' }),
+      expect.anything(),
+    )
+  })
+
+  function savedMatchWithoutRegion(store: { items: unknown; action: unknown }) {
+    store.items = {
+      '/incoming/Princess/01.mp3': {
+        ...unsearchedItem('/incoming/Princess/01.mp3'),
+        // saved before regions were recorded
+        selectedMatch: {
+          title: 'A Princess of Mars',
+          asin: 'B008DFUGCQ',
+          authors: [],
+        } as unknown as SearchResult,
+        hasSearched: true,
+        selected: true,
+      },
+    }
+    store.action = 'none'
+  }
+
+  it.each([
+    [
+      'a 404',
+      () =>
+        getAudibleMetadata.mockRejectedValue(
+          Object.assign(new Error('Not Found'), { status: 404 }),
+        ),
+    ],
+    [
+      'an empty record',
+      () => getAudibleMetadata.mockResolvedValue({ asin: 'B008DFUGCQ', title: '' }),
+    ],
+  ])(
+    'leaves a saved match unresolved, with the reason, when its region answers %s',
+    async (_case, arrange) => {
+      const { useLibraryImportStore } = await import('@/stores/libraryImport')
+      const store = useLibraryImportStore()
+      arrange()
+      savedMatchWithoutRegion(store)
+
+      const { imported, errors } = await store.importSelected('/media/audiobooks')
+
+      expect(getAudibleMetadata).toHaveBeenCalledWith('B008DFUGCQ', 'fr')
+      expect(addToLibrary).not.toHaveBeenCalled()
+      expect(startManualImport).not.toHaveBeenCalled()
+      expect(imported).toBe(0)
+      expect(errors).toHaveLength(1)
+      const row = store.items['/incoming/Princess/01.mp3']
+      expect(row?.selectedMatch).toBeNull()
+      expect(row?.selected).toBe(false)
+      expect(row?.matchError).toContain('B008DFUGCQ')
+      expect(row?.matchError).toContain('Search for a match')
+    },
+  )
+
+  it('keeps the match but does not import when the metadata lookup fails for another reason', async () => {
+    const { useLibraryImportStore } = await import('@/stores/libraryImport')
+    const store = useLibraryImportStore()
+    getAudibleMetadata.mockRejectedValue(
+      Object.assign(new Error('Too Many Requests'), { status: 429 }),
+    )
+    savedMatchWithoutRegion(store)
+
+    const { imported, errors } = await store.importSelected('/media/audiobooks')
+
+    expect(addToLibrary).not.toHaveBeenCalled()
+    expect(imported).toBe(0)
+    expect(errors[0]).toContain('Too Many Requests')
+    const row = store.items['/incoming/Princess/01.mp3']
+    expect(row?.selectedMatch?.asin).toBe('B008DFUGCQ')
+    expect(row?.matchError).toBeUndefined()
+  })
+
+  it('clears the reason once a new match is picked', async () => {
+    const { useLibraryImportStore } = await import('@/stores/libraryImport')
+    const store = useLibraryImportStore()
+    getAudibleMetadata.mockRejectedValue(Object.assign(new Error('Not Found'), { status: 404 }))
+    savedMatchWithoutRegion(store)
+    await store.importSelected('/media/audiobooks')
+
+    store.selectMatch('/incoming/Princess/01.mp3', {
+      title: 'A Princess of Mars',
+      asin: 'B008DFUGCQ',
+      region: 'us',
+    } as unknown as SearchResult)
+
+    const row = store.items['/incoming/Princess/01.mp3']
+    expect(row?.matchError).toBeUndefined()
+    expect(row?.selectedMatch?.region).toBe('us')
+  })
+
+  it('fetches full metadata from the region the match came from', async () => {
+    const { useLibraryImportStore } = await import('@/stores/libraryImport')
+    const store = useLibraryImportStore()
+    getAudibleMetadata.mockResolvedValue({ authors: [{ name: 'D. Rus' }], narrators: [] })
+    store.items = {
+      '/incoming/AlterWorld/01.mp3': {
+        ...unsearchedItem('/incoming/AlterWorld/01.mp3'),
+        selectedMatch: {
+          title: 'AlterWorld',
+          asin: 'B0H9MD3W8Q',
+          authors: [],
+          region: 'fr',
+        } as unknown as SearchResult,
+        hasSearched: true,
+        selected: true,
+      },
+    }
+    store.action = 'none'
+
+    await store.importSelected('/media/audiobooks')
+
+    expect(getAudibleMetadata).toHaveBeenCalledWith('B0H9MD3W8Q', 'fr')
+    expect(addToLibrary).toHaveBeenCalledWith(
+      expect.objectContaining({ authors: ['D. Rus'], region: 'fr' }),
+      expect.anything(),
     )
   })
 })

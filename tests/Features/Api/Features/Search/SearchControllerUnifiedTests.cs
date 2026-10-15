@@ -180,6 +180,76 @@ namespace Listenarr.Tests.Features.Api.Features.Search
         }
 
         [Fact]
+        public async Task AdvancedSearch_AsinWithEmptyRegionalRecord_ReturnsNoResult()
+        {
+            var mockSearch = new Mock<ISearchService>();
+            var stubAudible = new StubAudibleService
+            {
+                // What Audible returns for an ASIN it doesn't sell in the requested market
+                BookResponseToReturn = new AudibleBookResponseBuilder()
+                    .WithAsin("B008DFUGCQ")
+                    .WithTitle(string.Empty)
+                    .Build()
+            };
+            var mockMeta = new Mock<IAudiobookMetadataService>();
+
+            var controller = CreateController(mockSearch, stubAudible, mockMeta);
+
+            var reqJson = System.Text.Json.JsonSerializer.SerializeToElement(new { mode = "advanced", asin = "B008DFUGCQ", region = "fr" });
+            var res = await controller.Search(reqJson);
+
+            var ok = Assert.IsType<OkObjectResult>(res.Result);
+            var serialized = System.Text.Json.JsonSerializer.Serialize(ok.Value);
+            using var doc = System.Text.Json.JsonDocument.Parse(serialized);
+            Assert.Empty(doc.RootElement.EnumerateArray());
+            Assert.Equal("fr", stubAudible.LastRegion);
+            mockSearch.Verify(s => s.IntelligentSearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<double>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<System.Threading.CancellationToken>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task AdvancedSearch_TitleThatIsAnAsin_IsLookedUpAsAnAsin()
+        {
+            var mockSearch = new Mock<ISearchService>();
+            var stubAudible = new StubAudibleService
+            {
+                BookResponseToReturn = new AudibleBookResponseBuilder()
+                    .WithAsin("B0BK9W82PQ")
+                    .WithTitle("Primal Hunter 4")
+                    .Build()
+            };
+            var controller = CreateController(mockSearch, stubAudible, new Mock<IAudiobookMetadataService>());
+
+            // What Find Match sends when an ASIN is typed in the title field, with the tag author
+            var reqJson = System.Text.Json.JsonSerializer.SerializeToElement(new { mode = "advanced", title = "b0bk9w82pq", author = "Zogarth", region = "us" });
+            var res = await controller.Search(reqJson);
+
+            Assert.IsType<OkObjectResult>(res.Result);
+            Assert.Equal("us", stubAudible.LastRegion);
+            mockSearch.Verify(s => s.IntelligentSearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<double>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<System.Threading.CancellationToken>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task AdvancedSearch_TitleSearch_DropsEmptyRegionalRecords()
+        {
+            var mockSearch = new Mock<ISearchService>();
+            mockSearch.Setup(s => s.IntelligentSearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<double>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<System.Threading.CancellationToken>()))
+                      .ReturnsAsync(new List<MetadataSearchResult>
+                      {
+                          new() { Asin = "B0ZZZZZZZZ", Title = string.Empty },
+                          new() { Asin = "B0BK9W82PQ", Title = "Primal Hunter 4", Author = "Zogarth" }
+                      });
+            var controller = CreateController(mockSearch);
+
+            var reqJson = System.Text.Json.JsonSerializer.SerializeToElement(new { mode = "advanced", title = "Primal Hunter 4", region = "us" });
+            var res = await controller.Search(reqJson);
+
+            var ok = Assert.IsType<OkObjectResult>(res.Result);
+            using var doc = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(ok.Value));
+            var asins = doc.RootElement.EnumerateArray().Select(e => e.GetProperty("asin").GetString()).ToList();
+            Assert.Equal(new[] { "B0BK9W82PQ" }, asins);
+        }
+
+        [Fact]
         public async Task SimpleSearch_WithoutRegion_Uses_ConfiguredDefaultRegion()
         {
             var mockSearch = new Mock<ISearchService>();

@@ -26,6 +26,9 @@ import { signalRService } from '@/services/signalr'
 import { useToast } from '@/services/toastService'
 import type { RootFolder, RootFolderPathChangeResult } from '@/types'
 
+const routerPush = vi.hoisted(() => vi.fn())
+vi.mock('vue-router', () => ({ useRouter: () => ({ push: routerPush }) }))
+
 const targetPath = '/srv/Audiobooks '
 
 function relocation(
@@ -662,5 +665,20 @@ describe('RootFoldersSettings', () => {
 
     expect(wrapper.find('[data-cy="confirm-root-folder"]').exists()).toBe(false)
     expect(wrapper.findAll('button').some((button) => button.text().trim() === 'Retry')).toBe(false)
+  })
+
+  it('opens Library Import on the folder to scan it there', async () => {
+    vi.mocked(apiService.getRootFolders).mockResolvedValue([rootFolder(null)])
+    const pinia = createReadyPinia()
+    const wrapper = mount(RootFoldersSettings, { global: { plugins: [pinia] } })
+    await flushPromises()
+
+    await wrapper.get('[data-cy="scan-unmatched"]').trigger('click')
+
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'library-import',
+      query: { rootFolder: '3', scan: '1' },
+    })
+    wrapper.unmount()
   })
 })

@@ -234,6 +234,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
   PhSpinner,
   PhMagnifyingGlass,
@@ -267,6 +268,8 @@ const MAX_COLUMN_WIDTH = 960
 const MOBILE_TABLE_BREAKPOINT = 720
 
 const store = useLibraryImportStore()
+const route = useRoute()
+const router = useRouter()
 const rootFoldersStore = useRootFoldersStore()
 const configStore = useConfigurationStore()
 const filesystemReadinessStore = useFilesystemReadinessStore()
@@ -327,13 +330,24 @@ onMounted(async () => {
   await configStore.loadApplicationSettings()
   loadColumnWidths()
 
-  const defaultFolder = rootFoldersStore.defaultFolder ?? rootFoldersStore.folders[0] ?? null
-  if (defaultFolder) {
-    selectedFolderId.value = defaultFolder.id
-    await store.initFromRootFolder(defaultFolder.id)
+  // A folder asked for in the address ("Scan for unmatched files" in Settings > Root Folders), else
+  // the default one
+  const requestedId = Number(route.query.rootFolder)
+  const requestedFolder = rootFoldersStore.folders.find((f) => f.id === requestedId) ?? null
+  const folder =
+    requestedFolder ?? rootFoldersStore.defaultFolder ?? rootFoldersStore.folders[0] ?? null
+  if (folder) {
+    selectedFolderId.value = folder.id
+    await store.initFromRootFolder(folder.id)
   }
 
   store.action = 'none'
+
+  if (route.query.scan === '1') {
+    // Scan once: a reload of the page must not start another scan
+    void router.replace({ query: { ...route.query, scan: undefined } })
+    if (requestedFolder) await startScan()
+  }
 })
 
 onBeforeUnmount(() => {

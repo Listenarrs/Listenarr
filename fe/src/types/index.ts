@@ -125,6 +125,7 @@ export interface SearchResult extends BaseSearchResult {
   productUrl?: string // Direct link to Amazon/Audible product page
   isEnriched?: boolean
   metadataSource?: string // Which metadata API enriched this result
+  region?: string // Audible region the result was found in (e.g. 'fr', 'us')
   // Audible-style fields
   authors?: AudibleAuthor[]
   narrators?: AudibleNarrator[]
@@ -730,6 +731,22 @@ export interface AudiobookExternalIdentifierInput {
 
 export type AudiobookStatus = 'downloading' | 'no-file' | 'quality-mismatch' | 'quality-match'
 
+// A library book whose Audible identity is incomplete (GET /library/issues)
+export type LibraryIssueCode = 'missing_title' | 'missing_asin' | 'invalid_asin' | 'missing_region'
+export interface LibraryIssue {
+  id: number
+  title?: string | null
+  authors?: string[] | null
+  series?: string | null
+  seriesNumber?: string | null
+  imageUrl?: string | null
+  asin?: string | null
+  region?: string | null
+  issues: LibraryIssueCode[]
+  // The user keeps this book out of the issues (and their count)
+  ignored?: boolean
+}
+
 export interface Audiobook {
   id: number
   title: string
@@ -1210,6 +1227,22 @@ export interface UnmatchedFileItem {
   asin?: string
   format: string
   duration?: string
+  // What Start Matching searches for this book (computed by the server once the tags are read)
+  searchQuery?: BookSearchQuery | null
+}
+
+// A book search on Audible: its ASIN, or a title with an optional author (server rules)
+export interface BookSearchQuery {
+  asin?: string | null
+  title?: string | null
+  author?: string | null
+}
+
+// POST /library-import/match: the results and the one an automatic match takes
+export interface LibraryImportMatchResponse {
+  query: BookSearchQuery
+  candidates: SearchResult[]
+  match: SearchResult | null
 }
 
 export interface UnmatchedFilesResponse {

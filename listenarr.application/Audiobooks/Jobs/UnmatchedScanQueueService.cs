@@ -40,6 +40,8 @@ namespace Listenarr.Application.Audiobooks.Jobs
         public string? CoverPath { get; set; }
         public string? Asin { get; set; }
         public string Format { get; set; } = string.Empty;
+        // What Start Matching searches for this book, and what Find Match opens with
+        public BookSearchQuery? SearchQuery { get; set; }
     }
 
     public static class UnmatchedScanPublicError
