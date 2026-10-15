@@ -21,6 +21,7 @@ import {
   buildLibraryImportInitialQuery,
   buildLibraryImportSearchParams,
   buildLibraryImportTitle,
+  titleFitsSearch,
 } from '@/utils/libraryImportSearch'
 
 describe('library import search helpers', () => {
@@ -94,5 +95,35 @@ describe('library import search helpers', () => {
       asin: 'B0DQR9D4YG',
       cap: 5,
     })
+  })
+
+  it('accepts a result only when its title fits the searched name', () => {
+    // Audible's keyword search returns this for "not a match"
+    expect(titleFitsSearch('not a match', { title: 'The Perfect Match' })).toBe(false)
+    // the name carries more than the title: track number, subtitle, series
+    expect(
+      titleFitsSearch('04 - Primal Hunter 4 - A LitRPG Adventure (The Primal Hunter)', {
+        title: 'Primal Hunter 4',
+      }),
+    ).toBe(true)
+    // the volume is in the subtitle or the series
+    expect(
+      titleFitsSearch('Primal Hunter 4', {
+        title: 'Primal Hunter',
+        subtitle: 'Primal Hunter, Tome 4',
+      }),
+    ).toBe(true)
+    expect(
+      titleFitsSearch('Les cites des Anciens 1', {
+        title: 'Dragons et serpents',
+        series: [{ name: 'Les Cités des Anciens', position: '1' }],
+      }),
+    ).toBe(true)
+    expect(
+      titleFitsSearch('Dragons et serpents (Les Cités des Anciens 1)', {
+        title: 'Dragons et serpents',
+      }),
+    ).toBe(true)
+    expect(titleFitsSearch('Primal Hunter 4', { title: 'Primal Hunter 7' })).toBe(false)
   })
 })

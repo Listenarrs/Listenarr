@@ -444,6 +444,28 @@ describe('library import store', () => {
     )
   })
 
+  it("leaves a row unmatched when the search only returns books whose title doesn't fit", async () => {
+    const { useLibraryImportStore } = await import('@/stores/libraryImport')
+    const store = useLibraryImportStore()
+    advancedSearch.mockResolvedValue([
+      { title: 'The Perfect Match', asin: 'B0CY5SRLQQ', authors: [{ name: 'Lyla Mars' }] },
+    ])
+    store.items = {
+      '/incoming/not a match.mp3': {
+        ...unsearchedItem('/incoming/not a match.mp3'),
+        folderName: 'incoming',
+        detectedTitle: undefined,
+      },
+    }
+
+    store.startProcessing()
+    await vi.waitFor(() => expect(store.isProcessing).toBe(false))
+
+    expect(advancedSearch).toHaveBeenCalledWith({ title: 'not a match', cap: 5, region: 'fr' })
+    expect(store.items['/incoming/not a match.mp3']?.selectedMatch).toBeNull()
+    expect(store.items['/incoming/not a match.mp3']?.hasSearched).toBe(true)
+  })
+
   function unsearchedItem(id: string, detectedAsin?: string) {
     return {
       id,

@@ -20,7 +20,7 @@ import { ref, computed } from 'vue'
 import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import { logger } from '@/utils/logger'
-import { buildLibraryImportSearchParams } from '@/utils/libraryImportSearch'
+import { buildLibraryImportSearchParams, titleFitsSearch } from '@/utils/libraryImportSearch'
 import { normalizeSearchRegion, searchRegionOptions } from '@/utils/languageMapping'
 import { useConfigurationStore } from '@/stores/configuration'
 import type { SearchResult, AudibleBookMetadata, UnmatchedFileItem } from '@/types'
@@ -425,8 +425,15 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
         const byAsin = !!searchParams.asin
         const results = await searchInRegion(searchParams)
         metadataFetchCount.value++
-        // ASIN results are authoritative — take the first result directly without author comparison
-        const first = byAsin ? (results[0] ?? null) : pickBestMatch(results, item.detectedAuthor)
+        // ASIN results are authoritative — take the first result directly without author comparison.
+        // A search by name only keeps results whose title fits it: Audible's keyword search also
+        // returns unrelated books, and the first one would be taken as the match.
+        const first = byAsin
+          ? (results[0] ?? null)
+          : pickBestMatch(
+              results.filter((r) => titleFitsSearch(searchParams.title ?? '', r)),
+              item.detectedAuthor,
+            )
         const current = items.value[id]!
         items.value = {
           ...items.value,

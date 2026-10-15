@@ -88,3 +88,47 @@ export function buildLibraryImportSearchParams(
     cap,
   }
 }
+
+// Words of a title, ignoring case, accents and punctuation; numbers lose their leading zeros so
+// "04" and "4" are the same word
+function titleWords(text: string | undefined | null): string[] {
+  return (text ?? '')
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean)
+    .map((word) => (/^\d+$/.test(word) ? String(Number(word)) : word))
+}
+
+type TitledResult = {
+  title?: string
+  subtitle?: string
+  series?: unknown
+  seriesNumber?: string
+}
+
+// Whether a search result is plausibly the book searched by name. Audible's keyword search returns
+// loose results ("not a match" finds "The Perfect Match"), so an automatic match needs one of:
+// - every word of the result's title is in the searched name (the name may carry more: a track
+//   number, the series, the author), or
+// - every searched word is in the result's title, subtitle or series.
+export function titleFitsSearch(searchedTitle: string, result: TitledResult): boolean {
+  const searched = new Set(titleWords(searchedTitle))
+  const title = titleWords(result.title)
+  if (!searched.size || !title.length) return false
+  if (title.every((word) => searched.has(word))) return true
+
+  const series = Array.isArray(result.series)
+    ? (result.series as Array<{ name?: string; position?: string }>).flatMap((s) => [
+        s?.name,
+        s?.position,
+      ])
+    : [result.series as string | undefined]
+  const record = new Set(
+    [result.title, result.subtitle, result.seriesNumber, ...series].flatMap((part) =>
+      titleWords(typeof part === 'string' ? part : undefined),
+    ),
+  )
+  return [...searched].every((word) => record.has(word))
+}

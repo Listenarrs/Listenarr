@@ -259,4 +259,62 @@ describe('LibraryImportSearchModal', () => {
     )
     expect(wrapper.emitted('close')).toBeTruthy()
   })
+
+  it("doesn't take the author from the current match, which may be the wrong book", async () => {
+    const wrapper = mount(LibraryImportSearchModal, {
+      props: {
+        item: {
+          ...itemWithMatch({
+            asin: 'B0CY5SRLQQ',
+            title: 'The Perfect Match',
+            authors: [{ name: 'Lyla Mars' }] as SearchResult['authors'],
+            region: 'fr',
+          }),
+          fullPath: '/incoming/not a match.mp3',
+          sourceFiles: ['/incoming/not a match.mp3'],
+          detectedAuthor: undefined,
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(fieldValue(wrapper, 'record-title')).toBe('not a match')
+    expect(fieldValue(wrapper, 'record-author')).toBe('')
+    expect(apiService.advancedSearch).toHaveBeenCalledWith({
+      title: 'not a match',
+      region: 'fr',
+      cap: 8,
+    })
+  })
+
+  it('reverts the fields to the values it opened with and searches again', async () => {
+    const search = vi.mocked(apiService.advancedSearch)
+    const wrapper = mount(LibraryImportSearchModal, {
+      props: { item: { ...itemWithMatch(null), sourceFiles: ['/a/01.mp3', '/a/02.mp3'] } },
+    })
+    await flushPromises()
+    const revert = () => wrapper.get('[data-testid="find-match-revert"]')
+    expect(revert().attributes('disabled')).toBeDefined()
+
+    await wrapper.get('[data-testid="record-title"]').setValue('Something else')
+    await wrapper.get('[data-testid="record-region"]').setValue('us')
+    await flushPromises()
+    expect(revert().attributes('disabled')).toBeUndefined()
+
+    search.mockClear()
+    await revert().trigger('click')
+    await flushPromises()
+
+    expect(fieldValue(wrapper, 'record-title')).toBe('Primal Hunter 4')
+    expect((wrapper.get('[data-testid="record-region"]').element as HTMLSelectElement).value).toBe(
+      'fr',
+    )
+    expect(search).toHaveBeenCalledWith({
+      title: 'Primal Hunter 4',
+      author: 'Zogarth',
+      region: 'fr',
+      cap: 8,
+    })
+    expect(revert().attributes('disabled')).toBeDefined()
+  })
 })
