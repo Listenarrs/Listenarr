@@ -536,6 +536,94 @@ describe('library import store', () => {
     )
   })
 
+  function savedMatchWithoutRegion(store: { items: unknown; action: unknown }) {
+    store.items = {
+      '/incoming/Princess/01.mp3': {
+        ...unsearchedItem('/incoming/Princess/01.mp3'),
+        // saved before regions were recorded
+        selectedMatch: {
+          title: 'A Princess of Mars',
+          asin: 'B008DFUGCQ',
+          authors: [],
+        } as unknown as SearchResult,
+        hasSearched: true,
+        selected: true,
+      },
+    }
+    store.action = 'none'
+  }
+
+  it.each([
+    [
+      'a 404',
+      () =>
+        getAudibleMetadata.mockRejectedValue(
+          Object.assign(new Error('Not Found'), { status: 404 }),
+        ),
+    ],
+    [
+      'an empty record',
+      () => getAudibleMetadata.mockResolvedValue({ asin: 'B008DFUGCQ', title: '' }),
+    ],
+  ])(
+    'leaves a saved match unresolved, with the reason, when its region answers %s',
+    async (_case, arrange) => {
+      const { useLibraryImportStore } = await import('@/stores/libraryImport')
+      const store = useLibraryImportStore()
+      arrange()
+      savedMatchWithoutRegion(store)
+
+      const { imported, errors } = await store.importSelected('/media/audiobooks')
+
+      expect(getAudibleMetadata).toHaveBeenCalledWith('B008DFUGCQ', 'fr')
+      expect(addToLibrary).not.toHaveBeenCalled()
+      expect(startManualImport).not.toHaveBeenCalled()
+      expect(imported).toBe(0)
+      expect(errors).toHaveLength(1)
+      const row = store.items['/incoming/Princess/01.mp3']
+      expect(row?.selectedMatch).toBeNull()
+      expect(row?.selected).toBe(false)
+      expect(row?.matchError).toContain('B008DFUGCQ')
+      expect(row?.matchError).toContain('Search for a match')
+    },
+  )
+
+  it('keeps the match but does not import when the metadata lookup fails for another reason', async () => {
+    const { useLibraryImportStore } = await import('@/stores/libraryImport')
+    const store = useLibraryImportStore()
+    getAudibleMetadata.mockRejectedValue(
+      Object.assign(new Error('Too Many Requests'), { status: 429 }),
+    )
+    savedMatchWithoutRegion(store)
+
+    const { imported, errors } = await store.importSelected('/media/audiobooks')
+
+    expect(addToLibrary).not.toHaveBeenCalled()
+    expect(imported).toBe(0)
+    expect(errors[0]).toContain('Too Many Requests')
+    const row = store.items['/incoming/Princess/01.mp3']
+    expect(row?.selectedMatch?.asin).toBe('B008DFUGCQ')
+    expect(row?.matchError).toBeUndefined()
+  })
+
+  it('clears the reason once a new match is picked', async () => {
+    const { useLibraryImportStore } = await import('@/stores/libraryImport')
+    const store = useLibraryImportStore()
+    getAudibleMetadata.mockRejectedValue(Object.assign(new Error('Not Found'), { status: 404 }))
+    savedMatchWithoutRegion(store)
+    await store.importSelected('/media/audiobooks')
+
+    store.selectMatch('/incoming/Princess/01.mp3', {
+      title: 'A Princess of Mars',
+      asin: 'B008DFUGCQ',
+      region: 'us',
+    } as unknown as SearchResult)
+
+    const row = store.items['/incoming/Princess/01.mp3']
+    expect(row?.matchError).toBeUndefined()
+    expect(row?.selectedMatch?.region).toBe('us')
+  })
+
   it('fetches full metadata from the region the match came from', async () => {
     const { useLibraryImportStore } = await import('@/stores/libraryImport')
     const store = useLibraryImportStore()
