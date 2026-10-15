@@ -69,8 +69,17 @@ export function createRecordSearchState(init: {
 export const TITLE_SEARCH_CAP = 8
 export const ASIN_SEARCH_CAP = 5
 
-// What to search: an ASIN, or a title with an optional author
-export type RecordQuery = { asin?: string; title?: string; author?: string }
+// What to search: an ASIN, or a title, author, ISBN or series (Add New sends several of them), with
+// an optional language filter and page
+export type RecordQuery = {
+  asin?: string
+  title?: string
+  author?: string
+  isbn?: string
+  series?: string
+  language?: string
+  pagination?: { page?: number; limit?: number }
+}
 
 // A result is usable only with a title (an ASIN the catalogue doesn't sell in that market comes back
 // as an empty stub: an ASIN, no title); each one is tagged with the region it was found in
@@ -80,19 +89,40 @@ function usableInRegion(found: SearchResult[] | undefined, region: string): Sear
     .map((r) => ({ ...r, region: r.region || region }))
 }
 
-// The one Audible search behind Start Matching, Find Match and Repair: an ASIN is looked up as such,
-// otherwise the title (and author) is searched, in one region only
+// The search request for a query in one region: an ASIN is looked up as such (nothing else is sent
+// but the language filter); otherwise every non-empty field is sent. A page replaces the cap.
+export function recordSearchParams(
+  query: RecordQuery,
+  region: string,
+): Parameters<typeof apiService.advancedSearch>[0] | null {
+  const text = (value?: string) => value?.trim() || undefined
+  const asin = text(query.asin)?.toUpperCase()
+  const fields = asin
+    ? { asin }
+    : {
+        title: text(query.title),
+        author: text(query.author),
+        isbn: text(query.isbn),
+        series: text(query.series),
+      }
+  const given = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined))
+  if (!Object.keys(given).length) return null
+  return {
+    ...given,
+    region,
+    ...(query.language ? { language: query.language } : {}),
+    ...(query.pagination
+      ? { pagination: query.pagination }
+      : { cap: asin ? ASIN_SEARCH_CAP : TITLE_SEARCH_CAP }),
+  }
+}
+
+// The one Audible search behind Add New, Start Matching, Find Match and Repair, in one region only;
+// empty stubs are dropped and results are tagged with that region
 export async function findRecords(query: RecordQuery, region: string): Promise<SearchResult[]> {
-  const asin = query.asin?.trim().toUpperCase()
-  const title = query.title?.trim() ?? ''
-  const author = query.author?.trim()
-  if (!asin && !title) return []
-  const found = await apiService.advancedSearch(
-    asin
-      ? { asin, region, cap: ASIN_SEARCH_CAP }
-      : { title, ...(author ? { author } : {}), region, cap: TITLE_SEARCH_CAP },
-  )
-  return usableInRegion(found, region)
+  const params = recordSearchParams(query, region)
+  if (!params) return []
+  return usableInRegion(await apiService.advancedSearch(params), region)
 }
 
 export function firstAuthor(result: SearchResult): string {

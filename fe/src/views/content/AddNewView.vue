@@ -986,6 +986,7 @@ import type {
   AudibleSearchResult,
 } from '@/types'
 import { apiService } from '@/services/api'
+import { ASIN_PATTERN, findRecords, type RecordQuery } from '@/utils/audibleRecordSearch'
 import { getPlaceholderUrl } from '@/utils/placeholder'
 import { handleImageError } from '@/utils/imageFallback'
 import type { OpenLibraryBook } from '@/services/openlibrary'
@@ -1832,12 +1833,11 @@ const performAdvancedSearch = async () => {
       // The backend returns enriched SearchResult objects which are mapped
       // into the UI by handleAdvancedSearchResults.
       isAudiblePaged.value = false
-      const params: Record<string, unknown> = {}
+      const params: RecordQuery = {}
       if (p.title && p.title.trim()) params.title = p.title.trim()
       if (p.author && p.author.trim()) params.author = p.author.trim()
       if (p.isbn && p.isbn.trim()) params.isbn = p.isbn.trim()
       if (p.asin && p.asin.trim()) params.asin = p.asin.trim()
-      params.region = searchLanguage.value
       if (languageFilter) params.language = languageFilter
 
       const seriesName = p.series ? p.series.trim() : ''
@@ -1846,13 +1846,14 @@ const performAdvancedSearch = async () => {
       // so the backend performs the Audible series lookup and conversion.
       if (seriesName && !params.title && !params.author && !params.isbn && !params.asin) {
         try {
-          const seriesSearchParams: Record<string, unknown> = {
-            series: seriesName,
-            region: searchLanguage.value,
-            pagination: { page: 1, limit: resultsPerPage.value },
-          }
-          if (languageFilter) seriesSearchParams.language = languageFilter
-          const resp = await apiService.advancedSearch(seriesSearchParams)
+          const resp = await findRecords(
+            {
+              series: seriesName,
+              language: languageFilter || undefined,
+              pagination: { page: 1, limit: resultsPerPage.value },
+            },
+            searchLanguage.value,
+          )
           // backend returns enriched SearchResult objects
           await handleAdvancedSearchResults(resp as Partial<SearchResult>[])
         } catch (e) {
@@ -1869,7 +1870,7 @@ const performAdvancedSearch = async () => {
 
       // If both author and series provided, author takes priority; perform author search then filter by series (no extra Audible series lookup)
       if (params.author && seriesName) {
-        const results = (await apiService.advancedSearch(params)) as Partial<SearchResult>[]
+        const results = (await findRecords(params, searchLanguage.value)) as Partial<SearchResult>[]
 
         const filtered = results.filter((r) => {
           try {
@@ -1935,7 +1936,7 @@ const performAdvancedSearch = async () => {
         return
       }
 
-      const results = await apiService.advancedSearch(params)
+      const results = await findRecords(params, searchLanguage.value)
       await handleAdvancedSearchResults(results)
 
       // Scroll to top of results after search
@@ -1969,7 +1970,7 @@ const performAdvancedSearch = async () => {
 
   try {
     // Parse the query to extract advanced params
-    const params: Record<string, unknown> = {}
+    const params: RecordQuery = {}
     const parts = query.split(/\s+/)
 
     for (const part of parts) {
@@ -1984,21 +1985,22 @@ const performAdvancedSearch = async () => {
       }
     }
 
-    // If no explicit prefixes were provided, treat the entire query as a title search
+    // Without prefixes, the query is an ASIN when it looks like one (the same rule as Find Match and
+    // Repair), otherwise a title
     const hasExplicit = params.title || params.author || params.isbn || params.asin
     if (!hasExplicit) {
-      params.title = query
+      if (ASIN_PATTERN.test(query)) params.asin = query
+      else params.title = query
     }
 
-    // Always include the configured default region for Audible/Audible lookups
-    params.region = searchLanguage.value
+    // The region is passed with the query (searchLanguage holds the selected region)
     const languageFilter = getPreferredSearchLanguageFilter(preferredSearchLanguage.value)
     if (languageFilter) params.language = languageFilter
 
     // Include pagination/cap when calling advanced search from unified query
     params.pagination = { page: 1, limit: resultsPerPage.value }
     currentAdvancedPage.value = 1
-    const results = await apiService.advancedSearch(params)
+    const results = await findRecords(params, searchLanguage.value)
     await handleAdvancedSearchResults(results)
   } catch (err) {
     advancedSearchError.value = err instanceof Error ? err.message : 'Search failed'
