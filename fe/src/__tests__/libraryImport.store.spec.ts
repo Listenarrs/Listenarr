@@ -383,7 +383,7 @@ describe('library import store', () => {
     expect(store.scanWarnings).toEqual(['One path could not be read and was skipped.'])
   })
 
-  it('prefers detected title and author for automatic matching before folder fallback', async () => {
+  it('matches a single-file book by its file name and a multi-file book by its folder name', async () => {
     const { useLibraryImportStore } = await import('@/stores/libraryImport')
     const store = useLibraryImportStore()
 
@@ -395,17 +395,33 @@ describe('library import store', () => {
     ])
 
     store.items = {
-      'C:\\incoming\\Chapter 01.mp3': {
-        id: 'C:\\incoming\\Chapter 01.mp3',
-        fullPath: 'C:\\incoming\\Chapter 01.mp3',
-        sourceFiles: ['C:\\incoming\\Chapter 01.mp3'],
-        folderPath: 'C:\\incoming',
-        relativePath: 'test-import',
-        folderName: 'test-import',
-        detectedTitle: 'Jack of Shadows',
+      'C:\\incoming\\Zelazny\\Jack of Shadows.mp3': {
+        id: 'C:\\incoming\\Zelazny\\Jack of Shadows.mp3',
+        fullPath: 'C:\\incoming\\Zelazny\\Jack of Shadows.mp3',
+        sourceFiles: ['C:\\incoming\\Zelazny\\Jack of Shadows.mp3'],
+        folderPath: 'C:\\incoming\\Zelazny',
+        relativePath: 'Zelazny',
+        folderName: 'Zelazny',
+        // the title tag is often the series name: not used for the search
+        detectedTitle: 'Amber',
         detectedAuthor: 'Roger Zelazny',
         format: 'MP3',
         fileCount: 1,
+        selectedMatch: null,
+        hasSearched: false,
+        isSearching: false,
+        selected: false,
+      },
+      '/incoming/Primal Hunter 4/01.mp3': {
+        id: '/incoming/Primal Hunter 4/01.mp3',
+        fullPath: '/incoming/Primal Hunter 4/01.mp3',
+        sourceFiles: ['/incoming/Primal Hunter 4/01.mp3', '/incoming/Primal Hunter 4/02.mp3'],
+        folderPath: '/incoming/Primal Hunter 4',
+        relativePath: 'Primal Hunter 4',
+        folderName: 'Primal Hunter 4',
+        detectedTitle: 'The Primal Hunter',
+        format: 'MP3',
+        fileCount: 2,
         selectedMatch: null,
         hasSearched: false,
         isSearching: false,
@@ -422,7 +438,8 @@ describe('library import store', () => {
       cap: 5,
       region: 'fr',
     })
-    expect(store.items['C:\\incoming\\Chapter 01.mp3']?.selectedMatch?.title).toBe(
+    expect(advancedSearch).toHaveBeenCalledWith({ title: 'Primal Hunter 4', cap: 5, region: 'fr' })
+    expect(store.items['C:\\incoming\\Zelazny\\Jack of Shadows.mp3']?.selectedMatch?.title).toBe(
       'Jack of Shadows',
     )
   })

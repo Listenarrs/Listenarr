@@ -21,39 +21,43 @@ export interface LibraryImportSearchCandidate {
   detectedTitle?: string
   detectedAuthor?: string
   detectedAsin?: string
+  // Audio files of the book (one row per book)
+  sourceFiles?: string[]
+  fileCount?: number
 }
 
-export function buildLibraryImportFallbackTitle(
-  item: Pick<LibraryImportSearchCandidate, 'fullPath' | 'folderName'>,
-): string {
-  const filenameStem =
-    item.fullPath
+// "Name (3)" → "Name 3": a trailing number in brackets is usually the volume
+function withVolumeNumber(name: string): string {
+  const numericMatch = /\((\d+)\)\s*$/.exec(name)
+  return numericMatch ? `${name.replace(/\s*\(\d+\)\s*$/, '').trim()} ${numericMatch[1]}` : name
+}
+
+function fileStem(fullPath: string): string {
+  return (
+    fullPath
       .replace(/\\/g, '/')
       .split('/')
       .pop()
       ?.replace(/\.[^.]+$/, '') ?? ''
-  const numericMatch = /\((\d+)\)\s*$/.exec(filenameStem)
-  const stemBase = filenameStem.replace(/\s*\(\d+\)\s*$/, '').trim()
-  const base =
-    stemBase && stemBase.toLowerCase() !== item.folderName.toLowerCase()
-      ? filenameStem
-      : item.folderName
+  )
+}
 
-  if (numericMatch) {
-    return `${base.replace(/\s*\(\d+\)\s*$/, '').trim()} ${numericMatch[1]}`
-  }
-
-  return base
+// The book title to search: the folder name when the book has several audio files (their names are
+// chapters or parts), the file name when it has only one. The title tag is not used: it is often the
+// series name, or not read yet when matching starts.
+export function buildLibraryImportTitle(
+  item: Pick<LibraryImportSearchCandidate, 'fullPath' | 'folderName' | 'sourceFiles' | 'fileCount'>,
+): string {
+  const audioFiles = item.sourceFiles?.length || item.fileCount || 1
+  const name = audioFiles > 1 ? item.folderName : fileStem(item.fullPath) || item.folderName
+  return withVolumeNumber(name.trim())
 }
 
 export function buildLibraryImportInitialQuery(item: LibraryImportSearchCandidate): string {
   const asin = item.detectedAsin?.trim()
   if (asin) return asin
 
-  const detectedTitle = item.detectedTitle?.trim()
-  if (detectedTitle) return detectedTitle
-
-  return buildLibraryImportFallbackTitle(item)
+  return buildLibraryImportTitle(item)
 }
 
 export function buildLibraryImportInitialAuthor(item: LibraryImportSearchCandidate): string {

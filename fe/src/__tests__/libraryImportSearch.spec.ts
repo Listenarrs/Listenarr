@@ -17,21 +17,24 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
-  buildLibraryImportFallbackTitle,
   buildLibraryImportInitialAuthor,
   buildLibraryImportInitialQuery,
   buildLibraryImportSearchParams,
+  buildLibraryImportTitle,
 } from '@/utils/libraryImportSearch'
 
 describe('library import search helpers', () => {
-  it('prefers detected title and author before folder fallback', () => {
+  it('searches a single-file book by its file name, with the author from the tags', () => {
     const item = {
-      fullPath: 'C:\\incoming\\Chapter 01.mp3',
-      folderName: 'test-import',
-      detectedTitle: 'Jack of Shadows',
+      fullPath: 'C:\\incoming\\Zelazny\\Jack of Shadows.m4b',
+      folderName: 'Zelazny',
+      sourceFiles: ['C:\\incoming\\Zelazny\\Jack of Shadows.m4b'],
+      fileCount: 1,
+      detectedTitle: 'Amber (tag)',
       detectedAuthor: 'Roger Zelazny',
     }
 
+    expect(buildLibraryImportTitle(item)).toBe('Jack of Shadows')
     expect(buildLibraryImportInitialQuery(item)).toBe('Jack of Shadows')
     expect(buildLibraryImportInitialAuthor(item)).toBe('Roger Zelazny')
     expect(buildLibraryImportSearchParams(item, 5)).toEqual({
@@ -41,13 +44,34 @@ describe('library import search helpers', () => {
     })
   })
 
-  it('falls back to the filename or folder when no detected title exists', () => {
+  it('searches a multi-file book by its folder name', () => {
+    const item = {
+      fullPath: '/incoming/Primal Hunter 4/01.mp3',
+      folderName: 'Primal Hunter 4',
+      sourceFiles: ['/incoming/Primal Hunter 4/01.mp3', '/incoming/Primal Hunter 4/02.mp3'],
+      fileCount: 2,
+      detectedTitle: 'The Primal Hunter',
+    }
+
+    expect(buildLibraryImportInitialQuery(item)).toBe('Primal Hunter 4')
+    expect(buildLibraryImportSearchParams(item, 5)).toEqual({ title: 'Primal Hunter 4', cap: 5 })
+  })
+
+  it('uses the file count when the file list is not known', () => {
+    expect(
+      buildLibraryImportTitle({ fullPath: '/in/Book/01.mp3', folderName: 'Book', fileCount: 12 }),
+    ).toBe('Book')
+    expect(buildLibraryImportTitle({ fullPath: '/in/Book/Book One.m4b', folderName: 'Book' })).toBe(
+      'Book One',
+    )
+  })
+
+  it('turns a trailing number in brackets into a volume number', () => {
     const item = {
       fullPath: 'C:\\incoming\\The Land (3).m4b',
       folderName: 'The Land',
     }
 
-    expect(buildLibraryImportFallbackTitle(item)).toBe('The Land 3')
     expect(buildLibraryImportInitialQuery(item)).toBe('The Land 3')
     expect(buildLibraryImportSearchParams(item, 5)).toEqual({
       title: 'The Land 3',

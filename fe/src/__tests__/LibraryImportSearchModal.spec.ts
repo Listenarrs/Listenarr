@@ -153,7 +153,7 @@ describe('LibraryImportSearchModal', () => {
   const fieldValue = (wrapper: ReturnType<typeof mount>, testid: string) =>
     (wrapper.get(`[data-testid="${testid}"]`).element as HTMLInputElement).value
 
-  it("looks the current match's ASIN up in its region and shows the book", async () => {
+  it('fills the title with the folder name and searches it, showing the current match as picked', async () => {
     const search = vi.mocked(apiService.advancedSearch)
     search.mockResolvedValue([
       {
@@ -161,19 +161,56 @@ describe('LibraryImportSearchModal', () => {
         title: 'Primal Hunter, Vol. 7',
         authors: [{ name: 'Zogarth' }],
       } as unknown as SearchResult,
+      {
+        asin: 'B0BK9W82PQ',
+        title: 'Primal Hunter 4',
+        authors: [{ name: 'Zogarth' }],
+      } as unknown as SearchResult,
     ])
     const wrapper = mount(LibraryImportSearchModal, {
       props: {
-        item: itemWithMatch({ asin: 'B0HM45F8MW', title: 'Primal Hunter, Vol. 7', region: 'fr' }),
+        item: {
+          ...itemWithMatch({ asin: 'B0HM45F8MW', title: 'Primal Hunter, Vol. 7', region: 'fr' }),
+          sourceFiles: ['/incoming/PH4/01.mp3', '/incoming/PH4/02.mp3'],
+          fileCount: 2,
+        },
       },
     })
     await flushPromises()
 
-    expect(search).toHaveBeenCalledTimes(1)
-    expect(search).toHaveBeenCalledWith({ asin: 'B0HM45F8MW', region: 'fr', cap: 5 })
+    expect(fieldValue(wrapper, 'record-title')).toBe('Primal Hunter 4')
     expect(fieldValue(wrapper, 'record-asin')).toBe('B0HM45F8MW')
-    expect(fieldValue(wrapper, 'record-author')).toBe('Zogarth')
-    expect(wrapper.findAll('[data-testid="record-result"]')).toHaveLength(1)
+    expect(search).toHaveBeenCalledTimes(1)
+    expect(search).toHaveBeenCalledWith({
+      title: 'Primal Hunter 4',
+      author: 'Zogarth',
+      region: 'fr',
+      cap: 8,
+    })
+    const results = wrapper.findAll('[data-testid="record-result"]')
+    expect(results).toHaveLength(2)
+    expect(results[0]!.classes()).toContain('picked')
+    expect(results[1]!.classes()).not.toContain('picked')
+  })
+
+  it('fills the title with the file name for a single-file book', async () => {
+    const wrapper = mount(LibraryImportSearchModal, {
+      props: {
+        item: {
+          ...itemWithMatch(null),
+          fullPath: '/incoming/Zelazny/Jack of Shadows.m4b',
+          sourceFiles: ['/incoming/Zelazny/Jack of Shadows.m4b'],
+          folderName: 'Zelazny',
+          detectedTitle: 'Amber',
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(fieldValue(wrapper, 'record-title')).toBe('Jack of Shadows')
+    expect(apiService.advancedSearch).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Jack of Shadows' }),
+    )
   })
 
   it('looks the ASIN up again when the region changes, and says when that region has no record', async () => {
