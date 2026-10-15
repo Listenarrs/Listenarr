@@ -107,6 +107,11 @@ namespace Listenarr.Application.Metadata.Audible
             return await _productSearchWorkflow.SearchByTitleAsync(title, page, limit, region, language);
         }
 
+        public virtual async Task<AudibleSearchResponse?> SearchByNarratorAsync(string narrator, string? title = null, int page = 1, int limit = 50, string region = "us", string? language = null)
+        {
+            return await _productSearchWorkflow.SearchByNarratorAsync(narrator, title, page, limit, region, language);
+        }
+
         public virtual async Task<AudibleSearchResponse?> SearchByTitleAndAuthorAsync(string title, string author, int page = 1, int limit = 50, string region = "us", string? language = null)
         {
             // For advanced title+author searches, prefer the author lookup + /author/books/[ASIN] flow

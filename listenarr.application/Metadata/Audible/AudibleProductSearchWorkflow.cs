@@ -37,6 +37,49 @@ namespace Listenarr.Application.Metadata.Audible
             _logger = logger;
         }
 
+        /// <summary>
+        /// Search by narrator using Audible's own narrator field.
+        /// </summary>
+        /// <remarks>
+        /// Deliberately not routed through the keyword composer: a narrator name sent as
+        /// free-text keywords matches the odd title that mentions the name and misses the
+        /// catalogue the narrator actually read.
+        /// </remarks>
+        public async Task<AudibleSearchResponse?> SearchByNarratorAsync(
+            string narrator,
+            string? title,
+            int page,
+            int limit,
+            string region,
+            string? language)
+        {
+            var normalizedNarrator = narrator?.Trim();
+            if (string.IsNullOrWhiteSpace(normalizedNarrator))
+            {
+                return new AudibleSearchResponse
+                {
+                    Results = new List<AudibleSearchResult>(),
+                    TotalResults = 0
+                };
+            }
+
+            var normalizedTitle = string.IsNullOrWhiteSpace(title) ? null : title.Trim();
+
+            var response = await SearchProductsDirectAsync(
+                query: null,
+                title: normalizedTitle,
+                author: null,
+                narrator: normalizedNarrator,
+                publisher: null,
+                page: page,
+                limit: limit,
+                region: region,
+                language: language,
+                sortBy: "Relevance");
+
+            return ToSearchResponse(response);
+        }
+
         public async Task<AudibleSearchResponse?> SearchByTitleAsync(string title, int page, int limit, string region, string? language)
         {
             var normalizedTitle = title?.Trim();

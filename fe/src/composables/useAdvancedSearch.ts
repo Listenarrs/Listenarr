@@ -32,6 +32,7 @@ export interface AdvancedSearchParams {
   isbn?: string
   series?: string
   asin?: string
+  narrator?: string
 }
 
 /**
@@ -61,6 +62,7 @@ export const useAdvancedSearch = () => {
     isbn: '',
     series: '',
     asin: '',
+    narrator: '',
   })
 
   // Debounce timer for localStorage saves
@@ -164,6 +166,7 @@ export const useAdvancedSearch = () => {
       isbn: '',
       series: '',
       asin: '',
+      narrator: '',
     }
     // Persist handled by watcher
   }
