@@ -230,6 +230,7 @@ import {
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '@/components/feedback'
 import { apiService } from '@/services/api'
 import { useConfigurationStore } from '@/stores/configuration'
+import { useLibraryIssuesStore } from '@/stores/libraryIssues'
 import { normalizeSearchRegion, orderedSearchRegionOptions } from '@/utils/languageMapping'
 import AudibleRecordSearch from '@/components/domain/audiobook/AudibleRecordSearch.vue'
 import {
@@ -278,6 +279,7 @@ const emit = defineEmits<{
 }>()
 
 const configStore = useConfigurationStore()
+const libraryIssuesStore = useLibraryIssuesStore()
 const configuredRegion = ref('us')
 // Catalogue used when the configured one has no record, as in the rest of the matching
 const FALLBACK_REGION = 'us'
@@ -436,6 +438,8 @@ async function repair() {
   }
   executing.value = false
   finished.value = true
+  // Repaired books leave the Issues list (and its count under System)
+  void libraryIssuesStore.load()
 }
 
 function selectAll() {

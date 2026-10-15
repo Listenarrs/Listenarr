@@ -472,6 +472,23 @@
               <span>System</span>
               <Pill variant="error" v-if="systemIssues > 0">{{ systemIssues }}</Pill>
             </RouterLink>
+            <!-- Books whose Audible identity is incomplete, to repair -->
+            <RouterLink
+              v-if="libraryIssuesStore.count > 0"
+              to="/issues"
+              class="nav-item nav-issues"
+              data-testid="nav-issues"
+              :class="{ 'router-link-active': pendingNavPath === '/issues' }"
+              @mouseenter="preload('issues')"
+              @focus="preload('issues')"
+              @click="closeMobileMenu"
+            >
+              <PhWarning class="nav-issues-icon" />
+              <span>Issues</span>
+              <Pill variant="warning" v-if="libraryIssuesStore.count > 0">{{
+                libraryIssuesStore.count
+              }}</Pill>
+            </RouterLink>
           </div>
         </nav>
         <div v-if="version && version.length > 0" class="sidebar-footer">
@@ -557,6 +574,7 @@ import {
   PhHeart,
   PhGear,
   PhMonitor,
+  PhWarning,
   PhFileMinus,
   PhDownload,
   PhCheckCircle,
@@ -578,6 +596,7 @@ import { useMoveJobsStore } from '@/stores/moveJobs'
 import { useLibraryDeleteOperationsStore } from '@/stores/libraryDeleteOperations'
 import { useScanNotificationsStore } from '@/stores/scanNotifications'
 import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
+import { useLibraryIssuesStore } from '@/stores/libraryIssues'
 import { useAuthStore } from '@/stores/auth'
 import { apiService } from '@/services/api'
 import { getStartupConfigCached } from '@/services/startupConfigCache'
@@ -610,6 +629,7 @@ const moveJobsStore = useMoveJobsStore()
 const deleteOperationsStore = useLibraryDeleteOperationsStore()
 const scanNotificationsStore = useScanNotificationsStore()
 const filesystemReadinessStore = useFilesystemReadinessStore()
+const libraryIssuesStore = useLibraryIssuesStore()
 const auth = useAuthStore()
 const authEnabled = ref(false)
 const startupConfigLoaded = ref(false)
@@ -1359,6 +1379,8 @@ watch(
 // Initialize: Subscribe to SignalR for real-time updates (NO POLLING!)
 onMounted(async () => {
   filesystemReadinessStore.start()
+  // The count of books to repair, shown under System
+  void libraryIssuesStore.load()
   logger.debug('Initializing real-time updates via SignalR...')
 
   // Session debugging utilities
@@ -2945,5 +2967,10 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
 .view-all-link:hover {
   color: #42a5f5;
   text-decoration: underline;
+}
+
+/* Issues: books to repair, under System */
+.nav-issues .nav-issues-icon {
+  color: #f39c12;
 }
 </style>

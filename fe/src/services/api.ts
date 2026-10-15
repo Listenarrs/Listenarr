@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 import type {
+  LibraryIssue,
   SearchResult,
   Download,
   ApiConfiguration,
@@ -1148,6 +1149,11 @@ class ApiService {
   // Library API
   async getLibrary(): Promise<Audiobook[]> {
     return this.request<Audiobook[]>('/library')
+  }
+
+  // Books whose Audible identity is incomplete (no title, no ASIN, malformed ASIN, no region)
+  async getLibraryIssues(): Promise<LibraryIssue[]> {
+    return this.request<LibraryIssue[]>('/library/issues')
   }
 
   private normalizeMetadataForApi(

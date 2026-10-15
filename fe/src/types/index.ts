@@ -731,6 +731,20 @@ export interface AudiobookExternalIdentifierInput {
 
 export type AudiobookStatus = 'downloading' | 'no-file' | 'quality-mismatch' | 'quality-match'
 
+// A library book whose Audible identity is incomplete (GET /library/issues)
+export type LibraryIssueCode = 'missing_title' | 'missing_asin' | 'invalid_asin' | 'missing_region'
+export interface LibraryIssue {
+  id: number
+  title?: string | null
+  authors?: string[] | null
+  series?: string | null
+  seriesNumber?: string | null
+  imageUrl?: string | null
+  asin?: string | null
+  region?: string | null
+  issues: LibraryIssueCode[]
+}
+
 export interface Audiobook {
   id: number
   title: string
