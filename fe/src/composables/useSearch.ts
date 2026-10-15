@@ -16,45 +16,10 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 import { ref, computed } from 'vue'
-import type { SearchResult } from '@/types'
 import { apiService } from '@/services/api'
 import { logger } from '@/utils/logger'
 import { getPreferredSearchLanguageFilter } from '@/utils/languageMapping'
-
-type AudibleMetadataRecord = Record<string, unknown> & {
-  guid?: string
-  id?: string
-  asin?: string
-  title?: string
-  productTitle?: string
-  size?: string | number
-  image?: string
-  imageUrl?: string
-  coverImage?: string
-  publisher?: string
-  publisherName?: string
-  releaseDate?: string
-  publishedDate?: string
-  runtimeMinutes?: number
-  runtimeLengthMin?: number
-  runtime?: number
-  lengthMinutes?: number
-  language?: string
-  Language?: string
-  subtitle?: string
-  Subtitle?: string
-  description?: string
-  Description?: string
-  narrators?: SearchResult['narrators']
-  Narrators?: SearchResult['narrators']
-  authors?: SearchResult['authors']
-  Authors?: SearchResult['authors']
-}
-
-type AudibleMetadataResponse = {
-  metadata?: AudibleMetadataRecord
-  source?: string
-} & AudibleMetadataRecord
+import { ASIN_PATTERN, findRecords, type RecordQuery } from '@/utils/audibleRecordSearch'
 
 export function useSearch() {
   // Reactive state
@@ -105,8 +70,7 @@ export function useSearch() {
     // ASIN / ISBN-10 pattern (ASINs often start with 'B' followed by 9 alphanumerics).
     // Use a strict regex to avoid misclassifying short title-like strings as ASINs.
     // Pattern covers: 'B' + 9 alnum (typical ASIN) OR 10-digit ISBN-10 (ending with digit or 'X').
-    const asinOrIsbn10 = /^(B[0-9A-Z]{9}|\d{9}(?:X|\d))$/
-    if (asinOrIsbn10.test(trimmed)) {
+    if (ASIN_PATTERN.test(trimmed)) {
       return 'asin'
     }
 
@@ -158,9 +122,8 @@ export function useSearch() {
       // If query starts with 'isbn:' (case-insensitive), use advanced search
       const isbnMatch = query.match(/^isbn:(.+)/i)
       if (isbnMatch && isbnMatch[1]) {
-        const params: Record<string, unknown> = {
+        const params: RecordQuery = {
           isbn: isbnMatch[1].trim(),
-          region: searchLanguage.value,
           pagination: { page: 1, limit: 50 },
         }
         if (languageFilter) params.language = languageFilter
@@ -168,8 +131,7 @@ export function useSearch() {
           isSearching.value = true
           searchError.value = ''
           searchStatus.value = 'Searching for audiobooks and fetching metadata...'
-          const resp = await apiService.advancedSearch({ ...params })
-          results = resp || []
+          results = await findRecords(params, searchLanguage.value)
         } catch (err) {
           searchError.value = err instanceof Error ? err.message : 'Failed to search for audiobooks'
           throw err
@@ -188,7 +150,7 @@ export function useSearch() {
 
       // Improved: parse advanced tokens (TITLE:, AUTHOR:, ISBN:, ASIN:, SERIES:) with multi-word support
 
-      const params: Record<string, unknown> = {}
+      const params: RecordQuery = {}
       // Add SERIES: to the regex
       const regex = /(TITLE:|AUTHOR:|ISBN:|ASIN:|SERIES:)/gi
       const matches = []
@@ -222,8 +184,7 @@ export function useSearch() {
       }
       if (!foundAny) params.title = query
 
-      // Include language and a reasonable default pagination
-      params.region = searchLanguage.value
+      // Include language and a reasonable default pagination (the region is passed with the query)
       if (languageFilter) params.language = languageFilter
       params.pagination = { page: 1, limit: 50 }
 
@@ -233,8 +194,7 @@ export function useSearch() {
         searchError.value = ''
         searchStatus.value = 'Searching for audiobooks and fetching metadata...'
         // Use canonical /search endpoint (POST) for advanced search
-        const resp = await apiService.advancedSearch({ ...params })
-        results = resp || []
+        results = await findRecords(params, searchLanguage.value)
       } catch (err) {
         searchError.value = err instanceof Error ? err.message : 'Failed to search for audiobooks'
         throw err
@@ -257,7 +217,7 @@ export function useSearch() {
 
     // Validate ASIN using the same strict pattern as detection.
     // Matches: 'B' + 9 alphanumerics OR 10-digit numeric ASIN (ISBN-10 format)
-    if (!/^(B[0-9A-Z]{9}|\d{9}(?:X|\d))$/.test(cleanAsin.toUpperCase())) {
+    if (!ASIN_PATTERN.test(cleanAsin)) {
       searchError.value =
         'Invalid ASIN format. Expected an Amazon ASIN like B08G9PRS1K or 1980006520'
       return
@@ -268,97 +228,14 @@ export function useSearch() {
     searchStatus.value = `Searching for ASIN ${cleanAsin}...`
 
     try {
-      // Cancel any previous search and create controller for this request
+      // Cancel any previous search
       try {
         searchAbortController.value?.abort()
       } catch {}
-      searchAbortController.value = new AbortController()
+      searchAbortController.value = null
 
-      // Use metadata endpoint to fetch canonical metadata for the ASIN and
-      // convert into a SearchResult-like envelope the UI expects.
-      const metaResp = await apiService.getAudibleMetadata<AudibleMetadataResponse>(
-        cleanAsin,
-        searchLanguage.value,
-      )
-
-      logger.debug('ASIN audible metadata response:', metaResp)
-
-      const meta =
-        metaResp?.metadata && typeof metaResp.metadata === 'object'
-          ? metaResp.metadata
-          : (metaResp as AudibleMetadataRecord)
-      const mapped: SearchResult = {
-        id: String(meta.guid ?? meta.id ?? meta.asin ?? cleanAsin),
-        asin: cleanAsin,
-        title: String(meta.title ?? meta.productTitle ?? ''),
-        artist: '',
-        album: '',
-        category: '',
-        source: String(metaResp?.source ?? 'audible'),
-        sourceLink: '',
-        publishedDate: String(meta.releaseDate ?? meta.publishedDate ?? ''),
-        format: '',
-        size: Number(meta.size ?? 0),
-        magnetLink: '',
-        torrentUrl: '',
-        nzbUrl: '',
-        downloadType: '',
-        imageUrl:
-          typeof meta.image === 'string'
-            ? meta.image
-            : typeof meta.imageUrl === 'string'
-              ? meta.imageUrl
-              : typeof meta.coverImage === 'string'
-                ? meta.coverImage
-                : undefined,
-        metadataSource: String(metaResp?.source ?? 'audible'),
-        language:
-          typeof meta.language === 'string'
-            ? meta.language
-            : typeof meta.Language === 'string'
-              ? meta.Language
-              : undefined,
-        subtitle:
-          typeof meta.subtitle === 'string'
-            ? meta.subtitle
-            : typeof meta.Subtitle === 'string'
-              ? meta.Subtitle
-              : undefined,
-        description:
-          typeof meta.description === 'string'
-            ? meta.description
-            : typeof meta.Description === 'string'
-              ? meta.Description
-              : undefined,
-        publisher:
-          typeof meta.publisher === 'string'
-            ? meta.publisher
-            : typeof meta.publisherName === 'string'
-              ? meta.publisherName
-              : undefined,
-        runtime:
-          typeof meta.runtimeMinutes === 'number'
-            ? meta.runtimeMinutes
-            : typeof meta.runtimeLengthMin === 'number'
-              ? meta.runtimeLengthMin
-              : typeof meta.lengthMinutes === 'number'
-                ? meta.lengthMinutes
-                : typeof meta.runtime === 'number'
-                  ? meta.runtime
-                  : undefined,
-        narrators: Array.isArray(meta.narrators)
-          ? (meta.narrators as SearchResult['narrators'])
-          : Array.isArray(meta.Narrators)
-            ? (meta.Narrators as SearchResult['narrators'])
-            : undefined,
-        authors: Array.isArray(meta.authors)
-          ? (meta.authors as SearchResult['authors'])
-          : Array.isArray(meta.Authors)
-            ? (meta.Authors as SearchResult['authors'])
-            : undefined,
-      }
-
-      return [mapped]
+      // The shared Audible search: the ASIN looked up in the selected region, empty stubs dropped
+      return await findRecords({ asin: cleanAsin }, searchLanguage.value)
     } catch (error) {
       logger.error('ASIN search failed:', error)
       searchError.value = error instanceof Error ? error.message : 'Failed to search for audiobook'

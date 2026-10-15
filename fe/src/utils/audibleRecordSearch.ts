@@ -22,9 +22,9 @@ import type { SearchResult } from '@/types'
 // search by title and author, or type an ASIN, which is looked up in the selected region.
 // The functions mutate the state they are given: pass the reactive object.
 
-// 10 letters or digits, with at least one digit (Audible ASINs start with B0, or are ISBN-10s):
-// a 10-letter title such as "Alchemised" is a title, not an ASIN
-export const ASIN_PATTERN = /^(?=.*\d)[A-Z0-9]{10}$/i
+// An Audible ASIN: "B" and 9 letters or digits, or an ISBN-10 (9 digits and a digit or X), with at
+// least one digit, so a title such as "Alchemised" or "Bartimaeus" is not taken for an ASIN
+export const ASIN_PATTERN = /^(?=.*\d)(B[0-9A-Z]{9}|\d{9}[\dX])$/i
 
 export interface RecordSearchState {
   asin: string

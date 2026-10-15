@@ -438,7 +438,9 @@ describe('RepairBooksModal', () => {
     await row(wrapper).get('[data-testid="record-asin"]').setValue('B0BK9')
     await flushPromises()
 
-    expect(row(wrapper).get('[data-testid="record-asin-invalid"]').text()).toContain('10 letters')
+    expect(row(wrapper).get('[data-testid="record-asin-invalid"]').text()).toContain(
+      'B and 9 letters or digits',
+    )
     expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
     await wrapper.get('[data-testid="repair-confirm"]').trigger('click')

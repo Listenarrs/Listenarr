@@ -98,7 +98,7 @@
       class="record-hint record-hint-error"
       data-testid="record-asin-invalid"
     >
-      An ASIN has 10 letters or digits, including at least one digit.
+      An ASIN is B and 9 letters or digits (B0BK9W82PQ), or a 10-digit ISBN.
     </p>
     <p v-else-if="state.asinCleared" class="record-hint" data-testid="record-asin-cleared">
       ASIN cleared: it belonged to the previous match. Search and pick the right book, or type its
