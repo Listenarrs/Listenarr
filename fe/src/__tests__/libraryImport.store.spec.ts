@@ -28,6 +28,7 @@ const getUnmatchedResults = vi.fn()
 const getSavedUnmatchedFiles = vi.fn()
 const getAudibleMetadata = vi.fn()
 const getApplicationSettings = vi.fn()
+const matchLibraryImportItem = vi.fn()
 let unmatchedScanHandler:
   | ((payload: { jobId: string; error?: string }) => void | Promise<void>)
   | null = null
@@ -43,6 +44,7 @@ vi.mock('@/services/api', () => ({
     scanUnmatchedFiles,
     getUnmatchedResults,
     getSavedUnmatchedFiles,
+    matchLibraryImportItem,
   },
 }))
 
@@ -383,89 +385,6 @@ describe('library import store', () => {
     expect(store.scanWarnings).toEqual(['One path could not be read and was skipped.'])
   })
 
-  it('matches a single-file book by its file name and a multi-file book by its folder name', async () => {
-    const { useLibraryImportStore } = await import('@/stores/libraryImport')
-    const store = useLibraryImportStore()
-
-    advancedSearch.mockResolvedValue([
-      {
-        title: 'Jack of Shadows',
-        authors: [{ name: 'Roger Zelazny' }],
-      },
-    ])
-
-    store.items = {
-      'C:\\incoming\\Zelazny\\Jack of Shadows.mp3': {
-        id: 'C:\\incoming\\Zelazny\\Jack of Shadows.mp3',
-        fullPath: 'C:\\incoming\\Zelazny\\Jack of Shadows.mp3',
-        sourceFiles: ['C:\\incoming\\Zelazny\\Jack of Shadows.mp3'],
-        folderPath: 'C:\\incoming\\Zelazny',
-        relativePath: 'Zelazny',
-        folderName: 'Zelazny',
-        // the title tag is often the series name: not used for the search
-        detectedTitle: 'Amber',
-        detectedAuthor: 'Roger Zelazny',
-        format: 'MP3',
-        fileCount: 1,
-        selectedMatch: null,
-        hasSearched: false,
-        isSearching: false,
-        selected: false,
-      },
-      '/incoming/Primal Hunter 4/01.mp3': {
-        id: '/incoming/Primal Hunter 4/01.mp3',
-        fullPath: '/incoming/Primal Hunter 4/01.mp3',
-        sourceFiles: ['/incoming/Primal Hunter 4/01.mp3', '/incoming/Primal Hunter 4/02.mp3'],
-        folderPath: '/incoming/Primal Hunter 4',
-        relativePath: 'Primal Hunter 4',
-        folderName: 'Primal Hunter 4',
-        detectedTitle: 'The Primal Hunter',
-        format: 'MP3',
-        fileCount: 2,
-        selectedMatch: null,
-        hasSearched: false,
-        isSearching: false,
-        selected: false,
-      },
-    }
-
-    store.startProcessing()
-    await vi.waitFor(() => expect(store.isProcessing).toBe(false))
-
-    expect(advancedSearch).toHaveBeenCalledWith({
-      title: 'Jack of Shadows',
-      author: 'Roger Zelazny',
-      cap: 8,
-      region: 'fr',
-    })
-    expect(advancedSearch).toHaveBeenCalledWith({ title: 'Primal Hunter 4', cap: 8, region: 'fr' })
-    expect(store.items['C:\\incoming\\Zelazny\\Jack of Shadows.mp3']?.selectedMatch?.title).toBe(
-      'Jack of Shadows',
-    )
-  })
-
-  it("leaves a row unmatched when the search only returns books whose title doesn't fit", async () => {
-    const { useLibraryImportStore } = await import('@/stores/libraryImport')
-    const store = useLibraryImportStore()
-    advancedSearch.mockResolvedValue([
-      { title: 'The Perfect Match', asin: 'B0CY5SRLQQ', authors: [{ name: 'Lyla Mars' }] },
-    ])
-    store.items = {
-      '/incoming/not a match.mp3': {
-        ...unsearchedItem('/incoming/not a match.mp3'),
-        folderName: 'incoming',
-        detectedTitle: undefined,
-      },
-    }
-
-    store.startProcessing()
-    await vi.waitFor(() => expect(store.isProcessing).toBe(false))
-
-    expect(advancedSearch).toHaveBeenCalledWith({ title: 'not a match', cap: 8, region: 'fr' })
-    expect(store.items['/incoming/not a match.mp3']?.selectedMatch).toBeNull()
-    expect(store.items['/incoming/not a match.mp3']?.hasSearched).toBe(true)
-  })
-
   function unsearchedItem(id: string, detectedAsin?: string) {
     return {
       id,
@@ -485,48 +404,79 @@ describe('library import store', () => {
     }
   }
 
-  it('matches in the configured region and keeps that region on the match', async () => {
+  it('sends the query the server computed for each row, in the configured region, and takes its match', async () => {
     const { useLibraryImportStore } = await import('@/stores/libraryImport')
     const store = useLibraryImportStore()
-    advancedSearch.mockResolvedValue([{ title: 'AlterWorld', asin: 'B0H9MD3W8Q', authors: [] }])
+    matchLibraryImportItem.mockImplementation(async (query: { title?: string }) => ({
+      query,
+      candidates: [],
+      match:
+        query.title === 'Primal Hunter, Tome 4'
+          ? { title: 'Primal Hunter', asin: 'B0FXXVV42J', region: 'fr' }
+          : null,
+    }))
     store.items = {
-      '/incoming/AlterWorld/01.mp3': unsearchedItem('/incoming/AlterWorld/01.mp3', 'B0H9MD3W8Q'),
+      '/incoming/PH4/01.mp3': {
+        ...unsearchedItem('/incoming/PH4/01.mp3'),
+        searchQuery: { title: 'Primal Hunter, Tome 4', author: 'Zogarth' },
+      },
+      '/incoming/not a match.mp3': {
+        ...unsearchedItem('/incoming/not a match.mp3'),
+        searchQuery: { title: 'not a match' },
+      },
     }
 
     store.startProcessing()
     await vi.waitFor(() => expect(store.isProcessing).toBe(false))
 
-    expect(advancedSearch).toHaveBeenCalledTimes(1)
-    expect(advancedSearch).toHaveBeenCalledWith({ asin: 'B0H9MD3W8Q', cap: 5, region: 'fr' })
-    expect(store.items['/incoming/AlterWorld/01.mp3']?.selectedMatch?.region).toBe('fr')
+    expect(matchLibraryImportItem).toHaveBeenCalledWith(
+      { title: 'Primal Hunter, Tome 4', author: 'Zogarth' },
+      'fr',
+    )
+    expect(matchLibraryImportItem).toHaveBeenCalledWith({ title: 'not a match' }, 'fr')
+    expect(advancedSearch).not.toHaveBeenCalled()
+    const ph4 = store.items['/incoming/PH4/01.mp3']
+    expect(ph4?.selectedMatch).toEqual(
+      expect.objectContaining({ asin: 'B0FXXVV42J', region: 'fr' }),
+    )
+    expect(ph4?.selected).toBe(true)
+    const other = store.items['/incoming/not a match.mp3']
+    expect(other?.selectedMatch).toBeNull()
+    expect(other?.hasSearched).toBe(true)
   })
 
-  it('searches the configured region only and never switches catalogues on its own', async () => {
+  it('falls back to the folder name and tag author for a scan without a query', async () => {
     const { useLibraryImportStore } = await import('@/stores/libraryImport')
     const store = useLibraryImportStore()
-    advancedSearch.mockResolvedValue([])
+    matchLibraryImportItem.mockResolvedValue({ query: {}, candidates: [], match: null })
+    store.items = {
+      '/incoming/AlterWorld/01.mp3': {
+        ...unsearchedItem('/incoming/AlterWorld/01.mp3'),
+        detectedAuthor: 'D. Rus',
+      },
+    }
+
+    store.startProcessing()
+    await vi.waitFor(() => expect(store.isProcessing).toBe(false))
+
+    expect(matchLibraryImportItem).toHaveBeenCalledWith(
+      { title: 'AlterWorld', author: 'D. Rus' },
+      'fr',
+    )
+  })
+
+  it('leaves the row without a match when the match request fails', async () => {
+    const { useLibraryImportStore } = await import('@/stores/libraryImport')
+    const store = useLibraryImportStore()
+    matchLibraryImportItem.mockRejectedValue(new Error('Network down'))
     store.items = { '/incoming/AlterWorld/01.mp3': unsearchedItem('/incoming/AlterWorld/01.mp3') }
 
     store.startProcessing()
     await vi.waitFor(() => expect(store.isProcessing).toBe(false))
 
-    expect(advancedSearch).toHaveBeenCalledTimes(1)
-    expect(advancedSearch).toHaveBeenCalledWith(expect.objectContaining({ region: 'fr' }))
-    expect(store.items['/incoming/AlterWorld/01.mp3']?.selectedMatch).toBeNull()
-  })
-
-  it('treats empty "Unknown Title" stubs as no result', async () => {
-    const { useLibraryImportStore } = await import('@/stores/libraryImport')
-    const store = useLibraryImportStore()
-    advancedSearch.mockResolvedValue([{ asin: 'B0BK9W82PQ', authors: [] }])
-    store.items = {
-      '/incoming/PH4/01.mp3': unsearchedItem('/incoming/PH4/01.mp3', 'B0BK9W82PQ'),
-    }
-
-    store.startProcessing()
-    await vi.waitFor(() => expect(store.isProcessing).toBe(false))
-
-    expect(store.items['/incoming/PH4/01.mp3']?.selectedMatch).toBeNull()
+    const row = store.items['/incoming/AlterWorld/01.mp3']
+    expect(row?.selectedMatch).toBeNull()
+    expect(row?.isSearching).toBe(false)
   })
 
   it('keeps the configured region for a saved match that has none', async () => {

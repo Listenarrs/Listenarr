@@ -15,6 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using Listenarr.Application.Search.Audible;
 using Listenarr.Domain.Common;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -464,7 +465,14 @@ namespace Listenarr.Infrastructure.Library.Scanning
                             Description = parsed.Description,
                             CoverPath = parsed.CoverPath,
                             Asin = parsed.Asin,
-                            Format = Path.GetExtension(representative).TrimStart('.').ToUpperInvariant()
+                            Format = Path.GetExtension(representative).TrimStart('.').ToUpperInvariant(),
+                            // Built once the tags are read: the ASIN and author they carry are part of it
+                            SearchQuery = BookSearchRules.LibraryImportQuery(
+                                representative,
+                                relativeFolder,
+                                orderedFiles.Count,
+                                parsed.Author,
+                                parsed.Asin)
                         });
                     }
                 });

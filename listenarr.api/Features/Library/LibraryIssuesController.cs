@@ -45,6 +45,18 @@ namespace Listenarr.Api.Features.Library
         }
 
         /// <summary>
+        /// One book's issues (possibly none) and whether they are ignored.
+        /// </summary>
+        /// <param name="id">Audiobook ID.</param>
+        /// <param name="ct">Cancellation token.</param>
+        [HttpGet("{id:int}")]
+        public async Task<IActionResult> GetIssue(int id, CancellationToken ct)
+        {
+            var item = await _libraryIssueService.GetIssueAsync(id, ct);
+            return item == null ? NotFound(new { message = "Audiobook not found" }) : Ok(item);
+        }
+
+        /// <summary>
         /// Ignore the issues of a book (it leaves the list and its count) or stop ignoring them.
         /// </summary>
         /// <param name="id">Audiobook ID.</param>

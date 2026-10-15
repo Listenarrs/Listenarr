@@ -22,8 +22,9 @@ import type { SearchResult } from '@/types'
 // search by title and author, or type an ASIN, which is looked up in the selected region.
 // The functions mutate the state they are given: pass the reactive object.
 
-// An Audible ASIN: "B" and 9 letters or digits, or an ISBN-10 (9 digits and a digit or X), with at
-// least one digit, so a title such as "Alchemised" or "Bartimaeus" is not taken for an ASIN
+// The shape of an Audible ASIN ("B" and 9 letters or digits, or an ISBN-10, with at least one digit),
+// as BookSearchRules.LooksLikeAsin on the server: a UI hint only, to look a typed ASIN up as soon as
+// it is complete and to flag a malformed one; the server decides what a search treats as an ASIN
 export const ASIN_PATTERN = /^(?=.*\d)(B[0-9A-Z]{9}|\d{9}[\dX])$/i
 
 export interface RecordSearchState {
@@ -81,14 +82,6 @@ export type RecordQuery = {
   pagination?: { page?: number; limit?: number }
 }
 
-// A result is usable only with a title (an ASIN the catalogue doesn't sell in that market comes back
-// as an empty stub: an ASIN, no title); each one is tagged with the region it was found in
-function usableInRegion(found: SearchResult[] | undefined, region: string): SearchResult[] {
-  return (found ?? [])
-    .filter((r) => Boolean(r.title))
-    .map((r) => ({ ...r, region: r.region || region }))
-}
-
 // The search request for a query in one region: an ASIN is looked up as such (nothing else is sent
 // but the language filter); otherwise every non-empty field is sent. A page replaces the cap.
 export function recordSearchParams(
@@ -117,12 +110,13 @@ export function recordSearchParams(
   }
 }
 
-// The one Audible search behind Add New, Start Matching, Find Match and Repair, in one region only;
-// empty stubs are dropped and results are tagged with that region
+// The one Audible search behind Add New, Find Match and Repair, in one region only. The server drops
+// empty records (an ASIN, no title), tags each result with its region and looks a title that is an
+// ASIN up as one.
 export async function findRecords(query: RecordQuery, region: string): Promise<SearchResult[]> {
   const params = recordSearchParams(query, region)
   if (!params) return []
-  return usableInRegion(await apiService.advancedSearch(params), region)
+  return (await apiService.advancedSearch(params)) ?? []
 }
 
 export function firstAuthor(result: SearchResult): string {
@@ -171,17 +165,14 @@ function cancelLookup(state: RecordSearchState) {
   state.asinNotFound = false
 }
 
-// Search the title and author in the selected region; a title that is itself an ASIN is looked up
-// as one
+// Search the title and author in the selected region (the server looks a title that is an ASIN up
+// as one)
 export async function searchRecords(state: RecordSearchState) {
   const term = state.query.trim()
   if (!term) return
   state.searching = true
   try {
-    state.results = await findRecords(
-      ASIN_PATTERN.test(term) ? { asin: term } : { title: term, author: state.author },
-      state.region,
-    )
+    state.results = await findRecords({ title: term, author: state.author }, state.region)
   } catch {
     state.results = []
   } finally {

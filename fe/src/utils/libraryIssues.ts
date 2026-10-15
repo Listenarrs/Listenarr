@@ -17,8 +17,8 @@
  */
 import type { LibraryIssueCode } from '@/types'
 
-// The problems of a book's Audible identity, as GET /library/issues reports them
-// (LibraryIssueService): shown on the Issues page and in Repair
+// Labels of the problems of a book's Audible identity; the server finds them (LibraryIssueService,
+// GET /library/issues): shown on the Issues page and in Repair
 
 export const ISSUE_LABELS: Record<LibraryIssueCode, string> = {
   missing_title: 'No title',
@@ -29,19 +29,4 @@ export const ISSUE_LABELS: Record<LibraryIssueCode, string> = {
 
 export function issueLabel(code: LibraryIssueCode): string {
   return ISSUE_LABELS[code] ?? code
-}
-
-// The same rules as the server, for a book whose ASIN and region are known
-export function bookIssueCodes(book: {
-  title?: string | null
-  asin?: string | null
-  region?: string | null
-}): LibraryIssueCode[] {
-  const issues: LibraryIssueCode[] = []
-  if (!book.title?.trim()) issues.push('missing_title')
-  const asin = book.asin?.trim() ?? ''
-  if (!asin) issues.push('missing_asin')
-  else if (!/^[A-Z0-9]{10}$/i.test(asin)) issues.push('invalid_asin')
-  else if (!book.region?.trim()) issues.push('missing_region')
-  return issues
 }

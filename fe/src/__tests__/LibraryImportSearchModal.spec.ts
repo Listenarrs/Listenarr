@@ -119,6 +119,8 @@ describe('LibraryImportSearchModal', () => {
         asin: 'B0BK9W82PQ',
         title: 'Primal Hunter 4',
         authors: [{ name: 'Zogarth' }],
+        // the server tags each result with the region it was found in
+        region: 'us',
       } as unknown as SearchResult,
     ])
     await wrapper.get('[data-testid="record-region"]').setValue('us')
@@ -193,7 +195,7 @@ describe('LibraryImportSearchModal', () => {
     expect(results[1]!.classes()).not.toContain('picked')
   })
 
-  it('fills the title with the file name for a single-file book', async () => {
+  it('opens with the query the server computed for the row', async () => {
     const wrapper = mount(LibraryImportSearchModal, {
       props: {
         item: {
@@ -202,6 +204,7 @@ describe('LibraryImportSearchModal', () => {
           sourceFiles: ['/incoming/Zelazny/Jack of Shadows.m4b'],
           folderName: 'Zelazny',
           detectedTitle: 'Amber',
+          searchQuery: { title: 'Jack of Shadows', author: 'Roger Zelazny' },
         },
       },
     })
@@ -242,6 +245,8 @@ describe('LibraryImportSearchModal', () => {
         asin: 'B0BK9W82PQ',
         title: 'Primal Hunter 4',
         authors: [{ name: 'Zogarth' }],
+        // the server tags each result with the region it was found in
+        region: 'us',
       } as unknown as SearchResult,
     ])
     await wrapper.get('[data-testid="record-region"]').setValue('us')
@@ -273,6 +278,7 @@ describe('LibraryImportSearchModal', () => {
           fullPath: '/incoming/not a match.mp3',
           sourceFiles: ['/incoming/not a match.mp3'],
           detectedAuthor: undefined,
+          searchQuery: { title: 'not a match' },
         },
       },
     })

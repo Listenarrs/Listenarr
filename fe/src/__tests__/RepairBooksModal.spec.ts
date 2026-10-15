@@ -26,6 +26,7 @@ const apiMocks = vi.hoisted(() => ({
   updateAudiobookIdentifiers: vi.fn(),
   rescanAudiobookMetadata: vi.fn(),
   getApplicationSettings: vi.fn(),
+  getLibraryIssue: vi.fn(),
 }))
 
 vi.mock('@/services/api', () => ({
@@ -99,6 +100,7 @@ describe('RepairBooksModal', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     apiMocks.getApplicationSettings.mockResolvedValue({ defaultSearchRegion: 'fr' })
+    apiMocks.getLibraryIssue.mockResolvedValue({ id: 7, issues: [] })
     apiMocks.getAudiobook.mockResolvedValue(mismatched)
     apiMocks.getAudiobookIdentifiers.mockResolvedValue({
       audiobookId: 7,
@@ -136,7 +138,7 @@ describe('RepairBooksModal', () => {
     ).toBe('fr')
   })
 
-  it('searches in the chosen region, ignores empty stubs, and fills the ASIN and region from the pick', async () => {
+  it('searches in the chosen region and fills the ASIN and region from the pick', async () => {
     apiMocks.advancedSearch.mockResolvedValue([
       {
         asin: 'B0BK9W82PQ',
@@ -145,7 +147,6 @@ describe('RepairBooksModal', () => {
         language: 'english',
         region: 'us',
       },
-      { asin: 'B0ZZZZZZZZ' },
     ])
     const wrapper = mountModal()
     await flushPromises()
@@ -460,22 +461,20 @@ describe('RepairBooksModal', () => {
     expect(wrapper.emitted('organize')).toEqual([[[7]]])
   })
 
-  it('shows the current problems of the book in orange, as on the Issues page', async () => {
-    apiMocks.getAudiobook.mockResolvedValue({ ...mismatched, asin: undefined })
-    apiMocks.getAudiobookIdentifiers.mockResolvedValue({ audiobookId: 7, identifiers: [isbn] })
+  it('shows the current problems the server reports for the book, in orange as on the Issues page', async () => {
+    apiMocks.getLibraryIssue.mockResolvedValue({ id: 7, issues: ['missing_asin'] })
     const wrapper = mountModal()
     await flushPromises()
+
+    expect(apiMocks.getLibraryIssue).toHaveBeenCalledWith(7)
 
     const pills = row(wrapper).findAll('[data-testid="repair-issue"]')
     expect(pills.map((p) => p.text())).toEqual(['No ASIN'])
     expect(pills[0]!.classes()).toContain('pill-warning')
   })
 
-  it('flags an ASIN without region', async () => {
-    apiMocks.getAudiobookIdentifiers.mockResolvedValue({
-      audiobookId: 7,
-      identifiers: [{ ...frenchAsin, region: null }],
-    })
+  it('shows no problem when the issues cannot be read', async () => {
+    apiMocks.getLibraryIssue.mockRejectedValue(new Error('Not found'))
     const wrapper = mountModal()
     await flushPromises()
 
@@ -483,6 +482,7 @@ describe('RepairBooksModal', () => {
       row(wrapper)
         .findAll('[data-testid="repair-issue"]')
         .map((p) => p.text()),
-    ).toEqual(['No region'])
+    ).toEqual([])
+    expect(row(wrapper).text()).toContain('Primal Hunter, Vol. 7')
   })
 })

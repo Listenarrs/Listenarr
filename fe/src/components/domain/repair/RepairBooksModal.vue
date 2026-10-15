@@ -245,7 +245,7 @@ import { useLibraryIssuesStore } from '@/stores/libraryIssues'
 import { normalizeSearchRegion, orderedSearchRegionOptions } from '@/utils/languageMapping'
 import AudibleRecordSearch from '@/components/domain/audiobook/AudibleRecordSearch.vue'
 import { Pill } from '@/components/base'
-import { bookIssueCodes, issueLabel } from '@/utils/libraryIssues'
+import { issueLabel } from '@/utils/libraryIssues'
 import {
   ASIN_PATTERN,
   createRecordSearchState,
@@ -253,7 +253,11 @@ import {
   resetRecordSearch,
   type RecordSearchState,
 } from '@/utils/audibleRecordSearch'
-import type { AudiobookExternalIdentifier, AudiobookExternalIdentifierInput } from '@/types'
+import type {
+  AudiobookExternalIdentifier,
+  AudiobookExternalIdentifierInput,
+  LibraryIssueCode,
+} from '@/types'
 
 interface RepairRow extends RecordSearchState {
   id: number
@@ -262,6 +266,8 @@ interface RepairRow extends RecordSearchState {
   currentAsin: string
   currentRegion: string
   identifiers: AudiobookExternalIdentifier[]
+  // The book's issues from GET /library/issues/{id} (empty when it has none or they can't be read)
+  currentIssues: LibraryIssueCode[]
   selected: boolean
   // Values when the modal opened, restored by Revert
   initial: { query: string; author: string; region: string; asin: string }
@@ -314,9 +320,9 @@ function regionOptionsFor(row: RepairRow) {
   return orderedSearchRegionOptions([row.initial.region, configuredRegion.value, FALLBACK_REGION])
 }
 
-// What is wrong with the book as it is now (before the repair)
+// What is wrong with the book as it is now (before the repair), as the server reports it
 function currentIssues(row: RepairRow) {
-  return bookIssueCodes({ title: row.title, asin: row.currentAsin, region: row.currentRegion })
+  return row.currentIssues
 }
 
 function primaryAsin(identifiers: AudiobookExternalIdentifier[]) {
@@ -337,9 +343,10 @@ async function load() {
     )
     rows.value = await Promise.all(
       props.audiobookIds.map(async (id) => {
-        const [book, ids] = await Promise.all([
+        const [book, ids, issue] = await Promise.all([
           apiService.getAudiobook(id),
           apiService.getAudiobookIdentifiers(id),
+          apiService.getLibraryIssue(id).catch(() => null),
         ])
         const asin = primaryAsin(ids.identifiers ?? [])
         const initial = {
@@ -356,6 +363,7 @@ async function load() {
           currentAsin: asin?.value ?? book.asin ?? '',
           currentRegion: asin?.region ?? '',
           identifiers: ids.identifiers ?? [],
+          currentIssues: issue?.issues ?? [],
           initial,
           selected: true,
         }

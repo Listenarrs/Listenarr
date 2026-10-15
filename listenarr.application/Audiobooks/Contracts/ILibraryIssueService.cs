@@ -21,6 +21,7 @@ namespace Listenarr.Application.Audiobooks.Contracts
     public interface ILibraryIssueService
     {
         Task<IReadOnlyList<LibraryIssueItem>> GetIssuesAsync(bool includeIgnored = false, CancellationToken ct = default);
+        Task<LibraryIssueItem?> GetIssueAsync(int audiobookId, CancellationToken ct = default);
         Task<bool> SetIgnoredAsync(int audiobookId, bool ignored, CancellationToken ct = default);
     }
 }

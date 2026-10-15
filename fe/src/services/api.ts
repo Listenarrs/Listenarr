@@ -16,6 +16,8 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 import type {
+  BookSearchQuery,
+  LibraryImportMatchResponse,
   LibraryIssue,
   SearchResult,
   Download,
@@ -1157,6 +1159,22 @@ class ApiService {
     return this.request<LibraryIssue[]>(
       `/library/issues${includeIgnored ? '?includeIgnored=true' : ''}`,
     )
+  }
+
+  // One book's issues (possibly none) and whether they are ignored
+  async getLibraryIssue(id: number): Promise<LibraryIssue> {
+    return this.request<LibraryIssue>(`/library/issues/${id}`)
+  }
+
+  // Start Matching: the server searches the row's query in the region and picks the match
+  async matchLibraryImportItem(
+    query: BookSearchQuery,
+    region?: string,
+  ): Promise<LibraryImportMatchResponse> {
+    return this.request<LibraryImportMatchResponse>('/library-import/match', {
+      method: 'POST',
+      body: JSON.stringify({ ...query, ...(region ? { region } : {}) }),
+    })
   }
 
   async setLibraryIssueIgnored(

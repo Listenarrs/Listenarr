@@ -27,10 +27,10 @@ describe('findRecords', () => {
     advancedSearch.mockReset()
   })
 
-  it('searches the title and author in one region, drops empty stubs and tags the region', async () => {
+  // The server drops empty records and tags each result with its region: results are used as is
+  it('searches the title and author in one region and returns the server results', async () => {
     advancedSearch.mockResolvedValue([
-      { title: 'Primal Hunter 4', asin: 'B0BK9W82PQ', authors: [] },
-      { asin: 'B0ZZZZZZZZ' },
+      { title: 'Primal Hunter 4', asin: 'B0BK9W82PQ', authors: [], region: 'us' },
     ])
 
     const results = await findRecords({ title: ' The Primal Hunter 4 ', author: 'Zogarth' }, 'us')

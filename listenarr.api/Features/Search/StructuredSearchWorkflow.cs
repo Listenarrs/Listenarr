@@ -116,6 +116,18 @@ namespace Listenarr.Api.Features.Search
                 return StructuredSearchWorkflowResult.BadRequest("At least one advanced search parameter (title, author, isbn, asin, series, or query) is required");
             }
 
+            // A title that is an ASIN is looked up as one (Find Match, Repair and Add New send what was
+            // typed as the title); an author given with it doesn't change that
+            if (string.IsNullOrWhiteSpace(req.Asin)
+                && string.IsNullOrWhiteSpace(req.Isbn)
+                && string.IsNullOrWhiteSpace(req.Series)
+                && BookSearchRules.LooksLikeAsin(req.Title))
+            {
+                req.Asin = req.Title!.Trim().ToUpperInvariant();
+                req.Title = null;
+                req.Author = null;
+            }
+
             LogAdvancedRequest(req, region, language);
 
             var asinResult = await TryExecuteAsinSearchAsync(req, useSimplified, region, language, httpContext);
@@ -134,6 +146,12 @@ namespace Listenarr.Api.Features.Search
             var candidateLimit = req.Cap.HasValue ? Math.Clamp(req.Cap.Value, 5, 2000) : 200;
             var returnLimit = req.Pagination != null && req.Pagination.Limit > 0 ? Math.Clamp(req.Pagination.Limit, 1, 1000) : 50;
             var results = await _searchService.IntelligentSearchAsync(query, candidateLimit, returnLimit, region: region, language: language, ct: httpContext.RequestAborted);
+
+            // Audible answers an ASIN it doesn't sell in that market with an empty record (an ASIN, no
+            // title): it is no book to offer, nor a match to pick
+            results = results?
+                .Where(r => !(string.IsNullOrWhiteSpace(r.Title) && !string.IsNullOrWhiteSpace(r.Asin)))
+                .ToList();
 
             await _responseMapper.NormalizeMetadataResultImagesAsync(results, httpContext, "result");
             results = ApplySeriesFilter(req, results);

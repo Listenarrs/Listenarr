@@ -102,5 +102,21 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Catalog
             Assert.False((await service.GetIssuesAsync()).Single(i => i.Id == noAsin.Id).Ignored);
             Assert.False(await service.SetIgnoredAsync(999999, true));
         }
+
+        [Fact]
+        [Trait("Method", "GetIssueAsync")]
+        [Trait("Scenario", "ReturnsOneBooksIssuesWithTheSameRules")]
+        public async Task GetIssueAsync_ReturnsOneBooksIssuesWithTheSameRules()
+        {
+            var noRegion = await AddBook("Primal Hunter 4", "B0BK9W82PQ", Asin("B0BK9W82PQ", null));
+            var healthy = await AddBook("Primal Hunter", "B0FXXVV42J", Asin("B0FXXVV42J", "fr"));
+            var service = _provider.GetRequiredService<ILibraryIssueService>();
+
+            var issue = await service.GetIssueAsync(noRegion.Id);
+            Assert.NotNull(issue);
+            Assert.Equal(new[] { LibraryIssueCodes.MissingRegion }, issue!.Issues);
+            Assert.Empty((await service.GetIssueAsync(healthy.Id))!.Issues);
+            Assert.Null(await service.GetIssueAsync(999999));
+        }
     }
 }

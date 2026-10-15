@@ -64,7 +64,6 @@ import {
   searchRecords,
 } from '@/utils/audibleRecordSearch'
 import { orderedSearchRegionOptions } from '@/utils/languageMapping'
-import { buildLibraryImportQuery, buildLibraryImportTitle } from '@/utils/libraryImportSearch'
 import type { SearchResult } from '@/types'
 
 const props = defineProps<{ item: LibraryImportItem }>()
@@ -75,14 +74,14 @@ const emit = defineEmits<{
 
 const store = useLibraryImportStore()
 const match = props.item.selectedMatch
-// The same query Start Matching uses for this row
-const rowQuery = buildLibraryImportQuery(props.item)
+// The query the server computed for this row (the one Start Matching uses)
+const rowQuery = props.item.searchQuery ?? {}
 // The values the search opens with, restored by Revert (the region is set once configured is known)
 const initial = {
   asin: match?.asin ?? rowQuery.asin ?? '',
   region: match?.region ?? '',
   // The cleaned folder name for a book of several audio files, the file name for a single file
-  query: rowQuery.title ?? buildLibraryImportTitle(props.item),
+  query: rowQuery.title ?? props.item.folderName,
   // The author read from the files only: the current match may be the wrong book
   author: props.item.detectedAuthor?.trim() ?? '',
 }

@@ -44,34 +44,57 @@ namespace Listenarr.Application.Audiobooks.Catalog
             foreach (var audiobook in audiobooks.OrderBy(a => a.Title))
             {
                 asinsByAudiobookId.TryGetValue(audiobook.Id, out var asins);
-                var primary = asins?.FirstOrDefault();
-                var asin = primary?.ValueNormalized is { Length: > 0 } normalized
-                    ? normalized
-                    : audiobook.Asin?.Trim();
-                var issues = FindIssues(audiobook.Title, asin, primary);
-                var ignored = ignoredIds.Contains(audiobook.Id);
-                var listed = ignored ? includeIgnored : issues.Count > 0;
-                if (!listed)
+                var item = ToItem(audiobook, asins, ignoredIds.Contains(audiobook.Id));
+                var listed = item.Ignored ? includeIgnored : item.Issues.Length > 0;
+                if (listed)
                 {
-                    continue;
+                    items.Add(item);
                 }
-
-                items.Add(new LibraryIssueItem
-                {
-                    Id = audiobook.Id,
-                    Title = audiobook.Title,
-                    Authors = audiobook.Authors?.ToArray(),
-                    Series = audiobook.Series,
-                    SeriesNumber = audiobook.SeriesNumber,
-                    ImageUrl = audiobook.ImageUrl,
-                    Asin = string.IsNullOrWhiteSpace(asin) ? null : asin,
-                    Region = string.IsNullOrWhiteSpace(primary?.Region) ? null : primary!.Region,
-                    Issues = issues.ToArray(),
-                    Ignored = ignored
-                });
             }
 
             return items;
+        }
+
+        // One book's issues (possibly none) and whether it is ignored; null when the book doesn't exist
+        public async Task<LibraryIssueItem?> GetIssueAsync(int audiobookId, CancellationToken ct = default)
+        {
+            var audiobook = await _audiobookRepository.GetByIdSnapshotAsync(audiobookId, ct);
+            if (audiobook == null)
+            {
+                return null;
+            }
+
+            var asins = audiobook.ExternalIdentifiers?
+                .Where(i => i.Type == AudiobookExternalIdentifierType.Asin)
+                .OrderByDescending(i => i.IsPrimary)
+                .ThenBy(i => i.Id)
+                .ToList();
+            var ignoredIds = await _audiobookRepository.GetIssueIgnoredAudiobookIdsAsync(ct);
+            return ToItem(audiobook, asins, ignoredIds.Contains(audiobookId));
+        }
+
+        private static LibraryIssueItem ToItem(
+            Audiobook audiobook,
+            List<AudiobookExternalIdentifier>? asins,
+            bool ignored)
+        {
+            var primary = asins?.FirstOrDefault();
+            var asin = primary?.ValueNormalized is { Length: > 0 } normalized
+                ? normalized
+                : audiobook.Asin?.Trim();
+            return new LibraryIssueItem
+            {
+                Id = audiobook.Id,
+                Title = audiobook.Title,
+                Authors = audiobook.Authors?.ToArray(),
+                Series = audiobook.Series,
+                SeriesNumber = audiobook.SeriesNumber,
+                ImageUrl = audiobook.ImageUrl,
+                Asin = string.IsNullOrWhiteSpace(asin) ? null : asin,
+                Region = string.IsNullOrWhiteSpace(primary?.Region) ? null : primary!.Region,
+                Issues = FindIssues(audiobook.Title, asin, primary).ToArray(),
+                Ignored = ignored
+            };
         }
 
         public Task<bool> SetIgnoredAsync(int audiobookId, bool ignored, CancellationToken ct = default) =>

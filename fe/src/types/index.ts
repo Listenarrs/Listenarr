@@ -1227,6 +1227,22 @@ export interface UnmatchedFileItem {
   asin?: string
   format: string
   duration?: string
+  // What Start Matching searches for this book (computed by the server once the tags are read)
+  searchQuery?: BookSearchQuery | null
+}
+
+// A book search on Audible: its ASIN, or a title with an optional author (server rules)
+export interface BookSearchQuery {
+  asin?: string | null
+  title?: string | null
+  author?: string | null
+}
+
+// POST /library-import/match: the results and the one an automatic match takes
+export interface LibraryImportMatchResponse {
+  query: BookSearchQuery
+  candidates: SearchResult[]
+  match: SearchResult | null
 }
 
 export interface UnmatchedFilesResponse {

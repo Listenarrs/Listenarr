@@ -20,11 +20,9 @@ import { ref, computed } from 'vue'
 import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import { logger } from '@/utils/logger'
-import { buildLibraryImportQuery, pickAutoMatch } from '@/utils/libraryImportSearch'
-import { findRecords } from '@/utils/audibleRecordSearch'
 import { normalizeSearchRegion, searchRegionOptions } from '@/utils/languageMapping'
 import { useConfigurationStore } from '@/stores/configuration'
-import type { SearchResult, AudibleBookMetadata, UnmatchedFileItem } from '@/types'
+import type { SearchResult, AudibleBookMetadata, BookSearchQuery, UnmatchedFileItem } from '@/types'
 
 export interface LibraryImportItem {
   id: string // = fullPath (unique key)
@@ -38,6 +36,8 @@ export interface LibraryImportItem {
   detectedAuthor?: string
   detectedAsin?: string
   detectedSeries?: string
+  // What Start Matching searches (from the server's scan): the ASIN, or the cleaned name and author
+  searchQuery?: BookSearchQuery | null
   format: string
   fileCount: number
   // Match state
@@ -84,6 +84,7 @@ function unmatchedToImportItem(item: UnmatchedFileItem): LibraryImportItem {
     detectedAuthor: item.author,
     detectedAsin: item.asin,
     detectedSeries: item.series,
+    searchQuery: item.searchQuery ?? null,
     format: item.format,
     fileCount: item.fileCount,
     selectedMatch: null,
@@ -386,11 +387,15 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
       items.value = { ...items.value, [id]: { ...item, isSearching: true } }
 
       try {
-        // Same query and search as Find Match, in the configured region (no switch to another one)
-        const query = buildLibraryImportQuery(item)
-        const results = await findRecords(query, await _configuredRegion())
+        // The server searches the row's query in the configured region (no switch to another one)
+        // and picks the match with the shared rules; a scan from an older server has no query
+        const query: BookSearchQuery = item.searchQuery ?? {
+          title: item.folderName,
+          author: item.detectedAuthor,
+        }
+        const { match } = await apiService.matchLibraryImportItem(query, await _configuredRegion())
         metadataFetchCount.value++
-        const first = pickAutoMatch(results, query, item.detectedAuthor)
+        const first = match ?? null
         const current = items.value[id]!
         items.value = {
           ...items.value,
