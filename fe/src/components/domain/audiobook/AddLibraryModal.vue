@@ -351,11 +351,13 @@
                       placeholder="Comma-separated genres"
                     />
                   </div>
-                  <!-- The ASIN and its region come from the search: a wrong book is fixed with
-                       another search (or a repair after the add), not by editing its identifier -->
                   <div class="detail-item">
                     <span class="label">ASIN</span>
-                    <span class="value" data-testid="metadata-asin">{{ asinWithRegion }}</span>
+                    <input v-model="editableMetadata.asin" type="text" class="form-input" />
+                    <div v-if="asinValidationError" class="path-validation-error">
+                      <PhWarning :size="16" />
+                      <span>{{ asinValidationError }}</span>
+                    </div>
                   </div>
                   <div class="detail-item">
                     <span class="label">ISBN</span>
@@ -482,6 +484,7 @@
           isAdding ||
           metadataLoading ||
           Boolean(destinationPathValidationError) ||
+          Boolean(asinValidationError) ||
           metadataLookupFailed
         "
       >
@@ -931,11 +934,12 @@ function regionLabel(region: string): string {
   return searchRegionOptions.find((o) => o.value === region)?.label ?? region
 }
 
-const asinWithRegion = computed(() => {
+// An ASIN can be corrected by hand (Audible sometimes republishes a book under a new one), but a
+// malformed one could never be looked up again, so it blocks the add; no ASIN is still allowed
+const asinValidationError = computed(() => {
   const asin = trimToUndefined(editableMetadata.value?.asin)
-  if (!asin) return '—'
-  const region = trimToUndefined(editableMetadata.value?.region)
-  return region ? `${asin} (${regionLabel(region)})` : asin
+  if (!asin || /^[A-Z0-9]{10}$/i.test(asin)) return null
+  return 'An ASIN has 10 letters or digits.'
 })
 
 const imageSrc = computed(() => {
@@ -1524,6 +1528,10 @@ const getAlreadyExistingAudiobook = (error: unknown): Audiobook | null => {
 const addToLibrary = async () => {
   if (!props.book) return
   if (metadataLookupFailed.value) return
+  if (asinValidationError.value) {
+    toast.error('Invalid ASIN', asinValidationError.value)
+    return
+  }
   if (destinationPathValidationError.value) {
     toast.error('Invalid destination', destinationPathValidationError.value)
     return

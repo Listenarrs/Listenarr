@@ -102,7 +102,7 @@ describe('AddLibraryModal editable metadata', () => {
     expect(apiMocks.getAudibleMetadata).toHaveBeenCalledWith('B001234567', 'fr')
   })
 
-  it('shows the ASIN and its region read-only and submits them unchanged', async () => {
+  async function openAsinField() {
     const wrapper = mount(AddLibraryModal, {
       props: { visible: true, book: fakeBook },
       attachTo: document.body,
@@ -117,13 +117,34 @@ describe('AddLibraryModal editable metadata', () => {
       .findAll('.metadata-edit-grid .detail-item')
       .find((item) => item.find('.label').text() === 'ASIN')
     expect(asinField, 'Expected the ASIN field in the editor').toBeTruthy()
-    expect(asinField!.find('input').exists()).toBe(false)
-    expect(asinField!.get('[data-testid="metadata-asin"]').text()).toBe('B001234567 (Germany (DE))')
+    return { wrapper, asinField: asinField! }
+  }
 
+  it('refuses to add a book whose ASIN was edited into a malformed one', async () => {
+    const { wrapper, asinField } = await openAsinField()
+
+    await asinField.get('input').setValue('erg')
+    await flushPromises()
+
+    expect(asinField.get('.path-validation-error').text()).toContain('10 letters or digits')
+    const addButton = wrapper.get('button.btn-primary')
+    expect(addButton.attributes('disabled')).toBeDefined()
+    await addButton.trigger('click')
+    await flushPromises()
+    expect(apiMocks.addToLibrary).not.toHaveBeenCalled()
+  })
+
+  it('submits an ASIN corrected by hand', async () => {
+    const { wrapper, asinField } = await openAsinField()
+
+    await asinField.get('input').setValue('B009876543')
+    await flushPromises()
+
+    expect(asinField.find('.path-validation-error').exists()).toBe(false)
     await wrapper.get('button.btn-primary').trigger('click')
     await flushPromises()
     expect(apiMocks.addToLibrary).toHaveBeenCalledWith(
-      expect.objectContaining({ asin: 'B001234567', region: 'de' }),
+      expect.objectContaining({ asin: 'B009876543' }),
       expect.any(Object),
     )
   })
