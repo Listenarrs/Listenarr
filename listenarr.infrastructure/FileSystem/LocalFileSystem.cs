@@ -51,6 +51,8 @@ public sealed class LocalFileSystem : IFileSystem
 
     public void DeleteDirectory(string path, bool recursive) => Directory.Delete(path, recursive);
 
+    public void MoveFile(string sourcePath, string destinationPath) => File.Move(sourcePath, destinationPath, overwrite: false);
+
     public IEnumerable<string> EnumerateFiles(string path) => Directory.EnumerateFiles(path);
 
     public IEnumerable<string> EnumerateFiles(string path, string searchPattern, SearchOption searchOption) =>
