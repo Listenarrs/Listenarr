@@ -57,11 +57,11 @@
           @click="openRepair(selectedIds)"
         >
           <PhWrench :size="16" />
-          Repair books
+          {{ repairSelectedLabel }}
         </button>
       </div>
 
-      <div class="issues-list">
+      <div ref="listEl" class="issues-list">
         <div
           v-for="book in issuesStore.items"
           :key="book.id"
@@ -111,6 +111,23 @@
           </button>
         </div>
       </div>
+
+      <!-- The same button under a list that goes past the bottom of the screen -->
+      <div v-if="listOverflows" class="issues-toolbar issues-toolbar-bottom">
+        <span class="issues-count">
+          {{ selectedIds.length }} of {{ issuesStore.items.length }} selected
+        </span>
+        <button
+          type="button"
+          class="btn btn-primary"
+          data-testid="issues-repair-selected-bottom"
+          :disabled="!selectedIds.length"
+          @click="openRepair(selectedIds)"
+        >
+          <PhWrench :size="16" />
+          {{ repairSelectedLabel }}
+        </button>
+      </div>
     </template>
 
     <RenamePreviewModal
@@ -131,7 +148,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { PhCheckCircle, PhSpinner, PhWarning, PhWrench } from '@phosphor-icons/vue'
 import { Pill } from '@/components/base'
@@ -155,6 +172,31 @@ const allSelected = computed(
   () => issuesStore.items.length > 0 && selectedIds.value.length === issuesStore.items.length,
 )
 const someSelected = computed(() => selectedIds.value.length > 0)
+const repairSelectedLabel = computed(() => {
+  const n = selectedIds.value.length
+  return `Repair Selected ${n === 1 ? 'Book' : 'Books'} (${n})`
+})
+
+// The list goes past the bottom of the screen: the button is repeated under it
+const listEl = ref<HTMLElement | null>(null)
+const listOverflows = ref(false)
+function measureList() {
+  const el = listEl.value
+  listOverflows.value = Boolean(el && el.getBoundingClientRect().bottom > window.innerHeight)
+}
+let resizeObserver: ResizeObserver | null = null
+watch(listEl, (el) => {
+  resizeObserver?.disconnect()
+  if (el && typeof ResizeObserver !== 'undefined') {
+    resizeObserver = new ResizeObserver(measureList)
+    resizeObserver.observe(el)
+  }
+  measureList()
+})
+watch(
+  () => issuesStore.items.length,
+  () => void nextTick(measureList),
+)
 
 const showRepairModal = ref(false)
 const repairAudiobookIds = ref<number[]>([])
@@ -224,6 +266,12 @@ async function handleOrganizeDone() {
 
 onMounted(() => {
   void loadOrLeave()
+  window.addEventListener('resize', measureList)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', measureList)
+  resizeObserver?.disconnect()
 })
 </script>
 
@@ -284,6 +332,10 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
+}
+
+.issues-toolbar-bottom {
+  margin: 0.75rem 0 0;
 }
 
 .issues-list {

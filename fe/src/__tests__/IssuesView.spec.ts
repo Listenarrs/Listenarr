@@ -80,6 +80,10 @@ describe('IssuesView', () => {
     const wrapper = mountView()
     await flushPromises()
 
+    await wrapper.get('[data-testid="issues-row-9"] input[type="checkbox"]').setValue(true)
+    expect(wrapper.get('[data-testid="issues-repair-selected"]').text()).toContain(
+      'Repair Selected Book (1)',
+    )
     await wrapper.get('[data-testid="issues-row-9"] [data-testid="issues-repair"]').trigger('click')
 
     expect(wrapper.get('[data-testid="repair-modal"]').attributes('data-ids')).toBe('9')
@@ -96,6 +100,24 @@ describe('IssuesView', () => {
     await repairBooks().trigger('click')
 
     expect(wrapper.get('[data-testid="repair-modal"]').attributes('data-ids')).toBe('7,9')
+    expect(repairBooks().text()).toContain('Repair Selected Books (2)')
+  })
+
+  it('repeats the repair button under a list taller than the screen', async () => {
+    getLibraryIssues.mockResolvedValue(issues)
+    const rect = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockReturnValue({ bottom: window.innerHeight + 500 } as DOMRect)
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="issues-repair-selected-bottom"]').exists()).toBe(true)
+
+    rect.mockReturnValue({ bottom: 100 } as DOMRect)
+    window.dispatchEvent(new Event('resize'))
+    await flushPromises()
+    expect(wrapper.find('[data-testid="issues-repair-selected-bottom"]').exists()).toBe(false)
+    rect.mockRestore()
   })
 
   it('goes back to the books when there is nothing to repair, including after the last repair', async () => {
