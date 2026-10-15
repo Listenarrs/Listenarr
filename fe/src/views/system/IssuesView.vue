@@ -230,7 +230,8 @@ onMounted(() => {
 <style scoped>
 .issues-view {
   padding: 1.5rem;
-  max-width: 1200px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .issues-header h1 {
@@ -294,7 +295,7 @@ onMounted(() => {
 
 .issues-row {
   display: grid;
-  grid-template-columns: auto 48px minmax(12rem, 2fr) minmax(8rem, 1fr) minmax(8rem, 1fr) auto;
+  grid-template-columns: auto 48px minmax(12rem, 3fr) minmax(10rem, 1fr) minmax(10rem, 1.5fr) auto;
   align-items: center;
   gap: 0.75rem;
   padding: 0.5rem 0.75rem;
