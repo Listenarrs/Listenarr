@@ -120,115 +120,23 @@
                   </span>
                 </label>
 
-                <div class="repair-fields">
-                  <label class="repair-field">
-                    <span>ASIN</span>
-                    <input
-                      v-model="row.asin"
-                      type="text"
-                      class="form-input"
-                      data-testid="repair-asin"
-                      @input="onAsinTyped(row)"
-                    />
-                  </label>
-                  <label class="repair-field">
-                    <span>Region</span>
-                    <select
-                      v-model="row.region"
-                      class="form-input"
-                      data-testid="repair-region"
-                      @change="onRegionEdited(row)"
+                <AudibleRecordSearch
+                  class="repair-record-search"
+                  :state="row"
+                  :region-options="regionOptionsFor(row)"
+                  @pick="row.selected = true"
+                  @found="row.selected = true"
+                >
+                  <template #hint>
+                    <p
+                      v-if="needsPick(row) && !row.asin.trim() && !row.asinCleared"
+                      class="repair-hint"
+                      data-testid="repair-needs-pick"
                     >
-                      <option v-for="o in regionOptionsFor(row)" :key="o.value" :value="o.value">
-                        {{ o.label }}
-                      </option>
-                    </select>
-                  </label>
-                  <label class="repair-field repair-field-name">
-                    <span>Title</span>
-                    <input
-                      v-model="row.query"
-                      type="text"
-                      class="form-input"
-                      data-testid="repair-query"
-                      @input="onNameEdited(row)"
-                      @keydown.enter.prevent="search(row)"
-                    />
-                  </label>
-                  <label class="repair-field repair-field-author">
-                    <span>Author</span>
-                    <input
-                      v-model="row.author"
-                      type="text"
-                      class="form-input"
-                      data-testid="repair-author"
-                      @input="onNameEdited(row)"
-                      @keydown.enter.prevent="search(row)"
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    class="btn btn-secondary repair-search-btn"
-                    data-testid="repair-search"
-                    :disabled="row.searching || !searchTerm(row)"
-                    @click="search(row)"
-                  >
-                    <PhSpinner v-if="row.searching" class="ph-spin" :size="14" />
-                    <PhMagnifyingGlass v-else :size="14" />
-                    Search
-                  </button>
-                </div>
-
-                <p v-if="row.lookingUp" class="repair-hint" data-testid="repair-asin-lookup">
-                  Looking up {{ row.asin.trim().toUpperCase() }} in {{ regionLabel(row.region) }}…
-                </p>
-                <p
-                  v-else-if="row.asinNotFound"
-                  class="repair-hint repair-hint-error"
-                  data-testid="repair-asin-not-found"
-                >
-                  No record for {{ row.asin.trim().toUpperCase() }} in
-                  {{ regionLabel(row.region) }}: check the ASIN or choose another region.
-                </p>
-                <p
-                  v-else-if="asinMalformed(row)"
-                  class="repair-hint repair-hint-error"
-                  data-testid="repair-asin-invalid"
-                >
-                  An ASIN has 10 letters or digits.
-                </p>
-                <p
-                  v-else-if="row.asinCleared"
-                  class="repair-hint"
-                  data-testid="repair-asin-cleared"
-                >
-                  ASIN cleared: it belonged to the previous match. Search and pick the right book,
-                  or type its ASIN.
-                </p>
-                <p
-                  v-else-if="needsPick(row) && !row.asin.trim()"
-                  class="repair-hint"
-                  data-testid="repair-needs-pick"
-                >
-                  Pick the right book (or type its ASIN) before repairing.
-                </p>
-                <p v-if="row.searched && !row.results.length" class="repair-empty">
-                  No result in {{ regionLabel(row.region) }}.
-                </p>
-                <ul v-if="row.results.length" class="repair-results">
-                  <li v-for="result in row.results" :key="result.asin">
-                    <button
-                      type="button"
-                      class="repair-result"
-                      :class="{ picked: result.asin === row.asin.trim().toUpperCase() }"
-                      data-testid="repair-result"
-                      @click="pick(row, result)"
-                    >
-                      <span class="repair-result-title">{{ resultTitle(result) }}</span>
-                      <span class="repair-result-meta">{{ resultMeta(result) }}</span>
-                    </button>
-                  </li>
-                </ul>
+                      Pick the right book (or type its ASIN) before repairing.
+                    </p>
+                  </template>
+                </AudibleRecordSearch>
               </div>
             </div>
           </div>
@@ -314,7 +222,6 @@ import {
   PhCheckSquare,
   PhFolderOpen,
   PhInfo,
-  PhMagnifyingGlass,
   PhSpinner,
   PhWarningCircle,
   PhWrench,
@@ -323,37 +230,27 @@ import {
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '@/components/feedback'
 import { apiService } from '@/services/api'
 import { useConfigurationStore } from '@/stores/configuration'
-import { normalizeSearchRegion, searchRegionOptions } from '@/utils/languageMapping'
-import type {
-  AudiobookExternalIdentifier,
-  AudiobookExternalIdentifierInput,
-  SearchResult,
-} from '@/types'
+import { normalizeSearchRegion, orderedSearchRegionOptions } from '@/utils/languageMapping'
+import AudibleRecordSearch from '@/components/domain/audiobook/AudibleRecordSearch.vue'
+import {
+  ASIN_PATTERN,
+  createRecordSearchState,
+  isChosen,
+  resetRecordSearch,
+  type RecordSearchState,
+} from '@/utils/audibleRecordSearch'
+import type { AudiobookExternalIdentifier, AudiobookExternalIdentifierInput } from '@/types'
 
-interface RepairRow {
+interface RepairRow extends RecordSearchState {
   id: number
   title: string
   authors: string[]
   currentAsin: string
   currentRegion: string
   identifiers: AudiobookExternalIdentifier[]
-  query: string
-  author: string
-  region: string
-  asin: string
   selected: boolean
   // Values when the modal opened, restored by Revert
   initial: { query: string; author: string; region: string; asin: string }
-  // The ASIN the user chose for this region (picked from the results or typed); null = still the old match
-  chosen: { asin: string; region: string } | null
-  asinCleared: boolean
-  // ASIN lookup in the selected region: in flight, or answered with no record
-  lookingUp: boolean
-  asinNotFound: boolean
-  lookupId: number
-  searching: boolean
-  searched: boolean
-  results: SearchResult[]
 }
 
 interface RepairResult {
@@ -362,8 +259,6 @@ interface RepairResult {
   success: boolean
   detail: string
 }
-
-const ASIN_PATTERN = /^[A-Z0-9]{10}$/i
 
 const props = withDefaults(
   defineProps<{
@@ -401,39 +296,7 @@ const repairedIds = computed(() => results.value.filter((r) => r.success).map((r
 // Every Audible region stays available, ordered by usefulness: the book's current region first,
 // then the configured one and the US fallback, then the others alphabetically.
 function regionOptionsFor(row: RepairRow) {
-  const first = [row.initial.region, configuredRegion.value, FALLBACK_REGION].filter(
-    (r, i, list) => r && list.indexOf(r) === i,
-  )
-  const head = first
-    .map((r) => searchRegionOptions.find((o) => o.value === r))
-    .filter((o): o is (typeof searchRegionOptions)[number] => Boolean(o))
-  const rest = searchRegionOptions
-    .filter((o) => !first.includes(o.value))
-    .sort((x, y) => x.label.localeCompare(y.label))
-  return [...head, ...rest]
-}
-
-function regionLabel(region: string): string {
-  return searchRegionOptions.find((o) => o.value === region)?.label ?? region
-}
-
-function resultTitle(result: SearchResult): string {
-  return [result.title, result.subtitle].filter(Boolean).join(': ')
-}
-
-function resultMeta(result: SearchResult): string {
-  const names = (list?: Array<{ name?: string } | string>) =>
-    (list ?? []).map((x) => (typeof x === 'string' ? x : x?.name)).filter(Boolean)
-  const authors = names(result.authors as Array<{ name?: string } | string>)
-  const narrators = names(result.narrators as Array<{ name?: string } | string>)
-  return [
-    authors.join(', '),
-    narrators.length ? `read by ${narrators.join(', ')}` : '',
-    result.language,
-    result.asin,
-  ]
-    .filter(Boolean)
-    .join(' · ')
+  return orderedSearchRegionOptions([row.initial.region, configuredRegion.value, FALLBACK_REGION])
 }
 
 function primaryAsin(identifiers: AudiobookExternalIdentifier[]) {
@@ -459,32 +322,22 @@ async function load() {
           apiService.getAudiobookIdentifiers(id),
         ])
         const asin = primaryAsin(ids.identifiers ?? [])
+        const initial = {
+          query: book.title ?? '',
+          author: book.authors?.[0] ?? '',
+          region: asin?.region || configuredRegion.value,
+          asin: asin?.value ?? book.asin ?? '',
+        }
         return {
+          ...createRecordSearchState(initial),
           id,
           title: book.title ?? '',
           authors: book.authors ?? [],
           currentAsin: asin?.value ?? book.asin ?? '',
           currentRegion: asin?.region ?? '',
           identifiers: ids.identifiers ?? [],
-          query: book.title ?? '',
-          author: book.authors?.[0] ?? '',
-          region: asin?.region || configuredRegion.value,
-          asin: asin?.value ?? book.asin ?? '',
-          initial: {
-            query: book.title ?? '',
-            author: book.authors?.[0] ?? '',
-            region: asin?.region || configuredRegion.value,
-            asin: asin?.value ?? book.asin ?? '',
-          },
+          initial,
           selected: true,
-          chosen: null,
-          asinCleared: false,
-          lookingUp: false,
-          asinNotFound: false,
-          lookupId: 0,
-          searching: false,
-          searched: false,
-          results: [],
         }
       }),
     )
@@ -493,131 +346,6 @@ async function load() {
   } finally {
     loading.value = false
   }
-}
-
-// Search looks up the title and author; a title that is itself an ASIN is looked up as one.
-// A typed ASIN is looked up on its own (see lookupAsin).
-function searchTerm(row: RepairRow): string {
-  return row.query.trim()
-}
-
-// An Audible result is usable only with a title: an ASIN the catalogue doesn't sell in that market
-// comes back as an empty stub
-const usable = (found: SearchResult[] | undefined) => (found ?? []).filter((r) => r.asin && r.title)
-
-async function search(row: RepairRow) {
-  const term = searchTerm(row)
-  if (!term) return
-  row.searching = true
-  try {
-    const author = row.author.trim()
-    const found = await apiService.advancedSearch(
-      ASIN_PATTERN.test(term)
-        ? { asin: term.toUpperCase(), region: row.region, cap: 5 }
-        : { title: term, ...(author ? { author } : {}), region: row.region, cap: 8 },
-    )
-    row.results = usable(found)
-  } catch {
-    row.results = []
-  } finally {
-    row.searching = false
-    row.searched = true
-  }
-}
-
-function firstAuthor(result: SearchResult): string {
-  const first = (result.authors as Array<{ name?: string } | string> | undefined)?.[0]
-  return (typeof first === 'string' ? first : first?.name) ?? ''
-}
-
-// Look the row's ASIN up in its region: when the catalogue has it, the title and author show which
-// book it is and the ASIN counts as chosen for that region; otherwise the repair stays blocked
-async function lookupAsin(row: RepairRow) {
-  const asin = row.asin.trim().toUpperCase()
-  const region = row.region
-  const id = ++row.lookupId
-  row.chosen = null
-  row.asinNotFound = false
-  row.asinCleared = false
-  row.lookingUp = true
-  let found: SearchResult[] = []
-  try {
-    found = usable(await apiService.advancedSearch({ asin, region, cap: 5 }))
-  } catch {
-    found = []
-  }
-  if (id !== row.lookupId) return
-  row.lookingUp = false
-  row.searched = false
-  const record = found.find((r) => (r.asin ?? '').toUpperCase() === asin)
-  if (!record) {
-    row.asinNotFound = true
-    row.results = []
-    return
-  }
-  row.query = record.title ?? row.query
-  row.author = firstAuthor(record) || row.author
-  row.results = [record]
-  row.chosen = { asin, region }
-  row.selected = true
-}
-
-function pick(row: RepairRow, result: SearchResult) {
-  ++row.lookupId
-  row.lookingUp = false
-  row.asinNotFound = false
-  row.asin = (result.asin ?? '').toUpperCase()
-  if (result.region) row.region = result.region
-  row.chosen = { asin: row.asin, region: row.region }
-  row.asinCleared = false
-  row.selected = true
-}
-
-function clearOldAsin(row: RepairRow) {
-  if (row.asin) {
-    row.asin = ''
-    row.asinCleared = true
-  }
-}
-
-// A new title or author means another book: the ASIN of the previous match no longer applies
-function onNameEdited(row: RepairRow) {
-  if (!row.chosen && !row.lookingUp) {
-    row.asinNotFound = false
-    clearOldAsin(row)
-  }
-}
-
-// ASINs differ from one Audible market to another: an ASIN is looked up again in the new region.
-// Results of a search belong to the previous region.
-function onRegionEdited(row: RepairRow) {
-  row.results = []
-  row.searched = false
-  if (ASIN_PATTERN.test(row.asin.trim())) {
-    void lookupAsin(row)
-  } else {
-    ++row.lookupId
-    row.lookingUp = false
-    row.chosen = null
-    row.asinNotFound = false
-  }
-}
-
-function onAsinTyped(row: RepairRow) {
-  row.asinCleared = false
-  if (ASIN_PATTERN.test(row.asin.trim())) {
-    void lookupAsin(row)
-  } else {
-    ++row.lookupId
-    row.lookingUp = false
-    row.chosen = null
-    row.asinNotFound = false
-  }
-}
-
-function asinMalformed(row: RepairRow): boolean {
-  const asin = row.asin.trim()
-  return asin.length > 0 && !ASIN_PATTERN.test(asin)
 }
 
 function isEdited(row: RepairRow): boolean {
@@ -630,25 +358,14 @@ function isEdited(row: RepairRow): boolean {
 }
 
 function revert(row: RepairRow) {
-  ++row.lookupId
-  row.lookingUp = false
-  row.asinNotFound = false
-  row.query = row.initial.query
-  row.author = row.initial.author
-  row.region = row.initial.region
-  row.asin = row.initial.asin
-  row.chosen = null
-  row.asinCleared = false
-  row.results = []
-  row.searched = false
+  resetRecordSearch(row, row.initial)
 }
 
 // A new ASIN or region is repaired only once that ASIN is known in that region: picked from the
 // results, or looked up successfully. Keeping the current ASIN and region only rescans.
 function needsPick(row: RepairRow): boolean {
   if (!row.selected || !asinChanged(row)) return false
-  const asin = row.asin.trim().toUpperCase()
-  return !(row.chosen && row.chosen.asin === asin && row.chosen.region === row.region)
+  return !isChosen(row)
 }
 
 function asinChanged(row: RepairRow): boolean {
@@ -828,77 +545,14 @@ watch(
   opacity: 0.75;
 }
 
-.repair-fields {
-  display: grid;
-  grid-template-columns:
-    minmax(8rem, 1fr) minmax(8rem, 1fr) minmax(10rem, 2fr) minmax(8rem, 1.5fr)
-    auto;
-  gap: 0.5rem;
-  align-items: end;
+.repair-record-search {
   margin-top: 0.75rem;
-}
-
-.repair-field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.8rem;
-}
-
-.repair-search-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
 }
 
 .repair-hint {
   margin: 0.5rem 0 0;
   font-size: 0.8rem;
   color: #ffb74d;
-}
-
-.repair-hint-error {
-  color: #ef9a9a;
-}
-
-.repair-empty {
-  margin: 0.5rem 0 0;
-  font-size: 0.8rem;
-  opacity: 0.75;
-}
-
-.repair-results {
-  list-style: none;
-  margin: 0.5rem 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.repair-result {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.1rem;
-  padding: 0.4rem 0.6rem;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.repair-result.picked {
-  border-color: rgba(76, 175, 80, 0.6);
-  background-color: rgba(76, 175, 80, 0.08);
-}
-
-.repair-result-meta {
-  font-size: 0.75rem;
-  opacity: 0.75;
 }
 
 .results-list {
@@ -925,11 +579,5 @@ watch(
   margin-left: auto;
   font-size: 0.8rem;
   opacity: 0.75;
-}
-
-@media (max-width: 720px) {
-  .repair-fields {
-    grid-template-columns: 1fr;
-  }
 }
 </style>

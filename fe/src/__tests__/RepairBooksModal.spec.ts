@@ -128,11 +128,11 @@ describe('RepairBooksModal', () => {
     expect(row(wrapper).text()).toContain('B0HM45F8MW')
     expect(row(wrapper).text()).toContain('(fr)')
     expect(
-      (row(wrapper).get('[data-testid="repair-query"]').element as HTMLInputElement).value,
+      (row(wrapper).get('[data-testid="record-title"]').element as HTMLInputElement).value,
     ).toBe('Primal Hunter, Vol. 7')
-    expect(inputValue(wrapper, 'repair-author')).toBe('Zogarth')
+    expect(inputValue(wrapper, 'record-author')).toBe('Zogarth')
     expect(
-      (row(wrapper).get('[data-testid="repair-region"]').element as HTMLSelectElement).value,
+      (row(wrapper).get('[data-testid="record-region"]').element as HTMLSelectElement).value,
     ).toBe('fr')
   })
 
@@ -150,9 +150,9 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
 
-    await row(wrapper).get('[data-testid="repair-query"]').setValue('The Primal Hunter 4')
-    await row(wrapper).get('[data-testid="repair-region"]').setValue('us')
-    await row(wrapper).get('[data-testid="repair-search"]').trigger('click')
+    await row(wrapper).get('[data-testid="record-title"]').setValue('The Primal Hunter 4')
+    await row(wrapper).get('[data-testid="record-region"]').setValue('us')
+    await row(wrapper).get('[data-testid="record-search"]').trigger('click')
     await flushPromises()
 
     expect(apiMocks.advancedSearch).toHaveBeenCalledWith({
@@ -161,11 +161,11 @@ describe('RepairBooksModal', () => {
       region: 'us',
       cap: 8,
     })
-    const results = row(wrapper).findAll('[data-testid="repair-result"]')
+    const results = row(wrapper).findAll('[data-testid="record-result"]')
     expect(results).toHaveLength(1)
     await results[0]!.trigger('click')
     expect(
-      (row(wrapper).get('[data-testid="repair-asin"]').element as HTMLInputElement).value,
+      (row(wrapper).get('[data-testid="record-asin"]').element as HTMLInputElement).value,
     ).toBe('B0BK9W82PQ')
   })
 
@@ -177,8 +177,8 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
 
-    await row(wrapper).get('[data-testid="repair-region"]').setValue('us')
-    await row(wrapper).get('[data-testid="repair-asin"]').setValue('B0BK9W82PQ')
+    await row(wrapper).get('[data-testid="record-region"]').setValue('us')
+    await row(wrapper).get('[data-testid="record-asin"]').setValue('B0BK9W82PQ')
     await flushPromises()
     await wrapper.get('[data-testid="repair-confirm"]').trigger('click')
     await flushPromises()
@@ -197,7 +197,7 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
 
-    await row(wrapper).get('[data-testid="repair-region"]').setValue('us')
+    await row(wrapper).get('[data-testid="record-region"]').setValue('us')
     await flushPromises()
 
     expect(apiMocks.advancedSearch).toHaveBeenCalledWith({
@@ -205,14 +205,14 @@ describe('RepairBooksModal', () => {
       region: 'us',
       cap: 5,
     })
-    expect(row(wrapper).get('[data-testid="repair-asin-not-found"]').text()).toContain('B0HM45F8MW')
+    expect(row(wrapper).get('[data-testid="record-asin-not-found"]').text()).toContain('B0HM45F8MW')
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
 
-    await row(wrapper).get('[data-testid="repair-search"]').trigger('click')
+    await row(wrapper).get('[data-testid="record-search"]').trigger('click')
     await flushPromises()
-    await row(wrapper).get('[data-testid="repair-result"]').trigger('click')
+    await row(wrapper).get('[data-testid="record-result"]').trigger('click')
 
-    expect(row(wrapper).find('[data-testid="repair-asin-not-found"]').exists()).toBe(false)
+    expect(row(wrapper).find('[data-testid="record-asin-not-found"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeUndefined()
   })
 
@@ -223,12 +223,12 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
 
-    await row(wrapper).get('[data-testid="repair-region"]').setValue('uk')
+    await row(wrapper).get('[data-testid="record-region"]').setValue('uk')
     await flushPromises()
 
-    expect(inputValue(wrapper, 'repair-asin')).toBe('B0HM45F8MW')
-    expect(inputValue(wrapper, 'repair-query')).toBe('Primal Hunter 7')
-    expect(inputValue(wrapper, 'repair-author')).toBe('Zogarth')
+    expect(inputValue(wrapper, 'record-asin')).toBe('B0HM45F8MW')
+    expect(inputValue(wrapper, 'record-title')).toBe('Primal Hunter 7')
+    expect(inputValue(wrapper, 'record-author')).toBe('Zogarth')
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeUndefined()
 
     await wrapper.get('[data-testid="repair-confirm"]').trigger('click')
@@ -245,9 +245,9 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
 
-    await row(wrapper).get('[data-testid="repair-author"]').setValue('Someone Else')
+    await row(wrapper).get('[data-testid="record-author"]').setValue('Someone Else')
 
-    expect(inputValue(wrapper, 'repair-asin')).toBe('')
+    expect(inputValue(wrapper, 'record-asin')).toBe('')
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
   })
 
@@ -255,10 +255,10 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
 
-    await row(wrapper).get('[data-testid="repair-query"]').setValue('The Primal Hunter 4')
+    await row(wrapper).get('[data-testid="record-title"]').setValue('The Primal Hunter 4')
 
     expect(
-      (row(wrapper).get('[data-testid="repair-asin"]').element as HTMLInputElement).value,
+      (row(wrapper).get('[data-testid="record-asin"]').element as HTMLInputElement).value,
     ).toBe('')
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
   })
@@ -270,14 +270,14 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
 
-    await row(wrapper).get('[data-testid="repair-region"]').setValue('us')
-    await row(wrapper).get('[data-testid="repair-search"]').trigger('click')
+    await row(wrapper).get('[data-testid="record-region"]').setValue('us')
+    await row(wrapper).get('[data-testid="record-search"]').trigger('click')
     await flushPromises()
-    await row(wrapper).get('[data-testid="repair-result"]').trigger('click')
-    await row(wrapper).get('[data-testid="repair-query"]').setValue('Primal Hunter 4 (Zogarth)')
+    await row(wrapper).get('[data-testid="record-result"]').trigger('click')
+    await row(wrapper).get('[data-testid="record-title"]').setValue('Primal Hunter 4 (Zogarth)')
 
     expect(
-      (row(wrapper).get('[data-testid="repair-asin"]').element as HTMLInputElement).value,
+      (row(wrapper).get('[data-testid="record-asin"]').element as HTMLInputElement).value,
     ).toBe('B0BK9W82PQ')
   })
 
@@ -287,22 +287,22 @@ describe('RepairBooksModal', () => {
     const revert = row(wrapper).get('[data-testid="repair-revert"]')
     expect(revert.attributes('disabled')).toBeDefined()
 
-    await row(wrapper).get('[data-testid="repair-query"]').setValue('The Primal Hunter 4')
-    await row(wrapper).get('[data-testid="repair-region"]').setValue('us')
+    await row(wrapper).get('[data-testid="record-title"]').setValue('The Primal Hunter 4')
+    await row(wrapper).get('[data-testid="record-region"]').setValue('us')
     expect(row(wrapper).get('[data-testid="repair-revert"]').attributes('disabled')).toBeUndefined()
 
     await row(wrapper).get('[data-testid="repair-revert"]').trigger('click')
 
     expect(
-      (row(wrapper).get('[data-testid="repair-query"]').element as HTMLInputElement).value,
+      (row(wrapper).get('[data-testid="record-title"]').element as HTMLInputElement).value,
     ).toBe('Primal Hunter, Vol. 7')
     expect(
-      (row(wrapper).get('[data-testid="repair-region"]').element as HTMLSelectElement).value,
+      (row(wrapper).get('[data-testid="record-region"]').element as HTMLSelectElement).value,
     ).toBe('fr')
     expect(
-      (row(wrapper).get('[data-testid="repair-asin"]').element as HTMLInputElement).value,
+      (row(wrapper).get('[data-testid="record-asin"]').element as HTMLInputElement).value,
     ).toBe('B0HM45F8MW')
-    expect(row(wrapper).find('[data-testid="repair-asin-cleared"]').exists()).toBe(false)
+    expect(row(wrapper).find('[data-testid="record-asin-cleared"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeUndefined()
   })
 
@@ -311,9 +311,9 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
 
-    await row(wrapper).get('[data-testid="repair-region"]').setValue('us')
+    await row(wrapper).get('[data-testid="record-region"]').setValue('us')
     await flushPromises()
-    await row(wrapper).get('[data-testid="repair-asin"]').setValue('B0BK9W82PQ')
+    await row(wrapper).get('[data-testid="record-asin"]').setValue('B0BK9W82PQ')
     await flushPromises()
 
     expect(apiMocks.advancedSearch).toHaveBeenLastCalledWith({
@@ -321,9 +321,9 @@ describe('RepairBooksModal', () => {
       region: 'us',
       cap: 5,
     })
-    expect(inputValue(wrapper, 'repair-query')).toBe('Primal Hunter 4')
-    expect(inputValue(wrapper, 'repair-author')).toBe('Zogarth')
-    expect(row(wrapper).find('[data-testid="repair-asin-not-found"]').exists()).toBe(false)
+    expect(inputValue(wrapper, 'record-title')).toBe('Primal Hunter 4')
+    expect(inputValue(wrapper, 'record-author')).toBe('Zogarth')
+    expect(row(wrapper).find('[data-testid="record-asin-not-found"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeUndefined()
   })
 
@@ -332,7 +332,7 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
 
-    await row(wrapper).get('[data-testid="repair-asin"]').setValue('B0BK9W82PQ')
+    await row(wrapper).get('[data-testid="record-asin"]').setValue('B0BK9W82PQ')
     await flushPromises()
 
     expect(apiMocks.advancedSearch).toHaveBeenLastCalledWith({
@@ -340,8 +340,8 @@ describe('RepairBooksModal', () => {
       region: 'fr',
       cap: 5,
     })
-    expect(row(wrapper).get('[data-testid="repair-asin-not-found"]').text()).toContain('France')
-    expect(inputValue(wrapper, 'repair-query')).toBe('Primal Hunter, Vol. 7')
+    expect(row(wrapper).get('[data-testid="record-asin-not-found"]').text()).toContain('France')
+    expect(inputValue(wrapper, 'record-title')).toBe('Primal Hunter, Vol. 7')
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
   })
 
@@ -350,7 +350,7 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
 
-    await row(wrapper).get('[data-testid="repair-search"]').trigger('click')
+    await row(wrapper).get('[data-testid="record-search"]').trigger('click')
     await flushPromises()
 
     expect(apiMocks.advancedSearch).toHaveBeenCalledTimes(1)
@@ -371,17 +371,17 @@ describe('RepairBooksModal', () => {
     await flushPromises()
 
     const options = row(wrapper)
-      .findAll('[data-testid="repair-region"] option')
+      .findAll('[data-testid="record-region"] option')
       .map((o) => (o.element as HTMLOptionElement).value)
     expect(options.slice(0, 3)).toEqual(['uk', 'fr', 'us'])
     const labels = row(wrapper)
-      .findAll('[data-testid="repair-region"] option')
+      .findAll('[data-testid="record-region"] option')
       .slice(3)
       .map((o) => o.text())
     expect(labels).toEqual([...labels].sort((x, y) => x.localeCompare(y)))
     expect(options.length).toBeGreaterThan(3)
     expect(
-      (row(wrapper).get('[data-testid="repair-region"]').element as HTMLSelectElement).value,
+      (row(wrapper).get('[data-testid="record-region"]').element as HTMLSelectElement).value,
     ).toBe('uk')
   })
 
@@ -390,9 +390,9 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
 
-    await row(wrapper).get('[data-testid="repair-region"]').setValue('de')
-    await row(wrapper).get('[data-testid="repair-query"]').setValue('Primal Hunter 4')
-    await row(wrapper).get('[data-testid="repair-search"]').trigger('click')
+    await row(wrapper).get('[data-testid="record-region"]').setValue('de')
+    await row(wrapper).get('[data-testid="record-title"]').setValue('Primal Hunter 4')
+    await row(wrapper).get('[data-testid="record-search"]').trigger('click')
     await flushPromises()
 
     expect(apiMocks.advancedSearch).toHaveBeenLastCalledWith({
@@ -435,10 +435,10 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
 
-    await row(wrapper).get('[data-testid="repair-asin"]').setValue('B0BK9')
+    await row(wrapper).get('[data-testid="record-asin"]').setValue('B0BK9')
     await flushPromises()
 
-    expect(row(wrapper).get('[data-testid="repair-asin-invalid"]').text()).toContain('10 letters')
+    expect(row(wrapper).get('[data-testid="record-asin-invalid"]').text()).toContain('10 letters')
     expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
     await wrapper.get('[data-testid="repair-confirm"]').trigger('click')
