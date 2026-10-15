@@ -459,4 +459,30 @@ describe('RepairBooksModal', () => {
 
     expect(wrapper.emitted('organize')).toEqual([[[7]]])
   })
+
+  it('shows the current problems of the book in orange, as on the Issues page', async () => {
+    apiMocks.getAudiobook.mockResolvedValue({ ...mismatched, asin: undefined })
+    apiMocks.getAudiobookIdentifiers.mockResolvedValue({ audiobookId: 7, identifiers: [isbn] })
+    const wrapper = mountModal()
+    await flushPromises()
+
+    const pills = row(wrapper).findAll('[data-testid="repair-issue"]')
+    expect(pills.map((p) => p.text())).toEqual(['No ASIN'])
+    expect(pills[0]!.classes()).toContain('pill-warning')
+  })
+
+  it('flags an ASIN without region', async () => {
+    apiMocks.getAudiobookIdentifiers.mockResolvedValue({
+      audiobookId: 7,
+      identifiers: [{ ...frenchAsin, region: null }],
+    })
+    const wrapper = mountModal()
+    await flushPromises()
+
+    expect(
+      row(wrapper)
+        .findAll('[data-testid="repair-issue"]')
+        .map((p) => p.text()),
+    ).toEqual(['No region'])
+  })
 })

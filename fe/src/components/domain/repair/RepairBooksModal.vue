@@ -102,10 +102,21 @@
                   </span>
                   <span class="repair-header-right">
                     <span class="repair-meta">
-                      {{ row.authors.join(', ') || 'Unknown author' }} ·
-                      {{ row.currentAsin || 'no ASIN' }}
-                      <template v-if="row.currentRegion"> ({{ row.currentRegion }})</template>
+                      {{ row.authors.join(', ') || 'Unknown author' }}
+                      <template v-if="row.currentAsin">
+                        · {{ row.currentAsin }}
+                        <template v-if="row.currentRegion"> ({{ row.currentRegion }})</template>
+                      </template>
                     </span>
+                    <!-- The book's current problems, in orange as on the Issues page -->
+                    <Pill
+                      v-for="code in currentIssues(row)"
+                      :key="code"
+                      variant="warning"
+                      data-testid="repair-issue"
+                    >
+                      {{ issueLabel(code) }}
+                    </Pill>
                     <button
                       type="button"
                       class="btn btn-secondary repair-revert-btn"
@@ -233,6 +244,8 @@ import { useConfigurationStore } from '@/stores/configuration'
 import { useLibraryIssuesStore } from '@/stores/libraryIssues'
 import { normalizeSearchRegion, orderedSearchRegionOptions } from '@/utils/languageMapping'
 import AudibleRecordSearch from '@/components/domain/audiobook/AudibleRecordSearch.vue'
+import { Pill } from '@/components/base'
+import { bookIssueCodes, issueLabel } from '@/utils/libraryIssues'
 import {
   ASIN_PATTERN,
   createRecordSearchState,
@@ -299,6 +312,11 @@ const repairedIds = computed(() => results.value.filter((r) => r.success).map((r
 // then the configured one and the US fallback, then the others alphabetically.
 function regionOptionsFor(row: RepairRow) {
   return orderedSearchRegionOptions([row.initial.region, configuredRegion.value, FALLBACK_REGION])
+}
+
+// What is wrong with the book as it is now (before the repair)
+function currentIssues(row: RepairRow) {
+  return bookIssueCodes({ title: row.title, asin: row.currentAsin, region: row.currentRegion })
 }
 
 function primaryAsin(identifiers: AudiobookExternalIdentifier[]) {
