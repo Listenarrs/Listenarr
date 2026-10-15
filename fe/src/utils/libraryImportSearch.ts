@@ -42,15 +42,67 @@ function fileStem(fullPath: string): string {
   )
 }
 
+const sameWords = (a: string[], b: Set<string>) => a.length > 0 && a.every((w) => b.has(w))
+
+// The book name inside a folder or file name such as
+// "04 Primal Hunter - Primal Hunter - Primal Hunter, Tome 4 - Zogarth":
+// - "[...]" and "{...}" tags are dropped, dots and underscores become spaces in a name without spaces;
+// - the name is split on " - "; a part that is the author is dropped;
+// - a leading number ("04 Primal Hunter", or a part "04" on its own) is the volume: it is taken off;
+// - a part whose words are all in another part is dropped (repeated series name);
+// - the volume is added back when no number is left ("Primal Hunter, Tome 4" already has it).
+export function cleanBookName(name: string, author?: string): string {
+  let text = name.replace(/\[[^\]]*\]|\{[^}]*\}/g, ' ')
+  if (!/\s/.test(text.trim())) text = text.replace(/[._]+/g, ' ')
+  text = withVolumeNumber(text.replace(/\s+/g, ' ').trim())
+
+  const authorWords = new Set(titleWords(author))
+  let volume = ''
+  const parts: string[] = []
+  for (const raw of text.split(/\s+[-–—]\s+/)) {
+    let part = raw.trim()
+    const leading = /^(\d{1,3})(?:\s*[-.)]\s*|\s+)(.*)$/.exec(part)
+    if (/^\d{1,3}$/.test(part)) {
+      volume ||= String(Number(part))
+      continue
+    }
+    if (leading && leading[2]) {
+      volume ||= String(Number(leading[1]))
+      part = leading[2].trim()
+    }
+    const words = titleWords(part)
+    if (!words.length) continue
+    if (authorWords.size && sameWords(words, authorWords)) continue
+    parts.push(part)
+  }
+
+  const kept = parts.filter((part, i) => {
+    const words = titleWords(part)
+    return !parts.some((other, j) => {
+      if (j === i) return false
+      const otherWords = new Set(titleWords(other))
+      // drop a part contained in a longer one; of two identical parts, keep the first
+      return sameWords(words, otherWords) && (otherWords.size > words.length || j < i)
+    })
+  })
+
+  const result = (kept.length ? kept : parts).join(' ').trim()
+  if (!result) return text
+  return volume && !/\d/.test(result) ? `${result} ${volume}` : result
+}
+
 // The book title to search: the folder name when the book has several audio files (their names are
-// chapters or parts), the file name when it has only one. The title tag is not used: it is often the
-// series name, or not read yet when matching starts.
+// chapters or parts), the file name when it has only one, cleaned up (see cleanBookName). The title
+// tag is not used: it is often the series name, or not read yet when matching starts.
 export function buildLibraryImportTitle(
-  item: Pick<LibraryImportSearchCandidate, 'fullPath' | 'folderName' | 'sourceFiles' | 'fileCount'>,
+  item: Pick<
+    LibraryImportSearchCandidate,
+    'fullPath' | 'folderName' | 'sourceFiles' | 'fileCount' | 'detectedAuthor'
+  >,
 ): string {
   const audioFiles = item.sourceFiles?.length || item.fileCount || 1
   const name = audioFiles > 1 ? item.folderName : fileStem(item.fullPath) || item.folderName
-  return withVolumeNumber(name.trim())
+  return cleanBookName(name.trim(), item.detectedAuthor)
 }
 
 export function buildLibraryImportInitialQuery(item: LibraryImportSearchCandidate): string {

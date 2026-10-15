@@ -21,6 +21,7 @@ import {
   buildLibraryImportInitialQuery,
   buildLibraryImportSearchParams,
   buildLibraryImportTitle,
+  cleanBookName,
   titleFitsSearch,
 } from '@/utils/libraryImportSearch'
 
@@ -125,5 +126,37 @@ describe('library import search helpers', () => {
       }),
     ).toBe(true)
     expect(titleFitsSearch('Primal Hunter 4', { title: 'Primal Hunter 7' })).toBe(false)
+  })
+
+  it('extracts the book name from a folder or file name', () => {
+    expect(
+      cleanBookName(
+        '04 Primal Hunter - Primal Hunter - Primal Hunter, Tome 4 - Zogarth',
+        'Zogarth',
+      ),
+    ).toBe('Primal Hunter, Tome 4')
+    expect(cleanBookName('04 - Primal Hunter 4 - A LitRPG Adventure (The Primal Hunter)')).toBe(
+      'Primal Hunter 4 A LitRPG Adventure (The Primal Hunter)',
+    )
+    expect(cleanBookName('Zogarth - Primal Hunter 12', 'Zogarth')).toBe('Primal Hunter 12')
+    expect(cleanBookName('03 - Le Fléau', 'Stephen King')).toBe('Le Fléau 3')
+    expect(cleanBookName('The Land (3)')).toBe('The Land 3')
+    expect(cleanBookName('Carrie [MP3 64kbps]')).toBe('Carrie')
+    expect(cleanBookName('Le_Fleau.Tome_1')).toBe('Le Fleau Tome 1')
+    expect(cleanBookName('not a match')).toBe('not a match')
+    expect(cleanBookName('Jack of Shadows')).toBe('Jack of Shadows')
+    // a book that is only a number keeps it
+    expect(cleanBookName('1984')).toBe('1984')
+  })
+
+  it('cleans the folder name of a multi-file book with the author from the tags', () => {
+    expect(
+      buildLibraryImportTitle({
+        fullPath: '/in/x/01.mp3',
+        folderName: '04 Primal Hunter - Primal Hunter - Primal Hunter, Tome 4 - Zogarth',
+        fileCount: 30,
+        detectedAuthor: 'Zogarth',
+      }),
+    ).toBe('Primal Hunter, Tome 4')
   })
 })
