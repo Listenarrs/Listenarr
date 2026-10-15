@@ -1151,9 +1151,22 @@ class ApiService {
     return this.request<Audiobook[]>('/library')
   }
 
-  // Books whose Audible identity is incomplete (no title, no ASIN, malformed ASIN, no region)
-  async getLibraryIssues(): Promise<LibraryIssue[]> {
-    return this.request<LibraryIssue[]>('/library/issues')
+  // Books whose Audible identity is incomplete (no title, no ASIN, malformed ASIN, no region),
+  // with the ignored books when asked
+  async getLibraryIssues(includeIgnored = false): Promise<LibraryIssue[]> {
+    return this.request<LibraryIssue[]>(
+      `/library/issues${includeIgnored ? '?includeIgnored=true' : ''}`,
+    )
+  }
+
+  async setLibraryIssueIgnored(
+    id: number,
+    ignored: boolean,
+  ): Promise<{ id: number; ignored: boolean }> {
+    return this.request<{ id: number; ignored: boolean }>(`/library/issues/${id}/ignored`, {
+      method: 'PUT',
+      body: JSON.stringify({ ignored }),
+    })
   }
 
   private normalizeMetadataForApi(

@@ -30,11 +30,24 @@
       <PhSpinner class="ph-spin" /> Loading…
     </div>
 
-    <div v-else-if="!issuesStore.items.length" class="issues-state" data-testid="issues-empty">
-      <PhCheckCircle class="issues-ok" /> No issues: every book has a title, an ASIN and its region.
+    <label v-if="issuesStore.ignored.length" class="issues-filter">
+      <input v-model="showIgnored" type="checkbox" data-testid="issues-show-ignored" />
+      Show ignored books ({{ issuesStore.ignored.length }})
+    </label>
+
+    <div
+      v-if="issuesStore.loaded && !visibleItems.length"
+      class="issues-state"
+      data-testid="issues-empty"
+    >
+      <PhCheckCircle class="issues-ok" /> No issues left to repair.
+      <template v-if="issuesStore.ignored.length">
+        {{ issuesStore.ignored.length }} ignored
+        {{ issuesStore.ignored.length === 1 ? 'book is' : 'books are' }} hidden.
+      </template>
     </div>
 
-    <template v-else>
+    <template v-else-if="visibleItems.length">
       <div class="issues-toolbar">
         <label class="issues-select-all">
           <input
@@ -47,7 +60,7 @@
           Select all
         </label>
         <span class="issues-count">
-          {{ selectedIds.length }} of {{ issuesStore.items.length }} selected
+          {{ selectedIds.length }} of {{ visibleItems.length }} selected
         </span>
         <button
           type="button"
@@ -63,9 +76,10 @@
 
       <div ref="listEl" class="issues-list">
         <div
-          v-for="book in issuesStore.items"
+          v-for="book in visibleItems"
           :key="book.id"
           class="issues-row"
+          :class="{ 'issues-row-ignored': book.ignored }"
           :data-testid="`issues-row-${book.id}`"
         >
           <input
@@ -96,10 +110,35 @@
             {{ book.asin || '—' }}<template v-if="book.region"> ({{ book.region }})</template>
           </span>
           <span class="issues-pills">
+            <Pill v-if="book.ignored" variant="subtle" data-testid="issues-ignored-pill"
+              >Ignored</Pill
+            >
             <Pill v-for="code in book.issues" :key="code" variant="warning">
               {{ issueLabel(code) }}
             </Pill>
           </span>
+          <button
+            v-if="book.ignored"
+            type="button"
+            class="btn btn-secondary issues-ignore-btn"
+            data-testid="issues-unignore"
+            title="Stop ignoring: list this book again when it has issues"
+            @click="unignoreBook(book)"
+          >
+            <PhEye :size="14" />
+            Stop ignoring
+          </button>
+          <button
+            v-else
+            type="button"
+            class="btn btn-secondary issues-ignore-btn"
+            data-testid="issues-ignore"
+            title="Ignore the problems of this book"
+            @click="ignoreBook(book)"
+          >
+            <PhEyeSlash :size="14" />
+            Ignore
+          </button>
           <button
             type="button"
             class="btn btn-secondary issues-repair-btn"
@@ -115,7 +154,7 @@
       <!-- The same button under a list that goes past the bottom of the screen -->
       <div v-if="listOverflows" class="issues-toolbar issues-toolbar-bottom">
         <span class="issues-count">
-          {{ selectedIds.length }} of {{ issuesStore.items.length }} selected
+          {{ selectedIds.length }} of {{ visibleItems.length }} selected
         </span>
         <button
           type="button"
@@ -150,26 +189,41 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
-import { PhCheckCircle, PhSpinner, PhWarning, PhWrench } from '@phosphor-icons/vue'
+import {
+  PhCheckCircle,
+  PhEye,
+  PhEyeSlash,
+  PhSpinner,
+  PhWarning,
+  PhWrench,
+} from '@phosphor-icons/vue'
+import { showConfirm } from '@/composables/confirmService'
 import { Pill } from '@/components/base'
 import RenamePreviewModal from '@/components/domain/organize/RenamePreviewModal.vue'
 import RepairBooksModal from '@/components/domain/repair/RepairBooksModal.vue'
 import { useProtectedImages } from '@/composables/useProtectedImages'
 import { useLibraryIssuesStore } from '@/stores/libraryIssues'
 import { getPlaceholderUrl } from '@/utils/placeholder'
-import type { LibraryIssueCode } from '@/types'
+import { issueLabel } from '@/utils/libraryIssues'
+import type { LibraryIssue } from '@/types'
 
 const issuesStore = useLibraryIssuesStore()
 const router = useRouter()
 const { getProtectedImageSrc } = useProtectedImages()
 const placeholderUrl = getPlaceholderUrl()
 
+// Ignored books are listed on demand, after the others
+const showIgnored = ref(false)
+const visibleItems = computed(() =>
+  showIgnored.value ? [...issuesStore.active, ...issuesStore.ignored] : issuesStore.active,
+)
+
 const selected = ref(new Set<number>())
 const selectedIds = computed(() =>
-  issuesStore.items.filter((b) => selected.value.has(b.id)).map((b) => b.id),
+  visibleItems.value.filter((b) => selected.value.has(b.id)).map((b) => b.id),
 )
 const allSelected = computed(
-  () => issuesStore.items.length > 0 && selectedIds.value.length === issuesStore.items.length,
+  () => visibleItems.value.length > 0 && selectedIds.value.length === visibleItems.value.length,
 )
 const someSelected = computed(() => selectedIds.value.length > 0)
 const repairSelectedLabel = computed(() => {
@@ -194,7 +248,7 @@ watch(listEl, (el) => {
   measureList()
 })
 watch(
-  () => issuesStore.items.length,
+  () => visibleItems.value.length,
   () => void nextTick(measureList),
 )
 
@@ -202,17 +256,6 @@ const showRepairModal = ref(false)
 const repairAudiobookIds = ref<number[]>([])
 const showOrganizeModal = ref(false)
 const organizeAudiobookIds = ref<number[]>([])
-
-const ISSUE_LABELS: Record<LibraryIssueCode, string> = {
-  missing_title: 'No title',
-  missing_asin: 'No ASIN',
-  invalid_asin: 'Invalid ASIN',
-  missing_region: 'No region',
-}
-
-function issueLabel(code: LibraryIssueCode): string {
-  return ISSUE_LABELS[code] ?? code
-}
 
 function toggle(id: number) {
   const next = new Set(selected.value)
@@ -222,19 +265,56 @@ function toggle(id: number) {
 }
 
 function toggleAll() {
-  selected.value = allSelected.value ? new Set() : new Set(issuesStore.items.map((b) => b.id))
+  selected.value = allSelected.value ? new Set() : new Set(visibleItems.value.map((b) => b.id))
 }
 
-function openRepair(ids: number[]) {
+const bookName = (book: LibraryIssue) => book.title || `book #${book.id}`
+
+async function ignoreBook(book: LibraryIssue) {
+  const ok = await showConfirm(
+    `Ignore the problems of "${bookName(book)}"? It won't appear in this list or in the Issues ` +
+      'count any more. "Show ignored books" lists it again, to stop ignoring it.',
+    'Ignore this book',
+    { confirmText: 'Ignore' },
+  )
+  if (!ok) return
+  await issuesStore.setIgnored(book.id, true)
+  const next = new Set(selected.value)
+  next.delete(book.id)
+  selected.value = next
+}
+
+async function unignoreBook(book: LibraryIssue) {
+  await issuesStore.setIgnored(book.id, false)
+}
+
+// Repairing ignored books: ask whether they stay ignored from the repair checks, whatever the result
+async function openRepair(ids: number[]) {
   if (!ids.length) return
+  const ignoredBooks = issuesStore.ignored.filter((b) => ids.includes(b.id))
+  if (ignoredBooks.length) {
+    const subject =
+      ignoredBooks.length === 1
+        ? `"${bookName(ignoredBooks[0]!)}" is ignored`
+        : `${ignoredBooks.length} of these books are ignored`
+    const keep = await showConfirm(
+      `${subject}. Keep ${ignoredBooks.length === 1 ? 'it' : 'them'} ignored from the repair ` +
+        'checks after the repair, whatever the result?',
+      'Repair ignored books',
+      { confirmText: 'Keep ignored', cancelText: 'Stop ignoring' },
+    )
+    if (!keep) {
+      for (const book of ignoredBooks) await issuesStore.setIgnored(book.id, false)
+    }
+  }
   repairAudiobookIds.value = [...ids]
   showRepairModal.value = true
 }
 
-// The page only exists while there is something to repair: without issues, back to the books
+// The page exists while there is something to repair or something ignored; otherwise, back to the books
 async function loadOrLeave() {
   await issuesStore.load()
-  if (issuesStore.loaded && issuesStore.count === 0) {
+  if (issuesStore.loaded && !issuesStore.hasAny) {
     void router.replace({ path: '/audiobooks', query: { group: 'books' } })
   }
 }
@@ -242,7 +322,7 @@ async function loadOrLeave() {
 // After a repair the list is read again: repaired books leave it, the selection keeps the others
 async function refresh() {
   await loadOrLeave()
-  const remaining = new Set(issuesStore.items.map((b) => b.id))
+  const remaining = new Set(visibleItems.value.map((b) => b.id))
   selected.value = new Set([...selected.value].filter((id) => remaining.has(id)))
 }
 
@@ -347,7 +427,9 @@ onBeforeUnmount(() => {
 
 .issues-row {
   display: grid;
-  grid-template-columns: auto 48px minmax(12rem, 3fr) minmax(10rem, 1fr) minmax(10rem, 1.5fr) auto;
+  grid-template-columns:
+    auto 48px minmax(12rem, 3fr) minmax(10rem, 1fr) minmax(10rem, 1.5fr)
+    auto auto;
   align-items: center;
   gap: 0.75rem;
   padding: 0.5rem 0.75rem;
@@ -389,6 +471,23 @@ onBeforeUnmount(() => {
 .issues-asin {
   font-family: monospace;
   font-size: 0.85rem;
+}
+
+.issues-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+.issues-row-ignored {
+  opacity: 0.7;
+}
+
+.issues-ignore-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 
 .issues-pills {

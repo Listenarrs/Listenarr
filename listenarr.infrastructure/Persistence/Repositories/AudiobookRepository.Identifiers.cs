@@ -37,4 +37,39 @@ public partial class AudiobookRepository
             .GroupBy(i => i.AudiobookId)
             .ToDictionary(g => g.Key, g => g.ToList());
     }
+
+    public async Task<HashSet<int>> GetIssueIgnoredAudiobookIdsAsync(CancellationToken ct = default)
+    {
+        var ids = await _db.AudiobookIssueIgnores
+            .AsNoTracking()
+            .Select(i => i.AudiobookId)
+            .ToListAsync(ct);
+        return ids.ToHashSet();
+    }
+
+    // Keep a book out of the library issues, or bring it back; false when the book doesn't exist
+    public async Task<bool> TrySetIssuesIgnoredAsync(int audiobookId, bool ignored, CancellationToken ct = default)
+    {
+        if (!await _db.Audiobooks.AnyAsync(a => a.Id == audiobookId, ct))
+        {
+            return false;
+        }
+
+        var existing = await _db.AudiobookIssueIgnores.FirstOrDefaultAsync(i => i.AudiobookId == audiobookId, ct);
+        if (ignored && existing == null)
+        {
+            _db.AudiobookIssueIgnores.Add(new AudiobookIssueIgnore { AudiobookId = audiobookId });
+        }
+        else if (!ignored && existing != null)
+        {
+            _db.AudiobookIssueIgnores.Remove(existing);
+        }
+        else
+        {
+            return true;
+        }
+
+        await _db.SaveChangesAsync(ct);
+        return true;
+    }
 }

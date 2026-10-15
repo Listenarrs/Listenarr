@@ -36,10 +36,31 @@ namespace Listenarr.Api.Features.Library
         /// List the books whose Audible identity is incomplete (no title, no ASIN, a malformed ASIN,
         /// or an ASIN without its region), to repair them.
         /// </summary>
+        /// <param name="includeIgnored">Also list the books whose issues are ignored.</param>
+        /// <param name="ct">Cancellation token.</param>
         [HttpGet]
-        public async Task<IActionResult> GetIssues(CancellationToken ct)
+        public async Task<IActionResult> GetIssues([FromQuery] bool includeIgnored, CancellationToken ct)
         {
-            return Ok(await _libraryIssueService.GetIssuesAsync(ct));
+            return Ok(await _libraryIssueService.GetIssuesAsync(includeIgnored, ct));
+        }
+
+        /// <summary>
+        /// Ignore the issues of a book (it leaves the list and its count) or stop ignoring them.
+        /// </summary>
+        /// <param name="id">Audiobook ID.</param>
+        /// <param name="request">Whether the book's issues are ignored.</param>
+        /// <param name="ct">Cancellation token.</param>
+        [HttpPut("{id:int}/ignored")]
+        public async Task<IActionResult> SetIgnored(int id, [FromBody] SetIgnoredRequest request, CancellationToken ct)
+        {
+            return await _libraryIssueService.SetIgnoredAsync(id, request.Ignored, ct)
+                ? Ok(new { id, ignored = request.Ignored })
+                : NotFound(new { message = "Audiobook not found" });
+        }
+
+        public sealed class SetIgnoredRequest
+        {
+            public bool Ignored { get; set; }
         }
     }
 }

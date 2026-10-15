@@ -21,7 +21,10 @@ import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent } from 'vue'
 
 const getLibraryIssues = vi.hoisted(() => vi.fn())
-vi.mock('@/services/api', () => ({ apiService: { getLibraryIssues } }))
+const setLibraryIssueIgnored = vi.hoisted(() => vi.fn())
+vi.mock('@/services/api', () => ({ apiService: { getLibraryIssues, setLibraryIssueIgnored } }))
+const showConfirm = vi.hoisted(() => vi.fn())
+vi.mock('@/composables/confirmService', () => ({ showConfirm }))
 vi.mock('@/composables/useProtectedImages', () => ({
   useProtectedImages: () => ({ getProtectedImageSrc: () => '/placeholder.svg' }),
 }))
@@ -63,6 +66,7 @@ function mountView() {
 describe('IssuesView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    setLibraryIssueIgnored.mockResolvedValue({})
   })
 
   it('lists the books with their issues', async () => {
@@ -131,5 +135,87 @@ describe('IssuesView', () => {
     await flushPromises()
 
     expect(routerReplace).toHaveBeenCalledWith({ path: '/audiobooks', query: { group: 'books' } })
+  })
+
+  it('ignores a book after confirmation, then lists it again with the filter', async () => {
+    getLibraryIssues.mockResolvedValue(issues)
+    showConfirm.mockResolvedValue(true)
+    const wrapper = mountView()
+    await flushPromises()
+    expect(getLibraryIssues).toHaveBeenCalledWith(true)
+
+    await wrapper.get('[data-testid="issues-row-9"] [data-testid="issues-ignore"]').trigger('click')
+    await flushPromises()
+
+    expect(showConfirm).toHaveBeenCalledWith(
+      expect.stringContaining('"dfh"'),
+      'Ignore this book',
+      expect.objectContaining({ confirmText: 'Ignore' }),
+    )
+    expect(setLibraryIssueIgnored).toHaveBeenCalledWith(9, true)
+    expect(wrapper.find('[data-testid="issues-row-9"]').exists()).toBe(false)
+
+    await wrapper.get('[data-testid="issues-show-ignored"]').setValue(true)
+    expect(wrapper.get('[data-testid="issues-row-9"]').text()).toContain('Ignored')
+
+    await wrapper
+      .get('[data-testid="issues-row-9"] [data-testid="issues-unignore"]')
+      .trigger('click')
+    await flushPromises()
+    expect(setLibraryIssueIgnored).toHaveBeenCalledWith(9, false)
+    expect(
+      wrapper.find('[data-testid="issues-row-9"] [data-testid="issues-ignore"]').exists(),
+    ).toBe(true)
+  })
+
+  it('does not ignore a book when the confirmation is cancelled', async () => {
+    getLibraryIssues.mockResolvedValue(issues)
+    showConfirm.mockResolvedValue(false)
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="issues-row-9"] [data-testid="issues-ignore"]').trigger('click')
+    await flushPromises()
+
+    expect(setLibraryIssueIgnored).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="issues-row-9"]').exists()).toBe(true)
+  })
+
+  it.each([
+    [true, false],
+    [false, true],
+  ])(
+    'asks whether an ignored book stays ignored before repairing it (keep: %s)',
+    async (keep, unignored) => {
+      getLibraryIssues.mockResolvedValue([issues[0], { ...issues[1]!, ignored: true }])
+      showConfirm.mockResolvedValue(keep)
+      const wrapper = mountView()
+      await flushPromises()
+      await wrapper.get('[data-testid="issues-show-ignored"]').setValue(true)
+
+      await wrapper
+        .get('[data-testid="issues-row-9"] [data-testid="issues-repair"]')
+        .trigger('click')
+      await flushPromises()
+
+      expect(showConfirm).toHaveBeenCalledWith(
+        expect.stringContaining('ignored'),
+        'Repair ignored books',
+        expect.objectContaining({ confirmText: 'Keep ignored', cancelText: 'Stop ignoring' }),
+      )
+      expect(setLibraryIssueIgnored.mock.calls.some(([id, v]) => id === 9 && v === false)).toBe(
+        unignored,
+      )
+      expect(wrapper.get('[data-testid="repair-modal"]').attributes('data-ids')).toBe('9')
+    },
+  )
+
+  it('stays available while ignored books exist, with nothing left to repair', async () => {
+    getLibraryIssues.mockResolvedValue([{ ...issues[1]!, ignored: true }])
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(routerReplace).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="issues-empty"]').text()).toContain('1 ignored book is hidden')
   })
 })

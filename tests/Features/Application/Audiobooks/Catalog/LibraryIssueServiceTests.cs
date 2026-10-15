@@ -62,7 +62,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Catalog
             var service = _provider.GetRequiredService<ILibraryIssueService>();
 
             // When
-            var issues = await service.GetIssuesAsync();
+            var issues = await service.GetIssuesAsync(includeIgnored: false);
 
             // Then
             Assert.DoesNotContain(issues, i => i.Id == healthy.Id);
@@ -73,6 +73,34 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Catalog
             var untitled = issues.Single(i => i.Id == noTitle.Id);
             Assert.Equal(new[] { LibraryIssueCodes.MissingTitle }, untitled.Issues);
             Assert.Equal("fr", untitled.Region);
+        }
+
+        [Fact]
+        [Trait("Method", "SetIgnoredAsync")]
+        [Trait("Scenario", "IgnoredBooksLeaveTheListUntilShownOrBroughtBack")]
+        public async Task SetIgnoredAsync_IgnoredBooksLeaveTheListUntilShownOrBroughtBack()
+        {
+            // Given a book with an issue and a healthy book, both ignored
+            var noAsin = await AddBook("Ready Player One", null, null);
+            var healthy = await AddBook("Primal Hunter", "B0FXXVV42J", Asin("B0FXXVV42J", "fr"));
+            var service = _provider.GetRequiredService<ILibraryIssueService>();
+            Assert.True(await service.SetIgnoredAsync(noAsin.Id, true));
+            Assert.True(await service.SetIgnoredAsync(healthy.Id, true));
+
+            // Then they are out of the default list
+            Assert.DoesNotContain(await service.GetIssuesAsync(), i => i.Id == noAsin.Id || i.Id == healthy.Id);
+
+            // And listed with includeIgnored, even the one without issues, so they can be brought back
+            var withIgnored = await service.GetIssuesAsync(includeIgnored: true);
+            var ignoredIssue = withIgnored.Single(i => i.Id == noAsin.Id);
+            Assert.True(ignoredIssue.Ignored);
+            Assert.Equal(new[] { LibraryIssueCodes.MissingAsin }, ignoredIssue.Issues);
+            Assert.Empty(withIgnored.Single(i => i.Id == healthy.Id).Issues);
+
+            // When one is brought back, it is listed again; a missing book is reported
+            Assert.True(await service.SetIgnoredAsync(noAsin.Id, false));
+            Assert.False((await service.GetIssuesAsync()).Single(i => i.Id == noAsin.Id).Ignored);
+            Assert.False(await service.SetIgnoredAsync(999999, true));
         }
     }
 }

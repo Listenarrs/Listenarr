@@ -29,8 +29,11 @@ namespace Listenarr.Application.Audiobooks.Catalog
         public string? ImageUrl { get; set; }
         public string? Asin { get; set; }
         public string? Region { get; set; }
-        // missing_title, missing_asin, invalid_asin, missing_region
+        // missing_title, missing_asin, invalid_asin, missing_region (empty for an ignored book that
+        // has none left)
         public string[] Issues { get; set; } = Array.Empty<string>();
+        // The user keeps this book out of the issues (and their count)
+        public bool Ignored { get; set; }
     }
 
     public static class LibraryIssueCodes

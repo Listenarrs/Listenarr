@@ -743,6 +743,8 @@ export interface LibraryIssue {
   asin?: string | null
   region?: string | null
   issues: LibraryIssueCode[]
+  // The user keeps this book out of the issues (and their count)
+  ignored?: boolean
 }
 
 export interface Audiobook {

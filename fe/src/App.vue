@@ -474,7 +474,7 @@
             </RouterLink>
             <!-- Books whose Audible identity is incomplete, to repair -->
             <RouterLink
-              v-if="libraryIssuesStore.count > 0"
+              v-if="libraryIssuesStore.hasAny"
               to="/issues"
               class="nav-item nav-issues"
               data-testid="nav-issues"
@@ -2079,7 +2079,8 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
 
 /* Push count pills to the end of sidebar nav items */
 .sidebar .nav-item .pill-count,
-.sidebar .nav-item .pill.pill-count {
+.sidebar .nav-item .pill.pill-count,
+.sidebar .nav-item.nav-issues .pill {
   margin-left: auto;
 }
 
