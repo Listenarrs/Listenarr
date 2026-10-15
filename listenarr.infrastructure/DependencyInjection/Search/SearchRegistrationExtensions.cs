@@ -8,6 +8,7 @@
  * (at your option) any later version.
  */
 using Listenarr.Infrastructure.Persistence.Repositories;
+using Listenarr.Infrastructure.Search.Providers.Common;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Listenarr.Infrastructure.DependencyInjection.Search;
@@ -19,7 +20,10 @@ internal static class SearchRegistrationExtensions
         services.AddScoped<IIndexerSearchProvider, InternetArchiveSearchProvider>();
         services.AddScoped<IIndexerSearchProvider, TorznabNewznabSearchProvider>();
         services.AddScoped<IIndexerSearchProvider, MyAnonamouseSearchProvider>();
-        services.AddScoped<IMyAnonamouseConnectionTester, MyAnonamouseConnectionTester>();
+        services.AddScoped<IIndexerConnectionTester, TorznabNewznabConnectionTester>();
+        services.AddScoped<IIndexerConnectionTester, InternetArchiveConnectionTester>();
+        services.AddScoped<IIndexerConnectionTester, MyAnonamouseConnectionTester>();
+        services.AddScoped<IIndexerConnectionTester, GenericIndexerConnectionTester>();
         services.AddScoped<IndexerAdditionalSettingsParser>();
         services.AddScoped<IndexerSearchWorkflow>();
         services.AddScoped<MetadataSourceCatalog>();
