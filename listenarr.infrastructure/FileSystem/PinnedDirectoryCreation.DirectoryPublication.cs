@@ -68,12 +68,24 @@ internal sealed partial class PinnedDirectoryCreation
     internal void DeletePinnedEmptyDirectory(string currentName) =>
         DeletePinnedEmptyDirectoryCore(currentName, requireImmediateDeletion: false);
 
-    internal void DeletePinnedEmptyDirectoryImmediately(string currentName) =>
-        DeletePinnedEmptyDirectoryCore(currentName, requireImmediateDeletion: true);
+    // releaseCoHeldDirectoryPins lets the calling operation hand over the extra handles it
+    // still holds open on this directory (anchors from OpenCreatedDirectoryAnchor(), promoted
+    // retirement pins, pre-delete generation witnesses). It is invoked only when an SMB-style
+    // volume forces the delete-on-close degrade, where the directory is removed only once every
+    // handle closes; on the POSIX fast path the name is unlinked with handles still open, so the
+    // callback is never run and callers dispose their pins normally.
+    internal void DeletePinnedEmptyDirectoryImmediately(
+        string currentName,
+        Action? releaseCoHeldDirectoryPins = null) =>
+        DeletePinnedEmptyDirectoryCore(
+            currentName,
+            requireImmediateDeletion: true,
+            releaseCoHeldDirectoryPins);
 
     private void DeletePinnedEmptyDirectoryCore(
         string currentName,
-        bool requireImmediateDeletion)
+        bool requireImmediateDeletion,
+        Action? releaseCoHeldDirectoryPins = null)
     {
         ThrowIfDisposed();
         ValidateLeafName(currentName);
@@ -147,12 +159,15 @@ internal sealed partial class PinnedDirectoryCreation
                 {
                     // Filesystems without POSIX immediate-delete support (SMB reports errors
                     // 1/50/87) cannot unlink a directory while a handle is still open. Degrade
-                    // to delete-on-close and take ownership of the pinned handle: the entry is
-                    // removed only once EVERY handle closes, and both handles hold
-                    // FILE_SHARE_DELETE, so the final close (deletionHandle, as this block
-                    // exits) finalizes the unlink before the method returns.
+                    // to delete-on-close: mark the entry, then release every handle this
+                    // operation holds on the directory — the pinned handle, the calling
+                    // operation's co-held pins, and finally the transient deletion handle as
+                    // this block exits. The entry is removed only once ALL of them close, and
+                    // every handle holds FILE_SHARE_DELETE, so dropping the last one finalizes
+                    // the unlink before the absence check below runs.
                     DeleteOpenedFileWindows(deletionHandle);
                     _directoryHandle.Dispose();
+                    releaseCoHeldDirectoryPins?.Invoke();
                     degradedToDeleteOnClose = true;
                     System.Threading.Interlocked.Increment(
                         ref DirectoryImmediateDeleteDegradedToDeleteOnCloseCount);
@@ -167,10 +182,11 @@ internal sealed partial class PinnedDirectoryCreation
                     currentPath);
                 if (degradedToDeleteOnClose)
                 {
-                    // The pinned handle was closed to finalize the delete-on-close, so the
-                    // namespace must no longer resolve. A directory still visible here is
-                    // unproven — our own delete-pending entry held by a foreign handle, or a
-                    // fresh generation — so immediate deletion cannot be confirmed.
+                    // Every handle this operation held was closed to finalize the
+                    // delete-on-close, so the name must no longer resolve. If it is still
+                    // visible, a handle outside this operation is pinning the delete-pending
+                    // entry (or a fresh generation took the name); either way immediate removal
+                    // cannot be confirmed, so fail closed rather than report success.
                     throw new System.ComponentModel.Win32Exception(
                         145,
                         "The verified empty directory remained visible after delete-on-close retirement.");
@@ -188,6 +204,17 @@ internal sealed partial class PinnedDirectoryCreation
                 exception.NativeErrorCode is 2 or 3)
             {
                 // The parent-relative reopen is the namespace disappearance proof.
+            }
+            catch (System.ComponentModel.Win32Exception exception) when (
+                degradedToDeleteOnClose && exception.NativeErrorCode == 5)
+            {
+                // Reopening a directory that is still delete-pending is denied with
+                // ERROR_ACCESS_DENIED (5): a handle outside this operation is pinning it, so
+                // the delete-on-close has not finalized. Immediate removal cannot be confirmed,
+                // so fail closed rather than treat the delete-pending entry as removed.
+                throw new System.ComponentModel.Win32Exception(
+                    145,
+                    "The verified empty directory remained delete-pending after delete-on-close retirement.");
             }
 
             var postDeleteParentVisibility = parentAnchor.ProbeVisiblePathMatch();

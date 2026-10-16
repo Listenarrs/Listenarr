@@ -284,7 +284,8 @@ internal sealed partial class EfLibraryDirectoryOwnershipStore
             }
 
             creation.DeletePinnedEmptyDirectoryImmediately(
-                Path.GetFileName(directory));
+                Path.GetFileName(directory),
+                releaseCoHeldDirectoryPins: createdAnchor.Dispose);
         }
         catch (Exception exception) when (exception is not (
             OutOfMemoryException or StackOverflowException))

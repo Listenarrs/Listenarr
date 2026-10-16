@@ -253,8 +253,14 @@ namespace Listenarr.Infrastructure.Library.Moving
                                 return false;
                             }
 
+                            // On an SMB-style volume the delete degrades to delete-on-close,
+                            // which only finalizes once every handle on the directory closes.
+                            // `child` is a duplicate handle on this same directory, so hand it
+                            // over for release at the degrade boundary; on the POSIX fast path
+                            // it is left untouched and disposed normally by its using scope.
                             childPublication.DeletePinnedEmptyDirectoryImmediately(
-                                entryName);
+                                entryName,
+                                releaseCoHeldDirectoryPins: child.Dispose);
                         }
 
                         continue;
