@@ -209,6 +209,24 @@ public sealed class NetworkStorageTheoryAttribute : TheoryAttribute
     }
 }
 
+public sealed class WindowsNetworkStorageFactAttribute : FactAttribute
+{
+    public WindowsNetworkStorageFactAttribute()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Skip = "This test requires a native Windows SMB network mount.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                NetworkStorageTheoryAttribute.PathEnvironmentVariable)))
+        {
+            Skip = "The native test runner did not provide a network filesystem mount.";
+        }
+    }
+}
+
 public sealed class ForeignOwnedNetworkStorageFactAttribute : FactAttribute
 {
     public const string SourcePathEnvironmentVariable =
