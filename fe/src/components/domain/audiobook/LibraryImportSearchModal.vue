@@ -72,6 +72,9 @@
                 >
                 <span v-if="result.asin" class="result-asin"> · {{ result.asin }}</span>
               </span>
+              <span v-if="extractNarrators(result)" class="result-narrator">
+                Narrated by {{ extractNarrators(result) }}
+              </span>
             </div>
           </div>
         </div>
@@ -101,6 +104,7 @@ import {
 } from '@/utils/libraryImportSearch'
 import { getPlaceholderUrl } from '@/utils/placeholder'
 import type { SearchResult } from '@/types'
+import { extractNarrators } from '@/utils/searchResultHelpers'
 
 const props = defineProps<{ item: LibraryImportItem }>()
 const emit = defineEmits<{
@@ -246,6 +250,15 @@ function select(result: SearchResult) {
 .result-asin {
   font-family: monospace;
   font-size: 0.7rem;
+}
+
+.result-narrator {
+  display: block;
+  font-size: 0.75rem;
+  color: #888;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .no-results,
