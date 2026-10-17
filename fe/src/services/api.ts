@@ -489,6 +489,7 @@ class ApiService {
     asin?: string
     region?: string
     language?: string
+    qualityProfileId?: number
   }): Promise<MonitorAuthorResponse> {
     return this.request<MonitorAuthorResponse>('/authors/monitoring', {
       method: 'POST',
@@ -518,6 +519,7 @@ class ApiService {
     asin?: string
     region?: string
     language?: string
+    qualityProfileId?: number
   }): Promise<MonitorSeriesResponse> {
     return this.request<MonitorSeriesResponse>('/series/monitoring', {
       method: 'POST',

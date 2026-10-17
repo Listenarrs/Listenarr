@@ -469,16 +469,44 @@
 
             <div class="option-group">
               <label class="form-label">Quality Profile</label>
-              <select v-model="options.qualityProfileId" class="form-select">
-                <option :value="null">Use Default Profile</option>
+              <select
+                v-model="options.qualityProfileId"
+                class="form-select"
+                data-testid="quality-profile-select"
+                :disabled="qualityProfiles.length === 0"
+              >
+                <option :value="null" disabled>Select a quality profile</option>
                 <option v-for="profile in qualityProfiles" :key="profile.id" :value="profile.id">
                   {{ profile.name }}{{ profile.isDefault ? ' (Default)' : '' }}
                 </option>
               </select>
               <small class="form-help">
-                Choose which quality profile to use for automatic downloads. Leave as "Use Default
-                Profile" to automatically use the default profile.
+                Choose which quality profile to use for automatic downloads.
               </small>
+              <div
+                v-if="qualityProfilesLoaded && qualityProfiles.length === 0"
+                class="path-validation-error"
+                data-testid="quality-profile-warning"
+              >
+                <PhWarning :size="16" />
+                <span>
+                  No quality profiles exist. Create one in
+                  <RouterLink
+                    :to="{ path: '/settings', hash: '#quality-profiles' }"
+                    @click="closeModal"
+                    >Settings → Quality Profiles</RouterLink
+                  >
+                  before adding audiobooks.
+                </span>
+              </div>
+              <div
+                v-else-if="qualityProfileValidationError"
+                class="path-validation-error"
+                data-testid="quality-profile-error"
+              >
+                <PhWarning :size="16" />
+                <span>{{ qualityProfileValidationError }}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -498,6 +526,7 @@
           metadataLoading ||
           Boolean(destinationPathValidationError) ||
           Boolean(asinValidationError) ||
+          Boolean(qualityProfileValidationError) ||
           metadataLookupFailed
         "
       >
@@ -573,6 +602,8 @@ const toast = useToast()
 
 const isAdding = ref(false)
 const qualityProfiles = ref<QualityProfile[]>([])
+const qualityProfilesLoaded = ref(false)
+const serverQualityProfileValidationError = ref<string | null>(null)
 
 const options = ref({
   monitored: true,
@@ -896,6 +927,27 @@ const estimatedFullPath = computed(() => {
 })
 const serverDestinationValidationError = ref<string | null>(null)
 const { pathLengthWarning: destinationPathWarning } = usePathLengthCheck(estimatedFullPath)
+watch(
+  () => options.value.qualityProfileId,
+  () => {
+    serverQualityProfileValidationError.value = null
+  },
+)
+
+// A book without a quality profile is never searched, so adding requires a valid one.
+const qualityProfileValidationError = computed(() => {
+  if (!qualityProfilesLoaded.value) return null
+  if (qualityProfiles.value.length === 0) {
+    return 'No quality profiles exist. Create one in Settings → Quality Profiles before adding audiobooks.'
+  }
+  if (serverQualityProfileValidationError.value) return serverQualityProfileValidationError.value
+  const selectedId = options.value.qualityProfileId
+  if (selectedId == null || !qualityProfiles.value.some((profile) => profile.id === selectedId)) {
+    return 'Select a quality profile.'
+  }
+  return null
+})
+
 const destinationPathValidationError = computed(() => {
   if (serverDestinationValidationError.value) return serverDestinationValidationError.value
 
@@ -1245,9 +1297,18 @@ const seedPreview = async () => {
   showMetadataEditor.value = false
 
   try {
+    qualityProfilesLoaded.value = false
+    serverQualityProfileValidationError.value = null
     await configStore.loadQualityProfiles()
     if (!isCurrentSeed(generation)) return
     qualityProfiles.value = configStore.qualityProfiles
+    // Preselect the user-designated default; never invent a profile when none is marked default.
+    const selectedId = options.value.qualityProfileId
+    if (selectedId == null || !qualityProfiles.value.some((profile) => profile.id === selectedId)) {
+      options.value.qualityProfileId =
+        qualityProfiles.value.find((profile) => profile.isDefault)?.id ?? null
+    }
+    qualityProfilesLoaded.value = true
 
     // Load application settings to get default root
     await configStore.loadApplicationSettings()
@@ -1577,6 +1638,10 @@ const addToLibrary = async () => {
     toast.error('Invalid destination', destinationPathValidationError.value)
     return
   }
+  if (qualityProfileValidationError.value) {
+    toast.error('Quality profile required', qualityProfileValidationError.value)
+    return
+  }
 
   const ownerGeneration = seedGeneration
   const requestGeneration = ++addGeneration
@@ -1589,7 +1654,7 @@ const addToLibrary = async () => {
     submittedTitle = metadataToSend.title || submittedTitle
     const result = await apiService.addToLibrary(metadataToSend, {
       monitored: options.value.monitored,
-      qualityProfileId: options.value.qualityProfileId || undefined,
+      qualityProfileId: options.value.qualityProfileId ?? undefined,
       autoSearch: options.value.autoSearch,
       destinationPath: destination,
     })
@@ -1610,6 +1675,13 @@ const addToLibrary = async () => {
     }
 
     console.error('Failed to add audiobook:', err)
+    const profileError = getApiValidationError(err, 'qualityProfileId')
+    if (profileError) {
+      serverQualityProfileValidationError.value = profileError.message
+      toast.error('Quality profile required', profileError.message)
+      return
+    }
+
     const validationError = getApiValidationError(err, 'destinationPath')
     if (validationError) {
       serverDestinationValidationError.value = validationError.message

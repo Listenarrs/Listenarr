@@ -77,7 +77,7 @@ describe('AddLibraryModal when the configured region has no record for the ASIN'
       outputPath: '/library',
       defaultSearchRegion: 'fr',
     })
-    apiMocks.getQualityProfiles.mockResolvedValue([])
+    apiMocks.getQualityProfiles.mockResolvedValue([{ id: 1, name: 'Standard', isDefault: true }])
     apiMocks.getRootFolders.mockResolvedValue([])
     apiMocks.previewLibraryPath.mockResolvedValue({
       fullPath: '/library/Edgar Rice Burroughs/A Princess of Mars',
