@@ -35,6 +35,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
             Init(services => services
                 .WithSingleton(_seriesCatalogService.Object)
                 .WithSingleton(_libraryAddService.Object));
+            await AddDefaultQualityProfileAsync();
 
             await _audiobookRepository.AddAsync(new AudiobookBuilder()
                 .WithTitle("The Final Empire")
@@ -134,6 +135,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
             Init(services => services
                 .WithSingleton(_seriesCatalogService.Object)
                 .WithSingleton(_imageCacheService.Object));
+            await AddDefaultQualityProfileAsync();
 
             var rootPath = FileService.GetTempDirectory("series-monitoring-library");
 
@@ -184,6 +186,160 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
             Assert.Equal(
                 Path.Join(rootPath, "Matt Dinniman", "Dungeon Crawler Carl", "This Inevitable Ruin"),
                 storedAudiobook.BasePath);
+        }
+
+        [Fact]
+        public async Task MonitorSeriesAsync_WithoutAnyQualityProfile_IsRejected()
+        {
+            // Given
+            Init(services => services
+                .WithSingleton(_seriesCatalogService.Object)
+                .WithSingleton(_libraryAddService.Object));
+
+            var service = _provider.GetRequiredService<ISeriesMonitoringService>();
+
+            // When
+            var exception = await Assert.ThrowsAsync<ArgumentException>(() => service.MonitorSeriesAsync(
+                new MonitorSeriesRequest { Name = "Mistborn", Region = "us", Language = "english" }));
+
+            // Then
+            Assert.Contains("quality profile is required", exception.Message);
+            var monitoredSeriesRepository = _provider.GetRequiredService<IMonitoredSeriesRepository>();
+            Assert.Empty(await monitoredSeriesRepository.GetAllAsync());
+            _libraryAddService.Verify(add => add.AddToLibraryAsync(
+                    It.IsAny<LibraryAddOperationRequest>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Never);
+        }
+
+        [Fact]
+        public async Task MonitorSeriesAsync_RetainsSelectedProfileAndUsesItForAdditions()
+        {
+            // Given
+            Init(services => services
+                .WithSingleton(_seriesCatalogService.Object)
+                .WithSingleton(_libraryAddService.Object));
+            await AddDefaultQualityProfileAsync();
+            var selectedProfile = await _qualityProfileRepository.AddAsync(
+                new QualityProfileBuilder().WithName("Lossless").Build());
+
+            _seriesCatalogService
+                .Setup(catalog => catalog.GetCatalogAsync("Mistborn", "us", 500, null, true, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new SeriesCatalogFetchResultBuilder()
+                    .WithSeries("Mistborn", "SERIES123")
+                    .WithBook(new AudibleSearchResultBuilder()
+                        .WithAsin("BOOK2")
+                        .WithTitle("The Well of Ascension")
+                        .WithAuthor("Brandon Sanderson")
+                        .WithLanguage("english")
+                        .WithSeries("Mistborn", "2")
+                        .Build())
+                    .Build());
+            _libraryAddService
+                .Setup(add => add.AddToLibraryAsync(It.IsAny<LibraryAddOperationRequest>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new LibraryAddOperationResult
+                {
+                    Added = true,
+                    Audiobook = new AudiobookBuilder().WithTitle("The Well of Ascension").Build()
+                });
+
+            var service = _provider.GetRequiredService<ISeriesMonitoringService>();
+
+            // When
+            var result = await service.MonitorSeriesAsync(new MonitorSeriesRequest
+            {
+                Name = "Mistborn",
+                Region = "us",
+                Language = "english",
+                QualityProfileId = selectedProfile.Id
+            });
+            // A later re-monitor without a profile keeps the stored choice.
+            var again = await service.MonitorSeriesAsync(new MonitorSeriesRequest
+            {
+                Name = "Mistborn",
+                Region = "us",
+                Language = "english"
+            });
+
+            // Then
+            Assert.True(result.SyncResult.Succeeded);
+            Assert.Equal(selectedProfile.Id, result.MonitoredSeries!.QualityProfileId);
+            Assert.Equal(selectedProfile.Id, again.MonitoredSeries!.QualityProfileId);
+            _libraryAddService.Verify(add => add.AddToLibraryAsync(
+                    It.Is<LibraryAddOperationRequest>(request => request.QualityProfileId == selectedProfile.Id),
+                    It.IsAny<CancellationToken>()),
+                Times.Exactly(2));
+        }
+
+        [Fact]
+        public async Task SyncSeriesAsync_QualityProfileRejection_ReportsFailure()
+        {
+            // Given
+            Init(services => services
+                .WithSingleton(_seriesCatalogService.Object)
+                .WithSingleton(_libraryAddService.Object));
+            var monitoredSeriesRepository = _provider.GetRequiredService<IMonitoredSeriesRepository>();
+            var monitoredSeries = await monitoredSeriesRepository.UpsertAsync(new MonitoredSeries
+            {
+                SeriesName = "Mistborn",
+                SeriesNameNormalized = "mistborn",
+                Region = "us",
+                Language = "english",
+                QualityProfileId = 42
+            });
+
+            _seriesCatalogService
+                .Setup(catalog => catalog.GetCatalogAsync("Mistborn", "us", 500, null, true, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new SeriesCatalogFetchResultBuilder()
+                    .WithSeries("Mistborn", "SERIES123")
+                    .WithBook(new AudibleSearchResultBuilder()
+                        .WithAsin("BOOK2")
+                        .WithTitle("The Well of Ascension")
+                        .WithAuthor("Brandon Sanderson")
+                        .WithLanguage("english")
+                        .Build())
+                    .WithBook(new AudibleSearchResultBuilder()
+                        .WithAsin("BOOK3")
+                        .WithTitle("The Hero of Ages")
+                        .WithAuthor("Brandon Sanderson")
+                        .WithLanguage("english")
+                        .Build())
+                    .Build());
+            _libraryAddService
+                .Setup(add => add.AddToLibraryAsync(It.IsAny<LibraryAddOperationRequest>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new LibraryAddOperationResult
+                {
+                    ValidationFailed = true,
+                    ValidationCode = LibraryAddValidationCodes.QualityProfileInvalid,
+                    ValidationField = "qualityProfileId",
+                    ValidationMessage = "Quality profile with ID 42 does not exist. Select a valid quality profile.",
+                    Message = "Quality profile with ID 42 does not exist. Select a valid quality profile."
+                });
+
+            var service = _provider.GetRequiredService<ISeriesMonitoringService>();
+
+            // When
+            var result = await service.SyncSeriesAsync(monitoredSeries.Id);
+
+            // Then
+            Assert.False(result.Succeeded);
+            Assert.Equal(0, result.AddedCount);
+            Assert.Equal(1, result.FailedCount);
+            Assert.Contains("Quality profile with ID 42", result.ErrorMessage);
+            var stored = Assert.Single(await monitoredSeriesRepository.GetAllAsync());
+            Assert.Null(stored.LastSuccessfulSyncAt);
+            Assert.Contains("Quality profile with ID 42", stored.LastError);
+            _libraryAddService.Verify(add => add.AddToLibraryAsync(
+                    It.IsAny<LibraryAddOperationRequest>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Once);
+        }
+
+        private async Task AddDefaultQualityProfileAsync()
+        {
+            var profile = new QualityProfileBuilder().WithName("Standard").Build();
+            profile.IsDefault = true;
+            await _qualityProfileRepository.AddAsync(profile);
         }
     }
 }

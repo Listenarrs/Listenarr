@@ -63,5 +63,17 @@ namespace Listenarr.Application.Audiobooks.Contracts
         public string? ResolvedDestination { get; set; }
 
         public Audiobook? Audiobook { get; set; }
+
+        public bool IsQualityProfileFailure =>
+            ValidationFailed
+            && (ValidationCode == LibraryAddValidationCodes.QualityProfileRequired
+                || ValidationCode == LibraryAddValidationCodes.QualityProfileInvalid);
+    }
+
+    public static class LibraryAddValidationCodes
+    {
+        public const string QualityProfileRequired = "quality_profile_required";
+
+        public const string QualityProfileInvalid = "quality_profile_invalid";
     }
 }
