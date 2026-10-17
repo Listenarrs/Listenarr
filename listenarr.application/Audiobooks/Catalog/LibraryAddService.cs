@@ -140,23 +140,11 @@ namespace Listenarr.Application.Audiobooks.Catalog
 
             AudiobookIdentifierMapper.SyncImportedIdentifiersFromLegacyFields(audiobook, metadata.Region);
 
-            if (request.QualityProfileId.HasValue)
+            // A profile-less audiobook is never searched, so refuse the add instead of storing it silently.
+            var profileFailure = await AssignQualityProfileAsync(audiobook, request);
+            if (profileFailure != null)
             {
-                audiobook.QualityProfileId = request.QualityProfileId.Value;
-            }
-            else
-            {
-                var defaultProfile = await _qualityProfileService.GetDefaultAsync();
-                if (defaultProfile != null)
-                {
-                    audiobook.QualityProfileId = defaultProfile.Id;
-                }
-                else
-                {
-                    _logger.LogWarning(
-                        "No default quality profile found. New audiobook '{Title}' will not have a quality profile assigned.",
-                        audiobook.Title);
-                }
+                return profileFailure;
             }
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -288,6 +276,52 @@ namespace Listenarr.Application.Audiobooks.Catalog
                 ValidationField = "destinationPath",
                 ResolvedDestination = resolvedDestination
             };
+
+        private async Task<LibraryAddOperationResult?> AssignQualityProfileAsync(
+            Audiobook audiobook,
+            LibraryAddOperationRequest request)
+        {
+            QualityProfile? profile;
+            if (request.QualityProfileId.HasValue)
+            {
+                profile = await _qualityProfileService.GetByIdAsync(request.QualityProfileId.Value);
+                if (profile == null)
+                {
+                    _logger.LogWarning(
+                        "Rejected library add for '{Title}': quality profile {ProfileId} does not exist.",
+                        audiobook.Title,
+                        request.QualityProfileId.Value);
+                    return QualityProfileValidationFailure(
+                        LibraryAddValidationCodes.QualityProfileInvalid,
+                        $"Quality profile with ID {request.QualityProfileId.Value} does not exist. Select a valid quality profile.");
+                }
+            }
+            else
+            {
+                profile = await _qualityProfileService.GetDefaultAsync();
+                if (profile == null)
+                {
+                    _logger.LogWarning(
+                        "Rejected library add for '{Title}': no quality profile supplied and no default profile is configured.",
+                        audiobook.Title);
+                    return QualityProfileValidationFailure(
+                        LibraryAddValidationCodes.QualityProfileRequired,
+                        "A quality profile is required. Select a quality profile, or create one in Settings > Quality Profiles.");
+                }
+            }
+
+            audiobook.QualityProfileId = profile.Id;
+            return null;
+        }
+
+        private static LibraryAddOperationResult QualityProfileValidationFailure(string code, string message) => new()
+        {
+            ValidationFailed = true,
+            Message = message,
+            ValidationMessage = message,
+            ValidationCode = code,
+            ValidationField = "qualityProfileId"
+        };
 
     }
 }

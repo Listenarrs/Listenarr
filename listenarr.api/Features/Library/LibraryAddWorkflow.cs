@@ -160,7 +160,11 @@ namespace Listenarr.Api.Features.Library
             _logger.LogInformation("Created Audiobook entity: Title={Title}, Asin={Asin}, PublishYear={PublishYear}",
                 LogRedaction.SanitizeText(audiobook.Title), LogRedaction.SanitizeText(audiobook.Asin), LogRedaction.SanitizeText(audiobook.PublishYear));
 
-            await AssignQualityProfileAsync(audiobook, request);
+            var profileFailure = await AssignQualityProfileAsync(audiobook, request);
+            if (profileFailure != null)
+            {
+                return profileFailure;
+            }
 
             if (!string.IsNullOrWhiteSpace(request.DestinationPath))
             {
@@ -367,31 +371,6 @@ namespace Listenarr.Api.Features.Library
             }
 
             return fallbackImageUrl;
-        }
-
-        private async Task AssignQualityProfileAsync(Audiobook audiobook, LibraryController.AddToLibraryRequest request)
-        {
-            if (request.QualityProfileId.HasValue)
-            {
-                audiobook.QualityProfileId = request.QualityProfileId.Value;
-                _logger.LogInformation("Assigned custom quality profile ID {ProfileId} to new audiobook '{Title}'",
-                    request.QualityProfileId.Value, LogRedaction.SanitizeText(audiobook.Title));
-                return;
-            }
-
-            using var scope = _scopeFactory.CreateScope();
-            var qualityProfileService = scope.ServiceProvider.GetRequiredService<IQualityProfileService>();
-            var defaultProfile = await qualityProfileService.GetDefaultAsync();
-            if (defaultProfile != null)
-            {
-                audiobook.QualityProfileId = defaultProfile.Id;
-                _logger.LogInformation("Assigned default quality profile '{ProfileName}' (ID: {ProfileId}) to new audiobook '{Title}'",
-                    defaultProfile.Name, defaultProfile.Id, audiobook.Title);
-            }
-            else
-            {
-                _logger.LogWarning("No default quality profile found. New audiobook '{Title}' will not have a quality profile assigned.", LogRedaction.SanitizeText(audiobook.Title));
-            }
         }
 
         private async Task ResolveAuthorAsinsAsync(Audiobook audiobook)
