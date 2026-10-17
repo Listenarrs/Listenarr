@@ -133,6 +133,7 @@ namespace Listenarr.Api.Features.Library
                 AuthorAsin = monitoredAuthor.AuthorAsin,
                 Region = monitoredAuthor.Region,
                 Language = monitoredAuthor.Language,
+                QualityProfileId = monitoredAuthor.QualityProfileId,
                 CreatedAt = monitoredAuthor.CreatedAt,
                 UpdatedAt = monitoredAuthor.UpdatedAt,
                 LastCheckedAt = monitoredAuthor.LastCheckedAt,
@@ -174,6 +175,8 @@ namespace Listenarr.Api.Features.Library
             public string Region { get; set; } = "us";
 
             public string Language { get; set; } = "all";
+
+            public int? QualityProfileId { get; set; }
 
             public DateTime CreatedAt { get; set; }
 

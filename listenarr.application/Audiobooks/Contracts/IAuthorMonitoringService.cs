@@ -46,6 +46,8 @@ namespace Listenarr.Application.Audiobooks.Contracts
         public string Region { get; set; } = "us";
 
         public string Language { get; set; } = "all";
+
+        public int? QualityProfileId { get; set; }
     }
 
     public sealed class MonitorAuthorOperationResult
