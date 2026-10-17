@@ -204,6 +204,7 @@ import { PhSpinner, PhXCircle, PhStar, PhCheck, PhPlus, PhGlobe } from '@phospho
 import { useSearchStore } from '@/stores/search'
 import { useLibraryStore } from '@/stores/library'
 import { apiService } from '@/services/api'
+import { getApiValidationError } from '@/services/apiErrors'
 import { buildApiPath } from '@/services/apiBase'
 import { logger } from '@/utils/logger'
 import { errorTracking } from '@/services/errorTracking'
@@ -515,9 +516,11 @@ const addToLibrary = async (result: SearchResult) => {
       metadata: { resultId: result.id },
     })
     const errorMessage = error instanceof Error ? error.message : String(error)
+    const profileError = getApiValidationError(error, 'qualityProfileId')
 
-    // Check if it's a conflict (already exists)
-    if (errorMessage.includes('409') || errorMessage.includes('Conflict')) {
+    if (profileError) {
+      toast.error('Quality profile required', profileError.message)
+    } else if (errorMessage.includes('409') || errorMessage.includes('Conflict')) {
       toast.warning('Already exists', 'This audiobook is already in your library.')
     } else {
       toast.error('Add failed', 'Failed to add audiobook. Please try again.')

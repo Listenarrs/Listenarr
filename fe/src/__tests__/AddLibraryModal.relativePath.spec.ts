@@ -26,7 +26,7 @@ vi.mock('@/services/api', () => ({
       .fn()
       .mockResolvedValue({ fullPath: 'C:\\root\\Author\\Title', relativePath: '' }),
     getApplicationSettings: vi.fn().mockResolvedValue({ outputPath: 'C:\\root' }),
-    getQualityProfiles: vi.fn().mockResolvedValue([]),
+    getQualityProfiles: vi.fn().mockResolvedValue([{ id: 1, name: 'Standard', isDefault: true }]),
     getRootFolders: vi.fn().mockResolvedValue([]),
     addToLibrary: vi.fn().mockResolvedValue({ audiobook: { id: 1 } }),
   },

@@ -271,10 +271,39 @@
               <PhArrowClockwise v-else />
               Refresh Author Metadata
             </button>
+            <select
+              v-if="qualityProfiles.length > 0"
+              v-model="monitoringQualityProfileId"
+              class="toolbar-btn monitoring-profile-select"
+              data-testid="monitoring-quality-profile"
+              aria-label="Quality profile for audiobooks added by monitoring"
+              title="Quality profile for audiobooks added by monitoring"
+              :disabled="isCurrentAuthorMonitored || authorMonitoringBusy"
+            >
+              <option :value="null" disabled>Select a quality profile</option>
+              <option v-for="profile in qualityProfiles" :key="profile.id" :value="profile.id">
+                {{ profile.name }}{{ profile.isDefault ? ' (Default)' : '' }}
+              </option>
+            </select>
+            <span
+              v-else-if="qualityProfilesLoaded && !isCurrentAuthorMonitored"
+              class="monitoring-profile-warning"
+              data-testid="monitoring-quality-profile-warning"
+            >
+              <PhWarningCircle />
+              No quality profiles.
+              <RouterLink :to="{ path: '/settings', hash: '#quality-profiles' }"
+                >Settings → Quality Profiles</RouterLink
+              >
+            </span>
             <button
               class="toolbar-btn author-monitor-btn"
               :class="{ active: isCurrentAuthorMonitored }"
-              :disabled="authorMonitoringBusy || authorMetadataRefreshBusy"
+              :disabled="
+                authorMonitoringBusy ||
+                authorMetadataRefreshBusy ||
+                (!isCurrentAuthorMonitored && !hasValidMonitoringQualityProfile)
+              "
               @click="toggleAuthorMonitoring"
               :title="
                 isCurrentAuthorMonitored ? 'Stop monitoring this author' : 'Monitor this author'
@@ -298,10 +327,39 @@
               <PhArrowClockwise v-else />
               Refresh Series Metadata
             </button>
+            <select
+              v-if="qualityProfiles.length > 0"
+              v-model="monitoringQualityProfileId"
+              class="toolbar-btn monitoring-profile-select"
+              data-testid="monitoring-quality-profile"
+              aria-label="Quality profile for audiobooks added by monitoring"
+              title="Quality profile for audiobooks added by monitoring"
+              :disabled="isCurrentSeriesMonitored || seriesMonitoringBusy"
+            >
+              <option :value="null" disabled>Select a quality profile</option>
+              <option v-for="profile in qualityProfiles" :key="profile.id" :value="profile.id">
+                {{ profile.name }}{{ profile.isDefault ? ' (Default)' : '' }}
+              </option>
+            </select>
+            <span
+              v-else-if="qualityProfilesLoaded && !isCurrentSeriesMonitored"
+              class="monitoring-profile-warning"
+              data-testid="monitoring-quality-profile-warning"
+            >
+              <PhWarningCircle />
+              No quality profiles.
+              <RouterLink :to="{ path: '/settings', hash: '#quality-profiles' }"
+                >Settings → Quality Profiles</RouterLink
+              >
+            </span>
             <button
               class="toolbar-btn author-monitor-btn"
               :class="{ active: isCurrentSeriesMonitored }"
-              :disabled="seriesMonitoringBusy || seriesMetadataRefreshBusy"
+              :disabled="
+                seriesMonitoringBusy ||
+                seriesMetadataRefreshBusy ||
+                (!isCurrentSeriesMonitored && !hasValidMonitoringQualityProfile)
+              "
               @click="toggleSeriesMonitoring"
               :title="
                 isCurrentSeriesMonitored ? 'Stop monitoring this series' : 'Monitor this series'
@@ -907,6 +965,12 @@ const showFullAuthorDescription = ref(false)
 const showFullSeriesDescription = ref(false)
 
 const qualityProfiles = computed(() => configStore.qualityProfiles)
+const qualityProfilesLoaded = ref(false)
+// Profile used for audiobooks that author/series monitoring adds later.
+const monitoringQualityProfileId = ref<number | null>(null)
+const hasValidMonitoringQualityProfile = computed(() =>
+  qualityProfiles.value.some((profile) => profile.id === monitoringQualityProfileId.value),
+)
 const authorCatalogRegion = computed(() =>
   normalizeSearchRegion(configStore.applicationSettings?.defaultSearchRegion ?? 'us'),
 )
@@ -1303,6 +1367,31 @@ watch(
 )
 
 // Ensure current sortKey is valid for the current view; reset to the type default if not
+// Show the retained profile for an active monitor; otherwise preselect the user's default.
+watch(
+  [
+    qualityProfiles,
+    () => authorMonitoringStatus.value?.qualityProfileId,
+    () => seriesMonitoringStatus.value?.qualityProfileId,
+  ],
+  () => {
+    const retained = isAuthorCollection.value
+      ? authorMonitoringStatus.value?.qualityProfileId
+      : isSeriesCollection.value
+        ? seriesMonitoringStatus.value?.qualityProfileId
+        : undefined
+    const profiles = qualityProfiles.value
+    if (retained != null && profiles.some((profile) => profile.id === retained)) {
+      monitoringQualityProfileId.value = retained
+      return
+    }
+    if (!profiles.some((profile) => profile.id === monitoringQualityProfileId.value)) {
+      monitoringQualityProfileId.value = profiles.find((profile) => profile.isDefault)?.id ?? null
+    }
+  },
+  { immediate: true },
+)
+
 watch(sortOptions, (newOpts) => {
   const vals = newOpts.map((o) => o.value)
   if (!vals.includes(sortKey.value)) {
@@ -1826,6 +1915,14 @@ async function loadCollectionData(forceLibrary = false, forceAuthorMetadataRefre
     setupTasks.push(configStore.loadApplicationSettings())
   }
 
+  if ((isAuthorCollection.value || isSeriesCollection.value) && !qualityProfilesLoaded.value) {
+    setupTasks.push(
+      configStore.loadQualityProfiles().then(() => {
+        qualityProfilesLoaded.value = true
+      }),
+    )
+  }
+
   await Promise.all(setupTasks)
 
   if (isAuthorCollection.value) {
@@ -2030,11 +2127,20 @@ async function toggleAuthorMonitoring() {
       return
     }
 
+    if (!hasValidMonitoringQualityProfile.value) {
+      toast.error(
+        'Quality profile required',
+        'Select a quality profile, or create one in Settings → Quality Profiles.',
+      )
+      return
+    }
+
     const response = await apiService.monitorAuthor({
       name: name.value,
       asin: authorCatalog.value?.author?.asin,
       region: authorCatalogRegion.value,
       language: preferredAuthorMonitoringLanguage.value,
+      qualityProfileId: monitoringQualityProfileId.value ?? undefined,
     })
 
     authorMonitoringStatus.value = response.monitoredAuthor
@@ -2086,11 +2192,20 @@ async function toggleSeriesMonitoring() {
       return
     }
 
+    if (!hasValidMonitoringQualityProfile.value) {
+      toast.error(
+        'Quality profile required',
+        'Select a quality profile, or create one in Settings → Quality Profiles.',
+      )
+      return
+    }
+
     const response = await apiService.monitorSeries({
       name: name.value,
       asin: seriesCatalog.value?.series?.asin || seriesLookup.value?.asin,
       region: seriesCatalogRegion.value,
       language: preferredSeriesMonitoringLanguage.value,
+      qualityProfileId: monitoringQualityProfileId.value ?? undefined,
     })
 
     seriesMonitoringStatus.value = response.monitoredSeries
@@ -3021,6 +3136,27 @@ defineExpose({
   align-items: center;
   gap: 8px;
   margin-left: auto;
+}
+
+.monitoring-profile-select {
+  max-width: 220px;
+}
+
+.monitoring-profile-select option {
+  background-color: #1a1a1a;
+}
+
+.monitoring-profile-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #ffb74d;
+}
+
+.monitoring-profile-warning a {
+  color: inherit;
+  text-decoration: underline;
 }
 
 .author-monitor-btn {

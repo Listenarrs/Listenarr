@@ -39,7 +39,9 @@ const {
   mockToastWarning,
   mockToastError,
   mockGetAudiobookDeleteCapabilities,
+  mockGetQualityProfiles,
 } = vi.hoisted(() => ({
+  mockGetQualityProfiles: vi.fn(async () => [] as Array<Record<string, unknown>>),
   mockGetLibrary: vi.fn(async () => []),
   mockGetAuthorCatalog: vi.fn(async () => null),
   mockGetAuthorLookup: vi.fn(async () => null),
@@ -114,6 +116,7 @@ vi.mock('@/services/api', () => ({
     unmonitorAuthor: mockUnmonitorAuthor,
     unmonitorSeries: mockUnmonitorSeries,
     getAudiobookDeleteCapabilities: mockGetAudiobookDeleteCapabilities,
+    getQualityProfiles: mockGetQualityProfiles,
   },
 }))
 
@@ -132,6 +135,11 @@ describe('CollectionView', () => {
     setActivePinia(pinia)
     mockGetLibrary.mockReset()
     mockGetLibrary.mockResolvedValue([])
+    mockGetQualityProfiles.mockReset()
+    mockGetQualityProfiles.mockResolvedValue([
+      { id: 2, name: 'Lossless', isDefault: false },
+      { id: 3, name: 'Standard', isDefault: true },
+    ])
     mockGetAuthorCatalog.mockReset()
     mockGetAuthorCatalog.mockResolvedValue(null)
     mockGetAuthorLookup.mockReset()
@@ -1391,8 +1399,93 @@ describe('CollectionView', () => {
       asin: 'AUTHOR123',
       region: 'uk',
       language: 'german',
+      qualityProfileId: 3,
     })
     expect(mockToastSuccess).toHaveBeenCalled()
+  })
+
+  it('blocks author monitoring with a settings link when no quality profiles exist', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mockGetQualityProfiles.mockResolvedValue([])
+    mockGetAuthorCatalog.mockResolvedValue({
+      author: { asin: 'AUTHOR123', name: 'Andy Weir' },
+      totalBooks: 0,
+      books: [],
+    })
+
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: { template: '<div />' } },
+        { path: '/settings', name: 'settings', component: { template: '<div />' } },
+        { path: '/collection/:type/:name', name: 'collection', component: CollectionView },
+      ],
+    })
+    await router.push('/collection/author/Andy%20Weir')
+    await router.isReady().catch(() => {})
+
+    const store = useLibraryStore()
+    store.audiobooks = [] as unknown as import('@/types').Audiobook[]
+    store.fetchLibrary = vi.fn(async () => undefined)
+
+    const wrapper = mount(CollectionView, {
+      global: {
+        plugins: [pinia, router],
+        stubs: ['EditAudiobookModal', 'CustomSelect', 'AddLibraryModal'],
+      },
+    })
+    await flushPromises()
+
+    const warning = wrapper.find('[data-testid="monitoring-quality-profile-warning"]')
+    expect(warning.exists()).toBe(true)
+    expect(warning.find('a').attributes('href')).toBe('/settings#quality-profiles')
+    expect(wrapper.find('.author-monitor-btn').attributes('disabled')).toBeDefined()
+
+    await (
+      wrapper.vm as unknown as { toggleAuthorMonitoring: () => Promise<void> }
+    ).toggleAuthorMonitoring?.()
+    expect(mockMonitorAuthor).not.toHaveBeenCalled()
+  })
+
+  it('sends the selected quality profile when monitoring an author', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    mockGetAuthorCatalog.mockResolvedValue({
+      author: { asin: 'AUTHOR123', name: 'Andy Weir' },
+      totalBooks: 0,
+      books: [],
+    })
+
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: { template: '<div />' } },
+        { path: '/collection/:type/:name', name: 'collection', component: CollectionView },
+      ],
+    })
+    await router.push('/collection/author/Andy%20Weir')
+    await router.isReady().catch(() => {})
+
+    const store = useLibraryStore()
+    store.audiobooks = [] as unknown as import('@/types').Audiobook[]
+    store.fetchLibrary = vi.fn(async () => undefined)
+
+    const wrapper = mount(CollectionView, {
+      global: {
+        plugins: [pinia, router],
+        stubs: ['EditAudiobookModal', 'CustomSelect', 'AddLibraryModal'],
+      },
+    })
+    await flushPromises()
+
+    const select = wrapper.get('[data-testid="monitoring-quality-profile"]')
+    expect((select.element as HTMLSelectElement).value).toBe('3')
+    await select.setValue('2')
+    await wrapper.get('.author-monitor-btn').trigger('click')
+    await flushPromises()
+
+    expect(mockMonitorAuthor).toHaveBeenCalledWith(expect.objectContaining({ qualityProfileId: 2 }))
   })
 
   it('monitors a series using the configured region and language defaults', async () => {
@@ -1474,6 +1567,7 @@ describe('CollectionView', () => {
       asin: 'SERIES123',
       region: 'uk',
       language: 'german',
+      qualityProfileId: 3,
     })
     expect(mockToastSuccess).toHaveBeenCalled()
   })
