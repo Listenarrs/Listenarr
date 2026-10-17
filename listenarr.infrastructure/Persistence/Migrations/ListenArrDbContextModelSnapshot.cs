@@ -880,6 +880,9 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Property<DateTime?>("LastSuccessfulSyncAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("QualityProfileId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Region")
                         .IsRequired()
                         .HasMaxLength(16)
@@ -921,6 +924,9 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
 
                     b.Property<DateTime?>("LastSuccessfulSyncAt")
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("QualityProfileId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("Region")
                         .IsRequired()

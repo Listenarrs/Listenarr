@@ -34,6 +34,11 @@ namespace Listenarr.Domain.Audiobooks
 
         public string Language { get; set; } = "all";
 
+        /// <summary>
+        /// Quality profile assigned to audiobooks this monitor adds in the future.
+        /// </summary>
+        public int? QualityProfileId { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
