@@ -65,7 +65,7 @@ describe('AddLibraryModal editable metadata', () => {
     vi.clearAllMocks()
     apiMocks.getAudibleMetadata.mockResolvedValue({})
     apiMocks.getApplicationSettings.mockResolvedValue({ outputPath: 'C:\\root' })
-    apiMocks.getQualityProfiles.mockResolvedValue([])
+    apiMocks.getQualityProfiles.mockResolvedValue([{ id: 1, name: 'Standard', isDefault: true }])
     apiMocks.getRootFolders.mockResolvedValue([])
     apiMocks.previewLibraryPath.mockImplementation((metadata, destinationRoot) => {
       const root = destinationRoot || 'C:\\root'
