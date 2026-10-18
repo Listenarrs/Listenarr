@@ -92,7 +92,7 @@ public partial class FileMover : IFilePublicationSourceCapability
             // none of them. A locked file, a permissions problem and an unreadable mount were
             // indistinguishable afterwards, and this is the gate that refuses the import, so the
             // one line an operator gets is the only thing they have to go on.
-            var reason = ComposeUnsupportedReason(exception, FindSymlinkedAncestor(sourcePath));
+            var reason = ComposeUnsupportedReason(exception, await FindUnpinnableLinkedAncestorAsync(sourcePath));
 
             _logger.LogWarning(
                 exception,
@@ -177,20 +177,35 @@ public partial class FileMover : IFilePublicationSourceCapability
     }
 
     /// <summary>
-    /// The first directory in the path that is a symbolic link, or null if there is none.
+    /// The first directory in the path that is a symbolic link the pinned walk refuses, or null if
+    /// there is none.
     /// </summary>
     /// <remarks>
     /// Refusing a linked ancestor is deliberate and covered by
     /// CheckPublicationSource_LinkedAncestor_ReturnsUnsupported, so this does not change the
     /// answer. It only says which segment caused it, because the raw failure is an ENOTDIR from
     /// openat and gives an operator nothing to act on.
+    ///
+    /// Beneath a configured root only the segments below the root are opened without following
+    /// links. The root itself is opened by the boundary authorizer, which follows its link, so a
+    /// link at or above the root is supported and blaming it would send the operator after the
+    /// wrong thing. The walk stops at the root for that reason, and covers the whole path only for
+    /// a source outside every configured root.
     /// </remarks>
-    private static string? FindSymlinkedAncestor(string sourcePath)
+    private async Task<string?> FindUnpinnableLinkedAncestorAsync(string sourcePath)
     {
         try
         {
             var current = Path.GetDirectoryName(Path.GetFullPath(sourcePath));
-            while (!string.IsNullOrEmpty(current))
+            if (string.IsNullOrEmpty(current))
+            {
+                return null;
+            }
+
+            var managed = await ResolveManagedRootPathAsync(current);
+            while (!string.IsNullOrEmpty(current)
+                && (managed.Root == null || managed.Semantics == null
+                    || IsStrictlyBelowRoot(current, managed.Root.Path, managed.Semantics.Value)))
             {
                 if (Directory.Exists(current)
                     && Directory.ResolveLinkTarget(current, returnFinalTarget: false) != null)
@@ -200,13 +215,24 @@ public partial class FileMover : IFilePublicationSourceCapability
                 current = Path.GetDirectoryName(current);
             }
         }
-        catch (Exception exception) when (exception is
-            IOException or UnauthorizedAccessException or NotSupportedException
-                or System.Security.SecurityException)
+        catch (Exception exception) when (exception is not (
+            OperationCanceledException or OutOfMemoryException
+                or StackOverflowException))
         {
-            // Best effort only. The caller still reports the original failure.
+            // Best effort only. The caller still reports the original failure, and a diagnostic
+            // that cannot be computed must not replace it.
         }
 
         return null;
+    }
+
+    private static bool IsStrictlyBelowRoot(
+        string path,
+        string rootPath,
+        FileSystemPathSemantics semantics)
+    {
+        return FileSystemPathIdentity.TryGetRelativePathWithinBase(
+                rootPath, path, semantics, out var relative)
+            && relative.Length > 0;
     }
 }
