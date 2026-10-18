@@ -1362,8 +1362,12 @@ try {
 // Initialize search results from sessionStorage
 try {
   const storedResults = sessionStorage.getItem(RESULTS_KEY)
+  let restoredAnyResult = false
   if (storedResults) {
     const parsed = JSON.parse(storedResults)
+    restoredAnyResult = Boolean(
+      parsed.audibleResult || parsed.titleResults?.length || parsed.isbnResult,
+    )
     if (parsed.audibleResult) audibleResult.value = parsed.audibleResult
     if (parsed.titleResults) titleResults.value = parsed.titleResults
     if (parsed.isbnResult) isbnResult.value = parsed.isbnResult
@@ -1393,7 +1397,8 @@ try {
   if (storedAdded) {
     addedAsins.value = new Set(JSON.parse(storedAdded))
   }
-  const storedContext = sessionStorage.getItem(SEARCH_CONTEXT_KEY)
+  // Only a search that left results on screen is restored with its context
+  const storedContext = restoredAnyResult ? sessionStorage.getItem(SEARCH_CONTEXT_KEY) : null
   if (storedContext) {
     restoredSearchContext = JSON.parse(storedContext) as SearchContext
     searchQuery.value = restoredSearchContext.query ?? ''
@@ -1479,11 +1484,21 @@ watch(currentAdvancedPage, () => {
     }
   })
 })
-watch([searchQuery, searchLanguage, preferredSearchLanguage], ([query, region, language]) => {
+
+// Saved when a search is submitted, never while the form is edited: a draft typed after the search,
+// or the defaults shown on an empty visit, are not the context of the results on screen
+const rememberSearchContext = (query?: string) => {
   try {
-    sessionStorage.setItem(SEARCH_CONTEXT_KEY, JSON.stringify({ query, region, language }))
+    sessionStorage.setItem(
+      SEARCH_CONTEXT_KEY,
+      JSON.stringify({
+        query,
+        region: searchLanguage.value,
+        language: preferredSearchLanguage.value,
+      } satisfies SearchContext),
+    )
   } catch {}
-})
+}
 
 // Computed properties
 const hasResults = computed(() => {
@@ -1854,6 +1869,7 @@ const performAdvancedSearch = async () => {
       return
     }
 
+    rememberSearchContext()
     advancedSearchError.value = ''
     isSearching.value = true
     searchError.value = ''
@@ -1995,6 +2011,7 @@ const performAdvancedSearch = async () => {
     return
   }
 
+  rememberSearchContext(searchQuery.value)
   advancedSearchError.value = ''
   isSearching.value = true
   searchError.value = ''
@@ -2162,6 +2179,7 @@ const handleUnifiedSearchResults = async (results: SearchResult[] | null | undef
 }
 
 const performSearch = async () => {
+  if (searchQuery.value.trim()) rememberSearchContext(searchQuery.value)
   const results = await runSearch()
   await handleUnifiedSearchResults(results)
   return results

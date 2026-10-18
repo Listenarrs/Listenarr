@@ -345,6 +345,58 @@ describe('AddNewView pagination', () => {
     expect(window.localStorage.getItem('listenarr.addNewSearchContext')).toBeNull()
   })
 
+  it('restores the submitted query, not a draft typed after the search, when coming back', async () => {
+    window.sessionStorage.setItem(
+      'listenarr.addNewResults',
+      JSON.stringify({ titleResults: [{ key: 'B000999', title: 'Dune Simple' }] }),
+    )
+    window.sessionStorage.setItem('listenarr.addNewSearchType', 'title')
+    window.sessionStorage.setItem('listenarr.addNewTitleResultsCount', '1')
+    window.sessionStorage.setItem(
+      'listenarr.addNewSearchContext',
+      JSON.stringify({ query: 'Dune', region: 'fr', language: 'french' }),
+    )
+    const router = createTestRouter()
+    const first = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+
+    // Typed but not submitted, then the user goes to another page
+    await first.find('input#unified-search-input').setValue('Foundation')
+    await flushPromises()
+    first.unmount()
+
+    const back = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    const vm = back.vm as unknown as { searchQuery?: string; titleResults?: unknown[] }
+    expect(vm.titleResults?.length).toBe(1)
+    expect(vm.searchQuery).toBe('Dune')
+  })
+
+  it('uses the new defaults after a visit without a search', async () => {
+    const apiModule = await import('@/services/api')
+    const apiService = apiModule.apiService as unknown as { getApplicationSettings?: Mock }
+    apiService.getApplicationSettings?.mockResolvedValue({
+      defaultSearchRegion: 'de',
+      defaultSearchLanguage: 'german',
+    })
+    const router = createTestRouter()
+    const first = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    first.unmount()
+    expect(window.sessionStorage.getItem('listenarr.addNewSearchContext')).toBeNull()
+
+    // The defaults change in Settings before coming back
+    apiService.getApplicationSettings?.mockResolvedValue({
+      defaultSearchRegion: 'fr',
+      defaultSearchLanguage: 'french',
+    })
+    const back = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    const vm = back.vm as unknown as { searchLanguage?: string; preferredSearchLanguage?: string }
+    expect(vm.searchLanguage).toBe('fr')
+    expect(vm.preferredSearchLanguage).toBe('french')
+  })
+
   it('defaults language to the region primary language when no language is configured', async () => {
     const apiModule = await import('@/services/api')
     const apiService = apiModule.apiService as unknown as { getApplicationSettings?: Mock }
