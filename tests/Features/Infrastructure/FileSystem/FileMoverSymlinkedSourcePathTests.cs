@@ -16,6 +16,8 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Tests.Common;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Listenarr.Tests.Features.Infrastructure.FileSystem;
 
@@ -87,5 +89,84 @@ public sealed class FileMoverSymlinkedSourcePathTests : BaseTests
         // the type name comes from the caught exception, so an empty cause fails here.
         Assert.Contains(Path.GetFileName(layout.Link), result.Reason, StringComparison.Ordinal);
         Assert.Matches(@"\w+Exception: \S", result.Reason!);
+    }
+
+    /// <summary>
+    /// A configured root that is itself reached through a symlink, with a source file beneath it.
+    /// </summary>
+    /// <remarks>
+    /// The mover is built with the root folder repository so that CheckAsync takes the managed
+    /// path, where the configured root is opened through the boundary authorizer and its link is
+    /// followed. Optionally adds a nested root at the book directory whose identity is unavailable,
+    /// which refuses the source for a reason that has nothing to do with the link.
+    /// </remarks>
+    private async Task<(FileMover Mover, string Source)> CreateLinkedManagedRootAsync(
+        string name,
+        bool addUnavailableNestedRoot)
+    {
+        var directory = FileService.GetTempDirectory(name);
+        var physicalRoot = Directory.CreateDirectory(Path.Join(directory, "physical-library")).FullName;
+        var linkedRoot = Path.Join(directory, "library");
+        Directory.CreateSymbolicLink(linkedRoot, physicalRoot);
+        await AddAuthorizedRootAsync(linkedRoot, "Linked library root");
+
+        var bookDirectory = Directory.CreateDirectory(Path.Join(linkedRoot, "Book")).FullName;
+        var source = Path.Join(bookDirectory, "book.m4b");
+        await File.WriteAllTextAsync(source, "audio");
+
+        var dbContextFactory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+        if (addUnavailableNestedRoot)
+        {
+            await using var db = await dbContextFactory.CreateDbContextAsync();
+            db.RootFolders.Add(new RootFolder
+            {
+                Name = "Unavailable nested root",
+                Path = bookDirectory,
+                CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
+                PathIdentityState = PathIdentityState.Unavailable,
+                ResolvedCaseSensitivity = FileSystemCaseSensitivity.Unknown
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var mover = new FileMover(
+            NullLogger<FileMover>.Instance,
+            dbContextFactory: dbContextFactory,
+            rootFolderRepository: _rootFolderRepository);
+        return (mover, source);
+    }
+
+    [DirectoryLinkFact]
+    [Trait("Scenario", "A configured root reached through a symlink is publishable")]
+    public async Task CheckAsync_ManagedRootReachedThroughSymlink_IsSupported()
+    {
+        // The control. On the managed path the configured root is opened by following its link,
+        // so the link alone is not a reason to refuse.
+        var (mover, source) = await CreateLinkedManagedRootAsync(
+            "symlink-managed-root-control",
+            addUnavailableNestedRoot: false);
+
+        var result = await mover.CheckAsync(source);
+
+        Assert.True(result.IsSupported, result.Reason);
+    }
+
+    [DirectoryLinkFact]
+    [Trait("Scenario", "An unrelated refusal beneath a linked configured root does not blame the link")]
+    public async Task CheckAsync_ManagedRootReachedThroughSymlink_UnrelatedFailure_DoesNotBlameTheLink()
+    {
+        var (mover, source) = await CreateLinkedManagedRootAsync(
+            "symlink-managed-root-unrelated-failure",
+            addUnavailableNestedRoot: true);
+
+        var result = await mover.CheckAsync(source);
+
+        Assert.False(result.IsSupported);
+        Assert.StartsWith("InvalidOperationException: ", result.Reason, StringComparison.Ordinal);
+
+        // The link above is supported, as the control shows, so advice to configure the real
+        // path instead would send the operator after the wrong thing.
+        Assert.DoesNotContain("symbolic link", result.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("configure the real path", result.Reason, StringComparison.OrdinalIgnoreCase);
     }
 }
