@@ -20,6 +20,7 @@ using System.Text.Json.Nodes;
 
 namespace Listenarr.Tests.Features.Application.Security.Redaction
 {
+    [Collection(ProcessEnvironmentCollection.Name)]
     public class SecurityRedactionTests
     {
         [Fact]

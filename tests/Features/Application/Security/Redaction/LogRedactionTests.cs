@@ -17,6 +17,7 @@
  */
 namespace Listenarr.Tests.Features.Application.Security.Redaction
 {
+    [Collection(ProcessEnvironmentCollection.Name)]
     public class LogRedactionTests
     {
         [Fact]
