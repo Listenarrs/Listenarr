@@ -366,7 +366,8 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             var result = await controller.AddToLibrary(new LibraryController.AddToLibraryRequest
             {
                 Metadata = new AudibleBookMetadata { Title = $"ASIN '{asin}'", Asin = asin },
-                DestinationPath = Path.Join(tempRoot, $"ASIN {asin}"),
+                // "ASIN " (empty case) would end with a space, which Windows rejects as a folder name
+                DestinationPath = Path.Join(tempRoot, asin.Length == 0 ? "No ASIN" : $"ASIN {asin}"),
                 Monitored = true
             });
 
