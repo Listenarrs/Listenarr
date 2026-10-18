@@ -107,7 +107,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { PhSpinner } from '@phosphor-icons/vue'
 import { Modal, ModalHeader, ModalBody } from '@/components/feedback'
 import { useProtectedImages } from '@/composables/useProtectedImages'
@@ -153,6 +153,14 @@ function regionLabel(value: string): string {
 }
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
+// The search in flight: a newer one (typing, Enter, region change) aborts it, and only its own
+// response may update the list, so a slow answer for another query or region never shows up
+let searchController: AbortController | null = null
+
+onBeforeUnmount(() => {
+  if (debounceTimer) clearTimeout(debounceTimer)
+  searchController?.abort()
+})
 
 onMounted(async () => {
   configuredRegion.value = await store.configuredRegion()
@@ -171,17 +179,33 @@ function onInput() {
 async function runSearch() {
   const q = searchQuery.value.trim()
   if (!q) return
+  if (debounceTimer) {
+    clearTimeout(debounceTimer)
+    debounceTimer = null
+  }
+  searchController?.abort()
+  const controller = new AbortController()
+  searchController = controller
   isSearching.value = true
   hasSearched.value = false
+  // Results of the previous query or region can't be picked while this one runs
+  searchResults.value = []
   try {
     const isAsin = /^[A-Z0-9]{10}$/i.test(q)
     const params = isAsin
       ? { asin: q, cap: 5 }
       : { title: q, author: authorQuery.value.trim() || undefined, cap: 5 }
-    searchResults.value = await store.searchInRegion(params, region.value || undefined)
+    const results = await store.searchInRegion(params, region.value || undefined, controller.signal)
+    if (controller !== searchController) return
+    searchResults.value = results
     hasSearched.value = true
+  } catch (error) {
+    if (controller === searchController) throw error
   } finally {
-    isSearching.value = false
+    if (controller === searchController) {
+      searchController = null
+      isSearching.value = false
+    }
   }
 }
 

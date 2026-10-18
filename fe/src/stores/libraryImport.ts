@@ -410,9 +410,12 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   async function searchInRegion(
     params: AdvancedSearchParams,
     region?: string,
+    signal?: AbortSignal,
   ): Promise<SearchResult[]> {
     const searchRegion = region || (await _configuredRegion())
-    const results = await apiService.advancedSearch({ ...params, region: searchRegion })
+    const results = signal
+      ? await apiService.advancedSearch({ ...params, region: searchRegion }, signal)
+      : await apiService.advancedSearch({ ...params, region: searchRegion })
     return usableInRegion(results, searchRegion)
   }
 

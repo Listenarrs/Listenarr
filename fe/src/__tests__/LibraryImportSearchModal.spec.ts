@@ -144,7 +144,10 @@ describe('LibraryImportSearchModal', () => {
       },
     })
     await flushPromises()
-    expect(search).toHaveBeenLastCalledWith(expect.objectContaining({ region: 'fr' }))
+    expect(search).toHaveBeenLastCalledWith(
+      expect.objectContaining({ region: 'fr' }),
+      expect.any(AbortSignal),
+    )
     expect(
       (wrapper.get('[data-testid="find-match-region"]').element as HTMLSelectElement).value,
     ).toBe('fr')
@@ -158,11 +161,105 @@ describe('LibraryImportSearchModal', () => {
     ])
     await wrapper.get('[data-testid="find-match-region"]').setValue('us')
     await flushPromises()
-    expect(search).toHaveBeenLastCalledWith(expect.objectContaining({ region: 'us' }))
+    expect(search).toHaveBeenLastCalledWith(
+      expect.objectContaining({ region: 'us' }),
+      expect.any(AbortSignal),
+    )
 
     await wrapper.get('.result-item').trigger('click')
     expect(wrapper.emitted('select')?.[0]?.[0]).toEqual(
       expect.objectContaining({ asin: 'B0BK9W82PQ', region: 'us' }),
     )
+  })
+
+  it('keeps the results of the region the user picked when the earlier search answers last', async () => {
+    const search = vi.mocked(apiService.advancedSearch)
+    const pending: Record<string, (results: SearchResult[]) => void> = {}
+    const signals: Record<string, AbortSignal | undefined> = {}
+    search.mockImplementation(
+      (params, signal) =>
+        new Promise<SearchResult[]>((resolve) => {
+          pending[params.region!] = resolve
+          signals[params.region!] = signal
+        }),
+    )
+    const wrapper = mount(LibraryImportSearchModal, {
+      props: {
+        item: {
+          id: '/incoming/PH4/01.mp3',
+          fullPath: '/incoming/PH4/01.mp3',
+          sourceFiles: ['/incoming/PH4/01.mp3'],
+          folderPath: '/incoming/PH4',
+          relativePath: 'PH4',
+          folderName: 'Primal Hunter 4',
+          detectedTitle: 'The Primal Hunter 4',
+          detectedAuthor: 'Zogarth',
+          format: 'MP3',
+          fileCount: 1,
+          selectedMatch: null,
+          hasSearched: false,
+          isSearching: false,
+          selected: false,
+        },
+      },
+    })
+    await flushPromises()
+    expect(pending.fr).toBeDefined()
+
+    // The French search is still running when the user switches to US
+    await wrapper.get('[data-testid="find-match-region"]').setValue('us')
+    await flushPromises()
+    expect(signals.fr?.aborted).toBe(true)
+
+    pending.us!([
+      { asin: 'B0BK9W82PQ', title: 'Primal Hunter 4', authors: [{ name: 'Zogarth' }] },
+    ] as unknown as SearchResult[])
+    await flushPromises()
+    pending.fr!([
+      { asin: 'B0HM45F8MW', title: 'Primal Hunter, Vol. 7', authors: [{ name: 'Zogarth' }] },
+    ] as unknown as SearchResult[])
+    await flushPromises()
+
+    const items = wrapper.findAll('.result-item')
+    expect(items).toHaveLength(1)
+    expect(items[0]!.text()).toContain('Primal Hunter 4')
+    expect(wrapper.find('.search-spinner').exists()).toBe(false)
+    await items[0]!.trigger('click')
+    expect(wrapper.emitted('select')?.[0]?.[0]).toEqual(
+      expect.objectContaining({ asin: 'B0BK9W82PQ', region: 'us' }),
+    )
+  })
+
+  it('does not offer the previous results while a new search runs', async () => {
+    const search = vi.mocked(apiService.advancedSearch)
+    const wrapper = mount(LibraryImportSearchModal, {
+      props: {
+        item: {
+          id: '/incoming/Alchemised.m4b',
+          fullPath: '/incoming/Alchemised.m4b',
+          sourceFiles: ['/incoming/Alchemised.m4b'],
+          folderPath: '/incoming',
+          relativePath: 'Alchemised',
+          folderName: 'Alchemised',
+          detectedTitle: 'Alchemised',
+          detectedAuthor: 'SenLinYu',
+          format: 'M4B',
+          fileCount: 1,
+          selectedMatch: null,
+          hasSearched: false,
+          isSearching: false,
+          selected: false,
+        },
+      },
+    })
+    await flushPromises()
+    expect(wrapper.findAll('.result-item')).toHaveLength(1)
+
+    search.mockImplementation(() => new Promise<SearchResult[]>(() => {}))
+    await wrapper.get('[data-testid="find-match-region"]').setValue('us')
+    await flushPromises()
+
+    expect(wrapper.findAll('.result-item')).toHaveLength(0)
+    expect(wrapper.find('.search-spinner').exists()).toBe(true)
   })
 })

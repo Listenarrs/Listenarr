@@ -563,17 +563,20 @@ class ApiService {
     return results
   }
 
-  async advancedSearch(params: {
-    title?: string
-    author?: string
-    isbn?: string
-    series?: string
-    asin?: string
-    region?: string
-    language?: string
-    pagination?: { page?: number; limit?: number }
-    cap?: number
-  }): Promise<SearchResult[]> {
+  async advancedSearch(
+    params: {
+      title?: string
+      author?: string
+      isbn?: string
+      series?: string
+      asin?: string
+      region?: string
+      language?: string
+      pagination?: { page?: number; limit?: number }
+      cap?: number
+    },
+    signal?: AbortSignal,
+  ): Promise<SearchResult[]> {
     const body: Record<string, unknown> = { mode: 'Advanced' }
     const hasAsin = !!params.asin
     if (params.title) (body as Record<string, unknown>).title = params.title
@@ -591,7 +594,7 @@ class ApiService {
     if (typeof params.cap === 'number') (body as Record<string, unknown>).cap = params.cap
     const resp = await this.request<SearchResult[] | { results?: SearchResult[] } | null>(
       '/search',
-      { method: 'POST', body: JSON.stringify(body) },
+      { method: 'POST', body: JSON.stringify(body), signal },
     )
     let results = Array.isArray(resp) ? resp : (resp?.results ?? [])
 
