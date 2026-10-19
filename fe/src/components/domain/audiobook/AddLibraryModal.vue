@@ -1186,10 +1186,15 @@ async function lookupMetadata(
   return { found: true, enriched: enrichedMeta, source }
 }
 
+// Like seedPreview, a late answer never replaces what the user changed while it was pending: the
+// metadata they edited stays (the record's region is still taken, as the ASIN belongs to that
+// catalogue), and so does a destination they typed. ("Search again" is disabled while one runs.)
 const retryMetadataLookup = async () => {
   const asin = props.book?.asin
   if (!asin || !retryRegion.value) return
   const generation = seedGeneration
+  const metadataEditGenerationAtStart = metadataEditGeneration
+  const manualEditGenerationAtStart = manualEditGeneration
   const region = retryRegion.value
   metadataLoading.value = true
   const result = await lookupMetadata(asin, region, cloneMetadata(props.book))
@@ -1203,8 +1208,25 @@ const retryMetadataLookup = async () => {
   metadataLookupFailed.value = false
   enriched.value = result.enriched
   metadataSource.value = result.source || null
-  replaceEditableMetadata(enriched.value)
+  if (metadataEditGeneration === metadataEditGenerationAtStart) {
+    replaceEditableMetadata(enriched.value)
+  } else {
+    applyFoundRegion(result.enriched.region)
+  }
+  if (manualEditGeneration !== manualEditGenerationAtStart) return
   await refreshPreviewFromMetadata(true, generation)
+}
+
+// The region the record was found in, set on the edited metadata without counting as a user edit
+function applyFoundRegion(region: string | undefined) {
+  if (!region || !editableMetadata.value) return
+  suppressMetadataEditTracking = true
+  try {
+    editableMetadata.value = { ...editableMetadata.value, region }
+    bookRegion.value = region
+  } finally {
+    suppressMetadataEditTracking = false
+  }
 }
 
 // helper to load profiles/settings and seed preview

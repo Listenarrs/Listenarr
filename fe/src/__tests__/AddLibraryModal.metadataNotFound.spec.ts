@@ -128,6 +128,36 @@ describe('AddLibraryModal when the configured region has no record for the ASIN'
     )
   })
 
+  it('keeps a title edited while the regional retry is pending, with the region that found it', async () => {
+    let answerUs: (record: unknown) => void = () => {}
+    apiMocks.getAudibleMetadata
+      .mockRejectedValueOnce(notFound)
+      .mockImplementationOnce(() => new Promise((resolve) => (answerUs = resolve)))
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="metadata-retry-region"]').setValue('us')
+    await wrapper.get('[data-testid="metadata-retry"]').trigger('click')
+    // Editing while the US lookup runs
+    await wrapper.get('button.metadata-toggle-btn').trigger('click')
+    await flushPromises()
+    const title = wrapper
+      .findAll('.metadata-edit-grid .detail-item')
+      .find((item) => item.text().includes('Title'))!
+      .find('input')
+    await title.setValue('A Princess of Mars (my edition)')
+    answerUs(usRecord)
+    await flushPromises()
+
+    expect((title.element as HTMLInputElement).value).toBe('A Princess of Mars (my edition)')
+    await wrapper.get('button.btn-primary').trigger('click')
+    await flushPromises()
+    expect(apiMocks.addToLibrary).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'A Princess of Mars (my edition)', region: 'us' }),
+      expect.any(Object),
+    )
+  })
+
   it('keeps the region of the lookup when the response has no top-level region', async () => {
     // e.g. a book from "Scan for unmatched files": no region of its own, found in the configured one
     apiMocks.getAudibleMetadata.mockResolvedValue({
