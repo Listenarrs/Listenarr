@@ -1485,18 +1485,26 @@ watch(currentAdvancedPage, () => {
   })
 })
 
-// Saved when a search is submitted, never while the form is edited: a draft typed after the search,
-// or the defaults shown on an empty visit, are not the context of the results on screen
-const rememberSearchContext = (query?: string) => {
+// A new search empties the previous one, on screen and in the session, and notes what it searches
+// for. That context is saved only once its results are applied: never while the form is edited (a
+// draft typed after a search), never for a search that failed, never for an empty visit.
+const startSearch = (query?: string): SearchContext => {
+  titleResults.value = []
+  audibleResult.value = null
+  allAudibleResults.value = []
+  isbnResult.value = null
+  totalTitleResultsCount.value = 0
+  resolvedAsins.value = {}
+  asinFilteringApplied.value = false
   try {
-    sessionStorage.setItem(
-      SEARCH_CONTEXT_KEY,
-      JSON.stringify({
-        query,
-        region: searchLanguage.value,
-        language: preferredSearchLanguage.value,
-      } satisfies SearchContext),
-    )
+    sessionStorage.removeItem(SEARCH_CONTEXT_KEY)
+  } catch {}
+  return { query, region: searchLanguage.value, language: preferredSearchLanguage.value }
+}
+
+const rememberSearchContext = (context: SearchContext) => {
+  try {
+    sessionStorage.setItem(SEARCH_CONTEXT_KEY, JSON.stringify(context))
   } catch {}
 }
 
@@ -1869,7 +1877,7 @@ const performAdvancedSearch = async () => {
       return
     }
 
-    rememberSearchContext()
+    const context = startSearch()
     advancedSearchError.value = ''
     isSearching.value = true
     searchError.value = ''
@@ -1903,6 +1911,7 @@ const performAdvancedSearch = async () => {
           const resp = await apiService.advancedSearch(seriesSearchParams)
           // backend returns enriched SearchResult objects
           await handleAdvancedSearchResults(resp as Partial<SearchResult>[])
+          rememberSearchContext(context)
         } catch (e) {
           throw e
         }
@@ -1971,6 +1980,7 @@ const performAdvancedSearch = async () => {
 
         // If filtering produced no matches, fall back to returning the unfiltered author results
         await handleAdvancedSearchResults(filtered.length ? filtered : results)
+        rememberSearchContext(context)
 
         // done: scroll into view
         nextTick(() => {
@@ -1985,6 +1995,7 @@ const performAdvancedSearch = async () => {
 
       const results = await apiService.advancedSearch(params)
       await handleAdvancedSearchResults(results)
+      rememberSearchContext(context)
 
       // Scroll to top of results after search
       nextTick(() => {
@@ -2011,7 +2022,7 @@ const performAdvancedSearch = async () => {
     return
   }
 
-  rememberSearchContext(searchQuery.value)
+  const context = startSearch(searchQuery.value)
   advancedSearchError.value = ''
   isSearching.value = true
   searchError.value = ''
@@ -2049,6 +2060,7 @@ const performAdvancedSearch = async () => {
     currentAdvancedPage.value = 1
     const results = await apiService.advancedSearch(params)
     await handleAdvancedSearchResults(results)
+    rememberSearchContext(context)
   } catch (err) {
     advancedSearchError.value = err instanceof Error ? err.message : 'Search failed'
     errorMessage.value = advancedSearchError.value
@@ -2179,9 +2191,12 @@ const handleUnifiedSearchResults = async (results: SearchResult[] | null | undef
 }
 
 const performSearch = async () => {
-  if (searchQuery.value.trim()) rememberSearchContext(searchQuery.value)
+  // A search already running is cancelled by the submit button instead; an empty box searches nothing
+  const searching = !isSearching.value && Boolean(searchQuery.value.trim())
+  const context = searching ? startSearch(searchQuery.value) : null
   const results = await runSearch()
   await handleUnifiedSearchResults(results)
+  if (context && Array.isArray(results)) rememberSearchContext(context)
   return results
 }
 

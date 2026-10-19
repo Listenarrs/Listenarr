@@ -345,6 +345,89 @@ describe('AddNewView pagination', () => {
     expect(window.localStorage.getItem('listenarr.addNewSearchContext')).toBeNull()
   })
 
+  // A successful Dune search of this session, as the page saved it
+  const seedDuneSearch = () => {
+    window.sessionStorage.setItem(
+      'listenarr.addNewResults',
+      JSON.stringify({ titleResults: [{ key: 'B000999', title: 'Dune Simple' }] }),
+    )
+    window.sessionStorage.setItem('listenarr.addNewSearchType', 'title')
+    window.sessionStorage.setItem('listenarr.addNewTitleResultsCount', '1')
+    window.sessionStorage.setItem(
+      'listenarr.addNewSearchContext',
+      JSON.stringify({ query: 'Dune', region: 'us', language: 'english' }),
+    )
+  }
+
+  it.each([
+    ['the search box', false],
+    ['the advanced form', true],
+  ])(
+    'clears the previous results when a search from %s fails, and keeps nothing of it',
+    async (_label, advanced) => {
+      seedDuneSearch()
+      const apiModule = await import('@/services/api')
+      vi.spyOn(apiModule.apiService, 'advancedSearch').mockRejectedValue(new Error('Network error'))
+      const router = createTestRouter()
+      const first = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+      await flushPromises()
+      const vm = first.vm as unknown as {
+        searchQuery?: string
+        titleResults?: unknown[]
+        showAdvancedSearch?: boolean
+        advancedSearchParams?: Record<string, unknown>
+        performSearch?: () => Promise<unknown>
+        performAdvancedSearch?: () => Promise<void>
+      }
+      expect(vm.titleResults?.length).toBe(1)
+
+      if (advanced) {
+        vm.showAdvancedSearch = true
+        vm.advancedSearchParams = { title: 'Foundation' }
+        await vm.performAdvancedSearch?.()
+      } else {
+        vm.searchQuery = 'Foundation'
+        await vm.performSearch?.().catch(() => undefined)
+      }
+      await flushPromises()
+
+      // The failed search shows nothing, not the Dune books under the new query
+      expect(vm.titleResults?.length).toBe(0)
+      expect(window.sessionStorage.getItem('listenarr.addNewSearchContext')).toBeNull()
+      first.unmount()
+
+      const back = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+      await flushPromises()
+      const backVm = back.vm as unknown as { searchQuery?: string; titleResults?: unknown[] }
+      expect(backVm.titleResults?.length).toBe(0)
+      expect(backVm.searchQuery).toBe('')
+    },
+  )
+
+  it('empties the previous results as soon as a new search starts', async () => {
+    seedDuneSearch()
+    const apiModule = await import('@/services/api')
+    vi.spyOn(apiModule.apiService, 'advancedSearch').mockImplementation(() => new Promise(() => {}))
+    const router = createTestRouter()
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      searchQuery?: string
+      titleResults?: unknown[]
+      performSearch?: () => Promise<unknown>
+    }
+    expect(vm.titleResults?.length).toBe(1)
+
+    vm.searchQuery = 'Foundation'
+    void vm.performSearch?.()
+    await flushPromises()
+
+    expect(vm.titleResults?.length).toBe(0)
+    expect(JSON.parse(window.sessionStorage.getItem('listenarr.addNewResults') ?? '{}')).toEqual(
+      expect.objectContaining({ titleResults: [] }),
+    )
+  })
+
   it('restores the submitted query, not a draft typed after the search, when coming back', async () => {
     window.sessionStorage.setItem(
       'listenarr.addNewResults',
