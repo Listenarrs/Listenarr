@@ -1,5 +1,6 @@
 using Listenarr.Application.Common.Exceptions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Persistence;
 
@@ -47,6 +48,7 @@ public sealed partial class FileRegistrationRecoveryService
                     cancellationToken);
             if (affected == 1)
             {
+                LogParked(operationId, expectedState, reason);
                 return true;
             }
 
@@ -69,8 +71,19 @@ public sealed partial class FileRegistrationRecoveryService
         journal.Error = reason;
         journal.UpdatedAt = now;
         await db.SaveChangesAsync(cancellationToken);
+        LogParked(operationId, expectedState, reason);
         return true;
     }
+
+    private void LogParked(
+        Guid operationId,
+        FileMutationJournalState reachedState,
+        string reason) =>
+        logger.LogWarning(
+            "Registration publication {OperationId} parked as NeedsAttention after reaching {ReachedState}: {Reason}",
+            operationId,
+            reachedState,
+            reason);
 
     private async Task ThrowIfNeedsAttentionAsync(
         Guid operationId,

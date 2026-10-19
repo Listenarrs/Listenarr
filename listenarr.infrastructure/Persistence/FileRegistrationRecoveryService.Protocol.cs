@@ -43,6 +43,7 @@ public sealed partial class FileRegistrationRecoveryService
         var now = timeProvider.GetUtcNow().UtcDateTime;
         const string reason =
             "This file publication uses an unsupported operation-evidence protocol. Its artifacts were preserved and only this operation requires repair.";
+        int parked;
         if (!db.Database.IsRelational())
         {
             var trackedQuery = db.FileMutationJournals
@@ -70,6 +71,7 @@ public sealed partial class FileRegistrationRecoveryService
                 journal.UpdatedAt = now;
             }
             await db.SaveChangesAsync(cancellationToken);
+            parked = tracked.Count;
         }
         else
         {
@@ -89,7 +91,7 @@ public sealed partial class FileRegistrationRecoveryService
                 trackedQuery = trackedQuery.Where(
                     journal => journal.OperationId == relationalOperationId);
             }
-            await trackedQuery
+            parked = await trackedQuery
                 .ExecuteUpdateAsync(
                     setters => setters
                         .SetProperty(
@@ -98,6 +100,16 @@ public sealed partial class FileRegistrationRecoveryService
                         .SetProperty(journal => journal.Error, reason)
                         .SetProperty(journal => journal.UpdatedAt, now),
                     cancellationToken);
+        }
+
+        // A concurrent pass can park some of the selected rows first; log only
+        // when every selected row was transitioned by this call.
+        if (parked == unsupported.Count)
+        {
+            foreach (var journal in unsupported)
+            {
+                LogParked(journal.OperationId, journal.State, reason);
+            }
         }
 
         // Protocol ambiguity is operation-scoped. Startup recovery records
