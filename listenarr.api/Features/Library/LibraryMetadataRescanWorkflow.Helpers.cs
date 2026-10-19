@@ -5,6 +5,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Caching.Memory;
+using Listenarr.Domain.Common;
 namespace Listenarr.Api.Features.Library
 {
     public sealed partial class LibraryMetadataRescanWorkflow
@@ -57,13 +58,18 @@ namespace Listenarr.Api.Features.Library
                     audiobook,
                     metadata.SeriesMemberships,
                     metadata.Series,
-                    metadata.SeriesNumber);
+                    metadata.SeriesNumber,
+                    metadata.SeriesAsin);
             }
 
-            var authors = NormalizeMetadataStringList(
+            // Mirrors AudibleBookMetadata.ToAudiobook(): stripped here too, so a rescan cannot
+            // put a role suffix like "Constance Garnett - translator" back on a book the add
+            // path already cleaned, and so Authors[0] keeps agreeing with AuthorCredits.Primary
+            // for the callers that key off it.
+            var authors = AuthorCredits.WithoutRoleSuffixes(NormalizeMetadataStringList(
                 (metadata.Authors != null && metadata.Authors.Any())
                     ? metadata.Authors
-                    : (!string.IsNullOrWhiteSpace(metadata.Author) ? new List<string> { metadata.Author! } : null));
+                    : (!string.IsNullOrWhiteSpace(metadata.Author) ? new List<string> { metadata.Author! } : null))).ToList();
             if (authors.Count > 0) audiobook.Authors = authors;
 
             var narrators = NormalizeMetadataStringList(
