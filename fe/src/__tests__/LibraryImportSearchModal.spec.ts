@@ -262,4 +262,48 @@ describe('LibraryImportSearchModal', () => {
     expect(wrapper.findAll('.result-item')).toHaveLength(0)
     expect(wrapper.find('.search-spinner').exists()).toBe(true)
   })
+
+  it('closes quietly while a search is running: the cancelled request is not reported', async () => {
+    const unhandled = vi.fn()
+    process.on('unhandledRejection', unhandled)
+    try {
+      // Like fetch: the request fails once its signal is aborted (the API wraps it as Network error)
+      vi.mocked(apiService.advancedSearch).mockImplementation(
+        (_params, signal) =>
+          new Promise<SearchResult[]>((_resolve, reject) => {
+            signal?.addEventListener('abort', () => reject(new Error('Network error')))
+          }),
+      )
+      const wrapper = mount(LibraryImportSearchModal, {
+        props: {
+          item: {
+            id: '/incoming/PH4/01.mp3',
+            fullPath: '/incoming/PH4/01.mp3',
+            sourceFiles: ['/incoming/PH4/01.mp3'],
+            folderPath: '/incoming/PH4',
+            relativePath: 'PH4',
+            folderName: 'Primal Hunter 4',
+            detectedTitle: 'The Primal Hunter 4',
+            detectedAuthor: 'Zogarth',
+            format: 'MP3',
+            fileCount: 1,
+            selectedMatch: null,
+            hasSearched: false,
+            isSearching: false,
+            selected: false,
+          },
+        },
+      })
+      await flushPromises()
+      expect(wrapper.find('.search-spinner').exists()).toBe(true)
+
+      wrapper.unmount()
+      await flushPromises()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      expect(unhandled).not.toHaveBeenCalled()
+    } finally {
+      process.off('unhandledRejection', unhandled)
+    }
+  })
 })

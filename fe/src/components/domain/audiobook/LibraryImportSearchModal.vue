@@ -200,7 +200,9 @@ async function runSearch() {
     searchResults.value = results
     hasSearched.value = true
   } catch (error) {
-    if (controller === searchController) throw error
+    // A cancelled search (a newer one, or the modal closing) fails on purpose: nothing to report.
+    // The API wraps the AbortError into a generic error, so the signal tells it apart.
+    if (controller === searchController && !controller.signal.aborted) throw error
   } finally {
     if (controller === searchController) {
       searchController = null
