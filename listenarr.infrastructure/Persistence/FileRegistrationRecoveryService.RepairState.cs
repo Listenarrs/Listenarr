@@ -80,7 +80,7 @@ public sealed partial class FileRegistrationRecoveryService
         FileMutationJournalState reachedState,
         string reason) =>
         logger.LogWarning(
-            "Registration publication {OperationId} parked as NeedsAttention after reaching {ReachedState}: {Reason}",
+            "File-registration publication {OperationId} parked as NeedsAttention after reaching {ReachedState}: {Reason}",
             operationId,
             reachedState,
             reason);
