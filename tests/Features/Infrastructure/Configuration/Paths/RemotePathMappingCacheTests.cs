@@ -36,12 +36,23 @@ namespace Listenarr.Tests.Features.Infrastructure.Configuration.Paths
             private int _byClientReads;
             public int ByClientReads => _byClientReads;
 
+            // When set, a by-client read holds after it has reached the database until released.
+            public bool HoldReads;
+            public readonly TaskCompletionSource ReadReachedDatabase = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            public readonly TaskCompletionSource ReleaseReads = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
             public Task<List<RemotePathMapping>> GetAllAsync(CancellationToken ct = default) => inner.GetAllAsync(ct);
             public Task<RemotePathMapping?> GetByIdAsync(int id, CancellationToken ct = default) => inner.GetByIdAsync(id, ct);
-            public Task<List<RemotePathMapping>> GetByClientIdAsync(string downloadClientId, CancellationToken ct = default)
+            public async Task<List<RemotePathMapping>> GetByClientIdAsync(string downloadClientId, CancellationToken ct = default)
             {
                 Interlocked.Increment(ref _byClientReads);
-                return inner.GetByClientIdAsync(downloadClientId, ct);
+                var mappings = await inner.GetByClientIdAsync(downloadClientId, ct);
+                if (HoldReads)
+                {
+                    ReadReachedDatabase.TrySetResult();
+                    await ReleaseReads.Task;
+                }
+                return mappings;
             }
             public Task<RemotePathMapping> SaveAsync(RemotePathMapping mapping, CancellationToken ct = default) => inner.SaveAsync(mapping, ct);
             public Task<bool> DeleteAsync(int id, CancellationToken ct = default) => inner.DeleteAsync(id, ct);
@@ -131,6 +142,42 @@ namespace Listenarr.Tests.Features.Infrastructure.Configuration.Paths
                 .WithLocalPath(FileUtils.GetAbsolutePath("library"))
                 .Build());
 
+            Assert.Empty(await _service.GetPathMappingByClientAsync(_client));
+        }
+
+        // A cold read has fetched the old set when a create saves and clears the key. The write
+        // must wait for that fill, or the fill stores the old set after the clear.
+        [Fact]
+        public async Task CreateAsync_DuringAnInFlightColdRead_IsSeenByTheNextRead()
+        {
+            _counter.HoldReads = true;
+            var inFlight = _service.GetPathMappingByClientAsync(_client);
+            await _counter.ReadReachedDatabase.Task;
+
+            var create = CreateMapping("downloads", "library");
+            // Not awaited: the write is expected to queue behind the fill, so awaiting it first
+            // would deadlock. The delay gives an unserialised write time to finish.
+            await Task.WhenAny(create, Task.Delay(TimeSpan.FromSeconds(1)));
+            _counter.HoldReads = false;
+            _counter.ReleaseReads.SetResult();
+
+            Assert.Empty(await inFlight);
+            await create;
+            Assert.Single(await _service.GetPathMappingByClientAsync(_client));
+        }
+
+        [Fact]
+        public async Task UpdateAsync_MovingAMappingToAnotherClient_ClearsTheOldClientToo()
+        {
+            var otherClient = await CreateDownloadClientConfiguration();
+            var mapping = await CreateMapping("downloads", "library");
+            Assert.Single(await _service.GetPathMappingByClientAsync(_client));
+            Assert.Empty(await _service.GetPathMappingByClientAsync(otherClient));
+
+            mapping.DownloadClientId = otherClient.Id;
+            await _service.UpdateAsync(mapping);
+
+            Assert.Single(await _service.GetPathMappingByClientAsync(otherClient));
             Assert.Empty(await _service.GetPathMappingByClientAsync(_client));
         }
 
