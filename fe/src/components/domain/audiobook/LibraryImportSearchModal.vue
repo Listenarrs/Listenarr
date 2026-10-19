@@ -229,8 +229,22 @@ function select(result: SearchResult) {
 
 .search-fields {
   display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Title, region and author on one line; they wrap only when the modal is too narrow */
+.search-fields > .search-input-row:first-child {
+  flex: 1 1 9rem;
+}
+
+.search-fields > .search-input-row:nth-child(2) {
+  flex: 0 0 auto;
+}
+
+.search-fields > .search-input-row:last-child {
+  flex: 1 1 9rem;
 }
 
 .region-label {
@@ -239,7 +253,8 @@ function select(result: SearchResult) {
 }
 
 .region-select {
-  flex: 1;
+  flex: 0 0 auto;
+  width: auto;
 }
 
 .search-input-row {
