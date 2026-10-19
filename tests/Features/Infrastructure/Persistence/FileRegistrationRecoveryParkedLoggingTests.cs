@@ -1,5 +1,7 @@
+using System.Data.Common;
 using Listenarr.Tests.Common;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Listenarr.Tests.Features.Infrastructure.Persistence;
@@ -29,13 +31,48 @@ public sealed class FileRegistrationRecoveryParkedLoggingTests : BaseTests
             [Guid.NewGuid()] = FileMutationJournalState.Planned,
             [Guid.NewGuid()] = FileMutationJournalState.SourceDeleted
         };
-        var versions = new[] { 0, FileMutationProtocol.Current + 1 };
+        // 0 is the CLR default, so a relational insert would replace it with the column default (1).
+        var versions = new[] { -1, FileMutationProtocol.Current + 1 };
         await SeedAsync(factory, seeded, versions);
 
         var logger = new CapturingLogger();
         await CreateService(factory, logger).ReconcileAsync();
 
         await AssertParkedAndLoggedAsync(factory, logger, seeded);
+        await using var verification = await factory.CreateDbContextAsync();
+        Assert.All(
+            await verification.FileMutationJournals.AsNoTracking().ToListAsync(),
+            journal => Assert.Contains("unsupported operation-evidence protocol", journal.Error));
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_UnsupportedProtocolJournalParkedConcurrently_WarnsOnlyForRowsThisCallParked()
+    {
+        var root = FileService.GetTempDirectory("registration-parked-concurrent");
+        var databasePath = Path.Join(root, "concurrent.db");
+        var plain = new DbContextOptionsBuilder<ListenArrDbContext>()
+            .UseSqlite($"Data Source={databasePath};Pooling=False")
+            .Options;
+        var seeded = new Dictionary<Guid, FileMutationJournalState>
+        {
+            [Guid.NewGuid()] = FileMutationJournalState.Planned,
+            [Guid.NewGuid()] = FileMutationJournalState.Planned
+        };
+        var concurrentlyParked = seeded.Keys.First();
+        var interceptor = new ParkBeforeFirstUpdateInterceptor(plain, concurrentlyParked);
+        var factory = new TestDbContextFactory(
+            new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseSqlite($"Data Source={databasePath};Pooling=False")
+                .AddInterceptors(interceptor)
+                .Options);
+        await SeedAsync(factory, seeded, [FileMutationProtocol.Current + 1]);
+
+        var logger = new CapturingLogger();
+        await CreateService(factory, logger).ReconcileAsync();
+
+        Assert.True(interceptor.Fired);
+        var warning = Assert.Single(logger.Warnings);
+        Assert.Contains(seeded.Keys.Last().ToString(), warning);
     }
 
     [Fact]
@@ -109,6 +146,36 @@ public sealed class FileRegistrationRecoveryParkedLoggingTests : BaseTests
         {
             var warning = Assert.Single(warnings, message => message.Contains(operationId.ToString()));
             Assert.Contains(state.ToString(), warning);
+        }
+    }
+
+    private sealed class ParkBeforeFirstUpdateInterceptor(
+        DbContextOptions<ListenArrDbContext> plain,
+        Guid operationId) : DbCommandInterceptor
+    {
+        public bool Fired { get; private set; }
+
+        public override async ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (!Fired
+                && command.CommandText.TrimStart().StartsWith("UPDATE", StringComparison.OrdinalIgnoreCase)
+                && command.CommandText.Contains("FileMutationJournals"))
+            {
+                Fired = true;
+                await using var other = new ListenArrDbContext(plain);
+                await other.FileMutationJournals
+                    .Where(journal => journal.OperationId == operationId)
+                    .ExecuteUpdateAsync(
+                        setters => setters.SetProperty(
+                            journal => journal.State,
+                            FileMutationJournalState.NeedsAttention),
+                        cancellationToken);
+            }
+            return result;
         }
     }
 
