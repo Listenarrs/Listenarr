@@ -680,9 +680,10 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
         imported++
       } catch (e) {
         if (e instanceof MatchRecordNotFoundError) {
-          // Leave the row unresolved, with the reason, rather than import a book with no metadata
+          // Leave the row unresolved, with the reason, rather than import a book with no metadata.
+          // Only if it still holds the match that failed: a match chosen meanwhile stays.
           const current = items.value[item.id]
-          if (current) {
+          if (current && current.selectedMatch === match) {
             items.value = {
               ...items.value,
               [item.id]: {

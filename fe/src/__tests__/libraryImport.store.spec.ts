@@ -842,6 +842,31 @@ describe('library import store', () => {
     expect(row?.matchError).toBeUndefined()
   })
 
+  it('keeps a match picked while the failing lookup of the previous one was pending', async () => {
+    const { useLibraryImportStore } = await import('@/stores/libraryImport')
+    const store = useLibraryImportStore()
+    let answerFrench: (error: Error) => void = () => {}
+    getAudibleMetadata.mockImplementation(
+      () => new Promise((_resolve, reject) => (answerFrench = reject)),
+    )
+    savedMatchWithoutRegion(store)
+
+    const importing = store.importSelected('/media/audiobooks')
+    await vi.waitFor(() => expect(getAudibleMetadata).toHaveBeenCalledWith('B008DFUGCQ', 'fr'))
+    // The user picks the US record before the French lookup answers
+    store.selectMatch('/incoming/Princess/01.mp3', {
+      title: 'A Princess of Mars',
+      asin: 'B008DFUGCQ',
+      region: 'us',
+    } as unknown as SearchResult)
+    answerFrench(Object.assign(new Error('Not Found'), { status: 404 }))
+    await importing
+
+    const row = store.items['/incoming/Princess/01.mp3']
+    expect(row?.selectedMatch?.region).toBe('us')
+    expect(row?.matchError).toBeUndefined()
+  })
+
   it('clears the reason once a new match is picked', async () => {
     const { useLibraryImportStore } = await import('@/stores/libraryImport')
     const store = useLibraryImportStore()
