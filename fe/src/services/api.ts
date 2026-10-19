@@ -569,6 +569,7 @@ class ApiService {
     isbn?: string
     series?: string
     asin?: string
+    narrator?: string
     region?: string
     language?: string
     pagination?: { page?: number; limit?: number }
@@ -583,6 +584,7 @@ class ApiService {
     if (params.isbn) (body as Record<string, unknown>).isbn = params.isbn
     if (params.series) (body as Record<string, unknown>).series = params.series
     if (params.asin) (body as Record<string, unknown>).asin = params.asin
+    if (params.narrator) (body as Record<string, unknown>).narrator = params.narrator
     const region =
       params.region || (params.language ? getRegionFromLanguage(params.language) : undefined)
     if (region) (body as Record<string, unknown>).region = region

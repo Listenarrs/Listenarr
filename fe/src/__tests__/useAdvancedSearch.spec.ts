@@ -74,6 +74,7 @@ describe('useAdvancedSearch', () => {
         isbn: '',
         series: '',
         asin: '',
+        narrator: '',
       })
     })
 
@@ -290,6 +291,7 @@ describe('useAdvancedSearch', () => {
         isbn: '',
         series: '',
         asin: '',
+        narrator: '',
       })
     })
 
@@ -322,6 +324,7 @@ describe('useAdvancedSearch', () => {
         isbn: '',
         series: '',
         asin: '',
+        narrator: '',
       })
     })
 

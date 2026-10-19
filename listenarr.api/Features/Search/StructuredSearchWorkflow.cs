@@ -111,9 +111,10 @@ namespace Listenarr.Api.Features.Search
                 && string.IsNullOrWhiteSpace(req.Query)
                 && string.IsNullOrWhiteSpace(req.Isbn)
                 && string.IsNullOrWhiteSpace(req.Asin)
-                && string.IsNullOrWhiteSpace(req.Series))
+                && string.IsNullOrWhiteSpace(req.Series)
+                && string.IsNullOrWhiteSpace(req.Narrator))
             {
-                return StructuredSearchWorkflowResult.BadRequest("At least one advanced search parameter (title, author, isbn, asin, series, or query) is required");
+                return StructuredSearchWorkflowResult.BadRequest("At least one advanced search parameter (title, author, narrator, isbn, asin, series, or query) is required");
             }
 
             LogAdvancedRequest(req, region, language);
@@ -128,6 +129,12 @@ namespace Listenarr.Api.Features.Search
             if (seriesResult != null)
             {
                 return seriesResult;
+            }
+
+            var narratorResult = await TryExecuteNarratorSearchAsync(req, region, language, httpContext);
+            if (narratorResult != null)
+            {
+                return narratorResult;
             }
 
             var query = ComposeAdvancedQuery(req);
@@ -329,6 +336,80 @@ namespace Listenarr.Api.Features.Search
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// Narrator searches go straight to Audible's narrator field rather than through
+        /// ComposeAdvancedQuery. A composed "NARRATOR:name" string is sent to the provider as
+        /// keywords, where the prefix becomes a literal search token and matches nothing.
+        /// </summary>
+        private async Task<StructuredSearchWorkflowResult?> TryExecuteNarratorSearchAsync(
+            SearchRequest req,
+            string region,
+            string? language,
+            HttpContext httpContext)
+        {
+            if (string.IsNullOrWhiteSpace(req.Narrator))
+            {
+                return null;
+            }
+
+            // Author remains the more selective field, so leave those requests on the
+            // existing path rather than narrowing them to the narrator endpoint.
+            if (!string.IsNullOrWhiteSpace(req.Author))
+            {
+                return null;
+            }
+
+            try
+            {
+                var limit = req.Pagination != null && req.Pagination.Limit > 0
+                    ? Math.Clamp(req.Pagination.Limit, 1, 1000)
+                    : 50;
+                var page = req.Pagination != null && req.Pagination.Page > 0 ? req.Pagination.Page : 1;
+
+                var response = await _audibleService.SearchByNarratorAsync(
+                    req.Narrator.Trim(),
+                    req.Title,
+                    page,
+                    limit,
+                    region,
+                    language);
+
+                var results = response?.Results ?? new List<AudibleSearchResult>();
+                if (results.Count == 0)
+                {
+                    _logger.LogInformation(
+                        "Narrator search for '{Narrator}' returned no results; falling back to unified search",
+                        LogRedaction.SanitizeText(req.Narrator));
+                    return null;
+                }
+
+                // Map through the same converter the series branch uses so the client receives
+                // an identically shaped result regardless of which branch answered.
+                var mapped = new List<object>();
+                foreach (var book in results)
+                {
+                    try
+                    {
+                        mapped.Add(await _responseMapper.MapAudibleSearchResultToOutputAsync(book, region, httpContext));
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                    {
+                        _logger.LogWarning(ex, "Failed converting narrator result to output for ASIN {Asin}", book.Asin);
+                    }
+                }
+
+                return mapped.Count > 0 ? StructuredSearchWorkflowResult.Ok(mapped) : null;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Narrator search failed for '{Narrator}'; falling back to unified search",
+                    LogRedaction.SanitizeText(req.Narrator));
+                return null;
+            }
         }
 
         private string ComposeAdvancedQuery(SearchRequest req)
