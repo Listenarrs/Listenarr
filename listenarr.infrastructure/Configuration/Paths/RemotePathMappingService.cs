@@ -68,6 +68,16 @@ namespace Listenarr.Infrastructure.Configuration.Paths
 
         private static string ClientCacheKey(string downloadClientId) => $"rpm_client_{downloadClientId}";
 
+        // Taken under the fill lock so a read that started before the write cannot store its result after the entry was cleared.
+        private async Task InvalidateClientCacheAsync(string downloadClientId)
+        {
+            var cacheKey = ClientCacheKey(downloadClientId);
+            using (await ClientCacheLocks.LockAsync(cacheKey))
+            {
+                cache.Remove(cacheKey);
+            }
+        }
+
         public async Task<RemotePathMapping> CreateAsync(RemotePathMapping mapping)
         {
             mapping.NormalizePaths();
@@ -81,7 +91,7 @@ namespace Listenarr.Infrastructure.Configuration.Paths
 
             try
             {
-                cache.Remove(ClientCacheKey(saved.DownloadClientId));
+                await InvalidateClientCacheAsync(saved.DownloadClientId);
             }
             catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
             {
@@ -110,7 +120,12 @@ namespace Listenarr.Infrastructure.Configuration.Paths
                 "Updated remote path mapping {MappingId} for client {ClientId}: {RemotePath} -> {LocalPath}",
                 saved.Id, saved.DownloadClientId, saved.RemotePath, saved.LocalPath);
 
-            try { cache.Remove(ClientCacheKey(saved.DownloadClientId)); }
+            try
+            {
+                // A mapping can move to another client, so the old owner's entry is stale too.
+                await InvalidateClientCacheAsync(existing.DownloadClientId);
+                await InvalidateClientCacheAsync(saved.DownloadClientId);
+            }
             catch (Exception caughtEx_2) when (caughtEx_2 is not OperationCanceledException && caughtEx_2 is not OutOfMemoryException && caughtEx_2 is not StackOverflowException)
             {
                 System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
@@ -132,7 +147,7 @@ namespace Listenarr.Infrastructure.Configuration.Paths
                     "Deleted remote path mapping {MappingId} for client {ClientId}",
                     id, existing.DownloadClientId);
 
-                try { cache.Remove(ClientCacheKey(existing.DownloadClientId)); }
+                try { await InvalidateClientCacheAsync(existing.DownloadClientId); }
                 catch (Exception caughtEx_3) when (caughtEx_3 is not OperationCanceledException && caughtEx_3 is not OutOfMemoryException && caughtEx_3 is not StackOverflowException)
                 {
                     System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
