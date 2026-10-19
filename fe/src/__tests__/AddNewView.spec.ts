@@ -428,6 +428,109 @@ describe('AddNewView pagination', () => {
     )
   })
 
+  // Navigation within the app keeps the same Pinia: the search store outlives the page
+  describe('a search that keeps running while the page is away', () => {
+    type Deferred = { query: string; resolve: (r: SearchResult[]) => void }
+    const book = (title: string, asin: string) =>
+      ({
+        asin,
+        title,
+        authors: [{ name: 'Someone' }],
+        language: 'english',
+      }) as unknown as SearchResult
+
+    async function setup() {
+      const apiModule = await import('@/services/api')
+      const pending: Deferred[] = []
+      vi.spyOn(apiModule.apiService, 'advancedSearch').mockImplementation(
+        (params: { title?: string }) =>
+          new Promise<SearchResult[]>((resolve) =>
+            pending.push({ query: params.title ?? '', resolve }),
+          ),
+      )
+      const pinia = createPinia()
+      const router = createTestRouter()
+      const visit = async () => {
+        const wrapper = mount(AddNewView, { global: { plugins: [pinia, router] } })
+        await flushPromises()
+        return {
+          wrapper,
+          vm: wrapper.vm as unknown as {
+            searchQuery?: string
+            isSearching?: boolean
+            titleResults?: Array<{ title?: string }>
+            performSearch?: () => Promise<unknown>
+          },
+        }
+      }
+      const answer = async (query: string, results: SearchResult[]) => {
+        pending.find((p) => p.query === query)!.resolve(results)
+        await flushPromises()
+      }
+      const savedQuery = () =>
+        JSON.parse(window.sessionStorage.getItem('listenarr.addNewSearchContext') ?? 'null')?.query
+      return { visit, answer, savedQuery }
+    }
+
+    it('shows the running search when coming back, then its results', async () => {
+      const { visit, answer, savedQuery } = await setup()
+      const first = await visit()
+      first.vm.searchQuery = 'Dune'
+      void first.vm.performSearch?.()
+      await flushPromises()
+      first.wrapper.unmount()
+
+      const back = await visit()
+      expect(back.vm.isSearching).toBe(true)
+      expect(back.vm.searchQuery).toBe('Dune')
+
+      await answer('Dune', [book('Dune', 'B000000001')])
+      expect(back.vm.isSearching).toBe(false)
+      expect(back.vm.titleResults?.map((r) => r.title)).toEqual(['Dune'])
+      expect(savedQuery()).toBe('Dune')
+    })
+
+    it('ignores an older search that answers after the search that replaced it', async () => {
+      const { visit, answer, savedQuery } = await setup()
+      const first = await visit()
+      first.vm.searchQuery = 'Dune'
+      void first.vm.performSearch?.()
+      await flushPromises()
+      first.wrapper.unmount()
+
+      // Back on the page, a new search replaces the one still running
+      const back = await visit()
+      back.vm.searchQuery = 'Foundation'
+      void back.vm.performSearch?.()
+      await flushPromises()
+      await answer('Foundation', [book('Foundation', 'B000000002')])
+      expect(back.vm.titleResults?.map((r) => r.title)).toEqual(['Foundation'])
+
+      await answer('Dune', [book('Dune', 'B000000001')])
+      expect(back.vm.titleResults?.map((r) => r.title)).toEqual(['Foundation'])
+      expect(savedQuery()).toBe('Foundation')
+      back.wrapper.unmount()
+
+      const again = await visit()
+      expect(again.vm.searchQuery).toBe('Foundation')
+      expect(again.vm.titleResults?.map((r) => r.title)).toEqual(['Foundation'])
+    })
+
+    it('ignores the answer of a cancelled search', async () => {
+      const { visit, answer, savedQuery } = await setup()
+      const page = await visit()
+      page.vm.searchQuery = 'Dune'
+      void page.vm.performSearch?.()
+      await flushPromises()
+      ;(page.wrapper.vm as unknown as { cancelSearch: () => void }).cancelSearch()
+      expect(page.vm.isSearching).toBe(false)
+
+      await answer('Dune', [book('Dune', 'B000000001')])
+      expect(page.vm.titleResults?.length).toBe(0)
+      expect(savedQuery()).toBeUndefined()
+    })
+  })
+
   it('restores the submitted query, not a draft typed after the search, when coming back', async () => {
     window.sessionStorage.setItem(
       'listenarr.addNewResults',

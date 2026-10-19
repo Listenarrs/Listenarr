@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-import { ref, computed } from 'vue'
+import { ref, computed, type Ref } from 'vue'
 import type { SearchResult } from '@/types'
 import { apiService } from '@/services/api'
 import { logger } from '@/utils/logger'
@@ -56,12 +56,16 @@ type AudibleMetadataResponse = {
   source?: string
 } & AudibleMetadataRecord
 
-export function useSearch() {
+type SearchType = 'asin' | 'title' | 'isbn' | null
+
+// options.searchType: shared state to keep the detected search type in (Add New keeps it in its
+// search store, with the results it belongs to)
+export function useSearch(options: { searchType?: Ref<SearchType> } = {}) {
   // Reactive state
   const searchQuery = ref('')
   const searchLanguage = ref('us')
   const preferredSearchLanguage = ref('english')
-  const searchType = ref<'asin' | 'title' | 'isbn' | null>(null)
+  const searchType = options.searchType ?? ref<SearchType>(null)
   const isSearching = ref(false)
   const searchError = ref('')
   const searchStatus = ref('')
