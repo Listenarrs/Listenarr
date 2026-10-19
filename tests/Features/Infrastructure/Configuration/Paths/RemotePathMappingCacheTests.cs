@@ -118,6 +118,22 @@ namespace Listenarr.Tests.Features.Infrastructure.Configuration.Paths
             Assert.Empty(await _service.GetPathMappingByClientAsync(_client));
         }
 
+        // The boundary of the cache: a row inserted behind the service stays invisible until the
+        // entry expires, because only the service's own writers clear it.
+        [Fact]
+        public async Task GetPathMappingByClientAsync_DoesNotSeeAMappingWrittenBehindTheService()
+        {
+            Assert.Empty(await _service.GetPathMappingByClientAsync(_client));
+
+            await _remotePathMappingRepository.SaveAsync(new RemotePathMappingBuilder()
+                .WithDownloadClientConfiguration(_client)
+                .WithRemotePath(FileUtils.GetAbsolutePath("downloads"))
+                .WithLocalPath(FileUtils.GetAbsolutePath("library"))
+                .Build());
+
+            Assert.Empty(await _service.GetPathMappingByClientAsync(_client));
+        }
+
         [Fact]
         public async Task GetPathMappingByClientAsync_HandsEachCallerItsOwnListInTheRepositoryOrder()
         {

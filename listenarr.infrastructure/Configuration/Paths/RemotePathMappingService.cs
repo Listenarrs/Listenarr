@@ -15,6 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using AsyncKeyedLock;
 using Listenarr.Domain.Common;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
@@ -37,10 +38,35 @@ namespace Listenarr.Infrastructure.Configuration.Paths
             return await remotePathMappingRepository.GetByIdAsync(id);
         }
 
+        // A client's mappings change only when the user edits them, but every translated path in a
+        // queue poll asks for them. Serving them from the cache that create, update and delete
+        // already clear keeps a poll to one read per client instead of one per path.
+        private static readonly TimeSpan ClientCacheLifetime = TimeSpan.FromSeconds(10);
+        private static readonly AsyncKeyedLocker<string> ClientCacheLocks = new();
+
         public async Task<List<RemotePathMapping>> GetPathMappingByClientAsync(DownloadClientConfiguration client)
         {
-            return await remotePathMappingRepository.GetByClientIdAsync(client.Id);
+            var cacheKey = ClientCacheKey(client.Id);
+            if (cache.TryGetValue(cacheKey, out RemotePathMapping[]? cached) && cached is not null)
+            {
+                return [.. cached];
+            }
+
+            // Concurrent translations of one poll all miss together; let the first fill the cache.
+            using (await ClientCacheLocks.LockAsync(cacheKey))
+            {
+                if (cache.TryGetValue(cacheKey, out cached) && cached is not null)
+                {
+                    return [.. cached];
+                }
+
+                var mappings = await remotePathMappingRepository.GetByClientIdAsync(client.Id);
+                cache.Set(cacheKey, mappings.ToArray(), ClientCacheLifetime);
+                return mappings;
+            }
         }
+
+        private static string ClientCacheKey(string downloadClientId) => $"rpm_client_{downloadClientId}";
 
         public async Task<RemotePathMapping> CreateAsync(RemotePathMapping mapping)
         {
@@ -55,7 +81,7 @@ namespace Listenarr.Infrastructure.Configuration.Paths
 
             try
             {
-                cache.Remove($"rpm_client_{saved.DownloadClientId}");
+                cache.Remove(ClientCacheKey(saved.DownloadClientId));
             }
             catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
             {
@@ -84,7 +110,7 @@ namespace Listenarr.Infrastructure.Configuration.Paths
                 "Updated remote path mapping {MappingId} for client {ClientId}: {RemotePath} -> {LocalPath}",
                 saved.Id, saved.DownloadClientId, saved.RemotePath, saved.LocalPath);
 
-            try { cache.Remove($"rpm_client_{saved.DownloadClientId}"); }
+            try { cache.Remove(ClientCacheKey(saved.DownloadClientId)); }
             catch (Exception caughtEx_2) when (caughtEx_2 is not OperationCanceledException && caughtEx_2 is not OutOfMemoryException && caughtEx_2 is not StackOverflowException)
             {
                 System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
@@ -106,7 +132,7 @@ namespace Listenarr.Infrastructure.Configuration.Paths
                     "Deleted remote path mapping {MappingId} for client {ClientId}",
                     id, existing.DownloadClientId);
 
-                try { cache.Remove($"rpm_client_{existing.DownloadClientId}"); }
+                try { cache.Remove(ClientCacheKey(existing.DownloadClientId)); }
                 catch (Exception caughtEx_3) when (caughtEx_3 is not OperationCanceledException && caughtEx_3 is not OutOfMemoryException && caughtEx_3 is not StackOverflowException)
                 {
                     System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
