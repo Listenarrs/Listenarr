@@ -27,8 +27,13 @@ import { logger } from '@/utils/logger'
 // searchRequestId; only the latest one may apply its results and save its context, so a late answer
 // from a replaced search (or from a page that was left) can't overwrite the newer one.
 //
-// The last successful search is kept in sessionStorage: it survives going to a book and back, not
-// closing the tab, so a later visit doesn't open on an old search.
+// Two things are kept apart, never mixed:
+// - the current inputs (draft): what the user typed or chose in the form, kept as is for the tab
+//   session; only what the user changed is kept, so an untouched region still follows Settings;
+// - the parameters of the results on screen (context): what the search that found them was made
+//   with, shown above them and loaded back into the form only when the user asks.
+//
+// Both are kept in sessionStorage: they survive going to a book and back, not closing the tab.
 
 // A title result of Add New, whatever source it came from
 export type TitleSearchResult = Omit<OpenLibraryBook, 'isbn'> & {
@@ -39,8 +44,24 @@ export type TitleSearchResult = Omit<OpenLibraryBook, 'isbn'> & {
   region?: string // Audible/Amazon market region from the search result
 }
 
-// The query, region and language a search was made with, restored with its results
-export type SearchContext = { query?: string; region?: string; language?: string }
+// The advanced form's fields a search was made with
+export type AdvancedSearchFields = {
+  title?: string
+  author?: string
+  series?: string
+  isbn?: string
+  asin?: string
+}
+// What a search was made with: the search box's query or the advanced form's fields, the region
+// and the language
+export type SearchContext = {
+  query?: string
+  advanced?: AdvancedSearchFields
+  region?: string
+  language?: string
+}
+// The form as the user left it (only what they changed)
+export type SearchDraft = { query?: string; region?: string; language?: string }
 export type SearchType = 'asin' | 'title' | 'isbn' | null
 
 const RESULTS_KEY = 'listenarr.addNewResults'
@@ -49,6 +70,7 @@ const TITLE_RESULTS_COUNT_KEY = 'listenarr.addNewTitleResultsCount'
 const ASIN_FILTERING_KEY = 'listenarr.addNewAsinFiltering'
 const RESOLVED_ASINS_KEY = 'listenarr.addNewResolvedAsins'
 const SEARCH_CONTEXT_KEY = 'listenarr.addNewSearchContext'
+const DRAFT_KEY = 'listenarr.addNewSearchDraft'
 // Earlier versions kept these in localStorage, where they outlived the session
 const LEGACY_LOCAL_KEYS = [
   RESULTS_KEY,
@@ -76,8 +98,10 @@ export const useAddNewSearchStore = defineStore('addNewSearch', () => {
   const resolvedAsins = ref<Record<string, string>>({})
   const asinFilteringApplied = ref(false)
   const searchType = ref<SearchType>(null)
-  // The context of the results shown (restored, or of the last search that succeeded)
+  // The parameters of the results shown (restored, or of the last search that succeeded)
   const context = ref<SearchContext | null>(null)
+  // The form as the user left it
+  const draft = ref<SearchDraft>({})
   // The search in progress, if any
   const running = ref(false)
   const runningContext = ref<SearchContext | null>(null)
@@ -160,6 +184,8 @@ export const useAddNewSearchStore = defineStore('addNewSearch', () => {
     // Only a search that left results on screen is restored with its context
     const storedContext = hasResults.value ? sessionStorage.getItem(SEARCH_CONTEXT_KEY) : null
     if (storedContext) context.value = JSON.parse(storedContext) as SearchContext
+    const storedDraft = sessionStorage.getItem(DRAFT_KEY)
+    if (storedDraft) draft.value = JSON.parse(storedDraft) as SearchDraft
   } catch (error) {
     logger.warn('Failed to restore persisted state:', error)
   }
@@ -179,6 +205,7 @@ export const useAddNewSearchStore = defineStore('addNewSearch', () => {
   watch(totalTitleResultsCount, (v) => save(TITLE_RESULTS_COUNT_KEY, v.toString()))
   watch(asinFilteringApplied, (v) => save(ASIN_FILTERING_KEY, v.toString()))
   watch(resolvedAsins, (v) => save(RESOLVED_ASINS_KEY, JSON.stringify(v)), { deep: true })
+  watch(draft, (v) => save(DRAFT_KEY, JSON.stringify(v)), { deep: true })
 
   return {
     audibleResult,
@@ -190,6 +217,7 @@ export const useAddNewSearchStore = defineStore('addNewSearch', () => {
     asinFilteringApplied,
     searchType,
     context,
+    draft,
     running,
     runningContext,
     hasResults,

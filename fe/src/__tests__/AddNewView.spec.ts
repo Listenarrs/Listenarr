@@ -264,7 +264,7 @@ describe('AddNewView pagination', () => {
     expect((wrapper.find('select#region-select').element as HTMLSelectElement).value).toBe('de')
   })
 
-  it('restores a search of this session with its query, region and language', async () => {
+  it('shows the parameters of a search of this session with its results, and restores them only on demand', async () => {
     const apiModule = await import('@/services/api')
     const apiService = apiModule.apiService as unknown as { getApplicationSettings?: Mock }
     apiService.getApplicationSettings?.mockResolvedValue({
@@ -293,6 +293,15 @@ describe('AddNewView pagination', () => {
       titleResults?: unknown[]
     }
     expect(vm.titleResults?.length).toBe(1)
+    // The results say what they were found with; the form is left alone (the defaults here)
+    expect(wrapper.get('[data-testid="search-results-for"]').text()).toBe(
+      'for “Dune” · France (FR) · French',
+    )
+    expect(vm.searchQuery).toBe('')
+    expect(vm.searchLanguage).toBe('de')
+    expect(vm.preferredSearchLanguage).toBe('german')
+
+    await wrapper.get('[data-testid="restore-search-inputs"]').trigger('click')
     expect(vm.searchQuery).toBe('Dune')
     expect(vm.searchLanguage).toBe('fr')
     expect(vm.preferredSearchLanguage).toBe('french')
@@ -360,11 +369,11 @@ describe('AddNewView pagination', () => {
   }
 
   it.each([
-    ['the search box', false],
-    ['the advanced form', true],
+    ['the search box', false, 'Foundation'],
+    ['the advanced form', true, ''],
   ])(
     'clears the previous results when a search from %s fails, and keeps nothing of it',
-    async (_label, advanced) => {
+    async (_label, advanced, typedQuery) => {
       seedDuneSearch()
       const apiModule = await import('@/services/api')
       vi.spyOn(apiModule.apiService, 'advancedSearch').mockRejectedValue(new Error('Network error'))
@@ -399,8 +408,9 @@ describe('AddNewView pagination', () => {
       const back = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
       await flushPromises()
       const backVm = back.vm as unknown as { searchQuery?: string; titleResults?: unknown[] }
+      // Nothing of the failed search comes back; what the user typed stays theirs
       expect(backVm.titleResults?.length).toBe(0)
-      expect(backVm.searchQuery).toBe('')
+      expect(backVm.searchQuery).toBe(typedQuery)
     },
   )
 
@@ -483,6 +493,8 @@ describe('AddNewView pagination', () => {
       const back = await visit()
       expect(back.vm.isSearching).toBe(true)
       expect(back.vm.searchQuery).toBe('Dune')
+      // What is being searched is said while it runs, whatever the form now holds
+      expect(back.wrapper.get('[data-testid="running-search-for"]').text()).toContain('for “Dune”')
 
       await answer('Dune', [book('Dune', 'B000000001')])
       expect(back.vm.isSearching).toBe(false)
@@ -565,7 +577,7 @@ describe('AddNewView pagination', () => {
     })
   })
 
-  it('restores the submitted query, not a draft typed after the search, when coming back', async () => {
+  it("keeps what was typed after a search when coming back, next to that search's results", async () => {
     window.sessionStorage.setItem(
       'listenarr.addNewResults',
       JSON.stringify({ titleResults: [{ key: 'B000999', title: 'Dune Simple' }] }),
@@ -589,7 +601,55 @@ describe('AddNewView pagination', () => {
     await flushPromises()
     const vm = back.vm as unknown as { searchQuery?: string; titleResults?: unknown[] }
     expect(vm.titleResults?.length).toBe(1)
-    expect(vm.searchQuery).toBe('Dune')
+    expect(vm.searchQuery).toBe('Foundation')
+    expect(back.get('[data-testid="search-results-for"]').text()).toContain('for “Dune”')
+  })
+
+  it('restores an advanced search into the advanced form', async () => {
+    window.sessionStorage.setItem(
+      'listenarr.addNewResults',
+      JSON.stringify({ titleResults: [{ key: 'B000999', title: 'Dune Simple' }] }),
+    )
+    window.sessionStorage.setItem('listenarr.addNewSearchType', 'title')
+    window.sessionStorage.setItem('listenarr.addNewTitleResultsCount', '1')
+    window.sessionStorage.setItem(
+      'listenarr.addNewSearchContext',
+      JSON.stringify({
+        advanced: { title: 'Dune', author: 'Frank Herbert' },
+        region: 'us',
+        language: 'english',
+      }),
+    )
+    const router = createTestRouter()
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="search-results-for"]').text()).toBe(
+      'for Title: Dune, Author: Frank Herbert · United States (US) · English',
+    )
+
+    await wrapper.get('[data-testid="restore-search-inputs"]').trigger('click')
+    const vm = wrapper.vm as unknown as {
+      showAdvancedSearch?: boolean
+      advancedSearchParams?: Record<string, unknown>
+    }
+    expect(vm.showAdvancedSearch).toBe(true)
+    expect(vm.advancedSearchParams).toEqual(
+      expect.objectContaining({ title: 'Dune', author: 'Frank Herbert' }),
+    )
+  })
+
+  it('keeps the region and language the user chose when coming back, not the defaults', async () => {
+    const router = createTestRouter()
+    const first = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    await first.get('select#region-select').setValue('fr')
+    first.unmount()
+
+    const back = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    const vm = back.vm as unknown as { searchLanguage?: string; preferredSearchLanguage?: string }
+    expect(vm.searchLanguage).toBe('fr')
+    expect(vm.preferredSearchLanguage).toBe('french')
   })
 
   it('uses the new defaults after a visit without a search', async () => {

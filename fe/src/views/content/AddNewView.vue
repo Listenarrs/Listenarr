@@ -91,6 +91,7 @@
                   id="language-select"
                   class="language-select form-select"
                   aria-label="Filter results by language"
+                  @change="rememberLanguageChoice"
                 >
                   <option
                     v-for="option in preferredSearchLanguageOptions"
@@ -236,6 +237,7 @@
                     aria-label="Filter results by language"
                     v-model="preferredSearchLanguage"
                     class="form-input"
+                    @change="rememberLanguageChoice"
                   >
                     <option
                       v-for="option in preferredSearchLanguageOptions"
@@ -342,6 +344,9 @@
       <div class="loading-spinner">
         <PhSpinner class="ph-spin" />
         <p>Searching for audiobooks...</p>
+        <p v-if="runningSearchDescription" class="search-status" data-testid="running-search-for">
+          {{ runningSearchDescription }}
+        </p>
         <p v-if="searchStatus" class="search-status">{{ searchStatus }}</p>
       </div>
     </div>
@@ -350,7 +355,11 @@
     <div v-if="hasResults" class="search-results">
       <!-- ASIN Results -->
       <div v-if="searchType === 'asin' && audibleResult">
-        <h2>Audiobook Found</h2>
+        <SearchResultsHeading
+          heading="Audiobook Found"
+          :context="searchStore.context"
+          @restore="restoreSearchInputs"
+        />
         <div class="title-results">
           <div class="title-result-card">
             <div class="result-poster">
@@ -613,9 +622,11 @@
 
       <!-- Title Search Results -->
       <div v-if="searchType === 'title' && titleResults.length > 0">
-        <h2>
-          Found {{ totalTitleResultsCount }} Book{{ totalTitleResultsCount === 1 ? '' : 's' }}
-        </h2>
+        <SearchResultsHeading
+          :heading="`Found ${totalTitleResultsCount} Book${totalTitleResultsCount === 1 ? '' : 's'}`"
+          :context="searchStore.context"
+          @restore="restoreSearchInputs"
+        />
         <div v-if="hasTitleResultControls" class="results-controls">
           <div
             v-if="isAudiblePaged && Math.ceil(audibleTotal / audibleLimit) > 1"
@@ -1005,9 +1016,12 @@ import { useLibraryStore } from '@/stores/library'
 import { storeToRefs } from 'pinia'
 import {
   useAddNewSearchStore,
+  type AdvancedSearchFields,
   type SearchContext,
   type TitleSearchResult,
 } from '@/stores/addNewSearch'
+import SearchResultsHeading from '@/components/domain/search/SearchResultsHeading.vue'
+import { describeSearchContext } from '@/utils/searchContext'
 import AddLibraryModal from '@/components/domain/audiobook/AddLibraryModal.vue'
 import { useToast } from '@/services/toastService'
 import { safeText } from '@/utils/textUtils'
@@ -1213,6 +1227,8 @@ const selectedSearchRegion = computed({
     const normalizedRegion = normalizeSearchRegion(value)
     searchLanguage.value = normalizedRegion
     preferredSearchLanguage.value = getPrimaryPreferredSearchLanguageForRegion(normalizedRegion)
+    searchStore.draft.region = normalizedRegion
+    searchStore.draft.language = preferredSearchLanguage.value
   },
 })
 
@@ -1354,13 +1370,17 @@ try {
   logger.warn('Failed to restore persisted state:', error)
 }
 
-// Coming back: the search still running, else the one whose results are shown
-const shownSearchContext: SearchContext | null = searchStore.running
-  ? searchStore.runningContext
-  : searchStore.hasResults
-    ? searchStore.context
-    : null
-if (shownSearchContext) searchQuery.value = shownSearchContext.query ?? ''
+// The form is the user's: coming back shows it as they left it, never a search's parameters
+// (those are shown with the results, and loaded into the form only on "Restore search inputs")
+searchQuery.value = searchStore.draft.query ?? ''
+watch(searchQuery, (query) => {
+  searchStore.draft.query = query
+})
+
+// Only the user's own choices are kept: an untouched region or language follows Settings
+const rememberLanguageChoice = () => {
+  searchStore.draft.language = preferredSearchLanguage.value
+}
 
 watch(
   addedAsins,
@@ -1394,12 +1414,38 @@ watch(currentAdvancedPage, () => {
 })
 
 // A new search: what it searches for, at the time it starts
-const newSearch = (query?: string): number =>
+const newSearch = (query?: string, advanced?: AdvancedSearchFields): number =>
   searchStore.begin({
     query,
+    advanced,
     region: searchLanguage.value,
     language: preferredSearchLanguage.value,
   })
+
+// "Restore search inputs": load the parameters of the results into the form, to change them or
+// search again from them
+const restoreSearchInputs = (context: SearchContext) => {
+  if (context.advanced) {
+    showAdvancedSearch.value = true
+    advancedSearchParams.value = { ...context.advanced }
+  } else {
+    showAdvancedSearch.value = false
+    searchQuery.value = context.query ?? ''
+  }
+  if (context.region) {
+    searchLanguage.value = normalizeSearchRegion(context.region)
+    searchStore.draft.region = searchLanguage.value
+  }
+  if (context.language) {
+    preferredSearchLanguage.value = normalizePreferredSearchLanguage(context.language)
+    searchStore.draft.language = preferredSearchLanguage.value
+  }
+}
+
+// What the running search looks for, shown while it runs (also after leaving and coming back)
+const runningSearchDescription = computed(() =>
+  searchStore.runningContext ? describeSearchContext(searchStore.runningContext) : '',
+)
 
 // Computed properties
 const hasResults = computed(() => {
@@ -1770,7 +1816,7 @@ const performAdvancedSearch = async () => {
       return
     }
 
-    const searchRequestId = newSearch()
+    const searchRequestId = newSearch(undefined, { ...p })
     advancedSearchError.value = ''
     searchError.value = ''
 
@@ -1977,6 +2023,7 @@ const clearAdvancedSearch = () => {
     typeof savedLanguage === 'string' && savedLanguage.trim()
       ? normalizePreferredSearchLanguage(savedLanguage)
       : getPrimaryPreferredSearchLanguageForRegion(searchLanguage.value)
+  searchStore.draft.language = undefined
   advancedSearchError.value = ''
   // Reset audible paging state
   audiblePage.value = 1
@@ -3297,15 +3344,16 @@ onMounted(async () => {
   const defaultRegion = normalizeSearchRegion(configStore.applicationSettings?.defaultSearchRegion)
   const defaultLanguage = configStore.applicationSettings?.defaultSearchLanguage
   // Coming back to a search of this session: show it with the region and language it was made in
-  if (shownSearchContext?.region && shownSearchContext.language) {
-    searchLanguage.value = normalizeSearchRegion(shownSearchContext.region)
-    preferredSearchLanguage.value = normalizePreferredSearchLanguage(shownSearchContext.language)
-  } else {
-    searchLanguage.value = defaultRegion
-    preferredSearchLanguage.value =
-      typeof defaultLanguage === 'string' && defaultLanguage.trim()
-        ? normalizePreferredSearchLanguage(defaultLanguage)
-        : getPrimaryPreferredSearchLanguageForRegion(defaultRegion)
+  searchLanguage.value = defaultRegion
+  preferredSearchLanguage.value =
+    typeof defaultLanguage === 'string' && defaultLanguage.trim()
+      ? normalizePreferredSearchLanguage(defaultLanguage)
+      : getPrimaryPreferredSearchLanguageForRegion(defaultRegion)
+  // What the user chose in this session wins over the defaults
+  if (searchStore.draft.region)
+    searchLanguage.value = normalizeSearchRegion(searchStore.draft.region)
+  if (searchStore.draft.language) {
+    preferredSearchLanguage.value = normalizePreferredSearchLanguage(searchStore.draft.language)
   }
 
   // Audible integration removed: no auth status to check
