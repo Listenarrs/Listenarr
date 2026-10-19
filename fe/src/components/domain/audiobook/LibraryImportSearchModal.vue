@@ -190,6 +190,8 @@ async function runSearch() {
   hasSearched.value = false
   // Results of the previous query or region can't be picked while this one runs
   searchResults.value = []
+  // Importing waits for it (each search counts once, however it ends)
+  store.findMatchSearchStarted()
   try {
     const isAsin = /^[A-Z0-9]{10}$/i.test(q)
     const params = isAsin
@@ -204,6 +206,7 @@ async function runSearch() {
     // The API wraps the AbortError into a generic error, so the signal tells it apart.
     if (controller === searchController && !controller.signal.aborted) throw error
   } finally {
+    store.findMatchSearchEnded()
     if (controller === searchController) {
       searchController = null
       isSearching.value = false

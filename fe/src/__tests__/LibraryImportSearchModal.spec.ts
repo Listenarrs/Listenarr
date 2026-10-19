@@ -306,4 +306,48 @@ describe('LibraryImportSearchModal', () => {
       process.off('unhandledRejection', unhandled)
     }
   })
+
+  it('tells the import a search is running until it ends, also when the modal closes during it', async () => {
+    const { useLibraryImportStore } = await import('@/stores/libraryImport')
+    let answer: (results: SearchResult[]) => void = () => {}
+    vi.mocked(apiService.advancedSearch).mockImplementation(
+      (_params, signal) =>
+        new Promise<SearchResult[]>((resolve, reject) => {
+          answer = resolve
+          signal?.addEventListener('abort', () => reject(new Error('Network error')))
+        }),
+    )
+    const item = {
+      id: '/incoming/PH4/01.mp3',
+      fullPath: '/incoming/PH4/01.mp3',
+      sourceFiles: ['/incoming/PH4/01.mp3'],
+      folderPath: '/incoming/PH4',
+      relativePath: 'PH4',
+      folderName: 'Primal Hunter 4',
+      detectedTitle: 'The Primal Hunter 4',
+      detectedAuthor: 'Zogarth',
+      format: 'MP3',
+      fileCount: 1,
+      selectedMatch: null,
+      hasSearched: false,
+      isSearching: false,
+      selected: false,
+    }
+    const store = useLibraryImportStore()
+
+    const first = mount(LibraryImportSearchModal, { props: { item } })
+    await flushPromises()
+    expect(store.findMatchSearching).toBe(true)
+    answer([])
+    await flushPromises()
+    expect(store.findMatchSearching).toBe(false)
+    first.unmount()
+
+    const second = mount(LibraryImportSearchModal, { props: { item } })
+    await flushPromises()
+    expect(store.findMatchSearching).toBe(true)
+    second.unmount()
+    await flushPromises()
+    expect(store.findMatchSearching).toBe(false)
+  })
 })

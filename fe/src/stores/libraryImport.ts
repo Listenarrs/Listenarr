@@ -158,6 +158,16 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   const items = ref<Record<string, LibraryImportItem>>({})
   const lookupQueue = ref<string[]>([])
   const isProcessing = ref(false)
+  // Find Match searches running in their modals: importing waits until none is left, so a row can't
+  // be imported while its match is being chosen
+  const findMatchSearchCount = ref(0)
+  const findMatchSearching = computed(() => findMatchSearchCount.value > 0)
+  function findMatchSearchStarted() {
+    findMatchSearchCount.value += 1
+  }
+  function findMatchSearchEnded() {
+    findMatchSearchCount.value = Math.max(0, findMatchSearchCount.value - 1)
+  }
   const rootFolderId = ref<number | null>(null)
   const scanStatus = ref<'idle' | 'scanning' | 'done' | 'error'>('idle')
   const scanError = ref<string | null>(null)
@@ -711,6 +721,9 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     items,
     lookupQueue,
     isProcessing,
+    findMatchSearching,
+    findMatchSearchStarted,
+    findMatchSearchEnded,
     rootFolderId,
     scanStatus,
     scanError,
