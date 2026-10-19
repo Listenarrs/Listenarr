@@ -76,12 +76,39 @@ describe('LibraryImportView opened from "Scan for unmatched files"', () => {
     expect(routerReplace).not.toHaveBeenCalled()
   })
 
-  it('does not scan a folder that does not exist', async () => {
+  it('says a requested folder no longer exists, opens the default one and does not scan it', async () => {
     routeQuery.value = { rootFolder: '99', scan: '1' }
-    const { store } = mountView()
+    const { wrapper, store } = mountView()
     await flushPromises()
 
     expect(store.initFromRootFolder).toHaveBeenCalledWith(2)
     expect(store.triggerScan).not.toHaveBeenCalled()
+    // The message takes the place of "No scan results yet"
+    expect(wrapper.get('[data-testid="requested-folder-missing"]').text()).toContain(
+      'This root folder no longer exists',
+    )
+    expect(wrapper.text()).not.toContain('No scan results yet')
+    // Nothing is left to ask for: a reload opens the page normally
+    expect(routerReplace).toHaveBeenCalledWith({
+      query: { rootFolder: undefined, scan: undefined },
+    })
+
+    // Scanning the default folder clears the message
+    await (wrapper.vm as unknown as { startScan: () => Promise<void> }).startScan()
+    await flushPromises()
+    expect(store.triggerScan).toHaveBeenCalledWith(2)
+    expect(wrapper.find('[data-testid="requested-folder-missing"]').exists()).toBe(false)
+  })
+
+  it('clears the missing-folder message when another folder is picked', async () => {
+    routeQuery.value = { rootFolder: '99' }
+    const { wrapper } = mountView()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="requested-folder-missing"]').exists()).toBe(true)
+
+    await wrapper.get('select.folder-select').setValue(3)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="requested-folder-missing"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('No scan results yet')
   })
 })

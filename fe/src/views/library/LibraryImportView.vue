@@ -90,6 +90,24 @@
       <p>Scanning for unmatched audio files...</p>
     </div>
 
+    <!-- The address asked for a root folder that no longer exists: say so instead of the empty state -->
+    <div
+      v-else-if="
+        store.scanStatus === 'idle' && store.itemList.length === 0 && requestedFolderMissing
+      "
+      class="state-panel"
+      role="alert"
+      data-testid="requested-folder-missing"
+    >
+      <PhWarning class="state-icon warn" />
+      <h3>This root folder no longer exists</h3>
+      <p>
+        The link asked for a root folder that isn't in Settings &gt; Root Folders any more. The
+        default folder is selected instead: click <strong>Scan</strong> to scan it, or pick another
+        folder.
+      </p>
+    </div>
+
     <div v-else-if="store.scanStatus === 'idle' && store.itemList.length === 0" class="state-panel">
       <PhMagnifyingGlass class="state-icon" />
       <h3>No scan results yet</h3>
@@ -269,6 +287,8 @@ const MOBILE_TABLE_BREAKPOINT = 720
 
 const store = useLibraryImportStore()
 const route = useRoute()
+// The address named a root folder that doesn't exist (any more)
+const requestedFolderMissing = ref(false)
 const router = useRouter()
 const rootFoldersStore = useRootFoldersStore()
 const configStore = useConfigurationStore()
@@ -334,6 +354,8 @@ onMounted(async () => {
   // the default one
   const requestedId = Number(route.query.rootFolder)
   const requestedFolder = rootFoldersStore.folders.find((f) => f.id === requestedId) ?? null
+  // An old link may name a folder removed since: open as usual on the default one, and say so
+  requestedFolderMissing.value = route.query.rootFolder !== undefined && !requestedFolder
   const folder =
     requestedFolder ?? rootFoldersStore.defaultFolder ?? rootFoldersStore.folders[0] ?? null
   if (folder) {
@@ -343,7 +365,10 @@ onMounted(async () => {
 
   store.action = 'none'
 
-  if (route.query.scan === '1') {
+  if (requestedFolderMissing.value) {
+    // Nothing left to ask for: a reload opens the page normally
+    void router.replace({ query: { ...route.query, rootFolder: undefined, scan: undefined } })
+  } else if (route.query.scan === '1') {
     // Scan once: a reload of the page must not start another scan
     void router.replace({ query: { ...route.query, scan: undefined } })
     if (requestedFolder) await startScan()
@@ -355,6 +380,7 @@ onBeforeUnmount(() => {
 })
 
 async function onFolderChange() {
+  requestedFolderMissing.value = false
   if (selectedFolderId.value) {
     store.stopProcessing()
     await store.initFromRootFolder(selectedFolderId.value)
@@ -363,6 +389,7 @@ async function onFolderChange() {
 
 async function startScan() {
   if (!selectedFolderId.value) return
+  requestedFolderMissing.value = false
   await store.triggerScan(selectedFolderId.value)
 }
 
@@ -619,6 +646,10 @@ async function refreshRootFolders(newFolder: RootFolder) {
 
 .state-icon.ok {
   color: #22c55e;
+}
+
+.state-icon.warn {
+  color: #f39c12;
 }
 
 .state-panel h3 {
