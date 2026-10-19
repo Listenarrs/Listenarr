@@ -56,6 +56,25 @@ public class MigrationMetadataTests : BaseTests
     }
 
     [Fact]
+    public void AddMonitoringQualityProfile_IsDiscoverableAndAddsNullableColumns()
+    {
+        AssertMigrationId<AddMonitoringQualityProfile>(
+            "20261017162658_AddMonitoringQualityProfile");
+        var up = BuildOperations(new AddMonitoringQualityProfile(), "Up");
+        var columns = up.Operations.OfType<AddColumnOperation>().ToList();
+        Assert.Equal(2, up.Operations.Count);
+        Assert.Equal(2, columns.Count);
+        Assert.All(columns, column =>
+        {
+            Assert.Equal("QualityProfileId", column.Name);
+            Assert.True(column.IsNullable);
+        });
+        Assert.Equal(
+            new[] { "MonitoredAuthors", "MonitoredSeries" },
+            columns.Select(column => column.Table).OrderBy(table => table, StringComparer.Ordinal));
+    }
+
+    [Fact]
     public void AddImportBlacklistExtensionsMigration_IsDiscoverableByEf()
     {
         AssertMigrationId<AddImportBlacklistExtensionsToApplicationSettings>(

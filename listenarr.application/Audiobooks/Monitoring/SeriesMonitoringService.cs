@@ -83,6 +83,7 @@ namespace Listenarr.Application.Audiobooks.Monitoring
         private readonly IAudiobookRepository _audiobooks;
         private readonly ISeriesCatalogService _seriesCatalogService;
         private readonly ILibraryAddService _libraryAddService;
+        private readonly IQualityProfileService _qualityProfileService;
         private readonly ILogger<SeriesMonitoringService> _logger;
 
         public SeriesMonitoringService(
@@ -90,12 +91,14 @@ namespace Listenarr.Application.Audiobooks.Monitoring
             IAudiobookRepository audiobooks,
             ISeriesCatalogService seriesCatalogService,
             ILibraryAddService libraryAddService,
+            IQualityProfileService qualityProfileService,
             ILogger<SeriesMonitoringService> logger)
         {
             _series = series;
             _audiobooks = audiobooks;
             _seriesCatalogService = seriesCatalogService;
             _libraryAddService = libraryAddService;
+            _qualityProfileService = qualityProfileService;
             _logger = logger;
         }
 
@@ -134,11 +137,15 @@ namespace Listenarr.Application.Audiobooks.Monitoring
             var displayName = request.Name.Trim();
 
             var monitoredSeries = await _series.GetByNameRegionLanguageAsync(normalizedName, normalizedRegion, normalizedLanguage, cancellationToken);
+            var qualityProfileId = await ResolveMonitoringQualityProfileIdAsync(
+                request.QualityProfileId,
+                monitoredSeries?.QualityProfileId);
 
             if (monitoredSeries == null)
             {
                 monitoredSeries = new MonitoredSeries
                 {
+                    QualityProfileId = qualityProfileId,
                     SeriesName = displayName,
                     SeriesNameNormalized = normalizedName,
                     SeriesAsin = NormalizeOptionalIdentifier(request.Asin),
@@ -152,6 +159,7 @@ namespace Listenarr.Application.Audiobooks.Monitoring
             {
                 monitoredSeries.SeriesName = displayName;
                 monitoredSeries.SeriesAsin = NormalizeOptionalIdentifier(request.Asin) ?? monitoredSeries.SeriesAsin;
+                monitoredSeries.QualityProfileId = qualityProfileId;
                 monitoredSeries.UpdatedAt = DateTime.UtcNow;
             }
 
@@ -258,6 +266,7 @@ namespace Listenarr.Application.Audiobooks.Monitoring
                         {
                             Metadata = MapToMetadata(book),
                             Monitored = true,
+                            QualityProfileId = monitoredSeries.QualityProfileId,
                             AutoSearch = false,
                             HistorySource = "SeriesMonitoring",
                             HistoryMessage =
@@ -283,6 +292,23 @@ namespace Listenarr.Application.Audiobooks.Monitoring
                     }
 
                     result.FailedCount++;
+
+                    if (addResult.IsQualityProfileFailure)
+                    {
+                        // Every remaining addition would be rejected for the same reason, so stop
+                        // and report the configuration problem instead of a successful sync.
+                        result.Succeeded = false;
+                        result.ErrorMessage = addResult.ValidationMessage ?? addResult.Message;
+                        _logger.LogWarning(
+                            "Monitored series '{Name}' sync stopped: {Reason}",
+                            monitoredSeries.SeriesName,
+                            result.ErrorMessage);
+                        monitoredSeries.LastError = TruncateError(result.ErrorMessage);
+                        monitoredSeries.LastCheckedAt = DateTime.UtcNow;
+                        monitoredSeries.UpdatedAt = DateTime.UtcNow;
+                        await _series.UpsertAsync(monitoredSeries, cancellationToken);
+                        return result;
+                    }
                 }
 
                 monitoredSeries.LastCheckedAt = DateTime.UtcNow;
@@ -318,5 +344,29 @@ namespace Listenarr.Application.Audiobooks.Monitoring
             }
         }
 
+        private async Task<int> ResolveMonitoringQualityProfileIdAsync(int? requestedProfileId, int? existingProfileId)
+        {
+            if (requestedProfileId.HasValue)
+            {
+                var requested = await _qualityProfileService.GetByIdAsync(requestedProfileId.Value);
+                return requested?.Id
+                    ?? throw new ArgumentException(
+                        $"Quality profile with ID {requestedProfileId.Value} does not exist. Select a valid quality profile.");
+            }
+
+            if (existingProfileId.HasValue)
+            {
+                var existing = await _qualityProfileService.GetByIdAsync(existingProfileId.Value);
+                if (existing != null)
+                {
+                    return existing.Id;
+                }
+            }
+
+            var defaultProfile = await _qualityProfileService.GetDefaultAsync();
+            return defaultProfile?.Id
+                ?? throw new ArgumentException(
+                    "A quality profile is required to monitor a series. Select a quality profile, or create one in Settings > Quality Profiles.");
+        }
     }
 }
