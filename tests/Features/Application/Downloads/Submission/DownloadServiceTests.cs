@@ -163,8 +163,8 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
             var downloadService = _provider.GetRequiredService<DownloadService>();
             var searchResult = new SearchResult
             {
-                Title = "The Glass Orchard",
-                Artist = "Andy Weir",
+                Title = "The Time Machine",
+                Artist = "H. G. Wells",
                 DownloadType = "Torrent",
                 MagnetLink = "magnet:?xt=urn:btih:ABCDEF1234567890ABCDEF1234567890ABCDEF12",
                 Size = 123456789
@@ -177,7 +177,7 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
                 h => h.RecordDownloadFailedAsync(
                     It.Is<string>(id => !string.IsNullOrWhiteSpace(id)),
                     "qb-1",
-                    "The Glass Orchard",
+                    "The Time Machine",
                     rejection.Message),
                 Times.Once);
         }
@@ -216,8 +216,8 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
             var downloadService = _provider.GetRequiredService<DownloadService>();
             var searchResult = new SearchResult
             {
-                Title = "The Glass Orchard",
-                Artist = "Andy Weir",
+                Title = "The Time Machine",
+                Artist = "H. G. Wells",
                 DownloadType = "Torrent",
                 MagnetLink = "magnet:?xt=urn:btih:ABCDEF1234567890ABCDEF1234567890ABCDEF12",
                 Size = 123456789
@@ -264,8 +264,8 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
             var downloadService = _provider.GetRequiredService<DownloadService>();
             var searchResult = new SearchResult
             {
-                Title = "The Glass Orchard",
-                Artist = "Andy Weir",
+                Title = "The Time Machine",
+                Artist = "H. G. Wells",
                 DownloadType = "Torrent",
                 MagnetLink = "magnet:?xt=urn:btih:ABCDEF1234567890ABCDEF1234567890ABCDEF12",
                 Size = 123456789
