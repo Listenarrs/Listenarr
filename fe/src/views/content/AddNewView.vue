@@ -311,8 +311,8 @@
               Use prefixes for precise searches: <strong>ASIN:</strong>, <strong>AUTHOR:</strong>,
               <strong>TITLE:</strong>, <strong>ISBN:</strong>, or <strong>SERIES:</strong>
             </span>
-            <span v-else-if="searchType === 'asin'">Searching by ASIN</span>
-            <span v-else-if="searchType === 'title'">
+            <span v-else-if="inputType === 'asin'">Searching by ASIN</span>
+            <span v-else-if="inputType === 'title'">
               <span v-if="searchQuery.toUpperCase().startsWith('TITLE:')">Searching by title</span>
               <span v-else-if="searchQuery.toUpperCase().startsWith('AUTHOR:')"
                 >Searching by author</span
@@ -322,7 +322,7 @@
               >
               <span v-else>Searching by title</span>
             </span>
-            <span v-else-if="searchType === 'isbn'">Searching by ISBN</span>
+            <span v-else-if="inputType === 'isbn'">Searching by ISBN</span>
           </div>
 
           <div
@@ -1139,6 +1139,7 @@ const {
   searchError,
   searchStatus,
   searchPlaceholder,
+  inputType,
   handleSearchInput,
   performSearch: runSearch,
   cancelSearch: cancelRequest,

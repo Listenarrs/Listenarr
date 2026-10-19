@@ -516,6 +516,40 @@ describe('AddNewView pagination', () => {
       expect(again.vm.titleResults?.map((r) => r.title)).toEqual(['Foundation'])
     })
 
+    it('keeps what is typed during a search: the search still ends, and the text stays', async () => {
+      const { visit, answer, savedQuery } = await setup()
+      const page = await visit()
+      page.vm.searchQuery = 'Dune'
+      void page.vm.performSearch?.()
+      await flushPromises()
+
+      // Typing the next search, not submitted: it neither stops Dune nor is replaced by it
+      await page.wrapper.get('#unified-search-input').setValue('Foundation')
+      expect(page.vm.isSearching).toBe(true)
+      await answer('Dune', [book('Dune', 'B000000001')])
+
+      expect(page.vm.titleResults?.map((r) => r.title)).toEqual(['Dune'])
+      expect(page.vm.searchQuery).toBe('Foundation')
+      // The saved context is still the search the results come from
+      expect(savedQuery()).toBe('Dune')
+    })
+
+    it('keeps the results type of the search when an ASIN is typed during it', async () => {
+      const { visit, answer } = await setup()
+      const page = await visit()
+      page.vm.searchQuery = 'Dune'
+      void page.vm.performSearch?.()
+      await flushPromises()
+
+      await page.wrapper.get('#unified-search-input').setValue('B0BK9W82PQ')
+      await answer('Dune', [book('Dune', 'B000000001')])
+
+      const vm = page.wrapper.vm as unknown as { searchType?: string; inputType?: string }
+      expect(vm.searchType).toBe('title')
+      expect(vm.inputType).toBe('asin')
+      expect(page.vm.titleResults?.map((r) => r.title)).toEqual(['Dune'])
+    })
+
     it('ignores the answer of a cancelled search', async () => {
       const { visit, answer, savedQuery } = await setup()
       const page = await visit()
@@ -781,8 +815,11 @@ describe('AddNewView pagination', () => {
       await vi.advanceTimersByTimeAsync(1100)
       await flushPromises()
 
-      const vm = wrapper.vm as unknown as { searchType?: string }
-      expect(vm.searchType).toBe('title')
+      // The hint follows the text typed; the type of the results on screen doesn't change
+      const vm = wrapper.vm as unknown as { inputType?: string; searchType?: string | null }
+      expect(vm.inputType).toBe('title')
+      expect(wrapper.get('#unified-search-hint').text()).toContain('Searching by title')
+      expect(vm.searchType).toBeNull()
       expect(advancedSearchSpy).not.toHaveBeenCalled()
     } finally {
       vi.useRealTimers()

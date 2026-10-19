@@ -74,12 +74,18 @@ export function useSearch(options: { searchType?: Ref<SearchType> } = {}) {
   const searchAbortController = ref<AbortController | null>(null)
 
   // Computed properties
+  // The type the text in the field would be searched as, for the hint under it
+  const inputType = computed<SearchType>(() =>
+    searchQuery.value.trim() ? detectSearchType(searchQuery.value) : null,
+  )
+
   const searchPlaceholder = computed(() => {
-    if (searchType.value === 'asin') {
+    const type = inputType.value ?? searchType.value
+    if (type === 'asin') {
       return 'Enter ASIN (e.g., B08G9PRS1K)'
-    } else if (searchType.value === 'title') {
+    } else if (type === 'title') {
       return 'Title, author, or ASIN (e.g., The Hobbit)'
-    } else if (searchType.value === 'isbn') {
+    } else if (type === 'isbn') {
       return 'Enter ISBN (e.g., 9780547928227 or 0547928220)'
     }
     return 'Search by ASIN, ISBN, or title'
@@ -117,23 +123,10 @@ export function useSearch(options: { searchType?: Ref<SearchType> } = {}) {
     return 'title'
   }
 
+  // Typing prepares the next search; it neither stops the running one (only Cancel does) nor changes
+  // the type of the results on screen (searchType), which belongs to the search that found them
   const handleSearchInput = () => {
     searchError.value = ''
-    const query = searchQuery.value.trim()
-
-    if (isSearching.value) {
-      try {
-        cancelSearch()
-      } catch (e) {
-        logger.debug('Error cancelling previous search on input', e)
-      }
-    }
-
-    if (query) {
-      searchType.value = detectSearchType(query)
-    } else {
-      searchType.value = null
-    }
   }
 
   const performSearch = async () => {
@@ -461,6 +454,7 @@ export function useSearch(options: { searchType?: Ref<SearchType> } = {}) {
 
     // Computed
     searchPlaceholder,
+    inputType,
 
     // Methods
     detectSearchType,
