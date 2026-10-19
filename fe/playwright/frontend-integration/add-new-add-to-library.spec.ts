@@ -91,6 +91,7 @@ const modal = (page: Page) => page.locator('.modal-content').last()
 const addButton = (page: Page) =>
   modal(page).locator('button', { hasText: /Add to Library|Adding/ })
 const cancelButton = (page: Page) => modal(page).locator('button', { hasText: 'Cancel' })
+const loading = (page: Page) => modal(page).getByTestId('metadata-loading')
 const notFound = (page: Page) => modal(page).getByTestId('metadata-not-found')
 const editMetadataButton = (page: Page) =>
   modal(page).locator('button', { hasText: 'Edit Metadata' })
@@ -228,5 +229,74 @@ test.describe('Add New: adding a search result to the library', () => {
     expect(await metadata.next()).toContain(`/api/v1/metadata/${asin}?region=us`)
     await metadata.found('us')
     await expectShowsRecord(modal(page))
+  })
+})
+
+// #1062: while the Audible record loads, the modal shows that it is loading, never the search's data
+// it is about to replace, and nothing can be edited or added yet.
+test.describe('Add New: the Add modal while the Audible record loads', () => {
+  test('shows only a loading state until the record arrives', async ({ page }) => {
+    await openAddModal(page)
+
+    await expect(loading(page)).toBeVisible()
+    await expect(loading(page)).toContainText('Fetching the Audible record')
+    await expect(modal(page)).not.toContainText('Search Title')
+    await expect(modal(page)).not.toContainText('Search Author')
+    await expect(editMetadataButton(page)).toHaveCount(0)
+    await expect(qualityProfile(page)).toHaveCount(0)
+    await expect(modal(page).locator('.library-options')).toHaveCount(0)
+    await expect(addButton(page)).toBeDisabled()
+    await expect(addButton(page).locator('.ph-spin')).toBeVisible()
+    await expect(cancelButton(page)).toBeEnabled()
+
+    await metadata.found('us')
+    await expect(loading(page)).toHaveCount(0)
+    await expectShowsRecord(modal(page))
+    await expect(editMetadataButton(page)).toBeVisible()
+    await expect(qualityProfile(page)).toBeVisible()
+    await expect(addButton(page)).toBeEnabled()
+    await expect(addButton(page).locator('.ph-spin')).toHaveCount(0)
+  })
+
+  test('can be cancelled while the record loads', async ({ page, api }) => {
+    await openAddModal(page)
+    await expect(loading(page)).toBeVisible()
+
+    await cancelButton(page).click()
+    await expect(page.locator('.modal-content')).toHaveCount(0)
+    await metadata.found('us')
+    expect(api.calls('addAudiobookToLibrary')).toHaveLength(0)
+  })
+
+  test('shows the missing record on its own, without the search data', async ({ page }) => {
+    await openAddModal(page)
+    await metadata.notFound()
+
+    await expect(notFound(page)).toBeVisible()
+    await expect(loading(page)).toHaveCount(0)
+    await expect(modal(page)).not.toContainText('Search Title')
+    await expect(editMetadataButton(page)).toHaveCount(0)
+    await expect(qualityProfile(page)).toHaveCount(0)
+    await expect(addButton(page)).toBeDisabled()
+  })
+
+  test('shows the loading state again while Search again looks in another region', async ({
+    page,
+  }) => {
+    await openAddModal(page)
+    await metadata.notFound()
+    await notFound(page).getByTestId('metadata-retry-region').selectOption('uk')
+    await notFound(page).getByTestId('metadata-retry').click()
+    await metadata.next()
+
+    await expect(loading(page)).toBeVisible()
+    await expect(notFound(page)).toHaveCount(0)
+    await expect(modal(page)).not.toContainText('Search Title')
+    await expect(addButton(page)).toBeDisabled()
+
+    await metadata.found('uk')
+    await expect(loading(page)).toHaveCount(0)
+    await expectShowsRecord(modal(page))
+    await expect(addButton(page)).toBeEnabled()
   })
 })
