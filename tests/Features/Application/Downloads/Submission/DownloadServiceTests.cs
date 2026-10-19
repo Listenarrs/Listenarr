@@ -163,7 +163,7 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
             var downloadService = _provider.GetRequiredService<DownloadService>();
             var searchResult = new SearchResult
             {
-                Title = "Artemis",
+                Title = "The Glass Orchard",
                 Artist = "Andy Weir",
                 DownloadType = "Torrent",
                 MagnetLink = "magnet:?xt=urn:btih:ABCDEF1234567890ABCDEF1234567890ABCDEF12",
@@ -177,7 +177,7 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
                 h => h.RecordDownloadFailedAsync(
                     It.Is<string>(id => !string.IsNullOrWhiteSpace(id)),
                     "qb-1",
-                    "Artemis",
+                    "The Glass Orchard",
                     rejection.Message),
                 Times.Once);
         }
@@ -216,7 +216,7 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
             var downloadService = _provider.GetRequiredService<DownloadService>();
             var searchResult = new SearchResult
             {
-                Title = "Artemis",
+                Title = "The Glass Orchard",
                 Artist = "Andy Weir",
                 DownloadType = "Torrent",
                 MagnetLink = "magnet:?xt=urn:btih:ABCDEF1234567890ABCDEF1234567890ABCDEF12",
@@ -264,7 +264,7 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
             var downloadService = _provider.GetRequiredService<DownloadService>();
             var searchResult = new SearchResult
             {
-                Title = "Artemis",
+                Title = "The Glass Orchard",
                 Artist = "Andy Weir",
                 DownloadType = "Torrent",
                 MagnetLink = "magnet:?xt=urn:btih:ABCDEF1234567890ABCDEF1234567890ABCDEF12",
