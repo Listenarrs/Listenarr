@@ -26,8 +26,9 @@ namespace Listenarr.Tests.Features.Application.Search.Indexers.Common
     public class IndexerQuerySanitizerTests : BaseTests
     {
         [Theory]
-        // Hyphens/dashes become spaces so a Newznab indexer does not read "-Cast" as an
-        // exclusion operator (issue #1068).
+        // Hyphens/dashes are normalized to spaces (Prowlarr/Sonarr-style query cleaning), so a
+        // hyphenated title token is searched as separate words rather than passed through as a
+        // bare "-token" to any indexer or proxy that treats a leading '-' as an operator.
         [InlineData("Full-Cast", "Full Cast")]
         [InlineData("Spider-Man", "Spider Man")]
         [InlineData("Harry Potter and the Philosopher's Stone (Full-Cast Edition)",

@@ -37,10 +37,12 @@ public static class IndexerQuerySanitizer
             if (char.IsControl(ch) || category == UnicodeCategory.Format)
                 continue;
 
-            // Hyphens and dashes must become spaces rather than survive or be dropped.
-            // Newznab-style indexers treat a leading '-' on a token as an exclusion operator,
-            // so "Full-Cast" is sent as "-Cast" and excludes exactly the releases we want.
-            // "Full Cast" matches; dropping the hyphen ("FullCast") would also miss.
+            // Normalize hyphens and dashes to spaces so a hyphenated title token (e.g.
+            // "Full-Cast") is searched as separate words ("Full Cast"), matching how
+            // Prowlarr/Sonarr clean query terms. This keeps tokenization consistent across
+            // indexers and avoids passing a bare "-token" through to any indexer or proxy that
+            // interprets a leading '-' as a query operator. Dropping the hyphen instead would
+            // wrongly join to "FullCast".
             if (ch is '-' or '‐' or '‑' or '‒' or '–'
                 or '—' or '―' or '−')
             {
