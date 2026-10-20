@@ -8,6 +8,7 @@
  * (at your option) any later version.
  */
 
+using Listenarr.Domain.Common;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.HostedServices.Search
@@ -35,6 +36,42 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                 parts.Add(audiobook.Series);
 
             return string.Join(" ", parts);
+        }
+
+        // Author-free fallback query: many release names omit the author, so the full
+        // title+author query can return nothing even when the book is available. A title
+        // (+ series) query recovers those. Callers must constrain the broadened results to
+        // titles that still match the book before grabbing.
+        public string BuildTitleFallbackSearchQuery(Audiobook audiobook)
+        {
+            var parts = new List<string>();
+
+            if (!string.IsNullOrEmpty(audiobook.Title))
+                parts.Add(audiobook.Title);
+
+            if (!string.IsNullOrEmpty(audiobook.Series))
+                parts.Add(audiobook.Series);
+
+            return string.Join(" ", parts);
+        }
+
+        // The author-free fallback broadens the search, so a same-title/different-book release
+        // could come back. The automatic path scores by quality only (relevance comes from the
+        // query), so constrain fallback results to titles that still match the book before they
+        // reach scoring — otherwise an unrelated release could be grabbed.
+        public List<SearchResult> ConstrainFallbackResultsToTitle(
+            List<SearchResult> fallbackResults,
+            Audiobook audiobook)
+        {
+            if (fallbackResults == null || fallbackResults.Count == 0
+                || string.IsNullOrWhiteSpace(audiobook.Title))
+            {
+                return new List<SearchResult>();
+            }
+
+            return fallbackResults
+                .Where(result => TitleUtils.IsMatchingTitle(result.Title, audiobook.Title))
+                .ToList();
         }
 
         public bool IsTorrentResult(SearchResult result)
