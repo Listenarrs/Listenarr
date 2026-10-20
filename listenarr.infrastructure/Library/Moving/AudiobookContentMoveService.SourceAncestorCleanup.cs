@@ -61,7 +61,8 @@ internal sealed partial class AudiobookContentMoveService
                     target,
                     ownership,
                     cancellationToken,
-                    originalDirectory);
+                    originalDirectory,
+                    releaseAdditionalCoHeldPins: currentDirectory.Dispose);
                 if (!interruptedRemovalCompleted)
                 {
                     return;
@@ -115,7 +116,8 @@ internal sealed partial class AudiobookContentMoveService
                 target,
                 finalOwnership,
                 cancellationToken,
-                originalDirectory);
+                originalDirectory,
+                releaseAdditionalCoHeldPins: currentDirectory.Dispose);
             if (!removalCompleted)
             {
                 return;

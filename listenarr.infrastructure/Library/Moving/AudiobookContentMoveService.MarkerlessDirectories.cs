@@ -352,7 +352,11 @@ internal sealed partial class AudiobookContentMoveService
             if (!Directory.EnumerateFileSystemEntries(path).Any()
                 && directory.VisiblePathMatches())
             {
-                creation.DeletePinnedEmptyDirectoryImmediately(Path.GetFileName(path));
+                // SMB degrade: release the caller's directory anchor for this uncommitted
+                // directory so delete-on-close can finalize.
+                creation.DeletePinnedEmptyDirectoryImmediately(
+                    Path.GetFileName(path),
+                    releaseCoHeldDirectoryPins: directory.Dispose);
             }
         }
         catch

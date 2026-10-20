@@ -36,7 +36,16 @@ public sealed partial class AudiobookFilesystemDeleteService
                     && authorization.ParentAnchor.VisiblePathMatches()))
                 return false;
 
-            publication.DeletePinnedEmptyDirectoryImmediately(name);
+            // SMB degrade: this is the final retirement of the authorized target, so release
+            // the local anchor and the caller's witness so delete-on-close can finalize. The
+            // authorization/parent handle stays alive for the parent-relative absence check.
+            publication.DeletePinnedEmptyDirectoryImmediately(
+                name,
+                releaseCoHeldDirectoryPins: () =>
+                {
+                    current.Dispose();
+                    originalTarget.Dispose();
+                });
             return true;
         }
         catch (Exception exception) when (exception is not (
@@ -229,7 +238,18 @@ public sealed partial class AudiobookFilesystemDeleteService
                 return false;
             }
 
-            publication.DeletePinnedEmptyDirectoryImmediately(directoryName);
+            // SMB degrade: release this directory's local anchor and the witness that
+            // authorized its retirement (for the hierarchy target this is originalTarget,
+            // released only now that the target itself is being retired). The executing
+            // publication's own handle is closed by the helper, and the parent/authorization
+            // stay alive for the parent-relative absence check.
+            publication.DeletePinnedEmptyDirectoryImmediately(
+                directoryName,
+                releaseCoHeldDirectoryPins: () =>
+                {
+                    directory.Dispose();
+                    originalDirectory.Dispose();
+                });
         }
         else if (!parent.VisiblePathMatches())
         {

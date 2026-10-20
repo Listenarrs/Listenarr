@@ -49,7 +49,8 @@ internal static class LibraryDirectoryOwnershipRemoval
         LibraryDirectoryOwnership ownership,
         PinnedDirectoryCreation.PinnedDirectoryAnchor parentAnchor,
         CancellationToken cancellationToken = default,
-        PinnedDirectoryCreation.PinnedDirectoryAnchor? originalDirectory = null)
+        PinnedDirectoryCreation.PinnedDirectoryAnchor? originalDirectory = null,
+        Action? releaseAdditionalCoHeldPins = null)
     {
         ArgumentNullException.ThrowIfNull(ownership);
         cancellationToken.ThrowIfCancellationRequested();
@@ -102,8 +103,18 @@ internal static class LibraryDirectoryOwnershipRemoval
         {
             return LibraryDirectoryRemovalOutcome.Retained;
         }
+        // SMB degrade: release the local anchor and the caller's original witness so
+        // delete-on-close can finalize; the parent stays alive for the absence check.
         publication.DeletePinnedEmptyDirectoryImmediately(
-            Path.GetFileName(originalPath));
+            Path.GetFileName(originalPath),
+            releaseCoHeldDirectoryPins: () =>
+            {
+                directory.Dispose();
+                originalDirectory?.Dispose();
+                // Any pins the caller still holds on this directory in an outer frame
+                // (e.g. source-ancestor cleanup's currentDirectory anchor).
+                releaseAdditionalCoHeldPins?.Invoke();
+            });
         return LibraryDirectoryRemovalOutcome.Removed;
     }
 

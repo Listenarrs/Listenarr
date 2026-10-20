@@ -251,7 +251,8 @@ internal sealed partial class AudiobookContentMoveService
         string target,
         LibraryDirectoryOwnership ownership,
         CancellationToken cancellationToken,
-        PinnedDirectoryCreation.PinnedDirectoryAnchor? originalDirectory = null)
+        PinnedDirectoryCreation.PinnedDirectoryAnchor? originalDirectory = null,
+        Action? releaseAdditionalCoHeldPins = null)
     {
         var ownershipKey = ownership.PathOwnershipKey
             ?? throw new MoveNeedsAttentionException(
@@ -268,7 +269,8 @@ internal sealed partial class AudiobookContentMoveService
                 ownership,
                 authorization.ParentAnchor,
                 cancellationToken,
-                originalDirectory);
+                originalDirectory,
+                releaseAdditionalCoHeldPins);
         }
         catch (InvalidOperationException exception)
         {

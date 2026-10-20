@@ -149,8 +149,16 @@ internal sealed partial class AudiobookContentMoveService
                     return;
                 }
 
+                // SMB degrade: release the co-held pins on this source directory so
+                // delete-on-close can finalize — the local publication anchor and the
+                // retirement lease's promoted handle. On the POSIX fast path this is not run.
                 publication.DeletePinnedEmptyDirectoryImmediately(
-                    Path.GetFileName(sourcePath));
+                    Path.GetFileName(sourcePath),
+                    releaseCoHeldDirectoryPins: () =>
+                    {
+                        directory.Dispose();
+                        sourceRetirementLease.ReleaseDirectory(sourcePath);
+                    });
             }
         }
 
@@ -358,8 +366,16 @@ internal sealed partial class AudiobookContentMoveService
                     return;
                 }
 
+                // SMB degrade: release the co-held pins on this source directory so
+                // delete-on-close can finalize — the local publication anchor and the
+                // retirement lease's promoted handle. On the POSIX fast path this is not run.
                 publication.DeletePinnedEmptyDirectoryImmediately(
-                    Path.GetFileName(source));
+                    Path.GetFileName(source),
+                    releaseCoHeldDirectoryPins: () =>
+                    {
+                        directory.Dispose();
+                        sourceRetirementLease.ReleaseDirectory(source);
+                    });
             }
         }
 
