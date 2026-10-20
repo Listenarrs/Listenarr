@@ -261,6 +261,8 @@ migrate-to-*.sh
 *.opus
 *.wma
 /listenarr.api/config/ffmpeg
+# Generated silence used as a tag round-trip fixture
+!/tests/Data/Audio/*.m4b
 
 # CI / publish outputs
 listenarr.api/publish/
