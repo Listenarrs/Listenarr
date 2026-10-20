@@ -9,6 +9,7 @@
  */
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Polly.CircuitBreaker;
 
 namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
 {
@@ -121,6 +122,11 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                     // still claims to be a healthy live snapshot, which is the failure this guard
                     // exists to stop. An error status from that request is already handled by the
                     // IsSuccessStatusCode check and does not reach here.
+                    //
+                    // BrokenCircuitException is excluded for the same reason. When the client's
+                    // circuit breaker opens after the torrent list arrives, every files request
+                    // that follows is rejected with it, and it does not derive from
+                    // HttpRequestException.
                     try
                     {
                         List<Dictionary<string, JsonElement>> files = [];
@@ -133,7 +139,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
 
                         items.Add(QbittorrentResponseMapper.MapQueueItem(torrent, client, files));
                     }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not HttpRequestException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not HttpRequestException && ex is not BrokenCircuitException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                     {
                         // Debug rather than Warning. A torrent whose fields the mapper cannot read
                         // does not heal, so this fires once per torrent on every poll for as long
