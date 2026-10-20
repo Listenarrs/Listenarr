@@ -125,16 +125,16 @@ namespace Listenarr.Tests.Features.Api
         {
             var metadataMock = new Mock<IAudiobookMetadataService>();
             metadataMock
-                .Setup(m => m.GetMetadataAsync("B0ROLESUFX", "us", false))
+                .Setup(m => m.GetMetadataAsync("B00EZAXAF8", "us", false))
                 .ReturnsAsync(new AudiobookMetadataEnvelope(
                     new AudibleBookResponse
                     {
-                        Asin = "B0ROLESUFX",
-                        Title = "Provider Title",
+                        Asin = "B00EZAXAF8",
+                        Title = "The Brothers Karamazov [Naxos AudioBooks Edition]",
                         Authors = new List<AudibleAuthor>
                         {
-                            new() { Name = "Sample Author" },
-                            new() { Name = "Sample Translator - translator" }
+                            new() { Name = "Fyodor Dostoevsky" },
+                            new() { Name = "Constance Garnett - translator" }
                         }
                     },
                     "Audible",
@@ -153,16 +153,16 @@ namespace Listenarr.Tests.Features.Api
                 var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
                 var audiobook = new Audiobook
                 {
-                    Title = "Catalog Title",
-                    Authors = new List<string> { "Sample Author", "Sample Translator - translator" },
-                    Asin = "B0ROLESUFX",
+                    Title = "The Brothers Karamazov [Naxos AudioBooks Edition]",
+                    Authors = new List<string> { "Fyodor Dostoevsky", "Constance Garnett - translator" },
+                    Asin = "B00EZAXAF8",
                     ExternalIdentifiers =
                     [
                         new AudiobookExternalIdentifier
                         {
                             Type = AudiobookExternalIdentifierType.Asin,
-                            ValueRaw = "B0ROLESUFX",
-                            ValueNormalized = "B0ROLESUFX",
+                            ValueRaw = "B00EZAXAF8",
+                            ValueNormalized = "B00EZAXAF8",
                             Region = "us",
                             IsPrimary = true,
                             Source = AudiobookExternalIdentifierSource.Manual
@@ -181,7 +181,7 @@ namespace Listenarr.Tests.Features.Api
             using var verificationScope = factory.Services.CreateScope();
             var verification = verificationScope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
             var updated = await verification.Audiobooks.SingleAsync(book => book.Id == audiobookId);
-            Assert.Equal(new[] { "Sample Author", "Sample Translator" }, updated.Authors);
+            Assert.Equal(new[] { "Fyodor Dostoevsky", "Constance Garnett" }, updated.Authors);
         }
 
         [Fact]

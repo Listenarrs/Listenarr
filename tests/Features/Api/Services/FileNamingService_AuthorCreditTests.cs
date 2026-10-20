@@ -46,7 +46,11 @@ namespace Listenarr.Tests.Features.Api.Services
         private string RenderAuthor(params string[] authors) =>
             _service.ApplyNamingPattern(
                 "{Author}",
-                new AudibleBookMetadata { Title = "Untitled", Authors = authors.ToList() });
+                new AudibleBookMetadata
+                {
+                    Title = "The Brothers Karamazov [Naxos AudioBooks Edition]",
+                    Authors = authors.ToList()
+                });
 
         [Fact]
         public void AuthorFolder_UsesTheAuthorWhenTheTranslatorIsCreditedSecond()
@@ -58,9 +62,9 @@ namespace Listenarr.Tests.Features.Api.Services
         [Fact]
         public void AuthorFolder_UsesTheAuthorWhenTheTranslatorIsCreditedFirst()
         {
-            // B00EZAXAF8, The Brothers Karamazov, the same pair the other way round. Taking the
-            // first credit renders "Constance Garnett - translator" here, so this is the
-            // assertion that separates the two rules.
+            // B00EZAXAF8, The Brothers Karamazov [Naxos AudioBooks Edition], the same pair the
+            // other way round. Taking the first credit renders "Constance Garnett - translator"
+            // here, so this is the assertion that separates the two rules.
             Assert.Equal("Fyodor Dostoevsky", RenderAuthor("Constance Garnett - translator", "Fyodor Dostoevsky"));
         }
 
@@ -95,9 +99,9 @@ namespace Listenarr.Tests.Features.Api.Services
         [Fact]
         public void AuthorFolder_UsesTheContributorsCleanNameWhenEveryCreditNamesARole()
         {
-            // 1094179574, an anthology credited only to its editors. Better the editor's name
-            // than "Unknown Author", and better it without the job title in the folder name.
-            Assert.Equal("Lisa Morton", RenderAuthor("Lisa Morton - editor", "Leslie S. Klinger - editor"));
+            // A book credited only to contributors. Better the editor's name than "Unknown
+            // Author", and better it without the job title in the folder name.
+            Assert.Equal("Edgar Rice Burroughs", RenderAuthor("Edgar Rice Burroughs - editor", "Mark Twain - editor"));
         }
 
         [Fact]
@@ -105,8 +109,8 @@ namespace Listenarr.Tests.Features.Api.Services
         {
             // The single-credit case, which is the commonest shape of this: a translated classic
             // credited to nobody but its translator would otherwise create a folder called
-            // "Stephen Mitchell - translator".
-            Assert.Equal("Stephen Mitchell", RenderAuthor("Stephen Mitchell - translator"));
+            // "George Makepeace Towle - translator".
+            Assert.Equal("George Makepeace Towle", RenderAuthor("George Makepeace Towle - translator"));
         }
     }
 }
