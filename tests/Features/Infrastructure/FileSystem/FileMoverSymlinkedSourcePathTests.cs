@@ -114,26 +114,35 @@ public sealed class FileMoverSymlinkedSourcePathTests : BaseTests
         var source = Path.Join(bookDirectory, "book.m4b");
         await File.WriteAllTextAsync(source, "audio");
 
-        var dbContextFactory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
         if (addUnavailableNestedRoot)
         {
-            await using var db = await dbContextFactory.CreateDbContextAsync();
-            db.RootFolders.Add(new RootFolder
-            {
-                Name = "Unavailable nested root",
-                Path = bookDirectory,
-                CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
-                PathIdentityState = PathIdentityState.Unavailable,
-                ResolvedCaseSensitivity = FileSystemCaseSensitivity.Unknown
-            });
-            await db.SaveChangesAsync();
+            await AddUnavailableRootAsync(bookDirectory, "Unavailable nested root");
         }
 
-        var mover = new FileMover(
+        return (CreateManagedMover(), source);
+    }
+
+    private FileMover CreateManagedMover()
+    {
+        return new FileMover(
             NullLogger<FileMover>.Instance,
-            dbContextFactory: dbContextFactory,
+            dbContextFactory: _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>(),
             rootFolderRepository: _rootFolderRepository);
-        return (mover, source);
+    }
+
+    private async Task AddUnavailableRootAsync(string path, string name)
+    {
+        var dbContextFactory = _provider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+        await using var db = await dbContextFactory.CreateDbContextAsync();
+        db.RootFolders.Add(new RootFolder
+        {
+            Name = name,
+            Path = path,
+            CaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
+            PathIdentityState = PathIdentityState.Unavailable,
+            ResolvedCaseSensitivity = FileSystemCaseSensitivity.Unknown
+        });
+        await db.SaveChangesAsync();
     }
 
     [DirectoryLinkFact]
@@ -168,5 +177,76 @@ public sealed class FileMoverSymlinkedSourcePathTests : BaseTests
         // path instead would send the operator after the wrong thing.
         Assert.DoesNotContain("symbolic link", result.Reason, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("configure the real path", result.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [DirectoryLinkFact]
+    [Trait("Scenario", "A refusal that is not the overlap, beneath a linked configured root, does not blame the link")]
+    public async Task CheckAsync_ManagedRootReachedThroughSymlink_RootCannotBeAuthorized_DoesNotBlameTheLink()
+    {
+        // The unrelated failure above is the overlap, which is refused before the walk would look
+        // at a single directory. Here the root resolves and is then refused because nothing can
+        // authorize it, so only stopping the walk at the root keeps the root's link out of it.
+        var (_, source) = await CreateLinkedManagedRootAsync(
+            "symlink-managed-root-unauthorized",
+            addUnavailableNestedRoot: false);
+        var moverWithoutAuthorizer = new FileMover(
+            NullLogger<FileMover>.Instance,
+            rootFolderRepository: _rootFolderRepository);
+
+        var result = await moverWithoutAuthorizer.CheckAsync(source);
+
+        Assert.False(result.IsSupported);
+        Assert.StartsWith("InvalidOperationException: ", result.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("unresolved managed boundary", result.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("symbolic link", result.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("configure the real path", result.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [DirectoryLinkFact]
+    [Trait("Scenario", "A source covered only by an unavailable root reached through a symlink does not blame the link")]
+    public async Task CheckAsync_OnlyAnUnavailableRootCoversALinkedSource_DoesNotBlameTheLink()
+    {
+        // With no root it can resolve, the walk would otherwise cover the whole path and find the
+        // root's link. The overlap is refused before any directory is opened, so the link cannot
+        // be what caused it.
+        var directory = FileService.GetTempDirectory("symlink-unavailable-root-only");
+        var physicalRoot = Directory.CreateDirectory(Path.Join(directory, "physical-library")).FullName;
+        var linkedRoot = Path.Join(directory, "library");
+        Directory.CreateSymbolicLink(linkedRoot, physicalRoot);
+        await AddUnavailableRootAsync(linkedRoot, "Unavailable linked root");
+        var bookDirectory = Directory.CreateDirectory(Path.Join(linkedRoot, "Book")).FullName;
+        var source = Path.Join(bookDirectory, "book.m4b");
+        await File.WriteAllTextAsync(source, "audio");
+
+        var result = await CreateManagedMover().CheckAsync(source);
+
+        Assert.False(result.IsSupported);
+        Assert.StartsWith("InvalidOperationException: ", result.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("symbolic link", result.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("configure the real path", result.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [DirectoryLinkFact]
+    [Trait("Scenario", "A link below a configured root is still named")]
+    public async Task CheckAsync_LinkBelowAConfiguredRoot_NamesTheLink()
+    {
+        // Stopping the walk at the root must not silence it below the root, where segments are
+        // still opened without following links and a link is still the cause.
+        var directory = FileService.GetTempDirectory("symlink-below-configured-root");
+        var root = Directory.CreateDirectory(Path.Join(directory, "library")).FullName;
+        await AddAuthorizedRootAsync(root, "Library root");
+        var elsewhere = Directory.CreateDirectory(Path.Join(directory, "elsewhere")).FullName;
+        var link = Path.Join(root, "LinkedSub");
+        Directory.CreateSymbolicLink(link, elsewhere);
+        var bookDirectory = Directory.CreateDirectory(Path.Join(link, "Book")).FullName;
+        var source = Path.Join(bookDirectory, "book.m4b");
+        await File.WriteAllTextAsync(source, "audio");
+
+        var result = await CreateManagedMover().CheckAsync(source);
+
+        Assert.False(result.IsSupported);
+        Assert.Matches(@"^\w+Exception: \S", result.Reason!);
+        Assert.Contains("symbolic link", result.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("LinkedSub", result.Reason, StringComparison.Ordinal);
     }
 }

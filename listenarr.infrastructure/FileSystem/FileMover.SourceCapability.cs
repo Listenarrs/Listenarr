@@ -191,6 +191,9 @@ public partial class FileMover : IFilePublicationSourceCapability
     /// link at or above the root is supported and blaming it would send the operator after the
     /// wrong thing. The walk stops at the root for that reason, and covers the whole path only for
     /// a source outside every configured root.
+    ///
+    /// A source that overlaps a root whose identity is unavailable is refused before any directory
+    /// is opened, so no link on its path can be the cause and there is nothing to name.
     /// </remarks>
     private async Task<string?> FindUnpinnableLinkedAncestorAsync(string sourcePath)
     {
@@ -203,6 +206,11 @@ public partial class FileMover : IFilePublicationSourceCapability
             }
 
             var managed = await ResolveManagedRootPathAsync(current);
+            if (managed.HasUnavailableOverlap)
+            {
+                return null;
+            }
+
             while (!string.IsNullOrEmpty(current)
                 && (managed.Root == null || managed.Semantics == null
                     || IsStrictlyBelowRoot(current, managed.Root.Path, managed.Semantics.Value)))
