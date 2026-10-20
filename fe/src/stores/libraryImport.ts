@@ -222,11 +222,8 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     scanStatus.value = 'scanning'
     scanError.value = null
     scanWarnings.value = []
-    try {
-      localStorage.removeItem(_storageKey(id))
-    } catch {
-      /* non-fatal */
-    }
+    // The saved matches stay until this scan's results replace them: a scan that replaces this one
+    // reads them again
 
     let jobId = ''
     let settled = false

@@ -450,6 +450,37 @@ describe('library import store', () => {
       })
     })
 
+    it('keeps the saved matches when a scan of a folder that was not loaded is replaced by another scan of it', async () => {
+      const { useLibraryImportStore } = await import('@/stores/libraryImport')
+      const store = useLibraryImportStore()
+      const match = { title: 'Book A', asin: 'B000000001' }
+      localStorage.setItem(
+        'listenarr-import-matches-1',
+        JSON.stringify({
+          '/srv/1/A.mp3': { selectedMatch: match, hasSearched: true, selected: true },
+        }),
+      )
+      getSavedUnmatchedFiles.mockResolvedValue({ items: [unmatchedFile('/srv/2/B.mp3')] })
+      await store.initFromRootFolder(2)
+      const firstCheck = deferred<ReturnType<typeof completed>>()
+      let jobCount = 0
+      scanUnmatchedFiles.mockImplementation(async () => ({ jobId: `job-${++jobCount}` }))
+      getUnmatchedResults.mockImplementation((jobId: string) =>
+        jobId === 'job-1' ? firstCheck.promise : Promise.resolve(completed(jobId, '/srv/1/A.mp3')),
+      )
+
+      const firstScan = store.triggerScan(1)
+      await vi.waitFor(() => expect(getUnmatchedResults).toHaveBeenCalledWith('job-1'))
+      await store.triggerScan(1)
+      firstCheck.resolve(completed('job-1', '/srv/1/A.mp3'))
+      await firstScan
+
+      expect(store.items['/srv/1/A.mp3']).toMatchObject({ selectedMatch: match, selected: true })
+      expect(JSON.parse(localStorage.getItem('listenarr-import-matches-1') ?? '{}')).toMatchObject({
+        '/srv/1/A.mp3': { selectedMatch: match, selected: true },
+      })
+    })
+
     it("does not show another folder's rows while scanning a new one", async () => {
       const { useLibraryImportStore } = await import('@/stores/libraryImport')
       const store = useLibraryImportStore()
