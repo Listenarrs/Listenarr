@@ -155,12 +155,25 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
 
   // ─── Scan ─────────────────────────────────────────────────────────────────
 
+  // Only the latest load or scan may write the state: starting one stops listening to the previous
+  // scan, and an older one answering late is ignored
+  let currentOperation = 0
+  let stopCurrentScan: (() => void) | null = null
+
+  function _beginOperation(): number {
+    stopCurrentScan?.()
+    stopCurrentScan = null
+    return ++currentOperation
+  }
+
   async function initFromRootFolder(id: number) {
+    const operation = _beginOperation()
     rootFolderId.value = id
     scanStatus.value = 'idle'
     scanWarnings.value = []
     try {
       const saved = await apiService.getSavedUnmatchedFiles(id)
+      if (operation !== currentOperation) return
       if (saved.lastScannedAt) lastScannedAt.value = saved.lastScannedAt
       scanWarnings.value = saved.warnings ?? []
       const persisted = _loadPersistedMatches(id)
@@ -196,6 +209,15 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   }
 
   async function triggerScan(id: number) {
+    const operation = _beginOperation()
+    const isCurrent = () => operation === currentOperation
+    // Matches already made in this folder carry over to the new results, even when it wasn't loaded
+    const persisted = _loadPersistedMatches(id)
+    if (rootFolderId.value !== id) {
+      // Another folder's rows must not show under this one, even if the scan fails
+      items.value = {}
+      lastScannedAt.value = null
+    }
     rootFolderId.value = id
     scanStatus.value = 'scanning'
     scanError.value = null
@@ -219,25 +241,29 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
       }
     }
 
+    stopCurrentScan = cleanUp
+
     async function onComplete(completedJobId: string) {
-      if (settled) return
+      if (settled || !isCurrent()) return
       settled = true
       cleanUp()
       try {
         const response = await apiService.getUnmatchedResults(completedJobId)
-        _populateFromItems(response.items)
+        if (!isCurrent()) return
+        _populateFromItems(response.items, persisted)
         scanWarnings.value = response.warnings ?? []
         _persistMatches()
         lastScannedAt.value = new Date().toISOString()
         scanStatus.value = 'done'
       } catch (e) {
+        if (!isCurrent()) return
         scanStatus.value = 'error'
         scanError.value = (e as Error)?.message ?? 'Failed to fetch results'
       }
     }
 
     function onFailed(error?: string) {
-      if (settled) return
+      if (settled || !isCurrent()) return
       settled = true
       cleanUp()
       scanStatus.value = 'error'
@@ -258,9 +284,10 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     try {
       const result = await apiService.scanUnmatchedFiles(id)
       jobId = result.jobId
-      if (settled) return // SignalR already handled it before this line
+      if (settled || !isCurrent()) return // SignalR already handled it, or another scan replaced it
       // Poll once immediately — handles fast scans
       const check = await apiService.getUnmatchedResults(jobId)
+      if (!isCurrent()) return
       if (check.status === 'Completed') {
         await onComplete(jobId)
       } else if (check.status === 'Failed') {
@@ -283,10 +310,13 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     }
   }
 
-  function _populateFromItems(scanItems: UnmatchedFileItem[]) {
+  function _populateFromItems(
+    scanItems: UnmatchedFileItem[],
+    persisted: Record<string, PersistedEntry> = {},
+  ) {
     const newItems: Record<string, LibraryImportItem> = {}
     for (const item of scanItems) {
-      const existing = items.value[item.fullPath]
+      const existing = items.value[item.fullPath] ?? persisted[item.fullPath]
       const fresh = unmatchedToImportItem(item)
       newItems[item.fullPath] = existing
         ? {

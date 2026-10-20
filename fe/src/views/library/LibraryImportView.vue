@@ -28,7 +28,13 @@
     <div class="scan-controls">
       <div class="folder-select-wrap">
         <label class="control-label">Root folder</label>
-        <select v-model="selectedFolderId" class="folder-select" @change="onFolderChange">
+        <!-- Locked while a scan runs: its results belong to the folder it was started on -->
+        <select
+          v-model="selectedFolderId"
+          class="folder-select"
+          :disabled="store.scanStatus === 'scanning'"
+          @change="onFolderChange"
+        >
           <option v-for="f in rootFoldersStore.folders" :key="f.id" :value="f.id">
             {{ f.name || f.path }}
           </option>
@@ -85,27 +91,27 @@
       </div>
     </div>
 
-    <div v-if="store.scanStatus === 'scanning'" class="state-panel">
-      <PhSpinner class="ph-spin state-icon" />
-      <p>Scanning for unmatched audio files...</p>
-    </div>
-
-    <!-- The address asked for a root folder that no longer exists: say so instead of the empty state -->
+    <!-- The address asked for a root folder that no longer exists: say so above whatever the
+         default folder shows, saved results included -->
     <div
-      v-else-if="
-        store.scanStatus === 'idle' && store.itemList.length === 0 && requestedFolderMissing
-      "
-      class="state-panel"
+      v-if="requestedFolderMissing"
+      class="scan-warnings"
       role="alert"
       data-testid="requested-folder-missing"
     >
-      <PhWarning class="state-icon warn" />
-      <h3>This root folder no longer exists</h3>
-      <p>
-        The link asked for a root folder that isn't in Settings &gt; Root Folders any more. The
-        default folder is selected instead: click <strong>Scan</strong> to scan it, or pick another
-        folder.
-      </p>
+      <div class="scan-warning">
+        <PhWarning :size="14" />
+        <span>
+          <strong>This root folder no longer exists.</strong> The link asked for a root folder that
+          isn't in Settings &gt; Root Folders any more. The default folder is selected instead:
+          click <strong>Scan</strong> to scan it, or pick another folder.
+        </span>
+      </div>
+    </div>
+
+    <div v-if="store.scanStatus === 'scanning'" class="state-panel">
+      <PhSpinner class="ph-spin state-icon" />
+      <p>Scanning for unmatched audio files...</p>
     </div>
 
     <div v-else-if="store.scanStatus === 'idle' && store.itemList.length === 0" class="state-panel">
@@ -356,12 +362,7 @@ onMounted(async () => {
   const requestedFolder = rootFoldersStore.folders.find((f) => f.id === requestedId) ?? null
   // An old link may name a folder removed since: open as usual on the default one, and say so
   requestedFolderMissing.value = route.query.rootFolder !== undefined && !requestedFolder
-  const folder =
-    requestedFolder ?? rootFoldersStore.defaultFolder ?? rootFoldersStore.folders[0] ?? null
-  if (folder) {
-    selectedFolderId.value = folder.id
-    await store.initFromRootFolder(folder.id)
-  }
+  const scanRequested = requestedFolder !== null && route.query.scan === '1'
 
   store.action = 'none'
 
@@ -371,7 +372,26 @@ onMounted(async () => {
   } else if (route.query.scan === '1') {
     // Scan once: a reload of the page must not start another scan
     void router.replace({ query: { ...route.query, scan: undefined } })
-    if (requestedFolder) await startScan()
+  }
+
+  if (scanRequested) {
+    // The requested folder itself, whatever the list shows by then; this replaces any running scan
+    selectedFolderId.value = requestedFolder.id
+    await store.triggerScan(requestedFolder.id)
+    return
+  }
+
+  if (store.scanStatus === 'scanning' && store.rootFolderId !== null) {
+    // Back on the page while a scan runs: show that scan rather than another folder
+    selectedFolderId.value = store.rootFolderId
+    return
+  }
+
+  const folder =
+    requestedFolder ?? rootFoldersStore.defaultFolder ?? rootFoldersStore.folders[0] ?? null
+  if (folder) {
+    selectedFolderId.value = folder.id
+    await store.initFromRootFolder(folder.id)
   }
 })
 
@@ -381,14 +401,14 @@ onBeforeUnmount(() => {
 
 async function onFolderChange() {
   requestedFolderMissing.value = false
-  if (selectedFolderId.value) {
+  if (selectedFolderId.value && store.scanStatus !== 'scanning') {
     store.stopProcessing()
     await store.initFromRootFolder(selectedFolderId.value)
   }
 }
 
 async function startScan() {
-  if (!selectedFolderId.value) return
+  if (!selectedFolderId.value || store.scanStatus === 'scanning') return
   requestedFolderMissing.value = false
   await store.triggerScan(selectedFolderId.value)
 }
@@ -646,10 +666,6 @@ async function refreshRootFolders(newFolder: RootFolder) {
 
 .state-icon.ok {
   color: #22c55e;
-}
-
-.state-icon.warn {
-  color: #f39c12;
 }
 
 .state-panel h3 {
