@@ -97,6 +97,14 @@ namespace Listenarr.Application.Downloads.Common
             return [.. await Task.WhenAll(tasks)];
         }
 
+        public async Task<DownloadClientQueueSnapshot> GetQueueSnapshotAsync(DownloadClientConfiguration client, CancellationToken ct = default)
+        {
+            var adapter = ResolveAdapter(client);
+            var snapshot = await adapter.GetQueueSnapshotAsync(client, ct);
+            var tasks = snapshot.Items.Select(item => TranslateQueueItemPathsAsync(client, item));
+            return snapshot with { Items = [.. await Task.WhenAll(tasks)] };
+        }
+
         public async Task<bool> MarkItemAsImportedAsync(DownloadClientConfiguration client, Download download, CancellationToken ct = default)
         {
             if (client == null)

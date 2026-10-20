@@ -19,9 +19,15 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
         string clientType)
     {
         public async Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default)
+            => (await GetQueueSnapshotAsync(client, ids, ct)).Items;
+
+        public async Task<DownloadClientQueueSnapshot> GetQueueSnapshotAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default)
         {
             var items = new List<QueueItem>();
-            if (client == null) return items;
+            if (client == null) return DownloadClientQueueSnapshot.Complete(items);
+
+            // Cleared whenever the client may hold torrents that did not make it into items.
+            var isComplete = true;
 
             var isMonitorPoll = ids.Count > 0;
             var baseUrl = DownloadClientUriBuilder.BuildAuthority(client);
@@ -41,7 +47,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                     {
                         throw new DownloadClientAdapterPollingException(message, exception);
                     }
-                    return items;
+                    return new DownloadClientQueueSnapshot(items, IsComplete: false);
                 }
 
                 // Limit fields returned to reduce memory usage.
@@ -69,7 +75,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                     {
                         throw new DownloadClientAdapterPollingException(message);
                     }
-                    return items;
+                    return new DownloadClientQueueSnapshot(items, IsComplete: false);
                 }
 
                 var json = await torrentsResp.Content.ReadAsStringAsync(ct);
@@ -81,7 +87,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                     {
                         throw new DownloadClientAdapterPollingException(message);
                     }
-                    return items;
+                    return new DownloadClientQueueSnapshot(items, IsComplete: false);
                 }
 
                 var torrents = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(json);
@@ -93,7 +99,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                     {
                         throw new DownloadClientAdapterPollingException(message);
                     }
-                    return items;
+                    return new DownloadClientQueueSnapshot(items, IsComplete: false);
                 }
 
                 foreach (var torrent in torrents)
@@ -139,6 +145,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                             "Skipping unreadable qBittorrent torrent {TorrentHash} for client {ClientId}; the rest of the queue is unaffected",
                             LogRedaction.SanitizeText(hash),
                             LogRedaction.SanitizeText(client.Id));
+                        isComplete = false;
                     }
                 }
             }
@@ -153,9 +160,13 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 {
                     throw new DownloadClientAdapterPollingException("Error polling qBittorrent queue.", ex);
                 }
+
+                // Whatever was read before the failure is still returned for display, but it
+                // cannot stand for the whole queue.
+                isComplete = false;
             }
 
-            return FilterByIds(items, ids);
+            return new DownloadClientQueueSnapshot(FilterByIds(items, ids), isComplete);
         }
 
         private static List<QueueItem> FilterByIds(List<QueueItem> items, List<string> ids)

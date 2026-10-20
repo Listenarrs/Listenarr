@@ -122,12 +122,12 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
                 .Setup(g => g.GetQueueItemAsync(downloadClient, It.IsAny<Download>(), It.IsAny<QueueItem>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new QueueItem { SourceFiles = files });
             gatewayMock
-                .Setup(g => g.GetQueueAsync(downloadClient, It.IsAny<CancellationToken>()))
-                .ReturnsAsync([
+                .Setup(g => g.GetQueueSnapshotAsync(downloadClient, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(DownloadClientQueueSnapshot.Complete([
                     new QueueItem {
                         SourceFiles = files
                     }
-                ]);
+                ]));
             gatewayMock
                 .Setup(g => g.FetchDownloadsAsync(It.IsAny<DownloadClientConfiguration>(), It.IsAny<List<Download>>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((DownloadClientConfiguration client, List<Download> downloads, CancellationToken _) =>
