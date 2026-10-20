@@ -381,8 +381,8 @@ onMounted(async () => {
     return
   }
 
-  if (store.scanStatus === 'scanning' && store.rootFolderId !== null) {
-    // Back on the page while a scan runs: show that scan rather than another folder
+  if ((store.scanStatus === 'scanning' || store.isProcessing) && store.rootFolderId !== null) {
+    // Back on the page while a scan or Start Matching runs: show its folder rather than another one
     selectedFolderId.value = store.rootFolderId
     return
   }

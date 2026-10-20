@@ -160,14 +160,16 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   let currentOperation = 0
   let stopCurrentScan: (() => void) | null = null
 
-  function _beginOperation(): number {
+  function _beginOperation(folderId: number): number {
     stopCurrentScan?.()
     stopCurrentScan = null
+    // Start Matching works on the rows shown: another folder's rows replace them, so it stops
+    if (folderId !== rootFolderId.value) stopProcessing()
     return ++currentOperation
   }
 
   async function initFromRootFolder(id: number) {
-    const operation = _beginOperation()
+    const operation = _beginOperation(id)
     rootFolderId.value = id
     scanStatus.value = 'idle'
     scanWarnings.value = []
@@ -209,7 +211,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   }
 
   async function triggerScan(id: number) {
-    const operation = _beginOperation()
+    const operation = _beginOperation(id)
     const isCurrent = () => operation === currentOperation
     // Matches already made in this folder carry over to the new results, even when it wasn't loaded
     const persisted = _loadPersistedMatches(id)
@@ -368,6 +370,9 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
 
   // ─── Queue Processing ─────────────────────────────────────────────────────
 
+  // Only the latest Start Matching run may go on: a stopped one ends after its search in flight
+  let currentMatchingRun = 0
+
   function startProcessing() {
     const unsearched = itemList.value.filter((i) => !i.hasSearched).map((i) => i.id)
     if (unsearched.length === 0) return
@@ -378,6 +383,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   }
 
   function stopProcessing() {
+    currentMatchingRun++
     lookupQueue.value = []
     isProcessing.value = false
     // Clear any in-flight isSearching flags
@@ -390,7 +396,8 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   }
 
   async function processNext() {
-    while (isProcessing.value && lookupQueue.value.length > 0) {
+    const run = ++currentMatchingRun
+    while (run === currentMatchingRun && isProcessing.value && lookupQueue.value.length > 0) {
       const id: string = lookupQueue.value[0]!
       lookupQueue.value = lookupQueue.value.slice(1)
 
@@ -406,7 +413,9 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
         metadataFetchCount.value++
         // ASIN results are authoritative — take the first result directly without author comparison
         const first = byAsin ? (results[0] ?? null) : pickBestMatch(results, item.detectedAuthor)
-        const current = items.value[id]!
+        // The row may have left the page meanwhile (another folder loaded or scanned)
+        const current = items.value[id]
+        if (!current) continue
         items.value = {
           ...items.value,
           [id]: {
@@ -427,7 +436,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
           }
       }
     }
-    isProcessing.value = false
+    if (run === currentMatchingRun) isProcessing.value = false
   }
 
   // ─── Per-row manual search ────────────────────────────────────────────────

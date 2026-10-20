@@ -100,6 +100,21 @@ describe('LibraryImportView opened from "Scan for unmatched files"', () => {
     expect(wrapper.text()).toContain('Scanning for unmatched audio files')
   })
 
+  it('shows the folder being matched when coming back to the page during Start Matching', async () => {
+    routeQuery.value = {}
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useLibraryImportStore()
+    store.rootFolderId = 3
+    store.scanStatus = 'done'
+    store.isProcessing = true
+    const { wrapper, store: sameStore } = mountView({ keepPinia: pinia })
+    await flushPromises()
+
+    expect(sameStore.initFromRootFolder).not.toHaveBeenCalled()
+    expect((wrapper.get('select.folder-select').element as HTMLSelectElement).value).toBe('3')
+  })
+
   it('opens the default folder without scanning when nothing is requested', async () => {
     routeQuery.value = {}
     const { store } = mountView()
