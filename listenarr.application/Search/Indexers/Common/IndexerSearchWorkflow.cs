@@ -206,6 +206,16 @@ public class IndexerSearchWorkflow
         try
         {
             query = IndexerQuerySanitizer.Sanitize(query);
+            if (string.IsNullOrWhiteSpace(query))
+            {
+                // A query that sanitizes to nothing (dash-only or punctuation-only input) must
+                // never be dispatched: some indexers treat an empty query as "browse everything"
+                // and would return unrelated releases that could then be grabbed. Fail closed.
+                _logger.LogWarning(
+                    "Skipping indexer {Name} ({Implementation}): the search query was empty after sanitization",
+                    indexer.Name, indexer.Implementation);
+                return new List<IndexerSearchResult>();
+            }
             _logger.LogInformation("Searching indexer {Name} ({Implementation}) for: {Query}", indexer.Name, indexer.Implementation, query);
 
             var fallbackName = GetFallbackIndexerName(indexer);
