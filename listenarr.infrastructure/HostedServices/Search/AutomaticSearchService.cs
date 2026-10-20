@@ -210,6 +210,25 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             var searchResults = await searchService.SearchAsync(searchQuery, isAutomaticSearch: true);
             _logger.LogInformation("Found {Count} raw search results for audiobook '{Title}'", searchResults.Count, audiobook.Title);
 
+            // Author-free fallback: release names often omit the author, so a full title+author
+            // query can return nothing even when the book is available. Retry without the author,
+            // then constrain the broadened results to titles that still match this book, so a
+            // same-title/different-book release can't pass quality scoring and be grabbed.
+            if (searchResults.Count == 0)
+            {
+                var fallbackQuery = _resultClassifier.BuildTitleFallbackSearchQuery(audiobook);
+                if (!string.IsNullOrWhiteSpace(fallbackQuery)
+                    && !string.Equals(fallbackQuery, searchQuery, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogInformation("No results for '{Title}' with the full query; retrying without the author: {Query}",
+                        audiobook.Title, fallbackQuery);
+                    var fallbackResults = await searchService.SearchAsync(fallbackQuery, isAutomaticSearch: true);
+                    searchResults = _resultClassifier.ConstrainFallbackResultsToTitle(fallbackResults, audiobook);
+                    _logger.LogInformation("Author-free fallback for '{Title}': {Raw} raw result(s), {Kept} kept after title match",
+                        audiobook.Title, fallbackResults.Count, searchResults.Count);
+                }
+            }
+
             // Broadcast detailed debug info about the raw search results to help diagnose automatic search failures
             try
             {
