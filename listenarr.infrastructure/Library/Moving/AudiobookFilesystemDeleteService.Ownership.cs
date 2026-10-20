@@ -193,7 +193,8 @@ public sealed partial class AudiobookFilesystemDeleteService
     private async Task<bool> RetireOwnedDirectoryAsync(
         LibraryDirectoryOwnership ownership,
         PinnedDirectoryCreation.PinnedDirectoryAnchor originalDirectory,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Action? releaseAdditionalCoHeldPins = null)
     {
         var ownershipKey = ownership.PathOwnershipKey
             ?? throw new InvalidOperationException(
@@ -249,6 +250,9 @@ public sealed partial class AudiobookFilesystemDeleteService
                 {
                     directory.Dispose();
                     originalDirectory.Dispose();
+                    // Any handle the caller still holds on this directory in an outer frame
+                    // — e.g. RetireOwnedHierarchyAsync's outer publication for a descendant.
+                    releaseAdditionalCoHeldPins?.Invoke();
                 });
         }
         else if (!parent.VisiblePathMatches())
@@ -371,8 +375,14 @@ public sealed partial class AudiobookFilesystemDeleteService
                 continue;
             }
             using var directory = publication.OpenCreatedDirectoryAnchor();
+            // The outer publication here is a separate handle on the descendant directory; hand
+            // it over so the SMB degrade can finalize (it stays open across RetireOwnedDirectory).
             if (!observation.Matches(directory) || !originalTarget.VisiblePathMatches()
-                || !await RetireOwnedDirectoryAsync(ownership, directory, cancellationToken)) return false;
+                || !await RetireOwnedDirectoryAsync(
+                    ownership,
+                    directory,
+                    cancellationToken,
+                    releaseAdditionalCoHeldPins: publication.Dispose)) return false;
         }
 
         return true;
