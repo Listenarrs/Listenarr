@@ -675,6 +675,41 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
                 () => adapter.GetQueueAsync(_client, ["aaaa1111", "bbbb2222", "cccc3333"]));
         }
 
+        // The same failure arriving through the circuit breaker instead of the transport. Once the
+        // breaker opens after the torrent list has arrived, every files request that follows is
+        // rejected with BrokenCircuitException, which is not an HttpRequestException. Swallowed as
+        // an unreadable torrent, it turns a failed poll into a short successful one, and the
+        // monitor resets its retry backoff instead of growing it.
+        [Fact]
+        public async Task GetQueueAsync_WithIds_WhenTheBreakerOpensMidPoll_StillFailsThePoll()
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent("500");
+            apiMock.FilesRequestsBeforeBreakerOpens = 1;
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            await Assert.ThrowsAsync<DownloadClientAdapterPollingException>(
+                () => adapter.GetQueueAsync(_client, ["aaaa1111", "bbbb2222", "cccc3333"]));
+        }
+
+        // A full snapshot has no polling exception to raise, so the breaker failure lands in the
+        // outer handler with the first torrent already read. That row is still worth showing, but
+        // the torrents after it were never looked at, so the snapshot must not drive cleanup.
+        [Fact]
+        public async Task OrphanCleanup_WhenTheBreakerOpensMidPoll_KeepsTheUnreadTorrentsRecords()
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent("500");
+            apiMock.FilesRequestsBeforeBreakerOpens = 1;
+            var tracked = await TrackDownloadsAsync("aaaa1111", "bbbb2222", "cccc3333");
+
+            await RunOrphanCleanupAsync(tracked);
+
+            Assert.NotNull(await _downloadRepository.GetByIdAsync("tracked-bbbb2222"));
+            Assert.NotNull(await _downloadRepository.GetByIdAsync("tracked-cccc3333"));
+        }
+
         // The skip is a recurring condition, not an event. A torrent whose fields the mapper
         // cannot read stays unreadable, so at the monitor's default cadence one such torrent
         // writes a line on every poll for as long as it sits in the client. Warning would be
