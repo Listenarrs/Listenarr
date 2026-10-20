@@ -95,7 +95,7 @@ namespace Listenarr.Domain.Common
         private const string TailLead = "(?:(?:" + TailFiller + ")\\s+)*";
 
         // After a dash, both halves of the vocabulary are safe. A dash tail is how Audible writes
-        // a role suffix, so "Ralph Manheim - translated" has to keep matching.
+        // a role suffix, so "Constance Garnett - translated" has to keep matching.
         private const string DashTailBody =
             TailLead + "(?:" + AnyRole + ")" + TailRest;
 
@@ -103,7 +103,7 @@ namespace Listenarr.Domain.Common
         // subtlety of this class.
         //
         // Amazon and Audible use a trailing parenthetical for two different things: the person's
-        // role ("Smith(Translated by)") and the edition ("Lewis Carroll (Illustrated)"). Nothing
+        // role ("Wells(Translated by)") and the edition ("Lewis Carroll (Illustrated)"). Nothing
         // in the text tells them apart.
         //
         // For REMOVING the tail that ambiguity is cheap, and resolving it either way gives the
@@ -118,7 +118,7 @@ namespace Listenarr.Domain.Common
         // participle has to carry a "by" before it counts.
         //
         // An earlier revision used the loose form for both and a review caught it:
-        // Primary(["Lewis Carroll (Illustrated)", "John Tenniel"]) returned John Tenniel.
+        // Primary(["Lewis Carroll (Illustrated)", "Herman Melville"]) returned Herman Melville.
         private const string ParenStrictBody =
             TailLead + "(?:" + AgentAny + "|(?:" + WorkRoleWords + ")\\s+by)" + TailRest;
 
@@ -137,7 +137,7 @@ namespace Listenarr.Domain.Common
         private const RegexOptions TailOptions =
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.NonBacktracking;
 
-        // Audible is inconsistent about the spacing ("Gems -introduction by" as well as
+        // Audible is inconsistent about the spacing ("James -introduction by" as well as
         // "Garnett - translator") and uses hyphen, en dash and em dash.
         private static readonly Regex DashTail = new(
             "\\s[-\u2013\u2014]\\s*" + DashTailBody + "$", TailOptions, MatchTimeout);
@@ -162,10 +162,10 @@ namespace Listenarr.Domain.Common
         /// nothing but role vocabulary and joiners. Four things it deliberately does not match:
         ///
         /// A dashed tail that is not a role. Audible credits transliterated names as
-        /// <c>"Yang Jing - Yang Jing"</c>, and a rule keying on the dash alone would discard a
+        /// <c>"Leo Tolstoy - Leo Tolstoy"</c>, and a rule keying on the dash alone would discard a
         /// real author.
         ///
-        /// A combined credit such as <c>"Jonathan Maberry - editor/author"</c>. The person is
+        /// A combined credit such as <c>"Mark Twain - editor/author"</c>. The person is
         /// also an author of the book, so the credit stays. Note how that actually works: a
         /// slash is not a separator the tail knows about, so it simply ends the tail and the
         /// match fails. The side effect is that <c>"someone - editor/translator"</c> is kept
@@ -175,8 +175,8 @@ namespace Listenarr.Domain.Common
         /// A role word anywhere but the tail. An author surnamed Editor, or one whose name
         /// contains "Foreword", is a name and not a credit.
         ///
-        /// A tail of post-nominals with no role in it. <c>"Martin Luther King (Jr.)"</c> and
-        /// <c>"Gabor Maté (M.D.)"</c> are names. Those suffixes are only tolerated when they
+        /// A tail of post-nominals with no role in it. <c>"Edgar Rice Burroughs (Jr.)"</c> and
+        /// <c>"Charlotte Brontë (M.D.)"</c> are names. Those suffixes are only tolerated when they
         /// trail an actual role, as Audible leaves them in <c>"editor Jr."</c>.
         /// </remarks>
         public static bool IsRoleCredit(string? name)
