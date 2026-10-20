@@ -37,6 +37,17 @@ public static class IndexerQuerySanitizer
             if (char.IsControl(ch) || category == UnicodeCategory.Format)
                 continue;
 
+            // Hyphens and dashes must become spaces rather than survive or be dropped.
+            // Newznab-style indexers treat a leading '-' on a token as an exclusion operator,
+            // so "Full-Cast" is sent as "-Cast" and excludes exactly the releases we want.
+            // "Full Cast" matches; dropping the hyphen ("FullCast") would also miss.
+            if (ch is '-' or '‐' or '‑' or '‒' or '–'
+                or '—' or '―' or '−')
+            {
+                sb.Append(' ');
+                continue;
+            }
+
             if (forbidden.IndexOf(ch) >= 0)
                 continue;
 
