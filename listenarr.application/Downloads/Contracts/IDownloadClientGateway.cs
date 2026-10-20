@@ -41,6 +41,14 @@ namespace Listenarr.Application.Downloads.Contracts
         /// <returns>List of ongoing items in the download client related to listenarr downloads</returns>
         Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, CancellationToken ct = default);
 
+        /// <summary>
+        /// Given a download client, fetch all ongoing downloads in it and whether that list is complete
+        /// </summary>
+        /// <param name="client"></param>
+        /// <param name="ct"></param>
+        /// <returns>The readable items, flagged incomplete when the client reported items that could not be read</returns>
+        Task<DownloadClientQueueSnapshot> GetQueueSnapshotAsync(DownloadClientConfiguration client, CancellationToken ct = default);
+
         Task<QueueItem> GetQueueItemAsync(
             DownloadClientConfiguration client,
             Download download,
