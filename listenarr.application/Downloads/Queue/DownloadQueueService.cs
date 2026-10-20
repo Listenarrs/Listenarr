@@ -431,8 +431,37 @@ namespace Listenarr.Application.Downloads.Queue
 
             matchedDownload.Metadata ??= new Dictionary<string, object>();
 
+            var isTorrentClient =
+                string.Equals(client.Type, "qbittorrent", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(client.Type, "transmission", StringComparison.OrdinalIgnoreCase);
+
             var existingClientDownloadId = DownloadQueueMetadataMatcher.GetMetadataString(matchedDownload.Metadata, "ClientDownloadId");
-            if (!string.Equals(existingClientDownloadId, originalClientId, StringComparison.OrdinalIgnoreCase))
+            var existingTorrentHash = isTorrentClient
+                ? DownloadQueueMetadataMatcher.GetMetadataString(matchedDownload.Metadata, "TorrentHash")
+                : null;
+
+            // If this download already carries a client identifier (the one captured when it was
+            // grabbed), a queue item that matched it here did so by title, and that queue item can
+            // be a *different*, pre-existing client download for the same book. Overwriting the
+            // recorded identifier would make a later removal act on that unrelated item and delete
+            // it (issue #1055), so never rebind a download that already knows its identifier.
+            var hasDifferentRecordedId =
+                (!string.IsNullOrWhiteSpace(existingClientDownloadId) &&
+                 !string.Equals(existingClientDownloadId, originalClientId, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrWhiteSpace(existingTorrentHash) &&
+                 !string.Equals(existingTorrentHash, originalClientId, StringComparison.OrdinalIgnoreCase));
+            if (hasDifferentRecordedId)
+            {
+                logger.LogDebug(
+                    "Queue item {ClientItemId} matched download {DownloadId} by title, but it already has client identifier {Existing}; keeping it rather than rebinding to a possibly-unrelated client item",
+                    originalClientId,
+                    matchedDownload.Id,
+                    existingClientDownloadId ?? existingTorrentHash);
+                return;
+            }
+
+            // Otherwise learn the identifier only when none is recorded yet.
+            if (string.IsNullOrWhiteSpace(existingClientDownloadId))
             {
                 matchedDownload.Metadata["ClientDownloadId"] = originalClientId;
                 await downloadRepository.UpdateMetadataAsync(matchedDownload.Id, "ClientDownloadId", originalClientId);
@@ -440,15 +469,10 @@ namespace Listenarr.Application.Downloads.Queue
 
             allKnownClientItemIds.Add(originalClientId);
 
-            if (string.Equals(client.Type, "qbittorrent", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(client.Type, "transmission", StringComparison.OrdinalIgnoreCase))
+            if (isTorrentClient && string.IsNullOrWhiteSpace(existingTorrentHash))
             {
-                var existingTorrentHash = DownloadQueueMetadataMatcher.GetMetadataString(matchedDownload.Metadata, "TorrentHash");
-                if (!string.Equals(existingTorrentHash, originalClientId, StringComparison.OrdinalIgnoreCase))
-                {
-                    matchedDownload.Metadata["TorrentHash"] = originalClientId;
-                    await downloadRepository.UpdateMetadataAsync(matchedDownload.Id, "TorrentHash", originalClientId);
-                }
+                matchedDownload.Metadata["TorrentHash"] = originalClientId;
+                await downloadRepository.UpdateMetadataAsync(matchedDownload.Id, "TorrentHash", originalClientId);
             }
         }
 
