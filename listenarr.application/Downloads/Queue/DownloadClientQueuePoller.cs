@@ -74,7 +74,7 @@ namespace Listenarr.Application.Downloads.Queue
 
             try
             {
-                var pollTask = clientGateway.GetQueueAsync(client, timeoutCts.Token);
+                var pollTask = clientGateway.GetQueueSnapshotAsync(client, timeoutCts.Token);
                 var completedTask = await Task.WhenAny(pollTask, Task.Delay(clientQueueTimeout));
                 if (completedTask != pollTask)
                 {
@@ -87,22 +87,23 @@ namespace Listenarr.Application.Downloads.Queue
                     return BuildFallbackQueueResult(client, staleSnapshotMaxAge, "timeout");
                 }
 
-                var clientQueue = await pollTask;
+                var snapshot = await pollTask;
                 stopwatch.Stop();
                 var refreshedAtUtc = DateTimeOffset.UtcNow;
 
-                CacheClientQueueSnapshot(client, clientQueue, staleSnapshotMaxAge, refreshedAtUtc);
+                CacheClientQueueSnapshot(client, snapshot.Items, staleSnapshotMaxAge, refreshedAtUtc);
                 DownloadQueueDiagnostics.TryTimingMetric(metrics, "download.queue.client.poll.duration", stopwatch.Elapsed);
 
                 return new ClientQueueFetchResult(
                     client,
-                    DownloadQueueSnapshotMapper.CloneQueueItems(clientQueue),
+                    DownloadQueueSnapshotMapper.CloneQueueItems(snapshot.Items),
                     usedCachedSnapshot: false,
                     isUnavailable: false,
                     snapshotAge: null,
                     failureReason: null,
                     snapshotState: "live",
-                    snapshotRefreshedAtUtc: refreshedAtUtc);
+                    snapshotRefreshedAtUtc: refreshedAtUtc,
+                    isIncomplete: !snapshot.IsComplete);
             }
             catch (OperationCanceledException) when (!timeoutCts.IsCancellationRequested)
             {

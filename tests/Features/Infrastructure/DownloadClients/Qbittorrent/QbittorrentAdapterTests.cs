@@ -747,6 +747,73 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
             Assert.Equal("aaaa1111&bbbb=2222", query["hash"]);
         }
 
+        // Orphan cleanup removes a tracked download once its hash has been missing from a live
+        // queue snapshot for longer than the grace period. A torrent skipped because it could not
+        // be read is missing from the rows but not from the client, so a snapshot with a skip in
+        // it cannot say what is gone.
+        [Fact]
+        public async Task OrphanCleanup_WhenOneTorrentIsUnreadable_KeepsItsTrackingRecord()
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent("\"600\"");
+            var tracked = await TrackDownloadsAsync("aaaa1111", "bbbb2222", "cccc3333");
+
+            await RunOrphanCleanupAsync(tracked);
+
+            Assert.NotNull(await _downloadRepository.GetByIdAsync("tracked-bbbb2222"));
+        }
+
+        // The control for the test above. Without it, a record that survives could mean the
+        // apparatus never removes anything. With every torrent readable, the same cleanup still
+        // removes a record whose torrent is genuinely gone and keeps the ones still present.
+        [Fact]
+        public async Task OrphanCleanup_WhenEveryTorrentIsReadable_StillRemovesAGenuineOrphan()
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent("500");
+            var tracked = await TrackDownloadsAsync("aaaa1111", "bbbb2222", "cccc3333", "dddd4444");
+
+            await RunOrphanCleanupAsync(tracked);
+
+            Assert.Null(await _downloadRepository.GetByIdAsync("tracked-dddd4444"));
+            Assert.NotNull(await _downloadRepository.GetByIdAsync("tracked-bbbb2222"));
+        }
+
+        // Tracked downloads old enough that orphan cleanup's grace period no longer protects them.
+        private async Task<List<Download>> TrackDownloadsAsync(params string[] hashes)
+        {
+            var tracked = new List<Download>();
+            foreach (var hash in hashes)
+            {
+                var download = new DownloadBuilder()
+                    .WithId($"tracked-{hash}")
+                    .WithTitle(hash)
+                    .WithStatus(DownloadStatus.Downloading)
+                    .WithStartDate(DateTime.UtcNow.AddMinutes(-10))
+                    .WithExternalId(hash)
+                    .Build();
+                download.DownloadClientId = _client.Id;
+                tracked.Add(await _downloadRepository.AddAsync(download));
+            }
+
+            return tracked;
+        }
+
+        // The orphan half of the monitor cycle: a full snapshot through the same poller the
+        // monitor uses, handed to the same cleanup service.
+        private async Task RunOrphanCleanupAsync(List<Download> tracked)
+        {
+            var poller = _provider.GetRequiredService<DownloadClientQueuePoller>();
+            var snapshot = Assert.Single(await poller.FetchAsync(
+                [_client],
+                TimeSpan.FromSeconds(15),
+                TimeSpan.FromMinutes(3),
+                maxParallelClientPolls: 1));
+
+            await _provider.GetRequiredService<DownloadOrphanCleanupService>()
+                .RemoveOrphansAsync(_client, snapshot, snapshot.QueueItems, tracked);
+        }
+
         private sealed record RecordedLogEntry(LogLevel Level, string Message);
 
         // Enough of a logger to answer "at what level was this written", which nothing else in
