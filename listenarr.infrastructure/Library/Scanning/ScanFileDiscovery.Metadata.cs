@@ -219,10 +219,12 @@ internal static partial class ScanFileDiscovery
                 startingDirectory,
                 canonicalRoot,
                 semantics)
-            .Select(path => NormalizeMetadataToken(Path.GetFileName(path)))
+            .Select(path => NormalizeMetadataToken(
+                CollapseTrailingDottedPostNominals(Path.GetFileName(path))))
             .Any(token => authorTokens.Contains(token)
                 // Symmetric to BuildExpectedAuthorTokens: also match a folder that carries a
-                // post-nominal (e.g. "Jane Doe PhD") against clean author metadata.
+                // post-nominal (e.g. "Jane Doe PhD" or "Jane Doe, Ph.D.") against clean author
+                // metadata.
                 || authorTokens.Contains(StripTrailingPostNominals(token)));
     }
 
@@ -292,13 +294,16 @@ internal static partial class ScanFileDiscovery
         var tokens = new HashSet<string>(StringComparer.Ordinal);
         foreach (var author in audiobook.Authors ?? [])
         {
-            AddToken(tokens, author);
+            // Collapse dotted credentials first ("Jane Doe, Ph.D." -> "Jane Doe phd") so both
+            // the full token and the stripped token below see them as a single word.
+            var collapsedAuthor = CollapseTrailingDottedPostNominals(author);
+            AddToken(tokens, collapsedAuthor);
 
             // Also accept a directory that omits professional/generational post-nominals,
             // e.g. metadata "Jane Doe, PhD" matching a "Jane Doe" folder. This is additive
             // (never removes a token) and covers post-nominals only — initials are NOT
             // expanded, which would over-match distinct authors.
-            var normalized = NormalizeMetadataToken(author);
+            var normalized = NormalizeMetadataToken(collapsedAuthor);
             var stripped = StripTrailingPostNominals(normalized);
             if (!string.IsNullOrWhiteSpace(stripped)
                 && !string.Equals(stripped, normalized, StringComparison.Ordinal))
@@ -308,6 +313,49 @@ internal static partial class ScanFileDiscovery
         }
 
         return tokens;
+    }
+
+    // Rewrites trailing DOTTED spellings of the known post-nominals to their joined form so the
+    // subsequent token normalization keeps them as one token instead of splitting on the inner
+    // dots. Without this, "Jane Doe, Ph.D." normalizes to "jane doe ph d" and the trailing-word
+    // stripper never sees "phd". Only trailing, dotted, curated-list credentials are collapsed —
+    // spaced initials (e.g. "L. M. Montgomery", or a trailing "Montgomery L.M.") are left intact
+    // so a real name is never rewritten, and at least one leading word is always preserved.
+    // Shared by the metadata and folder sides so the two stay symmetric.
+    private static string CollapseTrailingDottedPostNominals(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return value ?? string.Empty;
+        }
+
+        var words = value.Split(
+            [' ', '\t', '\n', '\r', ',', ';'],
+            StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length <= 1)
+        {
+            return value;
+        }
+
+        var collapsed = false;
+        var end = words.Length;
+        while (end > 1 && words[end - 1].Contains('.'))
+        {
+            var letters = new string(words[end - 1]
+                    .Where(char.IsLetter)
+                    .ToArray())
+                .ToLowerInvariant();
+            if (letters.Length == 0 || !AuthorPostNominals.Contains(letters))
+            {
+                break;
+            }
+
+            words[end - 1] = letters;
+            collapsed = true;
+            end--;
+        }
+
+        return collapsed ? string.Join(' ', words) : value;
     }
 
     // Removes trailing post-nominal words from an already-normalized token, stopping at the
