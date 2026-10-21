@@ -18,7 +18,7 @@
 <template>
   <Modal :visible="true" size="md" @close="emit('close')">
     <template #header>
-      <ModalHeader :title="`Find Match — ${item.folderName}`" @close="emit('close')" />
+      <ModalHeader :title="`Find Match — ${target.name}`" @close="emit('close')" />
     </template>
     <ModalBody>
       <div class="search-wrap">
@@ -118,10 +118,11 @@ import {
   buildLibraryImportInitialQuery,
 } from '@/utils/libraryImportSearch'
 import { getPlaceholderUrl } from '@/utils/placeholder'
-import type { SearchResult } from '@/types'
+import type { FindMatchTarget, SearchResult } from '@/types'
 import { extractNarrators } from '@/utils/searchResultHelpers'
 
-const props = defineProps<{ item: LibraryImportItem }>()
+// What to find a match for: a Library Import row, or a book given as is (Repair)
+const props = defineProps<{ item?: LibraryImportItem; target?: FindMatchTarget }>()
 const emit = defineEmits<{
   close: []
   select: [result: SearchResult]
@@ -130,22 +131,26 @@ const emit = defineEmits<{
 const { getProtectedImageSrc } = useProtectedImages()
 const inputEl = ref<HTMLInputElement | null>(null)
 const placeholderUrl = getPlaceholderUrl()
-// Build the initial query: ASIN → filename stem (when more specific than folder) → folderName
-// detectedTitle comes from the audio file's "album" tag which is often the series name — skip it
-function initialQuery(): string {
-  return buildLibraryImportInitialQuery(props.item)
+// A Library Import row is searched by: ASIN → filename stem (when more specific than folder) →
+// folderName. detectedTitle comes from the audio file's "album" tag which is often the series name —
+// skip it
+const target: FindMatchTarget = props.target ?? {
+  name: props.item!.folderName,
+  query: buildLibraryImportInitialQuery(props.item!),
+  author: buildLibraryImportInitialAuthor(props.item!),
+  region: props.item!.selectedMatch?.region,
 }
-const searchQuery = ref(initialQuery())
-const authorQuery = ref(buildLibraryImportInitialAuthor(props.item))
+const searchQuery = ref(target.query)
+const authorQuery = ref(target.author)
 const searchResults = ref<SearchResult[]>([])
 const isSearching = ref(false)
 const hasSearched = ref(false)
 const store = useLibraryImportStore()
 // The configured region by default; the user can pick another one, which the selected match keeps
 const configuredRegion = ref('')
-const region = ref(props.item.selectedMatch?.region ?? '')
+const region = ref(target.region ?? '')
 const regionOptions = computed(() =>
-  orderedSearchRegionOptions([props.item.selectedMatch?.region, configuredRegion.value, 'us']),
+  orderedSearchRegionOptions([target.region, configuredRegion.value, 'us']),
 )
 
 function regionLabel(value: string): string {
@@ -190,8 +195,8 @@ async function runSearch() {
   hasSearched.value = false
   // Results of the previous query or region can't be picked while this one runs
   searchResults.value = []
-  // Importing waits for it (each search counts once, however it ends)
-  store.findMatchSearchStarted()
+  // Importing a Library Import row waits for it (each search counts once, however it ends)
+  if (props.item) store.findMatchSearchStarted()
   try {
     const isAsin = /^[A-Z0-9]{10}$/i.test(q)
     const params = isAsin
@@ -206,7 +211,7 @@ async function runSearch() {
     // The API wraps the AbortError into a generic error, so the signal tells it apart.
     if (controller === searchController && !controller.signal.aborted) throw error
   } finally {
-    store.findMatchSearchEnded()
+    if (props.item) store.findMatchSearchEnded()
     if (controller === searchController) {
       searchController = null
       isSearching.value = false

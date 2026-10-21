@@ -673,6 +673,14 @@
     @close="showOrganizeModal = false"
     @done="handleOrganizeDone"
   />
+
+  <RepairBooksModal
+    :visible="showRepairModal"
+    :audiobook-ids="audiobook ? [audiobook.id] : []"
+    @close="showRepairModal = false"
+    @done="handleRepairDone"
+    @organize="organizeAfterRepair"
+  />
 </template>
 
 <script setup lang="ts">
@@ -708,6 +716,7 @@ import { buildAudibleProductUrl } from '@/utils/marketDomains'
 import EditAudiobookModal from '@/components/domain/audiobook/EditAudiobookModal.vue'
 import ManualSearchModal from '@/components/domain/search/ManualSearchModal.vue'
 import RenamePreviewModal from '@/components/domain/organize/RenamePreviewModal.vue'
+import RepairBooksModal from '@/components/domain/repair/RepairBooksModal.vue'
 import CustomSelect from '@/components/form/CustomSelect.vue'
 import DeleteConfirmationModal from '@/components/feedback/DeleteConfirmationModal.vue'
 import { Pill } from '@/components/base'
@@ -718,6 +727,7 @@ import {
   PhSpinner,
   PhMagnifyingGlass,
   PhFolderOpen,
+  PhWrench,
   PhTrash,
   PhClock,
   PhFolder,
@@ -799,6 +809,7 @@ const displayedScanStatus = computed(() => {
 })
 const showEditModal = ref(false)
 const showOrganizeModal = ref(false)
+const showRepairModal = ref(false)
 const showMoreActions = ref(false)
 
 // History state
@@ -890,6 +901,18 @@ const topActions = computed<DetailTopAction[]>(() => [
     },
   },
   {
+    key: 'repair',
+    label: 'Repair Book',
+    title: 'Repair Book',
+    ariaLabel: 'Repair Book',
+    icon: PhWrench,
+    disabled: !audiobook.value,
+    desktopGroup: 'secondary',
+    onClick: () => {
+      showRepairModal.value = true
+    },
+  },
+  {
     key: 'organize',
     label: 'Organize Files',
     title: 'Organize Files',
@@ -945,6 +968,7 @@ type DetailTopAction = {
     | 'monitor'
     | 'edit'
     | 'rescan-metadata'
+    | 'repair'
     | 'organize'
     | 'delete'
   label: string
@@ -1808,6 +1832,17 @@ function closeEditModal() {
 async function handleEditSaved() {
   // Refresh the audiobook data after edit
   await loadAudiobook()
+}
+
+async function handleRepairDone() {
+  showRepairModal.value = false
+  await loadAudiobook()
+}
+
+async function organizeAfterRepair() {
+  showRepairModal.value = false
+  await loadAudiobook()
+  showOrganizeModal.value = true
 }
 
 async function handleOrganizeDone() {

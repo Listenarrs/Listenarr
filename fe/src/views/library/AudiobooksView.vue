@@ -120,6 +120,10 @@
           <PhFolderOpen />
           Organize Selected
         </button>
+        <button v-if="selectedCount > 0" class="toolbar-btn" @click="showRepair">
+          <PhWrench />
+          Repair Selected
+        </button>
         <button v-if="selectedCount > 0" class="toolbar-btn delete-btn" @click="confirmBulkDelete">
           <PhTrash />
           Delete Selected ({{ selectedCount }})
@@ -707,6 +711,14 @@
       @done="handleOrganizeDone"
     />
 
+    <RepairBooksModal
+      :visible="showRepairModal"
+      :audiobook-ids="repairAudiobookIds"
+      @close="showRepairModal = false"
+      @done="handleRepairDone"
+      @organize="organizeRepaired"
+    />
+
     <!-- Custom Filter Modal -->
     <CustomFilterModal
       :isOpen="showCustomFilterModal"
@@ -823,6 +835,7 @@ import {
   PhUser,
   PhBooks,
   PhFolderOpen,
+  PhWrench,
 } from '@phosphor-icons/vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
@@ -836,6 +849,7 @@ import { logger } from '@/utils/logger'
 import BulkEditModal from '@/components/domain/collection/BulkEditModal.vue'
 import EditAudiobookModal from '@/components/domain/audiobook/EditAudiobookModal.vue'
 import RenamePreviewModal from '@/components/domain/organize/RenamePreviewModal.vue'
+import RepairBooksModal from '@/components/domain/repair/RepairBooksModal.vue'
 import DeleteConfirmationModal from '@/components/feedback/DeleteConfirmationModal.vue'
 import CustomSelect from '@/components/form/CustomSelect.vue'
 import FiltersDropdown from '@/components/ui/FiltersDropdown.vue'
@@ -1823,6 +1837,8 @@ const qualityProfiles = ref<QualityProfile[]>([])
 const showBulkEditModal = ref(false)
 const showOrganizeModal = ref(false)
 const organizeAudiobookIds = ref<number[]>([])
+const showRepairModal = ref(false)
+const repairAudiobookIds = ref<number[]>([])
 const showEditModal = ref(false)
 const editAudiobook = ref<Audiobook | null>(null)
 const lastClickedIndex = ref<number | null>(null)
@@ -2339,6 +2355,23 @@ function showOrganize() {
 
 function closeOrganize() {
   showOrganizeModal.value = false
+}
+
+function showRepair() {
+  repairAudiobookIds.value = Array.from(libraryStore.selectedIds)
+  showRepairModal.value = true
+}
+
+async function handleRepairDone() {
+  showRepairModal.value = false
+  await libraryStore.fetchLibrary()
+}
+
+async function organizeRepaired(ids: number[]) {
+  showRepairModal.value = false
+  await libraryStore.fetchLibrary()
+  organizeAudiobookIds.value = ids
+  showOrganizeModal.value = true
 }
 
 async function handleOrganizeDone() {

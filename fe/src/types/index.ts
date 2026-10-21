@@ -1210,6 +1210,15 @@ export interface UnmatchedFileItem {
   duration?: string
 }
 
+// What Find Match searches for a book that isn't a Library Import row (Repair): the name shown in
+// its title, the initial query and author, and the region to search first
+export interface FindMatchTarget {
+  name: string
+  query: string
+  author: string
+  region?: string
+}
+
 export interface UnmatchedFilesResponse {
   jobId: string
   status: 'Queued' | 'Processing' | 'Completed' | 'Failed'
