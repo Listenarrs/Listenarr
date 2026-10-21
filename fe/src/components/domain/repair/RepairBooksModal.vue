@@ -44,8 +44,9 @@
             <p>
               Point each book at the right Audible record: use Find Match to search the title and
               author in the region and pick the result, or type the ASIN and its region (it is
-              checked in that region). Repairing saves the ASIN and its region and rescans the
-              metadata from it.
+              checked in that region). Changing the title, author or region empties the ASIN, which
+              no longer matches: pick the book again with Find Match. Repairing saves the ASIN and
+              its region and rescans the metadata from it.
             </p>
           </div>
 
@@ -140,6 +141,7 @@
                       v-model="row.query"
                       class="form-input"
                       data-testid="repair-title"
+                      @input="onSearchChanged(row)"
                       @keydown.enter.prevent="findMatchRow = row"
                     />
                   </label>
@@ -149,6 +151,7 @@
                       v-model="row.author"
                       class="form-input"
                       data-testid="repair-author"
+                      @input="onSearchChanged(row)"
                       @keydown.enter.prevent="findMatchRow = row"
                     />
                   </label>
@@ -158,7 +161,7 @@
                       v-model="row.region"
                       class="form-input"
                       data-testid="repair-region"
-                      @change="onTyped(row)"
+                      @change="onSearchChanged(row)"
                     >
                       <option v-for="o in regionOptionsFor(row)" :key="o.value" :value="o.value">
                         {{ o.label }}
@@ -184,7 +187,11 @@
                   class="repair-hint"
                   data-testid="repair-invalid-asin"
                 >
-                  An ASIN is 10 letters or digits: type it, or use Find Match.
+                  {{
+                    row.asin.trim()
+                      ? 'An ASIN is 10 letters or digits: type it, or use Find Match.'
+                      : 'No ASIN: use Find Match to pick the book, or type its ASIN.'
+                  }}
                 </p>
               </div>
             </div>
@@ -431,8 +438,15 @@ function pick(row: RepairRow, result: SearchResult) {
   row.selected = true
 }
 
-// A typed ASIN or region is no longer the picked record
+// A typed ASIN is no longer the picked record
 function onTyped(row: RepairRow) {
+  row.pickedTitle = null
+}
+
+// Another title, author or region describes another record: the ASIN no longer matches, so it is
+// emptied until Find Match picks the book again (or its ASIN is typed)
+function onSearchChanged(row: RepairRow) {
+  row.asin = ''
   row.pickedTitle = null
 }
 

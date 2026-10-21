@@ -155,6 +155,39 @@ describe('RepairBooksModal', () => {
     ).toEqual(['ASIN', 'Title', 'Author', 'Region'])
   })
 
+  it('empties the ASIN when the title, author or region changes, and asks to pick the book again', async () => {
+    for (const [testid, value] of [
+      ['repair-title', 'The Primal Hunter 4'],
+      ['repair-author', 'Someone else'],
+      ['repair-region', 'us'],
+    ]) {
+      const wrapper = mountModal()
+      await flushPromises()
+
+      await row(wrapper).get(`[data-testid="${testid}"]`).setValue(value)
+
+      expect(field(wrapper, 'repair-asin').value).toBe('')
+      expect(row(wrapper).get('[data-testid="repair-invalid-asin"]').text()).toContain(
+        'No ASIN: use Find Match to pick the book',
+      )
+      expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
+      wrapper.unmount()
+    }
+  })
+
+  it('keeps the ASIN and region of a record picked in Find Match', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    await row(wrapper).get('[data-testid="repair-title"]').setValue('Primal Hunter 4')
+
+    const findMatch = await openFindMatch(wrapper)
+    findMatch.vm.$emit('select', englishPh4)
+    await flushPromises()
+
+    expect(field(wrapper, 'repair-asin').value).toBe('B0BK9W82PQ')
+    expect(field(wrapper, 'repair-region').value).toBe('us')
+  })
+
   it("opens canary's Find Match on the book's title, author and region", async () => {
     const wrapper = mountModal()
     await flushPromises()
@@ -254,8 +287,9 @@ describe('RepairBooksModal', () => {
   it('checks a typed ASIN in its region with the Find Match search before saving it', async () => {
     const wrapper = mountModal()
     await flushPromises()
-    await row(wrapper).get('[data-testid="repair-asin"]').setValue('b0bk9w82pq')
+    // The region first: changing it empties the ASIN
     await row(wrapper).get('[data-testid="repair-region"]').setValue('us')
+    await row(wrapper).get('[data-testid="repair-asin"]').setValue('b0bk9w82pq')
 
     await repair(wrapper)
 
@@ -280,21 +314,21 @@ describe('RepairBooksModal', () => {
     expect(wrapper.text()).toContain('Audible France (FR) has no record for B0BK9W82PQ')
   })
 
-  it('forgets the picked record once the ASIN or region is typed again', async () => {
+  it('forgets the picked record once the ASIN is typed again, and checks the typed one', async () => {
     const wrapper = mountModal()
     await flushPromises()
     const findMatch = await openFindMatch(wrapper)
     findMatch.vm.$emit('select', englishPh4)
     await flushPromises()
 
-    await row(wrapper).get('[data-testid="repair-region"]').setValue('fr')
+    await row(wrapper).get('[data-testid="repair-asin"]').setValue('B0BK9W82PQ')
 
     expect(row(wrapper).find('[data-testid="repair-picked"]').exists()).toBe(false)
     await repair(wrapper)
     expect(apiMocks.advancedSearch).toHaveBeenLastCalledWith(
-      expect.objectContaining({ asin: 'B0BK9W82PQ', region: 'fr' }),
+      expect.objectContaining({ asin: 'B0BK9W82PQ', region: 'us' }),
     )
-    expect(apiMocks.updateAudiobookIdentifiers).not.toHaveBeenCalled()
+    expect(apiMocks.updateAudiobookIdentifiers).toHaveBeenCalled()
   })
 
   it('flags a malformed ASIN and does not let the repair start', async () => {
