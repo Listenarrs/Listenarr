@@ -408,6 +408,26 @@ describe('RepairBooksModal', () => {
     expect(row(wrapper).get('[data-testid="match-summary"]').text()).toBe('Untitled')
   })
 
+  it('selects the current book in the results, then the new one once picked', async () => {
+    const otherVol7 = { ...frenchVol7, asin: 'B0FRVOL7XX', title: 'Primal Hunter, Vol. 7 (other)' }
+    catalogue({ fr: [frenchVol7, otherVol7] })
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
+    await flushPromises()
+    const selected = () =>
+      row(wrapper)
+        .findAll('[data-testid="find-match-result"]')
+        .filter((r) => r.classes().includes('selected'))
+        .map((r) => r.text())
+    expect(selected()).toEqual([expect.stringContaining('B0HM45F8MW')])
+
+    await row(wrapper).findAll('[data-testid="find-match-result"]')[1]!.trigger('click')
+    expect(selected()).toEqual([expect.stringContaining('B0FRVOL7XX')])
+    expect(row(wrapper).get('[data-testid="match-picked"]').text()).toContain('B0FRVOL7XX')
+  })
+
   it('shows the current and new records under the fields', async () => {
     const wrapper = mountModal()
     await flushPromises()
@@ -450,13 +470,12 @@ describe('RepairBooksModal', () => {
       ).toBeUndefined()
   })
 
-  it('takes the ASIN and region of the picked result, closes the results, then repairs with them', async () => {
+  it('takes the ASIN and region of the picked result, then repairs with them', async () => {
     const wrapper = mountModal()
     await flushPromises()
 
     await searchAndPick(wrapper)
 
-    expect(row(wrapper).find('[data-testid="find-match-result"]').exists()).toBe(false)
     expect(field(wrapper, 'match-asin').value).toBe('B0BK9W82PQ')
     expect(field(wrapper, 'match-region').value).toBe('us')
     expect(row(wrapper).get('[data-testid="match-picked"]').text()).toContain('Primal Hunter 4')
@@ -542,7 +561,9 @@ describe('RepairBooksModal', () => {
   })
 
   it('lets the user pick when the region has several records for the ASIN', async () => {
-    catalogue({ de: [frenchVol7, { ...frenchVol7, title: 'Primal Hunter 7 (Dramatized)' }] })
+    // The German catalogue's records: not the French one the book points at
+    const germanVol7 = { ...frenchVol7, region: 'de' }
+    catalogue({ de: [germanVol7, { ...germanVol7, title: 'Primal Hunter 7 (Dramatized)' }] })
     const wrapper = mountModal()
     await flushPromises()
 

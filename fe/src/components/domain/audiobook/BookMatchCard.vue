@@ -205,7 +205,7 @@
         v-if="state.results.length"
         class="match-search-results"
         :results="state.results"
-        :selected-asin="match.picked?.asin"
+        :selected="selectedRecord"
         @select="pick"
       />
       <p v-else class="match-search-state" data-testid="match-search-empty">
@@ -306,6 +306,14 @@ const searchKind = computed<SearchKind>(() =>
   !match.value.query.trim() && match.value.asin ? 'asin' : 'title',
 )
 
+// The record shown as selected in the results: the new one once there is one, else the one the
+// book points at today
+const selectedRecord = computed(() => {
+  const { picked, current } = match.value
+  if (picked?.asin) return { asin: picked.asin, region: picked.region ?? match.value.region }
+  return current.asin ? { asin: current.asin, region: current.region } : null
+})
+
 // Changing the region looks the ASIN up there: not while a search runs, here or on another book.
 // One search at a time keeps answers from racing each other.
 const regionLocked = computed(() => props.searchLocked || state.value.status === 'searching')
@@ -397,14 +405,14 @@ function cancelSearch() {
   if (state.value.status === 'searching') state.value = idle()
 }
 
-// The record picked in the results: its ASIN in the region it was found in; the results close
+// The record picked in the results: its ASIN in the region it was found in. The results stay,
+// with the selection moved to it.
 function pick(result: SearchResult) {
   if (!result.asin) return
   match.value.asin = result.asin.toUpperCase()
   match.value.region = result.region || match.value.region
   asinEntered.value = false
   setMatched({ ...result, region: match.value.region })
-  state.value = idle()
 }
 
 function forgetRecord() {
