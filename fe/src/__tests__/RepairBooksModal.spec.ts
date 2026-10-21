@@ -113,6 +113,11 @@ const row = (wrapper: ReturnType<typeof mountModal>, id = 7) =>
   wrapper.get(`[data-testid="repair-row-${id}"]`)
 
 // Search the row's title and author in a region, then pick the result with that title
+// A filled ASIN has priority: emptying it lets Search look for the title and author
+async function emptyAsin(wrapper: ReturnType<typeof mountModal>, id = 7) {
+  await row(wrapper, id).get('[data-testid="match-asin"]').setValue('')
+}
+
 async function searchAndPick(
   wrapper: ReturnType<typeof mountModal>,
   { region = 'us', title = 'Primal Hunter 4' } = {},
@@ -120,6 +125,7 @@ async function searchAndPick(
   await row(wrapper).get('[data-testid="match-region"]').setValue(region)
   // Changing the region looks the ASIN up there first
   await flushPromises()
+  await emptyAsin(wrapper)
   await row(wrapper).get('[data-testid="match-search"]').trigger('click')
   await flushPromises()
   const result = row(wrapper)
@@ -178,7 +184,7 @@ describe('RepairBooksModal', () => {
     expect(wrapper.get('[data-testid="repair-confirm"]').text()).toContain('Repair 0')
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[data-testid="repair-info-asin"]').text()).toBe(
-      'A typed ASIN is searched on its own: the title and author are left out of that search.',
+      'A filled ASIN is searched on its own: the title and author are left out of that search.',
     )
     expect(wrapper.get('[data-testid="repair-count"]').text()).toBe(
       'Find a new record for each book to repair',
@@ -258,6 +264,7 @@ describe('RepairBooksModal', () => {
     await row(wrapper).get('[data-testid="match-region"]').setValue('us')
     await flushPromises()
 
+    await emptyAsin(wrapper)
     await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
 
@@ -281,6 +288,7 @@ describe('RepairBooksModal', () => {
     expect(field(wrapper, 'match-title').value).toBe('Primal Hunter, Vol. 7')
     expect(field(wrapper, 'match-author').value).toBe('Zogarth')
 
+    await emptyAsin(wrapper)
     await row(wrapper).get('[data-testid="match-title"]').setValue('The Primal Hunter 4')
     await row(wrapper).get('[data-testid="match-title"]').trigger('keydown', { key: 'Enter' })
     await flushPromises()
@@ -299,6 +307,7 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
 
+    await emptyAsin(wrapper)
     await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
 
@@ -330,6 +339,7 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
 
+    await emptyAsin(wrapper)
     await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
     const header = () => row(wrapper).get('[data-testid="match-results-header"]').text()
@@ -339,7 +349,7 @@ describe('RepairBooksModal', () => {
     expect(header()).toBe('Results for "Primal Hunter, Vol. 7" by "Zogarth" in France (FR)')
   })
 
-  it('says in the header when a typed ASIN was searched before the title', async () => {
+  it('heads the results of a filled ASIN with the ASIN, which has priority over the title', async () => {
     const wrapper = mountModal()
     await flushPromises()
     await row(wrapper).get('[data-testid="match-region"]').setValue('us')
@@ -350,7 +360,7 @@ describe('RepairBooksModal', () => {
     await flushPromises()
 
     expect(row(wrapper).get('[data-testid="match-results-header"]').text()).toBe(
-      'Results for ASIN B0BK9W82PQ (searched before the title) in United States (US)',
+      'Results for ASIN "B0BK9W82PQ" in United States (US)',
     )
   })
 
@@ -358,6 +368,7 @@ describe('RepairBooksModal', () => {
     catalogue({ fr: [frenchVol7] })
     const wrapper = mountModal()
     await flushPromises()
+    await emptyAsin(wrapper)
     await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
     expect(row(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(1)
@@ -388,6 +399,7 @@ describe('RepairBooksModal', () => {
     apiMocks.advancedSearch.mockImplementation(() => new Promise(() => {}))
     const wrapper = mountModal()
     await flushPromises()
+    await emptyAsin(wrapper)
     await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
 
@@ -408,6 +420,7 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
 
+    await emptyAsin(wrapper)
     await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
 
@@ -429,6 +442,7 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
 
+    await emptyAsin(wrapper)
     await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
 
@@ -480,6 +494,7 @@ describe('RepairBooksModal', () => {
     await row(wrapper).get('[data-testid="match-region"]').setValue('us')
     await flushPromises()
 
+    await emptyAsin(wrapper)
     await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
 
@@ -523,6 +538,7 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
 
+    await emptyAsin(wrapper)
     await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
     const selected = () =>
@@ -566,6 +582,7 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal([7, 8])
     await flushPromises()
 
+    await emptyAsin(wrapper)
     await row(wrapper, 7).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
 
@@ -648,7 +665,7 @@ describe('RepairBooksModal', () => {
     // Add New's ASIN search: the metadata sources, in the region
     expect(apiMocks.getAudibleMetadata).toHaveBeenCalledWith('B0HM45F8MW', 'de')
     expect(row(wrapper).get('[data-testid="match-search-pending"]').text()).toContain(
-      'Searching ASIN B0HM45F8MW (searched before the title) in Germany (DE)',
+      'Searching ASIN "B0HM45F8MW" in Germany (DE)',
     )
     expect(row(wrapper).find('[data-testid="match-cancel-search"]').exists()).toBe(true)
     answer()
@@ -706,30 +723,32 @@ describe('RepairBooksModal', () => {
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeUndefined()
   })
 
-  it('keeps the title and author when an ASIN is typed, and Search looks the ASIN up first', async () => {
+  it('looks a filled ASIN up before the title and author, and the title once the ASIN is emptied', async () => {
     catalogue({ fr: [frenchVol7, { ...englishPh4, region: 'fr' }] })
     const wrapper = mountModal()
     await flushPromises()
     apiMocks.advancedSearch.mockClear()
 
-    await row(wrapper).get('[data-testid="match-asin"]').setValue('B0BK9W82PQ')
-    await flushPromises()
-
-    expect(field(wrapper, 'match-title').value).toBe('Primal Hunter, Vol. 7')
-    expect(field(wrapper, 'match-author').value).toBe('Zogarth')
-    expect(apiMocks.getAudibleMetadata).not.toHaveBeenCalled()
-    expect(row(wrapper).attributes('data-match-state')).toBe('ignored')
-
+    // Filled from the start with the book's ASIN: Search looks it up, the title left out
     await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
-    expect(apiMocks.getAudibleMetadata).toHaveBeenCalledWith('B0BK9W82PQ', 'fr')
+    expect(apiMocks.getAudibleMetadata).toHaveBeenLastCalledWith('B0HM45F8MW', 'fr')
     expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
-    expect(row(wrapper).attributes('data-match-state')).toBe('matched')
+    expect(field(wrapper, 'match-title').value).toBe('Primal Hunter, Vol. 7')
 
-    // Looked up: the next Search goes back to the title and author
+    await row(wrapper).get('[data-testid="match-asin"]').setValue('B0BK9W82PQ')
     await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
-    expect(apiMocks.advancedSearch).toHaveBeenCalled()
+    expect(apiMocks.getAudibleMetadata).toHaveBeenLastCalledWith('B0BK9W82PQ', 'fr')
+    expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
+
+    await emptyAsin(wrapper)
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
+    await flushPromises()
+    // The record found for the ASIN filled the title and author, searched now
+    expect(apiMocks.advancedSearch).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Primal Hunter 4', author: 'Zogarth' }),
+    )
   })
 
   it('looks a typed ASIN up in its region with Enter, then saves it', async () => {
