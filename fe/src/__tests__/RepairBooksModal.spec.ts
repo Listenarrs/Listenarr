@@ -915,25 +915,25 @@ describe('RepairBooksModal', () => {
     expect(row(wrapper).findAll('[data-testid="find-match-result"]').length).toBeGreaterThan(0)
   })
 
-  it("offers every region: the book's, then the preferred one, then the rest alphabetically", async () => {
+  it("offers every region in canary's order: the book's, the preferred one and US, then by name", async () => {
     apiMocks.getApplicationSettings.mockResolvedValue({ defaultSearchRegion: 'de' })
     const wrapper = mountModal()
     await flushPromises()
 
-    // Codes in the field, the full name as each option's tooltip
+    // Codes in the field, the full name as each option's tooltip; the rest by full name
     const shown = row(wrapper).findAll('[data-testid="match-region"] option')
     expect(shown.map((o) => o.text())).toEqual([
       'FR',
       'DE',
+      'US',
       'AU',
       'BR',
       'CA',
-      'ES',
       'IN',
       'IT',
       'JP',
+      'ES',
       'UK',
-      'US',
     ])
     expect(shown[0]!.attributes('title')).toBe('France (FR)')
   })
@@ -948,7 +948,7 @@ describe('RepairBooksModal', () => {
     await flushPromises()
 
     const shown = row(wrapper).findAll('[data-testid="match-region"] option')
-    expect(shown.map((o) => o.text()).slice(0, 4)).toEqual(['DE', 'US', 'AU', 'BR'])
+    expect(shown.map((o) => o.text()).slice(0, 3)).toEqual(['DE', 'US', 'AU'])
     expect(field(wrapper, 'match-region').value).toBe('de')
   })
 
@@ -958,7 +958,7 @@ describe('RepairBooksModal', () => {
     await flushPromises()
 
     const shown = row(wrapper).findAll('[data-testid="match-region"] option')
-    expect(shown.map((o) => o.text()).slice(0, 4)).toEqual(['FR', 'US', 'AU', 'BR'])
+    expect(shown.map((o) => o.text()).slice(0, 3)).toEqual(['FR', 'US', 'AU'])
   })
 
   it('does not pick the current record found alone: tagged Current, nothing to repair', async () => {
