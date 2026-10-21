@@ -33,7 +33,6 @@ vi.mock('@/services/api', () => ({
 }))
 
 import RepairBooksModal from '@/components/domain/repair/RepairBooksModal.vue'
-import LibraryImportSearchModal from '@/components/domain/audiobook/LibraryImportSearchModal.vue'
 
 // An English book matched to the French translation on a French instance
 const mismatched = {
@@ -72,6 +71,14 @@ const englishPh4 = {
   region: 'us',
 }
 
+const frenchVol7 = {
+  asin: 'B0HM45F8MW',
+  title: 'Primal Hunter, Vol. 7',
+  authors: [{ name: 'Zogarth' }],
+  language: 'french',
+  region: 'fr',
+}
+
 // An Audible catalogue per region: ASIN lookups only find what that region sells
 function catalogue(byRegion: Record<string, Array<Record<string, unknown>>>) {
   apiMocks.advancedSearch.mockImplementation(
@@ -96,10 +103,19 @@ function mountModal(ids = [7]) {
 const row = (wrapper: ReturnType<typeof mountModal>, id = 7) =>
   wrapper.get(`[data-testid="repair-row-${id}"]`)
 
-async function openFindMatch(wrapper: ReturnType<typeof mountModal>) {
-  await row(wrapper).get('[data-testid="repair-find-match"]').trigger('click')
+// Search the row's title and author in a region, then pick the result with that title
+async function searchAndPick(
+  wrapper: ReturnType<typeof mountModal>,
+  { region = 'us', title = 'Primal Hunter 4' } = {},
+) {
+  await row(wrapper).get('[data-testid="repair-region"]').setValue(region)
+  await row(wrapper).get('[data-testid="repair-search"]').trigger('click')
   await flushPromises()
-  return wrapper.getComponent(LibraryImportSearchModal)
+  const result = row(wrapper)
+    .findAll('[data-testid="find-match-result"]')
+    .find((r) => r.text().includes(title))
+  await result!.trigger('click')
+  await flushPromises()
 }
 
 async function repair(wrapper: ReturnType<typeof mountModal>) {
@@ -168,46 +184,30 @@ describe('RepairBooksModal', () => {
 
       expect(field(wrapper, 'repair-asin').value).toBe('')
       expect(row(wrapper).get('[data-testid="repair-invalid-asin"]').text()).toContain(
-        'No ASIN: use Find Match to pick the book',
+        'No ASIN: search the book and pick it',
       )
       expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
       wrapper.unmount()
     }
   })
 
-  it('keeps the ASIN and region of a record picked in Find Match', async () => {
+  it('searches the title and author in the region and shows the results under the book', async () => {
     const wrapper = mountModal()
     await flushPromises()
-    await row(wrapper).get('[data-testid="repair-title"]').setValue('Primal Hunter 4')
+    await row(wrapper).get('[data-testid="repair-region"]').setValue('us')
 
-    const findMatch = await openFindMatch(wrapper)
-    findMatch.vm.$emit('select', englishPh4)
+    await row(wrapper).get('[data-testid="repair-search"]').trigger('click')
     await flushPromises()
 
-    expect(field(wrapper, 'repair-asin').value).toBe('B0BK9W82PQ')
-    expect(field(wrapper, 'repair-region').value).toBe('us')
-  })
-
-  it("opens canary's Find Match on the book's title, author and region", async () => {
-    const wrapper = mountModal()
-    await flushPromises()
-
-    const findMatch = await openFindMatch(wrapper)
-
-    expect(findMatch.props('target')).toEqual({
-      name: 'Primal Hunter, Vol. 7',
-      query: 'Primal Hunter, Vol. 7',
-      author: 'Zogarth',
-      region: 'fr',
-    })
-    expect(findMatch.text()).toContain('Find Match — Primal Hunter, Vol. 7')
     expect(apiMocks.advancedSearch).toHaveBeenCalledWith(
-      expect.objectContaining({ title: 'Primal Hunter, Vol. 7', author: 'Zogarth', region: 'fr' }),
+      expect.objectContaining({ title: 'Primal Hunter, Vol. 7', author: 'Zogarth', region: 'us' }),
       expect.any(AbortSignal),
     )
+    const results = row(wrapper).findAll('[data-testid="find-match-result"]')
+    expect(results.map((r) => r.text())).toEqual([expect.stringContaining('Primal Hunter 4')])
   })
 
-  it('searches the title and author typed on the row, from Find Match or with Enter, and Revert restores them', async () => {
+  it('searches with Enter in the title or author, and Revert restores them', async () => {
     const wrapper = mountModal()
     await flushPromises()
     expect(field(wrapper, 'repair-title').value).toBe('Primal Hunter, Vol. 7')
@@ -217,35 +217,130 @@ describe('RepairBooksModal', () => {
     await row(wrapper).get('[data-testid="repair-title"]').trigger('keydown', { key: 'Enter' })
     await flushPromises()
 
-    const findMatch = wrapper.getComponent(LibraryImportSearchModal)
-    expect(findMatch.props('target')).toMatchObject({
-      name: 'Primal Hunter, Vol. 7',
-      query: 'The Primal Hunter 4',
-      author: 'Zogarth',
-    })
     expect(apiMocks.advancedSearch).toHaveBeenCalledWith(
       expect.objectContaining({ title: 'The Primal Hunter 4', author: 'Zogarth' }),
       expect.any(AbortSignal),
     )
-
-    findMatch.vm.$emit('close')
-    await flushPromises()
     await row(wrapper).get('[data-testid="repair-revert"]').trigger('click')
     expect(field(wrapper, 'repair-title').value).toBe('Primal Hunter, Vol. 7')
+    expect(row(wrapper).find('[data-testid="find-match-result"]').exists()).toBe(false)
   })
 
-  it('takes the ASIN and region of the record picked in Find Match, then repairs with them', async () => {
+  it('shows the search pending, with a red Cancel search button instead of Search', async () => {
+    let answer!: (results: unknown[]) => void
+    apiMocks.advancedSearch.mockReturnValue(new Promise((resolve) => (answer = resolve)))
     const wrapper = mountModal()
     await flushPromises()
-    const findMatch = await openFindMatch(wrapper)
-    ;(findMatch.get('select').element as HTMLSelectElement).value = 'us'
-    await findMatch.get('select').trigger('change')
+
+    await row(wrapper).get('[data-testid="repair-search"]').trigger('click')
     await flushPromises()
 
-    await findMatch.get('.result-item').trigger('click')
+    expect(row(wrapper).get('[data-testid="repair-search-pending"]').text()).toContain(
+      'Searching "Primal Hunter, Vol. 7" in France (FR)',
+    )
+    expect(row(wrapper).find('[data-testid="repair-search"]').exists()).toBe(false)
+    expect(row(wrapper).get('[data-testid="repair-cancel-search"]').classes()).toContain(
+      'btn-danger',
+    )
+    expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
+
+    answer([])
+    await flushPromises()
+    expect(row(wrapper).get('[data-testid="repair-search-empty"]').text()).toContain(
+      'No results for "Primal Hunter, Vol. 7" by "Zogarth" in France (FR)',
+    )
+    expect(row(wrapper).find('[data-testid="repair-search"]').exists()).toBe(true)
+  })
+
+  it('cancels the search, back to the fields with nothing to report', async () => {
+    apiMocks.advancedSearch.mockImplementation(
+      (_params: unknown, signal?: AbortSignal) =>
+        new Promise((_resolve, reject) =>
+          signal?.addEventListener('abort', () => reject(new Error('aborted'))),
+        ),
+    )
+    const wrapper = mountModal()
+    await flushPromises()
+    await row(wrapper).get('[data-testid="repair-search"]').trigger('click')
     await flushPromises()
 
-    expect(wrapper.findComponent(LibraryImportSearchModal).exists()).toBe(false)
+    await row(wrapper).get('[data-testid="repair-cancel-search"]').trigger('click')
+    await flushPromises()
+
+    expect(row(wrapper).find('[data-testid="repair-search-pending"]').exists()).toBe(false)
+    expect(row(wrapper).find('[data-testid="repair-search-error"]').exists()).toBe(false)
+    expect(row(wrapper).find('[data-testid="repair-search"]').exists()).toBe(true)
+  })
+
+  it('stops a search that takes too long, says so and offers to retry', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    apiMocks.advancedSearch.mockImplementation(
+      (_params: unknown, signal?: AbortSignal) =>
+        new Promise((_resolve, reject) =>
+          signal?.addEventListener('abort', () => reject(new Error('aborted'))),
+        ),
+    )
+    const wrapper = mountModal()
+    await flushPromises()
+    await row(wrapper).get('[data-testid="repair-search"]').trigger('click')
+    await flushPromises()
+
+    await vi.advanceTimersByTimeAsync(30_000)
+    await flushPromises()
+
+    expect(row(wrapper).get('[data-testid="repair-search-error"]').text()).toContain(
+      'The search took longer than 30 seconds',
+    )
+    catalogue({ fr: [frenchVol7] })
+    await row(wrapper).get('[data-testid="repair-search-retry"]').trigger('click')
+    await flushPromises()
+    expect(row(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(1)
+  })
+
+  it('shows a failed search with its error and Retry', async () => {
+    apiMocks.advancedSearch.mockRejectedValueOnce(new Error('API error: 502 Bad Gateway'))
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await row(wrapper).get('[data-testid="repair-search"]').trigger('click')
+    await flushPromises()
+
+    expect(row(wrapper).get('[data-testid="repair-search-error"]').text()).toContain(
+      'The search failed: API error: 502 Bad Gateway',
+    )
+    expect(row(wrapper).find('[data-testid="repair-search-retry"]').exists()).toBe(true)
+  })
+
+  it('searches one book at a time: the others wait for it', async () => {
+    apiMocks.getAudiobook.mockImplementation(async (id: number) =>
+      id === 7 ? mismatched : { ...mismatched, id: 8, title: 'Other book' },
+    )
+    let answer!: (results: unknown[]) => void
+    apiMocks.advancedSearch.mockReturnValue(new Promise((resolve) => (answer = resolve)))
+    const wrapper = mountModal([7, 8])
+    await flushPromises()
+
+    await row(wrapper, 7).get('[data-testid="repair-search"]').trigger('click')
+    await flushPromises()
+
+    const otherSearch = row(wrapper, 8).get('[data-testid="repair-search"]')
+    expect(otherSearch.attributes('disabled')).toBeDefined()
+    expect(otherSearch.attributes('title')).toBe('Another book is being searched')
+
+    answer([])
+    await flushPromises()
+    expect(
+      row(wrapper, 8).get('[data-testid="repair-search"]').attributes('disabled'),
+    ).toBeUndefined()
+  })
+
+  it('takes the ASIN and region of the picked result, closes the results, then repairs with them', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await searchAndPick(wrapper)
+
+    expect(row(wrapper).find('[data-testid="find-match-result"]').exists()).toBe(false)
     expect(field(wrapper, 'repair-asin').value).toBe('B0BK9W82PQ')
     expect(field(wrapper, 'repair-region').value).toBe('us')
     expect(row(wrapper).get('[data-testid="repair-picked"]').text()).toContain('Primal Hunter 4')
@@ -272,9 +367,7 @@ describe('RepairBooksModal', () => {
   it('saves the new ASIN as primary, drops the identifiers of the old match and keeps manual ones', async () => {
     const wrapper = mountModal()
     await flushPromises()
-    const findMatch = await openFindMatch(wrapper)
-    findMatch.vm.$emit('select', englishPh4)
-    await flushPromises()
+    await searchAndPick(wrapper)
 
     await repair(wrapper)
 
@@ -284,7 +377,7 @@ describe('RepairBooksModal', () => {
     ])
   })
 
-  it('checks a typed ASIN in its region with the Find Match search before saving it', async () => {
+  it('checks a typed ASIN in its region with the same search before saving it', async () => {
     const wrapper = mountModal()
     await flushPromises()
     // The region first: changing it empties the ASIN
@@ -317,9 +410,7 @@ describe('RepairBooksModal', () => {
   it('forgets the picked record once the ASIN is typed again, and checks the typed one', async () => {
     const wrapper = mountModal()
     await flushPromises()
-    const findMatch = await openFindMatch(wrapper)
-    findMatch.vm.$emit('select', englishPh4)
-    await flushPromises()
+    await searchAndPick(wrapper)
 
     await row(wrapper).get('[data-testid="repair-asin"]').setValue('B0BK9W82PQ')
 
@@ -344,9 +435,7 @@ describe('RepairBooksModal', () => {
   it('reverts a book to its ASIN and region before the changes', async () => {
     const wrapper = mountModal()
     await flushPromises()
-    const findMatch = await openFindMatch(wrapper)
-    findMatch.vm.$emit('select', englishPh4)
-    await flushPromises()
+    await searchAndPick(wrapper)
 
     await row(wrapper).get('[data-testid="repair-revert"]').trigger('click')
 
