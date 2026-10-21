@@ -240,7 +240,8 @@ describe('LibraryImportSearchModal', () => {
     expect(field(wrapper, 'find-match-confirm').attributes('disabled')).toBeDefined()
 
     search.mockResolvedValue([ph4])
-    await field(wrapper, 'match-asin-retry').trigger('click')
+    // Entered again, the ASIN is looked up again
+    await field(wrapper, 'match-asin').trigger('change')
     await flushPromises()
     await field(wrapper, 'find-match-confirm').trigger('click')
     expect(wrapper.emitted('select')?.[0]?.[0]).toEqual(

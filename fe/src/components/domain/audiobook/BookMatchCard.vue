@@ -46,45 +46,6 @@
       </span>
     </div>
 
-    <!-- What the book points at today, and the record it will point at -->
-    <dl class="match-records">
-      <dt>Current</dt>
-      <dd data-testid="match-current">
-        <template v-if="match.current.asin">
-          <span class="match-asin">{{ match.current.asin }}</span>
-          · {{ regionLabel(match.current.region) || 'no region' }}
-        </template>
-        <span v-else class="match-muted">None</span>
-      </dd>
-      <dt>New</dt>
-      <dd v-if="match.picked" class="match-new-ok" data-testid="match-picked">
-        <span class="match-asin">{{ match.picked.asin }}</span>
-        · {{ regionLabel(match.picked.region ?? match.region) }} ·
-        {{ match.picked.title ?? match.picked.asin }}
-        <span class="match-status">
-          <PhCheckCircle :size="14" weight="fill" />
-          checked
-        </span>
-      </dd>
-      <dd v-else-if="match.asinError" class="match-new-error" data-testid="match-asin-error">
-        <PhXCircle :size="14" weight="fill" />
-        <span>{{ match.asinError }}</span>
-        <button
-          type="button"
-          class="btn btn-secondary match-retry-btn"
-          data-testid="match-asin-retry"
-          :disabled="!canSearchFor('asin')"
-          @click="search('asin')"
-        >
-          <PhArrowCounterClockwise :size="14" />
-          Retry
-        </button>
-      </dd>
-      <dd v-else class="match-muted" data-testid="match-none">
-        No new record yet: search the book and pick it, or type its ASIN
-      </dd>
-    </dl>
-
     <div class="match-fields">
       <label class="match-field match-field-asin">
         <span class="match-field-label">ASIN</span>
@@ -143,6 +104,20 @@
         Cancel search
       </button>
       <button
+        v-else-if="retryKind"
+        type="button"
+        class="btn btn-secondary match-search-btn"
+        data-testid="match-retry"
+        :disabled="!canSearchFor(retryKind)"
+        :title="
+          searchLocked ? 'Another book is being searched' : 'Search again with the same values'
+        "
+        @click="search(retryKind)"
+      >
+        <PhArrowCounterClockwise :size="16" />
+        Retry
+      </button>
+      <button
         v-else
         type="button"
         class="btn btn-secondary match-search-btn"
@@ -160,6 +135,35 @@
       </button>
     </div>
 
+    <!-- What the book points at today, and the record it will point at -->
+    <dl class="match-records">
+      <dt>Current</dt>
+      <dd data-testid="match-current">
+        <template v-if="match.current.asin">
+          <span class="match-asin">{{ match.current.asin }}</span>
+          · {{ regionLabel(match.current.region) || 'no region' }}
+        </template>
+        <span v-else class="match-muted">None</span>
+      </dd>
+      <dt>New</dt>
+      <dd v-if="match.picked" class="match-new-ok" data-testid="match-picked">
+        <span class="match-asin">{{ match.picked.asin }}</span>
+        · {{ regionLabel(match.picked.region ?? match.region) }} ·
+        {{ match.picked.title ?? match.picked.asin }}
+        <span class="match-status">
+          <PhCheckCircle :size="14" weight="fill" />
+          checked
+        </span>
+      </dd>
+      <dd v-else-if="match.asinError" class="match-new-error" data-testid="match-asin-error">
+        <PhXCircle :size="14" weight="fill" />
+        <span>{{ match.asinError }}</span>
+      </dd>
+      <dd v-else class="match-muted" data-testid="match-none">
+        No new record yet: search the book and pick it, or type its ASIN
+      </dd>
+    </dl>
+
     <!-- The rules, where they apply -->
     <p v-if="clearedBy && !match.asin" class="match-hint" data-testid="match-asin-cleared">
       ASIN cleared: the {{ clearedBy }} changed, search again.
@@ -168,7 +172,7 @@
       An ASIN is 10 letters or digits.
     </p>
 
-    <!-- The search under the book: pending, failed with Retry, or its results to pick from -->
+    <!-- The search under the book: pending, failed (Search is then Retry), or its results -->
     <p
       v-if="state.status === 'searching'"
       class="match-search-state"
@@ -183,22 +187,12 @@
       </template>
     </p>
     <p
-      v-else-if="state.status === 'failed'"
+      v-else-if="state.status === 'failed' && state.kind === 'title'"
       class="match-search-state match-search-error"
       data-testid="match-search-error"
     >
       <PhWarningCircle :size="16" />
       <span>{{ state.error }}</span>
-      <button
-        type="button"
-        class="btn btn-secondary match-retry-btn"
-        data-testid="match-search-retry"
-        :disabled="!canSearch"
-        @click="search()"
-      >
-        <PhArrowCounterClockwise :size="14" />
-        Retry
-      </button>
     </p>
     <template v-else-if="state.status === 'done'">
       <FindMatchResults
@@ -301,6 +295,15 @@ const barState = computed(() => {
 
 const canSearch = computed(() => canSearchFor('title'))
 
+// The last search, with the values still in the fields, found nothing or failed: Search becomes
+// Retry. Editing a field forgets that search, and Search comes back. An ASIN its region has no
+// record for keeps Search: searching the title there is what comes next.
+const retryKind = computed<SearchKind | null>(() => {
+  const { status, results, kind } = state.value
+  if (status === 'failed' || (status === 'done' && results.length === 0)) return kind
+  return null
+})
+
 function canSearchFor(kind: SearchKind): boolean {
   if (props.searchLocked || state.value.status === 'searching') return false
   return kind === 'asin' ? asinValid(match.value) : !!match.value.query.trim()
@@ -362,13 +365,10 @@ async function search(kind: SearchKind = 'title') {
     const error = timedOut
       ? `The search took longer than ${SEARCH_TIMEOUT_MS / 1000} seconds and was stopped.`
       : `The search failed: ${(e as Error)?.message ?? 'unknown error'}`
-    if (kind === 'asin') {
-      // An ASIN that could not be looked up stays unusable until it is
-      match.value.asinError = error
-      state.value = idle()
-    } else {
-      state.value = { status: 'failed', kind, results: [], error }
-    }
+    // An ASIN that could not be looked up stays unusable until it is (its error shows on the New
+    // line)
+    if (kind === 'asin') match.value.asinError = error
+    state.value = { status: 'failed', kind, results: [], error }
   } finally {
     clearTimeout(timer)
     if (controller === current) controller = null
@@ -506,7 +506,7 @@ defineExpose({ search, cancelSearch })
   grid-template-columns: auto 1fr;
   align-items: center;
   gap: 0.3rem 0.75rem;
-  margin: 0.6rem 0 0;
+  margin: 0.75rem 0 0;
   font-size: 0.85rem;
 }
 
@@ -614,15 +614,6 @@ defineExpose({ search, cancelSearch })
 
 .match-search-error {
   color: #ef4444;
-}
-
-.btn.match-retry-btn {
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.25rem 0.6rem;
-  font-size: 0.8rem;
 }
 
 .match-search-results {
