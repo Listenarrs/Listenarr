@@ -938,6 +938,20 @@ describe('RepairBooksModal', () => {
     expect(shown[0]!.attributes('title')).toBe('France (FR)')
   })
 
+  it('starts with the preferred region, then the US, for a book with no region', async () => {
+    apiMocks.getApplicationSettings.mockResolvedValue({ defaultSearchRegion: 'de' })
+    apiMocks.getAudiobookIdentifiers.mockResolvedValue({
+      audiobookId: 7,
+      identifiers: [{ ...frenchAsin, region: null }],
+    })
+    const wrapper = mountModal()
+    await flushPromises()
+
+    const shown = row(wrapper).findAll('[data-testid="match-region"] option')
+    expect(shown.map((o) => o.text()).slice(0, 4)).toEqual(['DE', 'US', 'AU', 'BR'])
+    expect(field(wrapper, 'match-region').value).toBe('de')
+  })
+
   it('puts the US second when the book is in the preferred region', async () => {
     // The book's region (fr) is the configured one (fr)
     const wrapper = mountModal()
