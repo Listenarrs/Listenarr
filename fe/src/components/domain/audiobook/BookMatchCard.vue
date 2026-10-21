@@ -15,10 +15,15 @@
   You should have received a copy of the GNU Affero General Public License
   along with this program. If not, see <https://www.gnu.org/licenses/>.
 -->
-<!-- One book and the Audible record it should point at: ASIN, Title, Author and Region, with the
-     search under the book (Repair Books and Find Match) -->
+<!-- One book and the Audible record it should point at: its current and new records, the ASIN,
+     Title, Author and Region fields, and the search under the book (Repair Books and Find Match).
+     The bar on its left tells its state: grey ignored, green matched, red error. -->
 <template>
-  <div class="form-control-card match-card">
+  <div
+    class="form-control-card match-card"
+    :class="`match-card-${barState}`"
+    :data-match-state="barState"
+  >
     <div class="match-header">
       <span class="match-heading">
         <slot name="heading" />
@@ -41,6 +46,45 @@
       </span>
     </div>
 
+    <!-- What the book points at today, and the record it will point at -->
+    <dl class="match-records">
+      <dt>Current</dt>
+      <dd data-testid="match-current">
+        <template v-if="match.current.asin">
+          <span class="match-asin">{{ match.current.asin }}</span>
+          · {{ regionLabel(match.current.region) || 'no region' }}
+        </template>
+        <span v-else class="match-muted">None</span>
+      </dd>
+      <dt>New</dt>
+      <dd v-if="match.picked" class="match-new-ok" data-testid="match-picked">
+        <span class="match-asin">{{ match.picked.asin }}</span>
+        · {{ regionLabel(match.picked.region ?? match.region) }} ·
+        {{ match.picked.title ?? match.picked.asin }}
+        <span class="match-status">
+          <PhCheckCircle :size="14" weight="fill" />
+          checked
+        </span>
+      </dd>
+      <dd v-else-if="match.asinError" class="match-new-error" data-testid="match-asin-error">
+        <PhXCircle :size="14" weight="fill" />
+        <span>{{ match.asinError }}</span>
+        <button
+          type="button"
+          class="btn btn-secondary match-retry-btn"
+          data-testid="match-asin-retry"
+          :disabled="!canSearchFor('asin')"
+          @click="search('asin')"
+        >
+          <PhArrowCounterClockwise :size="14" />
+          Retry
+        </button>
+      </dd>
+      <dd v-else class="match-muted" data-testid="match-none">
+        No new record yet: search the book and pick it, or type its ASIN
+      </dd>
+    </dl>
+
     <div class="match-fields">
       <label class="match-field match-field-asin">
         <span class="match-field-label">ASIN</span>
@@ -50,6 +94,8 @@
           maxlength="10"
           data-testid="match-asin"
           @input="onAsinTyped"
+          @change="onAsinEntered"
+          @keydown.enter.prevent="onAsinEntered"
         />
       </label>
       <label class="match-field">
@@ -59,7 +105,7 @@
           v-model="match.query"
           class="form-input"
           data-testid="match-title"
-          @input="onSearchChanged"
+          @input="onSearchChanged('title')"
           @keydown.enter.prevent="search()"
         />
       </label>
@@ -69,7 +115,7 @@
           v-model="match.author"
           class="form-input"
           data-testid="match-author"
-          @input="onSearchChanged"
+          @input="onSearchChanged('author')"
           @keydown.enter.prevent="search()"
         />
       </label>
@@ -102,13 +148,25 @@
         class="btn btn-secondary match-search-btn"
         data-testid="match-search"
         :disabled="!canSearch"
-        :title="searchLocked ? 'Another book is being searched' : undefined"
+        :title="
+          searchLocked
+            ? 'Another book is being searched'
+            : 'The search Add New and Library Import use, with the same rules and priorities'
+        "
         @click="search()"
       >
         <PhMagnifyingGlass :size="16" />
         Search
       </button>
     </div>
+
+    <!-- The rules, where they apply -->
+    <p v-if="clearedBy && !match.asin" class="match-hint" data-testid="match-asin-cleared">
+      ASIN cleared: the {{ clearedBy }} changed, search again.
+    </p>
+    <p v-if="asinEntered && !asinValid(match)" class="match-hint" data-testid="match-invalid-asin">
+      An ASIN is 10 letters or digits.
+    </p>
 
     <!-- The search under the book: pending, failed with Retry, or its results to pick from -->
     <p
@@ -135,8 +193,8 @@
         type="button"
         class="btn btn-secondary match-retry-btn"
         data-testid="match-search-retry"
-        :disabled="!canSearchFor(state.kind)"
-        @click="search(state.kind)"
+        :disabled="!canSearch"
+        @click="search()"
       >
         <PhArrowCounterClockwise :size="14" />
         Retry
@@ -157,20 +215,6 @@
         in {{ regionLabel(match.region) }}.
       </p>
     </template>
-    <p v-if="match.picked" class="match-picked" data-testid="match-picked">
-      New record: {{ match.picked.title ?? match.picked.asin }}
-    </p>
-    <p
-      v-if="checkAsin && !match.asinError && asinInvalid(match)"
-      class="match-hint"
-      data-testid="match-invalid-asin"
-    >
-      {{
-        match.asin.trim()
-          ? 'An ASIN is 10 letters or digits: type it, or search the book.'
-          : 'No ASIN: search the book and pick it, or type its ASIN.'
-      }}
-    </p>
   </div>
 </template>
 
@@ -178,19 +222,21 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   PhArrowCounterClockwise,
+  PhCheckCircle,
   PhMagnifyingGlass,
   PhSpinner,
   PhWarningCircle,
   PhX,
+  PhXCircle,
 } from '@phosphor-icons/vue'
 import FindMatchResults from './FindMatchResults.vue'
 import { useLibraryImportStore } from '@/stores/libraryImport'
 import { orderedSearchRegionOptions } from '@/utils/languageMapping'
 import {
   FALLBACK_REGION,
-  asinInvalid,
-  isEdited,
   asinValid,
+  isEdited,
+  matchState,
   noRecordError,
   regionLabel,
   searchParams,
@@ -206,12 +252,12 @@ const props = withDefaults(
     configuredRegion: string
     // Another book is being searched: this one waits for it
     searchLocked?: boolean
-    // Flag an ASIN that is missing or malformed
-    checkAsin?: boolean
+    // Left out by the user (Repair's checkbox): a matched book then shows as ignored
+    excluded?: boolean
     // Search as soon as the card shows, and focus the title
     searchOnMount?: boolean
   }>(),
-  { searchLocked: false, checkAsin: true, searchOnMount: false },
+  { searchLocked: false, excluded: false, searchOnMount: false },
 )
 
 const match = defineModel<BookMatch>('match', { required: true })
@@ -219,7 +265,8 @@ const match = defineModel<BookMatch>('match', { required: true })
 const emit = defineEmits<{
   // A search starts or ends, however it ends (except by unmounting the card)
   searching: [searching: boolean]
-  picked: [result: SearchResult]
+  // A record is now the book's new one, picked in the results or found for its ASIN
+  matched: [record: SearchResult]
 }>()
 
 // A search for the title and author, or the check of the ASIN in its region
@@ -235,6 +282,10 @@ interface SearchState {
 const libraryImportStore = useLibraryImportStore()
 const titleEl = ref<HTMLInputElement | null>(null)
 const state = ref<SearchState>(idle())
+// The field whose change emptied the ASIN, said under the fields until the ASIN is filled again
+const clearedBy = ref<'title' | 'author' | null>(null)
+// The ASIN was entered (left or Enter): a malformed one is flagged from then on, not while typed
+const asinEntered = ref(false)
 let controller: AbortController | null = null
 
 // Every Audible region stays available, ordered by usefulness: the book's region when the card
@@ -242,6 +293,11 @@ let controller: AbortController | null = null
 const regionOptions = computed(() =>
   orderedSearchRegionOptions([match.value.initial.region, props.configuredRegion, FALLBACK_REGION]),
 )
+
+const barState = computed(() => {
+  const matched = matchState(match.value)
+  return matched === 'matched' && props.excluded ? 'ignored' : matched
+})
 
 const canSearch = computed(() => canSearchFor('title'))
 
@@ -254,8 +310,16 @@ function idle(): SearchState {
   return { status: 'idle', kind: 'title', results: [], error: null }
 }
 
+function setMatched(record: SearchResult) {
+  match.value.picked = record
+  match.value.asinError = null
+  clearedBy.value = null
+  emit('matched', record)
+}
+
 // Search the title and author (or an ASIN typed as the title) in the region, the results opening
-// under the book; or check the ASIN in its region, which then vouches for it or rejects it
+// under the book; or look the ASIN up in its region: one record is the book's new one, several are
+// offered to pick from, none is an error
 async function search(kind: SearchKind = 'title') {
   if (!canSearchFor(kind)) return
   const asin = match.value.asin.trim().toUpperCase()
@@ -281,28 +345,30 @@ async function search(kind: SearchKind = 'title') {
       .filter((r) => r.asin?.toUpperCase() === asin)
       .map((r) => ({ ...r, region: r.region || region }))
     if (found.length === 1) {
-      // One record: it is the book's, selected in the results, and its title and author fill the
-      // fields
+      // One record: the book's, selected in the results; its title and author fill the fields
       const record = found[0]!
-      match.value.picked = record
       match.value.query = record.title || match.value.query
       match.value.author = record.authors?.[0]?.name || match.value.author
+      setMatched(record)
       state.value = { status: 'done', kind, results: found, error: null }
     } else if (found.length > 1) {
-      // Several records for one ASIN: the user picks
       state.value = { status: 'done', kind, results: found, error: null }
     } else {
       match.value.asinError = noRecordError(asin, region)
-      state.value = { status: 'failed', kind, results: [], error: match.value.asinError }
+      state.value = idle()
     }
   } catch (e) {
     if (controller !== current) return
     const error = timedOut
       ? `The search took longer than ${SEARCH_TIMEOUT_MS / 1000} seconds and was stopped.`
       : `The search failed: ${(e as Error)?.message ?? 'unknown error'}`
-    // An ASIN its region could not be checked for stays unusable until checked
-    if (kind === 'asin') match.value.asinError = error
-    state.value = { status: 'failed', kind, results: [], error }
+    if (kind === 'asin') {
+      // An ASIN that could not be looked up stays unusable until it is
+      match.value.asinError = error
+      state.value = idle()
+    } else {
+      state.value = { status: 'failed', kind, results: [], error }
+    }
   } finally {
     clearTimeout(timer)
     if (controller === current) controller = null
@@ -321,42 +387,44 @@ function pick(result: SearchResult) {
   if (!result.asin) return
   match.value.asin = result.asin.toUpperCase()
   match.value.region = result.region || match.value.region
-  match.value.picked = { ...result, region: result.region || match.value.region }
-  match.value.asinError = null
+  asinEntered.value = false
+  setMatched({ ...result, region: match.value.region })
   state.value = idle()
-  emit('picked', result)
 }
 
-// Another title or author describes another record: the ASIN no longer matches, so it is emptied
-// until the book is searched and picked again (or its ASIN is typed). A search running for the
-// previous values is stopped, and their results no longer apply.
-function onSearchChanged() {
-  match.value.asin = ''
-  onSearchReset()
-}
-
-function onSearchReset() {
+function forgetRecord() {
   match.value.picked = null
   match.value.asinError = null
   cancelSearch()
   state.value = idle()
 }
 
-// Another region keeps the ASIN and checks it there right away: the record picked in the previous
-// one no longer vouches for it, and the previous search and its results no longer apply
+// Another title or author describes another record: the ASIN no longer matches, so it is emptied
+// until the book is searched and picked again (or its ASIN is typed)
+function onSearchChanged(field: 'title' | 'author') {
+  if (match.value.asin) clearedBy.value = field
+  match.value.asin = ''
+  asinEntered.value = false
+  forgetRecord()
+}
+
+// Another region keeps the ASIN and looks it up there right away
 function onRegionChanged() {
-  onSearchReset()
+  forgetRecord()
   void search('asin')
 }
 
-// A typed ASIN is no longer the picked record, nor the one rejected in the region
+// A typed ASIN is no longer the new record, nor the one rejected; it is looked up once entered
 function onAsinTyped() {
-  match.value.picked = null
-  match.value.asinError = null
-  if (state.value.kind === 'asin') {
-    cancelSearch()
-    state.value = idle()
-  }
+  asinEntered.value = false
+  clearedBy.value = null
+  forgetRecord()
+}
+
+function onAsinEntered() {
+  if (!match.value.asin || match.value.picked) return
+  asinEntered.value = true
+  void search('asin')
 }
 
 watch(
@@ -367,9 +435,9 @@ watch(
 function revert() {
   cancelSearch()
   Object.assign(match.value, match.value.initial)
-  match.value.picked = null
-  match.value.asinError = null
-  state.value = idle()
+  clearedBy.value = null
+  asinEntered.value = false
+  forgetRecord()
 }
 
 onMounted(() => {
@@ -385,6 +453,19 @@ defineExpose({ search, cancelSearch })
 </script>
 
 <style scoped>
+/* The state bar, the whole height of the card: grey ignored, green matched, red error */
+.match-card {
+  border-left: 4px solid var(--match-bar-ignored, #6b7280);
+}
+
+.match-card-matched {
+  border-left-color: var(--match-bar-matched, #22c55e);
+}
+
+.match-card-error {
+  border-left-color: var(--match-bar-error, #ef4444);
+}
+
 .match-header {
   display: flex;
   justify-content: space-between;
@@ -417,6 +498,52 @@ defineExpose({ search, cancelSearch })
 .match-meta {
   font-size: 0.8rem;
   opacity: 0.75;
+}
+
+.match-records {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 0.3rem 0.75rem;
+  margin: 0.6rem 0 0;
+  font-size: 0.85rem;
+}
+
+.match-records dt {
+  font-size: 0.8rem;
+  color: #aaa;
+}
+
+.match-records dd {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0;
+  min-width: 0;
+}
+
+.match-asin {
+  font-family: monospace;
+}
+
+.match-muted {
+  color: #888;
+}
+
+.match-new-ok {
+  color: #e0e0e0;
+}
+
+.match-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: #22c55e;
+}
+
+.match-new-error {
+  color: #ef4444;
 }
 
 /* ASIN, Title, Author, Region and Search always share the whole row */
@@ -496,12 +623,6 @@ defineExpose({ search, cancelSearch })
 
 .match-search-results {
   margin-top: 0.75rem;
-}
-
-.match-picked {
-  margin: 0.5rem 0 0;
-  font-size: 0.85rem;
-  color: #22c55e;
 }
 
 .match-hint {
