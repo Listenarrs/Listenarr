@@ -409,6 +409,21 @@ describe('RepairBooksModal', () => {
     )
   })
 
+  it('shows each result with its subtitle, where some books keep their volume number', async () => {
+    catalogue({ us: [{ ...englishPh4, title: 'The Primal Hunter', subtitle: 'Book 4' }] })
+    const wrapper = mountModal()
+    await flushPromises()
+    await row(wrapper).get('[data-testid="match-region"]').setValue('us')
+    await flushPromises()
+
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
+    await flushPromises()
+
+    expect(row(wrapper).get('[data-testid="find-match-result"] .result-title').text()).toBe(
+      'The Primal Hunter: Book 4',
+    )
+  })
+
   it('sums New up like Current, every author included', async () => {
     catalogue({
       us: [

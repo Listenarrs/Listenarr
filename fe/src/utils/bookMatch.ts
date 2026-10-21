@@ -102,10 +102,16 @@ export function recordFromResult(result: SearchResult, region: string): BookReco
   }
 }
 
+// Title: Subtitle, the subtitle left out when there is none (some books carry their volume number
+// only in the subtitle)
+export function fullTitle(title?: string | null, subtitle?: string | null): string {
+  return [title?.trim(), subtitle?.trim()].filter(Boolean).join(': ')
+}
+
 // One line for a book record, the same next to Revert, on Current and on New:
 // ASIN - Title: Subtitle - Author(s) - Region, without the parts it doesn't have
 export function bookSummary(record: BookRecord): string {
-  const title = [record.title?.trim(), record.subtitle?.trim()].filter(Boolean).join(': ')
+  const title = fullTitle(record.title, record.subtitle)
   const authors = (record.authors ?? [])
     .map((a) => a.trim())
     .filter(Boolean)

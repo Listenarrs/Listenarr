@@ -24,7 +24,7 @@
       v-for="result in results"
       :key="result.asin ?? result.title"
       class="result-item"
-      :class="{ selected: isSame(result, selected) }"
+      :class="{ selected: isSame(result, selected), 'has-current': isSame(result, current) }"
       :aria-selected="isSame(result, selected)"
       data-testid="find-match-result"
       @click="emit('select', result)"
@@ -36,7 +36,7 @@
         alt=""
       />
       <div class="result-info">
-        <span class="result-title">{{ result.title }}</span>
+        <span class="result-title">{{ fullTitle(result.title, result.subtitle) }}</span>
         <span class="result-meta">
           {{ result.authors?.[0]?.name }}
           <span v-if="seriesName(result)"> · {{ seriesName(result) }}</span>
@@ -57,6 +57,7 @@
 import { useProtectedImages } from '@/composables/useProtectedImages'
 import { getPlaceholderUrl } from '@/utils/placeholder'
 import { extractNarrators, type NormalizedResult } from '@/utils/searchResultHelpers'
+import { fullTitle } from '@/utils/bookMatch'
 import type { SearchResult } from '@/types'
 
 // A record by its ASIN and, when known, its region
@@ -165,6 +166,11 @@ function seriesName(result: SearchResult): string | undefined {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Room for the tag, so a long title stops before it */
+.result-item.has-current .result-info {
+  padding-right: 4.5rem;
+}
+
 .result-current {
   position: absolute;
   top: 0.4rem;
