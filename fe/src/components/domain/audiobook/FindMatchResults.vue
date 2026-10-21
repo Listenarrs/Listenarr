@@ -16,15 +16,16 @@
   along with this program. If not, see <https://www.gnu.org/licenses/>.
 -->
 <!-- The results of a Find Match search: cover, title, author, series, ASIN and narrators; a click
-     picks one. Used by Find Match (Library Import) and Repair. -->
+     picks one, which turns green. The record the book points at today wears a "Current" tag.
+     Used by Find Match (Library Import) and Repair. -->
 <template>
   <div class="results-list">
     <div
       v-for="result in results"
       :key="result.asin ?? result.title"
       class="result-item"
-      :class="{ selected: isSelected(result) }"
-      :aria-selected="isSelected(result)"
+      :class="{ selected: isSame(result, selected) }"
+      :aria-selected="isSame(result, selected)"
       data-testid="find-match-result"
       @click="emit('select', result)"
     >
@@ -45,6 +46,9 @@
           Narrated by {{ narrators(result) }}
         </span>
       </div>
+      <span v-if="isSame(result, current)" class="result-current" data-testid="find-match-current">
+        Current
+      </span>
     </div>
   </div>
 </template>
@@ -55,20 +59,23 @@ import { getPlaceholderUrl } from '@/utils/placeholder'
 import { extractNarrators, type NormalizedResult } from '@/utils/searchResultHelpers'
 import type { SearchResult } from '@/types'
 
-// selected: the record shown as selected, by its ASIN and, when known, its region
-const props = defineProps<{
+// A record by its ASIN and, when known, its region
+type RecordRef = { asin: string; region?: string | null } | null
+
+// selected: the record picked (green); current: the one the book points at today (tagged)
+defineProps<{
   results: SearchResult[]
-  selected?: { asin: string; region?: string | null } | null
+  selected?: RecordRef
+  current?: RecordRef
 }>()
 const emit = defineEmits<{ select: [result: SearchResult] }>()
 
 const { getProtectedImageSrc } = useProtectedImages()
 const placeholderUrl = getPlaceholderUrl()
 
-function isSelected(result: SearchResult): boolean {
-  const selected = props.selected
-  if (!selected?.asin || result.asin?.toUpperCase() !== selected.asin.toUpperCase()) return false
-  return !selected.region || !result.region || result.region === selected.region
+function isSame(result: SearchResult, record: RecordRef | undefined): boolean {
+  if (!record?.asin || result.asin?.toUpperCase() !== record.asin.toUpperCase()) return false
+  return !record.region || !result.region || result.region === record.region
 }
 
 function narrators(result: SearchResult): string {
@@ -92,6 +99,7 @@ function seriesName(result: SearchResult): string | undefined {
 }
 
 .result-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0.6rem;
@@ -156,5 +164,16 @@ function seriesName(result: SearchResult): string | undefined {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.result-current {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.6rem;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid #555;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  color: #ccc;
+  background: #2a2a2a;
 }
 </style>

@@ -187,7 +187,8 @@
         v-if="state.results.length"
         class="match-search-results"
         :results="state.results"
-        :selected="selectedRecord"
+        :selected="pickedRecord"
+        :current="match.current"
         @select="pick"
       />
       <p v-else class="match-search-state" data-testid="match-search-empty">
@@ -314,12 +315,10 @@ const pendingText = computed(() => {
     : `Searching "${match.value.query.trim()}" in ${region}…`
 })
 
-// The record shown as selected in the results: the new one once there is one, else the one the
-// book points at today
-const selectedRecord = computed(() => {
-  const { picked, current } = match.value
-  if (picked?.asin) return { asin: picked.asin, region: picked.region ?? match.value.region }
-  return current.asin ? { asin: current.asin, region: current.region } : null
+// The record picked, green in the results; the current one only wears a tag there
+const pickedRecord = computed(() => {
+  const { picked } = match.value
+  return picked?.asin ? { asin: picked.asin, region: picked.region ?? match.value.region } : null
 })
 
 // Changing the region looks the ASIN up there: not while a search runs, here or on another book.
