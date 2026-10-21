@@ -226,11 +226,16 @@ internal static class DownloadClientRegistrationExtensions
                 sp.GetRequiredService<IHttpClientFactory>(),
                 DownloadClientTypes.Nzbget));
         services.AddScoped<NzbgetHistoryReader>();
+
+        // Warn-once state for failed history entries has to outlive the scoped workflow
+        // that reads it, or every poll would be a first sighting again.
+        services.AddSingleton<NzbgetFailedHistoryWarningTracker>();
         services.AddScoped<NzbgetHistoryEnrichmentWorkflow>(sp =>
             new NzbgetHistoryEnrichmentWorkflow(
                 sp.GetRequiredService<NzbgetHistoryReader>(),
                 sp.GetRequiredService<ILogger<NzbgetAdapter>>(),
-                sp.GetRequiredService<TimeProvider>()));
+                sp.GetRequiredService<TimeProvider>(),
+                sp.GetRequiredService<NzbgetFailedHistoryWarningTracker>()));
         services.AddScoped<NzbgetConnectionTester>(sp =>
             new NzbgetConnectionTester(
                 sp.GetRequiredService<NzbgetXmlRpcClient>(),
