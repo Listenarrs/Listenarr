@@ -353,9 +353,7 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
     const clear = row(wrapper).get('[data-testid="match-asin-clear"]')
-    expect(clear.attributes('aria-label')).toBe(
-      'Empty the ASIN field: Search then looks for the title and author',
-    )
+    expect(clear.attributes('aria-label')).toBe('Empty the ASIN field')
 
     await clear.trigger('click')
 
