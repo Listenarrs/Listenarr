@@ -747,6 +747,10 @@ export interface Audiobook {
   narrators?: string[]
   isbn?: string
   asin?: string
+  // Server-computed in the library list: why Audible can't be asked for this book (missing_title,
+  // missing_author, missing_asin, invalid_asin, missing_region); the "Broken books" group lists the
+  // books that have some
+  brokenReasons?: string[]
   openLibraryId?: string
   publisher?: string
   language?: string
