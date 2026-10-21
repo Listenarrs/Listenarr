@@ -926,6 +926,23 @@ describe('RepairBooksModal', () => {
 
     expect(options.slice(0, 3)).toEqual(['fr', 'de', 'us'])
     expect(options.length).toBeGreaterThan(3)
+
+    // Codes in the field, the full name as each option's tooltip; the others in code order
+    const shown = row(wrapper).findAll('[data-testid="match-region"] option')
+    expect(shown.map((o) => o.text())).toEqual([
+      'FR',
+      'DE',
+      'US',
+      'AU',
+      'BR',
+      'CA',
+      'ES',
+      'IN',
+      'IT',
+      'JP',
+      'UK',
+    ])
+    expect(shown[0]!.attributes('title')).toBe('France (FR)')
   })
 
   it('only rescans when the record found is the one the book already points at', async () => {
