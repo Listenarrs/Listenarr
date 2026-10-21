@@ -30,12 +30,12 @@
         v-if="match"
         v-model:match="match"
         :configured-region="configuredRegion"
+        :book="book"
         search-on-mount
         data-testid="find-match-card"
         @searching="onSearching"
       >
         <template #heading>{{ bookTitle }}</template>
-        <template #meta>{{ summary }}</template>
       </BookMatchCard>
     </ModalBody>
     <template #footer>
@@ -75,13 +75,7 @@ import {
   buildLibraryImportInitialAuthor,
   buildLibraryImportInitialQuery,
 } from '@/utils/libraryImportSearch'
-import {
-  asinChanged,
-  bookSummary,
-  createBookMatch,
-  matchState,
-  type BookMatch,
-} from '@/utils/bookMatch'
+import { asinChanged, createBookMatch, matchState, type BookMatch } from '@/utils/bookMatch'
 import type { SearchResult } from '@/types'
 
 const props = defineProps<{ item: LibraryImportItem }>()
@@ -99,15 +93,13 @@ const searching = ref(false)
 let searchCounted = false
 
 // The folder's match when it has one, else what its files say
-const summary = computed(() => {
+const book = computed(() => {
   const selected = props.item.selectedMatch
-  return bookSummary({
-    asin: selected?.asin,
+  return {
     title: selected?.title ?? props.item.detectedTitle,
     subtitle: selected?.subtitle,
     author: selected?.authors?.[0]?.name ?? props.item.detectedAuthor,
-    region: selected?.region,
-  })
+  }
 })
 
 const bookTitle = computed(() => props.item.detectedTitle?.trim() || props.item.folderName)

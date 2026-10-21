@@ -159,7 +159,7 @@ describe('RepairBooksModal', () => {
 
     expect(row(wrapper).text()).toContain('Primal Hunter, Vol. 7')
     expect(row(wrapper).get('[data-testid="match-current"]').text()).toMatch(
-      /^B0HM45F8MW - France \(FR\)$/,
+      /^B0HM45F8MW - Primal Hunter, Vol. 7 - Zogarth - France \(FR\)$/,
     )
     expect(row(wrapper).find('[data-testid="match-none"]').exists()).toBe(true)
     expect(row(wrapper).attributes('data-match-state')).toBe('ignored')
@@ -396,6 +396,10 @@ describe('RepairBooksModal', () => {
 
     expect(row(wrapper).get('[data-testid="match-summary"]').text()).toBe(
       'B0HM45F8MW - Primal Hunter, Vol. 7: A LitRPG Adventure - Zogarth - France (FR)',
+    )
+    // Current reads the same
+    expect(row(wrapper).get('[data-testid="match-current"]').text()).toBe(
+      row(wrapper).get('[data-testid="match-summary"]').text(),
     )
   })
 
