@@ -44,9 +44,9 @@
             <p>
               Point each book at the right Audible record: search its title and author in the region
               and pick the result under the book, or type the ASIN and its region (it is checked in
-              that region). Changing the title, author or region empties the ASIN, which no longer
-              matches: search and pick the book again. Repairing saves the ASIN and its region and
-              rescans the metadata from it.
+              that region). Changing the title or author empties the ASIN, which no longer matches:
+              search and pick the book again; changing the region keeps it, to be checked in that
+              region. Repairing saves the ASIN and its region and rescans the metadata from it.
             </p>
           </div>
 
