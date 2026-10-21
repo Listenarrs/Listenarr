@@ -15,8 +15,9 @@
   You should have received a copy of the GNU Affero General Public License
   along with this program. If not, see <https://www.gnu.org/licenses/>.
 -->
-<!-- One book and the Audible record it should point at: its current and new records, the ASIN,
-     Title, Author and Region fields, and the search under the book (Repair Books and Find Match).
+<!-- One book and the Audible record it should point at: a search box read like Add New's and a
+     region, the search under the book, and its current and new records (Repair Books and Find
+     Match).
      The bar along its bottom tells its state: grey ignored, green matched, orange for a field error
      or no result, red for a failed request, and breathes in blue while a search runs. While another
      book is searched, the whole card waits: nothing in it can be edited, searched or picked. -->
@@ -54,38 +55,16 @@
       </div>
 
       <div class="match-fields">
-        <label class="match-field match-field-asin">
-          <span class="match-field-label">ASIN</span>
-          <span class="match-clearable">
-            <input
-              v-model.trim="match.asin"
-              class="form-input"
-              maxlength="10"
-              data-testid="match-asin"
-              @input="onEdited"
-              @keydown.enter.prevent="searchByPriority"
-            />
-            <button
-              v-if="match.asin"
-              type="button"
-              class="match-clear-btn"
-              title="Empty the ASIN field"
-              aria-label="Empty the ASIN field"
-              data-testid="match-asin-clear"
-              @click.prevent="clearField('asin')"
-            >
-              <PhBackspace :size="18" />
-            </button>
-          </span>
-        </label>
         <label class="match-field">
-          <span class="match-field-label">Title</span>
+          <span class="match-field-label">Search</span>
           <span class="match-clearable">
             <input
-              ref="titleEl"
+              ref="queryEl"
               v-model="match.query"
               class="form-input"
-              data-testid="match-title"
+              placeholder="Title, ASIN, or TITLE:… AUTHOR:… SERIES:…"
+              title="As in Add New: a title, an ASIN, or TITLE:, AUTHOR:, ASIN:, SERIES: and ISBN: tokens"
+              data-testid="match-query"
               @input="onEdited"
               @keydown.enter.prevent="searchByPriority"
             />
@@ -93,33 +72,10 @@
               v-if="match.query"
               type="button"
               class="match-clear-btn"
-              title="Empty the Title field"
-              aria-label="Empty the Title field"
-              data-testid="match-title-clear"
-              @click.prevent="clearField('query')"
-            >
-              <PhBackspace :size="18" />
-            </button>
-          </span>
-        </label>
-        <label class="match-field">
-          <span class="match-field-label">Author</span>
-          <span class="match-clearable">
-            <input
-              v-model="match.author"
-              class="form-input"
-              data-testid="match-author"
-              @input="onEdited"
-              @keydown.enter.prevent="searchByPriority"
-            />
-            <button
-              v-if="match.author"
-              type="button"
-              class="match-clear-btn"
-              title="Empty the Author field"
-              aria-label="Empty the Author field"
-              data-testid="match-author-clear"
-              @click.prevent="clearField('author')"
+              title="Empty the Search field"
+              aria-label="Empty the Search field"
+              data-testid="match-query-clear"
+              @click.prevent="clearQuery"
             >
               <PhBackspace :size="18" />
             </button>
@@ -155,11 +111,11 @@
           Cancel search
         </button>
         <button
-          v-else-if="retryKind"
+          v-else-if="retry"
           type="button"
           class="btn btn-secondary match-search-btn"
           data-testid="match-retry"
-          :disabled="!canSearchFor(retryKind)"
+          :disabled="!canSearch"
           :title="
             searchLocked
               ? 'Another book is being searched'
@@ -175,11 +131,11 @@
           type="button"
           class="btn btn-secondary match-search-btn"
           data-testid="match-search"
-          :disabled="!canSearchFor(searchKind)"
+          :disabled="!canSearch"
           :title="
             searchLocked
               ? 'Another book is being searched'
-              : 'The search Add New and Library Import use, with the same rules and priorities'
+              : 'The search Add New uses, with the same rules and priorities'
           "
           @click="searchByPriority"
         >
@@ -346,16 +302,14 @@ import { resultsReveal, revealMs } from '@/utils/resultsReveal'
 import { orderedSearchRegionOptions } from '@/utils/languageMapping'
 import {
   FALLBACK_REGION,
-  asinValid,
   INVALID_ASIN_MESSAGE,
   bookSummary,
+  answerSource,
   isEdited,
   matchState,
   noRecordError,
   regionLabel,
   recordFromResult,
-  addNewQuery,
-  answerSource,
   searchCacheKey,
   searchLikeAddNew,
   SEARCH_CACHE,
@@ -363,6 +317,7 @@ import {
   type BookRecord,
 } from '@/utils/bookMatch'
 import type { SearchResult } from '@/types'
+import { queryAsin } from '@/services/audiobookSearch'
 
 // A search slower than this is stopped and reported, with Retry
 const SEARCH_TIMEOUT_MS = 30_000
@@ -377,7 +332,7 @@ const props = withDefaults(
     searchLocked?: boolean
     // Left out by the user (Repair's checkbox): a matched book then shows as ignored
     excluded?: boolean
-    // Search as soon as the card shows, and focus the title
+    // Search as soon as the card shows, and focus the search box
     searchOnMount?: boolean
     // The dialog is short of room (Repair measures its footer): the fields take the narrow
     // screen's layout before the screen itself is narrow
@@ -405,8 +360,9 @@ const emit = defineEmits<{
   matched: [record: SearchResult]
 }>()
 
-// A search for the title and author, or the check of the ASIN in its region
-type SearchKind = 'title' | 'asin'
+// What the search box holds: an ASIN alone (bare or ASIN:), looked up in the region, or any other
+// query (a title, TITLE:/AUTHOR:/… tokens), searched like Add New
+type SearchKind = 'query' | 'asin'
 
 // invalid: Search was asked for something it can't search (an ASIN that isn't one), a field error;
 // canceled: the user stopped the search. results: the last answer, kept until a new one replaces it
@@ -425,24 +381,22 @@ interface SearchState {
 interface Searched {
   kind: SearchKind
   asin: string
-  title: string
-  author: string
+  query: string
   region: string
 }
 
-// What a search looked for: the ASIN (which has priority when filled), or the title and author
+// What a search looked for: the ASIN, or the search box as typed
 function describeSearch(searched: Searched): string {
-  if (searched.kind === 'asin') return `ASIN "${searched.asin}"`
-  return `"${searched.title}"${searched.author ? ` by "${searched.author}"` : ''}`
+  return searched.kind === 'asin' ? `ASIN "${searched.asin}"` : `"${searched.query}"`
 }
 
-const titleEl = ref<HTMLInputElement | null>(null)
+const queryEl = ref<HTMLInputElement | null>(null)
 const state = ref<SearchState>(idle())
 // The search running, if any
 const running = ref<Searched | null>(null)
-// The kind of the last search started (answered, failed or canceled), and whether a field was
-// edited since: Retry until one is
-const lastSearchKind = ref<SearchKind | null>(null)
+// Whether a search ran (answered, failed or canceled), and whether the search box or region
+// changed since: Retry until one does
+const hasSearched = ref(false)
 const edited = ref(false)
 // The dialog's answered searches, when it keeps them
 const searchCache = inject(SEARCH_CACHE, null)
@@ -467,10 +421,6 @@ const barState = computed(() => {
     return 'warning'
   return matchState(match.value) === 'matched' && !props.excluded ? 'matched' : 'ignored'
 })
-
-// A filled ASIN has priority: a search looks it up on its own, leaving the title and author out.
-// With the ASIN field empty, it looks for the title and author
-const searchKind = computed<SearchKind>(() => (match.value.asin.trim() ? 'asin' : 'title'))
 
 // The book as it is today, as a record
 const currentRecord = computed<BookRecord>(() => ({
@@ -544,7 +494,7 @@ const noResultsReason = computed<{ text: string; tone: string } | null>(() => {
     text:
       searched.kind === 'asin'
         ? noRecordError(searched.asin, searched.region)
-        : 'Nothing found: no book for this title and author',
+        : 'Nothing found for this search',
     tone: warning,
   }
 })
@@ -582,24 +532,21 @@ const pendingResultsText = computed(() =>
 // One search at a time keeps answers from racing each other.
 const regionLocked = computed(() => props.searchLocked || state.value.status === 'searching')
 
-// Search becomes Retry once a search ran, whatever its outcome, until a field is edited: from then
-// on it is Search, even if the field is changed back. Retry asks Audible again (a new request),
-// where Search may be served by the dialog's answered searches
-const retryKind = computed<SearchKind | null>(() => {
-  if (edited.value || state.value.status === 'searching') return null
-  return lastSearchKind.value
-})
+// Search becomes Retry once a search ran, whatever its outcome, until the search box or region
+// changes: from then on it is Search, even if changed back. Retry asks Audible again (a new
+// request), where Search may be served by the dialog's answered searches
+const retry = computed(
+  () => hasSearched.value && !edited.value && state.value.status !== 'searching',
+)
 
-function canSearchFor(kind: SearchKind): boolean {
-  if (props.searchLocked || state.value.status === 'searching') return false
-  // An ASIN that isn't one can still be searched: Search then says what an ASIN is
-  return kind === 'asin' ? !!match.value.asin.trim() : !!match.value.query.trim()
-}
+const canSearch = computed(
+  () => !props.searchLocked && state.value.status !== 'searching' && !!match.value.query.trim(),
+)
 
 function idle(): SearchState {
   return {
     status: 'idle',
-    kind: 'title',
+    kind: 'query',
     results: [],
     error: null,
     searched: null,
@@ -640,40 +587,38 @@ function keepResultsHeight() {
   keptHeight.value = (resultsListEl.value?.$el as HTMLElement | undefined)?.offsetHeight ?? 0
 }
 
-// The answer to a search, under the book: a title search's results, or the records found for the
-// ASIN (none is an error)
-function showResults(
-  kind: SearchKind,
-  searched: Searched,
-  results: SearchResult[],
-  requestMs: number | null,
-) {
-  if (kind === 'title') {
+// The answer to a search, under the book: a query's results, or the records found for the ASIN
+// (none is an error)
+function showResults(searched: Searched, results: SearchResult[], requestMs: number | null) {
+  const { kind, asin, region } = searched
+  if (!asin) {
     state.value = { status: 'done', kind, results, error: null, searched, requestMs }
     startReveal()
     return
   }
   const found = results
-    .filter((r) => r.asin?.toUpperCase() === searched.asin)
-    .map((r) => ({ ...r, region: r.region || searched.region }))
-  // The records found are offered to pick from, like a title search's: nothing is picked for
-  // the user
+    .filter((r) => r.asin?.toUpperCase() === asin)
+    .map((r) => ({ ...r, region: r.region || region }))
+  // The records found are offered to pick from, like a query's: nothing is picked for the user
   if (found.length) {
     state.value = { status: 'done', kind, results: found, error: null, searched, requestMs }
     startReveal()
   } else {
-    // Found nothing (orange): searching the title there is what comes next
-    match.value.asinError = noRecordError(searched.asin, searched.region)
+    // Found nothing (orange): a title search is what comes next
+    match.value.asinError = noRecordError(asin, region)
     state.value = { status: 'done', kind, results: [], error: null, searched, requestMs }
   }
 }
 
-// Search the title and author in the region, or look the ASIN up there; the results open under
-// the book, to pick from. An ASIN its region has no record for is an error. Values already
+// Search what the search box holds, in the region, the way Add New does; the results open under
+// the book, to pick from. An ASIN alone the region has no record for is an error. Values already
 // answered while the dialog is open are served without a request, unless fresh (Retry)
-async function search(kind: SearchKind = 'title', fresh = false) {
-  if (!canSearchFor(kind)) return
-  if (kind === 'asin' && !asinValid(match.value)) {
+async function search(fresh = false) {
+  if (!canSearch.value) return
+  const query = match.value.query.trim()
+  const asin = queryAsin(query)
+  const kind: SearchKind = asin ? 'asin' : 'query'
+  if (!asin && /^ASIN:/i.test(query)) {
     // A field error, not a request one: nothing is sent. The previous results go, so the error
     // shows in their room
     match.value.picked = null
@@ -683,24 +628,16 @@ async function search(kind: SearchKind = 'title', fresh = false) {
     state.value = {
       ...state.value,
       status: 'invalid',
-      kind,
+      kind: 'asin',
       results: [],
       error: INVALID_ASIN_MESSAGE,
     }
     return
   }
-  const asin = match.value.asin.trim().toUpperCase()
   const region = match.value.region
-  const searched: Searched = {
-    kind,
-    asin,
-    title: match.value.query.trim(),
-    author: match.value.author.trim(),
-    region,
-  }
-  const query = kind === 'asin' ? asin : addNewQuery(match.value)
+  const searched: Searched = { kind, asin: asin ?? '', query, region }
   const cacheKey = searchCacheKey(query, region)
-  lastSearchKind.value = kind
+  hasSearched.value = true
   edited.value = false
   // A new search starts over: the record picked in the previous results is no longer selected, and
   // New goes back to no record (nothing stays picked that the user can't see)
@@ -710,7 +647,7 @@ async function search(kind: SearchKind = 'title', fresh = false) {
   if (!state.value.results.length) firstSearchRoom.value = true
   const answered = fresh ? undefined : searchCache?.get(cacheKey)
   if (answered) {
-    showResults(kind, searched, answered, null)
+    showResults(searched, answered, null)
     return
   }
   const current = new AbortController()
@@ -729,7 +666,7 @@ async function search(kind: SearchKind = 'title', fresh = false) {
     // A canceled search answers to nobody: the card already went back to its fields
     if (controller !== current) return
     searchCache?.set(cacheKey, results)
-    showResults(kind, searched, results, performance.now() - startedAt)
+    showResults(searched, results, performance.now() - startedAt)
   } catch (e) {
     if (controller !== current) return
     const error = timedOut
@@ -737,7 +674,7 @@ async function search(kind: SearchKind = 'title', fresh = false) {
       : `The search failed: ${(e as Error)?.message ?? 'unknown error'}`
     // An ASIN that could not be looked up stays unusable until it is (its error shows over the
     // results' room)
-    if (kind === 'asin') match.value.asinError = error
+    if (asin) match.value.asinError = error
     keepResultsHeight()
     state.value = { status: 'failed', kind, results: [], error, searched, requestMs: null }
   } finally {
@@ -790,8 +727,8 @@ function pick(result: SearchResult) {
     match.value.picked = null
     return
   }
-  // The record only: the fields keep the search as typed, so a wrong pick undone leaves them as
-  // they were
+  // The record only: the search box and region keep the search as typed, so a wrong pick undone
+  // leaves them as they were
   setMatched({ ...result, region: result.region || match.value.region })
 }
 
@@ -808,31 +745,27 @@ function forgetRecord() {
 }
 
 // Typing only prepares the next search: the results, the record and any error stay until it runs.
-// Search, Enter in any field and a region change all start the same search: the ASIN when it is
-// filled, the title and author otherwise. With no field edited since the last search, that is
-// Retry: a new request
+// Search, Enter and a region change all start it; with nothing changed since the last search,
+// that is Retry: a new request
 function searchByPriority() {
-  const retry = retryKind.value
-  void (retry ? search(retry, true) : search(searchKind.value))
+  void search(retry.value)
 }
 
-// Another region keeps the fields and searches there right away, by the same priority: the one
-// change that searches by itself
+// Another region: the search runs again there right away, the one change that searches by itself
 function onRegionChanged() {
   forgetRecord()
-  // A field changed: a search by priority, not a Retry of the previous one
+  // A field changed: a search, not a Retry of the previous one
   edited.value = true
   searchByPriority()
 }
 
-// The erase buttons of the ASIN, Title and Author fields: like typing, emptying a field only
-// prepares the next search (an empty ASIN lets Search look for the title and author)
-function clearField(field: 'asin' | 'query' | 'author') {
-  match.value[field] = ''
+// The search box's erase button: like typing, it only prepares the next search
+function clearQuery() {
+  match.value.query = ''
   edited.value = true
 }
 
-// Any change to a field, even back to what was searched: Search, no longer Retry
+// Any change to the search box, even back to what was searched: Search, no longer Retry
 function onEdited() {
   edited.value = true
 }
@@ -850,8 +783,8 @@ function revert() {
 
 onMounted(() => {
   if (!props.searchOnMount) return
-  titleEl.value?.focus()
-  titleEl.value?.select()
+  queryEl.value?.focus()
+  queryEl.value?.select()
   void search()
 })
 
@@ -1021,9 +954,7 @@ defineExpose({ search, cancelSearch })
 /* ASIN, Title, Author, Region and Search always share the whole row */
 .match-fields {
   display: grid;
-  grid-template-columns:
-    minmax(10.5rem, 1.2fr) minmax(0, 2.5fr) minmax(0, 1.5fr) minmax(5rem, 0.5fr)
-    auto;
+  grid-template-columns: minmax(0, 1fr) minmax(5rem, 6rem) auto;
   align-items: end;
   gap: 0.75rem;
   margin-top: 0.75rem;
@@ -1073,10 +1004,6 @@ defineExpose({ search, cancelSearch })
   background: rgba(255, 255, 255, 0.06);
 }
 
-.match-field-asin input {
-  font-family: monospace;
-}
-
 .match-field-label {
   font-size: 0.8rem;
   color: #aaa;
@@ -1099,6 +1026,7 @@ defineExpose({ search, cancelSearch })
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 
+  .match-fields > .match-field:first-child,
   .match-search-btn {
     grid-column: 1 / -1;
     width: auto;
@@ -1113,6 +1041,7 @@ defineExpose({ search, cancelSearch })
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
+.match-card-narrow .match-fields > .match-field:first-child,
 .match-card-narrow .match-search-btn {
   grid-column: 1 / -1;
   width: auto;

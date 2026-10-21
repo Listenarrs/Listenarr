@@ -25,8 +25,9 @@
         <PhInfo />
         <div class="find-match-info-lines">
           <p>Find the right Audible record for this book.</p>
-          <p data-testid="find-match-info-asin">
-            A filled ASIN is searched on its own: the title and author are left out of that search.
+          <p data-testid="find-match-info-search">
+            The search box reads like Add New's: a title, an ASIN, or TITLE:, AUTHOR:, ASIN:,
+            SERIES: and ISBN: tokens.
           </p>
         </div>
       </div>
@@ -84,6 +85,7 @@ import {
 import {
   asinChanged,
   createBookMatch,
+  initialQuery,
   matchState,
   recordFromResult,
   SEARCH_CACHE,
@@ -133,12 +135,13 @@ onMounted(async () => {
   const selected = props.item.selectedMatch
   match.value = createBookMatch(
     {
-      asin: selected?.asin ?? '',
+      // ASIN → filename stem (when more specific than folder) → folderName, with the author
+      query: initialQuery(
+        buildLibraryImportInitialQuery(props.item),
+        buildLibraryImportInitialAuthor(props.item),
+      ),
       // The configured region by default; the user can pick another one, which the match keeps
       region: selected?.region || configuredRegion.value,
-      // ASIN → filename stem (when more specific than folder) → folderName
-      query: buildLibraryImportInitialQuery(props.item),
-      author: buildLibraryImportInitialAuthor(props.item),
     },
     { asin: selected?.asin ?? '', region: selected?.region ?? '' },
   )

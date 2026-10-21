@@ -51,9 +51,9 @@
             <PhInfo />
             <div class="repair-info-lines">
               <p>Find the right Audible record for each book, then repair.</p>
-              <p data-testid="repair-info-asin">
-                A filled ASIN is searched on its own: the title and author are left out of that
-                search.
+              <p data-testid="repair-info-search">
+                The search box reads like Add New's: a title, an ASIN, or TITLE:, AUTHOR:, ASIN:,
+                SERIES: and ISBN: tokens.
               </p>
             </div>
           </div>
@@ -288,6 +288,7 @@ import {
   createBookMatch,
   recordFromResult,
   formatDuration,
+  initialQuery,
   matchState,
   SEARCH_CACHE,
   type BookMatch,
@@ -559,10 +560,8 @@ async function load() {
         const asin = primaryAsin(ids.identifiers ?? [])
         const match = createBookMatch(
           {
-            asin: asin?.value ?? book.asin ?? '',
+            query: initialQuery(book.title, book.authors?.[0]),
             region: asin?.region || configuredRegion.value,
-            query: book.title ?? '',
-            author: book.authors?.[0] ?? '',
           },
           { asin: asin?.value ?? book.asin ?? '', region: asin?.region ?? '' },
         )
