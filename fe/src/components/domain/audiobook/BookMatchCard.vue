@@ -486,7 +486,8 @@ defineExpose({ search, cancelSearch })
   gap: 0.5rem;
 }
 
-.match-revert-btn {
+.btn.match-revert-btn {
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -497,7 +498,7 @@ defineExpose({ search, cancelSearch })
 
 .match-meta {
   font-size: 0.8rem;
-  opacity: 0.75;
+  color: #aaa;
 }
 
 .match-records {
@@ -515,6 +516,7 @@ defineExpose({ search, cancelSearch })
 }
 
 .match-records dd {
+  color: #e0e0e0;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -527,6 +529,7 @@ defineExpose({ search, cancelSearch })
   font-family: monospace;
 }
 
+.match-records dd.match-muted,
 .match-muted {
   color: #888;
 }
@@ -542,7 +545,7 @@ defineExpose({ search, cancelSearch })
   color: #22c55e;
 }
 
-.match-new-error {
+.match-records dd.match-new-error {
   color: #ef4444;
 }
 
@@ -613,7 +616,8 @@ defineExpose({ search, cancelSearch })
   color: #ef4444;
 }
 
-.match-retry-btn {
+.btn.match-retry-btn {
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
