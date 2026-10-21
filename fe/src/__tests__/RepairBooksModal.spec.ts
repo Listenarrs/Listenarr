@@ -186,9 +186,7 @@ describe('RepairBooksModal', () => {
     expect(wrapper.get('[data-testid="repair-info-asin"]').text()).toBe(
       'A filled ASIN is searched on its own: the title and author are left out of that search.',
     )
-    expect(wrapper.get('[data-testid="repair-count"]').text()).toBe(
-      'Find a new record for each book to repair',
-    )
+    expect(wrapper.get('[data-testid="repair-count"]').text()).toBe('1 skipped')
     expect(wrapper.get('[data-testid="match-legend"]').text()).toMatch(
       /Ignored.*Matched.*Invalid.*Error.*Searching/,
     )

@@ -166,13 +166,7 @@
             class="repair-count"
             data-testid="repair-count"
           >
-            {{
-              selectedCount === 0
-                ? 'Find a new record for each book to repair'
-                : skippedCount
-                  ? `${skippedCount} skipped`
-                  : ''
-            }}
+            {{ skippedCount ? `${skippedCount} skipped` : '' }}
           </span>
           <button
             v-if="!finished"
