@@ -421,14 +421,18 @@ describe('RepairBooksModal', () => {
     await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
     expect(row(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(1)
+    await row(wrapper).get('[data-testid="find-match-result"]').trigger('click')
+    expect(row(wrapper).find('[data-testid="match-picked"]').exists()).toBe(true)
 
     // A search that never answers: only Cancel search or the timeout ends it
     apiMocks.advancedSearch.mockImplementation(() => new Promise(() => {}))
     await row(wrapper).get('[data-testid="match-title"]').trigger('keydown', { key: 'Enter' })
     await flushPromises()
-    // The previous results stay until the new search answers
+    // The previous results stay until the new search answers, nothing selected in them, New reset
     expect(row(wrapper).attributes('data-match-state')).toBe('searching')
     expect(row(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(1)
+    expect(row(wrapper).find('[data-testid="find-match-result"].selected').exists()).toBe(false)
+    expect(row(wrapper).get('[data-testid="match-none"]').exists()).toBe(true)
 
     await row(wrapper).get('[data-testid="match-cancel-search"]').trigger('click')
     await flushPromises()
@@ -518,7 +522,9 @@ describe('RepairBooksModal', () => {
     await row(wrapper).get('[data-testid="match-retry"]').trigger('click')
     await flushPromises()
     expect(apiMocks.getAudibleMetadata).toHaveBeenLastCalledWith('B0HM45F8MW', 'us')
-    expect(row(wrapper).attributes('data-match-state')).toBe('matched')
+    // Found, offered to pick: nothing picked for the user
+    expect(row(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(1)
+    expect(row(wrapper).attributes('data-match-state')).toBe('ignored')
     expect(row(wrapper).find('[data-testid="match-search"]').exists()).toBe(true)
   })
 
@@ -721,7 +727,7 @@ describe('RepairBooksModal', () => {
     await flushPromises()
   })
 
-  it('selects the one record the region has for the ASIN, the fields left as typed', async () => {
+  it('offers the one record the region has for the ASIN without picking it', async () => {
     catalogue({
       de: [{ ...frenchVol7, title: 'Primal Hunter 7', authors: [{ name: 'Zogarth (DE)' }] }],
     })
@@ -733,10 +739,15 @@ describe('RepairBooksModal', () => {
 
     const results = row(wrapper).findAll('[data-testid="find-match-result"]')
     expect(results).toHaveLength(1)
-    expect(results[0]!.classes()).toContain('selected')
+    expect(results[0]!.classes()).not.toContain('selected')
+    expect(row(wrapper).find('[data-testid="match-picked"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="repair-confirm"]').text()).toContain('Repair 0')
+
+    // Picked by the user: the new record, the fields left as typed
+    await results[0]!.trigger('click')
+    expect(row(wrapper).get('[data-testid="match-picked"]').text()).toContain('Primal Hunter 7')
     expect(field(wrapper, 'match-title').value).toBe('Primal Hunter, Vol. 7')
     expect(field(wrapper, 'match-author').value).toBe('Zogarth')
-    expect(row(wrapper).get('[data-testid="match-picked"]').text()).toContain('Primal Hunter 7')
 
     apiMocks.advancedSearch.mockClear()
     await repair(wrapper)
@@ -768,6 +779,7 @@ describe('RepairBooksModal', () => {
     await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
     expect(row(wrapper).find('[data-testid="match-asin-error"]').exists()).toBe(false)
+    await row(wrapper).get('[data-testid="find-match-result"]').trigger('click')
     expect(row(wrapper).attributes('data-match-state')).toBe('matched')
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeUndefined()
   })
@@ -810,8 +822,9 @@ describe('RepairBooksModal', () => {
     await flushPromises()
 
     expect(apiMocks.getAudibleMetadata).toHaveBeenLastCalledWith('B0BK9W82PQ', 'us')
+    await row(wrapper).get('[data-testid="find-match-result"]').trigger('click')
     expect(row(wrapper).get('[data-testid="match-picked"]').text()).toContain('Primal Hunter 4')
-    // The record found leaves the title and author as typed
+    // The record picked leaves the title and author as typed
     expect(field(wrapper, 'match-title').value).toBe('Primal Hunter, Vol. 7')
     expect(field(wrapper, 'match-author').value).toBe('Zogarth')
 
@@ -837,7 +850,7 @@ describe('RepairBooksModal', () => {
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
   })
 
-  it('keeps the new record while an ASIN is typed, and Enter looks the typed one up', async () => {
+  it('keeps the new record while an ASIN is typed, and a new search unpicks it', async () => {
     catalogue({ us: [englishPh4, { ...frenchVol7, asin: 'B0OTHER123', title: 'Other' }] })
     const wrapper = mountModal()
     await flushPromises()
@@ -850,6 +863,10 @@ describe('RepairBooksModal', () => {
     await asin.trigger('keydown', { key: 'Enter' })
     await flushPromises()
     expect(apiMocks.getAudibleMetadata).toHaveBeenLastCalledWith('B0OTHER123', 'us')
+    // The new search unpicked the previous record: New is back to no record
+    expect(row(wrapper).find('[data-testid="match-picked"]').exists()).toBe(false)
+    expect(row(wrapper).get('[data-testid="match-none"]').exists()).toBe(true)
+    await row(wrapper).get('[data-testid="find-match-result"]').trigger('click')
     expect(row(wrapper).get('[data-testid="match-picked"]').text()).toContain('B0OTHER123')
   })
 

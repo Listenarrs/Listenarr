@@ -373,13 +373,6 @@ const barState = computed(() => {
   return matchState(match.value) === 'matched' && !props.excluded ? 'matched' : 'ignored'
 })
 
-// The record the book points at today: same ASIN, and same region when both are known
-function isCurrentRecord(record: SearchResult): boolean {
-  const { current } = match.value
-  if (!current.asin || record.asin?.toUpperCase() !== current.asin.toUpperCase()) return false
-  return !current.region || !record.region || record.region === current.region
-}
-
 // A filled ASIN has priority: Search looks it up on its own, leaving the title and author out.
 // With the ASIN field empty, Search looks for the title and author
 const searchKind = computed<SearchKind>(() => (match.value.asin.trim() ? 'asin' : 'title'))
@@ -435,9 +428,8 @@ function setMatched(record: SearchResult) {
   emit('matched', record)
 }
 
-// Search the title and author (or an ASIN typed as the title) in the region, the results opening
-// under the book; or look the ASIN up in its region: one record is the book's new one, several are
-// offered to pick from, none is an error
+// Search the title and author in the region, or look the ASIN up there; the results open under
+// the book, to pick from. An ASIN its region has no record for is an error
 async function search(kind: SearchKind = 'title') {
   if (!canSearchFor(kind)) return
   if (kind === 'asin' && !asinValid(match.value)) {
@@ -465,9 +457,10 @@ async function search(kind: SearchKind = 'title') {
   state.value = { ...state.value, status: 'searching', kind, error: null }
   running.value = searched
   edited.value = false
+  // A new search starts over: the record picked in the previous results is no longer selected, and
+  // New goes back to no record (nothing stays picked that the user can't see)
+  match.value.picked = null
   match.value.asinError = null
-  // The record of another ASIN no longer stands: this lookup gives the new one, or none
-  if (kind === 'asin') match.value.picked = null
   try {
     const query = kind === 'asin' ? asin : addNewQuery(match.value)
     const results = await searchLikeAddNew(query, region, current.signal)
@@ -480,14 +473,9 @@ async function search(kind: SearchKind = 'title') {
     const found = results
       .filter((r) => r.asin?.toUpperCase() === asin)
       .map((r) => ({ ...r, region: r.region || region }))
-    if (found.length === 1) {
-      // One record: the book's new one, selected in the results (the fields stay as typed);
-      // unless it is the record the book already points at, which only wears its "Current" tag
-      // (nothing to repair)
-      const record = found[0]!
-      if (!isCurrentRecord(record)) setMatched(record)
-      state.value = { status: 'done', kind, results: found, error: null, searched }
-    } else if (found.length > 1) {
+    // The records found are offered to pick from, like a title search's: nothing is picked for
+    // the user
+    if (found.length) {
       state.value = { status: 'done', kind, results: found, error: null, searched }
     } else {
       // Found nothing (orange): a title search is what comes next, so Search stays
