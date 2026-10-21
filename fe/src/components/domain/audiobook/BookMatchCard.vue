@@ -63,8 +63,8 @@
             v-if="match.asin"
             type="button"
             class="match-asin-clear"
-            title="Empty the ASIN field: Search then looks for the title and author"
-            aria-label="Empty the ASIN field: Search then looks for the title and author"
+            title="Empty the ASIN field"
+            aria-label="Empty the ASIN field"
             data-testid="match-asin-clear"
             @click.prevent="clearAsin"
           >
