@@ -24,7 +24,13 @@ import {
 
 // The Audible record a book points at, as edited in a book match card (Repair and Find Match)
 
-export const ASIN_PATTERN = /^[A-Z0-9]{10}$/i
+// An ASIN as Add New's search reads one: B and 9 letters or digits, or 10 digits (an ISBN-10, the
+// last one possibly X)
+export const ASIN_PATTERN = /^(B[0-9A-Z]{9}|\d{9}(?:X|\d))$/i
+
+// What an ASIN must look like, shown when Search is asked for one that doesn't
+export const INVALID_ASIN_MESSAGE =
+  'Not an ASIN: an ASIN is B followed by 9 letters or digits (B08G9PRS1K), or 10 digits (1980006520).'
 // Catalogue offered after the book's and the configured ones
 export const FALLBACK_REGION = 'us'
 

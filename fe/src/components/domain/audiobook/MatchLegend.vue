@@ -20,6 +20,7 @@
   <ul class="match-legend" data-testid="match-legend">
     <li><span class="match-legend-bar ignored" />Ignored</li>
     <li><span class="match-legend-bar matched" />Matched</li>
+    <li><span class="match-legend-bar warning" />Invalid</li>
     <li><span class="match-legend-bar error" />Error</li>
     <li><span class="match-legend-bar searching" />Searching</li>
   </ul>
@@ -55,6 +56,10 @@
 
 .match-legend-bar.matched {
   background: var(--status-success);
+}
+
+.match-legend-bar.warning {
+  background: var(--status-warning);
 }
 
 .match-legend-bar.error {

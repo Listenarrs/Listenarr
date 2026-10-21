@@ -181,7 +181,7 @@ describe('RepairBooksModal', () => {
       'Find a new record for each book to repair',
     )
     expect(wrapper.get('[data-testid="match-legend"]').text()).toMatch(
-      /Ignored.*Matched.*Error.*Searching/,
+      /Ignored.*Matched.*Invalid.*Error.*Searching/,
     )
   })
 
@@ -304,6 +304,8 @@ describe('RepairBooksModal', () => {
     expect(row(wrapper).get('[data-testid="match-search-empty"]').text()).toContain(
       'No results for "Primal Hunter, Vol. 7" by "Zogarth" in France (FR)',
     )
+    // Nothing found is orange, not a failure
+    expect(row(wrapper).attributes('data-match-state')).toBe('warning')
     expect(row(wrapper).find('[data-testid="match-retry"]').exists()).toBe(true)
   })
 
@@ -355,6 +357,8 @@ describe('RepairBooksModal', () => {
     expect(row(wrapper).get('[data-testid="match-search-error"]').text()).toContain(
       'The search failed: API error: 502 Bad Gateway',
     )
+    // A failed request is red
+    expect(row(wrapper).attributes('data-match-state')).toBe('error')
     expect(row(wrapper).find('[data-testid="match-retry"]').exists()).toBe(true)
     expect(row(wrapper).find('[data-testid="match-search"]').exists()).toBe(false)
 
@@ -632,7 +636,8 @@ describe('RepairBooksModal', () => {
     expect(row(wrapper).get('[data-testid="match-asin-error"]').text()).toContain(
       'No record for B0HM45F8MW in Audible United States (US)',
     )
-    expect(row(wrapper).attributes('data-match-state')).toBe('error')
+    // No record is a search that found nothing: orange
+    expect(row(wrapper).attributes('data-match-state')).toBe('warning')
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
 
     // Another ASIN clears the error, and Search looks it up
@@ -732,6 +737,39 @@ describe('RepairBooksModal', () => {
 
     expect(row(wrapper).find('[data-testid="match-invalid-asin"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('says nothing about an empty ASIN', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await row(wrapper).get('[data-testid="match-asin"]').setValue('')
+
+    expect(row(wrapper).find('[data-testid="match-invalid-asin"]').exists()).toBe(false)
+  })
+
+  it('searches a malformed ASIN as a field error: its rules shown, orange, nothing sent', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    await row(wrapper).get('[data-testid="match-asin"]').setValue('B0BK9')
+    apiMocks.getAudibleMetadata.mockClear()
+    apiMocks.advancedSearch.mockClear()
+
+    const search = row(wrapper).get('[data-testid="match-search"]')
+    expect(search.attributes('disabled')).toBeUndefined()
+    await search.trigger('click')
+    await flushPromises()
+
+    const error = row(wrapper).get('[data-testid="match-search-error"]')
+    expect(error.text()).toContain('Not an ASIN: an ASIN is B followed by 9 letters or digits')
+    expect(error.classes()).toContain('match-search-warning')
+    expect(row(wrapper).attributes('data-match-state')).toBe('warning')
+    expect(apiMocks.getAudibleMetadata).not.toHaveBeenCalled()
+    expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
+
+    // Typing again clears it
+    await row(wrapper).get('[data-testid="match-asin"]').setValue('B0BK9W')
+    expect(row(wrapper).find('[data-testid="match-search-error"]').exists()).toBe(false)
   })
 
   it('reverts a book to its ASIN and region before the changes', async () => {
