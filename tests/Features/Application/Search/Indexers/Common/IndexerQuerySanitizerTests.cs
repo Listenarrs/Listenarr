@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Application.Search.Indexers.Common;
 using Listenarr.Tests.Common;
 
 namespace Listenarr.Tests.Features.Application.Search.Indexers.Common

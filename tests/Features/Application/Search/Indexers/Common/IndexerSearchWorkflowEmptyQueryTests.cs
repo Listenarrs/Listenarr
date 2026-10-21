@@ -16,11 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using Listenarr.Application.Search.Contracts;
-using Listenarr.Application.Search.Contracts.Repositories;
-using Listenarr.Application.Search.Core;
-using Listenarr.Application.Search.Indexers.Common;
-using Listenarr.Domain.Search;
 using Listenarr.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 
