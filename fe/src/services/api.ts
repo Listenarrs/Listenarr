@@ -62,6 +62,7 @@ import type {
   RenamePreview,
   RenameOperation,
   RenameResult,
+  LibraryIssue,
 } from '@/types'
 import { getStartupConfigCached, resetCache as resetStartupConfigCache } from './startupConfigCache'
 import { sessionTokenManager } from '@/utils/sessionToken'
@@ -997,6 +998,29 @@ class ApiService {
 
   async getUnmatchedResults(jobId: string): Promise<UnmatchedFilesResponse> {
     return this.request<UnmatchedFilesResponse>(`/rootfolders/unmatched-results/${jobId}`)
+  }
+
+  // Books whose Audible identity is incomplete (no title, no ASIN, malformed ASIN, no region),
+  // with the ignored books when asked
+  async getLibraryIssues(includeIgnored = false): Promise<LibraryIssue[]> {
+    return this.request<LibraryIssue[]>(
+      `/library/issues${includeIgnored ? '?includeIgnored=true' : ''}`,
+    )
+  }
+
+  // One book's issues (possibly none) and whether they are ignored
+  async getLibraryIssue(id: number): Promise<LibraryIssue> {
+    return this.request<LibraryIssue>(`/library/issues/${id}`)
+  }
+
+  async setLibraryIssueIgnored(
+    id: number,
+    ignored: boolean,
+  ): Promise<{ id: number; ignored: boolean }> {
+    return this.request<{ id: number; ignored: boolean }>(`/library/issues/${id}/ignored`, {
+      method: 'PUT',
+      body: JSON.stringify({ ignored }),
+    })
   }
 
   async getSavedUnmatchedFiles(rootFolderId: number): Promise<SavedUnmatchedResponse> {

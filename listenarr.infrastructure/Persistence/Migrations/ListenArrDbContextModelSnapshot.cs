@@ -538,6 +538,19 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.ToTable("AudiobookFiles");
                 });
 
+            modelBuilder.Entity("Listenarr.Domain.Audiobooks.AudiobookIssueIgnore", b =>
+                {
+                    b.Property<int>("AudiobookId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("AudiobookId");
+
+                    b.ToTable("AudiobookIssueIgnores", (string)null);
+                });
+
             modelBuilder.Entity("Listenarr.Domain.Audiobooks.AudiobookSeriesMembership", b =>
                 {
                     b.Property<int>("Id")
@@ -2690,6 +2703,15 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Audiobook");
+                });
+
+            modelBuilder.Entity("Listenarr.Domain.Audiobooks.AudiobookIssueIgnore", b =>
+                {
+                    b.HasOne("Listenarr.Domain.Audiobooks.Audiobook", null)
+                        .WithMany()
+                        .HasForeignKey("AudiobookId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Listenarr.Domain.Audiobooks.AudiobookSeriesMembership", b =>

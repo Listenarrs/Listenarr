@@ -26,6 +26,8 @@ const apiMocks = vi.hoisted(() => ({
   updateAudiobookIdentifiers: vi.fn(),
   rescanAudiobookMetadata: vi.fn(),
   getApplicationSettings: vi.fn(),
+  getLibraryIssue: vi.fn(),
+  getLibraryIssues: vi.fn(),
 }))
 
 vi.mock('@/services/api', () => ({
@@ -128,6 +130,8 @@ describe('RepairBooksModal', () => {
       region: 'us',
     })
     catalogue({ us: [englishPh4], fr: [] })
+    apiMocks.getLibraryIssue.mockResolvedValue({ id: 7, issues: [] })
+    apiMocks.getLibraryIssues.mockResolvedValue([])
   })
 
   afterEach(() => {
@@ -405,5 +409,34 @@ describe('RepairBooksModal', () => {
     await wrapper.get('[data-testid="repair-organize"]').trigger('click')
 
     expect(wrapper.emitted('organize')).toEqual([[[7]]])
+  })
+
+  it('shows the current problems the server reports for the book, in orange as on the Issues page', async () => {
+    apiMocks.getLibraryIssue.mockResolvedValue({ id: 7, issues: ['missing_asin'] })
+    const wrapper = mountModal()
+    await flushPromises()
+
+    expect(apiMocks.getLibraryIssue).toHaveBeenCalledWith(7)
+    const pills = row(wrapper).findAll('[data-testid="repair-issue"]')
+    expect(pills.map((p) => p.text())).toEqual(['No ASIN'])
+    expect(pills[0]!.classes()).toContain('pill-warning')
+  })
+
+  it('shows no problem when the issues cannot be read', async () => {
+    apiMocks.getLibraryIssue.mockRejectedValue(new Error('Not found'))
+    const wrapper = mountModal()
+    await flushPromises()
+
+    expect(row(wrapper).findAll('[data-testid="repair-issue"]')).toHaveLength(0)
+    expect(row(wrapper).text()).toContain('Primal Hunter, Vol. 7')
+  })
+
+  it('refreshes the Issues list once the books are repaired', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await repair(wrapper)
+
+    expect(apiMocks.getLibraryIssues).toHaveBeenCalled()
   })
 })

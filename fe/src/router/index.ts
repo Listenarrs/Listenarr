@@ -100,6 +100,12 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/issues',
+    name: 'issues',
+    component: () => import('../views/system/IssuesView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/logs',
     name: 'logs',
     component: () => import('../views/activity/LogsView.vue'),

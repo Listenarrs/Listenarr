@@ -110,6 +110,15 @@
                         <template v-if="row.currentRegion"> ({{ row.currentRegion }})</template>
                       </template>
                     </span>
+                    <!-- The book's current problems, in orange as on the Issues page -->
+                    <Pill
+                      v-for="code in row.currentIssues"
+                      :key="code"
+                      variant="warning"
+                      data-testid="repair-issue"
+                    >
+                      {{ issueLabel(code) }}
+                    </Pill>
                     <button
                       type="button"
                       class="btn btn-secondary repair-revert-btn"
@@ -295,12 +304,16 @@ import {
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '@/components/feedback'
 import { apiService } from '@/services/api'
 import { useLibraryImportStore } from '@/stores/libraryImport'
+import { useLibraryIssuesStore } from '@/stores/libraryIssues'
+import { Pill } from '@/components/base'
+import { issueLabel } from '@/utils/libraryIssues'
 import { orderedSearchRegionOptions, searchRegionOptions } from '@/utils/languageMapping'
 import LibraryImportSearchModal from '@/components/domain/audiobook/LibraryImportSearchModal.vue'
 import type {
   AudiobookExternalIdentifier,
   AudiobookExternalIdentifierInput,
   FindMatchTarget,
+  LibraryIssueCode,
   SearchResult,
 } from '@/types'
 
@@ -316,6 +329,8 @@ interface RepairRow {
   currentAsin: string
   currentRegion: string
   identifiers: AudiobookExternalIdentifier[]
+  // The book's issues from GET /library/issues/{id} (empty when it has none or they can't be read)
+  currentIssues: LibraryIssueCode[]
   asin: string
   region: string
   // What Find Match searches: the book's title and first author, editable
@@ -354,6 +369,7 @@ const emit = defineEmits<{
 
 // Find Match's search and configured region live in the Library Import store
 const libraryImportStore = useLibraryImportStore()
+const libraryIssuesStore = useLibraryIssuesStore()
 const configuredRegion = ref(FALLBACK_REGION)
 const loading = ref(false)
 const executing = ref(false)
@@ -393,9 +409,10 @@ async function load() {
     configuredRegion.value = await libraryImportStore.configuredRegion()
     rows.value = await Promise.all(
       props.audiobookIds.map(async (id) => {
-        const [book, ids] = await Promise.all([
+        const [book, ids, issue] = await Promise.all([
           apiService.getAudiobook(id),
           apiService.getAudiobookIdentifiers(id),
+          apiService.getLibraryIssue(id).catch(() => null),
         ])
         const asin = primaryAsin(ids.identifiers ?? [])
         const initial = {
@@ -411,6 +428,7 @@ async function load() {
           currentAsin: asin?.value ?? book.asin ?? '',
           currentRegion: asin?.region ?? '',
           identifiers: ids.identifiers ?? [],
+          currentIssues: issue?.issues ?? [],
           ...initial,
           pickedTitle: null,
           initial,
@@ -554,6 +572,8 @@ async function repair() {
   }
   executing.value = false
   finished.value = true
+  // Repaired books leave the Issues list (and its count under System)
+  void libraryIssuesStore.load()
 }
 
 function selectAll() {

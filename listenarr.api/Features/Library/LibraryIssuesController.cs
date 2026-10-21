@@ -1,0 +1,78 @@
+/*
+ * Listenarr - Audiobook Management System
+ * Copyright (C) 2024-2026 Listenarr Contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published
+ * by the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+using Microsoft.AspNetCore.Mvc;
+
+namespace Listenarr.Api.Features.Library
+{
+    [ApiController]
+    [Route("api/v{version:apiVersion}/library/issues")]
+    [Tags("Library")]
+    public class LibraryIssuesController : ControllerBase
+    {
+        private readonly ILibraryIssueService _libraryIssueService;
+
+        public LibraryIssuesController(ILibraryIssueService libraryIssueService)
+        {
+            _libraryIssueService = libraryIssueService;
+        }
+
+        /// <summary>
+        /// List the books whose Audible identity is incomplete (no title, no ASIN, a malformed ASIN,
+        /// or an ASIN without its region), to repair them.
+        /// </summary>
+        /// <param name="includeIgnored">Also list the books whose issues are ignored.</param>
+        /// <param name="ct">Cancellation token.</param>
+        [HttpGet]
+        public async Task<IActionResult> GetIssues([FromQuery] bool includeIgnored, CancellationToken ct)
+        {
+            return Ok(await _libraryIssueService.GetIssuesAsync(includeIgnored, ct));
+        }
+
+        /// <summary>
+        /// One book's issues (possibly none) and whether they are ignored.
+        /// </summary>
+        /// <param name="id">Audiobook ID.</param>
+        /// <param name="ct">Cancellation token.</param>
+        [HttpGet("{id:int}")]
+        public async Task<IActionResult> GetIssue(int id, CancellationToken ct)
+        {
+            var item = await _libraryIssueService.GetIssueAsync(id, ct);
+            return item == null ? NotFound(new { message = "Audiobook not found" }) : Ok(item);
+        }
+
+        /// <summary>
+        /// Ignore the issues of a book (it leaves the list and its count) or stop ignoring them.
+        /// </summary>
+        /// <param name="id">Audiobook ID.</param>
+        /// <param name="request">Whether the book's issues are ignored.</param>
+        /// <param name="ct">Cancellation token.</param>
+        [HttpPut("{id:int}/ignored")]
+        public async Task<IActionResult> SetIgnored(int id, [FromBody] SetIgnoredRequest request, CancellationToken ct)
+        {
+            return await _libraryIssueService.SetIgnoredAsync(id, request.Ignored, ct)
+                ? Ok(new { id, ignored = request.Ignored })
+                : NotFound(new { message = "Audiobook not found" });
+        }
+
+        public sealed class SetIgnoredRequest
+        {
+            public bool Ignored { get; set; }
+        }
+    }
+}
