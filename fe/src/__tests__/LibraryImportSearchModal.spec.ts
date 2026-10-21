@@ -204,6 +204,7 @@ describe('LibraryImportSearchModal', () => {
     expect(field(wrapper, 'find-match-confirm').attributes('disabled')).toBeDefined()
 
     await field(wrapper, 'match-asin').setValue('B000APXZHK')
+    await field(wrapper, 'match-search').trigger('click')
     await flushPromises()
     expect(wrapper.get('[data-testid="find-match-card"]').attributes('data-match-state')).toBe(
       'matched',
@@ -218,6 +219,7 @@ describe('LibraryImportSearchModal', () => {
 
     search.mockResolvedValue([])
     await field(wrapper, 'match-asin').setValue('B0BK9W82PQ')
+    await field(wrapper, 'match-asin').trigger('keydown', { key: 'Enter' })
     await flushPromises()
     expect(search).toHaveBeenLastCalledWith(
       expect.objectContaining({ asin: 'B0BK9W82PQ', region: 'fr' }),
@@ -229,8 +231,8 @@ describe('LibraryImportSearchModal', () => {
     expect(field(wrapper, 'find-match-confirm').attributes('disabled')).toBeDefined()
 
     search.mockResolvedValue([ph4])
-    // Entered again, the ASIN is looked up again
-    await field(wrapper, 'match-asin').trigger('change')
+    // Search looks the ASIN up again
+    await field(wrapper, 'match-search').trigger('click')
     await flushPromises()
     await field(wrapper, 'find-match-confirm').trigger('click')
     expect(wrapper.emitted('select')?.[0]?.[0]).toEqual(
