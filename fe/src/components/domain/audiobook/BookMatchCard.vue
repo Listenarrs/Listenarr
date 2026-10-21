@@ -536,9 +536,18 @@ function cancelSearch() {
 }
 
 // The record picked in the results: its ASIN in the region it was found in. The results stay,
-// with the selection moved to it.
+// with the selection moved to it. Clicking the selected row again unpicks it: no new record.
 function pick(result: SearchResult) {
   if (!result.asin) return
+  const picked = pickedRecord.value
+  if (
+    picked &&
+    picked.asin.toUpperCase() === result.asin.toUpperCase() &&
+    (!result.region || result.region === picked.region)
+  ) {
+    match.value.picked = null
+    return
+  }
   match.value.asin = result.asin.toUpperCase()
   match.value.region = result.region || match.value.region
   setMatched({ ...result, region: match.value.region })
