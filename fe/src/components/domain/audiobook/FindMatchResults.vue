@@ -111,7 +111,6 @@ function seriesName(result: SearchResult): string | undefined {
 
 .result-item.selected {
   background: rgba(34, 197, 94, 0.12);
-  box-shadow: inset 3px 0 0 #22c55e;
 }
 
 .result-thumb {
