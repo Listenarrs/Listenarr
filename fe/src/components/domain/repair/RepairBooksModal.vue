@@ -87,6 +87,7 @@
                 :configured-region="configuredRegion"
                 :search-locked="searchingRowId !== null && searchingRowId !== row.id"
                 :excluded="!row.selected"
+                :book="{ title: row.title, subtitle: row.subtitle, author: row.authors.join(', ') }"
                 :data-testid="`repair-row-${row.id}`"
                 @searching="(searching) => onSearching(row, searching)"
                 @matched="row.selected = true"
@@ -106,17 +107,6 @@
                     />
                     <span class="repair-title">{{ row.title || `Audiobook #${row.id}` }}</span>
                   </label>
-                </template>
-                <template #meta>
-                  {{
-                    bookSummary({
-                      asin: row.match.current.asin,
-                      title: row.title,
-                      subtitle: row.subtitle,
-                      author: row.authors.join(', '),
-                      region: row.match.current.region,
-                    })
-                  }}
                 </template>
               </BookMatchCard>
             </div>
@@ -232,7 +222,6 @@ import MatchLegend from '@/components/domain/audiobook/MatchLegend.vue'
 import {
   FALLBACK_REGION,
   asinChanged,
-  bookSummary,
   createBookMatch,
   matchState,
   type BookMatch,
