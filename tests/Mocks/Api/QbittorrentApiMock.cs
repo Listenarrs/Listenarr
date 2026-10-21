@@ -13,6 +13,11 @@ namespace Listenarr.Tests.Mocks.Api
         public HttpStatusCode InfoStatusCode { get; set; } = HttpStatusCode.OK;
         public string? InfoResponseOverride { get; set; }
 
+        // Applied only to full-queue requests (no hashes filter), so a test can let the
+        // ID-filtered monitor poll succeed while the full snapshot request fails.
+        public HttpStatusCode? FullQueueStatusCode { get; set; }
+        public string? FullQueueResponseOverride { get; set; }
+
         public QbittorrentApiMock()
         {
             AddRoute("api/v2/auth/login", DoLogin, HttpMethod.Post);
@@ -64,6 +69,17 @@ namespace Listenarr.Tests.Mocks.Api
             if (InfoStatusCode != HttpStatusCode.OK)
             {
                 return new HttpResponseMessage(InfoStatusCode);
+            }
+
+            var isFullQueueRequest = string.IsNullOrEmpty(HttpUtility.ParseQueryString(request.RequestUri!.Query)["hashes"]);
+            if (isFullQueueRequest && FullQueueStatusCode is { } fullQueueStatusCode)
+            {
+                return new HttpResponseMessage(fullQueueStatusCode);
+            }
+
+            if (isFullQueueRequest && FullQueueResponseOverride != null)
+            {
+                return MockUtils.GetCannedResponse(FullQueueResponseOverride);
             }
 
             return MockUtils.GetCannedResponse(InfoResponseOverride ?? """

@@ -1,7 +1,9 @@
+using System.Net;
 using System.Reflection;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Mocks;
+using Listenarr.Tests.Mocks.Api;
 
 namespace Listenarr.Tests.Features.Infrastructure.Downloads.Monitoring
 {
@@ -170,6 +172,80 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Monitoring
 
             Assert.Null(await _downloadRepository.GetByIdAsync(unlinked.Id));
         }
+
+        [Theory]
+        [Trait("Method", "MonitorDownloadsAsync")]
+        [InlineData(503, null)]
+        [InlineData(null, "{not json")]
+        public async Task MonitorDownloadsAsync_QbittorrentFullQueueFailure_KeepsActiveDownload(int? fullQueueStatus, string? fullQueueBody)
+        {
+            // The ID-filtered monitor poll succeeds, then the full-queue request used by
+            // orphan cleanup fails. That failure must reach the poller as a failure, not as
+            // a live empty snapshot that terminalizes the tracked download.
+            var qbittorrentClient = await SaveQbittorrentClientAsync();
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = """
+            [
+                {
+                    "hash": "abcdef",
+                    "name": "Book",
+                    "progress": 0.5,
+                    "size": 1000,
+                    "downloaded": 500,
+                    "state": "downloading",
+                    "save_path": "/downloads/book"
+                }
+            ]
+            """;
+            apiMock.FullQueueStatusCode = fullQueueStatus is { } status ? (HttpStatusCode)status : null;
+            apiMock.FullQueueResponseOverride = fullQueueBody;
+            var tracked = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithId("tracked-download")
+                .WithDownloading(0)
+                .WithExternalId("abcdef")
+                .WithStartDate(DateTime.UtcNow.AddMinutes(-10))
+                .WithDownloadClientConfiguration(qbittorrentClient)
+                .Build());
+
+            await downloadMonitorService.MonitorDownloadsAsync(CancellationToken.None);
+
+            var persisted = await _downloadRepository.GetByIdAsync(tracked.Id);
+            Assert.NotNull(persisted);
+            Assert.Equal(DownloadStatus.Downloading, persisted.Status);
+        }
+
+        [Fact]
+        [Trait("Method", "MonitorDownloadsAsync")]
+        public async Task MonitorDownloadsAsync_QbittorrentLiveEmptyQueue_RemovesSoleOrphanedDownload()
+        {
+            // The sole active torrent was deleted in qBittorrent: both requests succeed and
+            // return an empty list, so cleanup must remove the stranded record.
+            var qbittorrentClient = await SaveQbittorrentClientAsync();
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = "[]";
+            var orphan = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithId("sole-orphan")
+                .WithDownloading(0)
+                .WithExternalId("abcdef")
+                .WithStartDate(DateTime.UtcNow.AddMinutes(-10))
+                .WithDownloadClientConfiguration(qbittorrentClient)
+                .Build());
+
+            await downloadMonitorService.MonitorDownloadsAsync(CancellationToken.None);
+
+            Assert.Null(await _downloadRepository.GetByIdAsync(orphan.Id));
+        }
+
+        private Task<DownloadClientConfiguration> SaveQbittorrentClientAsync() =>
+            _downloadClientConfigurationRepository.SaveAsync(new DownloadClientConfigurationBuilder()
+                .WithHost("localhost")
+                .WithPort(443)
+                .WithSsl()
+                .WithUsername("admin")
+                .WithPassword("admin")
+                .WithType("qbittorrent")
+                .WithName("qBittorrent")
+                .Build());
 
         [Fact]
         [Trait("Method", "MonitorDownloadsAsync")]
