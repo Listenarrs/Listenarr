@@ -46,7 +46,8 @@
               and pick the result under the book, or type the ASIN and its region (it is checked in
               that region). Changing the title or author empties the ASIN, which no longer matches:
               search and pick the book again; changing the region keeps it, to be checked in that
-              region. Repairing saves the ASIN and its region and rescans the metadata from it.
+              region. The search is the one Add New and Library Import use, with the same rules and
+              priorities. Repairing saves the ASIN and its region and rescans the metadata from it.
             </p>
           </div>
 

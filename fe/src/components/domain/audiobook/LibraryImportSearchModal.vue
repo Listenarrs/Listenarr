@@ -27,7 +27,8 @@
           Search the title and author in the region and pick the result under the book, or type the
           ASIN and its region (it is checked in that region). Changing the title or author empties
           the ASIN, which no longer matches: search and pick the book again; changing the region
-          keeps it, to be checked in that region.
+          keeps it, to be checked in that region. The search is the one Add New and Library Import
+          use, with the same rules and priorities.
         </p>
       </div>
 
