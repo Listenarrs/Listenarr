@@ -120,9 +120,9 @@
           <PhFolderOpen />
           Organize Selected
         </button>
-        <button v-if="selectedCount > 0" class="toolbar-btn" @click="showRepair">
+        <button v-if="selectedCount > 0" class="toolbar-btn repair-btn" @click="showRepair">
           <PhWrench />
-          Repair Selected
+          Repair Selected ({{ selectedCount }})
         </button>
         <button v-if="selectedCount > 0" class="toolbar-btn delete-btn" @click="confirmBulkDelete">
           <PhTrash />
@@ -2583,6 +2583,17 @@ defineExpose({
 
 .toolbar-btn.edit-btn:hover {
   background-color: #1976d2;
+}
+
+/* Orange, like the problems Repair fixes; dark text stays readable on it */
+.toolbar-btn.repair-btn {
+  background-color: var(--warning-500);
+  border-color: var(--warning-600);
+  color: #1a1a1a;
+}
+
+.toolbar-btn.repair-btn:hover {
+  background-color: var(--warning-600);
 }
 
 .toolbar-btn.delete-btn {
