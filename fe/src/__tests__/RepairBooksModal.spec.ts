@@ -284,7 +284,7 @@ describe('RepairBooksModal', () => {
     expect(row(wrapper).get('[data-testid="match-search-empty"]').text()).toContain(
       'No results for "Primal Hunter, Vol. 7" by "Zogarth" in France (FR)',
     )
-    expect(row(wrapper).find('[data-testid="match-search"]').exists()).toBe(true)
+    expect(row(wrapper).find('[data-testid="match-retry"]').exists()).toBe(true)
   })
 
   it('cancels the search, back to the fields with nothing to report', async () => {
@@ -327,12 +327,12 @@ describe('RepairBooksModal', () => {
       'The search took longer than 30 seconds',
     )
     catalogue({ fr: [frenchVol7] })
-    await row(wrapper).get('[data-testid="match-search-retry"]').trigger('click')
+    await row(wrapper).get('[data-testid="match-retry"]').trigger('click')
     await flushPromises()
     expect(row(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(1)
   })
 
-  it('shows a failed search with its error and Retry', async () => {
+  it('shows a failed search with its error, Search becoming Retry until a field changes', async () => {
     apiMocks.advancedSearch.mockRejectedValueOnce(new Error('API error: 502 Bad Gateway'))
     const wrapper = mountModal()
     await flushPromises()
@@ -343,7 +343,60 @@ describe('RepairBooksModal', () => {
     expect(row(wrapper).get('[data-testid="match-search-error"]').text()).toContain(
       'The search failed: API error: 502 Bad Gateway',
     )
-    expect(row(wrapper).find('[data-testid="match-search-retry"]').exists()).toBe(true)
+    expect(row(wrapper).find('[data-testid="match-retry"]').exists()).toBe(true)
+    expect(row(wrapper).find('[data-testid="match-search"]').exists()).toBe(false)
+
+    await row(wrapper).get('[data-testid="match-author"]').setValue('Zogarth ')
+    expect(row(wrapper).find('[data-testid="match-retry"]').exists()).toBe(false)
+    expect(row(wrapper).find('[data-testid="match-search"]').exists()).toBe(true)
+  })
+
+  it('turns Search into Retry when the search finds nothing', async () => {
+    catalogue({ fr: [] })
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
+    await flushPromises()
+
+    expect(row(wrapper).find('[data-testid="match-search-empty"]').exists()).toBe(true)
+    catalogue({ fr: [frenchVol7] })
+    await row(wrapper).get('[data-testid="match-retry"]').trigger('click')
+    await flushPromises()
+    expect(row(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(1)
+    expect(row(wrapper).find('[data-testid="match-search"]').exists()).toBe(true)
+  })
+
+  it('offers Retry when the ASIN lookup fails, and Retry looks it up again', async () => {
+    apiMocks.advancedSearch.mockRejectedValueOnce(new Error('API error: 502 Bad Gateway'))
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await row(wrapper).get('[data-testid="match-region"]').setValue('us')
+    await flushPromises()
+    expect(row(wrapper).get('[data-testid="match-asin-error"]').text()).toContain(
+      'The search failed: API error: 502 Bad Gateway',
+    )
+
+    catalogue({ us: [{ ...frenchVol7, region: 'us' }] })
+    await row(wrapper).get('[data-testid="match-retry"]').trigger('click')
+    await flushPromises()
+    expect(apiMocks.advancedSearch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ asin: 'B0HM45F8MW', region: 'us' }),
+      expect.any(AbortSignal),
+    )
+    expect(row(wrapper).attributes('data-match-state')).toBe('matched')
+    expect(row(wrapper).find('[data-testid="match-search"]').exists()).toBe(true)
+  })
+
+  it('shows the current and new records under the fields', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+
+    const html = row(wrapper).html()
+    expect(html.indexOf('data-testid="match-current"')).toBeGreaterThan(
+      html.indexOf('data-testid="match-region"'),
+    )
   })
 
   it('searches one book at a time: the others wait for it', async () => {
