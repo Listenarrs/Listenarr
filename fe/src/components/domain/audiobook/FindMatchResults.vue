@@ -55,15 +55,20 @@ import { getPlaceholderUrl } from '@/utils/placeholder'
 import { extractNarrators, type NormalizedResult } from '@/utils/searchResultHelpers'
 import type { SearchResult } from '@/types'
 
-// selectedAsin: the record already picked, shown as selected
-const props = defineProps<{ results: SearchResult[]; selectedAsin?: string | null }>()
+// selected: the record shown as selected, by its ASIN and, when known, its region
+const props = defineProps<{
+  results: SearchResult[]
+  selected?: { asin: string; region?: string | null } | null
+}>()
 const emit = defineEmits<{ select: [result: SearchResult] }>()
 
 const { getProtectedImageSrc } = useProtectedImages()
 const placeholderUrl = getPlaceholderUrl()
 
 function isSelected(result: SearchResult): boolean {
-  return !!props.selectedAsin && result.asin?.toUpperCase() === props.selectedAsin.toUpperCase()
+  const selected = props.selected
+  if (!selected?.asin || result.asin?.toUpperCase() !== selected.asin.toUpperCase()) return false
+  return !selected.region || !result.region || result.region === selected.region
 }
 
 function narrators(result: SearchResult): string {
