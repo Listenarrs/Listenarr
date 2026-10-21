@@ -34,7 +34,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
             ArgumentNullException.ThrowIfNull(client);
             if (string.IsNullOrEmpty(id)) throw new ArgumentNullException(nameof(id));
 
-            var baseUrl = DownloadClientUriBuilder.BuildAuthority(client);
+            var baseUrl = QBittorrentHelpers.BuildBaseUrl(client);
 
             try
             {
