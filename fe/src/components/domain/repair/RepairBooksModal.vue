@@ -271,6 +271,9 @@
               />
               <span class="result-title">{{ result.title }}</span>
               <span class="result-detail">{{ result.detail }}</span>
+              <span class="result-duration" data-testid="repair-result-duration">
+                {{ formatDuration(result.durationMs) }}
+              </span>
             </div>
           </div>
         </div>
@@ -393,6 +396,8 @@ interface RepairResult {
   title: string
   success: boolean
   detail: string
+  // How long the repair of this book took, from its first request to its last
+  durationMs: number
 }
 
 const props = withDefaults(
@@ -652,6 +657,7 @@ async function repair() {
   results.value = []
   for (const row of selectedRows.value) {
     progress.value++
+    const startedAt = performance.now()
     try {
       if (asinChanged(row)) {
         if (!asinValid(row)) throw new Error('An ASIN is 10 letters or digits')
@@ -665,6 +671,7 @@ async function repair() {
         title: book.title || row.title,
         success: true,
         detail: `${rescanned.asin ?? row.asin} · ${rescanned.region ?? row.region}`,
+        durationMs: performance.now() - startedAt,
       })
     } catch (e) {
       results.value.push({
@@ -672,11 +679,17 @@ async function repair() {
         title: row.title,
         success: false,
         detail: e instanceof Error ? e.message : 'Repair failed',
+        durationMs: performance.now() - startedAt,
       })
     }
   }
   executing.value = false
   finished.value = true
+}
+
+// In seconds, with up to 2 decimals: 1.23 s, 1.5 s, 2 s
+function formatDuration(durationMs: number) {
+  return `${Number((durationMs / 1000).toFixed(2))} s`
 }
 
 function selectAll() {
@@ -932,5 +945,13 @@ onBeforeUnmount(cancelAllSearches)
   color: #aaa;
   font-size: 0.8rem;
   opacity: 0.75;
+}
+
+.result-duration {
+  min-width: 4rem;
+  text-align: right;
+  color: #aaa;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
 }
 </style>
