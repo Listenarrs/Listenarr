@@ -38,16 +38,34 @@ namespace Listenarr.Infrastructure.Library.Scanning
             {
                 await foreach (var job in queue.Reader.ReadAllAsync(stoppingToken))
                 {
+                    if (job.CancellationToken.IsCancellationRequested)
+                    {
+                        // Canceled while it waited in the queue
+                        metrics.Increment("worker.unmatchedscanbackgroundservice.job.canceled");
+                        logger.LogInformation("Skipping canceled unmatched scan job {JobId}", job.Id);
+                        continue;
+                    }
+
                     try
                     {
                         metrics.Increment("worker.unmatchedscanbackgroundservice.job.started");
-                        await processor.ProcessJobAsync(job, stoppingToken);
+                        using var jobCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                            stoppingToken,
+                            job.CancellationToken);
+                        await processor.ProcessJobAsync(job, jobCancellation.Token);
                         metrics.Increment("worker.unmatchedscanbackgroundservice.job.completed");
                     }
                     catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                     {
                         metrics.Increment("worker.unmatchedscanbackgroundservice.job.skipped");
                         throw;
+                    }
+                    catch (OperationCanceledException) when (job.CancellationToken.IsCancellationRequested)
+                    {
+                        // Canceled while it ran: the queue already holds the Canceled status
+                        metrics.Increment("worker.unmatchedscanbackgroundservice.job.canceled");
+                        logger.LogInformation("Unmatched scan job {JobId} stopped after being canceled", job.Id);
+                        await PublishCanceledAsync(job.Id, stoppingToken);
                     }
                     catch (OperationCanceledException ex)
                     {
@@ -136,6 +154,27 @@ namespace Listenarr.Infrastructure.Library.Scanning
             }
         }
 
+        private async Task PublishCanceledAsync(Guid jobId, CancellationToken stoppingToken)
+        {
+            try
+            {
+                await hubContext.Clients.All.SendAsync(
+                    "UnmatchedScanComplete",
+                    new { jobId = jobId.ToString(), count = 0, canceled = true },
+                    stoppingToken);
+            }
+            catch (Exception notificationException) when (
+                notificationException is OperationCanceledException
+                    ? !stoppingToken.IsCancellationRequested
+                    : WorkerExceptionClassifier.IsNonFatal(notificationException))
+            {
+                logger.LogWarning(
+                    notificationException,
+                    "Unmatched scan job {JobId} was canceled, but its notification could not be published",
+                    jobId);
+            }
+        }
+
         private bool TryGetTerminalJobStatus(Guid jobId, out string? terminalStatus)
         {
             terminalStatus = null;
@@ -173,42 +212,14 @@ namespace Listenarr.Infrastructure.Library.Scanning
                 embeddedTagsByFile);
     }
 
-    public partial class UnmatchedScanProcessor : IUnmatchedScanProcessor
+    public partial class UnmatchedScanProcessor
     {
-        private static readonly string[] AudioExtensions = { ".m4b", ".mp3", ".flac", ".ogg", ".opus", ".m4a", ".aac", ".wav" };
-        private sealed record StemGroup(string Stem, List<string> Files);
-        private sealed record GroupCandidate(string FilePath, string Stem, bool IsAncillary, string TitleKey, string AuthorKey);
-        private sealed record UnmatchedScanOutcome(
-            List<UnmatchedFileResult> Results,
-            List<string> Warnings);
-
-        private readonly IUnmatchedScanQueueService _queue;
-        private readonly IServiceScopeFactory _scopeFactory;
-        private readonly ILogger<UnmatchedScanProcessor> _logger;
-        private readonly IHubContext<SettingsHub> _hubContext;
-        private readonly IFfmpegService _ffmpegService;
-        private readonly IFileSystemSemanticsResolver _semanticsResolver;
-
-        public UnmatchedScanProcessor(
-            IUnmatchedScanQueueService queue,
-            IServiceScopeFactory scopeFactory,
-            ILogger<UnmatchedScanProcessor> logger,
-            IHubContext<SettingsHub> hubContext,
-            IFfmpegService ffmpegService,
-            IFileSystemSemanticsResolver semanticsResolver)
-        {
-            _queue = queue;
-            _scopeFactory = scopeFactory;
-            _logger = logger;
-            _hubContext = hubContext;
-            _ffmpegService = ffmpegService;
-            _semanticsResolver = semanticsResolver;
-        }
-
         public async Task ProcessJobAsync(UnmatchedScanJob job, CancellationToken cancellationToken)
         {
             _logger.LogInformation("Processing unmatched scan job {JobId} for {Path}", job.Id, job.RootFolderPath);
             _queue.UpdateJob(job.Id, "Processing");
+            // A job canceled meanwhile keeps its Canceled status: stop here rather than report it
+            job.CancellationToken.ThrowIfCancellationRequested();
 
             var outcome = await ScanAsync(job.RootFolderPath, cancellationToken);
 
@@ -217,6 +228,7 @@ namespace Listenarr.Infrastructure.Library.Scanning
                 "Completed",
                 outcome.Results,
                 warnings: outcome.Warnings);
+            job.CancellationToken.ThrowIfCancellationRequested();
             _logger.LogInformation(
                 "Unmatched scan job {JobId} completed: {Count} unmatched items, {WarningCount} warning(s)",
                 job.Id,
@@ -324,6 +336,8 @@ namespace Listenarr.Infrastructure.Library.Scanning
                         : $"{skippedPathCount} paths could not be read and were skipped. Other readable library-import results were preserved.");
             }
 
+            // The enumeration can't be interrupted: a scan canceled during it stops here
+            ct.ThrowIfCancellationRequested();
             var candidates = enumeration.Candidates.ToList();
 
             // Filter to untracked files
