@@ -110,7 +110,7 @@ function seriesName(result: SearchResult): string | undefined {
 }
 
 .result-item.selected {
-  background: rgba(34, 197, 94, 0.12);
+  background: rgba(46, 204, 113, 0.12);
 }
 
 .result-thumb {

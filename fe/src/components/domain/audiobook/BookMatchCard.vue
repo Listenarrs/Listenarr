@@ -607,11 +607,11 @@ defineExpose({ search, cancelSearch })
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  color: #22c55e;
+  color: #2ecc71;
 }
 
 .match-records dd.match-new-error {
-  color: #ef4444;
+  color: #e74c3c;
 }
 
 /* ASIN, Title, Author, Region and Search always share the whole row */
@@ -678,7 +678,7 @@ defineExpose({ search, cancelSearch })
 }
 
 .match-search-error {
-  color: #ef4444;
+  color: #e74c3c;
 }
 
 .match-search-results {
