@@ -1113,6 +1113,85 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
 
         [Fact]
         [Trait("Scenario", "HideUntrackedExternalActivity")]
+        public async Task GetQueueAsync_MatchedTransmissionItem_OverlaysImportBlockedStatus_OverClientReportedCompleted()
+        {
+            // A seeding torrent reports "completed" for as long as it seeds. If the matched Listenarr
+            // download has since been blocked on import, the client's view must not be allowed to win:
+            // that is exactly the bug behind Activity showing a green COMPLETED badge with no Retry
+            // control for a download that is really ImportBlocked.
+            var client = new DownloadClientConfiguration
+            {
+                Id = "tr-1",
+                Name = "Transmission",
+                Type = "transmission",
+                IsEnabled = true
+            };
+
+            var configMock = new Mock<IConfigurationService>();
+            configMock.Setup(c => c.GetDownloadClientConfigurationsAsync())
+                .ReturnsAsync(new List<DownloadClientConfiguration> { client });
+            configMock.Setup(c => c.GetApplicationSettingsAsync())
+                .ReturnsAsync(new ApplicationSettings { ShowCompletedExternalDownloads = false });
+
+            var trackedDownload = new Download
+            {
+                Id = "tracked-blocked-transmission",
+                DownloadClientId = "tr-1",
+                Title = "Tracked Blocked Book",
+                Status = DownloadStatus.ImportBlocked,
+                ErrorMessage = "Import blocked: destination already contains a newer file",
+                StartedAt = DateTime.UtcNow.AddHours(-2),
+                Metadata = new Dictionary<string, object>
+                {
+                    ["TorrentHash"] = "HASH-BLOCKED"
+                }
+            };
+
+            var downloadRepoMock = new Mock<IDownloadRepository>();
+            SetupQueueRepository(downloadRepoMock, new List<Download> { trackedDownload });
+            downloadRepoMock
+                .Setup(r => r.UpdateMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<object?>()))
+                .Returns(Task.CompletedTask);
+
+            var processingJobRepoMock = new Mock<IDownloadProcessingJobRepository>();
+            processingJobRepoMock.Setup(r => r.GetPendingDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+            processingJobRepoMock.Setup(r => r.GetAllJobDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+
+            var gatewayMock = new Mock<IDownloadClientGateway>();
+            gatewayMock.Setup(g => g.GetQueueAsync(client, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<QueueItem>
+                {
+                    new QueueItem
+                    {
+                        Id = "HASH-BLOCKED",
+                        Title = "Tracked Blocked Book",
+                        Status = "completed",
+                        DownloadClient = "Transmission",
+                        DownloadClientId = "tr-1",
+                        DownloadClientType = "transmission",
+                        AddedAt = DateTime.UtcNow
+                    }
+                });
+
+            var metricsMock = new Mock<IAppMetricsService>();
+
+            var service = CreateService(
+                configMock.Object,
+                downloadRepoMock.Object,
+                processingJobRepoMock.Object,
+                gatewayMock.Object,
+                metricsMock.Object);
+
+            var result = await service.GetQueueAsync();
+
+            Assert.Single(result);
+            Assert.Equal("tracked-blocked-transmission", result[0].Id);
+            Assert.Equal("importblocked", result[0].Status);
+            Assert.Equal("Import blocked: destination already contains a newer file", result[0].ErrorMessage);
+        }
+
+        [Fact]
+        [Trait("Scenario", "HideUntrackedExternalActivity")]
         public async Task GetQueueAsync_UnlinkedButMatchingTransmissionItem_IsShownAndPersistsClientId()
         {
             var client = new DownloadClientConfiguration
