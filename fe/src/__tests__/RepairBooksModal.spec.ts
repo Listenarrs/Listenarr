@@ -300,7 +300,7 @@ describe('RepairBooksModal', () => {
     await flushPromises()
 
     expect(row(wrapper).get('[data-testid="match-search-pending"]').text()).toContain(
-      'Searching "Primal Hunter, Vol. 7" in France (FR)',
+      'Searching "Primal Hunter, Vol. 7" by "Zogarth" in France (FR)',
     )
     // Shown by the breathing blue bottom bar only: no line under the book, nothing moves
     expect(row(wrapper).attributes('data-match-state')).toBe('searching')
@@ -320,6 +320,35 @@ describe('RepairBooksModal', () => {
     // Nothing found is orange, not a failure
     expect(row(wrapper).attributes('data-match-state')).toBe('warning')
     expect(row(wrapper).find('[data-testid="match-retry"]').exists()).toBe(true)
+  })
+
+  it('heads the results with what was searched, which typing afterwards does not change', async () => {
+    catalogue({ fr: [frenchVol7] })
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
+    await flushPromises()
+    const header = () => row(wrapper).get('[data-testid="match-results-header"]').text()
+    expect(header()).toBe('Results for "Primal Hunter, Vol. 7" by "Zogarth" in France (FR)')
+
+    await row(wrapper).get('[data-testid="match-title"]').setValue('Something else')
+    expect(header()).toBe('Results for "Primal Hunter, Vol. 7" by "Zogarth" in France (FR)')
+  })
+
+  it('says in the header when a typed ASIN was searched before the title', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    await row(wrapper).get('[data-testid="match-region"]').setValue('us')
+    await flushPromises()
+
+    await row(wrapper).get('[data-testid="match-asin"]').setValue('B0BK9W82PQ')
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
+    await flushPromises()
+
+    expect(row(wrapper).get('[data-testid="match-results-header"]').text()).toBe(
+      'Results for ASIN B0BK9W82PQ (searched before the title) in United States (US)',
+    )
   })
 
   it('keeps the results while a new search runs, and after Cancel search says it was canceled', async () => {
@@ -616,7 +645,7 @@ describe('RepairBooksModal', () => {
     // Add New's ASIN search: the metadata sources, in the region
     expect(apiMocks.getAudibleMetadata).toHaveBeenCalledWith('B0HM45F8MW', 'de')
     expect(row(wrapper).get('[data-testid="match-search-pending"]').text()).toContain(
-      'Checking B0HM45F8MW in Germany (DE)',
+      'Searching ASIN B0HM45F8MW (searched before the title) in Germany (DE)',
     )
     expect(row(wrapper).find('[data-testid="match-cancel-search"]').exists()).toBe(true)
     answer()

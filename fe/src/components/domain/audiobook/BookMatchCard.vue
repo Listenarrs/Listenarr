@@ -185,6 +185,14 @@
       <PhWarningCircle :size="16" />
       <span>{{ state.error }}</span>
     </p>
+    <p
+      v-if="state.results.length && state.searched"
+      class="match-results-header"
+      data-testid="match-results-header"
+    >
+      Results for {{ describeSearch(state.searched) }} in
+      {{ regionLabel(state.searched.region) }}
+    </p>
     <FindMatchResults
       v-if="state.results.length"
       class="match-search-results"
@@ -194,14 +202,12 @@
       @select="pick"
     />
     <p
-      v-else-if="state.status === 'done' && state.kind === 'title'"
+      v-else-if="state.status === 'done' && state.kind === 'title' && state.searched"
       class="match-search-state match-search-warning"
       data-testid="match-search-empty"
     >
-      No results for "{{ match.query.trim() }}"{{
-        match.author.trim() ? ` by "${match.author.trim()}"` : ''
-      }}
-      in {{ regionLabel(match.region) }}.
+      No results for {{ describeSearch(state.searched) }} in
+      {{ regionLabel(state.searched.region) }}.
     </p>
 
     <div class="match-bar" :title="pendingText ?? undefined" />
@@ -278,10 +284,31 @@ interface SearchState {
   kind: SearchKind
   results: SearchResult[]
   error: string | null
+  // What the results shown were searched with, for their header
+  searched: Searched | null
+}
+
+// The parameters of one search, taken when it starts: typing afterwards doesn't change them
+interface Searched {
+  kind: SearchKind
+  asin: string
+  title: string
+  author: string
+  region: string
+}
+
+// What a search looked for: the ASIN (said when it went before a title filled in), or the title
+// and author
+function describeSearch(searched: Searched): string {
+  if (searched.kind === 'asin')
+    return `ASIN ${searched.asin}${searched.title ? ' (searched before the title)' : ''}`
+  return `"${searched.title}"${searched.author ? ` by "${searched.author}"` : ''}`
 }
 
 const titleEl = ref<HTMLInputElement | null>(null)
 const state = ref<SearchState>(idle())
+// The search running, if any
+const running = ref<Searched | null>(null)
 // A field changed since the last search: Retry goes back to Search
 const edited = ref(false)
 // An ASIN typed by hand since the last lookup: Search looks it up first, the title and author
@@ -321,13 +348,11 @@ const currentRecord = computed<BookRecord>(() => ({
 }))
 
 // What the running search does, on the bar's tooltip and for screen readers
-const pendingText = computed(() => {
-  if (state.value.status !== 'searching') return null
-  const region = regionLabel(match.value.region)
-  return state.value.kind === 'asin'
-    ? `Checking ${match.value.asin.trim().toUpperCase()} in ${region}…`
-    : `Searching "${match.value.query.trim()}" in ${region}…`
-})
+const pendingText = computed(() =>
+  running.value
+    ? `Searching ${describeSearch(running.value)} in ${regionLabel(running.value.region)}…`
+    : null,
+)
 
 // The record picked, green in the results; the current one only wears a tag there
 const pickedRecord = computed(() => {
@@ -357,7 +382,7 @@ function canSearchFor(kind: SearchKind): boolean {
 }
 
 function idle(): SearchState {
-  return { status: 'idle', kind: 'title', results: [], error: null }
+  return { status: 'idle', kind: 'title', results: [], error: null, searched: null }
 }
 
 function setMatched(record: SearchResult) {
@@ -373,16 +398,18 @@ async function search(kind: SearchKind = 'title') {
   if (!canSearchFor(kind)) return
   if (kind === 'asin' && !asinValid(match.value)) {
     // A field error, not a request one: nothing is sent
-    state.value = {
-      status: 'invalid',
-      kind,
-      results: state.value.results,
-      error: INVALID_ASIN_MESSAGE,
-    }
+    state.value = { ...state.value, status: 'invalid', kind, error: INVALID_ASIN_MESSAGE }
     return
   }
   const asin = match.value.asin.trim().toUpperCase()
   const region = match.value.region
+  const searched: Searched = {
+    kind,
+    asin,
+    title: match.value.query.trim(),
+    author: match.value.author.trim(),
+    region,
+  }
   const current = new AbortController()
   controller = current
   let timedOut = false
@@ -391,7 +418,8 @@ async function search(kind: SearchKind = 'title') {
     current.abort()
   }, SEARCH_TIMEOUT_MS)
   // The previous results stay on screen until this search answers
-  state.value = { status: 'searching', kind, results: state.value.results, error: null }
+  state.value = { ...state.value, status: 'searching', kind, error: null }
+  running.value = searched
   edited.value = false
   match.value.asinError = null
   // Looked up: a next Search goes back to the title and author. The record of another ASIN no
@@ -406,7 +434,7 @@ async function search(kind: SearchKind = 'title') {
     // A canceled search answers to nobody: the card already went back to its fields
     if (controller !== current) return
     if (kind === 'title') {
-      state.value = { status: 'done', kind, results, error: null }
+      state.value = { status: 'done', kind, results, error: null, searched }
       return
     }
     const found = results
@@ -418,13 +446,13 @@ async function search(kind: SearchKind = 'title') {
       match.value.query = record.title || match.value.query
       match.value.author = record.authors?.[0]?.name || match.value.author
       setMatched(record)
-      state.value = { status: 'done', kind, results: found, error: null }
+      state.value = { status: 'done', kind, results: found, error: null, searched }
     } else if (found.length > 1) {
-      state.value = { status: 'done', kind, results: found, error: null }
+      state.value = { status: 'done', kind, results: found, error: null, searched }
     } else {
       // Found nothing (orange): a title search is what comes next, so Search stays
       match.value.asinError = noRecordError(asin, region)
-      state.value = { status: 'done', kind, results: [], error: null }
+      state.value = { status: 'done', kind, results: [], error: null, searched }
     }
   } catch (e) {
     if (controller !== current) return
@@ -434,10 +462,13 @@ async function search(kind: SearchKind = 'title') {
     // An ASIN that could not be looked up stays unusable until it is (its error shows on the New
     // line)
     if (kind === 'asin') match.value.asinError = error
-    state.value = { status: 'failed', kind, results: [], error }
+    state.value = { status: 'failed', kind, results: [], error, searched }
   } finally {
     clearTimeout(timer)
-    if (controller === current) controller = null
+    if (controller === current) {
+      controller = null
+      running.value = null
+    }
   }
 }
 
@@ -446,6 +477,7 @@ async function search(kind: SearchKind = 'title') {
 function stopSearch() {
   controller?.abort()
   controller = null
+  running.value = null
 }
 
 // Cancel search: the search stops, its results stay, and the card says it was canceled (orange)
@@ -470,8 +502,11 @@ function forgetRecord() {
   match.value.picked = null
   match.value.asinError = null
   stopSearch()
-  const { kind, results } = state.value
-  state.value = { status: results.length ? 'done' : 'idle', kind, results, error: null }
+  state.value = {
+    ...state.value,
+    status: state.value.results.length ? 'done' : 'idle',
+    error: null,
+  }
 }
 
 // Typing only prepares the next search: the results, the record and any error stay until it runs
@@ -728,8 +763,14 @@ defineExpose({ search, cancelSearch })
   color: var(--status-error);
 }
 
+.match-results-header {
+  margin: 0.75rem 0 0;
+  font-size: 0.8rem;
+  color: #aaa;
+}
+
 .match-search-results {
-  margin-top: 0.75rem;
+  margin-top: 0.4rem;
 }
 
 .match-hint {
