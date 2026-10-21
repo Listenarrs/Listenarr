@@ -17,8 +17,8 @@
 -->
 <!-- One book and the Audible record it should point at: its current and new records, the ASIN,
      Title, Author and Region fields, and the search under the book (Repair Books and Find Match).
-     The bar along its bottom tells its state: grey ignored, green matched, red error, and breathes
-     in blue while a search runs. -->
+     The bar along its bottom tells its state: grey ignored, green matched, orange for a field error
+     or no result, red for a failed request, and breathes in blue while a search runs. -->
 <template>
   <div
     class="form-control-card match-card"
@@ -154,7 +154,11 @@
           checked
         </span>
       </dd>
-      <dd v-else-if="match.asinError" class="match-new-error" data-testid="match-asin-error">
+      <dd
+        v-else-if="match.asinError"
+        :class="state.status === 'failed' ? 'match-new-error' : 'match-new-warning'"
+        data-testid="match-asin-error"
+      >
         <PhXCircle :size="14" weight="fill" />
         <span>{{ match.asinError }}</span>
       </dd>
@@ -167,16 +171,21 @@
     <p v-if="clearedBy && !match.asin" class="match-hint" data-testid="match-asin-cleared">
       ASIN cleared: the {{ clearedBy }} changed, search again.
     </p>
-    <p v-if="asinEntered && !asinValid(match)" class="match-hint" data-testid="match-invalid-asin">
-      An ASIN is 10 letters or digits.
+    <p
+      v-if="asinEntered && match.asin.trim() && !asinValid(match)"
+      class="match-hint"
+      data-testid="match-invalid-asin"
+    >
+      {{ INVALID_ASIN_MESSAGE }}
     </p>
 
     <!-- The search under the book: failed (Search is then Retry), or its results. A running search
          only shows on the bottom bar, so nothing moves under the book; its text is for screen
          readers. -->
     <p
-      v-if="state.status === 'failed' && state.kind === 'title'"
-      class="match-search-state match-search-error"
+      v-if="(state.status === 'failed' && state.kind === 'title') || state.status === 'invalid'"
+      class="match-search-state"
+      :class="state.status === 'invalid' ? 'match-search-warning' : 'match-search-error'"
       data-testid="match-search-error"
     >
       <PhWarningCircle :size="16" />
@@ -191,7 +200,11 @@
         :current="match.current"
         @select="pick"
       />
-      <p v-else class="match-search-state" data-testid="match-search-empty">
+      <p
+        v-else-if="state.kind === 'title'"
+        class="match-search-state match-search-warning"
+        data-testid="match-search-empty"
+      >
         No results for "{{ match.query.trim() }}"{{
           match.author.trim() ? ` by "${match.author.trim()}"` : ''
         }}
@@ -221,6 +234,7 @@ import { orderedSearchRegionOptions } from '@/utils/languageMapping'
 import {
   FALLBACK_REGION,
   asinValid,
+  INVALID_ASIN_MESSAGE,
   bookSummary,
   isEdited,
   matchState,
@@ -265,8 +279,9 @@ const emit = defineEmits<{
 // A search for the title and author, or the check of the ASIN in its region
 type SearchKind = 'title' | 'asin'
 
+// invalid: Search was asked for something it can't search (an ASIN that isn't one), a field error
 interface SearchState {
-  status: 'idle' | 'searching' | 'done' | 'failed'
+  status: 'idle' | 'searching' | 'done' | 'failed' | 'invalid'
   kind: SearchKind
   results: SearchResult[]
   error: string | null
@@ -289,10 +304,14 @@ const regionOptions = computed(() =>
   orderedSearchRegionOptions([match.value.initial.region, props.configuredRegion, FALLBACK_REGION]),
 )
 
+// Blue while searching; red when the request failed; orange for a field error or a search that
+// found nothing; green once matched (grey when left out); grey otherwise
 const barState = computed(() => {
-  if (state.value.status === 'searching') return 'searching'
-  const matched = matchState(match.value)
-  return matched === 'matched' && props.excluded ? 'ignored' : matched
+  const { status, results } = state.value
+  if (status === 'searching') return 'searching'
+  if (status === 'failed') return 'error'
+  if (status === 'invalid' || (status === 'done' && results.length === 0)) return 'warning'
+  return matchState(match.value) === 'matched' && !props.excluded ? 'matched' : 'ignored'
 })
 
 // Search looks the ASIN up first when it was typed by hand, or when there is no title to search;
@@ -333,13 +352,15 @@ const regionLocked = computed(() => props.searchLocked || state.value.status ===
 // record for keeps Search: searching the title there is what comes next.
 const retryKind = computed<SearchKind | null>(() => {
   const { status, results, kind } = state.value
-  if (status === 'failed' || (status === 'done' && results.length === 0)) return kind
+  if (status === 'failed') return kind
+  if (status === 'done' && results.length === 0 && kind === 'title') return kind
   return null
 })
 
 function canSearchFor(kind: SearchKind): boolean {
   if (props.searchLocked || state.value.status === 'searching') return false
-  return kind === 'asin' ? asinValid(match.value) : !!match.value.query.trim()
+  // An ASIN that isn't one can still be searched: Search then says what an ASIN is
+  return kind === 'asin' ? !!match.value.asin.trim() : !!match.value.query.trim()
 }
 
 function idle(): SearchState {
@@ -358,6 +379,11 @@ function setMatched(record: SearchResult) {
 // offered to pick from, none is an error
 async function search(kind: SearchKind = 'title') {
   if (!canSearchFor(kind)) return
+  if (kind === 'asin' && !asinValid(match.value)) {
+    // A field error, not a request one: nothing is sent
+    state.value = { status: 'invalid', kind, results: [], error: INVALID_ASIN_MESSAGE }
+    return
+  }
   const asin = match.value.asin.trim().toUpperCase()
   const region = match.value.region
   const current = new AbortController()
@@ -392,8 +418,9 @@ async function search(kind: SearchKind = 'title') {
     } else if (found.length > 1) {
       state.value = { status: 'done', kind, results: found, error: null }
     } else {
+      // Found nothing (orange): a title search is what comes next, so Search stays
       match.value.asinError = noRecordError(asin, region)
-      state.value = idle()
+      state.value = { status: 'done', kind, results: [], error: null }
     }
   } catch (e) {
     if (controller !== current) return
@@ -513,6 +540,10 @@ defineExpose({ search, cancelSearch })
   background: var(--status-success);
 }
 
+.match-card-warning .match-bar {
+  background: var(--status-warning);
+}
+
 .match-card-error .match-bar {
   background: var(--status-error);
 }
@@ -614,6 +645,10 @@ defineExpose({ search, cancelSearch })
   color: var(--status-success);
 }
 
+.match-records dd.match-new-warning {
+  color: var(--status-warning);
+}
+
 .match-records dd.match-new-error {
   color: var(--status-error);
 }
@@ -679,6 +714,10 @@ defineExpose({ search, cancelSearch })
   margin: 0.75rem 0 0;
   font-size: 0.85rem;
   color: #aaa;
+}
+
+.match-search-warning {
+  color: var(--status-warning);
 }
 
 .match-search-error {
