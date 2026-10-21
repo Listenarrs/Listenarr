@@ -508,6 +508,7 @@ defineExpose({ search, cancelSearch })
   align-items: center;
   gap: 0.5rem;
   font-weight: 600;
+  color: #e0e0e0;
 }
 
 .match-header-right {
