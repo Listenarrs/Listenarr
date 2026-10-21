@@ -79,6 +79,14 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Monitoring
         [Trait("Method", "MonitorDownloadsAsync")]
         public async Task MonitorDownloadsAsync_DownloadingBecomesCompleted()
         {
+            // This test alone polls in a tight loop on the real clock and asserts completion,
+            // so it needs the completion stability window out of the way. Stated here rather
+            // than for the whole class, since every other test in this file leaves the
+            // repository's single settings row for its own save.
+            await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()
+                .WithoutCompletionStabilityWindow()
+                .Build());
+
             var download = await _downloadRepository.AddAsync(new DownloadBuilder()
                 .WithDownloading(0)
                 .WithExternalId("1")
