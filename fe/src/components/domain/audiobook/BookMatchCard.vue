@@ -217,7 +217,6 @@ import {
   PhXCircle,
 } from '@phosphor-icons/vue'
 import FindMatchResults from './FindMatchResults.vue'
-import { useLibraryImportStore } from '@/stores/libraryImport'
 import { orderedSearchRegionOptions } from '@/utils/languageMapping'
 import {
   FALLBACK_REGION,
@@ -228,7 +227,8 @@ import {
   noRecordError,
   regionLabel,
   recordFromResult,
-  searchParams,
+  addNewQuery,
+  searchLikeAddNew,
   type BookMatch,
   type BookRecord,
 } from '@/utils/bookMatch'
@@ -272,13 +272,15 @@ interface SearchState {
   error: string | null
 }
 
-const libraryImportStore = useLibraryImportStore()
 const titleEl = ref<HTMLInputElement | null>(null)
 const state = ref<SearchState>(idle())
 // The field whose change emptied the ASIN, said under the fields until the ASIN is filled again
 const clearedBy = ref<'title' | 'author' | null>(null)
 // The ASIN was entered (left, or Enter): a malformed one is flagged from then on, not while typed
 const asinEntered = ref(false)
+// An ASIN typed by hand since the last lookup: Search looks it up first, the title and author
+// staying as they are
+const asinTyped = ref(false)
 let controller: AbortController | null = null
 
 // Every Audible region stays available, ordered by usefulness: the book's region when the card
@@ -293,11 +295,12 @@ const barState = computed(() => {
   return matched === 'matched' && props.excluded ? 'ignored' : matched
 })
 
-// Search looks the ASIN up when it is the only thing to search (a typed ASIN empties the title),
-// else searches the title and author
-const searchKind = computed<SearchKind>(() =>
-  !match.value.query.trim() && match.value.asin ? 'asin' : 'title',
-)
+// Search looks the ASIN up first when it was typed by hand, or when there is no title to search;
+// else it searches the title and author
+const searchKind = computed<SearchKind>(() => {
+  if (match.value.asin && (asinTyped.value || !match.value.query.trim())) return 'asin'
+  return 'title'
+})
 
 // The book as it is today, as a record
 const currentRecord = computed<BookRecord>(() => ({
@@ -365,9 +368,11 @@ async function search(kind: SearchKind = 'title') {
     current.abort()
   }, SEARCH_TIMEOUT_MS)
   state.value = { status: 'searching', kind, results: [], error: null }
+  // Looked up: a next Search goes back to the title and author
+  if (kind === 'asin') asinTyped.value = false
   try {
-    const params = kind === 'asin' ? { asin, cap: 5 } : searchParams(match.value)
-    const results = await libraryImportStore.searchInRegion(params, region, current.signal)
+    const query = kind === 'asin' ? asin : addNewQuery(match.value)
+    const results = await searchLikeAddNew(query, region, current.signal)
     // A canceled search answers to nobody: the card already went back to its fields
     if (controller !== current) return
     if (kind === 'title') {
@@ -423,6 +428,7 @@ function pick(result: SearchResult) {
 }
 
 function forgetRecord() {
+  asinTyped.value = false
   match.value.picked = null
   match.value.asinError = null
   cancelSearch()
@@ -444,14 +450,13 @@ function onRegionChanged() {
   void search('asin')
 }
 
-// A typed ASIN is another record: it is no longer the new one nor the rejected one, and the
-// title and author, which described the previous one, are emptied. Enter or Search looks it up.
+// A typed ASIN is another record: it is no longer the new one nor the rejected one. The title
+// and author stay as they are; Enter or Search looks the ASIN up first.
 function onAsinTyped() {
   asinEntered.value = false
   clearedBy.value = null
-  match.value.query = ''
-  match.value.author = ''
   forgetRecord()
+  asinTyped.value = true
 }
 
 function onAsinEntered() {

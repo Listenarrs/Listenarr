@@ -16,7 +16,11 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 import type { SearchResult } from '@/types'
-import { searchRegionOptions } from '@/utils/languageMapping'
+import { useSearch } from '@/composables/useSearch'
+import {
+  getPrimaryPreferredSearchLanguageForRegion,
+  searchRegionOptions,
+} from '@/utils/languageMapping'
 
 // The Audible record a book points at, as edited in a book match card (Repair and Find Match)
 
@@ -131,10 +135,41 @@ export function isEdited(match: BookMatch): boolean {
   )
 }
 
-// The search parameters for the title and author, or for an ASIN typed as the title
-export function searchParams(match: BookMatch) {
-  const query = match.query.trim()
-  return ASIN_PATTERN.test(query)
-    ? { asin: query.toUpperCase(), cap: 5 }
-    : { title: query, author: match.author.trim() || undefined, cap: 5 }
+// What Add New's search box would hold for this book: the title and author as TITLE:/AUTHOR:
+// tokens, or the title alone when it is an ASIN (Add New then looks the ASIN up)
+export function addNewQuery(match: BookMatch): string {
+  const title = match.query.trim()
+  const author = match.author.trim()
+  if (ASIN_PATTERN.test(title) || !author) return title
+  return `TITLE:${title} AUTHOR:${author}`
+}
+
+// Add New's own search (useSearch), so a book is searched the way it is added: titles through the
+// search endpoint filtered on the region's language, an ASIN through the metadata sources in their
+// priority order. Results are tagged with the region they were found in; aborting the signal
+// rejects at once. An ASIN the region has no record for answers no result.
+export async function searchLikeAddNew(
+  query: string,
+  region: string,
+  signal: AbortSignal,
+): Promise<SearchResult[]> {
+  const search = useSearch()
+  search.searchQuery.value = query
+  search.searchLanguage.value = region
+  search.preferredSearchLanguage.value = getPrimaryPreferredSearchLanguageForRegion(region)
+  const aborted = new Promise<never>((_, reject) =>
+    signal.addEventListener('abort', () => {
+      search.cancelSearch()
+      reject(new DOMException('The search was stopped', 'AbortError'))
+    }),
+  )
+  try {
+    const results = (await Promise.race([search.performSearch(), aborted])) ?? []
+    return (results as SearchResult[])
+      .filter((r) => !(r.asin && !r.title))
+      .map((r) => ({ ...r, region: r.region || region }))
+  } catch (e) {
+    if ((e as { status?: number })?.status === 404) return []
+    throw e
+  }
 }
