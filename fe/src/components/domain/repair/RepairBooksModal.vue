@@ -572,8 +572,28 @@ watch(
   flex-wrap: wrap;
 }
 
+/* Same info box as the Organize dialog */
+.repair-info-section {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.75rem;
+  background-color: rgba(52, 152, 219, 0.09);
+  border: 1px solid rgba(52, 152, 219, 0.28);
+  border-radius: 6px;
+  color: #3498db;
+}
+
+.repair-info-section p {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  color: #ccc;
+}
+
 .repair-toolbar-title {
   margin: 0;
+  color: #ccc;
 }
 
 .toolbar-actions {
@@ -684,8 +704,13 @@ watch(
   color: #ef9a9a;
 }
 
+.result-title {
+  color: #e0e0e0;
+}
+
 .result-detail {
   margin-left: auto;
+  color: #aaa;
   font-size: 0.8rem;
   opacity: 0.75;
 }
