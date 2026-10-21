@@ -17,7 +17,7 @@
  */
 import type { InjectionKey } from 'vue'
 import type { SearchResult } from '@/types'
-import { useSearch } from '@/composables/useSearch'
+import { searchAudiobooks } from '@/services/audiobookSearch'
 import { searchRegionOptions } from '@/utils/languageMapping'
 
 // The Audible record a book points at, as edited in a book match card (Repair and Find Match)
@@ -213,30 +213,33 @@ export function searchCacheKey(query: string, region: string): string {
   return `${region}|${query}`
 }
 
-// Add New's own search (useSearch), so a book is searched the way it is added: titles through the
-// search endpoint, an ASIN through the metadata sources in their priority order. No language
-// filter: language isn't a search field here, a region's catalogue also sells other languages'
-// editions (Audible France sells English books), and each result shows its language. Results are
-// tagged with the region they were found in; aborting the signal rejects at once. An ASIN the
-// region has no record for answers no result.
+// Add New's search (the shared audiobookSearch), so a book is searched the way it is added, in the
+// region. No language filter: language isn't a search field here, a region's catalogue also sells
+// other languages' editions (Audible France sells English books), and each result shows its
+// language. Results are tagged with the region they were found in, and records
+// without a title (an empty stub for an ASIN the region doesn't sell) are left out; an ASIN the
+// region has no record for (404) answers no result. Aborting the signal rejects at once, even
+// when the request can't be stopped.
 export async function searchLikeAddNew(
   query: string,
   region: string,
   signal: AbortSignal,
 ): Promise<SearchResult[]> {
-  const addNewSearch = useSearch()
-  addNewSearch.searchQuery.value = query
-  addNewSearch.searchLanguage.value = region
-  addNewSearch.preferredSearchLanguage.value = 'all'
   const searchAborted = new Promise<never>((_, reject) =>
-    signal.addEventListener('abort', () => {
-      addNewSearch.cancelSearch()
-      reject(new DOMException('The search was stopped', 'AbortError'))
-    }),
+    signal.addEventListener('abort', () =>
+      reject(new DOMException('The search was stopped', 'AbortError')),
+    ),
   )
   try {
-    const searchResults = (await Promise.race([addNewSearch.performSearch(), searchAborted])) ?? []
-    return (searchResults as SearchResult[])
+    const searchResults = await Promise.race([
+      searchAudiobooks(query, {
+        region,
+        language: 'all',
+        signal,
+      }),
+      searchAborted,
+    ])
+    return searchResults
       .filter((searchResult) => !(searchResult.asin && !searchResult.title))
       .map((searchResult) => ({ ...searchResult, region: searchResult.region || region }))
   } catch (e) {
