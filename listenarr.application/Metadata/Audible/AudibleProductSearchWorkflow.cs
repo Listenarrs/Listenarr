@@ -173,7 +173,10 @@ namespace Listenarr.Application.Metadata.Audible
                 query, title, author, narrator, publisher,
                 page, limit, safeRegion, language, sortBy, returnRawProducts);
 
-            if (result.Results.Count == 0)
+            // A failed call returns zero results, so without the check the diacritics
+            // retry fires against an Audible that just timed out and spends the caller's
+            // remaining budget on a second request that fails the same way.
+            if (result.Results.Count == 0 && !result.ProviderUnavailable)
             {
                 var hasDiacritics =
                     HasDiacritics(query) || HasDiacritics(title) ||
@@ -220,7 +223,10 @@ namespace Listenarr.Application.Metadata.Audible
             using var doc = await _apiClient.GetJsonDocumentAsync(url, safeRegion, includeLocaleHeaders: false, timeoutSeconds: 10);
             if (doc == null)
             {
-                return new SearchProductsDirectResponse();
+                // The client already logged why. What matters here is not losing the fact
+                // that it failed: an empty response with no marker is indistinguishable
+                // from Audible answering "no such book".
+                return new SearchProductsDirectResponse { ProviderUnavailable = true };
             }
 
             var root = doc.RootElement;
@@ -254,7 +260,8 @@ namespace Listenarr.Application.Metadata.Audible
             return new AudibleSearchResponse
             {
                 Results = response.Results,
-                TotalResults = response.TotalResults
+                TotalResults = response.TotalResults,
+                ProviderUnavailable = response.ProviderUnavailable
             };
         }
 
