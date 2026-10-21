@@ -368,6 +368,36 @@ describe('RepairBooksModal', () => {
     )
   })
 
+  it('empties the title and author with their erase buttons, without searching', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+
+    for (const [testid, label] of [
+      ['match-title', 'Title'],
+      ['match-author', 'Author'],
+    ]) {
+      const clear = row(wrapper).get(`[data-testid="${testid}-clear"]`)
+      expect(clear.attributes('aria-label')).toBe(`Empty the ${label} field`)
+      await clear.trigger('click')
+      expect(field(wrapper, testid!).value).toBe('')
+      expect(row(wrapper).find(`[data-testid="${testid}-clear"]`).exists()).toBe(false)
+    }
+    expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
+    expect(apiMocks.getAudibleMetadata).not.toHaveBeenCalled()
+  })
+
+  it('searches with Enter in the title like Search: a filled ASIN first', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    apiMocks.advancedSearch.mockClear()
+
+    await row(wrapper).get('[data-testid="match-title"]').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+
+    expect(apiMocks.getAudibleMetadata).toHaveBeenLastCalledWith('B0HM45F8MW', 'fr')
+    expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
+  })
+
   it('heads the results of a filled ASIN with the ASIN, which has priority over the title', async () => {
     const wrapper = mountModal()
     await flushPromises()
