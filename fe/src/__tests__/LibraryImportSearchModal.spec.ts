@@ -108,6 +108,8 @@ describe('LibraryImportSearchModal', () => {
     expect((field(wrapper, 'match-title').element as HTMLInputElement).value).toBe('Alchemised')
     expect((field(wrapper, 'match-author').element as HTMLInputElement).value).toBe('SenLinYu')
     expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false)
+    // No match yet: what the files say, without ASIN or region
+    expect(field(wrapper, 'match-summary').text()).toBe('Alchemised - SenLinYu')
   })
 
   it('searches as it opens and shows the results under the book, with their narrator', async () => {

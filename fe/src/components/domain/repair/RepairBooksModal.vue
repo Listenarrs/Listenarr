@@ -107,7 +107,17 @@
                     <span class="repair-title">{{ row.title || `Audiobook #${row.id}` }}</span>
                   </label>
                 </template>
-                <template #meta>{{ row.authors.join(', ') || 'Unknown author' }}</template>
+                <template #meta>
+                  {{
+                    bookSummary({
+                      asin: row.match.current.asin,
+                      title: row.title,
+                      subtitle: row.subtitle,
+                      author: row.authors.join(', '),
+                      region: row.match.current.region,
+                    })
+                  }}
+                </template>
               </BookMatchCard>
             </div>
           </div>
@@ -222,6 +232,7 @@ import MatchLegend from '@/components/domain/audiobook/MatchLegend.vue'
 import {
   FALLBACK_REGION,
   asinChanged,
+  bookSummary,
   createBookMatch,
   matchState,
   type BookMatch,
@@ -231,6 +242,7 @@ import type { AudiobookExternalIdentifier, AudiobookExternalIdentifierInput } fr
 interface RepairRow {
   id: number
   title: string
+  subtitle: string
   authors: string[]
   identifiers: AudiobookExternalIdentifier[]
   // The record the book should point at, edited in its card
@@ -317,6 +329,7 @@ async function load() {
         return {
           id,
           title: book.title ?? '',
+          subtitle: book.subtitle ?? '',
           authors: book.authors ?? [],
           identifiers: ids.identifiers ?? [],
           match,
