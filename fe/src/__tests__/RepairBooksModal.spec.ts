@@ -349,6 +349,27 @@ describe('RepairBooksModal', () => {
     expect(header()).toBe('Results for "Primal Hunter, Vol. 7" by "Zogarth" in France (FR)')
   })
 
+  it('empties the ASIN field with its trash button, so Search looks for the title', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    const clear = row(wrapper).get('[data-testid="match-asin-clear"]')
+    expect(clear.attributes('aria-label')).toBe(
+      'Empty the ASIN field: Search then looks for the title and author',
+    )
+
+    await clear.trigger('click')
+
+    expect(field(wrapper, 'match-asin').value).toBe('')
+    expect(clear.attributes('disabled')).toBeDefined()
+    // Nothing searched by itself
+    expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
+    await flushPromises()
+    expect(apiMocks.advancedSearch).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Primal Hunter, Vol. 7', author: 'Zogarth' }),
+    )
+  })
+
   it('heads the results of a filled ASIN with the ASIN, which has priority over the title', async () => {
     const wrapper = mountModal()
     await flushPromises()

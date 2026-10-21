@@ -50,14 +50,27 @@
     <div class="match-fields">
       <label class="match-field match-field-asin">
         <span class="match-field-label">ASIN</span>
-        <input
-          v-model.trim="match.asin"
-          class="form-input"
-          maxlength="10"
-          data-testid="match-asin"
-          @input="onAsinTyped"
-          @keydown.enter.prevent="onAsinEntered"
-        />
+        <span class="match-asin-input">
+          <input
+            v-model.trim="match.asin"
+            class="form-input"
+            maxlength="10"
+            data-testid="match-asin"
+            @input="onAsinTyped"
+            @keydown.enter.prevent="onAsinEntered"
+          />
+          <button
+            type="button"
+            class="match-asin-clear"
+            title="Empty the ASIN field: Search then looks for the title and author"
+            aria-label="Empty the ASIN field: Search then looks for the title and author"
+            data-testid="match-asin-clear"
+            :disabled="!match.asin"
+            @click.prevent="clearAsin"
+          >
+            <PhTrash :size="16" />
+          </button>
+        </span>
       </label>
       <label class="match-field">
         <span class="match-field-label">Title</span>
@@ -223,6 +236,7 @@ import {
   PhArrowCounterClockwise,
   PhCheckCircle,
   PhMagnifyingGlass,
+  PhTrash,
   PhWarningCircle,
   PhX,
   PhXCircle,
@@ -508,6 +522,13 @@ function onRegionChanged() {
   void search('asin')
 }
 
+// The trash button: an empty ASIN lets Search look for the title and author. Like typing, it only
+// prepares the next search
+function clearAsin() {
+  match.value.asin = ''
+  edited.value = true
+}
+
 // A typed ASIN only prepares the next search too: Enter or Search then looks it up
 function onAsinTyped() {
   edited.value = true
@@ -698,6 +719,42 @@ defineExpose({ search, cancelSearch })
 .match-field .form-input {
   width: 100%;
   box-sizing: border-box;
+}
+
+/* The trash button sits inside the ASIN field, on its right */
+.match-asin-input {
+  position: relative;
+  display: block;
+}
+
+.match-asin-input .form-input {
+  padding-right: 2.2rem;
+}
+
+.match-asin-clear {
+  position: absolute;
+  top: 50%;
+  right: 0.4rem;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.25rem;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #aaa;
+  cursor: pointer;
+}
+
+.match-asin-clear:hover:not(:disabled) {
+  color: var(--status-error);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.match-asin-clear:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .match-field-asin input {
