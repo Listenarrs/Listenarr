@@ -253,7 +253,12 @@ public sealed class SearchResponseMapper
         if (!string.IsNullOrWhiteSpace(md?.Author)) fallbackAuthors.Add(new { asin = (string?)null, name = md.Author, region = region, regions = new[] { region }, image = (string?)null, updatedAt = (string?)null });
 
         var fallbackSeries = new List<object>();
-        if (!string.IsNullOrWhiteSpace(md?.Series)) fallbackSeries.Add(new { asin = md.Series, name = md.Series, region = region, position = md.SeriesNumber, updatedAt = (string?)null });
+        // A MetadataSearchResult carries the series as a name only, so there is no series
+        // identifier to report here. The author fallback three lines above says so with a
+        // null asin; this one used to repeat the name into the field instead, and clients
+        // that store what they are handed then wrote a series name into a column whose
+        // whole value is that it is not a name.
+        if (!string.IsNullOrWhiteSpace(md?.Series)) fallbackSeries.Add(new { asin = (string?)null, name = md.Series, region = region, position = md.SeriesNumber, updatedAt = (string?)null });
 
         return new
         {
