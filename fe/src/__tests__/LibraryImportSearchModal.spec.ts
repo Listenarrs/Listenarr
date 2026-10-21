@@ -202,7 +202,8 @@ describe('LibraryImportSearchModal', () => {
     expect(wrapper.get('[data-testid="match-legend"]').exists()).toBe(true)
 
     await field(wrapper, 'match-asin').setValue('B0BK9')
-    expect(field(wrapper, 'match-invalid-asin').text()).toContain('Not an ASIN')
+    await field(wrapper, 'match-search').trigger('click')
+    expect(field(wrapper, 'match-search-error').text()).toContain('Not an ASIN')
     expect(field(wrapper, 'find-match-confirm').attributes('disabled')).toBeDefined()
 
     await field(wrapper, 'match-asin').setValue('B000APXZHK')
