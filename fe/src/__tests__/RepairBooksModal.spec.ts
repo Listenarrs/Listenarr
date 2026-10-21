@@ -322,20 +322,32 @@ describe('RepairBooksModal', () => {
     expect(row(wrapper).find('[data-testid="match-retry"]').exists()).toBe(true)
   })
 
-  it('cancels the search, back to the fields with nothing to report', async () => {
-    // A search that never answers: only Cancel search or the timeout ends it
-    apiMocks.advancedSearch.mockImplementation(() => new Promise(() => {}))
+  it('keeps the results while a new search runs, and after Cancel search says it was canceled', async () => {
+    catalogue({ fr: [frenchVol7] })
     const wrapper = mountModal()
     await flushPromises()
     await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
+    expect(row(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(1)
+
+    // A search that never answers: only Cancel search or the timeout ends it
+    apiMocks.advancedSearch.mockImplementation(() => new Promise(() => {}))
+    await row(wrapper).get('[data-testid="match-title"]').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    // The previous results stay until the new search answers
+    expect(row(wrapper).attributes('data-match-state')).toBe('searching')
+    expect(row(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(1)
 
     await row(wrapper).get('[data-testid="match-cancel-search"]').trigger('click')
     await flushPromises()
 
+    const message = row(wrapper).get('[data-testid="match-search-error"]')
+    expect(message.text()).toBe('Search canceled.')
+    expect(message.classes()).toContain('match-search-warning')
+    expect(row(wrapper).attributes('data-match-state')).toBe('warning')
+    expect(row(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(1)
     expect(row(wrapper).find('[data-testid="match-search-pending"]').exists()).toBe(false)
-    expect(row(wrapper).find('[data-testid="match-search-error"]').exists()).toBe(false)
-    expect(row(wrapper).find('[data-testid="match-search"]').exists()).toBe(true)
+    expect(row(wrapper).find('[data-testid="match-retry"]').exists()).toBe(true)
   })
 
   it('stops a search that takes too long, says so and offers to retry', async () => {
@@ -799,6 +811,8 @@ describe('RepairBooksModal', () => {
     expect(field(wrapper, 'match-region').value).toBe('fr')
     expect(row(wrapper).find('[data-testid="match-picked"]').exists()).toBe(false)
     expect(row(wrapper).get('[data-testid="match-revert"]').attributes('disabled')).toBeDefined()
+    // Only a new search replaces the results
+    expect(row(wrapper).findAll('[data-testid="find-match-result"]').length).toBeGreaterThan(0)
   })
 
   it("offers every region: the book's current one, then the configured one and US, then the rest", async () => {
