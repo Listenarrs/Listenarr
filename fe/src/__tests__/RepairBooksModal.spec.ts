@@ -945,14 +945,32 @@ describe('RepairBooksModal', () => {
     expect(shown[0]!.attributes('title')).toBe('France (FR)')
   })
 
-  it('only rescans when the record found is the one the book already points at', async () => {
+  it('does not pick the current record found alone: tagged Current, nothing to repair', async () => {
     catalogue({ fr: [frenchVol7] })
     const wrapper = mountModal()
     await flushPromises()
-    const asin = row(wrapper).get('[data-testid="match-asin"]')
-    await asin.trigger('keydown', { key: 'Enter' })
+
+    // The ASIN filled is the book's own
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
 
+    const result = row(wrapper).get('[data-testid="find-match-result"]')
+    expect(result.classes()).not.toContain('selected')
+    expect(result.find('[data-testid="find-match-current"]').exists()).toBe(true)
+    expect(row(wrapper).find('[data-testid="match-picked"]').exists()).toBe(false)
+    expect(row(wrapper).attributes('data-match-state')).toBe('ignored')
+    expect(wrapper.get('[data-testid="repair-confirm"]').text()).toContain('Repair 0')
+  })
+
+  it('only rescans when the current record is picked', async () => {
+    catalogue({ fr: [frenchVol7] })
+    const wrapper = mountModal()
+    await flushPromises()
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
+    await flushPromises()
+
+    await row(wrapper).get('[data-testid="find-match-result"]').trigger('click')
+    expect(row(wrapper).attributes('data-match-state')).toBe('matched')
     await repair(wrapper)
 
     expect(apiMocks.updateAudiobookIdentifiers).not.toHaveBeenCalled()

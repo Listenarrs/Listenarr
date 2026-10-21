@@ -366,6 +366,8 @@ const regionOptions = computed(() => {
 
 // Blue while searching; red when the request failed; orange for a field error or a search that
 // found nothing; green once matched (grey when left out); grey otherwise
+// Matched (green) is only a picked record, the one state Repair counts; a search that found records
+// with nothing picked yet stays ignored (grey)
 const barState = computed(() => {
   const { status, results } = state.value
   if (status === 'searching') return 'searching'
@@ -374,6 +376,13 @@ const barState = computed(() => {
     return 'warning'
   return matchState(match.value) === 'matched' && !props.excluded ? 'matched' : 'ignored'
 })
+
+// The record the book points at today: same ASIN, and same region when both are known
+function isCurrentRecord(record: SearchResult): boolean {
+  const { current } = match.value
+  if (!current.asin || record.asin?.toUpperCase() !== current.asin.toUpperCase()) return false
+  return !current.region || !record.region || record.region === current.region
+}
 
 // A filled ASIN has priority: Search looks it up on its own, leaving the title and author out.
 // With the ASIN field empty, Search looks for the title and author
@@ -476,11 +485,15 @@ async function search(kind: SearchKind = 'title') {
       .filter((r) => r.asin?.toUpperCase() === asin)
       .map((r) => ({ ...r, region: r.region || region }))
     if (found.length === 1) {
-      // One record: the book's, selected in the results; its title and author fill the fields
+      // One record: the book's new one, selected in the results, its title and author filling
+      // the fields; unless it is the record the book already points at, which only wears its
+      // "Current" tag (nothing to repair)
       const record = found[0]!
-      match.value.query = record.title || match.value.query
-      match.value.author = record.authors?.[0]?.name || match.value.author
-      setMatched(record)
+      if (!isCurrentRecord(record)) {
+        match.value.query = record.title || match.value.query
+        match.value.author = record.authors?.[0]?.name || match.value.author
+        setMatched(record)
+      }
       state.value = { status: 'done', kind, results: found, error: null, searched }
     } else if (found.length > 1) {
       state.value = { status: 'done', kind, results: found, error: null, searched }
