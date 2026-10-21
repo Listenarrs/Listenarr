@@ -171,7 +171,9 @@ describe('RepairBooksModal', () => {
     expect(wrapper.get('[data-testid="repair-count"]').text()).toBe(
       'Find a new record for each book to repair',
     )
-    expect(wrapper.get('[data-testid="match-legend"]').text()).toMatch(/Ignored.*Matched.*Error/)
+    expect(wrapper.get('[data-testid="match-legend"]').text()).toMatch(
+      /Ignored.*Matched.*Error.*Searching/,
+    )
   })
 
   it('counts only the books with a new record, ticked when found, and the skipped ones', async () => {
@@ -273,6 +275,10 @@ describe('RepairBooksModal', () => {
     expect(row(wrapper).get('[data-testid="match-search-pending"]').text()).toContain(
       'Searching "Primal Hunter, Vol. 7" in France (FR)',
     )
+    // Shown by the breathing blue bottom bar only: no line under the book, nothing moves
+    expect(row(wrapper).attributes('data-match-state')).toBe('searching')
+    expect(row(wrapper).find('.match-search-state').exists()).toBe(false)
+    expect(row(wrapper).find('.match-bar').attributes('title')).toContain('Searching')
     expect(row(wrapper).find('[data-testid="match-search"]').exists()).toBe(false)
     expect(row(wrapper).get('[data-testid="match-cancel-search"]').classes()).toContain(
       'btn-danger',
