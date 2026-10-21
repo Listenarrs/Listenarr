@@ -100,6 +100,8 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             existing.PreferredWords = profile.PreferredWords ?? new System.Collections.Generic.List<string>();
             existing.MustNotContain = profile.MustNotContain ?? new System.Collections.Generic.List<string>();
             existing.MustContain = profile.MustContain ?? new System.Collections.Generic.List<string>();
+            existing.PreferredNarrators = profile.PreferredNarrators ?? new System.Collections.Generic.List<string>();
+            existing.ExcludedNarrators = profile.ExcludedNarrators ?? new System.Collections.Generic.List<string>();
             existing.PreferredLanguages = profile.PreferredLanguages ?? new System.Collections.Generic.List<string>();
 
             // Update CustomGroupNames

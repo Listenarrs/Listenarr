@@ -44,6 +44,8 @@ public class SqliteMigrationSchemaTests : BaseTests
         "20260825021432_AddWeakStorageVerifiedCleanup";
     private const string OperationEvidencePublicationsMigrationId =
         "20261002210137_AddOperationEvidencePublications";
+    private const string NarratorPreferencesMigrationId =
+        "20261018220000_AddNarratorPreferencesToQualityProfile";
 
     private static (SqliteConnection Connection, ListenArrDbContext Context)
         CreateMigratedSqliteContext()
@@ -226,7 +228,8 @@ public class SqliteMigrationSchemaTests : BaseTests
                 FileMutationParentGenerationProofsMigrationId,
                 CompatibilityFilePublicationMigrationId,
                 WeakStorageVerifiedCleanupMigrationId,
-                OperationEvidencePublicationsMigrationId
+                OperationEvidencePublicationsMigrationId,
+                NarratorPreferencesMigrationId
             ],
             postCanary);
         Assert.Contains("20251124102000_AddMoveJobSourcePath", applied);
