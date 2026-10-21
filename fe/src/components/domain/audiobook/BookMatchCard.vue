@@ -168,38 +168,41 @@
 
     <!-- The rules, where they apply -->
 
-    <!-- The search under the book: failed (Search is then Retry), or its results. A running search
-         only shows on the bottom bar, so nothing moves under the book; its text is for screen
+    <!-- The search under the book: its message (failed in red; invalid or canceled in orange), and
+         its results, which stay until a new search on this book answers. A running search only
+         shows on the bottom bar, so nothing moves under the book; its text is for screen
          readers. -->
     <p
-      v-if="(state.status === 'failed' && state.kind === 'title') || state.status === 'invalid'"
+      v-if="
+        (state.status === 'failed' && state.kind === 'title') ||
+        state.status === 'invalid' ||
+        state.status === 'canceled'
+      "
       class="match-search-state"
-      :class="state.status === 'invalid' ? 'match-search-warning' : 'match-search-error'"
+      :class="state.status === 'failed' ? 'match-search-error' : 'match-search-warning'"
       data-testid="match-search-error"
     >
       <PhWarningCircle :size="16" />
       <span>{{ state.error }}</span>
     </p>
-    <template v-else-if="state.status === 'done'">
-      <FindMatchResults
-        v-if="state.results.length"
-        class="match-search-results"
-        :results="state.results"
-        :selected="pickedRecord"
-        :current="match.current"
-        @select="pick"
-      />
-      <p
-        v-else-if="state.kind === 'title'"
-        class="match-search-state match-search-warning"
-        data-testid="match-search-empty"
-      >
-        No results for "{{ match.query.trim() }}"{{
-          match.author.trim() ? ` by "${match.author.trim()}"` : ''
-        }}
-        in {{ regionLabel(match.region) }}.
-      </p>
-    </template>
+    <FindMatchResults
+      v-if="state.results.length"
+      class="match-search-results"
+      :results="state.results"
+      :selected="pickedRecord"
+      :current="match.current"
+      @select="pick"
+    />
+    <p
+      v-else-if="state.status === 'done' && state.kind === 'title'"
+      class="match-search-state match-search-warning"
+      data-testid="match-search-empty"
+    >
+      No results for "{{ match.query.trim() }}"{{
+        match.author.trim() ? ` by "${match.author.trim()}"` : ''
+      }}
+      in {{ regionLabel(match.region) }}.
+    </p>
 
     <div class="match-bar" :title="pendingText ?? undefined" />
     <span class="match-sr-only" role="status">
@@ -268,9 +271,10 @@ const emit = defineEmits<{
 // A search for the title and author, or the check of the ASIN in its region
 type SearchKind = 'title' | 'asin'
 
-// invalid: Search was asked for something it can't search (an ASIN that isn't one), a field error
+// invalid: Search was asked for something it can't search (an ASIN that isn't one), a field error;
+// canceled: the user stopped the search. results: the last answer, kept until a new one replaces it
 interface SearchState {
-  status: 'idle' | 'searching' | 'done' | 'failed' | 'invalid'
+  status: 'idle' | 'searching' | 'done' | 'failed' | 'invalid' | 'canceled'
   kind: SearchKind
   results: SearchResult[]
   error: string | null
@@ -297,7 +301,8 @@ const barState = computed(() => {
   const { status, results } = state.value
   if (status === 'searching') return 'searching'
   if (status === 'failed') return 'error'
-  if (status === 'invalid' || (status === 'done' && results.length === 0)) return 'warning'
+  if (status === 'invalid' || status === 'canceled' || (status === 'done' && results.length === 0))
+    return 'warning'
   return matchState(match.value) === 'matched' && !props.excluded ? 'matched' : 'ignored'
 })
 
@@ -340,7 +345,7 @@ const regionLocked = computed(() => props.searchLocked || state.value.status ===
 const retryKind = computed<SearchKind | null>(() => {
   if (edited.value) return null
   const { status, results, kind } = state.value
-  if (status === 'failed') return kind
+  if (status === 'failed' || status === 'canceled') return kind
   if (status === 'done' && results.length === 0 && kind === 'title') return kind
   return null
 })
@@ -368,7 +373,12 @@ async function search(kind: SearchKind = 'title') {
   if (!canSearchFor(kind)) return
   if (kind === 'asin' && !asinValid(match.value)) {
     // A field error, not a request one: nothing is sent
-    state.value = { status: 'invalid', kind, results: [], error: INVALID_ASIN_MESSAGE }
+    state.value = {
+      status: 'invalid',
+      kind,
+      results: state.value.results,
+      error: INVALID_ASIN_MESSAGE,
+    }
     return
   }
   const asin = match.value.asin.trim().toUpperCase()
@@ -380,7 +390,8 @@ async function search(kind: SearchKind = 'title') {
     timedOut = true
     current.abort()
   }, SEARCH_TIMEOUT_MS)
-  state.value = { status: 'searching', kind, results: [], error: null }
+  // The previous results stay on screen until this search answers
+  state.value = { status: 'searching', kind, results: state.value.results, error: null }
   edited.value = false
   match.value.asinError = null
   // Looked up: a next Search goes back to the title and author. The record of another ASIN no
@@ -431,10 +442,17 @@ async function search(kind: SearchKind = 'title') {
 }
 
 // Back to the fields, nothing to report
-function cancelSearch() {
+// Stops the running search, if any, leaving the card as it is
+function stopSearch() {
   controller?.abort()
   controller = null
-  if (state.value.status === 'searching') state.value = idle()
+}
+
+// Cancel search: the search stops, its results stay, and the card says it was canceled (orange)
+function cancelSearch() {
+  if (state.value.status !== 'searching') return
+  stopSearch()
+  state.value = { ...state.value, status: 'canceled', error: 'Search canceled.' }
 }
 
 // The record picked in the results: its ASIN in the region it was found in. The results stay,
@@ -446,12 +464,14 @@ function pick(result: SearchResult) {
   setMatched({ ...result, region: match.value.region })
 }
 
+// The record and its error no longer apply; the results stay until a new search replaces them
 function forgetRecord() {
   asinTyped.value = false
   match.value.picked = null
   match.value.asinError = null
-  cancelSearch()
-  state.value = idle()
+  stopSearch()
+  const { kind, results } = state.value
+  state.value = { status: results.length ? 'done' : 'idle', kind, results, error: null }
 }
 
 // Typing only prepares the next search: the results, the record and any error stay until it runs
@@ -484,7 +504,6 @@ watch(
 )
 
 function revert() {
-  cancelSearch()
   Object.assign(match.value, match.value.initial)
   edited.value = false
   forgetRecord()
@@ -497,7 +516,7 @@ onMounted(() => {
   void search()
 })
 
-onBeforeUnmount(cancelSearch)
+onBeforeUnmount(stopSearch)
 
 defineExpose({ search, cancelSearch })
 </script>
