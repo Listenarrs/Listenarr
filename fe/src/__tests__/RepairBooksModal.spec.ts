@@ -153,14 +153,46 @@ describe('RepairBooksModal', () => {
     vi.restoreAllMocks()
   })
 
-  it('lists each book with its current ASIN and region', async () => {
+  it('opens with nothing to repair: each book shows its current record and no new one yet', async () => {
     const wrapper = mountModal()
     await flushPromises()
 
     expect(row(wrapper).text()).toContain('Primal Hunter, Vol. 7')
-    expect(row(wrapper).text()).toMatch(/B0HM45F8MW\s+\(fr\)/)
+    expect(row(wrapper).get('[data-testid="match-current"]').text()).toMatch(
+      /B0HM45F8MW\s+·\s+France \(FR\)/,
+    )
+    expect(row(wrapper).find('[data-testid="match-none"]').exists()).toBe(true)
+    expect(row(wrapper).attributes('data-match-state')).toBe('ignored')
+    expect(row(wrapper).get('[data-testid="repair-include"]').attributes('disabled')).toBeDefined()
     expect(field(wrapper, 'match-asin').value).toBe('B0HM45F8MW')
     expect(field(wrapper, 'match-region').value).toBe('fr')
+    expect(wrapper.get('[data-testid="repair-confirm"]').text()).toContain('Repair 0')
+    expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="repair-count"]').text()).toBe(
+      'Find a new record for each book to repair',
+    )
+    expect(wrapper.get('[data-testid="match-legend"]').text()).toMatch(/Ignored.*Matched.*Error/)
+  })
+
+  it('counts only the books with a new record, ticked when found, and the skipped ones', async () => {
+    const wrapper = mountModal([7, 8])
+    await flushPromises()
+
+    await searchAndPick(wrapper)
+
+    expect(row(wrapper).attributes('data-match-state')).toBe('matched')
+    expect(row(wrapper).get('[data-testid="repair-include"]').element).toHaveProperty(
+      'checked',
+      true,
+    )
+    expect(row(wrapper, 8).attributes('data-match-state')).toBe('ignored')
+    expect(wrapper.get('[data-testid="repair-confirm"]').text()).toContain('Repair 1')
+    expect(wrapper.get('[data-testid="repair-count"]').text()).toBe('1 skipped')
+
+    // Unticked: ignored, though matched
+    await row(wrapper).get('[data-testid="repair-include"]').setValue(false)
+    expect(row(wrapper).attributes('data-match-state')).toBe('ignored')
+    expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
   })
 
   it('names each field above it, in the order ASIN, Title, Author, Region', async () => {
@@ -185,8 +217,8 @@ describe('RepairBooksModal', () => {
       await row(wrapper).get(`[data-testid="${testid}"]`).setValue(value)
 
       expect(field(wrapper, 'match-asin').value).toBe('')
-      expect(row(wrapper).get('[data-testid="match-invalid-asin"]').text()).toContain(
-        'No ASIN: search the book and pick it',
+      expect(row(wrapper).get('[data-testid="match-asin-cleared"]').text()).toBe(
+        `ASIN cleared: the ${testid === 'match-title' ? 'title' : 'author'} changed, search again.`,
       )
       expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
       wrapper.unmount()
@@ -450,61 +482,73 @@ describe('RepairBooksModal', () => {
     await flushPromises()
 
     expect(field(wrapper, 'match-asin').value).toBe('B0HM45F8MW')
-    expect(row(wrapper).get('[data-testid="match-search-error"]').text()).toContain(
-      'Audible United States (US) has no record for B0HM45F8MW',
+    expect(row(wrapper).get('[data-testid="match-asin-error"]').text()).toContain(
+      'No record for B0HM45F8MW in Audible United States (US)',
     )
-    expect(row(wrapper).find('[data-testid="match-invalid-asin"]').exists()).toBe(false)
+    expect(row(wrapper).attributes('data-match-state')).toBe('error')
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
 
-    // Another ASIN clears the error
+    // Another ASIN clears the error, and is looked up once entered
     await row(wrapper).get('[data-testid="match-asin"]').setValue('B0BK9W82PQ')
-    expect(row(wrapper).find('[data-testid="match-search-error"]').exists()).toBe(false)
+    await flushPromises()
+    expect(row(wrapper).find('[data-testid="match-asin-error"]').exists()).toBe(false)
+    expect(row(wrapper).attributes('data-match-state')).toBe('matched')
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeUndefined()
   })
 
-  it('checks a typed ASIN in its region with the same search before saving it', async () => {
+  it('looks a typed ASIN up in its region once entered, then saves it', async () => {
     const wrapper = mountModal()
     await flushPromises()
     await row(wrapper).get('[data-testid="match-region"]').setValue('us')
     await flushPromises()
     await row(wrapper).get('[data-testid="match-asin"]').setValue('b0bk9w82pq')
+    await flushPromises()
 
-    await repair(wrapper)
-
-    expect(apiMocks.advancedSearch).toHaveBeenCalledWith(
+    expect(apiMocks.advancedSearch).toHaveBeenLastCalledWith(
       expect.objectContaining({ asin: 'B0BK9W82PQ', region: 'us', cap: 5 }),
+      expect.any(AbortSignal),
     )
+    expect(row(wrapper).get('[data-testid="match-picked"]').text()).toContain('Primal Hunter 4')
+
+    apiMocks.advancedSearch.mockClear()
+    await repair(wrapper)
+    expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
     expect(apiMocks.updateAudiobookIdentifiers).toHaveBeenCalledWith(
       7,
       expect.arrayContaining([expect.objectContaining({ value: 'B0BK9W82PQ', region: 'us' })]),
     )
   })
 
-  it('does not save a typed ASIN its region has no record for', async () => {
+  it('does not let a typed ASIN its region has no record for be repaired', async () => {
     const wrapper = mountModal()
     await flushPromises()
     await row(wrapper).get('[data-testid="match-asin"]').setValue('B0BK9W82PQ')
+    await flushPromises()
 
-    await repair(wrapper)
-
-    expect(apiMocks.updateAudiobookIdentifiers).not.toHaveBeenCalled()
-    expect(apiMocks.rescanAudiobookMetadata).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('Audible France (FR) has no record for B0BK9W82PQ')
+    expect(row(wrapper).get('[data-testid="match-asin-error"]').text()).toContain(
+      'No record for B0BK9W82PQ in Audible France (FR)',
+    )
+    expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
   })
 
-  it('forgets the picked record once the ASIN is typed again, and checks the typed one', async () => {
+  it('forgets the new record while the ASIN is typed, and looks it up again once entered', async () => {
     const wrapper = mountModal()
     await flushPromises()
     await searchAndPick(wrapper)
+    const asin = row(wrapper).get('[data-testid="match-asin"]')
 
-    await row(wrapper).get('[data-testid="match-asin"]').setValue('B0BK9W82PQ')
-
+    ;(asin.element as HTMLInputElement).value = 'B0BK9W82PQ'
+    await asin.trigger('input')
     expect(row(wrapper).find('[data-testid="match-picked"]').exists()).toBe(false)
-    await repair(wrapper)
+    expect(row(wrapper).attributes('data-match-state')).toBe('ignored')
+
+    await asin.trigger('change')
+    await flushPromises()
     expect(apiMocks.advancedSearch).toHaveBeenLastCalledWith(
       expect.objectContaining({ asin: 'B0BK9W82PQ', region: 'us' }),
+      expect.any(AbortSignal),
     )
-    expect(apiMocks.updateAudiobookIdentifiers).toHaveBeenCalled()
+    expect(row(wrapper).find('[data-testid="match-picked"]').exists()).toBe(true)
   })
 
   it('flags a malformed ASIN and does not let the repair start', async () => {
@@ -543,24 +587,28 @@ describe('RepairBooksModal', () => {
     expect(options.length).toBeGreaterThan(3)
   })
 
-  it('only rescans when the ASIN and region are unchanged', async () => {
+  it('only rescans when the record found is the one the book already points at', async () => {
+    catalogue({ fr: [frenchVol7] })
     const wrapper = mountModal()
+    await flushPromises()
+    const asin = row(wrapper).get('[data-testid="match-asin"]')
+    await asin.trigger('change')
     await flushPromises()
 
     await repair(wrapper)
 
-    expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
     expect(apiMocks.updateAudiobookIdentifiers).not.toHaveBeenCalled()
     expect(apiMocks.rescanAudiobookMetadata).toHaveBeenCalledWith(7)
   })
 
   it('retries the rescan once when it is refused for coming too soon', async () => {
-    vi.useFakeTimers()
     apiMocks.rescanAudiobookMetadata
       .mockRejectedValueOnce(Object.assign(new Error('Too many requests'), { status: 429 }))
       .mockResolvedValueOnce({ message: 'ok', audiobookId: 7, asin: 'B0HM45F8MW', region: 'fr' })
     const wrapper = mountModal()
     await flushPromises()
+    await searchAndPick(wrapper)
+    vi.useFakeTimers()
 
     const done = repair(wrapper)
     await vi.advanceTimersByTimeAsync(3000)
@@ -581,6 +629,7 @@ describe('RepairBooksModal', () => {
     })
     const wrapper = mountModal()
     await flushPromises()
+    await searchAndPick(wrapper)
 
     await repair(wrapper)
 
@@ -596,6 +645,7 @@ describe('RepairBooksModal', () => {
     })
     const wrapper = mountModal()
     await flushPromises()
+    await searchAndPick(wrapper)
 
     await repair(wrapper)
 
@@ -606,6 +656,7 @@ describe('RepairBooksModal', () => {
   it('offers to organize the repaired books', async () => {
     const wrapper = mountModal()
     await flushPromises()
+    await searchAndPick(wrapper)
 
     await repair(wrapper)
     await wrapper.get('[data-testid="repair-organize"]').trigger('click')

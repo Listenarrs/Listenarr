@@ -125,7 +125,7 @@ vi.mock('@/components/feedback', async (importOriginal) => {
         '<div class="modal-header"><component v-if="icon" :is="icon" /><h2 v-if="title">{{title}}</h2><button @click="$emit(\'close\')" class="close-btn">x</button></div>',
     },
     ModalBody: { template: '<div class="modal-body"><slot /></div>' },
-    ModalFooter: { template: '<div class="modal-footer"><slot /></div>' },
+    ModalFooter: { template: '<div class="modal-footer"><slot name="left" /><slot /></div>' },
   }
 })
 

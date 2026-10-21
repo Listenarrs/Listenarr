@@ -33,8 +33,8 @@ export interface BookMatchValues {
 }
 
 export interface BookMatch extends BookMatchValues {
-  // The record picked in the search results (its ASIN and region are known to exist); null when
-  // the ASIN is typed
+  // The book's new record, looked up in its region: picked in the search results, or the one
+  // record found for its ASIN. Only a book with one can be repaired or matched.
   picked: SearchResult | null
   // Why the ASIN can't be used in its region, once checked there (no record, or the check failed):
   // the book can't be repaired or matched until it changes
@@ -68,14 +68,17 @@ export function asinChanged(match: BookMatch): boolean {
   )
 }
 
-// Keeping the current ASIN and region is fine; a new one must look like an ASIN. An ASIN its
-// region has no record for is never fine.
-export function asinInvalid(match: BookMatch): boolean {
-  return !!match.asinError || (asinChanged(match) && !asinValid(match))
+// The state a book match card shows on its left bar: a new record looked up (matched), an ASIN
+// its region rejects (error), or nothing to do yet (ignored)
+export type MatchState = 'ignored' | 'matched' | 'error'
+
+export function matchState(match: BookMatch): MatchState {
+  if (match.asinError) return 'error'
+  return match.picked ? 'matched' : 'ignored'
 }
 
 export function noRecordError(asin: string, region: string): string {
-  return `Audible ${regionLabel(region)} has no record for ${asin}. Search the book and pick it in the right region.`
+  return `No record for ${asin} in Audible ${regionLabel(region)}`
 }
 
 export function isEdited(match: BookMatch): boolean {
@@ -94,19 +97,4 @@ export function searchParams(match: BookMatch) {
   return ASIN_PATTERN.test(query)
     ? { asin: query.toUpperCase(), cap: 5 }
     : { title: query, author: match.author.trim() || undefined, cap: 5 }
-}
-
-// The record of the match: the picked one, or the typed ASIN looked up in its region with the
-// same search. A record Audible doesn't have there is refused.
-export async function resolveRecord(
-  match: BookMatch,
-  search: (params: { asin: string; cap: number }, region: string) => Promise<SearchResult[]>,
-): Promise<SearchResult> {
-  if (match.picked) return match.picked
-  const asin = match.asin.trim().toUpperCase()
-  const found = (await search({ asin, cap: 5 }, match.region)).find(
-    (r) => r.asin?.toUpperCase() === asin,
-  )
-  if (!found) throw new Error(noRecordError(asin, match.region))
-  return { ...found, region: found.region || match.region }
 }
