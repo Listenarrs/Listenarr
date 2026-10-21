@@ -438,7 +438,7 @@ describe('RepairBooksModal', () => {
     expect(row(wrapper).get('[data-testid="match-summary"]').text()).toBe('Untitled')
   })
 
-  it('selects the current book in the results, then the new one once picked', async () => {
+  it('tags the current book in the results, and turns only the picked one green', async () => {
     const otherVol7 = { ...frenchVol7, asin: 'B0FRVOL7XX', title: 'Primal Hunter, Vol. 7 (other)' }
     catalogue({ fr: [frenchVol7, otherVol7] })
     const wrapper = mountModal()
@@ -451,11 +451,21 @@ describe('RepairBooksModal', () => {
         .findAll('[data-testid="find-match-result"]')
         .filter((r) => r.classes().includes('selected'))
         .map((r) => r.text())
-    expect(selected()).toEqual([expect.stringContaining('B0HM45F8MW')])
+    const results = () => row(wrapper).findAll('[data-testid="find-match-result"]')
+    // Nothing picked yet: no green row, the current record tagged
+    expect(selected()).toEqual([])
+    expect(results()[0]!.get('[data-testid="find-match-current"]').text()).toBe('Current')
+    expect(results()[1]!.find('[data-testid="find-match-current"]').exists()).toBe(false)
 
-    await row(wrapper).findAll('[data-testid="find-match-result"]')[1]!.trigger('click')
+    await results()[1]!.trigger('click')
     expect(selected()).toEqual([expect.stringContaining('B0FRVOL7XX')])
     expect(row(wrapper).get('[data-testid="match-picked"]').text()).toContain('B0FRVOL7XX')
+    expect(results()[0]!.find('[data-testid="find-match-current"]').exists()).toBe(true)
+
+    // Picking the current record turns it green too
+    await results()[0]!.trigger('click')
+    expect(selected()).toEqual([expect.stringContaining('B0HM45F8MW')])
+    expect(row(wrapper).get('[data-testid="match-picked"]').text()).toContain('B0HM45F8MW')
   })
 
   it('shows the current and new records under the fields', async () => {
