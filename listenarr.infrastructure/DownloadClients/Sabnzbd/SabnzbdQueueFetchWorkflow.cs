@@ -49,11 +49,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                 {
                     var message = $"SABnzbd API key not configured for client {LogRedaction.SanitizeText(client.Name ?? client.Id)}.";
                     logger.LogWarning("SABnzbd API key not configured for {ClientName}", client.Name);
-                    if (isMonitorPoll)
-                    {
-                        throw new DownloadClientAdapterPollingException(message);
-                    }
-                    return items;
+                    throw new DownloadClientAdapterPollingException(message);
                 }
 
                 var requestUrl = requestBuilder.BuildUrl(requestContext, new Dictionary<string, string>
@@ -69,11 +65,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                 {
                     var message = $"SABnzbd queue request failed with status {response.StatusCode} for client {LogRedaction.SanitizeText(client.Name ?? client.Id)}.";
                     logger.LogWarning("SABnzbd queue request failed with status {Status}", response.StatusCode);
-                    if (isMonitorPoll)
-                    {
-                        throw new DownloadClientAdapterPollingException(message);
-                    }
-                    return items;
+                    throw new DownloadClientAdapterPollingException(message);
                 }
 
                 var jsonContent = await response.Content.ReadAsStringAsync(ct);
@@ -81,11 +73,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                 {
                     var message = $"SABnzbd returned empty queue response for client {LogRedaction.SanitizeText(client.Name ?? client.Id)}.";
                     logger.LogWarning("SABnzbd returned empty response for client {ClientName}", LogRedaction.SanitizeText(client.Name));
-                    if (isMonitorPoll)
-                    {
-                        throw new DownloadClientAdapterPollingException(message);
-                    }
-                    return items;
+                    throw new DownloadClientAdapterPollingException(message);
                 }
 
                 var doc = JsonDocument.Parse(jsonContent);
@@ -95,11 +83,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                 {
                     var message = $"SABnzbd returned an invalid queue response for client {LogRedaction.SanitizeText(client.Name ?? client.Id)}.";
                     logger.LogWarning("SABnzbd returned an invalid queue response for client {ClientName}", LogRedaction.SanitizeText(client.Name ?? client.Id));
-                    if (isMonitorPoll)
-                    {
-                        throw new DownloadClientAdapterPollingException(message);
-                    }
-                    return items;
+                    throw new DownloadClientAdapterPollingException(message);
                 }
 
                 var speed = 0.0;
@@ -150,10 +134,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 logger.LogError(ex, "Error getting SABnzbd queue");
-                if (isMonitorPoll)
-                {
-                    throw new DownloadClientAdapterPollingException("Error polling SABnzbd queue.", ex);
-                }
+                throw new DownloadClientAdapterPollingException("Error polling SABnzbd queue.", ex);
             }
 
             return items;
