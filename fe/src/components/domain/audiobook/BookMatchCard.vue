@@ -502,19 +502,19 @@ defineExpose({ search, cancelSearch })
   right: 0;
   bottom: 0;
   height: 3px;
-  background: var(--match-bar-ignored, #6b7280);
+  background: var(--status-idle);
 }
 
 .match-card-matched .match-bar {
-  background: var(--match-bar-matched, #2ecc71);
+  background: var(--status-success);
 }
 
 .match-card-error .match-bar {
-  background: var(--match-bar-error, #e74c3c);
+  background: var(--status-error);
 }
 
 .match-card-searching .match-bar {
-  background: var(--match-bar-searching, #3498db);
+  background: var(--status-progress);
   animation: match-bar-breathe 1.6s ease-in-out infinite alternate;
 }
 
@@ -607,11 +607,11 @@ defineExpose({ search, cancelSearch })
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  color: #2ecc71;
+  color: var(--status-success);
 }
 
 .match-records dd.match-new-error {
-  color: #e74c3c;
+  color: var(--status-error);
 }
 
 /* ASIN, Title, Author, Region and Search always share the whole row */
@@ -678,7 +678,7 @@ defineExpose({ search, cancelSearch })
 }
 
 .match-search-error {
-  color: #e74c3c;
+  color: var(--status-error);
 }
 
 .match-search-results {

@@ -58,6 +58,15 @@
   --info-500: #74c0fc;
   --info-600: #4dabf7;
 
+  /* Status palette: the library cards' bottom bar and its legend, and the book match cards
+     (Repair, Find Match). Use these names, not the colour codes, to keep them the same. */
+  --status-success: #2ecc71;
+  --status-warning: #f39c12;
+  --status-error: #e74c3c;
+  --status-progress: #3498db;
+  --status-progress-light: #5dade2;
+  --status-idle: var(--gray-500);
+
   /* Neutral Colors */
   --gray-50: #f9fafb;
   --gray-100: #f3f4f6;
