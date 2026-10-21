@@ -85,8 +85,9 @@ export function asinChanged(match: BookMatch): boolean {
 export type MatchState = 'ignored' | 'matched' | 'error'
 
 export function matchState(match: BookMatch): MatchState {
-  if (match.asinError) return 'error'
-  return match.picked ? 'matched' : 'ignored'
+  // A record the user picked (a new search unpicks it first)
+  if (match.picked) return 'matched'
+  return match.asinError ? 'error' : 'ignored'
 }
 
 export function noRecordError(asin: string, region: string): string {
