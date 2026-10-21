@@ -201,39 +201,48 @@ describe('LibraryImportSearchModal', () => {
     expect(items[0]!.text()).toContain('Primal Hunter 4')
   })
 
-  it('offers no match until a new record is picked or a valid ASIN typed', async () => {
+  it('offers no match until a record is picked or found for a typed ASIN', async () => {
     const wrapper = mountModal()
     await flushPromises()
     expect(field(wrapper, 'find-match-confirm').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="find-match-card"]').attributes('data-match-state')).toBe(
+      'ignored',
+    )
+    expect(wrapper.get('[data-testid="match-legend"]').exists()).toBe(true)
 
     await field(wrapper, 'match-asin').setValue('B0BK9')
-    expect(field(wrapper, 'match-invalid-asin').text()).toContain('10 letters or digits')
+    expect(field(wrapper, 'match-invalid-asin').text()).toBe('An ASIN is 10 letters or digits.')
     expect(field(wrapper, 'find-match-confirm').attributes('disabled')).toBeDefined()
 
-    await field(wrapper, 'match-asin').setValue('B0BK9W82PQ')
+    await field(wrapper, 'match-asin').setValue('B000APXZHK')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="find-match-card"]').attributes('data-match-state')).toBe(
+      'matched',
+    )
     expect(field(wrapper, 'find-match-confirm').attributes('disabled')).toBeUndefined()
   })
 
-  it('checks a typed ASIN in its region before using it', async () => {
+  it('looks a typed ASIN up in its region before it can be used', async () => {
     const search = vi.mocked(apiService.advancedSearch)
     const wrapper = mountModal(primalHunter)
     await flushPromises()
 
     search.mockResolvedValue([])
     await field(wrapper, 'match-asin').setValue('B0BK9W82PQ')
-    await field(wrapper, 'find-match-confirm').trigger('click')
     await flushPromises()
     expect(search).toHaveBeenLastCalledWith(
       expect.objectContaining({ asin: 'B0BK9W82PQ', region: 'fr' }),
+      expect.any(AbortSignal),
     )
-    expect(field(wrapper, 'find-match-error').text()).toContain(
-      'Audible France (FR) has no record for B0BK9W82PQ',
+    expect(field(wrapper, 'match-asin-error').text()).toContain(
+      'No record for B0BK9W82PQ in Audible France (FR)',
     )
-    expect(wrapper.emitted('select')).toBeUndefined()
+    expect(field(wrapper, 'find-match-confirm').attributes('disabled')).toBeDefined()
 
     search.mockResolvedValue([ph4])
-    await field(wrapper, 'find-match-confirm').trigger('click')
+    await field(wrapper, 'match-asin-retry').trigger('click')
     await flushPromises()
+    await field(wrapper, 'find-match-confirm').trigger('click')
     expect(wrapper.emitted('select')?.[0]?.[0]).toEqual(
       expect.objectContaining({ asin: 'B0BK9W82PQ', region: 'fr' }),
     )
@@ -250,8 +259,8 @@ describe('LibraryImportSearchModal', () => {
     search.mockResolvedValue([])
     await field(wrapper, 'match-region').setValue('de')
     await flushPromises()
-    expect(field(wrapper, 'match-search-error').text()).toContain(
-      'Audible Germany (DE) has no record for B0BK9W82PQ',
+    expect(field(wrapper, 'match-asin-error').text()).toContain(
+      'No record for B0BK9W82PQ in Audible Germany (DE)',
     )
     expect(field(wrapper, 'find-match-confirm').attributes('disabled')).toBeDefined()
 

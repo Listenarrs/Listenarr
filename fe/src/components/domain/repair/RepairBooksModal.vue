@@ -41,16 +41,7 @@
         <div v-else-if="!finished && rows.length" class="repair-list-wrapper">
           <div class="info-section repair-info-section">
             <PhInfo />
-            <p>
-              Point each book at the right Audible record: search its title and author in the region
-              and pick the result under the book, or type the ASIN and its region (it is checked in
-              that region). Changing the title or author empties the ASIN, which no longer matches:
-              search and pick the book again; changing the region keeps it and looks it up there: a
-              single record is selected and fills the title and author; none is an error, and the
-              book can't be repaired until it changes. The search is the one Add New and Library
-              Import use, with the same rules and priorities. Repairing saves the ASIN and its
-              region and rescans the metadata from it.
-            </p>
+            <p>Find the right Audible record for each book, then repair.</p>
           </div>
 
           <div class="form-group repair-group">
@@ -61,7 +52,7 @@
             <div class="form-control-card">
               <div class="repair-toolbar">
                 <p class="repair-toolbar-title">
-                  <strong>{{ selectedCount }}</strong> of {{ rows.length }} audiobook(s) selected
+                  <strong>{{ selectedCount }}</strong> of {{ rows.length }} book(s) to repair
                 </p>
                 <div class="toolbar-actions">
                   <button
@@ -95,31 +86,28 @@
                 v-model:match="row.match"
                 :configured-region="configuredRegion"
                 :search-locked="searchingRowId !== null && searchingRowId !== row.id"
-                :check-asin="row.selected"
+                :excluded="!row.selected"
                 :data-testid="`repair-row-${row.id}`"
                 @searching="(searching) => onSearching(row, searching)"
-                @picked="row.selected = true"
+                @matched="row.selected = true"
               >
                 <template #heading>
-                  <label class="repair-heading">
+                  <label
+                    class="repair-heading"
+                    :title="isMatched(row) ? undefined : 'Find its new record first'"
+                  >
                     <input
                       type="checkbox"
                       class="repair-checkbox"
-                      :checked="row.selected"
+                      data-testid="repair-include"
+                      :checked="isIncluded(row)"
+                      :disabled="!isMatched(row)"
                       @change="row.selected = !row.selected"
                     />
                     <span class="repair-title">{{ row.title || `Audiobook #${row.id}` }}</span>
                   </label>
                 </template>
-                <template #meta>
-                  {{ row.authors.join(', ') || 'Unknown author' }}
-                  <template v-if="row.match.current.asin">
-                    · {{ row.match.current.asin }}
-                    <template v-if="row.match.current.region">
-                      ({{ row.match.current.region }})</template
-                    >
-                  </template>
-                </template>
+                <template #meta>{{ row.authors.join(', ') || 'Unknown author' }}</template>
               </BookMatchCard>
             </div>
           </div>
@@ -164,20 +152,28 @@
             <PhX :size="16" />
             {{ finished ? 'Close' : 'Cancel' }}
           </button>
+          <MatchLegend v-if="!finished && rows.length" />
         </template>
         <template #default>
+          <span
+            v-if="!finished && !loading && rows.length"
+            class="repair-count"
+            data-testid="repair-count"
+          >
+            {{
+              selectedCount === 0
+                ? 'Find a new record for each book to repair'
+                : skippedCount
+                  ? `${skippedCount} skipped`
+                  : ''
+            }}
+          </span>
           <button
             v-if="!finished"
             type="button"
             class="btn btn-primary"
             data-testid="repair-confirm"
-            :disabled="
-              loading ||
-              executing ||
-              searchingRowId !== null ||
-              selectedCount === 0 ||
-              selectedRows.some((row) => asinInvalid(row.match))
-            "
+            :disabled="loading || executing || searchingRowId !== null || selectedCount === 0"
             @click="repair"
           >
             <PhSpinner v-if="executing" class="ph-spin" :size="16" />
@@ -222,12 +218,12 @@ import { Modal, ModalBody, ModalFooter, ModalHeader } from '@/components/feedbac
 import { apiService } from '@/services/api'
 import { useLibraryImportStore } from '@/stores/libraryImport'
 import BookMatchCard from '@/components/domain/audiobook/BookMatchCard.vue'
+import MatchLegend from '@/components/domain/audiobook/MatchLegend.vue'
 import {
   FALLBACK_REGION,
   asinChanged,
-  asinInvalid,
   createBookMatch,
-  resolveRecord,
+  matchState,
   type BookMatch,
 } from '@/utils/bookMatch'
 import type { AudiobookExternalIdentifier, AudiobookExternalIdentifierInput } from '@/types'
@@ -239,6 +235,7 @@ interface RepairRow {
   identifiers: AudiobookExternalIdentifier[]
   // The record the book should point at, edited in its card
   match: BookMatch
+  // Ticked: repaired once it has a new record (finding one ticks it)
   selected: boolean
 }
 
@@ -281,8 +278,10 @@ const progress = ref(0)
 // One book is searched at a time: the others wait for it
 const searchingRowId = ref<number | null>(null)
 
-const selectedRows = computed(() => rows.value.filter((r) => r.selected))
+// Only a book with a new record, looked up in its region, is repaired
+const selectedRows = computed(() => rows.value.filter(isIncluded))
 const selectedCount = computed(() => selectedRows.value.length)
+const skippedCount = computed(() => rows.value.length - selectedCount.value)
 const repairedIds = computed(() => results.value.filter((r) => r.success).map((r) => r.id))
 
 function primaryAsin(identifiers: AudiobookExternalIdentifier[]) {
@@ -321,7 +320,7 @@ async function load() {
           authors: book.authors ?? [],
           identifiers: ids.identifiers ?? [],
           match,
-          selected: true,
+          selected: false,
         }
       }),
     )
@@ -330,6 +329,14 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+function isMatched(row: RepairRow): boolean {
+  return matchState(row.match) === 'matched'
+}
+
+function isIncluded(row: RepairRow): boolean {
+  return row.selected && isMatched(row)
 }
 
 function onSearching(row: RepairRow, searching: boolean) {
@@ -376,12 +383,9 @@ async function repair() {
     progress.value++
     const startedAt = performance.now()
     try {
-      if (asinChanged(row.match)) {
-        if (asinInvalid(row.match)) throw new Error('An ASIN is 10 letters or digits')
-        // A typed ASIN is checked in its region first, with the same search
-        await resolveRecord(row.match, libraryImportStore.searchInRegion)
+      // The new record was looked up in its region: saved, then the metadata read from it
+      if (asinChanged(row.match))
         await apiService.updateAudiobookIdentifiers(row.id, identifiersWithPrimaryAsin(row))
-      }
       const rescanned = await rescan(row.id)
       const book = await apiService.getAudiobook(row.id)
       results.value.push({
@@ -410,8 +414,9 @@ function formatDuration(durationMs: number) {
   return `${Number((durationMs / 1000).toFixed(2))} s`
 }
 
+// Every book with a new record
 function selectAll() {
-  rows.value.forEach((r) => (r.selected = true))
+  rows.value.forEach((r) => (r.selected = isMatched(r)))
 }
 
 function clearSelection() {
@@ -501,6 +506,11 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+.repair-count {
+  font-size: 0.85rem;
+  color: #aaa;
 }
 
 .repair-heading {

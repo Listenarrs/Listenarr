@@ -23,14 +23,7 @@
     <ModalBody>
       <div class="info-section find-match-info">
         <PhInfo />
-        <p>
-          Search the title and author in the region and pick the result under the book, or type the
-          ASIN and its region (it is checked in that region). Changing the title or author empties
-          the ASIN, which no longer matches: search and pick the book again; changing the region
-          keeps it and looks it up there: a single record is selected and fills the title and
-          author; none is an error, and it can't be used until it changes. The search is the one Add
-          New and Library Import use, with the same rules and priorities.
-        </p>
+        <p>Find the right Audible record for this book.</p>
       </div>
 
       <BookMatchCard
@@ -50,11 +43,6 @@
           </template>
         </template>
       </BookMatchCard>
-
-      <p v-if="error" class="find-match-error" data-testid="find-match-error">
-        <PhWarningCircle :size="16" />
-        {{ error }}
-      </p>
     </ModalBody>
     <template #footer>
       <ModalFooter :showCancel="false">
@@ -63,6 +51,7 @@
             <PhX :size="16" />
             Cancel
           </button>
+          <MatchLegend />
         </template>
         <template #default>
           <button
@@ -72,8 +61,7 @@
             :disabled="!canConfirm"
             @click="confirm"
           >
-            <PhSpinner v-if="confirming" class="ph-spin" :size="16" />
-            <PhCheckCircle v-else :size="16" />
+            <PhCheckCircle :size="16" />
             Use this match
           </button>
         </template>
@@ -84,22 +72,16 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { PhCheckCircle, PhInfo, PhSpinner, PhWarningCircle, PhX } from '@phosphor-icons/vue'
+import { PhCheckCircle, PhInfo, PhX } from '@phosphor-icons/vue'
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '@/components/feedback'
 import BookMatchCard from './BookMatchCard.vue'
+import MatchLegend from './MatchLegend.vue'
 import { useLibraryImportStore, type LibraryImportItem } from '@/stores/libraryImport'
 import {
   buildLibraryImportInitialAuthor,
   buildLibraryImportInitialQuery,
 } from '@/utils/libraryImportSearch'
-import {
-  asinChanged,
-  asinInvalid,
-  asinValid,
-  createBookMatch,
-  resolveRecord,
-  type BookMatch,
-} from '@/utils/bookMatch'
+import { asinChanged, createBookMatch, matchState, type BookMatch } from '@/utils/bookMatch'
 import type { SearchResult } from '@/types'
 
 const props = defineProps<{ item: LibraryImportItem }>()
@@ -112,24 +94,20 @@ const store = useLibraryImportStore()
 const configuredRegion = ref('')
 // Built once the configured region is known: the card searches as soon as it shows
 const match = ref<BookMatch | null>(null)
-const confirming = ref(false)
 const searching = ref(false)
-const error = ref<string | null>(null)
 // Importing waits for a running search; counted once, however it ends (also when the modal closes)
 let searchCounted = false
 
 const bookTitle = computed(() => props.item.detectedTitle?.trim() || props.item.folderName)
 
-// A new record, picked or typed as a valid ASIN that its region doesn't reject; the one the folder
-// already has is no change
+// A new record, looked up in its region (picked, or the one found for the ASIN); the one the
+// folder already has is no change
 const canConfirm = computed(
   () =>
     !!match.value &&
-    !confirming.value &&
     !searching.value &&
-    asinChanged(match.value) &&
-    asinValid(match.value) &&
-    !asinInvalid(match.value),
+    matchState(match.value) === 'matched' &&
+    asinChanged(match.value),
 )
 
 onMounted(async () => {
@@ -159,21 +137,10 @@ function onSearching(value: boolean) {
   }
 }
 
-// The picked record, or the typed ASIN once its region is checked to have it
-async function confirm() {
-  if (!match.value || !canConfirm.value) return
-  confirming.value = true
-  error.value = null
-  onSearching(true)
-  try {
-    emit('select', await resolveRecord(match.value, store.searchInRegion))
-    emit('close')
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : 'The ASIN could not be checked'
-  } finally {
-    confirming.value = false
-    onSearching(false)
-  }
+function confirm() {
+  if (!match.value?.picked || !canConfirm.value) return
+  emit('select', match.value.picked)
+  emit('close')
 }
 
 onBeforeUnmount(() => onSearching(false))
@@ -197,14 +164,5 @@ onBeforeUnmount(() => onSearching(false))
   font-size: 0.95rem;
   line-height: 1.4;
   color: #ccc;
-}
-
-.find-match-error {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin: 0.75rem 0 0;
-  font-size: 0.85rem;
-  color: #ef4444;
 }
 </style>
