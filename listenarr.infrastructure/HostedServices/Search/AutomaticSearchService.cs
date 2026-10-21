@@ -24,22 +24,39 @@ namespace Listenarr.Infrastructure.HostedServices.Search
     public class AutomaticSearchService(
         ILogger<AutomaticSearchService> logger,
         IAutomaticSearchProcessor processor,
-        IWorkerCycleRunner cycleRunner) : BackgroundService
+        IWorkerCycleRunner cycleRunner,
+        IServiceScopeFactory scopeFactory) : BackgroundService
     {
-        private static readonly TimeSpan SearchInterval = TimeSpan.FromHours(6);
-
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            logger.LogInformation("AutomaticSearchService started. Will search monitored audiobooks every {Hours} hours", SearchInterval.TotalHours);
+            logger.LogInformation("AutomaticSearchService started. Sweep interval and per-book cooldown are read from settings each cycle");
 
             await cycleRunner.RunPeriodicAsync(
                 nameof(AutomaticSearchService),
                 initialDelay: TimeSpan.FromMinutes(5),
-                intervalProvider: () => SearchInterval,
+                intervalProvider: GetSweepInterval,
                 runCycle: processor.RunCycleAsync,
                 stoppingToken);
 
             logger.LogInformation("AutomaticSearchService stopped");
+        }
+
+        // Read each cycle so a settings change takes effect without a restart. The sweep
+        // cadence only decides how often the worker looks; eligibility is the cooldown's job.
+        private TimeSpan GetSweepInterval()
+        {
+            try
+            {
+                using var scope = scopeFactory.CreateScope();
+                var configurationService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+                var settings = configurationService.GetApplicationSettingsAsync().GetAwaiter().GetResult();
+                return AutomaticSearchTiming.FromSettings(settings).SweepInterval;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                logger.LogWarning(ex, "Could not read automatic-search timing settings; sweeping every {Hours} hour(s)", AutomaticSearchTiming.Default.SweepInterval.TotalHours);
+                return AutomaticSearchTiming.Default.SweepInterval;
+            }
         }
     }
 
@@ -75,9 +92,12 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             var searchService = scope.ServiceProvider.GetRequiredService<ISearchService>();
             var qualityProfileService = scope.ServiceProvider.GetRequiredService<IQualityProfileService>();
             var downloadService = scope.ServiceProvider.GetRequiredService<IDownloadService>();
+            var configurationService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
 
-            // Get all monitored audiobooks that haven't been searched in the last 6 hours
-            var cutoffTime = DateTime.UtcNow.AddHours(-6);
+            var timing = AutomaticSearchTiming.FromSettings(await configurationService.GetApplicationSettingsAsync());
+
+            // A book is eligible once per cooldown, however often the sweep itself runs.
+            var cutoffTime = timing.EligibilityCutoff(DateTime.UtcNow);
             var monitoredAudiobooks = await audiobookRepository.GetMonitoredAudiobooksForSearchAsync(cutoffTime, stoppingToken);
 
             _logger.LogInformation("Found {Count} monitored audiobooks eligible for automatic search", monitoredAudiobooks.Count);
@@ -91,6 +111,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             var processedCount = 0;
             var downloadsQueued = 0;
 
+            var isFirstBook = true;
             foreach (var audiobook in monitoredAudiobooks)
             {
                 if (stoppingToken.IsCancellationRequested)
@@ -98,6 +119,13 @@ namespace Listenarr.Infrastructure.HostedServices.Search
 
                 try
                 {
+                    // Pause between books so a large wanted list does not hammer the indexers.
+                    if (!isFirstBook && timing.BookDelay > TimeSpan.Zero)
+                    {
+                        await Task.Delay(timing.BookDelay, stoppingToken);
+                    }
+                    isFirstBook = false;
+
                     var downloadsQueuedForBook = await ProcessAudiobookAsync(
                         audiobook, searchService, qualityProfileService, downloadService, audiobookRepository, downloadRepository, fileRepository, stoppingToken);
 
