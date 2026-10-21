@@ -248,6 +248,38 @@ public class MigrationMetadataTests : BaseTests
             "Listenarr.Domain.Audiobooks.LibraryDirectoryOwnershipRetiredMarker"));
     }
 
+    [Fact]
+    public void AddAutomaticSearchTiming_IsDiscoverableAndAddsSettingsColumnsWithDefaults()
+    {
+        AssertMigrationId<AddAutomaticSearchTiming>(
+            "20261021212418_AddAutomaticSearchTiming");
+
+        var migration = new AddAutomaticSearchTiming();
+        var up = BuildOperations(migration, "Up");
+        var down = BuildOperations(migration, "Down");
+
+        var columns = up.Operations.OfType<AddColumnOperation>().ToList();
+        Assert.Equal(3, up.Operations.Count);
+        Assert.Equal(3, columns.Count);
+        Assert.All(columns, column =>
+        {
+            Assert.Equal("ApplicationSettings", column.Table);
+            Assert.False(column.IsNullable);
+        });
+        Assert.Equal(1, columns.Single(column => column.Name == "AutomaticSearchIntervalHours").DefaultValue);
+        Assert.Equal(24, columns.Single(column => column.Name == "AutomaticSearchCooldownHours").DefaultValue);
+        Assert.Equal(5, columns.Single(column => column.Name == "AutomaticSearchBookDelaySeconds").DefaultValue);
+        Assert.Equal(3, down.Operations.OfType<DropColumnOperation>().Count());
+        Assert.Equal(3, down.Operations.Count);
+
+        var applicationSettings = AssertEntity(
+            migration.TargetModel,
+            "Listenarr.Domain.Configuration.ApplicationSettings");
+        Assert.NotNull(applicationSettings.FindProperty("AutomaticSearchIntervalHours"));
+        Assert.NotNull(applicationSettings.FindProperty("AutomaticSearchCooldownHours"));
+        Assert.NotNull(applicationSettings.FindProperty("AutomaticSearchBookDelaySeconds"));
+    }
+
     private static MigrationBuilder BuildOperations(Migration migration, string methodName)
     {
         var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.Sqlite");
