@@ -57,6 +57,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 job = LastJob;
                 return job != null && string.Equals(job.RootFolderPath, rootFolderPath, StringComparison.Ordinal);
             }
+            public bool TryCancel(Guid id, out UnmatchedScanJob? job) => TryGetJob(id, out job);
         }
 
         private static readonly IUnmatchedScanQueueService _fakeQueue = new FakeUnmatchedQueue();
@@ -354,6 +355,45 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(result);
             var root = Assert.Single(Assert.IsAssignableFrom<List<RootFolderDto>>(ok.Value));
             Assert.Null(root.PathSyntax);
+        }
+
+        [Fact]
+        public async Task CancelUnmatchedScan_QueuedJob_ReturnsCanceledStatus()
+        {
+            using var db = CreateDb();
+            var queue = new UnmatchedScanQueueService(
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<UnmatchedScanQueueService>.Instance,
+                new Mock<IFileSystemSemanticsResolver>().Object);
+            var jobId = await queue.EnqueueAsync(FileUtils.GetAbsolutePath("cancel-scan-root"));
+            var controller = new RootFoldersController(
+                new FakeService(),
+                queue,
+                new EfAudiobookFileRepository(db),
+                new AudiobookRepository(db),
+                new LocalFileSystem());
+
+            var result = controller.CancelUnmatchedScan(jobId);
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(result);
+            Assert.Contains("\"status\":\"Canceled\"", JsonSerializer.Serialize(ok.Value), StringComparison.Ordinal);
+            var status = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(controller.GetUnmatchedResults(jobId));
+            Assert.Contains("\"status\":\"Canceled\"", JsonSerializer.Serialize(status.Value), StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void CancelUnmatchedScan_UnknownJob_ReturnsNotFound()
+        {
+            using var db = CreateDb();
+            var controller = new RootFoldersController(
+                new FakeService(),
+                new FakeUnmatchedQueue(),
+                new EfAudiobookFileRepository(db),
+                new AudiobookRepository(db),
+                new LocalFileSystem());
+
+            var result = controller.CancelUnmatchedScan(Guid.NewGuid());
+
+            Assert.IsType<Microsoft.AspNetCore.Mvc.NotFoundObjectResult>(result);
         }
 
         [Fact]

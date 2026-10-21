@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Collections.Concurrent;
+using System.Text.Json.Serialization;
 using System.Threading.Channels;
 using Listenarr.Domain.Common;
 using Microsoft.Extensions.Logging;
@@ -60,6 +61,14 @@ namespace Listenarr.Application.Audiobooks.Jobs
         public string? Error { get; set; }
         public List<UnmatchedFileResult>? Results { get; set; }
         public List<string> Warnings { get; set; } = new();
+
+        // Canceled by the user: a queued job is skipped, a running one stops at its next checkpoint
+        private readonly CancellationTokenSource _cancellation = new();
+
+        [JsonIgnore]
+        public CancellationToken CancellationToken => _cancellation.Token;
+
+        internal void RequestCancellation() => _cancellation.Cancel();
     }
 
     public interface IUnmatchedScanQueueService
@@ -73,6 +82,8 @@ namespace Listenarr.Application.Audiobooks.Jobs
             string? error = null,
             List<string>? warnings = null);
         bool TryGetLastJobForPath(string rootFolderPath, out UnmatchedScanJob? job);
+        // Cancels a queued or running job (status Canceled); a finished one is left as it is
+        bool TryCancel(Guid id, out UnmatchedScanJob? job);
         ChannelReader<UnmatchedScanJob> Reader { get; }
     }
 
@@ -101,7 +112,7 @@ namespace Listenarr.Application.Audiobooks.Jobs
             var cutoff = DateTime.UtcNow - JobTtl;
             foreach (var (id, job) in _jobs)
             {
-                if (job.Status is not ("Completed" or "Failed")) continue;
+                if (job.Status is not ("Completed" or "Failed" or "Canceled")) continue;
                 var timestamp = job.CompletedAt ?? job.EnqueuedAt;
                 if (timestamp >= cutoff) continue;
 
@@ -143,19 +154,37 @@ namespace Listenarr.Application.Audiobooks.Jobs
             List<string>? warnings = null)
         {
             if (!_jobs.TryGetValue(id, out var job)) return;
-            job.Status = status;
-            job.Error = error;
-            if (results != null) job.Results = results;
-            if (warnings != null) job.Warnings = warnings;
-            if (status is "Completed" or "Failed")
+            lock (job)
             {
+                // A canceled job stays canceled: its late progress, results or failure are dropped
+                if (job.Status == "Canceled") return;
+                job.Status = status;
+                job.Error = error;
+                if (results != null) job.Results = results;
+                if (warnings != null) job.Warnings = warnings;
+                if (status is "Completed" or "Failed")
+                {
+                    job.CompletedAt = DateTime.UtcNow;
+                }
+                if (status == "Completed")
+                {
+                    _lastJobByPath[job.RootFolderPath] = id;
+                }
+            }
+        }
+
+        public bool TryCancel(Guid id, out UnmatchedScanJob? job)
+        {
+            if (!_jobs.TryGetValue(id, out job)) return false;
+            lock (job)
+            {
+                if (job.Status is not ("Queued" or "Processing")) return true;
+                job.Status = "Canceled";
                 job.CompletedAt = DateTime.UtcNow;
+                job.RequestCancellation();
             }
-            if (status == "Completed")
-            {
-                _lastJobByPath[job.RootFolderPath] = id;
-            }
-            _jobs[id] = job;
+            _logger.LogInformation("Canceled unmatched scan job {JobId}", id);
+            return true;
         }
 
         public bool TryGetLastJobForPath(string rootFolderPath, out UnmatchedScanJob? job)
