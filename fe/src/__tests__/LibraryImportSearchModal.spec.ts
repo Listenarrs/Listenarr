@@ -260,8 +260,10 @@ describe('LibraryImportSearchModal', () => {
     metadata.mockResolvedValue({ metadata: { ...ph4, title: 'Primal Hunter 4 (US)' } })
     await field(wrapper, 'match-region').setValue('us')
     await flushPromises()
+    expect(field(wrapper, 'match-picked').text()).toContain('Primal Hunter 4 (US)')
+    // The fields stay as typed
     expect((field(wrapper, 'match-title').element as HTMLInputElement).value).toBe(
-      'Primal Hunter 4 (US)',
+      'The Primal Hunter 4',
     )
     expect(wrapper.get('[data-testid="find-match-result"]').classes()).toContain('selected')
 
