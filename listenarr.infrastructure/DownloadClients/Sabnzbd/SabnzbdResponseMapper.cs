@@ -49,6 +49,17 @@ internal static class SabnzbdResponseMapper
         var mappedStatus = MapQueueStatus(status);
         var storagePath = GetString(slot, "storage");
         var explicitContentPath = string.IsNullOrWhiteSpace(storagePath) ? null : storagePath;
+
+        // SABnzbd reports an item as "Completed" in the active queue briefly before
+        // archiving it to history with the real storage path - active-queue slots don't
+        // reliably expose it (see comment below). Reporting completion here anyway lets
+        // QueueItemConverter mark the download Completed with no DownloadPath, which
+        // permanently blocks import. Excluding it instead makes the caller treat this
+        // download as missing from the active queue, which triggers a same-cycle history
+        // lookup - and history has the storage path by then.
+        if (mappedStatus == "completed" && explicitContentPath == null)
+            return null;
+
         var remotePath = explicitContentPath ?? (string.IsNullOrWhiteSpace(client.DownloadPath)
             ? null
             : client.DownloadPath);
