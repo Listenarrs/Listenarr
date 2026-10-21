@@ -56,6 +56,7 @@
                 <option value="Torznab">Torznab</option>
                 <option value="MyAnonamouse">MyAnonamouse</option>
                 <option value="InternetArchive">Internet Archive</option>
+                <option value="AudioBookBay">AudioBookBay</option>
                 <option value="Custom">Custom</option>
               </select>
             </FormRow>
@@ -174,7 +175,8 @@
             <FormRow
               v-if="
                 formData.implementation !== 'MyAnonamouse' &&
-                formData.implementation !== 'InternetArchive'
+                formData.implementation !== 'InternetArchive' &&
+                formData.implementation !== 'AudioBookBay'
               "
               label="API Key"
               labelFor="apiKey"
@@ -206,7 +208,10 @@
           <!-- Features -->
           <FormSection title="Features" :icon="PhGear">
             <CheckboxCard
-              v-if="formData.implementation !== 'InternetArchive'"
+              v-if="
+                formData.implementation !== 'InternetArchive' &&
+                formData.implementation !== 'AudioBookBay'
+              "
               v-model="formData.enableRss"
               title="Enable RSS"
               description="Use RSS feeds to monitor for new releases"
@@ -484,6 +489,14 @@ watch(
       formData.value.type = 'Torrent'
       // Set default URL for MyAnonamouse
       formData.value.url = 'https://www.myanonamouse.net'
+    }
+    // AudioBookBay is torrent only (magnet via scrape); default the public host
+    else if (newImplementation === 'AudioBookBay') {
+      formData.value.type = 'Torrent'
+      formData.value.enableRss = false
+      if (!formData.value.url) {
+        formData.value.url = 'https://audiobookbay.lu'
+      }
     }
     // Torznab defaults to Torrent
     else if (newImplementation === 'Torznab') {
