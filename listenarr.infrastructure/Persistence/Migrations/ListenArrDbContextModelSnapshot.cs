@@ -1857,6 +1857,9 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Property<bool>("EnableCoverArtDownload")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("EnableIndexerDomainRotation")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("EnableMetadataProcessing")
                         .HasColumnType("INTEGER");
 
@@ -1892,6 +1895,9 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("ImportBlacklistExtensions")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("IndexerMirrorOverridesJson")
                         .HasColumnType("TEXT");
 
                     b.Property<int>("MaxConcurrentDownloads")
