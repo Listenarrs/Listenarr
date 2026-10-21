@@ -139,7 +139,8 @@ export function isEdited(match: BookMatch): boolean {
     match.asin !== initial.asin ||
     match.region !== initial.region ||
     match.query !== initial.query ||
-    match.author !== initial.author
+    match.author !== initial.author ||
+    !!match.picked
   )
 }
 
