@@ -50,7 +50,7 @@
     <div class="match-fields">
       <label class="match-field match-field-asin">
         <span class="match-field-label">ASIN</span>
-        <span class="match-asin-input">
+        <span class="match-clearable">
           <input
             v-model.trim="match.asin"
             class="form-input"
@@ -62,11 +62,11 @@
           <button
             v-if="match.asin"
             type="button"
-            class="match-asin-clear"
+            class="match-clear-btn"
             title="Empty the ASIN field"
             aria-label="Empty the ASIN field"
             data-testid="match-asin-clear"
-            @click.prevent="clearAsin"
+            @click.prevent="clearField('asin')"
           >
             <PhBackspace :size="18" />
           </button>
@@ -74,24 +74,50 @@
       </label>
       <label class="match-field">
         <span class="match-field-label">Title</span>
-        <input
-          ref="titleEl"
-          v-model="match.query"
-          class="form-input"
-          data-testid="match-title"
-          @input="onEdited"
-          @keydown.enter.prevent="search()"
-        />
+        <span class="match-clearable">
+          <input
+            ref="titleEl"
+            v-model="match.query"
+            class="form-input"
+            data-testid="match-title"
+            @input="onEdited"
+            @keydown.enter.prevent="search(searchKind)"
+          />
+          <button
+            v-if="match.query"
+            type="button"
+            class="match-clear-btn"
+            title="Empty the Title field"
+            aria-label="Empty the Title field"
+            data-testid="match-title-clear"
+            @click.prevent="clearField('query')"
+          >
+            <PhBackspace :size="18" />
+          </button>
+        </span>
       </label>
       <label class="match-field">
         <span class="match-field-label">Author</span>
-        <input
-          v-model="match.author"
-          class="form-input"
-          data-testid="match-author"
-          @input="onEdited"
-          @keydown.enter.prevent="search()"
-        />
+        <span class="match-clearable">
+          <input
+            v-model="match.author"
+            class="form-input"
+            data-testid="match-author"
+            @input="onEdited"
+            @keydown.enter.prevent="search(searchKind)"
+          />
+          <button
+            v-if="match.author"
+            type="button"
+            class="match-clear-btn"
+            title="Empty the Author field"
+            aria-label="Empty the Author field"
+            data-testid="match-author-clear"
+            @click.prevent="clearField('author')"
+          >
+            <PhBackspace :size="18" />
+          </button>
+        </span>
       </label>
       <label class="match-field">
         <span class="match-field-label">Region</span>
@@ -522,10 +548,10 @@ function onRegionChanged() {
   void search('asin')
 }
 
-// The erase button: an empty ASIN lets Search look for the title and author. Like typing, it only
-// prepares the next search
-function clearAsin() {
-  match.value.asin = ''
+// The erase buttons of the ASIN, Title and Author fields: like typing, emptying a field only
+// prepares the next search (an empty ASIN lets Search look for the title and author)
+function clearField(field: 'asin' | 'query' | 'author') {
+  match.value[field] = ''
   edited.value = true
 }
 
@@ -702,7 +728,7 @@ defineExpose({ search, cancelSearch })
 .match-fields {
   display: grid;
   grid-template-columns:
-    minmax(8rem, 1fr) minmax(0, 2.5fr) minmax(0, 1.5fr) minmax(12rem, 1.3fr)
+    minmax(10.5rem, 1.2fr) minmax(0, 2.5fr) minmax(0, 1.5fr) minmax(12rem, 1.3fr)
     auto;
   align-items: end;
   gap: 0.75rem;
@@ -721,18 +747,18 @@ defineExpose({ search, cancelSearch })
   box-sizing: border-box;
 }
 
-/* The erase button sits inside the ASIN field, on its right, while the field holds something. Its
-   room is always kept, so showing it doesn't change the field's size nor move the others */
-.match-asin-input {
+/* The erase button sits inside its field, on the right, while the field holds something. Its room
+   is always kept, so showing it doesn't change the field's size nor move the others */
+.match-clearable {
   position: relative;
   display: block;
 }
 
-.match-asin-input .form-input {
+.match-clearable .form-input {
   padding-right: 2.2rem;
 }
 
-.match-asin-clear {
+.match-clear-btn {
   position: absolute;
   top: 50%;
   right: 0.4rem;
@@ -748,7 +774,7 @@ defineExpose({ search, cancelSearch })
   cursor: pointer;
 }
 
-.match-asin-clear:hover {
+.match-clear-btn:hover {
   color: var(--status-error);
   background: rgba(255, 255, 255, 0.06);
 }
