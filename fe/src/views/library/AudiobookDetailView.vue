@@ -908,7 +908,7 @@ const topActions = computed<DetailTopAction[]>(() => [
     icon: PhWrench,
     disabled: !audiobook.value,
     desktopGroup: 'secondary',
-    desktopClass: 'repair-btn',
+    desktopClass: 'warning',
     onClick: () => {
       showRepairModal.value = true
     },
@@ -2138,17 +2138,6 @@ function formatDate(dateString?: string): string {
 
 .nav-btn:hover {
   background-color: #4a4a4a;
-}
-
-/* Orange, like Repair Selected in the library; dark icon stays readable on it */
-.nav-btn.repair-btn {
-  background-color: var(--warning-500);
-  border-color: var(--warning-600);
-  color: #1a1a1a;
-}
-
-.nav-btn.repair-btn:hover {
-  background-color: var(--warning-600);
 }
 
 .nav-btn.delete-btn {

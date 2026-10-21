@@ -66,7 +66,8 @@
 
 /* Backwards-compatible alias used across many components */
 /* Base icon-only buttons: neutral filled grey with white icon
-   Use `.icon-button.primary` for brand actions and `.icon-button.danger` for destructive actions */
+   Use `.icon-button.primary` for brand actions, `.icon-button.danger` for destructive actions and
+   `.icon-button.warning` for actions that fix a problem (Repair) */
 .icon-button {
   background-color: #3a3a3a;
   border: 1px solid #555;
@@ -268,21 +269,40 @@
   stroke: currentColor !important;
 }
 
+/* Warning (orange, dark icon to stay readable) */
+.nav-btn.icon-button.warning {
+  background-color: var(--warning-500) !important;
+  border-color: var(--warning-600) !important;
+  color: #1a1a1a !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12) !important;
+}
+.nav-btn.icon-button.warning:hover:not(:disabled) {
+  background-color: var(--warning-600) !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.16) !important;
+}
+.nav-btn.icon-button.warning svg,
+.nav-btn.icon-button.warning svg * {
+  color: #1a1a1a !important;
+  fill: currentColor !important;
+  stroke: currentColor !important;
+}
+
 /* Neutral (non-primary, non-danger) nav icon buttons: use filled grey background with white icon */
-.nav-btn.icon-button:not(.primary):not(.danger) {
+.nav-btn.icon-button:not(.primary):not(.danger):not(.warning) {
   background-color: #3a3a3a !important;
   border-color: #555 !important;
   color: #ffffff !important;
   box-shadow: none !important;
   transform: none !important;
 }
-.nav-btn.icon-button:not(.primary):not(.danger) svg,
-.nav-btn.icon-button:not(.primary):not(.danger) svg * {
+.nav-btn.icon-button:not(.primary):not(.danger):not(.warning) svg,
+.nav-btn.icon-button:not(.primary):not(.danger):not(.warning) svg * {
   color: #fff !important;
   fill: currentColor !important;
   stroke: currentColor !important;
 }
-.nav-btn.icon-button:not(.primary):not(.danger):hover:not(:disabled) {
+.nav-btn.icon-button:not(.primary):not(.danger):not(.warning):hover:not(:disabled) {
   background-color: #4a4a4a !important;
   border-color: #666 !important;
   transform: translateY(-1px) !important;
