@@ -3108,19 +3108,19 @@ defineExpose({
 }
 
 .legend-dot.status-downloading {
-  background-color: #3498db;
+  background-color: var(--status-progress);
 }
 
 .legend-dot.status-no-file {
-  background-color: #e74c3c;
+  background-color: var(--status-error);
 }
 
 .legend-dot.status-quality-mismatch {
-  background-color: #f39c12;
+  background-color: var(--status-warning);
 }
 
 .legend-dot.status-quality-match {
-  background-color: #2ecc71;
+  background-color: var(--status-success);
 }
 
 @media (max-width: 768px) {
@@ -3206,48 +3206,48 @@ defineExpose({
 }
 
 .audiobook-item.status-no-file .audiobook-poster-container {
-  border-bottom: 3px solid #e74c3c;
+  border-bottom: 3px solid var(--status-error);
 }
 
 .audiobook-item.status-downloading .audiobook-poster-container {
-  border-bottom: 3px solid #3498db;
+  border-bottom: 3px solid var(--status-progress);
   animation: pulse 2s ease-in-out infinite;
 }
 
 @keyframes pulse {
   0%,
   100% {
-    border-bottom-color: #3498db;
+    border-bottom-color: var(--status-progress);
   }
   50% {
-    border-bottom-color: #5dade2;
+    border-bottom-color: var(--status-progress-light);
   }
 }
 
 .audiobook-item.status-quality-mismatch .audiobook-poster-container {
-  border-bottom: 3px solid #f39c12;
+  border-bottom: 3px solid var(--status-warning);
 }
 
 .audiobook-item.status-quality-match .audiobook-poster-container {
-  border-bottom: 3px solid #2ecc71;
+  border-bottom: 3px solid var(--status-success);
 }
 
 /* List view status borders */
 .audiobook-list-item.status-no-file .list-thumb {
-  border-bottom: 3px solid #e74c3c;
+  border-bottom: 3px solid var(--status-error);
 }
 
 .audiobook-list-item.status-downloading .list-thumb {
-  border-bottom: 3px solid #3498db;
+  border-bottom: 3px solid var(--status-progress);
   animation: pulse 2s ease-in-out infinite;
 }
 
 .audiobook-list-item.status-quality-mismatch .list-thumb {
-  border-bottom: 3px solid #f39c12;
+  border-bottom: 3px solid var(--status-warning);
 }
 
 .audiobook-list-item.status-quality-match .list-thumb {
-  border-bottom: 3px solid #2ecc71;
+  border-bottom: 3px solid var(--status-success);
 }
 
 .selection-checkbox {
