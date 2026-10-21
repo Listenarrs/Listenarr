@@ -661,7 +661,7 @@ describe('RepairBooksModal', () => {
 
     await searchAndPick(wrapper)
 
-    expect(field(wrapper, 'match-asin').value).toBe('B0BK9W82PQ')
+    expect(row(wrapper).get('[data-testid="match-picked"]').text()).toContain('B0BK9W82PQ')
     expect(field(wrapper, 'match-region').value).toBe('us')
     expect(row(wrapper).get('[data-testid="match-picked"]').text()).toContain('Primal Hunter 4')
 
@@ -721,7 +721,7 @@ describe('RepairBooksModal', () => {
     await flushPromises()
   })
 
-  it('selects the one record the region has for the ASIN, and fills the title and author with it', async () => {
+  it('selects the one record the region has for the ASIN, the fields left as typed', async () => {
     catalogue({
       de: [{ ...frenchVol7, title: 'Primal Hunter 7', authors: [{ name: 'Zogarth (DE)' }] }],
     })
@@ -734,8 +734,8 @@ describe('RepairBooksModal', () => {
     const results = row(wrapper).findAll('[data-testid="find-match-result"]')
     expect(results).toHaveLength(1)
     expect(results[0]!.classes()).toContain('selected')
-    expect(field(wrapper, 'match-title').value).toBe('Primal Hunter 7')
-    expect(field(wrapper, 'match-author').value).toBe('Zogarth (DE)')
+    expect(field(wrapper, 'match-title').value).toBe('Primal Hunter, Vol. 7')
+    expect(field(wrapper, 'match-author').value).toBe('Zogarth')
     expect(row(wrapper).get('[data-testid="match-picked"]').text()).toContain('Primal Hunter 7')
 
     apiMocks.advancedSearch.mockClear()
@@ -794,9 +794,9 @@ describe('RepairBooksModal', () => {
     await emptyAsin(wrapper)
     await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
-    // The record found for the ASIN filled the title and author, searched now
+    // The record found for the ASIN left the title and author as they were
     expect(apiMocks.advancedSearch).toHaveBeenCalledWith(
-      expect.objectContaining({ title: 'Primal Hunter 4', author: 'Zogarth' }),
+      expect.objectContaining({ title: 'Primal Hunter, Vol. 7', author: 'Zogarth' }),
     )
   })
 
@@ -811,8 +811,8 @@ describe('RepairBooksModal', () => {
 
     expect(apiMocks.getAudibleMetadata).toHaveBeenLastCalledWith('B0BK9W82PQ', 'us')
     expect(row(wrapper).get('[data-testid="match-picked"]').text()).toContain('Primal Hunter 4')
-    // The record found fills the title and author again
-    expect(field(wrapper, 'match-title').value).toBe('Primal Hunter 4')
+    // The record found leaves the title and author as typed
+    expect(field(wrapper, 'match-title').value).toBe('Primal Hunter, Vol. 7')
     expect(field(wrapper, 'match-author').value).toBe('Zogarth')
 
     apiMocks.getAudibleMetadata.mockClear()
@@ -978,10 +978,16 @@ describe('RepairBooksModal', () => {
     expect(wrapper.get('[data-testid="repair-confirm"]').text()).toContain('Repair 0')
   })
 
-  it('unpicks the selected row when it is clicked again: no new record', async () => {
+  it('unpicks the selected row when it is clicked again: no new record, the fields untouched', async () => {
     const wrapper = mountModal()
     await flushPromises()
     await searchAndPick(wrapper)
+    const fields = () =>
+      ['match-asin', 'match-title', 'match-author', 'match-region'].map(
+        (id) => field(wrapper, id).value,
+      )
+    // Picking left the search as typed
+    expect(fields()).toEqual(['', 'Primal Hunter, Vol. 7', 'Zogarth', 'us'])
     expect(row(wrapper).attributes('data-match-state')).toBe('matched')
     const selected = row(wrapper).get('[data-testid="find-match-result"].selected')
 
@@ -993,6 +999,7 @@ describe('RepairBooksModal', () => {
     )
     expect(row(wrapper).attributes('data-match-state')).toBe('ignored')
     expect(wrapper.get('[data-testid="repair-confirm"]').text()).toContain('Repair 0')
+    expect(fields()).toEqual(['', 'Primal Hunter, Vol. 7', 'Zogarth', 'us'])
   })
 
   it('only rescans when the current record is picked', async () => {

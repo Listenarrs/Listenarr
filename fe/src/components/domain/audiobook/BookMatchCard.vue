@@ -481,15 +481,11 @@ async function search(kind: SearchKind = 'title') {
       .filter((r) => r.asin?.toUpperCase() === asin)
       .map((r) => ({ ...r, region: r.region || region }))
     if (found.length === 1) {
-      // One record: the book's new one, selected in the results, its title and author filling
-      // the fields; unless it is the record the book already points at, which only wears its
-      // "Current" tag (nothing to repair)
+      // One record: the book's new one, selected in the results (the fields stay as typed);
+      // unless it is the record the book already points at, which only wears its "Current" tag
+      // (nothing to repair)
       const record = found[0]!
-      if (!isCurrentRecord(record)) {
-        match.value.query = record.title || match.value.query
-        match.value.author = record.authors?.[0]?.name || match.value.author
-        setMatched(record)
-      }
+      if (!isCurrentRecord(record)) setMatched(record)
       state.value = { status: 'done', kind, results: found, error: null, searched }
     } else if (found.length > 1) {
       state.value = { status: 'done', kind, results: found, error: null, searched }
@@ -544,9 +540,9 @@ function pick(result: SearchResult) {
     match.value.picked = null
     return
   }
-  match.value.asin = result.asin.toUpperCase()
-  match.value.region = result.region || match.value.region
-  setMatched({ ...result, region: match.value.region })
+  // The record only: the fields keep the search as typed, so a wrong pick undone leaves them as
+  // they were
+  setMatched({ ...result, region: result.region || match.value.region })
 }
 
 // The record and its error no longer apply; the results stay until a new search replaces them
