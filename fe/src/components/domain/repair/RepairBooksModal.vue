@@ -841,11 +841,6 @@ onBeforeUnmount(cancelAllSearches)
   .repair-fields {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
-
-  .repair-search-btn {
-    grid-column: 1 / -1;
-    justify-content: center;
-  }
 }
 
 .repair-field-label {
@@ -859,8 +854,15 @@ onBeforeUnmount(cancelAllSearches)
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
-  min-width: 9.5rem;
+  width: 11rem;
   white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .repair-search-btn {
+    grid-column: 1 / -1;
+    width: auto;
+  }
 }
 
 .repair-search-state {
