@@ -962,6 +962,23 @@ describe('RepairBooksModal', () => {
     expect(wrapper.get('[data-testid="repair-confirm"]').text()).toContain('Repair 0')
   })
 
+  it('unpicks the selected row when it is clicked again: no new record', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+    expect(row(wrapper).attributes('data-match-state')).toBe('matched')
+    const selected = row(wrapper).get('[data-testid="find-match-result"].selected')
+
+    await selected.trigger('click')
+
+    expect(row(wrapper).find('[data-testid="find-match-result"].selected').exists()).toBe(false)
+    expect(row(wrapper).get('[data-testid="match-none"]').text()).toBe(
+      'No new record yet: search the book and pick it, or type its ASIN',
+    )
+    expect(row(wrapper).attributes('data-match-state')).toBe('ignored')
+    expect(wrapper.get('[data-testid="repair-confirm"]').text()).toContain('Repair 0')
+  })
+
   it('only rescans when the current record is picked', async () => {
     catalogue({ fr: [frenchVol7] })
     const wrapper = mountModal()
