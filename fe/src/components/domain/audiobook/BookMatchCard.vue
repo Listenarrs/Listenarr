@@ -353,11 +353,13 @@ const running = ref<Searched | null>(null)
 const edited = ref(false)
 let controller: AbortController | null = null
 
-// Every Audible region stays available, ordered by usefulness: the book's region when the card
-// opened first, then the configured one and the US, then the others. The field shows region codes
-// to save room (the full name is each option's tooltip), so the others follow in code order
+// Every Audible region stays available: the book's region first, then the preferred (configured)
+// one, or the US when the book's region is the preferred one; then the others alphabetically by the
+// code the field shows (each option's tooltip gives the full name)
 const regionOptions = computed(() => {
-  const first = [match.value.initial.region, props.configuredRegion, FALLBACK_REGION]
+  const book = match.value.initial.region
+  const second = book === props.configuredRegion ? FALLBACK_REGION : props.configuredRegion
+  const first: string[] = [book, second]
   const ordered = orderedSearchRegionOptions(first)
   const head = ordered.filter((o) => first.includes(o.value))
   const rest = ordered.filter((o) => !first.includes(o.value))
