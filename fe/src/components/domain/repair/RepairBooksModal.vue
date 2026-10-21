@@ -687,7 +687,7 @@ watch(
 .repair-fields {
   display: grid;
   grid-template-columns:
-    minmax(8rem, 1fr) minmax(0, 2.5fr) minmax(0, 1.5fr) minmax(10rem, 1.3fr)
+    minmax(8rem, 1fr) minmax(0, 2.5fr) minmax(0, 1.5fr) minmax(12rem, 1.3fr)
     auto;
   align-items: end;
   gap: 0.75rem;
