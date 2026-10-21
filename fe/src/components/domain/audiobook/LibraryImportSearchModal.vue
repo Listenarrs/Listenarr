@@ -35,13 +35,7 @@
         @searching="onSearching"
       >
         <template #heading>{{ bookTitle }}</template>
-        <template #meta>
-          {{ item.detectedAuthor || 'Unknown author' }}
-          <template v-if="match.current.asin">
-            · {{ match.current.asin }}
-            <template v-if="match.current.region"> ({{ match.current.region }})</template>
-          </template>
-        </template>
+        <template #meta>{{ summary }}</template>
       </BookMatchCard>
     </ModalBody>
     <template #footer>
@@ -81,7 +75,13 @@ import {
   buildLibraryImportInitialAuthor,
   buildLibraryImportInitialQuery,
 } from '@/utils/libraryImportSearch'
-import { asinChanged, createBookMatch, matchState, type BookMatch } from '@/utils/bookMatch'
+import {
+  asinChanged,
+  bookSummary,
+  createBookMatch,
+  matchState,
+  type BookMatch,
+} from '@/utils/bookMatch'
 import type { SearchResult } from '@/types'
 
 const props = defineProps<{ item: LibraryImportItem }>()
@@ -97,6 +97,18 @@ const match = ref<BookMatch | null>(null)
 const searching = ref(false)
 // Importing waits for a running search; counted once, however it ends (also when the modal closes)
 let searchCounted = false
+
+// The folder's match when it has one, else what its files say
+const summary = computed(() => {
+  const selected = props.item.selectedMatch
+  return bookSummary({
+    asin: selected?.asin,
+    title: selected?.title ?? props.item.detectedTitle,
+    subtitle: selected?.subtitle,
+    author: selected?.authors?.[0]?.name ?? props.item.detectedAuthor,
+    region: selected?.region,
+  })
+})
 
 const bookTitle = computed(() => props.item.detectedTitle?.trim() || props.item.folderName)
 

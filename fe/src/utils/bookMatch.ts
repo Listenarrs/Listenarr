@@ -81,6 +81,26 @@ export function noRecordError(asin: string, region: string): string {
   return `No record for ${asin} in Audible ${regionLabel(region)}`
 }
 
+// One line for a book next to its Revert button: ASIN - Title: Subtitle - Author - Region, without
+// the parts it doesn't have
+export function bookSummary(book: {
+  asin?: string | null
+  title?: string | null
+  subtitle?: string | null
+  author?: string | null
+  region?: string | null
+}): string {
+  const title = [book.title?.trim(), book.subtitle?.trim()].filter(Boolean).join(': ')
+  return [
+    book.asin?.trim(),
+    title,
+    book.author?.trim(),
+    book.region ? regionLabel(book.region) : '',
+  ]
+    .filter(Boolean)
+    .join(' - ')
+}
+
 export function isEdited(match: BookMatch): boolean {
   const { initial } = match
   return (

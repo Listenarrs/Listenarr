@@ -29,7 +29,7 @@
         <slot name="heading" />
       </span>
       <span class="match-header-right">
-        <span class="match-meta">
+        <span class="match-meta" data-testid="match-summary">
           <slot name="meta" />
         </span>
         <button
