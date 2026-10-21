@@ -21,7 +21,6 @@ namespace Listenarr.Infrastructure.DownloadClients.Transmission
             var items = new List<QueueItem>();
             if (client == null) return items;
 
-            var isMonitorPoll = ids.Count > 0;
             var configuredCategory = DownloadClientCategoryFilter.GetConfiguredCategory(client);
 
             // Keep local filtering for monitor calls. Listenarr stores hash-shaped IDs,
@@ -47,11 +46,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Transmission
                 {
                     var message = $"Transmission returned an invalid queue response for client {LogRedaction.SanitizeText(client.Name ?? client.Id)}.";
                     logger.LogWarning("Transmission returned an invalid queue response for client {ClientName}", LogRedaction.SanitizeText(client.Name ?? client.Id));
-                    if (isMonitorPoll)
-                    {
-                        throw new DownloadClientAdapterPollingException(message);
-                    }
-                    return items;
+                    throw new DownloadClientAdapterPollingException(message);
                 }
 
                 foreach (var torrent in torrents.EnumerateArray())
@@ -79,10 +74,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Transmission
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 logger.LogWarning(ex, "Failed to retrieve Transmission queue for client {ClientName}", LogRedaction.SanitizeText(client.Name ?? client.Id));
-                if (isMonitorPoll)
-                {
-                    throw new DownloadClientAdapterPollingException("Error polling Transmission queue.", ex);
-                }
+                throw new DownloadClientAdapterPollingException("Error polling Transmission queue.", ex);
             }
 
             return FilterByIds(items, ids);
