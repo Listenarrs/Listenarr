@@ -17,7 +17,8 @@
 -->
 <!-- One book and the Audible record it should point at: its current and new records, the ASIN,
      Title, Author and Region fields, and the search under the book (Repair Books and Find Match).
-     The bar on its left tells its state: grey ignored, green matched, red error. -->
+     The bar along its bottom tells its state: grey ignored, green matched, red error, and breathes
+     in blue while a search runs. -->
 <template>
   <div
     class="form-control-card match-card"
@@ -170,22 +171,11 @@
       An ASIN is 10 letters or digits.
     </p>
 
-    <!-- The search under the book: pending, failed (Search is then Retry), or its results -->
+    <!-- The search under the book: failed (Search is then Retry), or its results. A running search
+         only shows on the bottom bar, so nothing moves under the book; its text is for screen
+         readers. -->
     <p
-      v-if="state.status === 'searching'"
-      class="match-search-state"
-      data-testid="match-search-pending"
-    >
-      <PhSpinner class="ph-spin" :size="16" />
-      <template v-if="state.kind === 'asin'">
-        Checking {{ match.asin.trim().toUpperCase() }} in {{ regionLabel(match.region) }}…
-      </template>
-      <template v-else>
-        Searching "{{ match.query.trim() }}" in {{ regionLabel(match.region) }}…
-      </template>
-    </p>
-    <p
-      v-else-if="state.status === 'failed' && state.kind === 'title'"
+      v-if="state.status === 'failed' && state.kind === 'title'"
       class="match-search-state match-search-error"
       data-testid="match-search-error"
     >
@@ -207,6 +197,11 @@
         in {{ regionLabel(match.region) }}.
       </p>
     </template>
+
+    <div class="match-bar" :title="pendingText ?? undefined" />
+    <span class="match-sr-only" role="status">
+      <span v-if="pendingText" data-testid="match-search-pending">{{ pendingText }}</span>
+    </span>
   </div>
 </template>
 
@@ -216,7 +211,6 @@ import {
   PhArrowCounterClockwise,
   PhCheckCircle,
   PhMagnifyingGlass,
-  PhSpinner,
   PhWarningCircle,
   PhX,
   PhXCircle,
@@ -293,6 +287,7 @@ const regionOptions = computed(() =>
 )
 
 const barState = computed(() => {
+  if (state.value.status === 'searching') return 'searching'
   const matched = matchState(match.value)
   return matched === 'matched' && props.excluded ? 'ignored' : matched
 })
@@ -309,6 +304,15 @@ const currentRecord = computed<BookRecord>(() => ({
   asin: match.value.current.asin,
   region: match.value.current.region,
 }))
+
+// What the running search does, on the bar's tooltip and for screen readers
+const pendingText = computed(() => {
+  if (state.value.status !== 'searching') return null
+  const region = regionLabel(match.value.region)
+  return state.value.kind === 'asin'
+    ? `Checking ${match.value.asin.trim().toUpperCase()} in ${region}…`
+    : `Searching "${match.value.query.trim()}" in ${region}…`
+})
 
 // The record shown as selected in the results: the new one once there is one, else the one the
 // book points at today
@@ -483,17 +487,58 @@ defineExpose({ search, cancelSearch })
 </script>
 
 <style scoped>
-/* The state bar, the whole height of the card: grey ignored, green matched, red error */
-.match-card {
-  border-left: 4px solid var(--match-bar-ignored, #6b7280);
+/* The state bar along the bottom of the card: grey ignored, green matched, red error, and blue
+   breathing while a search runs (a search has no progress to show) */
+.form-control-card.match-card {
+  position: relative;
+  overflow: hidden;
+  padding-bottom: calc(1rem + 4px);
 }
 
-.match-card-matched {
-  border-left-color: var(--match-bar-matched, #22c55e);
+.match-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  background: var(--match-bar-ignored, #6b7280);
 }
 
-.match-card-error {
-  border-left-color: var(--match-bar-error, #ef4444);
+.match-card-matched .match-bar {
+  background: var(--match-bar-matched, #22c55e);
+}
+
+.match-card-error .match-bar {
+  background: var(--match-bar-error, #ef4444);
+}
+
+.match-card-searching .match-bar {
+  background: var(--match-bar-searching, #3b82f6);
+  animation: match-bar-breathe 1.6s ease-in-out infinite alternate;
+}
+
+@keyframes match-bar-breathe {
+  from {
+    opacity: 0.2;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .match-card-searching .match-bar {
+    animation: none;
+  }
+}
+
+.match-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .match-header {

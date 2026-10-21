@@ -15,12 +15,13 @@
   You should have received a copy of the GNU Affero General Public License
   along with this program. If not, see <https://www.gnu.org/licenses/>.
 -->
-<!-- What the bar on the left of each book match card means (Repair Books and Find Match) -->
+<!-- What the bar along the bottom of each book match card means (Repair Books and Find Match) -->
 <template>
   <ul class="match-legend" data-testid="match-legend">
     <li><span class="match-legend-bar ignored" />Ignored</li>
     <li><span class="match-legend-bar matched" />Matched</li>
     <li><span class="match-legend-bar error" />Error</li>
+    <li><span class="match-legend-bar searching" />Searching</li>
   </ul>
 </template>
 
@@ -43,11 +44,11 @@
   gap: 0.35rem;
 }
 
-/* The same colours as the card's bar */
+/* The same colours as the card's bar, drawn the same way: a short horizontal bar */
 .match-legend-bar {
   display: inline-block;
-  width: 4px;
-  height: 1rem;
+  width: 1rem;
+  height: 4px;
   border-radius: 2px;
   background: var(--match-bar-ignored, #6b7280);
 }
@@ -58,5 +59,9 @@
 
 .match-legend-bar.error {
   background: var(--match-bar-error, #ef4444);
+}
+
+.match-legend-bar.searching {
+  background: var(--match-bar-searching, #3b82f6);
 }
 </style>
