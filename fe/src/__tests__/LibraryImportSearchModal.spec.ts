@@ -239,6 +239,37 @@ describe('LibraryImportSearchModal', () => {
     )
   })
 
+  it('looks the ASIN up when the region changes: one record is selected, none is an error', async () => {
+    const search = vi.mocked(apiService.advancedSearch)
+    const wrapper = mountModal({
+      ...primalHunter,
+      selectedMatch: { ...ph4, region: 'fr' } as unknown as typeof alchemised.selectedMatch,
+    })
+    await flushPromises()
+
+    search.mockResolvedValue([])
+    await field(wrapper, 'match-region').setValue('de')
+    await flushPromises()
+    expect(field(wrapper, 'match-search-error').text()).toContain(
+      'Audible Germany (DE) has no record for B0BK9W82PQ',
+    )
+    expect(field(wrapper, 'find-match-confirm').attributes('disabled')).toBeDefined()
+
+    search.mockResolvedValue([{ ...ph4, title: 'Primal Hunter 4 (US)' } as SearchResult])
+    await field(wrapper, 'match-region').setValue('us')
+    await flushPromises()
+    expect((field(wrapper, 'match-title').element as HTMLInputElement).value).toBe(
+      'Primal Hunter 4 (US)',
+    )
+    expect(wrapper.get('[data-testid="find-match-result"]').classes()).toContain('selected')
+
+    await field(wrapper, 'find-match-confirm').trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('select')?.[0]?.[0]).toEqual(
+      expect.objectContaining({ asin: 'B0BK9W82PQ', region: 'us' }),
+    )
+  })
+
   it('closes quietly while a search is running: the cancelled request is not reported', async () => {
     const unhandled = vi.fn()
     process.on('unhandledRejection', unhandled)

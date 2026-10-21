@@ -109,6 +109,8 @@ async function searchAndPick(
   { region = 'us', title = 'Primal Hunter 4' } = {},
 ) {
   await row(wrapper).get('[data-testid="match-region"]').setValue(region)
+  // Changing the region looks the ASIN up there first
+  await flushPromises()
   await row(wrapper).get('[data-testid="match-search"]').trigger('click')
   await flushPromises()
   const result = row(wrapper)
@@ -195,6 +197,7 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
     await row(wrapper).get('[data-testid="match-region"]').setValue('us')
+    await flushPromises()
 
     await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
@@ -377,28 +380,93 @@ describe('RepairBooksModal', () => {
     ])
   })
 
-  it('keeps the ASIN when the region changes, and checks it in the new region', async () => {
+  it('keeps the ASIN when the region changes and looks it up there, with Cancel search', async () => {
+    let answer: (results: unknown[]) => void = () => {}
+    apiMocks.advancedSearch.mockImplementation(() => new Promise((resolve) => (answer = resolve)))
     const wrapper = mountModal()
     await flushPromises()
-    await searchAndPick(wrapper)
-    expect(row(wrapper).find('[data-testid="match-picked"]').exists()).toBe(true)
 
-    await row(wrapper).get('[data-testid="match-region"]').setValue('fr')
+    await row(wrapper).get('[data-testid="match-region"]').setValue('de')
 
-    expect(field(wrapper, 'match-asin').value).toBe('B0BK9W82PQ')
-    // Picked in the US catalogue: it no longer vouches for the French one
-    expect(row(wrapper).find('[data-testid="match-picked"]').exists()).toBe(false)
+    expect(field(wrapper, 'match-asin').value).toBe('B0HM45F8MW')
+    expect(apiMocks.advancedSearch).toHaveBeenCalledWith(
+      expect.objectContaining({ asin: 'B0HM45F8MW', region: 'de' }),
+      expect.any(AbortSignal),
+    )
+    expect(row(wrapper).get('[data-testid="match-search-pending"]').text()).toContain(
+      'Checking B0HM45F8MW in Germany (DE)',
+    )
+    expect(row(wrapper).find('[data-testid="match-cancel-search"]').exists()).toBe(true)
+    answer([])
+    await flushPromises()
+  })
+
+  it('selects the one record the region has for the ASIN, and fills the title and author with it', async () => {
+    catalogue({
+      de: [{ ...frenchVol7, title: 'Primal Hunter 7', authors: [{ name: 'Zogarth (DE)' }] }],
+    })
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await row(wrapper).get('[data-testid="match-region"]').setValue('de')
+    await flushPromises()
+
+    const results = row(wrapper).findAll('[data-testid="find-match-result"]')
+    expect(results).toHaveLength(1)
+    expect(results[0]!.classes()).toContain('selected')
+    expect(field(wrapper, 'match-title').value).toBe('Primal Hunter 7')
+    expect(field(wrapper, 'match-author').value).toBe('Zogarth (DE)')
+    expect(row(wrapper).get('[data-testid="match-picked"]').text()).toContain('Primal Hunter 7')
+
     apiMocks.advancedSearch.mockClear()
     await repair(wrapper)
-    expect(apiMocks.advancedSearch).toHaveBeenCalledWith(
-      expect.objectContaining({ asin: 'B0BK9W82PQ', region: 'fr' }),
+    // Already looked up: saved without a second lookup
+    expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
+    expect(apiMocks.updateAudiobookIdentifiers).toHaveBeenCalledWith(
+      7,
+      expect.arrayContaining([expect.objectContaining({ value: 'B0HM45F8MW', region: 'de' })]),
     )
+  })
+
+  it('lets the user pick when the region has several records for the ASIN', async () => {
+    catalogue({ de: [frenchVol7, { ...frenchVol7, title: 'Primal Hunter 7 (Dramatized)' }] })
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await row(wrapper).get('[data-testid="match-region"]').setValue('de')
+    await flushPromises()
+
+    const results = row(wrapper).findAll('[data-testid="find-match-result"]')
+    expect(results).toHaveLength(2)
+    expect(results.some((r) => r.classes().includes('selected'))).toBe(false)
+    expect(field(wrapper, 'match-title').value).toBe('Primal Hunter, Vol. 7')
+  })
+
+  it('shows an error when the region has no record for the ASIN, and the book cannot be repaired', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await row(wrapper).get('[data-testid="match-region"]').setValue('us')
+    await flushPromises()
+
+    expect(field(wrapper, 'match-asin').value).toBe('B0HM45F8MW')
+    expect(row(wrapper).get('[data-testid="match-search-error"]').text()).toContain(
+      'Audible United States (US) has no record for B0HM45F8MW',
+    )
+    expect(row(wrapper).find('[data-testid="match-invalid-asin"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
+
+    // Another ASIN clears the error
+    await row(wrapper).get('[data-testid="match-asin"]').setValue('B0BK9W82PQ')
+    expect(row(wrapper).find('[data-testid="match-search-error"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeUndefined()
   })
 
   it('checks a typed ASIN in its region with the same search before saving it', async () => {
     const wrapper = mountModal()
     await flushPromises()
     await row(wrapper).get('[data-testid="match-region"]').setValue('us')
+    await flushPromises()
     await row(wrapper).get('[data-testid="match-asin"]').setValue('b0bk9w82pq')
 
     await repair(wrapper)
