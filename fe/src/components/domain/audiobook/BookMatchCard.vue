@@ -127,12 +127,14 @@
           data-testid="match-region"
           :disabled="regionLocked"
           :title="
-            regionLocked ? 'Wait for the search to end: changing the region searches' : undefined
+            regionLocked
+              ? 'Wait for the search to end: changing the region searches'
+              : regionLabel(match.region)
           "
           @change="onRegionChanged"
         >
-          <option v-for="o in regionOptions" :key="o.value" :value="o.value">
-            {{ o.label }}
+          <option v-for="o in regionOptions" :key="o.value" :value="o.value" :title="o.label">
+            {{ o.value.toUpperCase() }}
           </option>
         </select>
       </label>
@@ -352,10 +354,15 @@ const edited = ref(false)
 let controller: AbortController | null = null
 
 // Every Audible region stays available, ordered by usefulness: the book's region when the card
-// opened first, then the configured one and the US, then the others alphabetically
-const regionOptions = computed(() =>
-  orderedSearchRegionOptions([match.value.initial.region, props.configuredRegion, FALLBACK_REGION]),
-)
+// opened first, then the configured one and the US, then the others. The field shows region codes
+// to save room (the full name is each option's tooltip), so the others follow in code order
+const regionOptions = computed(() => {
+  const first = [match.value.initial.region, props.configuredRegion, FALLBACK_REGION]
+  const ordered = orderedSearchRegionOptions(first)
+  const head = ordered.filter((o) => first.includes(o.value))
+  const rest = ordered.filter((o) => !first.includes(o.value))
+  return [...head, ...rest.sort((a, b) => a.value.localeCompare(b.value))]
+})
 
 // Blue while searching; red when the request failed; orange for a field error or a search that
 // found nothing; green once matched (grey when left out); grey otherwise
@@ -728,7 +735,7 @@ defineExpose({ search, cancelSearch })
 .match-fields {
   display: grid;
   grid-template-columns:
-    minmax(10.5rem, 1.2fr) minmax(0, 2.5fr) minmax(0, 1.5fr) minmax(12rem, 1.3fr)
+    minmax(10.5rem, 1.2fr) minmax(0, 2.5fr) minmax(0, 1.5fr) minmax(5rem, 0.5fr)
     auto;
   align-items: end;
   gap: 0.75rem;
