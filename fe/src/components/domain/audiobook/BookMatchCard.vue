@@ -49,7 +49,7 @@
           class="form-input"
           maxlength="10"
           data-testid="match-asin"
-          @input="match.picked = null"
+          @input="onAsinTyped"
         />
       </label>
       <label class="match-field">
@@ -60,7 +60,7 @@
           class="form-input"
           data-testid="match-title"
           @input="onSearchChanged"
-          @keydown.enter.prevent="search"
+          @keydown.enter.prevent="search()"
         />
       </label>
       <label class="match-field">
@@ -70,7 +70,7 @@
           class="form-input"
           data-testid="match-author"
           @input="onSearchChanged"
-          @keydown.enter.prevent="search"
+          @keydown.enter.prevent="search()"
         />
       </label>
       <label class="match-field">
@@ -103,7 +103,7 @@
         data-testid="match-search"
         :disabled="!canSearch"
         :title="searchLocked ? 'Another book is being searched' : undefined"
-        @click="search"
+        @click="search()"
       >
         <PhMagnifyingGlass :size="16" />
         Search
@@ -117,7 +117,12 @@
       data-testid="match-search-pending"
     >
       <PhSpinner class="ph-spin" :size="16" />
-      Searching "{{ match.query.trim() }}" in {{ regionLabel(match.region) }}…
+      <template v-if="state.kind === 'asin'">
+        Checking {{ match.asin.trim().toUpperCase() }} in {{ regionLabel(match.region) }}…
+      </template>
+      <template v-else>
+        Searching "{{ match.query.trim() }}" in {{ regionLabel(match.region) }}…
+      </template>
     </p>
     <p
       v-else-if="state.status === 'failed'"
@@ -130,8 +135,8 @@
         type="button"
         class="btn btn-secondary match-retry-btn"
         data-testid="match-search-retry"
-        :disabled="!canSearch"
-        @click="search"
+        :disabled="!canSearchFor(state.kind)"
+        @click="search(state.kind)"
       >
         <PhArrowCounterClockwise :size="14" />
         Retry
@@ -142,6 +147,7 @@
         v-if="state.results.length"
         class="match-search-results"
         :results="state.results"
+        :selected-asin="match.picked?.asin"
         @select="pick"
       />
       <p v-else class="match-search-state" data-testid="match-search-empty">
@@ -154,7 +160,11 @@
     <p v-if="match.picked" class="match-picked" data-testid="match-picked">
       New record: {{ match.picked.title ?? match.picked.asin }}
     </p>
-    <p v-if="checkAsin && asinInvalid(match)" class="match-hint" data-testid="match-invalid-asin">
+    <p
+      v-if="checkAsin && !match.asinError && asinInvalid(match)"
+      class="match-hint"
+      data-testid="match-invalid-asin"
+    >
       {{
         match.asin.trim()
           ? 'An ASIN is 10 letters or digits: type it, or search the book.'
@@ -180,6 +190,8 @@ import {
   FALLBACK_REGION,
   asinInvalid,
   isEdited,
+  asinValid,
+  noRecordError,
   regionLabel,
   searchParams,
   type BookMatch,
@@ -210,8 +222,12 @@ const emit = defineEmits<{
   picked: [result: SearchResult]
 }>()
 
+// A search for the title and author, or the check of the ASIN in its region
+type SearchKind = 'title' | 'asin'
+
 interface SearchState {
   status: 'idle' | 'searching' | 'done' | 'failed'
+  kind: SearchKind
   results: SearchResult[]
   error: string | null
 }
@@ -227,18 +243,23 @@ const regionOptions = computed(() =>
   orderedSearchRegionOptions([match.value.initial.region, props.configuredRegion, FALLBACK_REGION]),
 )
 
-const canSearch = computed(
-  () => !props.searchLocked && state.value.status !== 'searching' && !!match.value.query.trim(),
-)
+const canSearch = computed(() => canSearchFor('title'))
 
-function idle(): SearchState {
-  return { status: 'idle', results: [], error: null }
+function canSearchFor(kind: SearchKind): boolean {
+  if (props.searchLocked || state.value.status === 'searching') return false
+  return kind === 'asin' ? asinValid(match.value) : !!match.value.query.trim()
 }
 
-// Search the title and author (or an ASIN typed as the title) in the region; the results open
-// under the book
-async function search() {
-  if (!canSearch.value) return
+function idle(): SearchState {
+  return { status: 'idle', kind: 'title', results: [], error: null }
+}
+
+// Search the title and author (or an ASIN typed as the title) in the region, the results opening
+// under the book; or check the ASIN in its region, which then vouches for it or rejects it
+async function search(kind: SearchKind = 'title') {
+  if (!canSearchFor(kind)) return
+  const asin = match.value.asin.trim().toUpperCase()
+  const region = match.value.region
   const current = new AbortController()
   controller = current
   let timedOut = false
@@ -246,24 +267,42 @@ async function search() {
     timedOut = true
     current.abort()
   }, SEARCH_TIMEOUT_MS)
-  state.value = { status: 'searching', results: [], error: null }
+  state.value = { status: 'searching', kind, results: [], error: null }
   try {
-    const results = await libraryImportStore.searchInRegion(
-      searchParams(match.value),
-      match.value.region,
-      current.signal,
-    )
+    const params = kind === 'asin' ? { asin, cap: 5 } : searchParams(match.value)
+    const results = await libraryImportStore.searchInRegion(params, region, current.signal)
     // A canceled search answers to nobody: the card already went back to its fields
-    if (controller === current) state.value = { status: 'done', results, error: null }
+    if (controller !== current) return
+    if (kind === 'title') {
+      state.value = { status: 'done', kind, results, error: null }
+      return
+    }
+    const found = results
+      .filter((r) => r.asin?.toUpperCase() === asin)
+      .map((r) => ({ ...r, region: r.region || region }))
+    if (found.length === 1) {
+      // One record: it is the book's, selected in the results, and its title and author fill the
+      // fields
+      const record = found[0]!
+      match.value.picked = record
+      match.value.query = record.title || match.value.query
+      match.value.author = record.authors?.[0]?.name || match.value.author
+      state.value = { status: 'done', kind, results: found, error: null }
+    } else if (found.length > 1) {
+      // Several records for one ASIN: the user picks
+      state.value = { status: 'done', kind, results: found, error: null }
+    } else {
+      match.value.asinError = noRecordError(asin, region)
+      state.value = { status: 'failed', kind, results: [], error: match.value.asinError }
+    }
   } catch (e) {
-    if (controller === current)
-      state.value = {
-        status: 'failed',
-        results: [],
-        error: timedOut
-          ? `The search took longer than ${SEARCH_TIMEOUT_MS / 1000} seconds and was stopped.`
-          : `The search failed: ${(e as Error)?.message ?? 'unknown error'}`,
-      }
+    if (controller !== current) return
+    const error = timedOut
+      ? `The search took longer than ${SEARCH_TIMEOUT_MS / 1000} seconds and was stopped.`
+      : `The search failed: ${(e as Error)?.message ?? 'unknown error'}`
+    // An ASIN its region could not be checked for stays unusable until checked
+    if (kind === 'asin') match.value.asinError = error
+    state.value = { status: 'failed', kind, results: [], error }
   } finally {
     clearTimeout(timer)
     if (controller === current) controller = null
@@ -283,6 +322,7 @@ function pick(result: SearchResult) {
   match.value.asin = result.asin.toUpperCase()
   match.value.region = result.region || match.value.region
   match.value.picked = { ...result, region: result.region || match.value.region }
+  match.value.asinError = null
   state.value = idle()
   emit('picked', result)
 }
@@ -292,15 +332,31 @@ function pick(result: SearchResult) {
 // previous values is stopped, and their results no longer apply.
 function onSearchChanged() {
   match.value.asin = ''
-  onRegionChanged()
+  onSearchReset()
 }
 
-// Another region keeps the ASIN, now to be checked in that region: the record picked in the
-// previous one no longer vouches for it, and the previous search and its results no longer apply
-function onRegionChanged() {
+function onSearchReset() {
   match.value.picked = null
+  match.value.asinError = null
   cancelSearch()
   state.value = idle()
+}
+
+// Another region keeps the ASIN and checks it there right away: the record picked in the previous
+// one no longer vouches for it, and the previous search and its results no longer apply
+function onRegionChanged() {
+  onSearchReset()
+  void search('asin')
+}
+
+// A typed ASIN is no longer the picked record, nor the one rejected in the region
+function onAsinTyped() {
+  match.value.picked = null
+  match.value.asinError = null
+  if (state.value.kind === 'asin') {
+    cancelSearch()
+    state.value = idle()
+  }
 }
 
 watch(
@@ -312,6 +368,7 @@ function revert() {
   cancelSearch()
   Object.assign(match.value, match.value.initial)
   match.value.picked = null
+  match.value.asinError = null
   state.value = idle()
 }
 

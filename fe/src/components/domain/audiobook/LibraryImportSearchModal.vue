@@ -27,8 +27,9 @@
           Search the title and author in the region and pick the result under the book, or type the
           ASIN and its region (it is checked in that region). Changing the title or author empties
           the ASIN, which no longer matches: search and pick the book again; changing the region
-          keeps it, to be checked in that region. The search is the one Add New and Library Import
-          use, with the same rules and priorities.
+          keeps it and looks it up there: a single record is selected and fills the title and
+          author; none is an error, and it can't be used until it changes. The search is the one Add
+          New and Library Import use, with the same rules and priorities.
         </p>
       </div>
 
@@ -93,6 +94,7 @@ import {
 } from '@/utils/libraryImportSearch'
 import {
   asinChanged,
+  asinInvalid,
   asinValid,
   createBookMatch,
   resolveRecord,
@@ -118,14 +120,16 @@ let searchCounted = false
 
 const bookTitle = computed(() => props.item.detectedTitle?.trim() || props.item.folderName)
 
-// A new record, picked or typed as a valid ASIN; the one the folder already has is no change
+// A new record, picked or typed as a valid ASIN that its region doesn't reject; the one the folder
+// already has is no change
 const canConfirm = computed(
   () =>
     !!match.value &&
     !confirming.value &&
     !searching.value &&
     asinChanged(match.value) &&
-    asinValid(match.value),
+    asinValid(match.value) &&
+    !asinInvalid(match.value),
 )
 
 onMounted(async () => {

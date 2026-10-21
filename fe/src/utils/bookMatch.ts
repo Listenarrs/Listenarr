@@ -36,6 +36,9 @@ export interface BookMatch extends BookMatchValues {
   // The record picked in the search results (its ASIN and region are known to exist); null when
   // the ASIN is typed
   picked: SearchResult | null
+  // Why the ASIN can't be used in its region, once checked there (no record, or the check failed):
+  // the book can't be repaired or matched until it changes
+  asinError: string | null
   // Values when the card opened, restored by Revert
   initial: BookMatchValues
   // The record the book points at today (empty when it has none)
@@ -46,7 +49,7 @@ export function createBookMatch(
   initial: BookMatchValues,
   current: { asin: string; region: string },
 ): BookMatch {
-  return { ...initial, picked: null, initial: { ...initial }, current }
+  return { ...initial, picked: null, asinError: null, initial: { ...initial }, current }
 }
 
 export function regionLabel(region: string): string {
@@ -65,9 +68,14 @@ export function asinChanged(match: BookMatch): boolean {
   )
 }
 
-// Keeping the current ASIN and region is fine; a new one must look like an ASIN
+// Keeping the current ASIN and region is fine; a new one must look like an ASIN. An ASIN its
+// region has no record for is never fine.
 export function asinInvalid(match: BookMatch): boolean {
-  return asinChanged(match) && !asinValid(match)
+  return !!match.asinError || (asinChanged(match) && !asinValid(match))
+}
+
+export function noRecordError(asin: string, region: string): string {
+  return `Audible ${regionLabel(region)} has no record for ${asin}. Search the book and pick it in the right region.`
 }
 
 export function isEdited(match: BookMatch): boolean {
@@ -99,9 +107,6 @@ export async function resolveRecord(
   const found = (await search({ asin, cap: 5 }, match.region)).find(
     (r) => r.asin?.toUpperCase() === asin,
   )
-  if (!found)
-    throw new Error(
-      `Audible ${regionLabel(match.region)} has no record for ${asin}. Search the book and pick it in the right region.`,
-    )
+  if (!found) throw new Error(noRecordError(asin, match.region))
   return { ...found, region: found.region || match.region }
 }

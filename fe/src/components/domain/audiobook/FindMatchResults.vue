@@ -23,6 +23,8 @@
       v-for="result in results"
       :key="result.asin ?? result.title"
       class="result-item"
+      :class="{ selected: isSelected(result) }"
+      :aria-selected="isSelected(result)"
       data-testid="find-match-result"
       @click="emit('select', result)"
     >
@@ -53,11 +55,16 @@ import { getPlaceholderUrl } from '@/utils/placeholder'
 import { extractNarrators, type NormalizedResult } from '@/utils/searchResultHelpers'
 import type { SearchResult } from '@/types'
 
-defineProps<{ results: SearchResult[] }>()
+// selectedAsin: the record already picked, shown as selected
+const props = defineProps<{ results: SearchResult[]; selectedAsin?: string | null }>()
 const emit = defineEmits<{ select: [result: SearchResult] }>()
 
 const { getProtectedImageSrc } = useProtectedImages()
 const placeholderUrl = getPlaceholderUrl()
+
+function isSelected(result: SearchResult): boolean {
+  return !!props.selectedAsin && result.asin?.toUpperCase() === props.selectedAsin.toUpperCase()
+}
 
 function narrators(result: SearchResult): string {
   return extractNarrators(result as unknown as NormalizedResult)
@@ -95,6 +102,11 @@ function seriesName(result: SearchResult): string | undefined {
 
 .result-item:hover {
   background: #2a2a2a;
+}
+
+.result-item.selected {
+  background: rgba(34, 197, 94, 0.12);
+  box-shadow: inset 3px 0 0 #22c55e;
 }
 
 .result-thumb {
