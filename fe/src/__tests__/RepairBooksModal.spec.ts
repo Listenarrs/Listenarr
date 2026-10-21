@@ -403,6 +403,26 @@ describe('RepairBooksModal', () => {
     )
   })
 
+  it('sums New up like Current, every author included', async () => {
+    catalogue({
+      us: [
+        {
+          ...englishPh4,
+          subtitle: 'A LitRPG Adventure',
+          authors: [{ name: 'Zogarth' }, { name: 'Co Author' }],
+        },
+      ],
+    })
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await searchAndPick(wrapper)
+
+    expect(row(wrapper).get('[data-testid="match-picked"]').text()).toMatch(
+      /^B0BK9W82PQ - Primal Hunter 4: A LitRPG Adventure - Zogarth, Co Author - United States \(US\)/,
+    )
+  })
+
   it('leaves the parts a book does not have out of its summary', async () => {
     apiMocks.getAudiobook.mockResolvedValue({ id: 7, title: 'Untitled', authors: [] })
     apiMocks.getAudiobookIdentifiers.mockResolvedValue({ audiobookId: 7, identifiers: [] })
