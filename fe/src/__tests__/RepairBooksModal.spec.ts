@@ -389,6 +389,25 @@ describe('RepairBooksModal', () => {
     expect(row(wrapper).find('[data-testid="match-search"]').exists()).toBe(true)
   })
 
+  it('sums the book up next to Revert: ASIN - Title: Subtitle - Author - Region', async () => {
+    apiMocks.getAudiobook.mockResolvedValue({ ...mismatched, subtitle: 'A LitRPG Adventure' })
+    const wrapper = mountModal()
+    await flushPromises()
+
+    expect(row(wrapper).get('[data-testid="match-summary"]').text()).toBe(
+      'B0HM45F8MW - Primal Hunter, Vol. 7: A LitRPG Adventure - Zogarth - France (FR)',
+    )
+  })
+
+  it('leaves the parts a book does not have out of its summary', async () => {
+    apiMocks.getAudiobook.mockResolvedValue({ id: 7, title: 'Untitled', authors: [] })
+    apiMocks.getAudiobookIdentifiers.mockResolvedValue({ audiobookId: 7, identifiers: [] })
+    const wrapper = mountModal()
+    await flushPromises()
+
+    expect(row(wrapper).get('[data-testid="match-summary"]').text()).toBe('Untitled')
+  })
+
   it('shows the current and new records under the fields', async () => {
     const wrapper = mountModal()
     await flushPromises()
