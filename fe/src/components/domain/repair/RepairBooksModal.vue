@@ -349,7 +349,9 @@ function onSearching(row: RepairRow, searching: boolean) {
 // The new ASIN becomes the primary one. Identifiers that came from the previous match (provider or
 // import) are dropped: an ISBN of the wrong book would let the rescan find it again. Manual ones stay.
 function identifiersWithPrimaryAsin(row: RepairRow): AudiobookExternalIdentifierInput[] {
-  const asin = row.match.asin.trim().toUpperCase()
+  // Only a matched book is repaired: its new record is the picked one, whatever the fields hold
+  const asin = (row.match.picked?.asin ?? '').toUpperCase()
+  const region = row.match.picked?.region || row.match.region
   const manual = row.identifiers
     .filter((i) => i.source === 'Manual')
     .filter((i) => !(i.type === 'Asin' && i.value.toUpperCase() === asin))
@@ -360,10 +362,7 @@ function identifiersWithPrimaryAsin(row: RepairRow): AudiobookExternalIdentifier
       isPrimary: i.type === 'Asin' ? false : Boolean(i.isPrimary),
       source: 'Manual' as const,
     }))
-  return [
-    { type: 'Asin', value: asin, region: row.match.region, isPrimary: true, source: 'Manual' },
-    ...manual,
-  ]
+  return [{ type: 'Asin', value: asin, region, isPrimary: true, source: 'Manual' }, ...manual]
 }
 
 async function rescan(id: number) {
@@ -394,7 +393,7 @@ async function repair() {
         id: row.id,
         title: book.title || row.title,
         success: true,
-        detail: `${rescanned.asin ?? row.match.asin} · ${rescanned.region ?? row.match.region}`,
+        detail: `${rescanned.asin ?? row.match.picked?.asin} · ${rescanned.region ?? row.match.region}`,
         durationMs: performance.now() - startedAt,
       })
     } catch (e) {

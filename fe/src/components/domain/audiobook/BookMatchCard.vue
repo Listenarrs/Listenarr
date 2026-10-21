@@ -66,7 +66,7 @@
           v-model="match.query"
           class="form-input"
           data-testid="match-title"
-          @input="onSearchChanged('title')"
+          @input="onEdited"
           @keydown.enter.prevent="search()"
         />
       </label>
@@ -76,7 +76,7 @@
           v-model="match.author"
           class="form-input"
           data-testid="match-author"
-          @input="onSearchChanged('author')"
+          @input="onEdited"
           @keydown.enter.prevent="search()"
         />
       </label>
@@ -167,9 +167,6 @@
     </dl>
 
     <!-- The rules, where they apply -->
-    <p v-if="clearedBy && !match.asin" class="match-hint" data-testid="match-asin-cleared">
-      ASIN cleared: the {{ clearedBy }} changed, search again.
-    </p>
 
     <!-- The search under the book: failed (Search is then Retry), or its results. A running search
          only shows on the bottom bar, so nothing moves under the book; its text is for screen
@@ -281,8 +278,8 @@ interface SearchState {
 
 const titleEl = ref<HTMLInputElement | null>(null)
 const state = ref<SearchState>(idle())
-// The field whose change emptied the ASIN, said under the fields until the ASIN is filled again
-const clearedBy = ref<'title' | 'author' | null>(null)
+// A field changed since the last search: Retry goes back to Search
+const edited = ref(false)
 // An ASIN typed by hand since the last lookup: Search looks it up first, the title and author
 // staying as they are
 const asinTyped = ref(false)
@@ -341,6 +338,7 @@ const regionLocked = computed(() => props.searchLocked || state.value.status ===
 // Retry. Editing a field forgets that search, and Search comes back. An ASIN its region has no
 // record for keeps Search: searching the title there is what comes next.
 const retryKind = computed<SearchKind | null>(() => {
+  if (edited.value) return null
   const { status, results, kind } = state.value
   if (status === 'failed') return kind
   if (status === 'done' && results.length === 0 && kind === 'title') return kind
@@ -360,7 +358,6 @@ function idle(): SearchState {
 function setMatched(record: SearchResult) {
   match.value.picked = record
   match.value.asinError = null
-  clearedBy.value = null
   emit('matched', record)
 }
 
@@ -384,8 +381,14 @@ async function search(kind: SearchKind = 'title') {
     current.abort()
   }, SEARCH_TIMEOUT_MS)
   state.value = { status: 'searching', kind, results: [], error: null }
-  // Looked up: a next Search goes back to the title and author
-  if (kind === 'asin') asinTyped.value = false
+  edited.value = false
+  match.value.asinError = null
+  // Looked up: a next Search goes back to the title and author. The record of another ASIN no
+  // longer stands: this lookup gives the new one, or none
+  if (kind === 'asin') {
+    asinTyped.value = false
+    match.value.picked = null
+  }
   try {
     const query = kind === 'asin' ? asin : addNewQuery(match.value)
     const results = await searchLikeAddNew(query, region, current.signal)
@@ -451,30 +454,27 @@ function forgetRecord() {
   state.value = idle()
 }
 
-// Another title or author describes another record: the ASIN no longer matches, so it is emptied
-// until the book is searched and picked again (or its ASIN is typed)
-function onSearchChanged(field: 'title' | 'author') {
-  if (match.value.asin) clearedBy.value = field
-  match.value.asin = ''
-  forgetRecord()
+// Typing only prepares the next search: the results, the record and any error stay until it runs
+function onEdited() {
+  edited.value = true
 }
 
-// Another region keeps the ASIN and looks it up there right away
+// Another region keeps the ASIN and looks it up there right away: the one change that searches by
+// itself
 function onRegionChanged() {
   forgetRecord()
   void search('asin')
 }
 
-// A typed ASIN is another record: it is no longer the new one nor the rejected one. The title
-// and author stay as they are; Enter or Search looks the ASIN up first.
+// A typed ASIN only prepares the next search too: Enter or Search then looks it up first, the
+// title and author staying as they are
 function onAsinTyped() {
-  clearedBy.value = null
-  forgetRecord()
+  edited.value = true
   asinTyped.value = true
 }
 
 function onAsinEntered() {
-  if (!match.value.asin || match.value.picked) return
+  if (!match.value.asin.trim()) return
   void search('asin')
 }
 
@@ -486,7 +486,7 @@ watch(
 function revert() {
   cancelSearch()
   Object.assign(match.value, match.value.initial)
-  clearedBy.value = null
+  edited.value = false
   forgetRecord()
 }
 
