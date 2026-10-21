@@ -51,6 +51,24 @@ describe('LibraryImportSearchModal', () => {
     vi.restoreAllMocks()
   })
 
+  it('names each field above it: Title or ASIN, Author, then Region', async () => {
+    const wrapper = mount(LibraryImportSearchModal, {
+      props: {
+        target: { name: 'Alchemised', query: 'Alchemised', author: 'SenLinYu', region: 'fr' },
+      },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(wrapper.findAll('.search-field-label').map((l) => l.text())).toEqual([
+      'Title or ASIN',
+      'Author',
+      'Region',
+    ])
+    expect(
+      (wrapper.get('[data-testid="find-match-query"]').element as HTMLInputElement).value,
+    ).toBe('Alchemised')
+  })
+
   it('displays narrator when result includes narrator data', async () => {
     vi.spyOn(apiService, 'advancedSearch').mockResolvedValue([
       {

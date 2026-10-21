@@ -22,22 +22,40 @@
     </template>
     <ModalBody>
       <div class="search-wrap">
+        <!-- Title (or ASIN), author and region, each named above its field, on one line; they
+             wrap only when the modal is too narrow -->
         <div class="search-fields">
-          <div class="search-input-row">
+          <label class="search-field search-field-query">
+            <span class="search-field-label">
+              Title or ASIN
+              <PhSpinner v-if="isSearching" class="ph-spin search-spinner" :size="12" />
+            </span>
             <input
               ref="inputEl"
               v-model="searchQuery"
               class="form-input search-input"
               placeholder="Title or ASIN…"
+              data-testid="find-match-query"
               @input="onInput"
               @keydown.escape="emit('close')"
               @keydown.enter="runSearch"
             />
-          </div>
-          <div class="search-input-row">
-            <label class="region-label" for="find-match-region">Region</label>
+          </label>
+          <label class="search-field search-field-author">
+            <span class="search-field-label">Author</span>
+            <input
+              v-model="authorQuery"
+              class="form-input search-input"
+              placeholder="Author (optional)…"
+              data-testid="find-match-author"
+              @input="onInput"
+              @keydown.escape="emit('close')"
+              @keydown.enter="runSearch"
+            />
+          </label>
+          <label class="search-field search-field-region">
+            <span class="search-field-label">Region</span>
             <select
-              id="find-match-region"
               v-model="region"
               class="form-input region-select"
               data-testid="find-match-region"
@@ -47,18 +65,7 @@
                 {{ o.label }}
               </option>
             </select>
-          </div>
-          <div class="search-input-row">
-            <input
-              v-model="authorQuery"
-              class="form-input search-input"
-              placeholder="Author (optional)…"
-              @input="onInput"
-              @keydown.escape="emit('close')"
-              @keydown.enter="runSearch"
-            />
-            <PhSpinner v-if="isSearching" class="ph-spin search-spinner" :size="16" />
-          </div>
+          </label>
         </div>
 
         <div v-if="searchResults.length > 0" class="results-list">
@@ -235,41 +242,40 @@ function select(result: SearchResult) {
 .search-fields {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-end;
   gap: 0.5rem;
 }
 
-/* Title, region and author on one line; they wrap only when the modal is too narrow */
-.search-fields > .search-input-row:first-child {
+.search-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.search-field-query {
+  flex: 2 1 12rem;
+}
+
+.search-field-author {
   flex: 1 1 9rem;
 }
 
-.search-fields > .search-input-row:nth-child(2) {
+.search-field-region {
   flex: 0 0 auto;
 }
 
-.search-fields > .search-input-row:last-child {
-  flex: 1 1 9rem;
-}
-
-.region-label {
-  font-size: 0.8rem;
-  color: #888;
-}
-
-.region-select {
-  flex: 0 0 auto;
-  width: auto;
-}
-
-.search-input-row {
+.search-field-label {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: #aaa;
 }
 
 .search-input {
-  flex: 1;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .search-spinner {
