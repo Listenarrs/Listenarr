@@ -163,6 +163,33 @@ describe('RepairBooksModal', () => {
     )
   })
 
+  it('searches the title and author typed on the row, from Find Match or with Enter, and Revert restores them', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    expect(field(wrapper, 'repair-title').value).toBe('Primal Hunter, Vol. 7')
+    expect(field(wrapper, 'repair-author').value).toBe('Zogarth')
+
+    await row(wrapper).get('[data-testid="repair-title"]').setValue('The Primal Hunter 4')
+    await row(wrapper).get('[data-testid="repair-title"]').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+
+    const findMatch = wrapper.getComponent(LibraryImportSearchModal)
+    expect(findMatch.props('target')).toMatchObject({
+      name: 'Primal Hunter, Vol. 7',
+      query: 'The Primal Hunter 4',
+      author: 'Zogarth',
+    })
+    expect(apiMocks.advancedSearch).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'The Primal Hunter 4', author: 'Zogarth' }),
+      expect.any(AbortSignal),
+    )
+
+    findMatch.vm.$emit('close')
+    await flushPromises()
+    await row(wrapper).get('[data-testid="repair-revert"]').trigger('click')
+    expect(field(wrapper, 'repair-title').value).toBe('Primal Hunter, Vol. 7')
+  })
+
   it('takes the ASIN and region of the record picked in Find Match, then repairs with them', async () => {
     const wrapper = mountModal()
     await flushPromises()
