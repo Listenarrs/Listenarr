@@ -212,6 +212,7 @@ describe('LibraryImportSearchModal', () => {
     await field(wrapper, 'match-asin').setValue('B000APXZHK')
     await field(wrapper, 'match-search').trigger('click')
     await flushPromises()
+    await wrapper.get('[data-testid="find-match-result"]').trigger('click')
     expect(wrapper.get('[data-testid="find-match-card"]').attributes('data-match-state')).toBe(
       'matched',
     )
@@ -236,13 +237,14 @@ describe('LibraryImportSearchModal', () => {
     // Enter looks the ASIN up again
     await field(wrapper, 'match-asin').trigger('keydown', { key: 'Enter' })
     await flushPromises()
+    await wrapper.get('[data-testid="find-match-result"]').trigger('click')
     await field(wrapper, 'find-match-confirm').trigger('click')
     expect(wrapper.emitted('select')?.[0]?.[0]).toEqual(
       expect.objectContaining({ asin: 'B0BK9W82PQ', region: 'fr' }),
     )
   })
 
-  it('looks the ASIN up when the region changes: one record is selected, none is an error', async () => {
+  it('looks the ASIN up when the region changes: a record found is offered, none is an error', async () => {
     const wrapper = mountModal({
       ...primalHunter,
       selectedMatch: { ...ph4, region: 'fr' } as unknown as typeof alchemised.selectedMatch,
@@ -260,6 +262,8 @@ describe('LibraryImportSearchModal', () => {
     metadata.mockResolvedValue({ metadata: { ...ph4, title: 'Primal Hunter 4 (US)' } })
     await field(wrapper, 'match-region').setValue('us')
     await flushPromises()
+    expect(wrapper.get('[data-testid="find-match-result"]').classes()).not.toContain('selected')
+    await wrapper.get('[data-testid="find-match-result"]').trigger('click')
     expect(field(wrapper, 'match-picked').text()).toContain('Primal Hunter 4 (US)')
     // The fields stay as typed
     expect((field(wrapper, 'match-title').element as HTMLInputElement).value).toBe(
