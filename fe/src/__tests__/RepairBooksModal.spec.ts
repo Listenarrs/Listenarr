@@ -159,7 +159,7 @@ describe('RepairBooksModal', () => {
 
     expect(row(wrapper).text()).toContain('Primal Hunter, Vol. 7')
     expect(row(wrapper).get('[data-testid="match-current"]').text()).toMatch(
-      /B0HM45F8MW\s+·\s+France \(FR\)/,
+      /^B0HM45F8MW - France \(FR\)$/,
     )
     expect(row(wrapper).find('[data-testid="match-none"]').exists()).toBe(true)
     expect(row(wrapper).attributes('data-match-state')).toBe('ignored')
@@ -569,20 +569,36 @@ describe('RepairBooksModal', () => {
     expect(row(wrapper).attributes('data-match-state')).toBe('error')
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
 
-    // Another ASIN clears the error, and is looked up once entered
+    // Another ASIN clears the error, and Search looks it up
     await row(wrapper).get('[data-testid="match-asin"]').setValue('B0BK9W82PQ')
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
     expect(row(wrapper).find('[data-testid="match-asin-error"]').exists()).toBe(false)
     expect(row(wrapper).attributes('data-match-state')).toBe('matched')
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeUndefined()
   })
 
-  it('looks a typed ASIN up in its region once entered, then saves it', async () => {
+  it('empties the title and author when an ASIN is typed, without searching', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    apiMocks.advancedSearch.mockClear()
+
+    await row(wrapper).get('[data-testid="match-asin"]').setValue('B0BK9W82PQ')
+    await flushPromises()
+
+    expect(field(wrapper, 'match-title').value).toBe('')
+    expect(field(wrapper, 'match-author').value).toBe('')
+    expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
+    expect(row(wrapper).attributes('data-match-state')).toBe('ignored')
+  })
+
+  it('looks a typed ASIN up in its region with Enter, then saves it', async () => {
     const wrapper = mountModal()
     await flushPromises()
     await row(wrapper).get('[data-testid="match-region"]').setValue('us')
     await flushPromises()
     await row(wrapper).get('[data-testid="match-asin"]').setValue('b0bk9w82pq')
+    await row(wrapper).get('[data-testid="match-asin"]').trigger('keydown', { key: 'Enter' })
     await flushPromises()
 
     expect(apiMocks.advancedSearch).toHaveBeenLastCalledWith(
@@ -590,6 +606,9 @@ describe('RepairBooksModal', () => {
       expect.any(AbortSignal),
     )
     expect(row(wrapper).get('[data-testid="match-picked"]').text()).toContain('Primal Hunter 4')
+    // The record found fills the title and author again
+    expect(field(wrapper, 'match-title').value).toBe('Primal Hunter 4')
+    expect(field(wrapper, 'match-author').value).toBe('Zogarth')
 
     apiMocks.advancedSearch.mockClear()
     await repair(wrapper)
@@ -604,6 +623,7 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
     await row(wrapper).get('[data-testid="match-asin"]').setValue('B0BK9W82PQ')
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
 
     expect(row(wrapper).get('[data-testid="match-asin-error"]').text()).toContain(
@@ -612,7 +632,7 @@ describe('RepairBooksModal', () => {
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
   })
 
-  it('forgets the new record while the ASIN is typed, and looks it up again once entered', async () => {
+  it('forgets the new record while the ASIN is typed, and looks it up again with Enter', async () => {
     const wrapper = mountModal()
     await flushPromises()
     await searchAndPick(wrapper)
@@ -623,7 +643,7 @@ describe('RepairBooksModal', () => {
     expect(row(wrapper).find('[data-testid="match-picked"]').exists()).toBe(false)
     expect(row(wrapper).attributes('data-match-state')).toBe('ignored')
 
-    await asin.trigger('change')
+    await asin.trigger('keydown', { key: 'Enter' })
     await flushPromises()
     expect(apiMocks.advancedSearch).toHaveBeenLastCalledWith(
       expect.objectContaining({ asin: 'B0BK9W82PQ', region: 'us' }),
@@ -673,7 +693,7 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
     const asin = row(wrapper).get('[data-testid="match-asin"]')
-    await asin.trigger('change')
+    await asin.trigger('keydown', { key: 'Enter' })
     await flushPromises()
 
     await repair(wrapper)

@@ -55,7 +55,7 @@
           maxlength="10"
           data-testid="match-asin"
           @input="onAsinTyped"
-          @change="onAsinEntered"
+          @change="asinEntered = true"
           @keydown.enter.prevent="onAsinEntered"
         />
       </label>
@@ -126,13 +126,13 @@
         type="button"
         class="btn btn-secondary match-search-btn"
         data-testid="match-search"
-        :disabled="!canSearch"
+        :disabled="!canSearchFor(searchKind)"
         :title="
           searchLocked
             ? 'Another book is being searched'
             : 'The search Add New and Library Import use, with the same rules and priorities'
         "
-        @click="search()"
+        @click="search(searchKind)"
       >
         <PhMagnifyingGlass :size="16" />
         Search
@@ -143,17 +143,19 @@
     <dl class="match-records">
       <dt>Current</dt>
       <dd data-testid="match-current">
-        <template v-if="match.current.asin">
-          <span class="match-asin">{{ match.current.asin }}</span>
-          · {{ regionLabel(match.current.region) || 'no region' }}
-        </template>
-        <span v-else class="match-muted">None</span>
+        {{ bookSummary({ asin: match.current.asin, region: match.current.region }) || 'None' }}
       </dd>
       <dt>New</dt>
-      <dd v-if="match.picked" class="match-new-ok" data-testid="match-picked">
-        <span class="match-asin">{{ match.picked.asin }}</span>
-        · {{ regionLabel(match.picked.region ?? match.region) }} ·
-        {{ match.picked.title ?? match.picked.asin }}
+      <dd v-if="match.picked" data-testid="match-picked">
+        {{
+          bookSummary({
+            asin: match.picked.asin,
+            title: match.picked.title,
+            subtitle: match.picked.subtitle,
+            author: match.picked.authors?.[0]?.name,
+            region: match.picked.region ?? match.region,
+          })
+        }}
         <span class="match-status">
           <PhCheckCircle :size="14" weight="fill" />
           checked
@@ -163,7 +165,7 @@
         <PhXCircle :size="14" weight="fill" />
         <span>{{ match.asinError }}</span>
       </dd>
-      <dd v-else class="match-muted" data-testid="match-none">
+      <dd v-else data-testid="match-none">
         No new record yet: search the book and pick it, or type its ASIN
       </dd>
     </dl>
@@ -233,6 +235,7 @@ import { orderedSearchRegionOptions } from '@/utils/languageMapping'
 import {
   FALLBACK_REGION,
   asinValid,
+  bookSummary,
   isEdited,
   matchState,
   noRecordError,
@@ -282,7 +285,7 @@ const titleEl = ref<HTMLInputElement | null>(null)
 const state = ref<SearchState>(idle())
 // The field whose change emptied the ASIN, said under the fields until the ASIN is filled again
 const clearedBy = ref<'title' | 'author' | null>(null)
-// The ASIN was entered (left or Enter): a malformed one is flagged from then on, not while typed
+// The ASIN was entered (left, or Enter): a malformed one is flagged from then on, not while typed
 const asinEntered = ref(false)
 let controller: AbortController | null = null
 
@@ -297,7 +300,11 @@ const barState = computed(() => {
   return matched === 'matched' && props.excluded ? 'ignored' : matched
 })
 
-const canSearch = computed(() => canSearchFor('title'))
+// Search looks the ASIN up when it is the only thing to search (a typed ASIN empties the title),
+// else searches the title and author
+const searchKind = computed<SearchKind>(() =>
+  !match.value.query.trim() && match.value.asin ? 'asin' : 'title',
+)
 
 // Changing the region looks the ASIN up there: not while a search runs, here or on another book.
 // One search at a time keeps answers from racing each other.
@@ -422,10 +429,13 @@ function onRegionChanged() {
   void search('asin')
 }
 
-// A typed ASIN is no longer the new record, nor the one rejected; it is looked up once entered
+// A typed ASIN is another record: it is no longer the new one nor the rejected one, and the
+// title and author, which described the previous one, are emptied. Enter or Search looks it up.
 function onAsinTyped() {
   asinEntered.value = false
   clearedBy.value = null
+  match.value.query = ''
+  match.value.author = ''
   forgetRecord()
 }
 
@@ -509,41 +519,29 @@ defineExpose({ search, cancelSearch })
   color: #aaa;
 }
 
+/* Current and New read like the summary next to Revert; only their state is coloured */
 .match-records {
   display: grid;
   grid-template-columns: auto 1fr;
   align-items: center;
   gap: 0.3rem 0.75rem;
   margin: 0.75rem 0 0;
-  font-size: 0.85rem;
-}
-
-.match-records dt {
   font-size: 0.8rem;
   color: #aaa;
 }
 
+.match-records dt {
+  color: #aaa;
+}
+
 .match-records dd {
-  color: #e0e0e0;
+  color: #aaa;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 0.4rem;
   margin: 0;
   min-width: 0;
-}
-
-.match-asin {
-  font-family: monospace;
-}
-
-.match-records dd.match-muted,
-.match-muted {
-  color: #888;
-}
-
-.match-new-ok {
-  color: #e0e0e0;
 }
 
 .match-status {
