@@ -148,6 +148,7 @@ describe('RepairBooksModal', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    vi.restoreAllMocks()
   })
 
   it('lists each book with its current ASIN and region', async () => {
@@ -484,6 +485,38 @@ describe('RepairBooksModal', () => {
 
     expect(apiMocks.rescanAudiobookMetadata).toHaveBeenCalledTimes(2)
     expect(wrapper.text()).toContain('B0HM45F8MW · fr')
+  })
+
+  it('shows how long each repair took, in seconds with up to 2 decimals', async () => {
+    // The clock moves only while the book is rescanned
+    let now = 1000
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
+    apiMocks.rescanAudiobookMetadata.mockImplementationOnce(async () => {
+      now += 1234.5
+      return { message: 'ok', audiobookId: 7, asin: 'B0HM45F8MW', region: 'fr' }
+    })
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await repair(wrapper)
+
+    expect(wrapper.get('[data-testid="repair-result-duration"]').text()).toBe('1.23 s')
+  })
+
+  it('shows how long a failed repair took too, without trailing zeros', async () => {
+    let now = 1000
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
+    apiMocks.rescanAudiobookMetadata.mockImplementationOnce(async () => {
+      now += 500
+      throw new Error('Audible is down')
+    })
+    const wrapper = mountModal()
+    await flushPromises()
+
+    await repair(wrapper)
+
+    expect(wrapper.text()).toContain('Audible is down')
+    expect(wrapper.get('[data-testid="repair-result-duration"]').text()).toBe('0.5 s')
   })
 
   it('offers to organize the repaired books', async () => {
