@@ -160,6 +160,16 @@ internal sealed partial class AudiobookScanService(
             semantics,
             diagnostics,
             cancellationToken);
+        await RefreshChangedTrackedFileMetadataAsync(
+            command,
+            pinnedAuthority,
+            audiobook,
+            discovery,
+            existingFiles,
+            resolvedExistingPaths,
+            attributedPaths,
+            diagnostics,
+            cancellationToken);
 
         var refreshed = await audiobookRepository.GetForScanSnapshotAsync(
             audiobook.Id,
