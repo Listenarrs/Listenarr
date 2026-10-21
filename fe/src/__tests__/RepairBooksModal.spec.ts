@@ -108,8 +108,8 @@ async function searchAndPick(
   wrapper: ReturnType<typeof mountModal>,
   { region = 'us', title = 'Primal Hunter 4' } = {},
 ) {
-  await row(wrapper).get('[data-testid="repair-region"]').setValue(region)
-  await row(wrapper).get('[data-testid="repair-search"]').trigger('click')
+  await row(wrapper).get('[data-testid="match-region"]').setValue(region)
+  await row(wrapper).get('[data-testid="match-search"]').trigger('click')
   await flushPromises()
   const result = row(wrapper)
     .findAll('[data-testid="find-match-result"]')
@@ -157,8 +157,8 @@ describe('RepairBooksModal', () => {
 
     expect(row(wrapper).text()).toContain('Primal Hunter, Vol. 7')
     expect(row(wrapper).text()).toMatch(/B0HM45F8MW\s+\(fr\)/)
-    expect(field(wrapper, 'repair-asin').value).toBe('B0HM45F8MW')
-    expect(field(wrapper, 'repair-region').value).toBe('fr')
+    expect(field(wrapper, 'match-asin').value).toBe('B0HM45F8MW')
+    expect(field(wrapper, 'match-region').value).toBe('fr')
   })
 
   it('names each field above it, in the order ASIN, Title, Author, Region', async () => {
@@ -167,24 +167,24 @@ describe('RepairBooksModal', () => {
 
     expect(
       row(wrapper)
-        .findAll('.repair-field-label')
+        .findAll('.match-field-label')
         .map((l) => l.text()),
     ).toEqual(['ASIN', 'Title', 'Author', 'Region'])
   })
 
   it('empties the ASIN when the title, author or region changes, and asks to pick the book again', async () => {
     for (const [testid, value] of [
-      ['repair-title', 'The Primal Hunter 4'],
-      ['repair-author', 'Someone else'],
-      ['repair-region', 'us'],
+      ['match-title', 'The Primal Hunter 4'],
+      ['match-author', 'Someone else'],
+      ['match-region', 'us'],
     ]) {
       const wrapper = mountModal()
       await flushPromises()
 
       await row(wrapper).get(`[data-testid="${testid}"]`).setValue(value)
 
-      expect(field(wrapper, 'repair-asin').value).toBe('')
-      expect(row(wrapper).get('[data-testid="repair-invalid-asin"]').text()).toContain(
+      expect(field(wrapper, 'match-asin').value).toBe('')
+      expect(row(wrapper).get('[data-testid="match-invalid-asin"]').text()).toContain(
         'No ASIN: search the book and pick it',
       )
       expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
@@ -195,9 +195,9 @@ describe('RepairBooksModal', () => {
   it('searches the title and author in the region and shows the results under the book', async () => {
     const wrapper = mountModal()
     await flushPromises()
-    await row(wrapper).get('[data-testid="repair-region"]').setValue('us')
+    await row(wrapper).get('[data-testid="match-region"]').setValue('us')
 
-    await row(wrapper).get('[data-testid="repair-search"]').trigger('click')
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
 
     expect(apiMocks.advancedSearch).toHaveBeenCalledWith(
@@ -211,19 +211,19 @@ describe('RepairBooksModal', () => {
   it('searches with Enter in the title or author, and Revert restores them', async () => {
     const wrapper = mountModal()
     await flushPromises()
-    expect(field(wrapper, 'repair-title').value).toBe('Primal Hunter, Vol. 7')
-    expect(field(wrapper, 'repair-author').value).toBe('Zogarth')
+    expect(field(wrapper, 'match-title').value).toBe('Primal Hunter, Vol. 7')
+    expect(field(wrapper, 'match-author').value).toBe('Zogarth')
 
-    await row(wrapper).get('[data-testid="repair-title"]').setValue('The Primal Hunter 4')
-    await row(wrapper).get('[data-testid="repair-title"]').trigger('keydown', { key: 'Enter' })
+    await row(wrapper).get('[data-testid="match-title"]').setValue('The Primal Hunter 4')
+    await row(wrapper).get('[data-testid="match-title"]').trigger('keydown', { key: 'Enter' })
     await flushPromises()
 
     expect(apiMocks.advancedSearch).toHaveBeenCalledWith(
       expect.objectContaining({ title: 'The Primal Hunter 4', author: 'Zogarth' }),
       expect.any(AbortSignal),
     )
-    await row(wrapper).get('[data-testid="repair-revert"]').trigger('click')
-    expect(field(wrapper, 'repair-title').value).toBe('Primal Hunter, Vol. 7')
+    await row(wrapper).get('[data-testid="match-revert"]').trigger('click')
+    expect(field(wrapper, 'match-title').value).toBe('Primal Hunter, Vol. 7')
     expect(row(wrapper).find('[data-testid="find-match-result"]').exists()).toBe(false)
   })
 
@@ -233,24 +233,24 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
 
-    await row(wrapper).get('[data-testid="repair-search"]').trigger('click')
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
 
-    expect(row(wrapper).get('[data-testid="repair-search-pending"]').text()).toContain(
+    expect(row(wrapper).get('[data-testid="match-search-pending"]').text()).toContain(
       'Searching "Primal Hunter, Vol. 7" in France (FR)',
     )
-    expect(row(wrapper).find('[data-testid="repair-search"]').exists()).toBe(false)
-    expect(row(wrapper).get('[data-testid="repair-cancel-search"]').classes()).toContain(
+    expect(row(wrapper).find('[data-testid="match-search"]').exists()).toBe(false)
+    expect(row(wrapper).get('[data-testid="match-cancel-search"]').classes()).toContain(
       'btn-danger',
     )
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
 
     answer([])
     await flushPromises()
-    expect(row(wrapper).get('[data-testid="repair-search-empty"]').text()).toContain(
+    expect(row(wrapper).get('[data-testid="match-search-empty"]').text()).toContain(
       'No results for "Primal Hunter, Vol. 7" by "Zogarth" in France (FR)',
     )
-    expect(row(wrapper).find('[data-testid="repair-search"]').exists()).toBe(true)
+    expect(row(wrapper).find('[data-testid="match-search"]').exists()).toBe(true)
   })
 
   it('cancels the search, back to the fields with nothing to report', async () => {
@@ -262,15 +262,15 @@ describe('RepairBooksModal', () => {
     )
     const wrapper = mountModal()
     await flushPromises()
-    await row(wrapper).get('[data-testid="repair-search"]').trigger('click')
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
 
-    await row(wrapper).get('[data-testid="repair-cancel-search"]').trigger('click')
+    await row(wrapper).get('[data-testid="match-cancel-search"]').trigger('click')
     await flushPromises()
 
-    expect(row(wrapper).find('[data-testid="repair-search-pending"]').exists()).toBe(false)
-    expect(row(wrapper).find('[data-testid="repair-search-error"]').exists()).toBe(false)
-    expect(row(wrapper).find('[data-testid="repair-search"]').exists()).toBe(true)
+    expect(row(wrapper).find('[data-testid="match-search-pending"]').exists()).toBe(false)
+    expect(row(wrapper).find('[data-testid="match-search-error"]').exists()).toBe(false)
+    expect(row(wrapper).find('[data-testid="match-search"]').exists()).toBe(true)
   })
 
   it('stops a search that takes too long, says so and offers to retry', async () => {
@@ -283,17 +283,17 @@ describe('RepairBooksModal', () => {
     )
     const wrapper = mountModal()
     await flushPromises()
-    await row(wrapper).get('[data-testid="repair-search"]').trigger('click')
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
 
     await vi.advanceTimersByTimeAsync(30_000)
     await flushPromises()
 
-    expect(row(wrapper).get('[data-testid="repair-search-error"]').text()).toContain(
+    expect(row(wrapper).get('[data-testid="match-search-error"]').text()).toContain(
       'The search took longer than 30 seconds',
     )
     catalogue({ fr: [frenchVol7] })
-    await row(wrapper).get('[data-testid="repair-search-retry"]').trigger('click')
+    await row(wrapper).get('[data-testid="match-search-retry"]').trigger('click')
     await flushPromises()
     expect(row(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(1)
   })
@@ -303,13 +303,13 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
 
-    await row(wrapper).get('[data-testid="repair-search"]').trigger('click')
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
 
-    expect(row(wrapper).get('[data-testid="repair-search-error"]').text()).toContain(
+    expect(row(wrapper).get('[data-testid="match-search-error"]').text()).toContain(
       'The search failed: API error: 502 Bad Gateway',
     )
-    expect(row(wrapper).find('[data-testid="repair-search-retry"]').exists()).toBe(true)
+    expect(row(wrapper).find('[data-testid="match-search-retry"]').exists()).toBe(true)
   })
 
   it('searches one book at a time: the others wait for it', async () => {
@@ -321,17 +321,17 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal([7, 8])
     await flushPromises()
 
-    await row(wrapper, 7).get('[data-testid="repair-search"]').trigger('click')
+    await row(wrapper, 7).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
 
-    const otherSearch = row(wrapper, 8).get('[data-testid="repair-search"]')
+    const otherSearch = row(wrapper, 8).get('[data-testid="match-search"]')
     expect(otherSearch.attributes('disabled')).toBeDefined()
     expect(otherSearch.attributes('title')).toBe('Another book is being searched')
 
     answer([])
     await flushPromises()
     expect(
-      row(wrapper, 8).get('[data-testid="repair-search"]').attributes('disabled'),
+      row(wrapper, 8).get('[data-testid="match-search"]').attributes('disabled'),
     ).toBeUndefined()
   })
 
@@ -342,9 +342,9 @@ describe('RepairBooksModal', () => {
     await searchAndPick(wrapper)
 
     expect(row(wrapper).find('[data-testid="find-match-result"]').exists()).toBe(false)
-    expect(field(wrapper, 'repair-asin').value).toBe('B0BK9W82PQ')
-    expect(field(wrapper, 'repair-region').value).toBe('us')
-    expect(row(wrapper).get('[data-testid="repair-picked"]').text()).toContain('Primal Hunter 4')
+    expect(field(wrapper, 'match-asin').value).toBe('B0BK9W82PQ')
+    expect(field(wrapper, 'match-region').value).toBe('us')
+    expect(row(wrapper).get('[data-testid="match-picked"]').text()).toContain('Primal Hunter 4')
 
     apiMocks.advancedSearch.mockClear()
     await repair(wrapper)
@@ -382,8 +382,8 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
     // The region first: changing it empties the ASIN
-    await row(wrapper).get('[data-testid="repair-region"]').setValue('us')
-    await row(wrapper).get('[data-testid="repair-asin"]').setValue('b0bk9w82pq')
+    await row(wrapper).get('[data-testid="match-region"]').setValue('us')
+    await row(wrapper).get('[data-testid="match-asin"]').setValue('b0bk9w82pq')
 
     await repair(wrapper)
 
@@ -399,7 +399,7 @@ describe('RepairBooksModal', () => {
   it('does not save a typed ASIN its region has no record for', async () => {
     const wrapper = mountModal()
     await flushPromises()
-    await row(wrapper).get('[data-testid="repair-asin"]').setValue('B0BK9W82PQ')
+    await row(wrapper).get('[data-testid="match-asin"]').setValue('B0BK9W82PQ')
 
     await repair(wrapper)
 
@@ -413,9 +413,9 @@ describe('RepairBooksModal', () => {
     await flushPromises()
     await searchAndPick(wrapper)
 
-    await row(wrapper).get('[data-testid="repair-asin"]').setValue('B0BK9W82PQ')
+    await row(wrapper).get('[data-testid="match-asin"]').setValue('B0BK9W82PQ')
 
-    expect(row(wrapper).find('[data-testid="repair-picked"]').exists()).toBe(false)
+    expect(row(wrapper).find('[data-testid="match-picked"]').exists()).toBe(false)
     await repair(wrapper)
     expect(apiMocks.advancedSearch).toHaveBeenLastCalledWith(
       expect.objectContaining({ asin: 'B0BK9W82PQ', region: 'us' }),
@@ -427,9 +427,9 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
 
-    await row(wrapper).get('[data-testid="repair-asin"]').setValue('B0BK9')
+    await row(wrapper).get('[data-testid="match-asin"]').setValue('B0BK9')
 
-    expect(row(wrapper).find('[data-testid="repair-invalid-asin"]').exists()).toBe(true)
+    expect(row(wrapper).find('[data-testid="match-invalid-asin"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
   })
 
@@ -438,12 +438,12 @@ describe('RepairBooksModal', () => {
     await flushPromises()
     await searchAndPick(wrapper)
 
-    await row(wrapper).get('[data-testid="repair-revert"]').trigger('click')
+    await row(wrapper).get('[data-testid="match-revert"]').trigger('click')
 
-    expect(field(wrapper, 'repair-asin').value).toBe('B0HM45F8MW')
-    expect(field(wrapper, 'repair-region').value).toBe('fr')
-    expect(row(wrapper).find('[data-testid="repair-picked"]').exists()).toBe(false)
-    expect(row(wrapper).get('[data-testid="repair-revert"]').attributes('disabled')).toBeDefined()
+    expect(field(wrapper, 'match-asin').value).toBe('B0HM45F8MW')
+    expect(field(wrapper, 'match-region').value).toBe('fr')
+    expect(row(wrapper).find('[data-testid="match-picked"]').exists()).toBe(false)
+    expect(row(wrapper).get('[data-testid="match-revert"]').attributes('disabled')).toBeDefined()
   })
 
   it("offers every region: the book's current one, then the configured one and US, then the rest", async () => {
@@ -452,7 +452,7 @@ describe('RepairBooksModal', () => {
     await flushPromises()
 
     const options = row(wrapper)
-      .findAll('[data-testid="repair-region"] option')
+      .findAll('[data-testid="match-region"] option')
       .map((o) => o.attributes('value'))
 
     expect(options.slice(0, 3)).toEqual(['fr', 'de', 'us'])
