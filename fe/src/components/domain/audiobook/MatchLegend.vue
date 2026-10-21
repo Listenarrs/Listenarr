@@ -48,20 +48,20 @@
 .match-legend-bar {
   display: inline-block;
   width: 1rem;
-  height: 4px;
+  height: 3px;
   border-radius: 2px;
   background: var(--match-bar-ignored, #6b7280);
 }
 
 .match-legend-bar.matched {
-  background: var(--match-bar-matched, #22c55e);
+  background: var(--match-bar-matched, #2ecc71);
 }
 
 .match-legend-bar.error {
-  background: var(--match-bar-error, #ef4444);
+  background: var(--match-bar-error, #e74c3c);
 }
 
 .match-legend-bar.searching {
-  background: var(--match-bar-searching, #3b82f6);
+  background: var(--match-bar-searching, #3498db);
 }
 </style>

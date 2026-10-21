@@ -487,12 +487,13 @@ defineExpose({ search, cancelSearch })
 </script>
 
 <style scoped>
-/* The state bar along the bottom of the card: grey ignored, green matched, red error, and blue
-   breathing while a search runs (a search has no progress to show) */
+/* The state bar along the bottom of the card, with the library's colours and thickness (its
+   cards' bottom bar): grey ignored, green matched, red error, and blue breathing while a search
+   runs (a search has no progress to show) */
 .form-control-card.match-card {
   position: relative;
   overflow: hidden;
-  padding-bottom: calc(1rem + 4px);
+  padding-bottom: calc(1rem + 3px);
 }
 
 .match-bar {
@@ -500,20 +501,20 @@ defineExpose({ search, cancelSearch })
   left: 0;
   right: 0;
   bottom: 0;
-  height: 4px;
+  height: 3px;
   background: var(--match-bar-ignored, #6b7280);
 }
 
 .match-card-matched .match-bar {
-  background: var(--match-bar-matched, #22c55e);
+  background: var(--match-bar-matched, #2ecc71);
 }
 
 .match-card-error .match-bar {
-  background: var(--match-bar-error, #ef4444);
+  background: var(--match-bar-error, #e74c3c);
 }
 
 .match-card-searching .match-bar {
-  background: var(--match-bar-searching, #3b82f6);
+  background: var(--match-bar-searching, #3498db);
   animation: match-bar-breathe 1.6s ease-in-out infinite alternate;
 }
 
