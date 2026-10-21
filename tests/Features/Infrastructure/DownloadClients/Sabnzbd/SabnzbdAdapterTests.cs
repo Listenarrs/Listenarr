@@ -43,6 +43,50 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Sabnzbd
                 .Build());
         }
 
+        /// <summary>
+        /// Regression test for https://github.com/Listenarrs/Listenarr/issues/808
+        /// Release titles containing '"' (common in usenet subject lines) crashed
+        /// AddAsync with an ArgumentException from ContentDispositionHeaderValue
+        /// before the request ever reached SABnzbd.
+        /// </summary>
+        [Fact]
+        public async Task AddAsync_TitleContainsQuotesAndCommas_SendsNzbWithoutHeaderEncodingError()
+        {
+            // Given: a real-world release title (from DrunkenSlug/NZBgeek) with embedded
+            // quotes and a comma-decimal size, resolved the way the production pipeline does
+            var title = "DBS #0762 \"J.K. Rowling - Harry Potter 1-7 Audio Book (english)\" - " +
+                "\"Audio book - Harry Potter And The Deathly Hallows - J.K. Rowling.part01.rar\" (02_22) - 672,05 MB";
+            var candidate = new TrustedDownloadCandidate(
+                "release-1",
+                title,
+                "J.K. Rowling",
+                "Harry Potter",
+                "DrunkenSlug (Prowlarr)",
+                "MP3",
+                "en",
+                700_000_000,
+                null,
+                new DownloadSourceDescriptor(
+                    IndexerId: null,
+                    IndexerImplementation: "Newznab",
+                    Protocol: DownloadProtocol.Usenet,
+                    Locators: [new DownloadSourceLocator(DownloadSourceLocatorKind.NzbUrl, "https://indexer.example/nzb/1")]));
+            var downloader = new Mock<INzbFileDownloader>();
+            downloader
+                .Setup(d => d.DownloadAsync(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync([1, 2, 3]);
+            var resolver = new GenericUsenetSourceResolver(downloader.Object);
+
+            // When: the title is resolved into a prepared submission and sent to SABnzbd
+            var submission = await resolver.ResolveAsync(candidate, provisionalDownloadId: null, CancellationToken.None);
+            var adapter = MockUtils.CreateSabnzbdAdapter(_provider);
+            var result = await adapter.AddAsync(_client, submission);
+
+            // Then: no ArgumentException, and SABnzbd actually received the addfile request
+            Assert.Equal("SABnzbd_nzo_addfile_test", result.ExternalId);
+            Assert.Single(sabnzbdApiMock.AddFileRequests);
+        }
+
         [Fact]
         public async Task TestConnectionAsync_NormalizesHostWithSchemeAndPath()
         {
