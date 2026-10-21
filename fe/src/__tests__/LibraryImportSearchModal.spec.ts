@@ -30,6 +30,50 @@ vi.mock('@/composables/useProtectedImages', () => ({
   }),
 }))
 
+const alchemised = {
+  id: 'C:\\incoming\\Alchemised.m4b',
+  fullPath: 'C:\\incoming\\Alchemised.m4b',
+  sourceFiles: ['C:\\incoming\\Alchemised.m4b'],
+  folderPath: 'C:\\incoming',
+  relativePath: 'Alchemised',
+  folderName: 'Alchemised',
+  detectedTitle: 'Alchemised',
+  detectedAuthor: 'SenLinYu',
+  format: 'M4B',
+  fileCount: 1,
+  selectedMatch: null,
+  hasSearched: false,
+  isSearching: false,
+  selected: false,
+}
+
+const primalHunter = {
+  ...alchemised,
+  id: '/incoming/PH4/01.mp3',
+  fullPath: '/incoming/PH4/01.mp3',
+  sourceFiles: ['/incoming/PH4/01.mp3'],
+  folderPath: '/incoming/PH4',
+  relativePath: 'PH4',
+  folderName: 'Primal Hunter 4',
+  detectedTitle: 'The Primal Hunter 4',
+  detectedAuthor: 'Zogarth',
+  format: 'MP3',
+}
+
+const ph4 = {
+  asin: 'B0BK9W82PQ',
+  title: 'Primal Hunter 4',
+  authors: [{ name: 'Zogarth' }],
+} as unknown as SearchResult
+
+function mountModal(item: typeof alchemised = alchemised) {
+  return mount(LibraryImportSearchModal, { props: { item } })
+}
+
+function field(wrapper: ReturnType<typeof mountModal>, testId: string) {
+  return wrapper.get(`[data-testid="${testId}"]`)
+}
+
 describe('LibraryImportSearchModal', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -51,41 +95,23 @@ describe('LibraryImportSearchModal', () => {
     vi.restoreAllMocks()
   })
 
-  it('names each field above it: Title or ASIN, Author, then Region', async () => {
-    const wrapper = mount(LibraryImportSearchModal, {
-      props: {
-        item: {
-          id: 'C:\\incoming\\Alchemised.m4b',
-          fullPath: 'C:\\incoming\\Alchemised.m4b',
-          sourceFiles: ['C:\\incoming\\Alchemised.m4b'],
-          folderPath: 'C:\\incoming',
-          relativePath: 'Alchemised',
-          folderName: 'Alchemised',
-          detectedTitle: 'Alchemised',
-          detectedAuthor: 'SenLinYu',
-          format: 'M4B',
-          fileCount: 1,
-          selectedMatch: null,
-          hasSearched: false,
-          isSearching: false,
-          selected: false,
-        },
-      },
-    })
-    await new Promise((resolve) => setTimeout(resolve, 0))
+  it('shows the book in the same card as Repair: ASIN, Title, Author, Region, without a checkbox', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
 
-    expect(wrapper.findAll('.search-field-label').map((l) => l.text())).toEqual([
-      'Title or ASIN',
+    expect(wrapper.findAll('.match-field-label').map((l) => l.text())).toEqual([
+      'ASIN',
+      'Title',
       'Author',
       'Region',
     ])
-    expect(
-      (wrapper.get('[data-testid="find-match-query"]').element as HTMLInputElement).value,
-    ).toBe('Alchemised')
+    expect((field(wrapper, 'match-title').element as HTMLInputElement).value).toBe('Alchemised')
+    expect((field(wrapper, 'match-author').element as HTMLInputElement).value).toBe('SenLinYu')
+    expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false)
   })
 
-  it('displays narrator when result includes narrator data', async () => {
-    vi.spyOn(apiService, 'advancedSearch').mockResolvedValue([
+  it('searches as it opens and shows the results under the book, with their narrator', async () => {
+    vi.mocked(apiService.advancedSearch).mockResolvedValue([
       {
         asin: 'B000APXZHK',
         title: 'Alchemised',
@@ -94,58 +120,16 @@ describe('LibraryImportSearchModal', () => {
         narrator: 'John Smith',
       } as unknown as SearchResult,
     ])
+    const wrapper = mountModal()
+    await flushPromises()
 
-    const wrapper = mount(LibraryImportSearchModal, {
-      props: {
-        item: {
-          id: 'C:\\incoming\\Alchemised.m4b',
-          fullPath: 'C:\\incoming\\Alchemised.m4b',
-          sourceFiles: ['C:\\incoming\\Alchemised.m4b'],
-          folderPath: 'C:\\incoming',
-          relativePath: 'Alchemised',
-          folderName: 'Alchemised',
-          detectedTitle: 'Alchemised',
-          detectedAuthor: 'SenLinYu',
-          format: 'M4B',
-          fileCount: 1,
-          selectedMatch: null,
-          hasSearched: false,
-          isSearching: false,
-          selected: false,
-        },
-      },
-    })
-
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    await wrapper.vm.$nextTick()
-
+    expect(wrapper.findAll('[data-testid="find-match-result"]')).toHaveLength(1)
     expect(wrapper.find('.result-narrator').text()).toContain('John Smith')
   })
 
   it('routes result thumbnails through the protected image helper', async () => {
-    const wrapper = mount(LibraryImportSearchModal, {
-      props: {
-        item: {
-          id: 'C:\\incoming\\Alchemised.m4b',
-          fullPath: 'C:\\incoming\\Alchemised.m4b',
-          sourceFiles: ['C:\\incoming\\Alchemised.m4b'],
-          folderPath: 'C:\\incoming',
-          relativePath: 'Alchemised',
-          folderName: 'Alchemised',
-          detectedTitle: 'Alchemised',
-          detectedAuthor: 'SenLinYu',
-          format: 'M4B',
-          fileCount: 1,
-          selectedMatch: null,
-          hasSearched: false,
-          isSearching: false,
-          selected: false,
-        },
-      },
-    })
-
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    await wrapper.vm.$nextTick()
+    const wrapper = mountModal()
+    await flushPromises()
 
     expect(getProtectedImageSrc).toHaveBeenCalledWith(
       '/api/v1/images/B000APXZHK',
@@ -156,56 +140,36 @@ describe('LibraryImportSearchModal', () => {
 
   it('searches the configured region first, then the region the user picks, which the match keeps', async () => {
     const search = vi.mocked(apiService.advancedSearch)
-    const wrapper = mount(LibraryImportSearchModal, {
-      props: {
-        item: {
-          id: '/incoming/PH4/01.mp3',
-          fullPath: '/incoming/PH4/01.mp3',
-          sourceFiles: ['/incoming/PH4/01.mp3'],
-          folderPath: '/incoming/PH4',
-          relativePath: 'PH4',
-          folderName: 'Primal Hunter 4',
-          detectedTitle: 'The Primal Hunter 4',
-          detectedAuthor: 'Zogarth',
-          format: 'MP3',
-          fileCount: 1,
-          selectedMatch: null,
-          hasSearched: false,
-          isSearching: false,
-          selected: false,
-        },
-      },
-    })
+    const wrapper = mountModal(primalHunter)
     await flushPromises()
     expect(search).toHaveBeenLastCalledWith(
       expect.objectContaining({ region: 'fr' }),
       expect.any(AbortSignal),
     )
-    expect(
-      (wrapper.get('[data-testid="find-match-region"]').element as HTMLSelectElement).value,
-    ).toBe('fr')
+    expect((field(wrapper, 'match-region').element as HTMLSelectElement).value).toBe('fr')
 
-    search.mockResolvedValue([
-      {
-        asin: 'B0BK9W82PQ',
-        title: 'Primal Hunter 4',
-        authors: [{ name: 'Zogarth' }],
-      } as unknown as SearchResult,
-    ])
-    await wrapper.get('[data-testid="find-match-region"]').setValue('us')
+    search.mockResolvedValue([ph4])
+    await field(wrapper, 'match-region').setValue('us')
+    await field(wrapper, 'match-search').trigger('click')
     await flushPromises()
     expect(search).toHaveBeenLastCalledWith(
       expect.objectContaining({ region: 'us' }),
       expect.any(AbortSignal),
     )
 
-    await wrapper.get('.result-item').trigger('click')
+    await wrapper.get('[data-testid="find-match-result"]').trigger('click')
+    expect(field(wrapper, 'match-picked').text()).toContain('Primal Hunter 4')
+    expect(wrapper.emitted('select')).toBeUndefined()
+
+    await field(wrapper, 'find-match-confirm').trigger('click')
+    await flushPromises()
     expect(wrapper.emitted('select')?.[0]?.[0]).toEqual(
       expect.objectContaining({ asin: 'B0BK9W82PQ', region: 'us' }),
     )
+    expect(wrapper.emitted('close')).toHaveLength(1)
   })
 
-  it('keeps the results of the region the user picked when the earlier search answers last', async () => {
+  it('stops the running search when the region changes: its late answer is not shown', async () => {
     const search = vi.mocked(apiService.advancedSearch)
     const pending: Record<string, (results: SearchResult[]) => void> = {}
     const signals: Record<string, AbortSignal | undefined> = {}
@@ -216,84 +180,63 @@ describe('LibraryImportSearchModal', () => {
           signals[params.region!] = signal
         }),
     )
-    const wrapper = mount(LibraryImportSearchModal, {
-      props: {
-        item: {
-          id: '/incoming/PH4/01.mp3',
-          fullPath: '/incoming/PH4/01.mp3',
-          sourceFiles: ['/incoming/PH4/01.mp3'],
-          folderPath: '/incoming/PH4',
-          relativePath: 'PH4',
-          folderName: 'Primal Hunter 4',
-          detectedTitle: 'The Primal Hunter 4',
-          detectedAuthor: 'Zogarth',
-          format: 'MP3',
-          fileCount: 1,
-          selectedMatch: null,
-          hasSearched: false,
-          isSearching: false,
-          selected: false,
-        },
-      },
-    })
+    const wrapper = mountModal(primalHunter)
     await flushPromises()
-    expect(pending.fr).toBeDefined()
+    expect(field(wrapper, 'match-search-pending').text()).toContain('France')
 
-    // The French search is still running when the user switches to US
-    await wrapper.get('[data-testid="find-match-region"]').setValue('us')
-    await flushPromises()
+    await field(wrapper, 'match-region').setValue('us')
     expect(signals.fr?.aborted).toBe(true)
+    expect(wrapper.find('[data-testid="match-search-pending"]').exists()).toBe(false)
 
-    pending.us!([
-      { asin: 'B0BK9W82PQ', title: 'Primal Hunter 4', authors: [{ name: 'Zogarth' }] },
-    ] as unknown as SearchResult[])
+    await field(wrapper, 'match-search').trigger('click')
+    pending.us!([ph4])
     await flushPromises()
     pending.fr!([
       { asin: 'B0HM45F8MW', title: 'Primal Hunter, Vol. 7', authors: [{ name: 'Zogarth' }] },
     ] as unknown as SearchResult[])
     await flushPromises()
 
-    const items = wrapper.findAll('.result-item')
+    const items = wrapper.findAll('[data-testid="find-match-result"]')
     expect(items).toHaveLength(1)
     expect(items[0]!.text()).toContain('Primal Hunter 4')
-    expect(wrapper.find('.search-spinner').exists()).toBe(false)
-    await items[0]!.trigger('click')
-    expect(wrapper.emitted('select')?.[0]?.[0]).toEqual(
-      expect.objectContaining({ asin: 'B0BK9W82PQ', region: 'us' }),
-    )
   })
 
-  it('does not offer the previous results while a new search runs', async () => {
+  it('offers no match until a new record is picked or a valid ASIN typed', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    expect(field(wrapper, 'find-match-confirm').attributes('disabled')).toBeDefined()
+
+    await field(wrapper, 'match-asin').setValue('B0BK9')
+    expect(field(wrapper, 'match-invalid-asin').text()).toContain('10 letters or digits')
+    expect(field(wrapper, 'find-match-confirm').attributes('disabled')).toBeDefined()
+
+    await field(wrapper, 'match-asin').setValue('B0BK9W82PQ')
+    expect(field(wrapper, 'find-match-confirm').attributes('disabled')).toBeUndefined()
+  })
+
+  it('checks a typed ASIN in its region before using it', async () => {
     const search = vi.mocked(apiService.advancedSearch)
-    const wrapper = mount(LibraryImportSearchModal, {
-      props: {
-        item: {
-          id: '/incoming/Alchemised.m4b',
-          fullPath: '/incoming/Alchemised.m4b',
-          sourceFiles: ['/incoming/Alchemised.m4b'],
-          folderPath: '/incoming',
-          relativePath: 'Alchemised',
-          folderName: 'Alchemised',
-          detectedTitle: 'Alchemised',
-          detectedAuthor: 'SenLinYu',
-          format: 'M4B',
-          fileCount: 1,
-          selectedMatch: null,
-          hasSearched: false,
-          isSearching: false,
-          selected: false,
-        },
-      },
-    })
-    await flushPromises()
-    expect(wrapper.findAll('.result-item')).toHaveLength(1)
-
-    search.mockImplementation(() => new Promise<SearchResult[]>(() => {}))
-    await wrapper.get('[data-testid="find-match-region"]').setValue('us')
+    const wrapper = mountModal(primalHunter)
     await flushPromises()
 
-    expect(wrapper.findAll('.result-item')).toHaveLength(0)
-    expect(wrapper.find('.search-spinner').exists()).toBe(true)
+    search.mockResolvedValue([])
+    await field(wrapper, 'match-asin').setValue('B0BK9W82PQ')
+    await field(wrapper, 'find-match-confirm').trigger('click')
+    await flushPromises()
+    expect(search).toHaveBeenLastCalledWith(
+      expect.objectContaining({ asin: 'B0BK9W82PQ', region: 'fr' }),
+    )
+    expect(field(wrapper, 'find-match-error').text()).toContain(
+      'Audible France (FR) has no record for B0BK9W82PQ',
+    )
+    expect(wrapper.emitted('select')).toBeUndefined()
+
+    search.mockResolvedValue([ph4])
+    await field(wrapper, 'find-match-confirm').trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('select')?.[0]?.[0]).toEqual(
+      expect.objectContaining({ asin: 'B0BK9W82PQ', region: 'fr' }),
+    )
   })
 
   it('closes quietly while a search is running: the cancelled request is not reported', async () => {
@@ -307,28 +250,9 @@ describe('LibraryImportSearchModal', () => {
             signal?.addEventListener('abort', () => reject(new Error('Network error')))
           }),
       )
-      const wrapper = mount(LibraryImportSearchModal, {
-        props: {
-          item: {
-            id: '/incoming/PH4/01.mp3',
-            fullPath: '/incoming/PH4/01.mp3',
-            sourceFiles: ['/incoming/PH4/01.mp3'],
-            folderPath: '/incoming/PH4',
-            relativePath: 'PH4',
-            folderName: 'Primal Hunter 4',
-            detectedTitle: 'The Primal Hunter 4',
-            detectedAuthor: 'Zogarth',
-            format: 'MP3',
-            fileCount: 1,
-            selectedMatch: null,
-            hasSearched: false,
-            isSearching: false,
-            selected: false,
-          },
-        },
-      })
+      const wrapper = mountModal(primalHunter)
       await flushPromises()
-      expect(wrapper.find('.search-spinner').exists()).toBe(true)
+      expect(wrapper.find('[data-testid="match-search-pending"]').exists()).toBe(true)
 
       wrapper.unmount()
       await flushPromises()
@@ -350,25 +274,9 @@ describe('LibraryImportSearchModal', () => {
           signal?.addEventListener('abort', () => reject(new Error('Network error')))
         }),
     )
-    const item = {
-      id: '/incoming/PH4/01.mp3',
-      fullPath: '/incoming/PH4/01.mp3',
-      sourceFiles: ['/incoming/PH4/01.mp3'],
-      folderPath: '/incoming/PH4',
-      relativePath: 'PH4',
-      folderName: 'Primal Hunter 4',
-      detectedTitle: 'The Primal Hunter 4',
-      detectedAuthor: 'Zogarth',
-      format: 'MP3',
-      fileCount: 1,
-      selectedMatch: null,
-      hasSearched: false,
-      isSearching: false,
-      selected: false,
-    }
     const store = useLibraryImportStore()
 
-    const first = mount(LibraryImportSearchModal, { props: { item } })
+    const first = mountModal(primalHunter)
     await flushPromises()
     expect(store.findMatchSearching).toBe(true)
     answer([])
@@ -376,7 +284,7 @@ describe('LibraryImportSearchModal', () => {
     expect(store.findMatchSearching).toBe(false)
     first.unmount()
 
-    const second = mount(LibraryImportSearchModal, { props: { item } })
+    const second = mountModal(primalHunter)
     await flushPromises()
     expect(store.findMatchSearching).toBe(true)
     second.unmount()
