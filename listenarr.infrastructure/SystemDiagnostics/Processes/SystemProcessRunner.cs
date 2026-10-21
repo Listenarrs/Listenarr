@@ -163,7 +163,7 @@ namespace Listenarr.Infrastructure.SystemDiagnostics.Processes
                 try { _action(); }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                 {
-                    Debug.WriteLine($"SystemProcessRunner.DisposableAction cleanup failed: {ex.Message}");
+                    // Nothing is logged here: DisposableAction is a private nested helper with no logger; a failed cleanup action must not escape Dispose.
                 }
             }
         }
