@@ -50,6 +50,22 @@ namespace Listenarr.Domain.Audiobooks
         public string? Language { get; set; }
         public string? Series { get; set; }
         public decimal? SeriesPosition { get; set; }
+
+        /// <summary>
+        /// The series position exactly as the metadata source gave it.
+        /// <para>
+        /// Audible/Audnexus report a position as a string, and it is not always a number:
+        /// an omnibus can sit at "1-4", a prequel at "0", a novella at "1.5". Those values
+        /// are meaningful, but they do not all fit in <see cref="SeriesPosition"/>, so a
+        /// position that fails to parse would otherwise be indistinguishable from a book
+        /// that has no series position at all.
+        /// </para>
+        /// <para>
+        /// Naming prefers this over <see cref="SeriesPosition"/> so that a real position is
+        /// never silently replaced by a track number.
+        /// </para>
+        /// </summary>
+        public string? SeriesPositionRaw { get; set; }
         public byte[]? CoverArt { get; set; }
         public string? CoverArtUrl { get; set; }
         public Dictionary<string, object> AdditionalData { get; set; } = [];
@@ -75,6 +91,8 @@ namespace Listenarr.Domain.Audiobooks
 
             if (!SeriesPosition.HasValue && value.SeriesPosition.HasValue)
                 SeriesPosition = value.SeriesPosition;
+            if (string.IsNullOrWhiteSpace(SeriesPositionRaw) && !string.IsNullOrWhiteSpace(value.SeriesPositionRaw))
+                SeriesPositionRaw = value.SeriesPositionRaw;
             if (!TrackNumber.HasValue && value.TrackNumber.HasValue)
                 TrackNumber = value.TrackNumber;
             if (!DiscNumber.HasValue && value.DiscNumber.HasValue)

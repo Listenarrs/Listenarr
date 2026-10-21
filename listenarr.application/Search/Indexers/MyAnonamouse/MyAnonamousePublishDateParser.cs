@@ -8,6 +8,7 @@
  * (at your option) any later version.
  */
 
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 
@@ -65,16 +66,20 @@ namespace Listenarr.Application.Search.Indexers.MyAnonamouse
                     double? hours = null;
                     double? minutes = null;
 
+                    // These three ages are machine format like every other number in this
+                    // indexer's JSON, so they are pinned for uniformity. No damage was
+                    // measured here: the values seen in practice are whole numbers, which
+                    // read the same under every culture.
                     // Prefer explicit ageHours/ageMinutes if present
                     if (item.TryGetProperty("ageHours", out var ah) && (ah.ValueKind == JsonValueKind.Number || ah.ValueKind == JsonValueKind.String))
                     {
                         if (ah.ValueKind == JsonValueKind.Number) hours = ah.GetDouble();
-                        else if (double.TryParse(ah.GetString(), out var htmp)) hours = htmp;
+                        else if (double.TryParse(ah.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var htmp)) hours = htmp;
                     }
                     if (item.TryGetProperty("ageMinutes", out var am) && (am.ValueKind == JsonValueKind.Number || am.ValueKind == JsonValueKind.String))
                     {
                         if (am.ValueKind == JsonValueKind.Number) minutes = am.GetDouble();
-                        else if (double.TryParse(am.GetString(), out var mtmp)) minutes = mtmp;
+                        else if (double.TryParse(am.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var mtmp)) minutes = mtmp;
                     }
 
                     // Fallback to 'age' if present. Heuristic: small values (<=48) likely hours; otherwise treat as days.
@@ -86,7 +91,8 @@ namespace Listenarr.Application.Search.Indexers.MyAnonamouse
                             if (a <= 48) hours = a;
                             else days = (int)Math.Floor(a);
                         }
-                        else if (ageElem.ValueKind == JsonValueKind.String && double.TryParse(ageElem.GetString(), out var adtmp))
+                        else if (ageElem.ValueKind == JsonValueKind.String
+                            && double.TryParse(ageElem.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var adtmp))
                         {
                             var a = adtmp;
                             if (a <= 48) hours = a;

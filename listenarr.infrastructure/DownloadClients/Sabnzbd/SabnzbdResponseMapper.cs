@@ -198,7 +198,10 @@ internal static class SabnzbdResponseMapper
         var parts = speedStr.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length == 0) return 0;
 
-        if (!double.TryParse(parts[0], out var value)) return 0;
+        // NumberStyles.Float rather than Any: Any carries AllowThousands, AllowCurrencySymbol
+        // and AllowParentheses, so under the invariant culture "1,5" reads as 15 and "(1.5)"
+        // as -1.5. SABnzbd emits a plain decimal, and a value that is not one should fail.
+        if (!double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var value)) return 0;
 
         if (parts.Length > 1)
         {
@@ -317,7 +320,9 @@ internal static class SabnzbdResponseMapper
         if (property.ValueKind == JsonValueKind.Number)
             return property.GetDouble();
 
-        if (property.ValueKind == JsonValueKind.String && double.TryParse(property.GetString() ?? "0", out var value))
+        // Float rather than Any, for the reason given on ParseSpeed above.
+        if (property.ValueKind == JsonValueKind.String
+            && double.TryParse(property.GetString() ?? "0", NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
             return value;
 
         return 0;
