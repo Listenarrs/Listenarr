@@ -74,6 +74,11 @@ function field(wrapper: ReturnType<typeof mountModal>, testId: string) {
   return wrapper.get(`[data-testid="${testId}"]`)
 }
 
+const metadata = vi.fn()
+
+// The metadata endpoint's answer for an ASIN the region doesn't sell
+const notFound = () => Promise.reject(Object.assign(new Error('Not found'), { status: 404 }))
+
 describe('LibraryImportSearchModal', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -89,6 +94,11 @@ describe('LibraryImportSearchModal', () => {
         authors: [{ name: 'SenLinYu' }],
       } as unknown as SearchResult,
     ])
+    // Add New's ASIN search goes through the metadata endpoint (missing from the shared API mock)
+    Object.assign(apiService, { getAudibleMetadata: metadata })
+    metadata.mockImplementation(async (asin: string) => ({
+      metadata: { asin, title: 'Alchemised', authors: [{ name: 'SenLinYu' }] },
+    }))
   })
 
   afterEach(() => {
@@ -145,8 +155,7 @@ describe('LibraryImportSearchModal', () => {
     const wrapper = mountModal(primalHunter)
     await flushPromises()
     expect(search).toHaveBeenLastCalledWith(
-      expect.objectContaining({ region: 'fr' }),
-      expect.any(AbortSignal),
+      expect.objectContaining({ region: 'fr', language: 'french' }),
     )
     expect((field(wrapper, 'match-region').element as HTMLSelectElement).value).toBe('fr')
 
@@ -155,8 +164,7 @@ describe('LibraryImportSearchModal', () => {
     await field(wrapper, 'match-search').trigger('click')
     await flushPromises()
     expect(search).toHaveBeenLastCalledWith(
-      expect.objectContaining({ region: 'us' }),
-      expect.any(AbortSignal),
+      expect.objectContaining({ region: 'us', language: 'english' }),
     )
 
     await wrapper.get('[data-testid="find-match-result"]').trigger('click')
@@ -173,21 +181,15 @@ describe('LibraryImportSearchModal', () => {
 
   it('locks the region while a search runs, until it ends or is canceled', async () => {
     const search = vi.mocked(apiService.advancedSearch)
-    const signals: AbortSignal[] = []
-    search.mockImplementation(
-      (_params, signal) =>
-        new Promise<SearchResult[]>(() => {
-          if (signal) signals.push(signal)
-        }),
-    )
+    search.mockImplementation(() => new Promise<SearchResult[]>(() => {}))
     const wrapper = mountModal(primalHunter)
     await flushPromises()
     expect(field(wrapper, 'match-search-pending').text()).toContain('France')
     expect(field(wrapper, 'match-region').attributes('disabled')).toBeDefined()
 
     await field(wrapper, 'match-cancel-search').trigger('click')
-    expect(signals[0]?.aborted).toBe(true)
     expect(field(wrapper, 'match-region').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('[data-testid="match-search-pending"]').exists()).toBe(false)
   })
 
   it('offers no match until a record is picked or found for a typed ASIN', async () => {
@@ -213,26 +215,22 @@ describe('LibraryImportSearchModal', () => {
   })
 
   it('looks a typed ASIN up in its region before it can be used', async () => {
-    const search = vi.mocked(apiService.advancedSearch)
     const wrapper = mountModal(primalHunter)
     await flushPromises()
 
-    search.mockResolvedValue([])
+    metadata.mockImplementation(notFound)
     await field(wrapper, 'match-asin').setValue('B0BK9W82PQ')
     await field(wrapper, 'match-asin').trigger('keydown', { key: 'Enter' })
     await flushPromises()
-    expect(search).toHaveBeenLastCalledWith(
-      expect.objectContaining({ asin: 'B0BK9W82PQ', region: 'fr' }),
-      expect.any(AbortSignal),
-    )
+    expect(metadata).toHaveBeenLastCalledWith('B0BK9W82PQ', 'fr')
     expect(field(wrapper, 'match-asin-error').text()).toContain(
       'No record for B0BK9W82PQ in Audible France (FR)',
     )
     expect(field(wrapper, 'find-match-confirm').attributes('disabled')).toBeDefined()
 
-    search.mockResolvedValue([ph4])
-    // Search looks the ASIN up again
-    await field(wrapper, 'match-search').trigger('click')
+    metadata.mockResolvedValue({ metadata: ph4 })
+    // Enter looks the ASIN up again
+    await field(wrapper, 'match-asin').trigger('keydown', { key: 'Enter' })
     await flushPromises()
     await field(wrapper, 'find-match-confirm').trigger('click')
     expect(wrapper.emitted('select')?.[0]?.[0]).toEqual(
@@ -241,14 +239,13 @@ describe('LibraryImportSearchModal', () => {
   })
 
   it('looks the ASIN up when the region changes: one record is selected, none is an error', async () => {
-    const search = vi.mocked(apiService.advancedSearch)
     const wrapper = mountModal({
       ...primalHunter,
       selectedMatch: { ...ph4, region: 'fr' } as unknown as typeof alchemised.selectedMatch,
     })
     await flushPromises()
 
-    search.mockResolvedValue([])
+    metadata.mockImplementation(notFound)
     await field(wrapper, 'match-region').setValue('de')
     await flushPromises()
     expect(field(wrapper, 'match-asin-error').text()).toContain(
@@ -256,7 +253,7 @@ describe('LibraryImportSearchModal', () => {
     )
     expect(field(wrapper, 'find-match-confirm').attributes('disabled')).toBeDefined()
 
-    search.mockResolvedValue([{ ...ph4, title: 'Primal Hunter 4 (US)' } as SearchResult])
+    metadata.mockResolvedValue({ metadata: { ...ph4, title: 'Primal Hunter 4 (US)' } })
     await field(wrapper, 'match-region').setValue('us')
     await flushPromises()
     expect((field(wrapper, 'match-title').element as HTMLInputElement).value).toBe(

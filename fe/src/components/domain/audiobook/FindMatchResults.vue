@@ -176,10 +176,10 @@ function seriesName(result: SearchResult): string | undefined {
   top: 0.4rem;
   right: 0.6rem;
   padding: 0.1rem 0.45rem;
-  border: 1px solid #555;
+  border: 1px solid var(--status-success);
   border-radius: 999px;
   font-size: 0.7rem;
-  color: #ccc;
-  background: #2a2a2a;
+  color: var(--status-success);
+  background: color-mix(in srgb, var(--status-success) 12%, transparent);
 }
 </style>

@@ -23,6 +23,7 @@ const apiMocks = vi.hoisted(() => ({
   getAudiobook: vi.fn(),
   getAudiobookIdentifiers: vi.fn(),
   advancedSearch: vi.fn(),
+  getAudibleMetadata: vi.fn(),
   updateAudiobookIdentifiers: vi.fn(),
   rescanAudiobookMetadata: vi.fn(),
   getApplicationSettings: vi.fn(),
@@ -79,7 +80,9 @@ const frenchVol7 = {
   region: 'fr',
 }
 
-// An Audible catalogue per region: ASIN lookups only find what that region sells
+// An Audible catalogue per region, answering like the API does for Add New's search: titles
+// through the search endpoint, an ASIN through the metadata endpoint (404 when the region doesn't
+// sell it)
 function catalogue(byRegion: Record<string, Array<Record<string, unknown>>>) {
   apiMocks.advancedSearch.mockImplementation(
     async ({ asin, region }: { asin?: string; region?: string }) => {
@@ -87,6 +90,12 @@ function catalogue(byRegion: Record<string, Array<Record<string, unknown>>>) {
       return asin ? books.filter((b) => b.asin === asin) : books
     },
   )
+  apiMocks.getAudibleMetadata.mockImplementation(async (asin: string, region: string) => {
+    const book = (byRegion[region] ?? []).find((b) => b.asin === asin)
+    if (!book)
+      throw Object.assign(new Error(`No metadata found for ASIN: ${asin}`), { status: 404 })
+    return { metadata: book, source: 'audible' }
+  })
 }
 
 const field = (wrapper: ReturnType<typeof mountModal>, testid: string) =>
@@ -236,9 +245,15 @@ describe('RepairBooksModal', () => {
     await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
 
+    // Add New's title search: the region, its language, up to 50 results
     expect(apiMocks.advancedSearch).toHaveBeenCalledWith(
-      expect.objectContaining({ title: 'Primal Hunter, Vol. 7', author: 'Zogarth', region: 'us' }),
-      expect.any(AbortSignal),
+      expect.objectContaining({
+        title: 'Primal Hunter, Vol. 7',
+        author: 'Zogarth',
+        region: 'us',
+        language: 'english',
+        pagination: { page: 1, limit: 50 },
+      }),
     )
     const results = row(wrapper).findAll('[data-testid="find-match-result"]')
     expect(results.map((r) => r.text())).toEqual([expect.stringContaining('Primal Hunter 4')])
@@ -256,7 +271,6 @@ describe('RepairBooksModal', () => {
 
     expect(apiMocks.advancedSearch).toHaveBeenCalledWith(
       expect.objectContaining({ title: 'The Primal Hunter 4', author: 'Zogarth' }),
-      expect.any(AbortSignal),
     )
     await row(wrapper).get('[data-testid="match-revert"]').trigger('click')
     expect(field(wrapper, 'match-title').value).toBe('Primal Hunter, Vol. 7')
@@ -294,12 +308,8 @@ describe('RepairBooksModal', () => {
   })
 
   it('cancels the search, back to the fields with nothing to report', async () => {
-    apiMocks.advancedSearch.mockImplementation(
-      (_params: unknown, signal?: AbortSignal) =>
-        new Promise((_resolve, reject) =>
-          signal?.addEventListener('abort', () => reject(new Error('aborted'))),
-        ),
-    )
+    // A search that never answers: only Cancel search or the timeout ends it
+    apiMocks.advancedSearch.mockImplementation(() => new Promise(() => {}))
     const wrapper = mountModal()
     await flushPromises()
     await row(wrapper).get('[data-testid="match-search"]').trigger('click')
@@ -315,12 +325,8 @@ describe('RepairBooksModal', () => {
 
   it('stops a search that takes too long, says so and offers to retry', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-    apiMocks.advancedSearch.mockImplementation(
-      (_params: unknown, signal?: AbortSignal) =>
-        new Promise((_resolve, reject) =>
-          signal?.addEventListener('abort', () => reject(new Error('aborted'))),
-        ),
-    )
+    // A search that never answers: only Cancel search or the timeout ends it
+    apiMocks.advancedSearch.mockImplementation(() => new Promise(() => {}))
     const wrapper = mountModal()
     await flushPromises()
     await row(wrapper).get('[data-testid="match-search"]').trigger('click')
@@ -374,7 +380,7 @@ describe('RepairBooksModal', () => {
   })
 
   it('offers Retry when the ASIN lookup fails, and Retry looks it up again', async () => {
-    apiMocks.advancedSearch.mockRejectedValueOnce(new Error('API error: 502 Bad Gateway'))
+    apiMocks.getAudibleMetadata.mockRejectedValueOnce(new Error('API error: 502 Bad Gateway'))
     const wrapper = mountModal()
     await flushPromises()
 
@@ -387,10 +393,7 @@ describe('RepairBooksModal', () => {
     catalogue({ us: [{ ...frenchVol7, region: 'us' }] })
     await row(wrapper).get('[data-testid="match-retry"]').trigger('click')
     await flushPromises()
-    expect(apiMocks.advancedSearch).toHaveBeenLastCalledWith(
-      expect.objectContaining({ asin: 'B0HM45F8MW', region: 'us' }),
-      expect.any(AbortSignal),
-    )
+    expect(apiMocks.getAudibleMetadata).toHaveBeenLastCalledWith('B0HM45F8MW', 'us')
     expect(row(wrapper).attributes('data-match-state')).toBe('matched')
     expect(row(wrapper).find('[data-testid="match-search"]').exists()).toBe(true)
   })
@@ -568,23 +571,26 @@ describe('RepairBooksModal', () => {
   })
 
   it('keeps the ASIN when the region changes and looks it up there, with Cancel search', async () => {
-    let answer: (results: unknown[]) => void = () => {}
-    apiMocks.advancedSearch.mockImplementation(() => new Promise((resolve) => (answer = resolve)))
+    let answer: () => void = () => {}
+    apiMocks.getAudibleMetadata.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          answer = () => reject(Object.assign(new Error('Not found'), { status: 404 }))
+        }),
+    )
     const wrapper = mountModal()
     await flushPromises()
 
     await row(wrapper).get('[data-testid="match-region"]').setValue('de')
 
     expect(field(wrapper, 'match-asin').value).toBe('B0HM45F8MW')
-    expect(apiMocks.advancedSearch).toHaveBeenCalledWith(
-      expect.objectContaining({ asin: 'B0HM45F8MW', region: 'de' }),
-      expect.any(AbortSignal),
-    )
+    // Add New's ASIN search: the metadata sources, in the region
+    expect(apiMocks.getAudibleMetadata).toHaveBeenCalledWith('B0HM45F8MW', 'de')
     expect(row(wrapper).get('[data-testid="match-search-pending"]').text()).toContain(
       'Checking B0HM45F8MW in Germany (DE)',
     )
     expect(row(wrapper).find('[data-testid="match-cancel-search"]').exists()).toBe(true)
-    answer([])
+    answer()
     await flushPromises()
   })
 
@@ -615,22 +621,6 @@ describe('RepairBooksModal', () => {
     )
   })
 
-  it('lets the user pick when the region has several records for the ASIN', async () => {
-    // The German catalogue's records: not the French one the book points at
-    const germanVol7 = { ...frenchVol7, region: 'de' }
-    catalogue({ de: [germanVol7, { ...germanVol7, title: 'Primal Hunter 7 (Dramatized)' }] })
-    const wrapper = mountModal()
-    await flushPromises()
-
-    await row(wrapper).get('[data-testid="match-region"]').setValue('de')
-    await flushPromises()
-
-    const results = row(wrapper).findAll('[data-testid="find-match-result"]')
-    expect(results).toHaveLength(2)
-    expect(results.some((r) => r.classes().includes('selected'))).toBe(false)
-    expect(field(wrapper, 'match-title').value).toBe('Primal Hunter, Vol. 7')
-  })
-
   it('shows an error when the region has no record for the ASIN, and the book cannot be repaired', async () => {
     const wrapper = mountModal()
     await flushPromises()
@@ -654,7 +644,8 @@ describe('RepairBooksModal', () => {
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeUndefined()
   })
 
-  it('empties the title and author when an ASIN is typed, without searching', async () => {
+  it('keeps the title and author when an ASIN is typed, and Search looks the ASIN up first', async () => {
+    catalogue({ fr: [frenchVol7, { ...englishPh4, region: 'fr' }] })
     const wrapper = mountModal()
     await flushPromises()
     apiMocks.advancedSearch.mockClear()
@@ -662,10 +653,21 @@ describe('RepairBooksModal', () => {
     await row(wrapper).get('[data-testid="match-asin"]').setValue('B0BK9W82PQ')
     await flushPromises()
 
-    expect(field(wrapper, 'match-title').value).toBe('')
-    expect(field(wrapper, 'match-author').value).toBe('')
-    expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
+    expect(field(wrapper, 'match-title').value).toBe('Primal Hunter, Vol. 7')
+    expect(field(wrapper, 'match-author').value).toBe('Zogarth')
+    expect(apiMocks.getAudibleMetadata).not.toHaveBeenCalled()
     expect(row(wrapper).attributes('data-match-state')).toBe('ignored')
+
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
+    await flushPromises()
+    expect(apiMocks.getAudibleMetadata).toHaveBeenCalledWith('B0BK9W82PQ', 'fr')
+    expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
+    expect(row(wrapper).attributes('data-match-state')).toBe('matched')
+
+    // Looked up: the next Search goes back to the title and author
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
+    await flushPromises()
+    expect(apiMocks.advancedSearch).toHaveBeenCalled()
   })
 
   it('looks a typed ASIN up in its region with Enter, then saves it', async () => {
@@ -677,18 +679,15 @@ describe('RepairBooksModal', () => {
     await row(wrapper).get('[data-testid="match-asin"]').trigger('keydown', { key: 'Enter' })
     await flushPromises()
 
-    expect(apiMocks.advancedSearch).toHaveBeenLastCalledWith(
-      expect.objectContaining({ asin: 'B0BK9W82PQ', region: 'us', cap: 5 }),
-      expect.any(AbortSignal),
-    )
+    expect(apiMocks.getAudibleMetadata).toHaveBeenLastCalledWith('B0BK9W82PQ', 'us')
     expect(row(wrapper).get('[data-testid="match-picked"]').text()).toContain('Primal Hunter 4')
     // The record found fills the title and author again
     expect(field(wrapper, 'match-title').value).toBe('Primal Hunter 4')
     expect(field(wrapper, 'match-author').value).toBe('Zogarth')
 
-    apiMocks.advancedSearch.mockClear()
+    apiMocks.getAudibleMetadata.mockClear()
     await repair(wrapper)
-    expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
+    expect(apiMocks.getAudibleMetadata).not.toHaveBeenCalled()
     expect(apiMocks.updateAudiobookIdentifiers).toHaveBeenCalledWith(
       7,
       expect.arrayContaining([expect.objectContaining({ value: 'B0BK9W82PQ', region: 'us' })]),
@@ -721,10 +720,7 @@ describe('RepairBooksModal', () => {
 
     await asin.trigger('keydown', { key: 'Enter' })
     await flushPromises()
-    expect(apiMocks.advancedSearch).toHaveBeenLastCalledWith(
-      expect.objectContaining({ asin: 'B0BK9W82PQ', region: 'us' }),
-      expect.any(AbortSignal),
-    )
+    expect(apiMocks.getAudibleMetadata).toHaveBeenLastCalledWith('B0BK9W82PQ', 'us')
     expect(row(wrapper).find('[data-testid="match-picked"]').exists()).toBe(true)
   })
 
