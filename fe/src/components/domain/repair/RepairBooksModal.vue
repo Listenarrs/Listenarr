@@ -44,7 +44,7 @@
             <div class="repair-info-lines">
               <p>Find the right Audible record for each book, then repair.</p>
               <p data-testid="repair-info-asin">
-                A typed ASIN is searched on its own: the title and author are left out of that
+                A filled ASIN is searched on its own: the title and author are left out of that
                 search.
               </p>
             </div>

@@ -297,11 +297,9 @@ interface Searched {
   region: string
 }
 
-// What a search looked for: the ASIN (said when it went before a title filled in), or the title
-// and author
+// What a search looked for: the ASIN (which has priority when filled), or the title and author
 function describeSearch(searched: Searched): string {
-  if (searched.kind === 'asin')
-    return `ASIN ${searched.asin}${searched.title ? ' (searched before the title)' : ''}`
+  if (searched.kind === 'asin') return `ASIN "${searched.asin}"`
   return `"${searched.title}"${searched.author ? ` by "${searched.author}"` : ''}`
 }
 
@@ -311,9 +309,6 @@ const state = ref<SearchState>(idle())
 const running = ref<Searched | null>(null)
 // A field changed since the last search: Retry goes back to Search
 const edited = ref(false)
-// An ASIN typed by hand since the last lookup: Search looks it up first, the title and author
-// staying as they are
-const asinTyped = ref(false)
 let controller: AbortController | null = null
 
 // Every Audible region stays available, ordered by usefulness: the book's region when the card
@@ -333,12 +328,9 @@ const barState = computed(() => {
   return matchState(match.value) === 'matched' && !props.excluded ? 'matched' : 'ignored'
 })
 
-// Search looks the ASIN up first when it was typed by hand, or when there is no title to search;
-// else it searches the title and author
-const searchKind = computed<SearchKind>(() => {
-  if (match.value.asin && (asinTyped.value || !match.value.query.trim())) return 'asin'
-  return 'title'
-})
+// A filled ASIN has priority: Search looks it up on its own, leaving the title and author out.
+// With the ASIN field empty, Search looks for the title and author
+const searchKind = computed<SearchKind>(() => (match.value.asin.trim() ? 'asin' : 'title'))
 
 // The book as it is today, as a record
 const currentRecord = computed<BookRecord>(() => ({
@@ -422,12 +414,8 @@ async function search(kind: SearchKind = 'title') {
   running.value = searched
   edited.value = false
   match.value.asinError = null
-  // Looked up: a next Search goes back to the title and author. The record of another ASIN no
-  // longer stands: this lookup gives the new one, or none
-  if (kind === 'asin') {
-    asinTyped.value = false
-    match.value.picked = null
-  }
+  // The record of another ASIN no longer stands: this lookup gives the new one, or none
+  if (kind === 'asin') match.value.picked = null
   try {
     const query = kind === 'asin' ? asin : addNewQuery(match.value)
     const results = await searchLikeAddNew(query, region, current.signal)
@@ -498,7 +486,6 @@ function pick(result: SearchResult) {
 
 // The record and its error no longer apply; the results stay until a new search replaces them
 function forgetRecord() {
-  asinTyped.value = false
   match.value.picked = null
   match.value.asinError = null
   stopSearch()
@@ -521,11 +508,9 @@ function onRegionChanged() {
   void search('asin')
 }
 
-// A typed ASIN only prepares the next search too: Enter or Search then looks it up first, the
-// title and author staying as they are
+// A typed ASIN only prepares the next search too: Enter or Search then looks it up
 function onAsinTyped() {
   edited.value = true
-  asinTyped.value = true
 }
 
 function onAsinEntered() {

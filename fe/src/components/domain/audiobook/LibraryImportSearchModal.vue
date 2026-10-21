@@ -26,7 +26,7 @@
         <div class="find-match-info-lines">
           <p>Find the right Audible record for this book.</p>
           <p data-testid="find-match-info-asin">
-            A typed ASIN is searched on its own: the title and author are left out of that search.
+            A filled ASIN is searched on its own: the title and author are left out of that search.
           </p>
         </div>
       </div>
