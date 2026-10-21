@@ -169,36 +169,23 @@ describe('LibraryImportSearchModal', () => {
     expect(wrapper.emitted('close')).toHaveLength(1)
   })
 
-  it('stops the running search when the region changes: its late answer is not shown', async () => {
+  it('locks the region while a search runs, until it ends or is canceled', async () => {
     const search = vi.mocked(apiService.advancedSearch)
-    const pending: Record<string, (results: SearchResult[]) => void> = {}
-    const signals: Record<string, AbortSignal | undefined> = {}
+    const signals: AbortSignal[] = []
     search.mockImplementation(
-      (params, signal) =>
-        new Promise<SearchResult[]>((resolve) => {
-          pending[params.region!] = resolve
-          signals[params.region!] = signal
+      (_params, signal) =>
+        new Promise<SearchResult[]>(() => {
+          if (signal) signals.push(signal)
         }),
     )
     const wrapper = mountModal(primalHunter)
     await flushPromises()
     expect(field(wrapper, 'match-search-pending').text()).toContain('France')
+    expect(field(wrapper, 'match-region').attributes('disabled')).toBeDefined()
 
-    await field(wrapper, 'match-region').setValue('us')
-    expect(signals.fr?.aborted).toBe(true)
-    expect(wrapper.find('[data-testid="match-search-pending"]').exists()).toBe(false)
-
-    await field(wrapper, 'match-search').trigger('click')
-    pending.us!([ph4])
-    await flushPromises()
-    pending.fr!([
-      { asin: 'B0HM45F8MW', title: 'Primal Hunter, Vol. 7', authors: [{ name: 'Zogarth' }] },
-    ] as unknown as SearchResult[])
-    await flushPromises()
-
-    const items = wrapper.findAll('[data-testid="find-match-result"]')
-    expect(items).toHaveLength(1)
-    expect(items[0]!.text()).toContain('Primal Hunter 4')
+    await field(wrapper, 'match-cancel-search').trigger('click')
+    expect(signals[0]?.aborted).toBe(true)
+    expect(field(wrapper, 'match-region').attributes('disabled')).toBeUndefined()
   })
 
   it('offers no match until a record is picked or found for a typed ASIN', async () => {

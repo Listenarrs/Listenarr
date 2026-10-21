@@ -414,12 +414,21 @@ describe('RepairBooksModal', () => {
     const otherSearch = row(wrapper, 8).get('[data-testid="match-search"]')
     expect(otherSearch.attributes('disabled')).toBeDefined()
     expect(otherSearch.attributes('title')).toBe('Another book is being searched')
+    // Changing a region searches: locked too, on every book
+    for (const id of [7, 8])
+      expect(
+        row(wrapper, id).get('[data-testid="match-region"]').attributes('disabled'),
+      ).toBeDefined()
 
     answer([])
     await flushPromises()
     expect(
       row(wrapper, 8).get('[data-testid="match-search"]').attributes('disabled'),
     ).toBeUndefined()
+    for (const id of [7, 8])
+      expect(
+        row(wrapper, id).get('[data-testid="match-region"]').attributes('disabled'),
+      ).toBeUndefined()
   })
 
   it('takes the ASIN and region of the picked result, closes the results, then repairs with them', async () => {
