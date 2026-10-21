@@ -207,6 +207,25 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                 _logger.LogDebug(ex, "Failed to broadcast raw search results summary for audiobook {Id}", audiobook.Id);
             }
 
+            if (!searchResults.Any() && !string.IsNullOrWhiteSpace(audiobook.RequiredNarrator))
+            {
+                // The narrator's name may not appear in every indexer's release title, which
+                // can turn a narrator-qualified query into a false zero-result search. Retry
+                // without it; RequiredNarrator is still enforced below as a hard filter on
+                // whatever comes back, so a wrong-narrator release still gets rejected.
+                var fallbackQuery = _resultClassifier.BuildSearchQuery(new Audiobook
+                {
+                    Title = audiobook.Title,
+                    Authors = audiobook.Authors,
+                    Series = audiobook.Series
+                });
+                _logger.LogInformation(
+                    "No results for narrator-qualified query; retrying for audiobook '{Title}' without narrator: {Query}",
+                    audiobook.Title, fallbackQuery);
+                searchResults = await searchService.SearchAsync(fallbackQuery, isAutomaticSearch: true);
+                _logger.LogInformation("Found {Count} raw search results for audiobook '{Title}' on narrator-less retry", searchResults.Count, audiobook.Title);
+            }
+
             if (!searchResults.Any())
             {
                 _logger.LogInformation("No search results found for audiobook '{Title}'", audiobook.Title);
@@ -215,6 +234,23 @@ namespace Listenarr.Infrastructure.HostedServices.Search
 
             // Score results against quality profile
             var scoredResults = await qualityProfileService.ScoreSearchResults(searchResults, audiobook.QualityProfile);
+
+            // Enforce the book-specific required narrator as a hard filter, independent of
+            // (and stricter than) the quality profile's PreferredNarrators/ExcludedNarrators,
+            // which are a global scoring bias rather than a per-book requirement. Matches
+            // against the result's structured Narrator field or its title text, same as the
+            // profile-level narrator checks in SearchResultScorer.
+            if (!string.IsNullOrWhiteSpace(audiobook.RequiredNarrator))
+            {
+                foreach (var scoredResult in scoredResults.Where(s => !s.IsRejected))
+                {
+                    if (!AutomaticSearchResultClassifier.MatchesRequiredNarrator(scoredResult.SearchResult, audiobook.RequiredNarrator))
+                    {
+                        scoredResult.RejectionReasons.Add($"Required narrator '{audiobook.RequiredNarrator}' not found");
+                        scoredResult.TotalScore = -1;
+                    }
+                }
+            }
 
             // Log all scored results for debugging
             _logger.LogInformation("Scored {Count} search results for audiobook '{Title}':", scoredResults.Count, audiobook.Title);

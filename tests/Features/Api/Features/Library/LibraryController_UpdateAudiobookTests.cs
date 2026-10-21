@@ -45,6 +45,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 Runtime = 600,
                 Edition = "Original Edition",
                 Version = "Original Version",
+                RequiredNarrator = "Original Required Narrator",
                 Series = "Original Series",
                 SeriesNumber = "1",
                 SeriesMemberships = new List<AudiobookSeriesMembership>
@@ -80,6 +81,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 Runtime = 720,
                 Edition = "Collector Edition",
                 Version = "Edited Version",
+                RequiredNarrator = "Edited Required Narrator",
                 Series = "Edited Universe",
                 SeriesNumber = "4",
                 SeriesMemberships = new List<AudiobookSeriesMembership>
@@ -124,6 +126,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             Assert.Equal(720, storedAudiobook.Runtime);
             Assert.Equal("Collector Edition", storedAudiobook.Edition);
             Assert.Equal("Edited Version", storedAudiobook.Version);
+            Assert.Equal("Edited Required Narrator", storedAudiobook.RequiredNarrator);
             Assert.Equal("Edited Universe", storedAudiobook.Series);
             Assert.Equal("4", storedAudiobook.SeriesNumber);
             Assert.NotNull(storedAudiobook.SeriesMemberships);
@@ -147,6 +150,47 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             Assert.False(storedAudiobook.Monitored);
             Assert.True(storedAudiobook.Explicit);
             Assert.True(storedAudiobook.Abridged);
+        }
+
+        [Fact]
+        [Trait("Method", "GetAudiobook")]
+        [Trait("Scenario", "ResponseIncludesRequiredNarrator")]
+        public async Task GetAudiobook_AfterSettingRequiredNarrator_ResponseIncludesIt()
+        {
+            // Regression test: GetAudiobook serializes a hand-written projection
+            // (LibraryQueryWorkflow.MapDetails), not the raw Audiobook entity, so a field can be
+            // correctly persisted yet silently absent from the actual API response if the
+            // projection isn't updated too. Asserting against the repository alone (as the test
+            // above does via GetFreshAudiobookAsync) would not catch that class of bug.
+            var existingAudiobook = await _audiobookRepository.AddAsync(new Audiobook
+            {
+                Title = "The Martian",
+                Authors = new List<string> { "Andy Weir" },
+            });
+
+            var controller = _provider.GetRequiredService<LibraryController>();
+            var updateResult = await controller.UpdateAudiobook(
+                existingAudiobook.Id,
+                new AudiobookUpdateRequest { RequiredNarrator = "R.C. Bray" });
+            Assert.IsType<OkObjectResult>(updateResult);
+
+            // Guard: proves the value persisted, so a failure below is the projection, not the write.
+            var directRead = await GetFreshAudiobookAsync(existingAudiobook.Id);
+            Assert.Equal("R.C. Bray", directRead?.RequiredNarrator);
+
+            // ServiceCollectionBuilder registers LibraryController and LibraryQueryWorkflow as
+            // singletons, so resolving either (even from a child scope) reads through the root
+            // DbContext that created the audiobook above. EF Core returns that already-tracked,
+            // stale instance instead of the updated row. Build the workflow from a fresh scope
+            // instead, as production's per-request (scoped) registration would.
+            using var readScope = _provider.CreateScope();
+            var queryWorkflow = ActivatorUtilities.CreateInstance<LibraryQueryWorkflow>(readScope.ServiceProvider);
+            var getResult = await queryWorkflow.GetByIdAsync(existingAudiobook.Id);
+            var okResult = Assert.IsType<OkObjectResult>(getResult.Result);
+            var payload = Assert.IsAssignableFrom<object>(okResult.Value);
+            var requiredNarratorProperty = payload.GetType().GetProperty("requiredNarrator");
+            Assert.NotNull(requiredNarratorProperty);
+            Assert.Equal("R.C. Bray", requiredNarratorProperty!.GetValue(payload));
         }
 
         [Fact]

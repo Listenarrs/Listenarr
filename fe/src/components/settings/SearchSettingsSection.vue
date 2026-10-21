@@ -66,13 +66,55 @@
         title="Enable OpenLibrary Searching"
         description="Include OpenLibrary title augmentation and lookups when performing intelligent searches."
       />
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="abs-base-url">Audiobookshelf URL</label>
+          <input
+            id="abs-base-url"
+            type="text"
+            class="form-input"
+            :value="settings.audiobookshelfBaseUrl || ''"
+            placeholder="http://192.168.4.48:13378"
+            @change="onAbsBaseUrlChange"
+          />
+        </div>
+        <div class="form-group">
+          <label for="abs-api-key">Audiobookshelf API Key</label>
+          <input
+            id="abs-api-key"
+            type="password"
+            class="form-input"
+            :value="settings.audiobookshelfApiKey || ''"
+            placeholder="API key from Audiobookshelf settings"
+            @change="onAbsApiKeyChange"
+          />
+        </div>
+      </div>
+      <small class="form-help">
+        When set, lets Listenarr pull in narrator metadata Audiobookshelf already knows about
+        for books already in your library (from its own file-tag reading or metadata
+        matching). Only fills in a Required Narrator for books that don't already have one.
+      </small>
+      <div class="form-row">
+        <button
+          type="button"
+          class="btn btn-secondary btn-sm"
+          :disabled="syncingAudiobookshelf"
+          @click="syncAudiobookshelf"
+        >
+          {{ syncingAudiobookshelf ? 'Syncing...' : 'Sync narrators from Audiobookshelf' }}
+        </button>
+        <small v-if="syncResultMessage" class="form-help">{{ syncResultMessage }}</small>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { ApplicationSettings } from '@/types'
+import { apiService } from '@/services/api'
 import { PhMagnifyingGlass } from '@phosphor-icons/vue'
 // Checkbox usage handled via CheckboxCard; no direct Checkbox import needed here
 import CheckboxCard from '@/components/settings/CheckboxCard.vue'
@@ -95,6 +137,31 @@ function updateField(field: keyof ApplicationSettings, value: unknown) {
 
 function updateEnableOpenLibrarySearch(value: boolean) {
   updateField('enableOpenLibrarySearch', value)
+}
+
+function onAbsBaseUrlChange(event: Event) {
+  updateField('audiobookshelfBaseUrl', (event.target as HTMLInputElement).value)
+}
+
+function onAbsApiKeyChange(event: Event) {
+  updateField('audiobookshelfApiKey', (event.target as HTMLInputElement).value)
+}
+
+const syncingAudiobookshelf = ref(false)
+const syncResultMessage = ref('')
+
+async function syncAudiobookshelf() {
+  syncingAudiobookshelf.value = true
+  syncResultMessage.value = ''
+  try {
+    const result = await apiService.syncAudiobookshelf()
+    syncResultMessage.value = `Checked ${result.audiobooksChecked}, updated ${result.audiobooksUpdated} from ${result.shelfItemsFound} Audiobookshelf items.`
+  } catch (error) {
+    syncResultMessage.value =
+      error instanceof Error ? error.message : 'Failed to sync from Audiobookshelf'
+  } finally {
+    syncingAudiobookshelf.value = false
+  }
 }
 
 const defaultSearchRegion = computed(() =>

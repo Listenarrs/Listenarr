@@ -8,6 +8,7 @@
  * (at your option) any later version.
  */
 
+using Listenarr.Domain.Common;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.HostedServices.Search
@@ -34,7 +35,26 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             if (!string.IsNullOrEmpty(audiobook.Series))
                 parts.Add(audiobook.Series);
 
+            if (!string.IsNullOrWhiteSpace(audiobook.RequiredNarrator))
+                parts.Add(audiobook.RequiredNarrator);
+
             return string.Join(" ", parts);
+        }
+
+        /// <summary>
+        /// Whether a search result satisfies a book's required narrator, matched against the
+        /// result's structured Narrator field or its title text (many indexers only name the
+        /// narrator in the title), ignoring punctuation/spacing via <see cref="NarratorNameMatcher"/>.
+        /// A blank <paramref name="requiredNarrator"/> always matches.
+        /// </summary>
+        public static bool MatchesRequiredNarrator(SearchResult result, string? requiredNarrator)
+        {
+            if (string.IsNullOrWhiteSpace(requiredNarrator))
+            {
+                return true;
+            }
+
+            return NarratorNameMatcher.Contains($"{result.Narrator} {result.Title}", requiredNarrator);
         }
 
         public bool IsTorrentResult(SearchResult result)

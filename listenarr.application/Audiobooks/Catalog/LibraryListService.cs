@@ -131,6 +131,7 @@ namespace Listenarr.Application.Audiobooks.Catalog
                     Language = a.Language,
                     Runtime = a.Runtime,
                     Edition = a.Edition,
+                    RequiredNarrator = a.RequiredNarrator,
                     ImageUrl = a.ImageUrl,
                     Monitored = a.Monitored,
                     BasePath = a.BasePath,

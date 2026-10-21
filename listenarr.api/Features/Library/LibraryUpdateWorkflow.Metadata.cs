@@ -59,6 +59,7 @@ public sealed partial class LibraryUpdateWorkflow
         if (request.Runtime != null) existingAudiobook.Runtime = request.Runtime;
         if (request.Edition != null) existingAudiobook.Edition = request.Edition;
         if (request.Version != null) existingAudiobook.Version = request.Version;
+        if (request.RequiredNarrator != null) existingAudiobook.RequiredNarrator = request.RequiredNarrator;
 
         ApplySeriesMembershipUpdates(existingAudiobook, request);
 
