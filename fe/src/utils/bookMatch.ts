@@ -70,11 +70,13 @@ export function asinValid(match: BookMatch): boolean {
   return ASIN_PATTERN.test(match.asin.trim())
 }
 
-// Another ASIN or region than the record the book points at today
+// A new record (the picked one) whose ASIN or region differs from the one the book points at today
 export function asinChanged(match: BookMatch): boolean {
+  const { picked, current } = match
+  if (!picked?.asin) return false
   return (
-    match.asin.trim().toUpperCase() !== match.current.asin.toUpperCase() ||
-    match.region !== match.current.region
+    picked.asin.toUpperCase() !== current.asin.toUpperCase() ||
+    (picked.region || match.region) !== current.region
   )
 }
 

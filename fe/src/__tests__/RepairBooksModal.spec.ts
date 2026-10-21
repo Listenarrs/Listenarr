@@ -217,23 +217,36 @@ describe('RepairBooksModal', () => {
     ).toEqual(['ASIN', 'Title', 'Author', 'Region'])
   })
 
-  it('empties the ASIN when the title or author changes, and asks to pick the book again', async () => {
-    for (const [testid, value] of [
-      ['match-title', 'The Primal Hunter 4'],
-      ['match-author', 'Someone else'],
-    ]) {
-      const wrapper = mountModal()
-      await flushPromises()
+  it('only prepares the next search while typing: the ASIN, results and record stay', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+    apiMocks.advancedSearch.mockClear()
+    apiMocks.getAudibleMetadata.mockClear()
 
-      await row(wrapper).get(`[data-testid="${testid}"]`).setValue(value)
+    for (const testid of ['match-title', 'match-author', 'match-asin'])
+      await row(wrapper).get(`[data-testid="${testid}"]`).setValue('Something else')
 
-      expect(field(wrapper, 'match-asin').value).toBe('')
-      expect(row(wrapper).get('[data-testid="match-asin-cleared"]').text()).toBe(
-        `ASIN cleared: the ${testid === 'match-title' ? 'title' : 'author'} changed, search again.`,
-      )
-      expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
-      wrapper.unmount()
-    }
+    expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
+    expect(apiMocks.getAudibleMetadata).not.toHaveBeenCalled()
+    expect(row(wrapper).findAll('[data-testid="find-match-result"]').length).toBeGreaterThan(0)
+    expect(row(wrapper).get('[data-testid="match-picked"]').text()).toContain('B0BK9W82PQ')
+    expect(row(wrapper).attributes('data-match-state')).toBe('matched')
+    expect(row(wrapper).find('.match-hint').exists()).toBe(false)
+  })
+
+  it('repairs with the picked record, even after the ASIN field changed', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+    await row(wrapper).get('[data-testid="match-asin"]').setValue('B0SOMETHIN')
+
+    await repair(wrapper)
+
+    expect(apiMocks.updateAudiobookIdentifiers).toHaveBeenCalledWith(
+      7,
+      expect.arrayContaining([expect.objectContaining({ value: 'B0BK9W82PQ', region: 'us' })]),
+    )
   })
 
   it('searches the title and author in the region and shows the results under the book', async () => {
@@ -712,21 +725,20 @@ describe('RepairBooksModal', () => {
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
   })
 
-  it('forgets the new record while the ASIN is typed, and looks it up again with Enter', async () => {
+  it('keeps the new record while an ASIN is typed, and Enter looks the typed one up', async () => {
+    catalogue({ us: [englishPh4, { ...frenchVol7, asin: 'B0OTHER123', title: 'Other' }] })
     const wrapper = mountModal()
     await flushPromises()
     await searchAndPick(wrapper)
     const asin = row(wrapper).get('[data-testid="match-asin"]')
 
-    ;(asin.element as HTMLInputElement).value = 'B0BK9W82PQ'
-    await asin.trigger('input')
-    expect(row(wrapper).find('[data-testid="match-picked"]').exists()).toBe(false)
-    expect(row(wrapper).attributes('data-match-state')).toBe('ignored')
+    await asin.setValue('B0OTHER123')
+    expect(row(wrapper).get('[data-testid="match-picked"]').text()).toContain('B0BK9W82PQ')
 
     await asin.trigger('keydown', { key: 'Enter' })
     await flushPromises()
-    expect(apiMocks.getAudibleMetadata).toHaveBeenLastCalledWith('B0BK9W82PQ', 'us')
-    expect(row(wrapper).find('[data-testid="match-picked"]').exists()).toBe(true)
+    expect(apiMocks.getAudibleMetadata).toHaveBeenLastCalledWith('B0OTHER123', 'us')
+    expect(row(wrapper).get('[data-testid="match-picked"]').text()).toContain('B0OTHER123')
   })
 
   it('does not let a malformed ASIN be repaired, and says nothing about it before Search', async () => {
@@ -768,8 +780,11 @@ describe('RepairBooksModal', () => {
     expect(apiMocks.getAudibleMetadata).not.toHaveBeenCalled()
     expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
 
-    // Typing again clears it
-    await row(wrapper).get('[data-testid="match-asin"]').setValue('B0BK9W')
+    // Typing only prepares the next search: the message stays until it runs
+    await row(wrapper).get('[data-testid="match-asin"]').setValue('B0BK9W82PQ')
+    expect(row(wrapper).find('[data-testid="match-search-error"]').exists()).toBe(true)
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
+    await flushPromises()
     expect(row(wrapper).find('[data-testid="match-search-error"]').exists()).toBe(false)
   })
 
