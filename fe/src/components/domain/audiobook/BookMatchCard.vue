@@ -60,15 +60,15 @@
             @keydown.enter.prevent="onAsinEntered"
           />
           <button
+            v-if="match.asin"
             type="button"
             class="match-asin-clear"
             title="Empty the ASIN field: Search then looks for the title and author"
             aria-label="Empty the ASIN field: Search then looks for the title and author"
             data-testid="match-asin-clear"
-            :disabled="!match.asin"
             @click.prevent="clearAsin"
           >
-            <PhTrash :size="16" />
+            <PhBackspace :size="18" />
           </button>
         </span>
       </label>
@@ -235,8 +235,8 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   PhArrowCounterClockwise,
   PhCheckCircle,
+  PhBackspace,
   PhMagnifyingGlass,
-  PhTrash,
   PhWarningCircle,
   PhX,
   PhXCircle,
@@ -522,7 +522,7 @@ function onRegionChanged() {
   void search('asin')
 }
 
-// The trash button: an empty ASIN lets Search look for the title and author. Like typing, it only
+// The erase button: an empty ASIN lets Search look for the title and author. Like typing, it only
 // prepares the next search
 function clearAsin() {
   match.value.asin = ''
@@ -721,7 +721,8 @@ defineExpose({ search, cancelSearch })
   box-sizing: border-box;
 }
 
-/* The trash button sits inside the ASIN field, on its right */
+/* The erase button sits inside the ASIN field, on its right, while the field holds something. Its
+   room is always kept, so showing it doesn't change the field's size nor move the others */
 .match-asin-input {
   position: relative;
   display: block;
@@ -747,14 +748,9 @@ defineExpose({ search, cancelSearch })
   cursor: pointer;
 }
 
-.match-asin-clear:hover:not(:disabled) {
+.match-asin-clear:hover {
   color: var(--status-error);
   background: rgba(255, 255, 255, 0.06);
-}
-
-.match-asin-clear:disabled {
-  opacity: 0.35;
-  cursor: default;
 }
 
 .match-field-asin input {

@@ -349,7 +349,7 @@ describe('RepairBooksModal', () => {
     expect(header()).toBe('Results for "Primal Hunter, Vol. 7" by "Zogarth" in France (FR)')
   })
 
-  it('empties the ASIN field with its trash button, so Search looks for the title', async () => {
+  it('empties the ASIN field with its erase button, shown while the field holds something', async () => {
     const wrapper = mountModal()
     await flushPromises()
     const clear = row(wrapper).get('[data-testid="match-asin-clear"]')
@@ -360,7 +360,7 @@ describe('RepairBooksModal', () => {
     await clear.trigger('click')
 
     expect(field(wrapper, 'match-asin').value).toBe('')
-    expect(clear.attributes('disabled')).toBeDefined()
+    expect(row(wrapper).find('[data-testid="match-asin-clear"]').exists()).toBe(false)
     // Nothing searched by itself
     expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
     await row(wrapper).get('[data-testid="match-search"]').trigger('click')
