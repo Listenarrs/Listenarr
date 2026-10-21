@@ -25,71 +25,68 @@
       </p>
     </div>
 
-    <div class="scan-controls">
-      <div class="folder-select-wrap">
-        <label class="control-label">Root folder</label>
-        <!-- Locked while a scan runs: its results belong to the folder it was started on -->
-        <select
-          v-model="selectedFolderId"
-          class="folder-select"
-          :disabled="store.scanStatus === 'scanning'"
-          @change="onFolderChange"
+    <!-- The form: which folder to scan, and the scan running or last run -->
+    <section class="scan-section">
+      <div class="scan-controls">
+        <div class="folder-select-wrap">
+          <label class="control-label" for="library-import-folder">Root folder</label>
+          <select
+            id="library-import-folder"
+            v-model="selectedFolderId"
+            class="folder-select"
+            @change="onFolderChange"
+          >
+            <option v-for="f in rootFoldersStore.folders" :key="f.id" :value="f.id">
+              {{ f.name || f.path }}
+            </option>
+          </select>
+        </div>
+
+        <button
+          class="btn btn-secondary btn-sm"
+          :disabled="!filesystemReadinessStore.filesystemReady"
+          :title="
+            !filesystemReadinessStore.filesystemReady
+              ? 'Available after library filesystem initialization completes'
+              : undefined
+          "
+          @click="openAddRootFolder"
         >
-          <option v-for="f in rootFoldersStore.folders" :key="f.id" :value="f.id">
-            {{ f.name || f.path }}
-          </option>
-        </select>
+          <PhFolderPlus :size="15" />
+          Choose another folder...
+        </button>
+
+        <button
+          class="btn btn-primary btn-sm"
+          data-testid="scan-button"
+          :disabled="
+            !selectedFolderId ||
+            store.scanStatus === 'scanning' ||
+            !filesystemReadinessStore.filesystemReady
+          "
+          :title="
+            !filesystemReadinessStore.filesystemReady
+              ? 'Available after library filesystem initialization completes'
+              : undefined
+          "
+          @click="startScan"
+        >
+          <PhSpinner v-if="store.scanStatus === 'scanning'" class="ph-spin" :size="15" />
+          <PhMagnifyingGlass v-else :size="15" />
+          {{ store.scanStatus === 'scanning' ? 'Scanning...' : 'Scan' }}
+        </button>
       </div>
 
-      <button
-        class="btn btn-secondary btn-sm"
-        :disabled="store.scanStatus === 'scanning' || !filesystemReadinessStore.filesystemReady"
-        :title="
-          !filesystemReadinessStore.filesystemReady
-            ? 'Available after library filesystem initialization completes'
-            : undefined
-        "
-        @click="openAddRootFolder"
-      >
-        <PhFolderPlus :size="15" />
-        Choose another folder...
-      </button>
-
-      <button
-        class="btn btn-primary btn-sm"
-        :disabled="
-          !selectedFolderId ||
-          store.scanStatus === 'scanning' ||
-          !filesystemReadinessStore.filesystemReady
-        "
-        :title="
-          !filesystemReadinessStore.filesystemReady
-            ? 'Available after library filesystem initialization completes'
-            : undefined
-        "
-        @click="startScan"
-      >
-        <PhSpinner v-if="store.scanStatus === 'scanning'" class="ph-spin" :size="15" />
-        <PhMagnifyingGlass v-else :size="15" />
-        {{ store.scanStatus === 'scanning' ? 'Scanning...' : 'Scan' }}
-      </button>
-
-      <span v-if="store.lastScannedAt" class="scan-meta">
-        Last scanned {{ timeAgo(store.lastScannedAt) }}
-        <span v-if="store.itemList.length > 0"> · {{ store.itemList.length }} unmatched</span>
-      </span>
-
-      <span v-if="store.scanStatus === 'error'" class="scan-error">
-        <PhWarning :size="14" /> {{ store.scanError ?? 'Scan failed' }}
-      </span>
-    </div>
-
-    <div v-if="store.scanWarnings.length > 0" class="scan-warnings" role="status">
-      <div v-for="warning in store.scanWarnings" :key="warning" class="scan-warning">
-        <PhWarning :size="14" />
-        <span>{{ warning }}</span>
-      </div>
-    </div>
+      <LibraryImportScanTask
+        v-if="store.scanTask"
+        :task="store.scanTask"
+        :folder-name="folderName(store.scanTask.rootFolderId)"
+        :shown="store.rootFolderId === store.scanTask.rootFolderId"
+        @cancel="store.cancelScan()"
+        @dismiss="store.dismissScanTask()"
+        @show="showScanTaskFolder"
+      />
+    </section>
 
     <!-- The address asked for a root folder that no longer exists: say so above whatever the
          default folder shows, saved results included -->
@@ -109,138 +106,163 @@
       </div>
     </div>
 
-    <div v-if="store.scanStatus === 'scanning'" class="state-panel">
-      <PhSpinner class="ph-spin state-icon" />
-      <p>Scanning for unmatched audio files...</p>
-    </div>
+    <!-- The results, under the form: always those of the folder named in their heading -->
+    <section v-if="store.rootFolderId !== null" class="results-panel">
+      <header class="results-header" data-testid="results-header">
+        <h2>Results for {{ folderName(store.rootFolderId) }}</h2>
+        <span class="results-path">{{ folderPath(store.rootFolderId) }}</span>
+        <span v-if="store.lastScannedAt" class="scan-meta">
+          Last scanned {{ timeAgo(store.lastScannedAt) }}
+          <span v-if="store.itemList.length > 0"> · {{ store.itemList.length }} unmatched</span>
+        </span>
+      </header>
 
-    <div v-else-if="store.scanStatus === 'idle' && store.itemList.length === 0" class="state-panel">
-      <PhMagnifyingGlass class="state-icon" />
-      <h3>No scan results yet</h3>
-      <p>Select a root folder and click <strong>Scan</strong> to find unmatched audio files.</p>
-    </div>
-
-    <div v-else-if="store.scanStatus === 'done' && store.itemList.length === 0" class="state-panel">
-      <PhCheckCircle class="state-icon ok" />
-      <h3>All files are in your library</h3>
-      <p>No unmatched audio files were found.</p>
-    </div>
-
-    <div v-else-if="store.itemList.length > 0" class="results-section">
-      <div class="table-toolbar">
-        <div class="table-summary">
-          <span class="summary-pill">{{ sortedItems.length }} items</span>
-          <span class="summary-text">
-            Sorted by {{ currentSortLabel }} ({{ sortDirectionLabel }})
-          </span>
-        </div>
-
-        <div class="mobile-sort-controls">
-          <label class="mobile-sort-control">
-            <span>Sort</span>
-            <select v-model="sortKey" class="sort-select">
-              <option v-for="option in sortOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </option>
-            </select>
-          </label>
-
-          <label class="mobile-sort-control">
-            <span>Order</span>
-            <select v-model="sortDirection" class="sort-select">
-              <option value="asc">Ascending</option>
-              <option value="desc">Descending</option>
-            </select>
-          </label>
+      <div v-if="store.scanWarnings.length > 0" class="scan-warnings" role="status">
+        <div v-for="warning in store.scanWarnings" :key="warning" class="scan-warning">
+          <PhWarning :size="14" />
+          <span>{{ warning }}</span>
         </div>
       </div>
 
-      <div class="table-wrap">
-        <table class="import-table" :style="{ minWidth: `${tableMinWidth}px` }">
-          <colgroup>
-            <col class="col-check" />
-            <col :style="{ width: `${columnWidths.folder}px` }" />
-            <col :style="{ width: `${columnWidths.path}px` }" />
-            <col :style="{ width: `${columnWidths.format}px` }" />
-            <col :style="{ width: `${columnWidths.match}px` }" />
-          </colgroup>
-
-          <thead>
-            <tr>
-              <th class="col-check">
-                <input
-                  type="checkbox"
-                  :checked="allMatchedSelected"
-                  :indeterminate="someSelected && !allMatchedSelected"
-                  @change="store.toggleSelectAll()"
-                  title="Select all matched"
-                />
-              </th>
-
-              <th class="sortable-header" :aria-sort="getAriaSort('folder')">
-                <button type="button" class="sort-button" @click="setSort('folder')">
-                  <span class="header-content">
-                    Book
-                    <component :is="getSortIcon('folder')" class="sort-icon" />
-                  </span>
-                </button>
-                <span
-                  class="resize-handle"
-                  :class="{ active: resizingColumn === 'folder' }"
-                  @pointerdown="startResize('folder', $event)"
-                />
-              </th>
-
-              <th class="sortable-header col-path" :aria-sort="getAriaSort('path')">
-                <button type="button" class="sort-button" @click="setSort('path')">
-                  <span class="header-content">
-                    Path
-                    <component :is="getSortIcon('path')" class="sort-icon" />
-                  </span>
-                </button>
-                <span
-                  class="resize-handle"
-                  :class="{ active: resizingColumn === 'path' }"
-                  @pointerdown="startResize('path', $event)"
-                />
-              </th>
-
-              <th class="sortable-header col-format" :aria-sort="getAriaSort('format')">
-                <button type="button" class="sort-button" @click="setSort('format')">
-                  <span class="header-content">
-                    Format
-                    <component :is="getSortIcon('format')" class="sort-icon" />
-                  </span>
-                </button>
-                <span
-                  class="resize-handle"
-                  :class="{ active: resizingColumn === 'format' }"
-                  @pointerdown="startResize('format', $event)"
-                />
-              </th>
-
-              <th class="sortable-header col-match" :aria-sort="getAriaSort('match')">
-                <button type="button" class="sort-button" @click="setSort('match')">
-                  <span class="header-content">
-                    Match
-                    <component :is="getSortIcon('match')" class="sort-icon" />
-                  </span>
-                </button>
-                <span
-                  class="resize-handle"
-                  :class="{ active: resizingColumn === 'match' }"
-                  @pointerdown="startResize('match', $event)"
-                />
-              </th>
-            </tr>
-          </thead>
-
-          <tbody>
-            <LibraryImportRow v-for="item in sortedItems" :key="item.id" :item="item" />
-          </tbody>
-        </table>
+      <div v-if="store.scanStatus === 'scanning'" class="state-panel">
+        <PhSpinner class="ph-spin state-icon" />
+        <p>Scanning for unmatched audio files...</p>
       </div>
-    </div>
+
+      <div
+        v-else-if="store.scanStatus === 'idle' && store.itemList.length === 0"
+        class="state-panel"
+      >
+        <PhMagnifyingGlass class="state-icon" />
+        <h3>No scan results yet</h3>
+        <p>Click <strong>Scan</strong> to find unmatched audio files in this folder.</p>
+      </div>
+
+      <div
+        v-else-if="store.scanStatus === 'done' && store.itemList.length === 0"
+        class="state-panel"
+      >
+        <PhCheckCircle class="state-icon ok" />
+        <h3>All files are in your library</h3>
+        <p>No unmatched audio files were found.</p>
+      </div>
+
+      <div v-else-if="store.itemList.length > 0" class="results-section">
+        <div class="table-toolbar">
+          <div class="table-summary">
+            <span class="summary-pill">{{ sortedItems.length }} items</span>
+            <span class="summary-text">
+              Sorted by {{ currentSortLabel }} ({{ sortDirectionLabel }})
+            </span>
+          </div>
+
+          <div class="mobile-sort-controls">
+            <label class="mobile-sort-control">
+              <span>Sort</span>
+              <select v-model="sortKey" class="sort-select">
+                <option v-for="option in sortOptions" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
+              </select>
+            </label>
+
+            <label class="mobile-sort-control">
+              <span>Order</span>
+              <select v-model="sortDirection" class="sort-select">
+                <option value="asc">Ascending</option>
+                <option value="desc">Descending</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table class="import-table" :style="{ minWidth: `${tableMinWidth}px` }">
+            <colgroup>
+              <col class="col-check" />
+              <col :style="{ width: `${columnWidths.folder}px` }" />
+              <col :style="{ width: `${columnWidths.path}px` }" />
+              <col :style="{ width: `${columnWidths.format}px` }" />
+              <col :style="{ width: `${columnWidths.match}px` }" />
+            </colgroup>
+
+            <thead>
+              <tr>
+                <th class="col-check">
+                  <input
+                    type="checkbox"
+                    :checked="allMatchedSelected"
+                    :indeterminate="someSelected && !allMatchedSelected"
+                    @change="store.toggleSelectAll()"
+                    title="Select all matched"
+                  />
+                </th>
+
+                <th class="sortable-header" :aria-sort="getAriaSort('folder')">
+                  <button type="button" class="sort-button" @click="setSort('folder')">
+                    <span class="header-content">
+                      Book
+                      <component :is="getSortIcon('folder')" class="sort-icon" />
+                    </span>
+                  </button>
+                  <span
+                    class="resize-handle"
+                    :class="{ active: resizingColumn === 'folder' }"
+                    @pointerdown="startResize('folder', $event)"
+                  />
+                </th>
+
+                <th class="sortable-header col-path" :aria-sort="getAriaSort('path')">
+                  <button type="button" class="sort-button" @click="setSort('path')">
+                    <span class="header-content">
+                      Path
+                      <component :is="getSortIcon('path')" class="sort-icon" />
+                    </span>
+                  </button>
+                  <span
+                    class="resize-handle"
+                    :class="{ active: resizingColumn === 'path' }"
+                    @pointerdown="startResize('path', $event)"
+                  />
+                </th>
+
+                <th class="sortable-header col-format" :aria-sort="getAriaSort('format')">
+                  <button type="button" class="sort-button" @click="setSort('format')">
+                    <span class="header-content">
+                      Format
+                      <component :is="getSortIcon('format')" class="sort-icon" />
+                    </span>
+                  </button>
+                  <span
+                    class="resize-handle"
+                    :class="{ active: resizingColumn === 'format' }"
+                    @pointerdown="startResize('format', $event)"
+                  />
+                </th>
+
+                <th class="sortable-header col-match" :aria-sort="getAriaSort('match')">
+                  <button type="button" class="sort-button" @click="setSort('match')">
+                    <span class="header-content">
+                      Match
+                      <component :is="getSortIcon('match')" class="sort-icon" />
+                    </span>
+                  </button>
+                  <span
+                    class="resize-handle"
+                    :class="{ active: resizingColumn === 'match' }"
+                    @pointerdown="startResize('match', $event)"
+                  />
+                </th>
+              </tr>
+            </thead>
+
+            <tbody>
+              <LibraryImportRow v-for="item in sortedItems" :key="item.id" :item="item" />
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
 
     <LibraryImportFooter
       v-if="rootFoldersStore.folders.length > 0"
@@ -275,6 +297,8 @@ import { useConfigurationStore } from '@/stores/configuration'
 import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import LibraryImportRow from '@/components/domain/audiobook/LibraryImportRow.vue'
 import LibraryImportFooter from '@/components/domain/audiobook/LibraryImportFooter.vue'
+import LibraryImportScanTask from '@/components/domain/audiobook/LibraryImportScanTask.vue'
+import { showConfirm } from '@/composables/confirmService'
 import {
   DEFAULT_LIBRARY_IMPORT_COLUMN_WIDTHS,
   LIBRARY_IMPORT_COLUMN_MIN_WIDTHS,
@@ -374,15 +398,29 @@ onMounted(async () => {
     void router.replace({ query: { ...route.query, scan: undefined } })
   }
 
+  // After a reload, the session's latest scan (running, finished, failed or canceled)
+  store.restoreScanTask()
+
   if (scanRequested) {
-    // The requested folder itself, whatever the list shows by then; this replaces any running scan
-    selectedFolderId.value = requestedFolder.id
-    await store.triggerScan(requestedFolder.id)
+    // The requested folder itself, whatever the list shows by then
+    await scanFolder(requestedFolder.id)
     return
   }
 
-  if ((store.scanStatus === 'scanning' || store.isProcessing) && store.rootFolderId !== null) {
-    // Back on the page while a scan or Start Matching runs: show its folder rather than another one
+  const task = store.scanTask
+  if (
+    !requestedFolder &&
+    task &&
+    rootFoldersStore.folders.some((f) => f.id === task.rootFolderId)
+  ) {
+    // Back on the page: show the folder of the latest scan
+    selectedFolderId.value = task.rootFolderId
+    if (store.rootFolderId !== task.rootFolderId) await store.initFromRootFolder(task.rootFolderId)
+    return
+  }
+
+  if (store.isProcessing && store.rootFolderId !== null) {
+    // Back on the page while Start Matching runs: show its folder rather than another one
     selectedFolderId.value = store.rootFolderId
     return
   }
@@ -401,16 +439,48 @@ onBeforeUnmount(() => {
 
 async function onFolderChange() {
   requestedFolderMissing.value = false
-  if (selectedFolderId.value && store.scanStatus !== 'scanning') {
-    store.stopProcessing()
-    await store.initFromRootFolder(selectedFolderId.value)
-  }
+  // Browsing another folder doesn't touch the scan running: its results stay with its folder
+  if (selectedFolderId.value) await store.initFromRootFolder(selectedFolderId.value)
 }
 
 async function startScan() {
   if (!selectedFolderId.value || store.scanStatus === 'scanning') return
   requestedFolderMissing.value = false
-  await store.triggerScan(selectedFolderId.value)
+  await scanFolder(selectedFolderId.value)
+}
+
+// Shows the folder and scans it. A scan running on another folder is replaced only if the user
+// agrees; one already running on this folder is shown as it is.
+async function scanFolder(folderId: number) {
+  selectedFolderId.value = folderId
+  const task = store.scanTask
+  if (store.scanTaskActive && task && task.rootFolderId !== folderId) {
+    if (store.rootFolderId !== folderId) void store.initFromRootFolder(folderId)
+    const replace = await showConfirm(
+      `A scan of ${folderName(task.rootFolderId)} is running. Cancel it and scan ${folderName(folderId)} instead?`,
+      'A scan is already running',
+      { confirmText: 'Cancel it and scan', cancelText: 'Keep the current scan' },
+    )
+    if (!replace) return
+  }
+  await store.triggerScan(folderId)
+}
+
+async function showScanTaskFolder() {
+  const task = store.scanTask
+  if (!task) return
+  requestedFolderMissing.value = false
+  selectedFolderId.value = task.rootFolderId
+  await store.initFromRootFolder(task.rootFolderId)
+}
+
+function folderName(folderId: number | null): string {
+  const folder = rootFoldersStore.folders.find((f) => f.id === folderId)
+  return folder ? folder.name || folder.path : 'a removed folder'
+}
+
+function folderPath(folderId: number | null): string {
+  return rootFoldersStore.folders.find((f) => f.id === folderId)?.path ?? ''
 }
 
 function timeAgo(isoString: string): string {
@@ -573,12 +643,41 @@ async function refreshRootFolders(newFolder: RootFolder) {
   margin: 0;
 }
 
+.scan-section {
+  margin-bottom: 1.5rem;
+  padding: 1.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: linear-gradient(135deg, rgba(42, 42, 42, 0.95) 0%, rgba(35, 35, 35, 0.95) 100%);
+}
+
 .scan-controls {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  margin-bottom: 1.25rem;
   flex-wrap: wrap;
+}
+
+.results-header {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.results-header h2 {
+  margin: 0;
+  color: white;
+  font-size: 1.25rem;
+  font-weight: 500;
+}
+
+.results-path {
+  color: #888;
+  font-family: monospace;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
 }
 
 .control-label {
@@ -621,14 +720,6 @@ async function refreshRootFolders(newFolder: RootFolder) {
 .scan-meta {
   font-size: 0.8rem;
   color: #666;
-}
-
-.scan-error {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  font-size: 0.8rem;
-  color: #ef4444;
 }
 
 .scan-warnings {

@@ -1218,8 +1218,10 @@ export interface UnmatchedFileItem {
 
 export interface UnmatchedFilesResponse {
   jobId: string
-  status: 'Queued' | 'Processing' | 'Completed' | 'Failed'
+  status: 'Queued' | 'Processing' | 'Completed' | 'Failed' | 'Canceled'
   error?: string
+  enqueuedAt?: string
+  completedAt?: string | null
   warnings?: string[]
   items: UnmatchedFileItem[]
 }
