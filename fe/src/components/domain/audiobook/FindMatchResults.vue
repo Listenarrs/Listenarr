@@ -110,7 +110,7 @@ function seriesName(result: SearchResult): string | undefined {
 }
 
 .result-item.selected {
-  background: rgba(46, 204, 113, 0.12);
+  background: color-mix(in srgb, var(--status-success) 12%, transparent);
 }
 
 .result-thumb {

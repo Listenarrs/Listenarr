@@ -50,18 +50,18 @@
   width: 1rem;
   height: 3px;
   border-radius: 2px;
-  background: var(--match-bar-ignored, #6b7280);
+  background: var(--status-idle);
 }
 
 .match-legend-bar.matched {
-  background: var(--match-bar-matched, #2ecc71);
+  background: var(--status-success);
 }
 
 .match-legend-bar.error {
-  background: var(--match-bar-error, #e74c3c);
+  background: var(--status-error);
 }
 
 .match-legend-bar.searching {
-  background: var(--match-bar-searching, #3498db);
+  background: var(--status-progress);
 }
 </style>
