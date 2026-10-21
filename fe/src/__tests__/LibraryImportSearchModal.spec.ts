@@ -118,6 +118,9 @@ describe('LibraryImportSearchModal', () => {
     expect((field(wrapper, 'match-title').element as HTMLInputElement).value).toBe('Alchemised')
     expect((field(wrapper, 'match-author').element as HTMLInputElement).value).toBe('SenLinYu')
     expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="find-match-info-asin"]').text()).toContain(
+      'A typed ASIN is searched on its own',
+    )
     // No match yet: what the files say, without ASIN or region
     expect(field(wrapper, 'match-summary').text()).toBe('Alchemised - SenLinYu')
   })

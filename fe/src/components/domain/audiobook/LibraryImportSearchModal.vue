@@ -23,7 +23,12 @@
     <ModalBody>
       <div class="info-section find-match-info">
         <PhInfo />
-        <p>Find the right Audible record for this book.</p>
+        <div class="find-match-info-lines">
+          <p>Find the right Audible record for this book.</p>
+          <p data-testid="find-match-info-asin">
+            A typed ASIN is searched on its own: the title and author are left out of that search.
+          </p>
+        </div>
       </div>
 
       <BookMatchCard
@@ -165,6 +170,12 @@ onBeforeUnmount(() => onSearching(false))
   border: 1px solid rgba(52, 152, 219, 0.28);
   border-radius: 6px;
   color: #3498db;
+}
+
+.find-match-info-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
 }
 
 .find-match-info p {
