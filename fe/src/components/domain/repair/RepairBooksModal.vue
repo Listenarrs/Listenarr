@@ -41,7 +41,13 @@
         <div v-else-if="!finished && rows.length" class="repair-list-wrapper">
           <div class="info-section repair-info-section">
             <PhInfo />
-            <p>Find the right Audible record for each book, then repair.</p>
+            <div class="repair-info-lines">
+              <p>Find the right Audible record for each book, then repair.</p>
+              <p data-testid="repair-info-asin">
+                A typed ASIN is searched on its own: the title and author are left out of that
+                search.
+              </p>
+            </div>
           </div>
 
           <div class="form-group repair-group">
@@ -484,6 +490,12 @@ watch(
   border: 1px solid rgba(52, 152, 219, 0.28);
   border-radius: 6px;
   color: #3498db;
+}
+
+.repair-info-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
 }
 
 .repair-info-section p {

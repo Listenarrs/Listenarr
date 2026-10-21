@@ -177,6 +177,9 @@ describe('RepairBooksModal', () => {
     expect(field(wrapper, 'match-region').value).toBe('fr')
     expect(wrapper.get('[data-testid="repair-confirm"]').text()).toContain('Repair 0')
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="repair-info-asin"]').text()).toBe(
+      'A typed ASIN is searched on its own: the title and author are left out of that search.',
+    )
     expect(wrapper.get('[data-testid="repair-count"]').text()).toBe(
       'Find a new record for each book to repair',
     )
