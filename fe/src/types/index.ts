@@ -242,7 +242,7 @@ export interface ApiConfiguration {
 export interface DownloadClientConfiguration {
   id: string
   name: string
-  type: 'qbittorrent' | 'transmission' | 'sabnzbd' | 'nzbget'
+  type: 'qbittorrent' | 'transmission' | 'deluge' | 'sabnzbd' | 'nzbget'
   host: string
   port: number
   username: string

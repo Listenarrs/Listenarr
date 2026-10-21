@@ -112,6 +112,14 @@ namespace Listenarr.Tests.Common
                 provider.GetRequiredService<ILogger<TransmissionAdapter>>());
         }
 
+        public static DelugeAdapter CreateDelugeAdapter(ServiceProvider provider)
+        {
+            return new DelugeAdapter(
+                provider.GetRequiredService<IHttpClientFactory>(),
+                Mock.Of<ITorrentFileDownloader>(),
+                provider.GetRequiredService<ILogger<DelugeAdapter>>());
+        }
+
         public static SabnzbdAdapter CreateSabnzbdAdapter(ServiceProvider provider)
         {
             return new SabnzbdAdapter(

@@ -33,6 +33,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Common
             Assert.Contains(adapters, a => a.ClientType == DownloadClientTypes.Transmission);
             Assert.Contains(adapters, a => a.ClientType == DownloadClientTypes.Sabnzbd);
             Assert.Contains(adapters, a => a.ClientType == DownloadClientTypes.Nzbget);
+            Assert.Contains(adapters, a => a.ClientType == DownloadClientTypes.Deluge);
         }
 
         [Fact]
@@ -49,6 +50,14 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Common
             _provider.GetRequiredService<TransmissionQueueFetchWorkflow>();
             _provider.GetRequiredService<TransmissionItemFetchWorkflow>();
             _provider.GetRequiredService<TransmissionImportItemResolver>();
+
+            _provider.GetRequiredService<DelugeRpcClient>();
+            _provider.GetRequiredService<DelugeConnectionTester>();
+            _provider.GetRequiredService<DelugeAddWorkflow>();
+            _provider.GetRequiredService<DelugeQueueFetchWorkflow>();
+            _provider.GetRequiredService<DelugeItemFetchWorkflow>();
+            _provider.GetRequiredService<DelugeRemovalWorkflow>();
+            _provider.GetRequiredService<DelugeImportItemResolver>();
 
             _provider.GetRequiredService<SabnzbdRequestBuilder>();
             _provider.GetRequiredService<SabnzbdAddWorkflow>();
@@ -89,6 +98,13 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Common
             Assert.NotSame(
                 firstScope.ServiceProvider.GetRequiredService<TransmissionRpcClient>(),
                 secondScope.ServiceProvider.GetRequiredService<TransmissionRpcClient>());
+
+            Assert.Same(
+                firstScope.ServiceProvider.GetRequiredService<DelugeRpcClient>(),
+                firstScope.ServiceProvider.GetRequiredService<DelugeRpcClient>());
+            Assert.NotSame(
+                firstScope.ServiceProvider.GetRequiredService<DelugeRpcClient>(),
+                secondScope.ServiceProvider.GetRequiredService<DelugeRpcClient>());
 
             Assert.Same(
                 firstScope.ServiceProvider.GetRequiredService<SabnzbdRequestBuilder>(),

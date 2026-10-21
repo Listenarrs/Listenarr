@@ -185,10 +185,10 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
                     continue;
                 }
 
-                // Respect per-client poll schedules to avoid overloading qbittorrent
+                // Respect per-client poll schedules to avoid overloading download clients
                 if (_nextClientPoll.TryGetValue(client.Id, out var scheduled) && DateTime.UtcNow < scheduled)
                 {
-                    logger.LogDebug($"Skipping qBittorrent poll for client {client.Id}, next scheduled at {scheduled}");
+                    logger.LogDebug($"Skipping poll for client {client.Id} ({client.Type}), next scheduled at {scheduled}");
                     continue;
                 }
 
