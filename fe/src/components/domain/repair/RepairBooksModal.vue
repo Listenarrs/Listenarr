@@ -42,11 +42,11 @@
           <div class="info-section repair-info-section">
             <PhInfo />
             <p>
-              Point each book at the right Audible record: use Find Match to search the title and
-              author in the region and pick the result, or type the ASIN and its region (it is
-              checked in that region). Changing the title, author or region empties the ASIN, which
-              no longer matches: pick the book again with Find Match. Repairing saves the ASIN and
-              its region and rescans the metadata from it.
+              Point each book at the right Audible record: search its title and author in the region
+              and pick the result under the book, or type the ASIN and its region (it is checked in
+              that region). Changing the title, author or region empties the ASIN, which no longer
+              matches: search and pick the book again. Repairing saves the ASIN and its region and
+              rescans the metadata from it.
             </p>
           </div>
 
@@ -142,7 +142,7 @@
                       class="form-input"
                       data-testid="repair-title"
                       @input="onSearchChanged(row)"
-                      @keydown.enter.prevent="findMatchRow = row"
+                      @keydown.enter.prevent="search(row)"
                     />
                   </label>
                   <label class="repair-field">
@@ -152,7 +152,7 @@
                       class="form-input"
                       data-testid="repair-author"
                       @input="onSearchChanged(row)"
-                      @keydown.enter.prevent="findMatchRow = row"
+                      @keydown.enter.prevent="search(row)"
                     />
                   </label>
                   <label class="repair-field">
@@ -169,16 +169,71 @@
                     </select>
                   </label>
                   <button
+                    v-if="row.search.status === 'searching'"
                     type="button"
-                    class="btn btn-secondary repair-find-btn"
-                    title="Find Match"
-                    data-testid="repair-find-match"
-                    @click="findMatchRow = row"
+                    class="btn btn-danger repair-search-btn"
+                    data-testid="repair-cancel-search"
+                    @click="cancelSearch(row)"
+                  >
+                    <PhX :size="16" />
+                    Cancel search
+                  </button>
+                  <button
+                    v-else
+                    type="button"
+                    class="btn btn-secondary repair-search-btn"
+                    data-testid="repair-search"
+                    :disabled="!canSearch(row)"
+                    :title="searchingRowId !== null ? 'Another book is being searched' : undefined"
+                    @click="search(row)"
                   >
                     <PhMagnifyingGlass :size="16" />
-                    Find Match
+                    Search
                   </button>
                 </div>
+
+                <!-- The search under the book: pending, failed with Retry, or its results to pick from
+                     (the same results list as Library Import's Find Match) -->
+                <p
+                  v-if="row.search.status === 'searching'"
+                  class="repair-search-state"
+                  data-testid="repair-search-pending"
+                >
+                  <PhSpinner class="ph-spin" :size="16" />
+                  Searching "{{ row.query.trim() }}" in {{ regionLabel(row.region) }}…
+                </p>
+                <p
+                  v-else-if="row.search.status === 'failed'"
+                  class="repair-search-state repair-search-error"
+                  data-testid="repair-search-error"
+                >
+                  <PhWarningCircle :size="16" />
+                  <span>{{ row.search.error }}</span>
+                  <button
+                    type="button"
+                    class="btn btn-secondary repair-retry-btn"
+                    data-testid="repair-search-retry"
+                    :disabled="!canSearch(row)"
+                    @click="search(row)"
+                  >
+                    <PhArrowCounterClockwise :size="14" />
+                    Retry
+                  </button>
+                </p>
+                <template v-else-if="row.search.status === 'done'">
+                  <FindMatchResults
+                    v-if="row.search.results.length"
+                    class="repair-search-results"
+                    :results="row.search.results"
+                    @select="(result) => pick(row, result)"
+                  />
+                  <p v-else class="repair-search-state" data-testid="repair-search-empty">
+                    No results for "{{ row.query.trim() }}"{{
+                      row.author.trim() ? ` by "${row.author.trim()}"` : ''
+                    }}
+                    in {{ regionLabel(row.region) }}.
+                  </p>
+                </template>
                 <p v-if="row.pickedTitle" class="repair-picked" data-testid="repair-picked">
                   New record: {{ row.pickedTitle }}
                 </p>
@@ -189,8 +244,8 @@
                 >
                   {{
                     row.asin.trim()
-                      ? 'An ASIN is 10 letters or digits: type it, or use Find Match.'
-                      : 'No ASIN: use Find Match to pick the book, or type its ASIN.'
+                      ? 'An ASIN is 10 letters or digits: type it, or search the book.'
+                      : 'No ASIN: search the book and pick it, or type its ASIN.'
                   }}
                 </p>
               </div>
@@ -241,7 +296,13 @@
             type="button"
             class="btn btn-primary"
             data-testid="repair-confirm"
-            :disabled="loading || executing || selectedCount === 0 || selectedRows.some(isInvalid)"
+            :disabled="
+              loading ||
+              executing ||
+              searchingRowId !== null ||
+              selectedCount === 0 ||
+              selectedRows.some(isInvalid)
+            "
             @click="repair"
           >
             <PhSpinner v-if="executing" class="ph-spin" :size="16" />
@@ -268,18 +329,10 @@
       </ModalFooter>
     </template>
   </Modal>
-
-  <!-- Canary's Find Match, searching the book's title and author in its region -->
-  <LibraryImportSearchModal
-    v-if="findMatchRow"
-    :target="findMatchTarget(findMatchRow)"
-    @close="findMatchRow = null"
-    @select="(result) => pick(findMatchRow!, result)"
-  />
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import {
   PhArrowCounterClockwise,
   PhCheckCircle,
@@ -296,18 +349,23 @@ import { Modal, ModalBody, ModalFooter, ModalHeader } from '@/components/feedbac
 import { apiService } from '@/services/api'
 import { useLibraryImportStore } from '@/stores/libraryImport'
 import { orderedSearchRegionOptions, searchRegionOptions } from '@/utils/languageMapping'
-import LibraryImportSearchModal from '@/components/domain/audiobook/LibraryImportSearchModal.vue'
+import FindMatchResults from '@/components/domain/audiobook/FindMatchResults.vue'
 import type {
   AudiobookExternalIdentifier,
   AudiobookExternalIdentifierInput,
-  FindMatchTarget,
   SearchResult,
 } from '@/types'
 
-// As in Find Match
+// As in Library Import's Find Match
 const ASIN_PATTERN = /^[A-Z0-9]{10}$/i
 // Catalogue offered after the book's and the configured ones
 const FALLBACK_REGION = 'us'
+
+interface RowSearch {
+  status: 'idle' | 'searching' | 'done' | 'failed'
+  results: SearchResult[]
+  error: string | null
+}
 
 interface RepairRow {
   id: number
@@ -318,10 +376,12 @@ interface RepairRow {
   identifiers: AudiobookExternalIdentifier[]
   asin: string
   region: string
-  // What Find Match searches: the book's title and first author, editable
+  // What the search looks for: the book's title and first author, editable
   query: string
   author: string
-  // The record picked in Find Match (its ASIN and region are known to exist); null when typed
+  // The search under the book: its state, results or error
+  search: RowSearch
+  // The record picked in the search (its ASIN and region are known to exist); null when typed
   pickedTitle: string | null
   selected: boolean
   // Values when the modal opened, restored by Revert
@@ -352,7 +412,7 @@ const emit = defineEmits<{
   organize: [ids: number[]]
 }>()
 
-// Find Match's search and configured region live in the Library Import store
+// The search Find Match uses and the configured region live in the Library Import store
 const libraryImportStore = useLibraryImportStore()
 const configuredRegion = ref(FALLBACK_REGION)
 const loading = ref(false)
@@ -362,7 +422,9 @@ const error = ref<string | null>(null)
 const rows = ref<RepairRow[]>([])
 const results = ref<RepairResult[]>([])
 const progress = ref(0)
-const findMatchRow = ref<RepairRow | null>(null)
+// One book is searched at a time: the others wait for it
+const searchingRowId = ref<number | null>(null)
+const searchControllers = new Map<number, AbortController>()
 
 const selectedRows = computed(() => rows.value.filter((r) => r.selected))
 const selectedCount = computed(() => selectedRows.value.length)
@@ -413,6 +475,7 @@ async function load() {
           identifiers: ids.identifiers ?? [],
           ...initial,
           pickedTitle: null,
+          search: idleSearch(),
           initial,
           selected: true,
         }
@@ -425,17 +488,73 @@ async function load() {
   }
 }
 
-function findMatchTarget(row: RepairRow): FindMatchTarget {
-  return { name: row.title, query: row.query, author: row.author, region: row.region }
+// A search slower than this is stopped and reported, with Retry
+const SEARCH_TIMEOUT_MS = 30_000
+
+function idleSearch(): RowSearch {
+  return { status: 'idle', results: [], error: null }
 }
 
-// The record picked in Find Match: its ASIN in the region it was found in
+function canSearch(row: RepairRow): boolean {
+  return searchingRowId.value === null && !!row.query.trim()
+}
+
+// Search the title and author (or an ASIN typed as the title) in the row's region, as Library
+// Import's Find Match does; the results open under the book
+async function search(row: RepairRow) {
+  if (!canSearch(row)) return
+  const query = row.query.trim()
+  const controller = new AbortController()
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, SEARCH_TIMEOUT_MS)
+  searchControllers.set(row.id, controller)
+  searchingRowId.value = row.id
+  row.search = { status: 'searching', results: [], error: null }
+  try {
+    const params = ASIN_PATTERN.test(query)
+      ? { asin: query.toUpperCase(), cap: 5 }
+      : { title: query, author: row.author.trim() || undefined, cap: 5 }
+    const results = await libraryImportStore.searchInRegion(params, row.region, controller.signal)
+    row.search = { status: 'done', results, error: null }
+  } catch (e) {
+    if (controller.signal.aborted && !timedOut) {
+      // Canceled by the user: back to the fields, nothing to report
+      row.search = idleSearch()
+    } else {
+      row.search = {
+        status: 'failed',
+        results: [],
+        error: timedOut
+          ? `The search took longer than ${SEARCH_TIMEOUT_MS / 1000} seconds and was stopped.`
+          : `The search failed: ${(e as Error)?.message ?? 'unknown error'}`,
+      }
+    }
+  } finally {
+    clearTimeout(timer)
+    searchControllers.delete(row.id)
+    if (searchingRowId.value === row.id) searchingRowId.value = null
+  }
+}
+
+function cancelSearch(row: RepairRow) {
+  searchControllers.get(row.id)?.abort()
+}
+
+function cancelAllSearches() {
+  for (const controller of searchControllers.values()) controller.abort()
+}
+
+// The record picked in the results: its ASIN in the region it was found in; the results close
 function pick(row: RepairRow, result: SearchResult) {
   if (!result.asin) return
   row.asin = result.asin.toUpperCase()
   row.region = result.region || row.region
   row.pickedTitle = result.title ?? result.asin
   row.selected = true
+  row.search = idleSearch()
 }
 
 // A typed ASIN is no longer the picked record
@@ -444,10 +563,12 @@ function onTyped(row: RepairRow) {
 }
 
 // Another title, author or region describes another record: the ASIN no longer matches, so it is
-// emptied until Find Match picks the book again (or its ASIN is typed)
+// emptied until the book is searched and picked again (or its ASIN is typed)
 function onSearchChanged(row: RepairRow) {
   row.asin = ''
   row.pickedTitle = null
+  // Results of the previous title, author or region no longer apply
+  if (row.search.status !== 'searching') row.search = idleSearch()
 }
 
 function isEdited(row: RepairRow): boolean {
@@ -460,8 +581,10 @@ function isEdited(row: RepairRow): boolean {
 }
 
 function revert(row: RepairRow) {
+  cancelSearch(row)
   Object.assign(row, row.initial)
   row.pickedTitle = null
+  row.search = idleSearch()
 }
 
 function asinChanged(row: RepairRow): boolean {
@@ -480,7 +603,7 @@ function isInvalid(row: RepairRow): boolean {
   return asinChanged(row) && !asinValid(row)
 }
 
-// A typed ASIN is looked up in its region first, with Find Match's search: a record Audible doesn't
+// A typed ASIN is looked up in its region first, with the same search: a record Audible doesn't
 // have there is not saved
 async function ensureRecordExists(row: RepairRow) {
   if (row.pickedTitle) return
@@ -488,7 +611,7 @@ async function ensureRecordExists(row: RepairRow) {
   const found = await libraryImportStore.searchInRegion({ asin, cap: 5 }, row.region)
   if (!found.some((r) => r.asin?.toUpperCase() === asin))
     throw new Error(
-      `Audible ${regionLabel(row.region)} has no record for ${asin}. Use Find Match to pick the book in the right region.`,
+      `Audible ${regionLabel(row.region)} has no record for ${asin}. Search the book and pick it in the right region.`,
     )
 }
 
@@ -566,6 +689,7 @@ function clearSelection() {
 
 function handleClose() {
   if (executing.value) return
+  cancelAllSearches()
   if (finished.value) emit('done')
   else emit('close')
 }
@@ -578,9 +702,12 @@ watch(
   () => props.visible,
   (visible) => {
     if (visible) void load()
+    else cancelAllSearches()
   },
   { immediate: true },
 )
+
+onBeforeUnmount(cancelAllSearches)
 </script>
 
 <style scoped>
@@ -683,7 +810,7 @@ watch(
   opacity: 0.75;
 }
 
-/* ASIN, Title, Author, Region and Find Match always share the whole row */
+/* ASIN, Title, Author, Region and Search always share the whole row */
 .repair-fields {
   display: grid;
   grid-template-columns:
@@ -715,7 +842,7 @@ watch(
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 
-  .repair-find-btn {
+  .repair-search-btn {
     grid-column: 1 / -1;
     justify-content: center;
   }
@@ -726,10 +853,38 @@ watch(
   color: #aaa;
 }
 
-.repair-find-btn {
+.repair-search-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.4rem;
+  white-space: nowrap;
+}
+
+.repair-search-state {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.75rem 0 0;
+  font-size: 0.85rem;
+  color: #aaa;
+}
+
+.repair-search-error {
+  color: #ef4444;
+}
+
+.repair-retry-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.8rem;
+}
+
+.repair-search-results {
+  margin-top: 0.75rem;
 }
 
 .repair-picked {
