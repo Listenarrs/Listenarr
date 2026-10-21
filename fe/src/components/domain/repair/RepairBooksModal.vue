@@ -135,19 +135,6 @@
                     />
                   </label>
                   <label class="repair-field">
-                    <span class="repair-field-label">Region</span>
-                    <select
-                      v-model="row.region"
-                      class="form-input"
-                      data-testid="repair-region"
-                      @change="onTyped(row)"
-                    >
-                      <option v-for="o in regionOptionsFor(row)" :key="o.value" :value="o.value">
-                        {{ o.label }}
-                      </option>
-                    </select>
-                  </label>
-                  <label class="repair-field">
                     <span class="repair-field-label">Title</span>
                     <input
                       v-model="row.query"
@@ -164,6 +151,19 @@
                       data-testid="repair-author"
                       @keydown.enter.prevent="findMatchRow = row"
                     />
+                  </label>
+                  <label class="repair-field">
+                    <span class="repair-field-label">Region</span>
+                    <select
+                      v-model="row.region"
+                      class="form-input"
+                      data-testid="repair-region"
+                      @change="onTyped(row)"
+                    >
+                      <option v-for="o in regionOptionsFor(row)" :key="o.value" :value="o.value">
+                        {{ o.label }}
+                      </option>
+                    </select>
                   </label>
                   <button
                     type="button"
@@ -669,11 +669,11 @@ watch(
   opacity: 0.75;
 }
 
-/* ASIN, Region, Title, Author and Find Match always share the whole row */
+/* ASIN, Title, Author, Region and Find Match always share the whole row */
 .repair-fields {
   display: grid;
   grid-template-columns:
-    minmax(8rem, 1fr) minmax(9rem, 1.2fr) minmax(0, 2.5fr) minmax(0, 1.5fr)
+    minmax(8rem, 1fr) minmax(0, 2.5fr) minmax(0, 1.5fr) minmax(10rem, 1.3fr)
     auto;
   align-items: end;
   gap: 0.75rem;

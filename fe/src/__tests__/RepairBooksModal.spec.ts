@@ -144,6 +144,17 @@ describe('RepairBooksModal', () => {
     expect(field(wrapper, 'repair-region').value).toBe('fr')
   })
 
+  it('names each field above it, in the order ASIN, Title, Author, Region', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+
+    expect(
+      row(wrapper)
+        .findAll('.repair-field-label')
+        .map((l) => l.text()),
+    ).toEqual(['ASIN', 'Title', 'Author', 'Region'])
+  })
+
   it("opens canary's Find Match on the book's title, author and region", async () => {
     const wrapper = mountModal()
     await flushPromises()
