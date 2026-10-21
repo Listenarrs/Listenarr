@@ -729,23 +729,24 @@ describe('RepairBooksModal', () => {
     expect(row(wrapper).find('[data-testid="match-picked"]').exists()).toBe(true)
   })
 
-  it('flags a malformed ASIN and does not let the repair start', async () => {
+  it('does not let a malformed ASIN be repaired, and says nothing about it before Search', async () => {
     const wrapper = mountModal()
     await flushPromises()
 
     await row(wrapper).get('[data-testid="match-asin"]').setValue('B0BK9')
 
-    expect(row(wrapper).find('[data-testid="match-invalid-asin"]').exists()).toBe(true)
+    expect(row(wrapper).find('[data-testid="match-search-error"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
   })
 
-  it('says nothing about an empty ASIN', async () => {
+  it('says nothing about an empty ASIN, and has nothing to search for it', async () => {
     const wrapper = mountModal()
     await flushPromises()
 
     await row(wrapper).get('[data-testid="match-asin"]').setValue('')
 
-    expect(row(wrapper).find('[data-testid="match-invalid-asin"]').exists()).toBe(false)
+    expect(row(wrapper).find('[data-testid="match-search-error"]').exists()).toBe(false)
+    expect(row(wrapper).find('.match-hint').exists()).toBe(false)
   })
 
   it('searches a malformed ASIN as a field error: its rules shown, orange, nothing sent', async () => {

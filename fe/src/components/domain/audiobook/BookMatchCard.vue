@@ -56,7 +56,6 @@
           maxlength="10"
           data-testid="match-asin"
           @input="onAsinTyped"
-          @change="asinEntered = true"
           @keydown.enter.prevent="onAsinEntered"
         />
       </label>
@@ -171,13 +170,6 @@
     <p v-if="clearedBy && !match.asin" class="match-hint" data-testid="match-asin-cleared">
       ASIN cleared: the {{ clearedBy }} changed, search again.
     </p>
-    <p
-      v-if="asinEntered && match.asin.trim() && !asinValid(match)"
-      class="match-hint"
-      data-testid="match-invalid-asin"
-    >
-      {{ INVALID_ASIN_MESSAGE }}
-    </p>
 
     <!-- The search under the book: failed (Search is then Retry), or its results. A running search
          only shows on the bottom bar, so nothing moves under the book; its text is for screen
@@ -291,8 +283,6 @@ const titleEl = ref<HTMLInputElement | null>(null)
 const state = ref<SearchState>(idle())
 // The field whose change emptied the ASIN, said under the fields until the ASIN is filled again
 const clearedBy = ref<'title' | 'author' | null>(null)
-// The ASIN was entered (left, or Enter): a malformed one is flagged from then on, not while typed
-const asinEntered = ref(false)
 // An ASIN typed by hand since the last lookup: Search looks it up first, the title and author
 // staying as they are
 const asinTyped = ref(false)
@@ -450,7 +440,6 @@ function pick(result: SearchResult) {
   if (!result.asin) return
   match.value.asin = result.asin.toUpperCase()
   match.value.region = result.region || match.value.region
-  asinEntered.value = false
   setMatched({ ...result, region: match.value.region })
 }
 
@@ -467,7 +456,6 @@ function forgetRecord() {
 function onSearchChanged(field: 'title' | 'author') {
   if (match.value.asin) clearedBy.value = field
   match.value.asin = ''
-  asinEntered.value = false
   forgetRecord()
 }
 
@@ -480,7 +468,6 @@ function onRegionChanged() {
 // A typed ASIN is another record: it is no longer the new one nor the rejected one. The title
 // and author stay as they are; Enter or Search looks the ASIN up first.
 function onAsinTyped() {
-  asinEntered.value = false
   clearedBy.value = null
   forgetRecord()
   asinTyped.value = true
@@ -488,7 +475,6 @@ function onAsinTyped() {
 
 function onAsinEntered() {
   if (!match.value.asin || match.value.picked) return
-  asinEntered.value = true
   void search('asin')
 }
 
@@ -501,7 +487,6 @@ function revert() {
   cancelSearch()
   Object.assign(match.value, match.value.initial)
   clearedBy.value = null
-  asinEntered.value = false
   forgetRecord()
 }
 
