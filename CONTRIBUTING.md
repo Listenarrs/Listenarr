@@ -11,7 +11,8 @@ Setup guides, FAQ, troubleshooting tips - the more information we have in the do
 - README improvements
 - Tutorial videos or blog posts
 
-- Canonical contributor guidance and AI-agent rules: see `.github/AGENTS.md`, `.github/CLAUDE.md` and `.github/RULES.md`
+- Canonical contributor guidance and AI-agent rules: see [`AGENTS.md`](AGENTS.md)
+
 ## Development
 
 ### Tools Required
@@ -150,6 +151,39 @@ This project follows a layered pattern: domain models in `listenarr.domain`, EF 
 - Run frontend tests: `cd fe && npm run test:unit`
 - Run frontend type checks: `cd fe && npm run type-check`
 - Ensure all tests pass before submitting PR
+
+### Code review bar
+
+Every review (self-review or otherwise) of a nontrivial diff should be a fresh, independent,
+adversarial pass over the complete diff against its authoritative base — not a validation of the
+implementation plan, prior review conclusions, or the author's stated intent.
+
+- Deliberately try to disprove every new assumption, contract, fallback, and safety claim the
+  diff introduces.
+- Trace modified shared helpers, interfaces, persistence contracts, and schemas through all
+  callers and consumers, including files outside the diff when needed to establish impact.
+- Whenever services, constructors, repositories, hosted workers, factories, or DI registrations
+  change, audit the complete constructor dependency graph and each service's lifetime. Singleton
+  or hosted-service capture of scoped services, `DbContext`s, repositories, disposable
+  transients, or other non-thread-safe state is a release-blocking finding unless an explicit
+  per-operation scope or factory proves it safe.
+- Validate the *production* registration graph — `ValidateScopes = true` and
+  `ValidateOnBuild = true` against the real service collection — not a test host, mocked
+  registration, or direct constructor test, which don't prove runtime wiring.
+- Treat passing tests as supporting evidence, not proof of correctness; look for missing cases,
+  invalid assumptions, and tests that only restate the implementation. A test skipped on the
+  current host does not validate that platform — platform-specific behavior (Windows/Unix path
+  and filesystem semantics especially) needs native confirmation, not an assumption.
+- Don't call a diff clean or merge-ready until a complete pass finds no confirmed defects. If a
+  finding causes a code or test change, the next pass starts over.
+
+### Cross-shell null redirection
+
+Never redirect output to `NUL` from Git Bash, MSYS, WSL, or another POSIX shell on Windows —
+those environments can create a real Windows-reserved file literally named `NUL` in the checkout.
+Use `/dev/null` only in POSIX shells and `$null` only in PowerShell. A repository entry whose
+Windows basename is `CON`, `PRN`, `AUX`, `NUL`, `COM1`-`COM9`, or `LPT1`-`LPT9` is a hygiene bug
+that must be fixed before merge.
 
 ### Compatibility and migration development policy
 
