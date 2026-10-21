@@ -853,11 +853,13 @@ onBeforeUnmount(cancelAllSearches)
   color: #aaa;
 }
 
+/* Search and Cancel search take the same width, so the row doesn't move when they swap */
 .repair-search-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
+  min-width: 9.5rem;
   white-space: nowrap;
 }
 
