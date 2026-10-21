@@ -30,7 +30,6 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
             // Cleared whenever the client may hold torrents that did not make it into items.
             var isComplete = true;
 
-            var isMonitorPoll = ids.Count > 0;
             var baseUrl = DownloadClientUriBuilder.BuildAuthority(client);
 
             try
@@ -44,11 +43,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 {
                     var message = $"qBittorrent authentication failed for client {LogRedaction.SanitizeText(client.Id)}.";
                     logger.LogWarning(exception, "qBittorrent authentication failed for client {ClientId}", LogRedaction.SanitizeText(client.Id));
-                    if (isMonitorPoll)
-                    {
-                        throw new DownloadClientAdapterPollingException(message, exception);
-                    }
-                    return new DownloadClientQueueSnapshot(items, IsComplete: false);
+                    throw new DownloadClientAdapterPollingException(message, exception);
                 }
 
                 // Limit fields returned to reduce memory usage.
@@ -72,11 +67,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 {
                     var message = $"qBittorrent queue request failed with status {torrentsResp.StatusCode} for client {LogRedaction.SanitizeText(client.Id)}.";
                     logger.LogWarning("qBittorrent queue request failed with status {Status} for client {ClientId}", torrentsResp.StatusCode, LogRedaction.SanitizeText(client.Id));
-                    if (isMonitorPoll)
-                    {
-                        throw new DownloadClientAdapterPollingException(message);
-                    }
-                    return new DownloadClientQueueSnapshot(items, IsComplete: false);
+                    throw new DownloadClientAdapterPollingException(message);
                 }
 
                 var json = await torrentsResp.Content.ReadAsStringAsync(ct);
@@ -84,11 +75,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 {
                     var message = $"qBittorrent returned an empty queue response for client {LogRedaction.SanitizeText(client.Id)}.";
                     logger.LogWarning("qBittorrent returned an empty queue response for client {ClientId}", LogRedaction.SanitizeText(client.Id));
-                    if (isMonitorPoll)
-                    {
-                        throw new DownloadClientAdapterPollingException(message);
-                    }
-                    return new DownloadClientQueueSnapshot(items, IsComplete: false);
+                    throw new DownloadClientAdapterPollingException(message);
                 }
 
                 var torrents = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(json);
@@ -96,11 +83,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 {
                     var message = $"qBittorrent returned an invalid queue response for client {LogRedaction.SanitizeText(client.Id)}.";
                     logger.LogWarning("qBittorrent returned an invalid queue response for client {ClientId}", LogRedaction.SanitizeText(client.Id));
-                    if (isMonitorPoll)
-                    {
-                        throw new DownloadClientAdapterPollingException(message);
-                    }
-                    return new DownloadClientQueueSnapshot(items, IsComplete: false);
+                    throw new DownloadClientAdapterPollingException(message);
                 }
 
                 foreach (var torrent in torrents)
@@ -162,14 +145,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 logger.LogWarning(ex, "Error getting qBittorrent queue - client may be unreachable");
-                if (isMonitorPoll)
-                {
-                    throw new DownloadClientAdapterPollingException("Error polling qBittorrent queue.", ex);
-                }
-
-                // Whatever was read before the failure is still returned for display, but it
-                // cannot stand for the whole queue.
-                isComplete = false;
+                throw new DownloadClientAdapterPollingException("Error polling qBittorrent queue.", ex);
             }
 
             return new DownloadClientQueueSnapshot(FilterByIds(items, ids), isComplete);
