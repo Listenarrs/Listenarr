@@ -26,12 +26,29 @@ vi.mock('vue-router', () => ({
   useRouter: () => ({ replace: routerReplace, push: vi.fn() }),
 }))
 
+const showConfirm = vi.hoisted(() => vi.fn())
+vi.mock('@/composables/confirmService', () => ({ showConfirm }))
+
 import LibraryImportView from '@/views/library/LibraryImportView.vue'
 import { useLibraryImportStore } from '@/stores/libraryImport'
 import { useRootFoldersStore } from '@/stores/rootFolders'
 import { useConfigurationStore } from '@/stores/configuration'
 import { apiService } from '@/services/api'
 import type { RootFolder } from '@/types'
+import type { LibraryImportScanTask } from '@/stores/libraryImport'
+
+const task = (
+  rootFolderId: number,
+  status: LibraryImportScanTask['status'] = 'running',
+): LibraryImportScanTask => ({
+  jobId: `job-${rootFolderId}`,
+  rootFolderId,
+  status,
+  startedAt: '2026-10-21T10:40:00Z',
+  finishedAt: status === 'running' ? null : '2026-10-21T10:42:00Z',
+  error: null,
+  itemCount: status === 'done' ? 4 : null,
+})
 
 const folder = (id: number, isDefault = false) =>
   ({ id, name: `Folder ${id}`, path: `/srv/${id}`, isDefault }) as unknown as RootFolder
@@ -47,8 +64,13 @@ function mountView({
   const config = useConfigurationStore()
   config.loadApplicationSettings = vi.fn().mockResolvedValue(undefined)
   const store = useLibraryImportStore()
-  if (!realInit) store.initFromRootFolder = vi.fn().mockResolvedValue(undefined)
+  // Like the real one, it shows the folder at once
+  if (!realInit)
+    store.initFromRootFolder = vi.fn(async (rootFolderId: number) => {
+      store.rootFolderId = rootFolderId
+    })
   store.triggerScan = vi.fn().mockResolvedValue(undefined)
+  store.cancelScan = vi.fn().mockResolvedValue(undefined)
   const wrapper = mount(LibraryImportView, {
     global: { plugins: [pinia], stubs: { RootFolderFormModal: true, LibraryImportFooter: true } },
   })
@@ -58,6 +80,7 @@ function mountView({
 describe('LibraryImportView opened from "Scan for unmatched files"', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    sessionStorage.clear()
   })
 
   it('selects the requested folder, scans it once and drops the scan request from the address', async () => {
@@ -71,33 +94,114 @@ describe('LibraryImportView opened from "Scan for unmatched files"', () => {
     expect(routerReplace).toHaveBeenCalledWith({ query: { rootFolder: '3', scan: undefined } })
   })
 
-  it('locks the folder list and the Scan button while a scan runs', async () => {
+  it('lets other folders be browsed while a scan runs, and only locks Scan on the folder scanned', async () => {
     routeQuery.value = {}
     const { wrapper, store } = mountView()
     await flushPromises()
 
-    store.scanStatus = 'scanning'
+    store.rootFolderId = 2
+    store.scanTask = task(2)
     await flushPromises()
+    expect(wrapper.get('select.folder-select').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[data-testid="scan-button"]').attributes('disabled')).toBeDefined()
 
-    expect(wrapper.get('select.folder-select').attributes('disabled')).toBeDefined()
-    expect(wrapper.get('button.btn-primary').attributes('disabled')).toBeDefined()
-    await (wrapper.vm as unknown as { startScan: () => Promise<void> }).startScan()
-    expect(store.triggerScan).not.toHaveBeenCalled()
+    await wrapper.get('select.folder-select').setValue(3)
+    await flushPromises()
+    expect(store.initFromRootFolder).toHaveBeenLastCalledWith(3)
+    expect(store.cancelScan).not.toHaveBeenCalled()
   })
 
-  it('shows the running scan when coming back to the page', async () => {
+  it('asks before replacing a scan of another folder, and scans only if the user agrees', async () => {
+    routeQuery.value = {}
+    const { wrapper, store } = mountView()
+    await flushPromises()
+    store.scanTask = task(2)
+    store.rootFolderId = 3
+    await wrapper.get('select.folder-select').setValue(3)
+
+    showConfirm.mockResolvedValueOnce(false)
+    await (wrapper.vm as unknown as { startScan: () => Promise<void> }).startScan()
+    expect(showConfirm).toHaveBeenCalledWith(
+      'A scan of Folder 2 is running. Cancel it and scan Folder 3 instead?',
+      'A scan is already running',
+      { confirmText: 'Cancel it and scan', cancelText: 'Keep the current scan' },
+    )
+    expect(store.triggerScan).not.toHaveBeenCalled()
+
+    showConfirm.mockResolvedValueOnce(true)
+    await (wrapper.vm as unknown as { startScan: () => Promise<void> }).startScan()
+    expect(store.triggerScan).toHaveBeenCalledWith(3)
+  })
+
+  it('asks before replacing a running scan when Settings asks to scan another folder', async () => {
+    routeQuery.value = { rootFolder: '3', scan: '1' }
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useLibraryImportStore().scanTask = task(2)
+    showConfirm.mockResolvedValueOnce(false)
+    const { wrapper, store } = mountView({ keepPinia: pinia })
+    await flushPromises()
+
+    expect(showConfirm).toHaveBeenCalledTimes(1)
+    expect(store.triggerScan).not.toHaveBeenCalled()
+    // The requested folder is shown with its saved results; the running scan goes on
+    expect(store.initFromRootFolder).toHaveBeenCalledWith(3)
+    expect((wrapper.get('select.folder-select').element as HTMLSelectElement).value).toBe('3')
+    expect(wrapper.get('[data-testid="scan-task"]').text()).toContain('Scanning Folder 2')
+  })
+
+  it('shows the running scan when Settings asks to scan the folder already being scanned', async () => {
+    routeQuery.value = { rootFolder: '3', scan: '1' }
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useLibraryImportStore().scanTask = task(3)
+    const { store } = mountView({ keepPinia: pinia })
+    await flushPromises()
+
+    expect(showConfirm).not.toHaveBeenCalled()
+    expect(store.triggerScan).toHaveBeenCalledWith(3)
+  })
+
+  it("shows the latest scan's folder when coming back to the page", async () => {
     routeQuery.value = {}
     const pinia = createPinia()
     setActivePinia(pinia)
-    const store = useLibraryImportStore()
-    store.rootFolderId = 3
-    store.scanStatus = 'scanning'
-    const { wrapper, store: sameStore } = mountView({ keepPinia: pinia })
+    useLibraryImportStore().scanTask = task(3, 'done')
+    const { wrapper, store } = mountView({ keepPinia: pinia })
     await flushPromises()
 
-    expect(sameStore.initFromRootFolder).not.toHaveBeenCalled()
+    expect(store.initFromRootFolder).toHaveBeenCalledWith(3)
     expect((wrapper.get('select.folder-select').element as HTMLSelectElement).value).toBe('3')
-    expect(wrapper.text()).toContain('Scanning for unmatched audio files')
+    expect(wrapper.get('[data-testid="scan-task"]').text()).toContain(
+      'Scan of Folder 3 finished: 4 unmatched books',
+    )
+  })
+
+  it('brings back the latest scan of the session after a reload', async () => {
+    routeQuery.value = {}
+    sessionStorage.setItem('listenarr.libraryImport.scanTask', JSON.stringify(task(3, 'failed')))
+    const { wrapper, store } = mountView()
+    await flushPromises()
+
+    expect(store.scanTask).toMatchObject({ rootFolderId: 3, status: 'failed' })
+    expect((wrapper.get('select.folder-select').element as HTMLSelectElement).value).toBe('3')
+    expect(wrapper.get('[data-testid="scan-task"]').text()).toContain('Scan of Folder 3 failed')
+  })
+
+  it('names the folder the results belong to, and lets the scan be canceled', async () => {
+    routeQuery.value = {}
+    const { wrapper, store } = mountView()
+    await flushPromises()
+    store.rootFolderId = 2
+    store.scanTask = task(3)
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="results-header"]').text()).toContain('Results for Folder 2')
+    expect(wrapper.get('[data-testid="results-header"]').text()).toContain('/srv/2')
+    await wrapper.get('[data-testid="scan-task-cancel"]').trigger('click')
+    expect(store.cancelScan).toHaveBeenCalled()
+    await wrapper.get('[data-testid="scan-task-show"]').trigger('click')
+    expect(store.initFromRootFolder).toHaveBeenLastCalledWith(3)
   })
 
   it('shows the folder being matched when coming back to the page during Start Matching', async () => {
@@ -106,7 +210,6 @@ describe('LibraryImportView opened from "Scan for unmatched files"', () => {
     setActivePinia(pinia)
     const store = useLibraryImportStore()
     store.rootFolderId = 3
-    store.scanStatus = 'done'
     store.isProcessing = true
     const { wrapper, store: sameStore } = mountView({ keepPinia: pinia })
     await flushPromises()
