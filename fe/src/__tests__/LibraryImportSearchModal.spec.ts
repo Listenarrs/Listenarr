@@ -54,7 +54,22 @@ describe('LibraryImportSearchModal', () => {
   it('names each field above it: Title or ASIN, Author, then Region', async () => {
     const wrapper = mount(LibraryImportSearchModal, {
       props: {
-        target: { name: 'Alchemised', query: 'Alchemised', author: 'SenLinYu', region: 'fr' },
+        item: {
+          id: 'C:\\incoming\\Alchemised.m4b',
+          fullPath: 'C:\\incoming\\Alchemised.m4b',
+          sourceFiles: ['C:\\incoming\\Alchemised.m4b'],
+          folderPath: 'C:\\incoming',
+          relativePath: 'Alchemised',
+          folderName: 'Alchemised',
+          detectedTitle: 'Alchemised',
+          detectedAuthor: 'SenLinYu',
+          format: 'M4B',
+          fileCount: 1,
+          selectedMatch: null,
+          hasSearched: false,
+          isSearching: false,
+          selected: false,
+        },
       },
     })
     await new Promise((resolve) => setTimeout(resolve, 0))
