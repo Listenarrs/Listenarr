@@ -42,10 +42,10 @@
           <div class="info-section repair-info-section">
             <PhInfo />
             <p>
-              Point each book at the right Audible record: use Find Match to search its title and
-              author in a region and pick the result, or type the ASIN and its region (it is checked
-              in that region). Repairing saves the ASIN and its region and rescans the metadata from
-              it.
+              Point each book at the right Audible record: use Find Match to search the title and
+              author in the region and pick the result, or type the ASIN and its region (it is
+              checked in that region). Repairing saves the ASIN and its region and rescans the
+              metadata from it.
             </p>
           </div>
 
@@ -146,6 +146,24 @@
                         {{ o.label }}
                       </option>
                     </select>
+                  </label>
+                  <label class="repair-field">
+                    <span class="repair-field-label">Title</span>
+                    <input
+                      v-model="row.query"
+                      class="form-input"
+                      data-testid="repair-title"
+                      @keydown.enter.prevent="findMatchRow = row"
+                    />
+                  </label>
+                  <label class="repair-field">
+                    <span class="repair-field-label">Author</span>
+                    <input
+                      v-model="row.author"
+                      class="form-input"
+                      data-testid="repair-author"
+                      @keydown.enter.prevent="findMatchRow = row"
+                    />
                   </label>
                   <button
                     type="button"
@@ -293,11 +311,14 @@ interface RepairRow {
   identifiers: AudiobookExternalIdentifier[]
   asin: string
   region: string
+  // What Find Match searches: the book's title and first author, editable
+  query: string
+  author: string
   // The record picked in Find Match (its ASIN and region are known to exist); null when typed
   pickedTitle: string | null
   selected: boolean
   // Values when the modal opened, restored by Revert
-  initial: { asin: string; region: string }
+  initial: { asin: string; region: string; query: string; author: string }
 }
 
 interface RepairResult {
@@ -373,6 +394,8 @@ async function load() {
         const initial = {
           asin: asin?.value ?? book.asin ?? '',
           region: asin?.region || configuredRegion.value,
+          query: book.title ?? '',
+          author: book.authors?.[0] ?? '',
         }
         return {
           id,
@@ -396,7 +419,7 @@ async function load() {
 }
 
 function findMatchTarget(row: RepairRow): FindMatchTarget {
-  return { name: row.title, query: row.title, author: row.authors[0] ?? '', region: row.region }
+  return { name: row.title, query: row.query, author: row.author, region: row.region }
 }
 
 // The record picked in Find Match: its ASIN in the region it was found in
@@ -414,12 +437,16 @@ function onTyped(row: RepairRow) {
 }
 
 function isEdited(row: RepairRow): boolean {
-  return row.asin !== row.initial.asin || row.region !== row.initial.region
+  return (
+    row.asin !== row.initial.asin ||
+    row.region !== row.initial.region ||
+    row.query !== row.initial.query ||
+    row.author !== row.initial.author
+  )
 }
 
 function revert(row: RepairRow) {
-  row.asin = row.initial.asin
-  row.region = row.initial.region
+  Object.assign(row, row.initial)
   row.pickedTitle = null
 }
 
@@ -642,10 +669,13 @@ watch(
   opacity: 0.75;
 }
 
+/* ASIN, Region, Title, Author and Find Match always share the whole row */
 .repair-fields {
-  display: flex;
-  align-items: flex-end;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns:
+    minmax(8rem, 1fr) minmax(9rem, 1.2fr) minmax(0, 2.5fr) minmax(0, 1.5fr)
+    auto;
+  align-items: end;
   gap: 0.75rem;
   margin-top: 0.75rem;
 }
@@ -654,11 +684,27 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
+  min-width: 0;
+}
+
+.repair-field .form-input {
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .repair-field-asin input {
-  width: 9.5rem;
   font-family: monospace;
+}
+
+@media (max-width: 720px) {
+  .repair-fields {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .repair-find-btn {
+    grid-column: 1 / -1;
+    justify-content: center;
+  }
 }
 
 .repair-field-label {
