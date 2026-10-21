@@ -86,6 +86,10 @@
           v-model="match.region"
           class="form-input"
           data-testid="match-region"
+          :disabled="regionLocked"
+          :title="
+            regionLocked ? 'Wait for the search to end: changing the region searches' : undefined
+          "
           @change="onRegionChanged"
         >
           <option v-for="o in regionOptions" :key="o.value" :value="o.value">
@@ -294,6 +298,10 @@ const barState = computed(() => {
 })
 
 const canSearch = computed(() => canSearchFor('title'))
+
+// Changing the region looks the ASIN up there: not while a search runs, here or on another book.
+// One search at a time keeps answers from racing each other.
+const regionLocked = computed(() => props.searchLocked || state.value.status === 'searching')
 
 // The last search, with the values still in the fields, found nothing or failed: Search becomes
 // Retry. Editing a field forgets that search, and Search comes back. An ASIN its region has no
