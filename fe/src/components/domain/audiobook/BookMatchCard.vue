@@ -30,7 +30,7 @@
       </span>
       <span class="match-header-right">
         <span class="match-meta" data-testid="match-summary">
-          {{ currentSummary }}
+          {{ bookSummary(currentRecord) }}
         </span>
         <button
           type="button"
@@ -143,19 +143,11 @@
     <dl class="match-records">
       <dt>Current</dt>
       <dd data-testid="match-current">
-        {{ currentSummary || 'None' }}
+        {{ bookSummary(currentRecord) || 'None' }}
       </dd>
       <dt>New</dt>
       <dd v-if="match.picked" data-testid="match-picked">
-        {{
-          bookSummary({
-            asin: match.picked.asin,
-            title: match.picked.title,
-            subtitle: match.picked.subtitle,
-            author: match.picked.authors?.[0]?.name,
-            region: match.picked.region ?? match.region,
-          })
-        }}
+        {{ bookSummary(recordFromResult(match.picked, match.region)) }}
         <span class="match-status">
           <PhCheckCircle :size="14" weight="fill" />
           checked
@@ -240,8 +232,10 @@ import {
   matchState,
   noRecordError,
   regionLabel,
+  recordFromResult,
   searchParams,
   type BookMatch,
+  type BookRecord,
 } from '@/utils/bookMatch'
 import type { SearchResult } from '@/types'
 
@@ -251,8 +245,9 @@ const SEARCH_TIMEOUT_MS = 30_000
 const props = withDefaults(
   defineProps<{
     configuredRegion: string
-    // The book as it is today, summed up with its current record next to Revert and on Current
-    book: { title?: string | null; subtitle?: string | null; author?: string | null }
+    // The book as it is today: with its current ASIN and region, the record next to Revert and on
+    // Current
+    book: Pick<BookRecord, 'title' | 'subtitle' | 'authors'>
     // Another book is being searched: this one waits for it
     searchLocked?: boolean
     // Left out by the user (Repair's checkbox): a matched book then shows as ignored
@@ -308,14 +303,12 @@ const searchKind = computed<SearchKind>(() =>
   !match.value.query.trim() && match.value.asin ? 'asin' : 'title',
 )
 
-// ASIN - Title: Subtitle - Author - Region of the book as it is today
-const currentSummary = computed(() =>
-  bookSummary({
-    ...props.book,
-    asin: match.value.current.asin,
-    region: match.value.current.region,
-  }),
-)
+// The book as it is today, as a record
+const currentRecord = computed<BookRecord>(() => ({
+  ...props.book,
+  asin: match.value.current.asin,
+  region: match.value.current.region,
+}))
 
 // The record shown as selected in the results: the new one once there is one, else the one the
 // book points at today

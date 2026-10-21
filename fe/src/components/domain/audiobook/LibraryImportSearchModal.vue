@@ -75,7 +75,14 @@ import {
   buildLibraryImportInitialAuthor,
   buildLibraryImportInitialQuery,
 } from '@/utils/libraryImportSearch'
-import { asinChanged, createBookMatch, matchState, type BookMatch } from '@/utils/bookMatch'
+import {
+  asinChanged,
+  createBookMatch,
+  matchState,
+  recordFromResult,
+  type BookMatch,
+  type BookRecord,
+} from '@/utils/bookMatch'
 import type { SearchResult } from '@/types'
 
 const props = defineProps<{ item: LibraryImportItem }>()
@@ -92,14 +99,11 @@ const searching = ref(false)
 // Importing waits for a running search; counted once, however it ends (also when the modal closes)
 let searchCounted = false
 
-// The folder's match when it has one, else what its files say
-const book = computed(() => {
+// The folder's match when it has one (read like New), else what its files say
+const book = computed<BookRecord>(() => {
   const selected = props.item.selectedMatch
-  return {
-    title: selected?.title ?? props.item.detectedTitle,
-    subtitle: selected?.subtitle,
-    author: selected?.authors?.[0]?.name ?? props.item.detectedAuthor,
-  }
+  if (selected) return recordFromResult(selected, selected.region ?? '')
+  return { title: props.item.detectedTitle, authors: [props.item.detectedAuthor ?? ''] }
 })
 
 const bookTitle = computed(() => props.item.detectedTitle?.trim() || props.item.folderName)

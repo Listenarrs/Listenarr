@@ -87,7 +87,7 @@
                 :configured-region="configuredRegion"
                 :search-locked="searchingRowId !== null && searchingRowId !== row.id"
                 :excluded="!row.selected"
-                :book="{ title: row.title, subtitle: row.subtitle, author: row.authors.join(', ') }"
+                :book="{ title: row.title, subtitle: row.subtitle, authors: row.authors }"
                 :data-testid="`repair-row-${row.id}`"
                 @searching="(searching) => onSearching(row, searching)"
                 @matched="row.selected = true"
