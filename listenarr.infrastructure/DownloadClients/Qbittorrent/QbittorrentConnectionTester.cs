@@ -119,6 +119,9 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                     }
                     var redacted = LogRedaction.RedactText(body, LogRedaction.GetSensitiveValuesFromEnvironment().Concat(new[] { client.Password ?? string.Empty }));
                     _logger.LogWarning("qBittorrent TestConnection: login failed with status {Status} for client {ClientId} - {Body}", loginResp.StatusCode, LogRedaction.SanitizeText(client.Id), redacted);
+                    if (QbittorrentAuthSession.IsIpBan(loginResp.StatusCode, body))
+                        return (false, "qBittorrent has banned Listenarr's IP address after too many failed login attempts. Fix the credentials, then wait for the ban to expire or restart qBittorrent.");
+
                     return (false, "qBittorrent: Connection to download client successful but could not authenticate. Please check username/password.");
                 }
             }
