@@ -25,8 +25,9 @@
         <PhInfo />
         <p>
           Search the title and author in the region and pick the result under the book, or type the
-          ASIN and its region (it is checked in that region). Changing the title, author or region
-          empties the ASIN, which no longer matches: search and pick the book again.
+          ASIN and its region (it is checked in that region). Changing the title or author empties
+          the ASIN, which no longer matches: search and pick the book again; changing the region
+          keeps it, to be checked in that region.
         </p>
       </div>
 

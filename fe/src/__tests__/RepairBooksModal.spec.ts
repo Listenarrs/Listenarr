@@ -172,11 +172,10 @@ describe('RepairBooksModal', () => {
     ).toEqual(['ASIN', 'Title', 'Author', 'Region'])
   })
 
-  it('empties the ASIN when the title, author or region changes, and asks to pick the book again', async () => {
+  it('empties the ASIN when the title or author changes, and asks to pick the book again', async () => {
     for (const [testid, value] of [
       ['match-title', 'The Primal Hunter 4'],
       ['match-author', 'Someone else'],
-      ['match-region', 'us'],
     ]) {
       const wrapper = mountModal()
       await flushPromises()
@@ -378,10 +377,27 @@ describe('RepairBooksModal', () => {
     ])
   })
 
+  it('keeps the ASIN when the region changes, and checks it in the new region', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+    expect(row(wrapper).find('[data-testid="match-picked"]').exists()).toBe(true)
+
+    await row(wrapper).get('[data-testid="match-region"]').setValue('fr')
+
+    expect(field(wrapper, 'match-asin').value).toBe('B0BK9W82PQ')
+    // Picked in the US catalogue: it no longer vouches for the French one
+    expect(row(wrapper).find('[data-testid="match-picked"]').exists()).toBe(false)
+    apiMocks.advancedSearch.mockClear()
+    await repair(wrapper)
+    expect(apiMocks.advancedSearch).toHaveBeenCalledWith(
+      expect.objectContaining({ asin: 'B0BK9W82PQ', region: 'fr' }),
+    )
+  })
+
   it('checks a typed ASIN in its region with the same search before saving it', async () => {
     const wrapper = mountModal()
     await flushPromises()
-    // The region first: changing it empties the ASIN
     await row(wrapper).get('[data-testid="match-region"]').setValue('us')
     await row(wrapper).get('[data-testid="match-asin"]').setValue('b0bk9w82pq')
 

@@ -79,7 +79,7 @@
           v-model="match.region"
           class="form-input"
           data-testid="match-region"
-          @change="onSearchChanged"
+          @change="onRegionChanged"
         >
           <option v-for="o in regionOptions" :key="o.value" :value="o.value">
             {{ o.label }}
@@ -287,11 +287,17 @@ function pick(result: SearchResult) {
   emit('picked', result)
 }
 
-// Another title, author or region describes another record: the ASIN no longer matches, so it is
-// emptied until the book is searched and picked again (or its ASIN is typed). A search running
-// for the previous values is stopped, and their results no longer apply.
+// Another title or author describes another record: the ASIN no longer matches, so it is emptied
+// until the book is searched and picked again (or its ASIN is typed). A search running for the
+// previous values is stopped, and their results no longer apply.
 function onSearchChanged() {
   match.value.asin = ''
+  onRegionChanged()
+}
+
+// Another region keeps the ASIN, now to be checked in that region: the record picked in the
+// previous one no longer vouches for it, and the previous search and its results no longer apply
+function onRegionChanged() {
   match.value.picked = null
   cancelSearch()
   state.value = idle()
