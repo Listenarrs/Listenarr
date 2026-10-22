@@ -33,12 +33,8 @@
           <p>{{ error }}</p>
         </div>
 
-        <div v-else-if="executing" class="repair-state">
-          <PhSpinner class="ph-spin repair-icon" />
-          <p>Repairing {{ progress }} of {{ selectedCount }}…</p>
-        </div>
-
-        <div v-else-if="!finished && rows.length" class="repair-list-wrapper">
+        <!-- The books stay through the repair: each card shows its own progress and result -->
+        <div v-else-if="rows.length" class="repair-list-wrapper">
           <div class="info-section repair-info-section">
             <PhInfo />
             <div class="repair-info-lines">
@@ -64,6 +60,7 @@
                   <button
                     type="button"
                     class="btn btn-secondary repair-action-btn"
+                    :disabled="executing || finished"
                     @click="selectAll"
                   >
                     Select All
@@ -71,6 +68,7 @@
                   <button
                     type="button"
                     class="btn btn-secondary repair-action-btn"
+                    :disabled="executing || finished"
                     @click="clearSelection"
                   >
                     Clear
@@ -94,6 +92,7 @@
                 :search-locked="searchingRowId !== null && searchingRowId !== row.id"
                 :excluded="!row.selected"
                 :narrow="legendAbove"
+                :task="row.task"
                 :book="{ title: row.title, subtitle: row.subtitle, authors: row.authors }"
                 :data-testid="`repair-row-${row.id}`"
                 @searching="(searching) => onSearching(row, searching)"
@@ -116,31 +115,6 @@
                   </label>
                 </template>
               </BookMatchCard>
-            </div>
-          </div>
-        </div>
-
-        <div v-if="finished && results.length" class="form-group repair-results-group">
-          <label class="form-label">
-            <PhCheckCircle />
-            Results
-          </label>
-          <div class="form-control-card results-list">
-            <div
-              v-for="result in results"
-              :key="result.id"
-              class="result-row"
-              :class="{ success: result.success, error: !result.success }"
-            >
-              <component
-                :is="result.success ? PhCheckCircle : PhWarningCircle"
-                class="result-icon"
-              />
-              <span class="result-title">{{ result.title }}</span>
-              <span class="result-detail">{{ result.detail }}</span>
-              <span class="result-duration" data-testid="repair-result-duration">
-                {{ formatDuration(result.durationMs) }}
-              </span>
             </div>
           </div>
         </div>
@@ -196,14 +170,18 @@
           >
             <PhSpinner v-if="executing" class="ph-spin" :size="16" />
             <PhWrench v-else :size="16" />
-            {{ executing ? 'Repairing…' : `Repair ${selectedCount}` }}
+            {{
+              executing ? `Repairing ${progress} of ${selectedCount}…` : `Repair ${selectedCount}`
+            }}
           </button>
           <template v-else>
+            <!-- Always there after a repair, so the footer doesn't change with the outcome -->
             <button
-              v-if="repairedIds.length"
               type="button"
               class="btn btn-secondary"
               data-testid="repair-organize"
+              :disabled="!repairedIds.length"
+              :title="repairedIds.length ? undefined : 'No book was repaired: nothing to organize'"
               @click="emit('organize', repairedIds)"
             >
               <PhFolderOpen :size="16" />
@@ -243,6 +221,7 @@ import {
   createBookMatch,
   matchState,
   type BookMatch,
+  type BookTask,
 } from '@/utils/bookMatch'
 import type { AudiobookExternalIdentifier, AudiobookExternalIdentifierInput } from '@/types'
 
@@ -256,15 +235,8 @@ interface RepairRow {
   match: BookMatch
   // Ticked: repaired once it has a new record (finding one ticks it)
   selected: boolean
-}
-
-interface RepairResult {
-  id: number
-  title: string
-  success: boolean
-  detail: string
-  // How long the repair of this book took, from its first request to its last
-  durationMs: number
+  // Its repair, once started: waiting, running, then how it ended (shown by its card)
+  task: BookTask | null
 }
 
 const props = withDefaults(
@@ -292,7 +264,6 @@ const executing = ref(false)
 const finished = ref(false)
 const error = ref<string | null>(null)
 const rows = ref<RepairRow[]>([])
-const results = ref<RepairResult[]>([])
 const progress = ref(0)
 // One book is searched at a time: the others wait for it
 const searchingRowId = ref<number | null>(null)
@@ -366,7 +337,9 @@ onBeforeUnmount(() => footerObserver?.disconnect())
 const selectedRows = computed(() => rows.value.filter(isIncluded))
 const selectedCount = computed(() => selectedRows.value.length)
 const skippedCount = computed(() => rows.value.length - selectedCount.value)
-const repairedIds = computed(() => results.value.filter((r) => r.success).map((r) => r.id))
+const repairedIds = computed(() =>
+  rows.value.filter((r) => r.task?.state === 'done').map((r) => r.id),
+)
 
 function primaryAsin(identifiers: AudiobookExternalIdentifier[]) {
   const asins = identifiers.filter((i) => i.type === 'Asin')
@@ -377,7 +350,6 @@ async function load() {
   loading.value = true
   finished.value = false
   error.value = null
-  results.value = []
   rows.value = []
   searchingRowId.value = null
   try {
@@ -406,6 +378,7 @@ async function load() {
           identifiers: ids.identifiers ?? [],
           match,
           selected: false,
+          task: null,
         }
       }),
     )
@@ -459,34 +432,47 @@ async function rescan(id: number) {
   }
 }
 
+// Every card shows its book's repair: the ticked books wait their turn, the others are skipped.
+// The repairs run one after the other; each card then says how its repair ended and how long it
+// took, and shows the book as it is now
 async function repair() {
+  const toRepair = [...selectedRows.value]
   executing.value = true
   progress.value = 0
-  results.value = []
-  for (const row of selectedRows.value) {
+  for (const row of rows.value)
+    row.task = toRepair.includes(row)
+      ? { state: 'waiting', text: 'Waiting to be repaired' }
+      : { state: 'skipped', text: 'Skipped: not repaired' }
+  for (const row of toRepair) {
     progress.value++
+    row.task = { state: 'running', text: 'Repairing…' }
     const startedAt = performance.now()
+    const took = () => formatDuration(performance.now() - startedAt)
+    let saved = false
     try {
       // The new record was looked up in its region: saved, then the metadata read from it
-      if (asinChanged(row.match))
+      if (asinChanged(row.match)) {
         await apiService.updateAudiobookIdentifiers(row.id, identifiersWithPrimaryAsin(row))
+        saved = true
+      }
       const rescanned = await rescan(row.id)
       const book = await apiService.getAudiobook(row.id)
-      results.value.push({
-        id: row.id,
-        title: book.title || row.title,
-        success: true,
-        detail: `${rescanned.asin ?? row.match.picked?.asin} · ${rescanned.region ?? row.match.region}`,
-        durationMs: performance.now() - startedAt,
-      })
+      const asin = rescanned.asin ?? row.match.picked?.asin ?? ''
+      const region = rescanned.region ?? row.match.picked?.region ?? row.match.region
+      row.title = book.title || row.title
+      row.subtitle = book.subtitle ?? row.subtitle
+      row.authors = book.authors ?? row.authors
+      row.match.current = { asin, region }
+      row.task = { state: 'done', text: `Repaired in ${took()}: ${asin} · ${region}` }
     } catch (e) {
-      results.value.push({
-        id: row.id,
-        title: row.title,
-        success: false,
-        detail: e instanceof Error ? e.message : 'Repair failed',
-        durationMs: performance.now() - startedAt,
-      })
+      const message = e instanceof Error ? e.message : 'Repair failed'
+      // The new ASIN saved but its metadata not read: repaired in part
+      row.task = saved
+        ? {
+            state: 'warning',
+            text: `The new ASIN is saved, but the metadata rescan failed (${took()}): ${message}`,
+          }
+        : { state: 'failed', text: `Repair failed (${took()}): ${message}` }
     }
   }
   executing.value = false
@@ -659,44 +645,5 @@ watch(
   align-items: center;
   gap: 0.5rem;
   cursor: pointer;
-}
-
-.results-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.result-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.result-row.success .result-icon {
-  color: #81c784;
-}
-
-.result-row.error .result-icon {
-  color: #ef9a9a;
-}
-
-.result-title {
-  color: #e0e0e0;
-}
-
-.result-detail {
-  margin-left: auto;
-  color: #aaa;
-  font-size: 0.8rem;
-  opacity: 0.75;
-}
-
-.result-duration {
-  min-width: 4rem;
-  text-align: right;
-  color: #aaa;
-  font-size: 0.8rem;
-  font-variant-numeric: tabular-nums;
 }
 </style>

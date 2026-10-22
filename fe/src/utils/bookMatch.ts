@@ -87,6 +87,17 @@ export function matchState(match: BookMatch): MatchState {
   return match.asinError ? 'error' : 'ignored'
 }
 
+// A task run on a book once its record is chosen (Repair's repair), shown by its whole card:
+// waiting its turn, running (blue, breathing), done (light green), warning (orange: done in part),
+// failed (red), or skipped (grey: left out of the task)
+export type BookTaskState = 'waiting' | 'running' | 'done' | 'warning' | 'failed' | 'skipped'
+
+export interface BookTask {
+  state: BookTaskState
+  // One line saying where the task is or how it ended
+  text: string
+}
+
 export function noRecordError(asin: string, region: string): string {
   return `No record for ${asin} in Audible ${regionLabel(region)}`
 }
