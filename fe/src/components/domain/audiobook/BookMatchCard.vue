@@ -264,11 +264,13 @@
           @select="pick"
         />
         <!-- No results: the empty list, at its full height when the card keeps its room, else at
-             the height of the results a failed or canceled search took away -->
+             the height of the results a failed or canceled search took away, or of one result from
+             the first search on (the spinner and the reveal need something to cover) -->
         <div
-          v-else-if="placeholders || keptHeight !== null"
+          v-else-if="emptyList"
           class="match-results-empty"
-          :style="placeholders ? undefined : { height: `${keptHeight}px` }"
+          :class="{ 'match-results-empty-row': !placeholders && keptHeight === null }"
+          :style="placeholders || keptHeight === null ? undefined : { height: `${keptHeight}px` }"
           data-testid="match-results-placeholder"
         />
         <span
@@ -479,7 +481,7 @@ const pickedRecord = computed(() => {
 // or another book's (one search at a time). Not to be picked until it answers
 const resultsPending = computed(
   () =>
-    (state.value.results.length > 0 || props.placeholders) &&
+    (state.value.results.length > 0 || emptyList.value) &&
     (state.value.status === 'searching' || props.searchLocked),
 )
 
@@ -589,6 +591,12 @@ function setMatched(record: SearchResult) {
 // results replace it
 const resultsListEl = ref<ComponentPublicInstance | null>(null)
 const keptHeight = ref<number | null>(null)
+// A card that doesn't keep the room from the start gets an empty list one result high with its
+// first search, kept until results replace it: the spinner and the reveal show over it
+const firstSearchRoom = ref(false)
+const emptyList = computed(
+  () => props.placeholders || keptHeight.value !== null || firstSearchRoom.value,
+)
 
 function keepResultsHeight() {
   if (props.placeholders || !state.value.results.length) return
@@ -651,6 +659,7 @@ async function search(kind: SearchKind = 'title', fresh = false) {
   match.value.picked = null
   match.value.asinError = null
   endReveal()
+  if (!state.value.results.length) firstSearchRoom.value = true
   const answered = fresh ? undefined : searchCache?.get(cacheKey)
   if (answered) {
     showResults(kind, searched, answered, null)
@@ -1225,12 +1234,18 @@ defineExpose({ search, cancelSearch })
 
 /* Kept room: the list at its full height, results or not */
 .match-results-placeholders .match-search-results,
-.match-results-empty {
+.match-results-placeholders .match-results-empty {
   height: 320px;
   box-sizing: border-box;
 }
 
+/* One result's height (its row and the list's border), from the first search on */
+.match-results-empty-row {
+  height: 5rem;
+}
+
 .match-results-empty {
+  box-sizing: border-box;
   margin-top: 0.4rem;
   border: 1px dashed #333;
   border-radius: 6px;
