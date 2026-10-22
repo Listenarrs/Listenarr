@@ -192,39 +192,63 @@ describe('RepairBooksModal', () => {
     )
   })
 
-  it('keeps the legend in the footer on a wide screen', async () => {
-    const wrapper = mountModal()
+  it('keeps the legend in the footer, between Cancel and the skipped count', async () => {
+    const wrapper = mountModal([7, 8])
     await flushPromises()
 
-    expect(wrapper.find('.modal-footer [data-testid="match-legend"]').exists()).toBe(true)
-    expect(wrapper.find('.repair-legend-under-list').exists()).toBe(false)
+    const footer = wrapper.get('.repair-footer').element
+    const order = [
+      '.cancel-button',
+      '[data-testid="match-legend"]',
+      '[data-testid="repair-count"]',
+    ].map((selector) => footer.querySelector(selector)!)
+    expect(order[0]!.compareDocumentPosition(order[1]!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(order[1]!.compareDocumentPosition(order[2]!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(wrapper.find('.repair-legend-above').exists()).toBe(false)
   })
 
-  it('moves the legend under the books on a narrow screen, so the footer keeps one line', async () => {
-    vi.stubGlobal(
-      'matchMedia',
-      vi.fn((query: string) => ({
-        matches: query === '(max-width: 720px)',
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-      })),
-    )
-    try {
+  describe('with too little room for the legend on the footer line', () => {
+    // jsdom has no layout: every element is 100px wide, the footer has room for `room` pixels, and
+    // the observer measures as soon as it observes, as a browser does
+    function layout(room: number) {
+      vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(100)
+      vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (
+        this: HTMLElement,
+      ) {
+        return this.classList.contains('repair-footer') ? room : 100
+      })
+      vi.stubGlobal(
+        'ResizeObserver',
+        class {
+          constructor(private readonly callback: () => void) {}
+          observe() {
+            this.callback()
+          }
+          disconnect() {}
+        },
+      )
+    }
+
+    afterEach(() => vi.unstubAllGlobals())
+
+    it('puts the legend on its own line above Cancel, the skipped count and Repair', async () => {
+      // Cancel, the five legend entries and the actions: 700px, more than the footer has
+      layout(500)
       const wrapper = mountModal()
       await flushPromises()
 
-      expect(wrapper.find('.modal-footer [data-testid="match-legend"]').exists()).toBe(false)
-      const legend = wrapper.get('.repair-legend-under-list')
-      // Right under the list of books
-      expect(legend.element.previousElementSibling?.classList).toContain('repair-list')
-      // Cancel, the skipped count and Repair stay in the footer
-      const footer = wrapper.get('.modal-footer')
-      expect(footer.text()).toContain('Cancel')
-      expect(footer.find('[data-testid="repair-count"]').exists()).toBe(true)
-      expect(footer.find('[data-testid="repair-confirm"]').exists()).toBe(true)
-    } finally {
-      vi.unstubAllGlobals()
-    }
+      expect(wrapper.get('.repair-footer').classes()).toContain('repair-footer-legend-above')
+      expect(wrapper.get('[data-testid="match-legend"]').classes()).toContain('repair-legend-above')
+    })
+
+    it('leaves it between Cancel and the skipped count when the line has room', async () => {
+      layout(2000)
+      const wrapper = mountModal()
+      await flushPromises()
+
+      expect(wrapper.get('.repair-footer').classes()).not.toContain('repair-footer-legend-above')
+      expect(wrapper.find('.repair-legend-above').exists()).toBe(false)
+    })
   })
 
   it('counts only the books with a new record, ticked when found, and the skipped ones', async () => {

@@ -116,11 +116,6 @@
                 </template>
               </BookMatchCard>
             </div>
-            <!-- On a narrow screen the legend sits under the books, so the footer keeps one line -->
-            <MatchLegend
-              v-if="narrowLayout && !finished && rows.length"
-              class="repair-legend-under-list"
-            />
           </div>
         </div>
 
@@ -152,9 +147,15 @@
     </template>
 
     <template #footer>
-      <ModalFooter class="repair-footer" :showCancel="false">
+      <ModalFooter
+        ref="footerRef"
+        class="repair-footer"
+        :class="{ 'repair-footer-legend-above': legendAbove }"
+        :showCancel="false"
+      >
         <template #left>
           <button
+            ref="cancelRef"
             type="button"
             class="btn cancel-button"
             :disabled="executing"
@@ -163,7 +164,13 @@
             <PhX :size="16" />
             {{ finished ? 'Close' : 'Cancel' }}
           </button>
-          <MatchLegend v-if="!narrowLayout && !finished && rows.length" />
+          <!-- Always in sight: between Cancel and the skipped count when the line has room for it,
+               on its own line above them otherwise -->
+          <MatchLegend
+            v-if="!finished && rows.length"
+            ref="legendRef"
+            :class="{ 'repair-legend-above': legendAbove }"
+          />
         </template>
         <template #default>
           <span
@@ -208,7 +215,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch, type ComponentPublicInstance } from 'vue'
 import {
   PhCheckCircle,
   PhCheckSquare,
@@ -284,20 +291,54 @@ const progress = ref(0)
 // One book is searched at a time: the others wait for it
 const searchingRowId = ref<number | null>(null)
 
-// The book card's breakpoint: below it, the legend leaves the footer for under the books
-const NARROW_LAYOUT_QUERY = '(max-width: 720px)'
-const narrowLayout = ref(false)
-let narrowLayoutMedia: MediaQueryList | null = null
-function onNarrowLayoutChanged(event: MediaQueryListEvent) {
-  narrowLayout.value = event.matches
+// The legend stays in the footer, in sight however long the list is: between Cancel and the
+// skipped count when the line has room for all of them, on its own line above them otherwise.
+// Wrapping alone would put it under them, hence the measure.
+const footerRef = ref<ComponentPublicInstance | null>(null)
+const cancelRef = ref<HTMLElement | null>(null)
+const legendRef = ref<ComponentPublicInstance | null>(null)
+const legendAbove = ref(false)
+let footerObserver: ResizeObserver | null = null
+
+// A length in pixels, 0 when the style has none
+const px = (value: string) => parseFloat(value) || 0
+const gapOf = (element: Element) => px(getComputedStyle(element).columnGap)
+
+function placeLegend() {
+  const footer = footerRef.value?.$el as HTMLElement | undefined
+  const legend = legendRef.value?.$el as HTMLElement | undefined
+  const left = footer?.querySelector<HTMLElement>('.modal-footer-left')
+  const actions = footer?.querySelector<HTMLElement>('.modal-footer-actions')
+  if (!footer || !legend || !left || !actions || !cancelRef.value) return
+  const footerStyle = getComputedStyle(footer)
+  const room = footer.clientWidth - px(footerStyle.paddingLeft) - px(footerStyle.paddingRight)
+  // The legend's width on one line, whatever line it is on now
+  const entries = Array.from(legend.children) as HTMLElement[]
+  const legendWidth =
+    entries.reduce((width, entry) => width + entry.offsetWidth, 0) +
+    gapOf(legend) * Math.max(entries.length - 1, 0)
+  const needed =
+    cancelRef.value.offsetWidth + gapOf(left) + legendWidth + gapOf(footer) + actions.offsetWidth
+  legendAbove.value = needed > room
 }
-onMounted(() => {
-  if (typeof window.matchMedia !== 'function') return
-  narrowLayoutMedia = window.matchMedia(NARROW_LAYOUT_QUERY)
-  narrowLayout.value = narrowLayoutMedia.matches
-  narrowLayoutMedia.addEventListener('change', onNarrowLayoutChanged)
-})
-onBeforeUnmount(() => narrowLayoutMedia?.removeEventListener('change', onNarrowLayoutChanged))
+
+// Measured again when the modal resizes, the skipped count changes, or the legend shows
+watch(
+  [footerRef, legendRef],
+  ([footer, legend]) => {
+    footerObserver?.disconnect()
+    footerObserver = null
+    if (!footer || !legend || typeof ResizeObserver !== 'function') return
+    footerObserver = new ResizeObserver(placeLegend)
+    const footerElement = footer.$el as HTMLElement
+    footerObserver.observe(footerElement)
+    footerObserver.observe(legend.$el as HTMLElement)
+    const actions = footerElement.querySelector('.modal-footer-actions')
+    if (actions) footerObserver.observe(actions)
+  },
+  { flush: 'post' },
+)
+onBeforeUnmount(() => footerObserver?.disconnect())
 
 // Only a book with a new record, looked up in its region, is repaired
 const selectedRows = computed(() => rows.value.filter(isIncluded))
@@ -535,13 +576,33 @@ watch(
   gap: 0.75rem;
 }
 
+/* One line while the legend shares the footer line, so it is measured whole: it only wraps,
+   centred, once the legend is above and Cancel, the count and Repair still don't fit */
 .repair-count {
   font-size: 0.85rem;
   color: #aaa;
+  white-space: nowrap;
+  text-align: center;
 }
 
-.repair-legend-under-list {
-  margin-top: 0.75rem;
+.repair-footer-legend-above .repair-count {
+  white-space: normal;
+}
+
+/* No room for the legend between Cancel and the skipped count: it takes a line of its own, above
+   them */
+.modal-footer.repair-footer-legend-above {
+  flex-wrap: wrap;
+  row-gap: 0.6rem;
+}
+
+.repair-footer-legend-above :deep(.modal-footer-left) {
+  display: contents;
+}
+
+.repair-legend-above {
+  order: -1;
+  flex-basis: 100%;
 }
 
 /* On a phone the footer stays one line: Cancel on the left, "n skipped" and Repair on the right
