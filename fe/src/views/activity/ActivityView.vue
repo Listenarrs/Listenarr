@@ -593,7 +593,17 @@ const allActivityItems = computed(() => {
   for (const it of completedExternal) if (!finalMap.has(it.id)) finalMap.set(it.id, it)
   for (const it of failedFromDownloads) if (!finalMap.has(it.id)) finalMap.set(it.id, it)
 
-  return Array.from(finalMap.values())
+  // An unavailable client's rows stay hidden until its next live poll, even
+  // when the downloads store still holds them. The queue health warning names it.
+  const unavailableClientIds = new Set(
+    queueClientStatuses.value
+      .filter((client) => client.isUnavailable)
+      .map((client) => (client.clientId || '').toLowerCase()),
+  )
+
+  return Array.from(finalMap.values()).filter(
+    (item) => !unavailableClientIds.has((item.downloadClientId || '').toLowerCase()),
+  )
 })
 
 // Build a lookup map from audiobook ID -> title for resolving friendly names

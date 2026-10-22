@@ -15,7 +15,10 @@ namespace Listenarr.Tests.Mocks.Api
             AddRoute("rpc", GetTorrent, HttpMethod.Post);
         }
 
-        public static async Task<HttpResponseMessage> GetTorrent(HttpRequestMessage request, CancellationToken ct)
+        // Applied only to torrent-get requests without an ids filter (full queue polls).
+        public string? FullQueueResponseOverride { get; set; }
+
+        public async Task<HttpResponseMessage> GetTorrent(HttpRequestMessage request, CancellationToken ct)
         {
             var body = await request.Content!.ReadAsStringAsync(ct);
             using var document = JsonDocument.Parse(body);
@@ -47,6 +50,11 @@ namespace Listenarr.Tests.Mocks.Api
                         {
                             return WhitespaceFolderTorrentGet();
                         }
+                    }
+
+                    if (FullQueueResponseOverride != null)
+                    {
+                        return MockUtils.GetCannedResponse(FullQueueResponseOverride);
                     }
 
                     var response = """
