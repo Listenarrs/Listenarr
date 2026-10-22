@@ -693,11 +693,14 @@ defineExpose({ search, cancelSearch })
   color: #aaa;
 }
 
-/* Current and New read like the summary next to Revert; only their state is coloured */
+/* Current and New read like the summary next to Revert; only their state is coloured. Each keeps
+   room for the lines a record summary usually takes (one, two on a phone), so the card doesn't
+   grow or shrink when the new record changes */
 .match-records {
   display: grid;
   grid-template-columns: auto 1fr;
-  align-items: center;
+  align-items: start;
+  line-height: 1.4;
   gap: 0.3rem 0.75rem;
   margin: 0.75rem 0 0;
   font-size: 0.8rem;
@@ -712,10 +715,12 @@ defineExpose({ search, cancelSearch })
   color: #aaa;
   display: flex;
   align-items: center;
+  align-content: flex-start;
   flex-wrap: wrap;
   gap: 0.4rem;
   margin: 0;
   min-width: 0;
+  min-height: 1.4em;
 }
 
 /* The new record flows as text, so "checked" follows its last line instead of taking a line of its own */
@@ -823,6 +828,10 @@ defineExpose({ search, cancelSearch })
   .match-search-btn {
     grid-column: 1 / -1;
     width: auto;
+  }
+
+  .match-records dd {
+    min-height: 2.8em;
   }
 }
 
