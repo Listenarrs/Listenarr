@@ -41,6 +41,13 @@ namespace Listenarr.Application.Downloads.Contracts
         /// <returns>List of ongoing items in the download client related to listenarr downloads</returns>
         Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, CancellationToken ct = default);
 
+        /// <summary>
+        /// Look up the given downloads in the client by their known client item IDs.
+        /// Unlike the full queue, this lookup ignores the client's category, so a tracked
+        /// job stays visible after its category changes. A failed lookup throws.
+        /// </summary>
+        Task<List<QueueItem>> GetTrackedQueueItemsAsync(DownloadClientConfiguration client, List<Download> downloads, CancellationToken ct = default);
+
         Task<QueueItem> GetQueueItemAsync(
             DownloadClientConfiguration client,
             Download download,

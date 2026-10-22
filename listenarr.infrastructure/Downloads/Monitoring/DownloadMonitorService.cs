@@ -78,7 +78,6 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
     {
         private static readonly TimeSpan OrphanCleanupInterval = TimeSpan.FromMinutes(10);
         private static readonly TimeSpan OrphanCleanupQueueTimeout = TimeSpan.FromSeconds(15);
-        private static readonly TimeSpan OrphanCleanupStaleSnapshotMaxAge = TimeSpan.FromMinutes(3);
 
         private int _pollingInterval = 30;
         private DateTime _lastFullBroadcast = DateTime.MinValue;
@@ -219,6 +218,7 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
                             client,
                             clientDownloads,
                             clientQueuePoller,
+                            downloadClientGateway,
                             orphanCleanupService);
                         ScheduleNextOrphanCleanup(client);
                     }
@@ -256,25 +256,49 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
             DownloadClientConfiguration client,
             List<Download> clientDownloads,
             DownloadClientQueuePoller clientQueuePoller,
+            IDownloadClientGateway downloadClientGateway,
             DownloadOrphanCleanupService orphanCleanupService)
         {
             try
             {
                 // Durable orphan removal belongs to the monitor worker, not the
                 // queue display path. Use the same full-snapshot poller safeguards
-                // as queue display so cached, unavailable, or suspiciously empty
-                // snapshots never drive destructive cleanup.
+                // as queue display so a failed or incomplete client response is
+                // reported unavailable and never drives destructive cleanup.
                 var queueResults = await clientQueuePoller.FetchAsync(
                     [client],
                     OrphanCleanupQueueTimeout,
-                    OrphanCleanupStaleSnapshotMaxAge,
                     maxParallelClientPolls: 1);
                 var clientQueueResult = queueResults.Single();
+                var liveItems = clientQueueResult.QueueItems;
+
+                if (!clientQueueResult.IsUnavailable)
+                {
+                    // The full snapshot is scoped to the client's category. A tracked job
+                    // whose category changed is missing from it but still in the client,
+                    // so look tracked jobs up by ID too. If that lookup fails, skip cleanup.
+                    List<QueueItem> trackedItems;
+                    try
+                    {
+                        using var timeoutCts = new CancellationTokenSource(OrphanCleanupQueueTimeout);
+                        trackedItems = await downloadClientGateway.GetTrackedQueueItemsAsync(client, clientDownloads, timeoutCts.Token);
+                    }
+                    catch (Exception ex) when (ex is not OutOfMemoryException && ex is not StackOverflowException)
+                    {
+                        logger.LogWarning(
+                            ex,
+                            "Skipping orphan cleanup for client {ClientName}: tracked download lookup failed",
+                            client.Name ?? client.Id);
+                        return;
+                    }
+
+                    liveItems = [.. liveItems, .. trackedItems];
+                }
 
                 await orphanCleanupService.RemoveOrphansAsync(
                     client,
                     clientQueueResult,
-                    clientQueueResult.QueueItems,
+                    liveItems,
                     clientDownloads);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)

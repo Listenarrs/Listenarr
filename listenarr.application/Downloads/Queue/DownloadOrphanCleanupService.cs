@@ -48,16 +48,14 @@ namespace Listenarr.Application.Downloads.Queue
                 return;
             }
 
+            // A snapshot that reaches this point is live and complete. Adapters throw on
+            // any failed or incomplete full-queue response, and the poller reports every
+            // failure as unavailable, never as a live empty snapshot. The caller also adds
+            // tracked jobs found by ID, so a category change does not hide them. An item
+            // missing from both is gone, so an empty live queue may terminalize orphans;
+            // otherwise deleting your only active torrent strands its Download record and
+            // blocks re-grabs with 409. The per-item grace period below protects fresh adds.
             var clientQueue = clientQueueResult.QueueItems;
-            if (clientQueue.Count == 0 && clientDownloads.Any())
-            {
-                logger.LogWarning(
-                    "Skipping orphan cleanup for client {ClientName}: client returned 0 queue items but {Count} downloads are tracked. Client may be temporarily unreachable.",
-                    client.Name,
-                    clientDownloads.Count);
-                return;
-            }
-
             var liveClientItemIds = BuildLiveClientItemIds(clientQueue, mappedQueueItems);
             var now = DateTime.UtcNow;
             var cleanupCandidates = clientDownloads

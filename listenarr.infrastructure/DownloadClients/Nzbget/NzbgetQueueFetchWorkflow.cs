@@ -17,13 +17,17 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
         NzbgetHistoryEnrichmentWorkflow historyEnrichmentWorkflow,
         ILogger<NzbgetAdapter> logger)
     {
-        public async Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default)
+        private const string IncompleteSnapshotMessage = "Incomplete NZBGet queue snapshot.";
+
+        public async Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default, bool ignoreCategory = false)
         {
             var items = new List<QueueItem>();
             if (client == null) return items;
 
-            var isMonitorPoll = ids.Count > 0;
-            var configuredCategory = DownloadClientCategoryFilter.GetConfiguredCategory(client);
+            // Tracked lookups for orphan cleanup ignore the category, so a tracked job
+            // stays visible after its category changes. Display and discovery keep it.
+            var isFullPoll = ids.Count == 0;
+            var configuredCategory = ignoreCategory ? null : DownloadClientCategoryFilter.GetConfiguredCategory(client);
             var activeIdentities = new List<NzbgetHistoryEnrichmentWorkflow.ActiveHistoryIdentity>();
 
             try
@@ -42,11 +46,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
                 {
                     var message = $"NZBGet returned an invalid queue response for client {LogRedaction.SanitizeText(client.Name ?? client.Id)}.";
                     logger.LogWarning("NZBGet returned an invalid queue response for client {ClientName}", LogRedaction.SanitizeText(client.Name ?? client.Id));
-                    if (isMonitorPoll)
-                    {
-                        throw new DownloadClientAdapterPollingException(message);
-                    }
-                    return items;
+                    throw new DownloadClientAdapterPollingException(message);
                 }
 
                 foreach (var valueElement in arrayData.Elements("value"))
@@ -54,6 +54,11 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
                     try
                     {
                         var structElement = valueElement.Element("struct");
+                        if (structElement == null && isFullPoll)
+                        {
+                            throw new DownloadClientAdapterPollingException(IncompleteSnapshotMessage);
+                        }
+
                         if (structElement != null)
                         {
                             var groupCategory = structElement.Elements("member")
@@ -74,8 +79,15 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
                                     queueItem.Title));
                         }
                     }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                    catch (Exception ex) when (ex is not DownloadClientAdapterPollingException && ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                     {
+                        // A full poll drives orphan cleanup, so an entry we cannot read
+                        // must fail the snapshot instead of silently dropping out of it.
+                        if (isFullPoll)
+                        {
+                            throw new DownloadClientAdapterPollingException(IncompleteSnapshotMessage, ex);
+                        }
+
                         logger.LogDebug(ex, "Failed to map NZBGet queue item (non-fatal)");
                     }
                 }
@@ -87,20 +99,12 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
             catch (HttpRequestException httpEx) when (httpEx.StatusCode == HttpStatusCode.Unauthorized || httpEx.StatusCode == HttpStatusCode.Forbidden)
             {
                 logger.LogWarning("NZBGet authentication failed for client {ClientName} — check username/password", LogRedaction.SanitizeText(client.Name ?? client.Id));
-                if (isMonitorPoll)
-                {
-                    throw new DownloadClientAdapterPollingException("NZBGet authentication failed.", httpEx);
-                }
-                return items;
+                throw new DownloadClientAdapterPollingException("NZBGet authentication failed.", httpEx);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 logger.LogWarning(ex, "Failed to retrieve NZBGet queue for client {ClientName}", LogRedaction.SanitizeText(client.Name ?? client.Id));
-                if (isMonitorPoll)
-                {
-                    throw new DownloadClientAdapterPollingException("Error polling NZBGet queue.", ex);
-                }
-                return items;
+                throw new DownloadClientAdapterPollingException("Error polling NZBGet queue.", ex);
             }
 
             await ApplyGlobalDownloadRateFallbackAsync(client, items, ct);

@@ -18,12 +18,11 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
         ILogger<QbittorrentAdapter> logger,
         string clientType)
     {
-        public async Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default)
+        public async Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default, bool ignoreCategory = false)
         {
             var items = new List<QueueItem>();
             if (client == null) return items;
 
-            var isMonitorPoll = ids.Count > 0;
             var baseUrl = DownloadClientUriBuilder.BuildAuthority(client);
 
             try
@@ -37,16 +36,17 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 {
                     var message = $"qBittorrent authentication failed for client {LogRedaction.SanitizeText(client.Id)}.";
                     logger.LogWarning(exception, "qBittorrent authentication failed for client {ClientId}", LogRedaction.SanitizeText(client.Id));
-                    if (isMonitorPoll)
-                    {
-                        throw new DownloadClientAdapterPollingException(message, exception);
-                    }
-                    return items;
+                    throw new DownloadClientAdapterPollingException(message, exception);
                 }
 
                 // Limit fields returned to reduce memory usage.
                 var fields = "name,progress,size,downloaded,dlspeed,eta,state,hash,added_on,num_seeds,num_leechs,ratio,save_path";
-                var categoryFilter = QBittorrentHelpers.BuildCategoryParameter(client.Settings, "&");
+                // Tracked lookups for orphan cleanup ignore the category, so a tracked
+                // torrent stays visible after its category changes. Display and
+                // discovery keep the category filter.
+                var categoryFilter = ignoreCategory
+                    ? string.Empty
+                    : QBittorrentHelpers.BuildCategoryParameter(client.Settings, "&");
 
                 var category = client.Settings?.TryGetValue("category", out var categoryObj) is true
                     ? categoryObj?.ToString()
@@ -65,11 +65,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 {
                     var message = $"qBittorrent queue request failed with status {torrentsResp.StatusCode} for client {LogRedaction.SanitizeText(client.Id)}.";
                     logger.LogWarning("qBittorrent queue request failed with status {Status} for client {ClientId}", torrentsResp.StatusCode, LogRedaction.SanitizeText(client.Id));
-                    if (isMonitorPoll)
-                    {
-                        throw new DownloadClientAdapterPollingException(message);
-                    }
-                    return items;
+                    throw new DownloadClientAdapterPollingException(message);
                 }
 
                 var json = await torrentsResp.Content.ReadAsStringAsync(ct);
@@ -77,11 +73,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 {
                     var message = $"qBittorrent returned an empty queue response for client {LogRedaction.SanitizeText(client.Id)}.";
                     logger.LogWarning("qBittorrent returned an empty queue response for client {ClientId}", LogRedaction.SanitizeText(client.Id));
-                    if (isMonitorPoll)
-                    {
-                        throw new DownloadClientAdapterPollingException(message);
-                    }
-                    return items;
+                    throw new DownloadClientAdapterPollingException(message);
                 }
 
                 var torrents = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(json);
@@ -89,11 +81,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 {
                     var message = $"qBittorrent returned an invalid queue response for client {LogRedaction.SanitizeText(client.Id)}.";
                     logger.LogWarning("qBittorrent returned an invalid queue response for client {ClientId}", LogRedaction.SanitizeText(client.Id));
-                    if (isMonitorPoll)
-                    {
-                        throw new DownloadClientAdapterPollingException(message);
-                    }
-                    return items;
+                    throw new DownloadClientAdapterPollingException(message);
                 }
 
                 foreach (var torrent in torrents)
@@ -118,10 +106,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 logger.LogWarning(ex, "Error getting qBittorrent queue - client may be unreachable");
-                if (isMonitorPoll)
-                {
-                    throw new DownloadClientAdapterPollingException("Error polling qBittorrent queue.", ex);
-                }
+                throw new DownloadClientAdapterPollingException("Error polling qBittorrent queue.", ex);
             }
 
             return FilterByIds(items, ids);

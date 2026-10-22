@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Runtime.InteropServices;
+using Listenarr.Domain.Downloads.Exceptions;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Mocks.Api;
@@ -47,6 +48,38 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Transmission
                 .WithHost("localhost")
                 .WithPort(9091)
                 .Build());
+        }
+
+        [Theory]
+        [Trait("Method", "GetQueueAsync")]
+        [Trait("Scenario", "RpcErrorFailsPoll")]
+        [InlineData("""{ "arguments": { "torrents": [] }, "result": "invalid argument" }""")]
+        [InlineData("""{ "arguments": { "torrents": [] } }""")]
+        public async Task GetQueueAsync_Throws_WhenRpcResultIsNotSuccess(string torrentsBody)
+        {
+            var transmissionApiMock = _provider.GetRequiredService<TransmissionApiMock>();
+            transmissionApiMock.FullQueueResponseOverride = torrentsBody;
+            var adapter = MockUtils.CreateTransmissionAdapter(_provider);
+
+            await Assert.ThrowsAsync<DownloadClientAdapterPollingException>(
+                () => adapter.GetQueueAsync(_client!));
+            await Assert.ThrowsAsync<DownloadClientAdapterPollingException>(
+                () => adapter.GetQueueAsync(_client!, ["abc"]));
+        }
+
+        [Theory]
+        [Trait("Method", "GetQueueAsync")]
+        [Trait("Scenario", "FullSnapshotWithUnreadableTorrentFails")]
+        [InlineData("""{ "arguments": { "torrents": [ { "name": "No id" } ] }, "result": "success" }""")]
+        [InlineData("""{ "arguments": { "torrents": [ { "id": "not-a-number", "name": "Bad id" } ] }, "result": "success" }""")]
+        public async Task GetQueueAsync_FullSnapshot_Throws_WhenTorrentCannotBeRead(string torrentsBody)
+        {
+            var transmissionApiMock = _provider.GetRequiredService<TransmissionApiMock>();
+            transmissionApiMock.FullQueueResponseOverride = torrentsBody;
+            var adapter = MockUtils.CreateTransmissionAdapter(_provider);
+
+            await Assert.ThrowsAsync<DownloadClientAdapterPollingException>(
+                () => adapter.GetQueueAsync(_client!));
         }
 
         [Fact]
