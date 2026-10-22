@@ -166,22 +166,25 @@
             {{ finished ? 'Close' : 'Cancel' }}
           </button>
           <!-- Always in sight: between Cancel and the skipped count when the line has room for it,
-               on its own line above them otherwise -->
+               on its own line above them otherwise. There from the start, loading included, so
+               the footer never changes shape -->
           <MatchLegend
-            v-if="!finished && rows.length"
+            v-if="!finished"
             ref="legendRef"
             :class="{ 'repair-legend-above': legendAbove }"
           />
         </template>
         <template #default>
+          <!-- Always shown, 0 included, from the start: a count that appears and disappears would
+               move Repair -->
           <span
-            v-if="!finished && !loading && rows.length"
+            v-if="!finished"
             ref="countRef"
             class="repair-count"
             :class="{ 'repair-count-wraps': countWraps }"
             data-testid="repair-count"
           >
-            {{ skippedCount ? `${skippedCount} skipped` : '' }}
+            {{ skippedCount }} skipped
           </span>
           <button
             v-if="!finished"
