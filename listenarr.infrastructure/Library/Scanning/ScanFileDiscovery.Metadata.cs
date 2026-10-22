@@ -219,13 +219,24 @@ internal static partial class ScanFileDiscovery
                 startingDirectory,
                 canonicalRoot,
                 semantics)
-            .Select(path => NormalizeMetadataToken(
-                CollapseTrailingDottedPostNominals(Path.GetFileName(path))))
-            .Any(token => authorTokens.Contains(token)
-                // Symmetric to BuildExpectedAuthorTokens: also match a folder that carries a
-                // post-nominal (e.g. "Jane Doe PhD" or "Jane Doe, Ph.D.") against clean author
-                // metadata.
-                || authorTokens.Contains(StripTrailingPostNominals(token)));
+            .Select(Path.GetFileName)
+            .Any(name =>
+            {
+                // Match the folder's original normalization first so a dotted folder name still
+                // matches a dotted record (both directions), then fall back to the collapsed and
+                // stripped aliases so a folder carrying post-nominals matches clean author
+                // metadata (symmetric to BuildExpectedAuthorTokens).
+                var original = NormalizeMetadataToken(name);
+                if (authorTokens.Contains(original))
+                {
+                    return true;
+                }
+
+                var collapsed = NormalizeMetadataToken(
+                    CollapseTrailingDottedPostNominals(name));
+                return authorTokens.Contains(collapsed)
+                    || authorTokens.Contains(StripTrailingPostNominals(collapsed));
+            });
     }
 
     private static IEnumerable<string> EnumerateAncestorsWithinRoot(
@@ -294,8 +305,13 @@ internal static partial class ScanFileDiscovery
         var tokens = new HashSet<string>(StringComparer.Ordinal);
         foreach (var author in audiobook.Authors ?? [])
         {
-            // Collapse dotted credentials first ("Jane Doe, Ph.D." -> "Jane Doe phd") so both
-            // the full token and the stripped token below see them as a single word.
+            // Keep the original author token so an exact dotted record/tag author (e.g.
+            // "Jane Doe, Ph.D.") still matches the embedded-artist comparison, which uses the
+            // original normalization.
+            AddToken(tokens, author);
+
+            // Also collapse dotted credentials ("Jane Doe, Ph.D." -> "Jane Doe phd") so both the
+            // full token and the stripped token below see them as a single word.
             var collapsedAuthor = CollapseTrailingDottedPostNominals(author);
             AddToken(tokens, collapsedAuthor);
 
@@ -339,19 +355,26 @@ internal static partial class ScanFileDiscovery
 
         var collapsed = false;
         var end = words.Length;
-        while (end > 1 && words[end - 1].Contains('.'))
+        // Walk across trailing credentials even when a plain one (e.g. "CPA") sits after a dotted
+        // one (e.g. "Ph.D."), so a mixed stack like "Ph.D., CPA" still reaches the dotted word.
+        // Only dotted spellings are rewritten; stripping just the periods keeps strings such as
+        // "Ph.D.2" ("phd2") from being accepted as a credential, and at least one word is kept.
+        while (end > 1)
         {
-            var letters = new string(words[end - 1]
-                    .Where(char.IsLetter)
-                    .ToArray())
+            var word = words[end - 1];
+            var letters = word.Replace(".", string.Empty, StringComparison.Ordinal)
                 .ToLowerInvariant();
-            if (letters.Length == 0 || !AuthorPostNominals.Contains(letters))
+            if (!AuthorPostNominals.Contains(letters))
             {
                 break;
             }
 
-            words[end - 1] = letters;
-            collapsed = true;
+            if (word.Contains('.'))
+            {
+                words[end - 1] = letters;
+                collapsed = true;
+            }
+
             end--;
         }
 
