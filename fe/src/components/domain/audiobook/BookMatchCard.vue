@@ -238,22 +238,38 @@
         <PhWarningCircle :size="16" />
         <span>{{ state.error }}</span>
       </p>
-      <p
-        v-if="state.results.length && state.searched"
-        class="match-results-header"
-        data-testid="match-results-header"
-      >
-        Results for {{ describeSearch(state.searched) }} in
-        {{ regionLabel(state.searched.region) }}
-      </p>
-      <FindMatchResults
+      <!-- The last results stay while a new search runs, so nothing moves; they are greyed out
+           under a spinning wheel and can't be picked until it answers. The same while another
+           book is searched: one search at a time -->
+      <div
         v-if="state.results.length"
-        class="match-search-results"
-        :results="state.results"
-        :selected="pickedRecord"
-        :current="match.current"
-        @select="pick"
-      />
+        class="match-results"
+        :class="{ 'match-results-pending': resultsPending }"
+        :aria-busy="resultsPending"
+        data-testid="match-results"
+      >
+        <p v-if="state.searched" class="match-results-header" data-testid="match-results-header">
+          Results for {{ describeSearch(state.searched) }} in
+          {{ regionLabel(state.searched.region) }}
+        </p>
+        <FindMatchResults
+          class="match-search-results"
+          :results="state.results"
+          :selected="pickedRecord"
+          :current="match.current"
+          @select="pick"
+        />
+        <span
+          v-if="resultsPending"
+          class="match-results-spinner"
+          data-testid="match-results-pending"
+        >
+          <PhSpinner class="ph-spin" :size="28" />
+          <span class="match-results-pending-text" data-testid="match-results-pending-text">
+            {{ pendingResultsText }}
+          </span>
+        </span>
+      </div>
       <p
         v-else-if="state.status === 'done' && state.kind === 'title' && state.searched"
         class="match-search-state match-search-warning"
@@ -278,6 +294,7 @@ import {
   PhCheckCircle,
   PhBackspace,
   PhMagnifyingGlass,
+  PhSpinner,
   PhWarningCircle,
   PhX,
   PhXCircle,
@@ -416,6 +433,19 @@ const pickedRecord = computed(() => {
   return picked?.asin ? { asin: picked.asin, region: picked.region ?? match.value.region } : null
 })
 
+// The results shown are waiting for a search: this book's (they are the previous search's, stale)
+// or another book's (one search at a time). Not to be picked until it answers
+const resultsPending = computed(
+  () =>
+    state.value.results.length > 0 && (state.value.status === 'searching' || props.searchLocked),
+)
+
+const pendingResultsText = computed(() =>
+  state.value.status === 'searching'
+    ? pendingText.value
+    : 'Waiting: a search is running on another book',
+)
+
 // Changing the region searches there: not while a search runs, here or on another book.
 // One search at a time keeps answers from racing each other.
 const regionLocked = computed(() => props.searchLocked || state.value.status === 'searching')
@@ -537,7 +567,8 @@ function cancelSearch() {
 // The record picked in the results: its ASIN in the region it was found in. The results stay,
 // with the selection moved to it. Clicking the selected row again unpicks it: no new record.
 function pick(result: SearchResult) {
-  if (!result.asin || props.searchLocked) return
+  // Not while a search runs: the results shown are the previous search's
+  if (!result.asin || props.searchLocked || state.value.status === 'searching') return
   const picked = pickedRecord.value
   if (
     picked &&
@@ -978,6 +1009,38 @@ defineExpose({ search, cancelSearch })
 
 .match-search-error {
   color: var(--status-error);
+}
+
+/* While a new search runs: the previous results greyed out, not clickable, under a spinning
+   wheel laid over them (it takes no room) */
+.match-results {
+  position: relative;
+}
+
+.match-results-pending .match-results-header,
+.match-results-pending .match-search-results {
+  opacity: 0.35;
+  pointer-events: none;
+  filter: grayscale(1);
+}
+
+.match-results-spinner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0 1rem;
+  color: var(--status-progress);
+  pointer-events: none;
+}
+
+.match-results-pending-text {
+  font-size: 0.8rem;
+  color: #ddd;
+  text-align: center;
 }
 
 .match-results-header {
