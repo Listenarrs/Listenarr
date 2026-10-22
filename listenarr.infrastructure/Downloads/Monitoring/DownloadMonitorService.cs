@@ -78,7 +78,6 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
     {
         private static readonly TimeSpan OrphanCleanupInterval = TimeSpan.FromMinutes(10);
         private static readonly TimeSpan OrphanCleanupQueueTimeout = TimeSpan.FromSeconds(15);
-        private static readonly TimeSpan OrphanCleanupStaleSnapshotMaxAge = TimeSpan.FromMinutes(3);
 
         private int _pollingInterval = 30;
         private DateTime _lastFullBroadcast = DateTime.MinValue;
@@ -262,12 +261,11 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
             {
                 // Durable orphan removal belongs to the monitor worker, not the
                 // queue display path. Use the same full-snapshot poller safeguards
-                // as queue display so cached, unavailable, or suspiciously empty
-                // snapshots never drive destructive cleanup.
+                // as queue display so a failed or incomplete client response is
+                // reported unavailable and never drives destructive cleanup.
                 var queueResults = await clientQueuePoller.FetchAsync(
                     [client],
                     OrphanCleanupQueueTimeout,
-                    OrphanCleanupStaleSnapshotMaxAge,
                     maxParallelClientPolls: 1);
                 var clientQueueResult = queueResults.Single();
 

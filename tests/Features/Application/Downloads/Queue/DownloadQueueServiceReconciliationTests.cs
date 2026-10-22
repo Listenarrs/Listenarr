@@ -33,8 +33,7 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
             IDownloadClientGateway clientGateway,
             IAppMetricsService metrics,
             IMemoryCache? memoryCache = null,
-            TimeSpan? clientQueueTimeout = null,
-            TimeSpan? staleSnapshotMaxAge = null)
+            TimeSpan? clientQueueTimeout = null)
         {
             var resolvedMemoryCache = memoryCache ?? Track(new MemoryCache(new MemoryCacheOptions()));
             var pathMapping = new Mock<IRemotePathMappingService>();
@@ -48,7 +47,6 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
                 processingJobRepository,
                 NullLogger<DownloadQueueCandidateLoader>.Instance);
             var clientQueuePoller = new DownloadClientQueuePoller(
-                resolvedMemoryCache,
                 clientGateway,
                 metrics,
                 NullLogger<DownloadClientQueuePoller>.Instance);
@@ -61,7 +59,6 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
                 NullLogger<DownloadQueueService>.Instance);
 
             service._clientQueueTimeout = (TimeSpan)(clientQueueTimeout == null ? service._clientQueueTimeout : clientQueueTimeout);
-            service._staleSnapshotMaxAge = (TimeSpan)(staleSnapshotMaxAge == null ? service._staleSnapshotMaxAge : staleSnapshotMaxAge);
 
             return service;
         }
@@ -511,8 +508,8 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
         }
 
         [Fact]
-        [Trait("Scenario", "ClientTimeoutUsesCachedSnapshot")]
-        public async Task GetQueueAsync_ClientTimeout_UsesCachedSnapshotFallback()
+        [Trait("Scenario", "ClientTimeoutHidesRowsUntilRecovery")]
+        public async Task GetQueueAsync_ClientTimeout_ReportsUnavailableWithNoRowsAndRestoresOnRecovery()
         {
             var client = new DownloadClientConfiguration
             {
@@ -552,20 +549,23 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
             processingJobRepoMock.Setup(r => r.GetPendingDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
             processingJobRepoMock.Setup(r => r.GetAllJobDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
 
+            static List<QueueItem> LiveQueue() => new()
+            {
+                new QueueItem
+                {
+                    Id = "HASH1",
+                    Title = "Dune - Frank Herbert [M4B]",
+                    Status = "downloading",
+                    AddedAt = DateTime.UtcNow
+                }
+            };
+
             var gatewayMock = new Mock<IDownloadClientGateway>();
             gatewayMock.SetupSequence(g => g.GetQueueAsync(client, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new List<QueueItem>
-                {
-                    new QueueItem
-                    {
-                        Id = "HASH1",
-                        Title = "Dune - Frank Herbert [M4B]",
-                        Status = "downloading",
-                        AddedAt = DateTime.UtcNow
-                    }
-                })
+                .ReturnsAsync(LiveQueue())
                 .Returns(Task.Delay(TimeSpan.FromSeconds(5))
-                    .ContinueWith(_ => new List<QueueItem>(), TaskScheduler.Default));
+                    .ContinueWith(_ => new List<QueueItem>(), TaskScheduler.Default))
+                .ReturnsAsync(LiveQueue());
 
             var metricsMock = new Mock<IAppMetricsService>();
 
@@ -575,28 +575,83 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
                 processingJobRepoMock.Object,
                 gatewayMock.Object,
                 metricsMock.Object,
-                clientQueueTimeout: TimeSpan.FromMilliseconds(75),
-                staleSnapshotMaxAge: TimeSpan.FromMinutes(1));
+                clientQueueTimeout: TimeSpan.FromMilliseconds(75));
 
-            var first = await service.GetQueueAsync();
-            Assert.Single(first);
-            Assert.Equal("tracked-1", first[0].Id);
-            Assert.False(first[0].IsStaleSnapshot);
-            Assert.Equal("live", first[0].SnapshotState);
+            var first = await service.GetQueueSnapshotAsync();
+            Assert.Single(first.Items);
+            Assert.Equal("tracked-1", first.Items[0].Id);
+            Assert.Equal("live", first.Items[0].SnapshotState);
 
             var startedAt = DateTime.UtcNow;
-            var second = await service.GetQueueAsync();
+            var second = await service.GetQueueSnapshotAsync();
             var elapsed = DateTime.UtcNow - startedAt;
 
-            Assert.Single(second);
-            Assert.Equal("tracked-1", second[0].Id);
-            Assert.True(second[0].IsStaleSnapshot);
-            Assert.Equal("cached", second[0].SnapshotState);
-            Assert.Equal("timeout", second[0].SnapshotFailureReason);
-            Assert.NotNull(second[0].SnapshotAgeSeconds);
-            Assert.True(elapsed < TimeSpan.FromSeconds(1), $"Expected cached fallback to return quickly, but took {elapsed.TotalMilliseconds:F0}ms");
+            Assert.Empty(second.Items);
+            Assert.True(second.HasUnavailableClients);
+            Assert.False(second.HasStaleData);
+            var status = Assert.Single(second.Clients);
+            Assert.True(status.IsUnavailable);
+            Assert.Equal("unavailable", status.SnapshotState);
+            Assert.Equal("timeout", status.SnapshotFailureReason);
+            Assert.True(elapsed < TimeSpan.FromSeconds(1), $"Expected the unavailable result to return quickly, but took {elapsed.TotalMilliseconds:F0}ms");
+            Assert.Equal(DownloadStatus.Downloading, trackedDownload.Status);
+            downloadRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Download>()), Times.Never);
+            downloadRepoMock.Verify(r => r.RemoveAsync(It.IsAny<string>()), Times.Never);
             metricsMock.Verify(m => m.Increment("download.queue.client.poll.timeout", It.Is<double>(v => Math.Abs(v - 1.0d) < 1e-9)), Times.Once);
-            metricsMock.Verify(m => m.Increment("download.queue.client.snapshot.fallback", It.Is<double>(v => Math.Abs(v - 1.0d) < 1e-9)), Times.Once);
+
+            var third = await service.GetQueueSnapshotAsync();
+            Assert.Single(third.Items);
+            Assert.Equal("tracked-1", third.Items[0].Id);
+            Assert.Equal("live", third.Items[0].SnapshotState);
+            Assert.False(third.HasUnavailableClients);
+        }
+
+        [Fact]
+        [Trait("Scenario", "UnavailableClientCompletedRowsHidden")]
+        public async Task GetQueueSnapshotAsync_UnavailableClient_ExcludesItsCompletedDownloadsFromDatabaseFallback()
+        {
+            var downClient = new DownloadClientConfiguration { Id = "qb-1", Name = "down qbit", Type = "qbittorrent", IsEnabled = true };
+            var liveClient = new DownloadClientConfiguration { Id = "qb-2", Name = "live qbit", Type = "qbittorrent", IsEnabled = true };
+
+            var configMock = new Mock<IConfigurationService>();
+            configMock.Setup(c => c.GetDownloadClientConfigurationsAsync())
+                .ReturnsAsync(new List<DownloadClientConfiguration> { downClient, liveClient });
+            configMock.Setup(c => c.GetApplicationSettingsAsync())
+                .ReturnsAsync(new ApplicationSettings { ShowCompletedExternalDownloads = true });
+
+            var downloads = new List<Download>
+            {
+                new() { Id = "done-down", DownloadClientId = "QB-1", Title = "Down client book", Status = DownloadStatus.Completed, StartedAt = DateTime.UtcNow.AddHours(-2) },
+                new() { Id = "done-live", DownloadClientId = "qb-2", Title = "Live client book", Status = DownloadStatus.Completed, StartedAt = DateTime.UtcNow.AddHours(-1) }
+            };
+
+            var downloadRepoMock = new Mock<IDownloadRepository>();
+            SetupQueueRepository(downloadRepoMock, downloads);
+
+            var processingJobRepoMock = new Mock<IDownloadProcessingJobRepository>();
+            processingJobRepoMock.Setup(r => r.GetPendingDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+            processingJobRepoMock.Setup(r => r.GetAllJobDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+
+            var gatewayMock = new Mock<IDownloadClientGateway>();
+            gatewayMock.Setup(g => g.GetQueueAsync(downClient, It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new InvalidOperationException("client down"));
+            gatewayMock.Setup(g => g.GetQueueAsync(liveClient, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<QueueItem>());
+
+            var service = CreateService(
+                configMock.Object,
+                downloadRepoMock.Object,
+                processingJobRepoMock.Object,
+                gatewayMock.Object,
+                new Mock<IAppMetricsService>().Object);
+
+            var snapshot = await service.GetQueueSnapshotAsync();
+
+            var item = Assert.Single(snapshot.Items);
+            Assert.Equal("done-live", item.Id);
+            Assert.True(snapshot.HasUnavailableClients);
+            Assert.True(snapshot.Clients.Single(c => c.ClientId == "qb-1").IsUnavailable);
+            Assert.False(snapshot.Clients.Single(c => c.ClientId == "qb-2").IsUnavailable);
         }
 
         [Fact]
@@ -637,8 +692,7 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
                 processingJobRepoMock.Object,
                 gatewayMock.Object,
                 metricsMock.Object,
-                clientQueueTimeout: TimeSpan.FromMilliseconds(75),
-                staleSnapshotMaxAge: TimeSpan.FromMilliseconds(75));
+                clientQueueTimeout: TimeSpan.FromMilliseconds(75));
 
             var snapshot = await service.GetQueueSnapshotAsync();
 

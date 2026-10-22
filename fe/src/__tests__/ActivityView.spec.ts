@@ -483,6 +483,63 @@ describe('ActivityView', () => {
     expect(wrapper.text()).toContain('qBittorrent unavailable after a timeout')
   })
 
+  it('hides downloads-store rows for an unavailable client and keeps other rows visible', async () => {
+    mockSignalR()
+    mockApi({
+      getQueue: vi.fn(async () => ({
+        items: [],
+        clients: [
+          {
+            clientId: 'QB-1',
+            clientName: 'qBittorrent',
+            clientType: 'qbittorrent',
+            snapshotState: 'unavailable',
+            isStaleSnapshot: false,
+            isUnavailable: true,
+            snapshotFailureReason: 'error',
+            itemCount: 0,
+          },
+        ],
+        generatedAt: new Date().toISOString(),
+        hasStaleData: false,
+        hasUnavailableClients: true,
+      })),
+    })
+    mockConfigurationStore(true)
+    mockLibraryStore()
+    const startedAt = new Date().toISOString()
+    const download = (id: string, downloadClientId: string, status: string) => ({
+      id,
+      status,
+      progress: status === 'Completed' ? 100 : 40,
+      downloadClientId,
+      startedAt,
+      title: id,
+      downloadedSize: 400,
+      totalSize: 1000,
+    })
+    mockDownloadsStore({
+      activeDownloads: [
+        download('down-active', 'qb-1', 'Downloading'),
+        download('ddl-active', 'DDL', 'Downloading'),
+      ],
+      completedDownloads: [
+        download('down-completed', 'qb-1', 'Completed'),
+        download('live-completed', 'qb-2', 'Completed'),
+      ],
+      failedDownloads: [download('down-failed', 'Qb-1', 'Failed')],
+    })
+
+    const wrapper = await mountActivityView()
+    const vm = wrapper.vm as unknown as ActivityViewVm
+
+    expect(vm.allActivityItems.map((item) => item.id).sort()).toEqual([
+      'ddl-active',
+      'live-completed',
+    ])
+    expect(wrapper.text()).toContain('qBittorrent unavailable after a client error')
+  })
+
   it('prefers the queue snapshot over a DDL active download with the same tracked id', async () => {
     mockSignalR()
     mockApi({
