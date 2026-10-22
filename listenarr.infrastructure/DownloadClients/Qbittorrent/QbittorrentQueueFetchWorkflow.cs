@@ -19,10 +19,10 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
         ILogger<QbittorrentAdapter> logger,
         string clientType)
     {
-        public async Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default)
-            => (await GetQueueSnapshotAsync(client, ids, ct)).Items;
+        public async Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default, bool ignoreCategory = false)
+            => (await GetQueueSnapshotAsync(client, ids, ct, ignoreCategory)).Items;
 
-        public async Task<DownloadClientQueueSnapshot> GetQueueSnapshotAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default)
+        public async Task<DownloadClientQueueSnapshot> GetQueueSnapshotAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default, bool ignoreCategory = false)
         {
             var items = new List<QueueItem>();
             if (client == null) return DownloadClientQueueSnapshot.Complete(items);
@@ -48,7 +48,12 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
 
                 // Limit fields returned to reduce memory usage.
                 var fields = "name,progress,size,downloaded,dlspeed,eta,state,hash,added_on,num_seeds,num_leechs,ratio,save_path";
-                var categoryFilter = QBittorrentHelpers.BuildCategoryParameter(client.Settings, "&");
+                // Tracked lookups for orphan cleanup ignore the category, so a tracked
+                // torrent stays visible after its category changes. Display and
+                // discovery keep the category filter.
+                var categoryFilter = ignoreCategory
+                    ? string.Empty
+                    : QBittorrentHelpers.BuildCategoryParameter(client.Settings, "&");
 
                 var category = client.Settings?.TryGetValue("category", out var categoryObj) is true
                     ? categoryObj?.ToString()

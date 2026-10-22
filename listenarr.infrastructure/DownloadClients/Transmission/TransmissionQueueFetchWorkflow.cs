@@ -18,12 +18,14 @@ namespace Listenarr.Infrastructure.DownloadClients.Transmission
     {
         private const string IncompleteSnapshotMessage = "Incomplete Transmission queue snapshot.";
 
-        public async Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default)
+        public async Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default, bool ignoreCategory = false)
         {
             var items = new List<QueueItem>();
             if (client == null) return items;
 
-            var configuredCategory = DownloadClientCategoryFilter.GetConfiguredCategory(client);
+            // Tracked lookups for orphan cleanup ignore labels, so a tracked torrent
+            // stays visible after its label changes. Display and discovery keep them.
+            var configuredCategory = ignoreCategory ? null : DownloadClientCategoryFilter.GetConfiguredCategory(client);
 
             // Keep local filtering for monitor calls. Listenarr stores hash-shaped IDs,
             // while Transmission RPC ID targeting varies across server versions.
@@ -44,6 +46,18 @@ namespace Listenarr.Infrastructure.DownloadClients.Transmission
             try
             {
                 var response = await rpcClient.InvokeAsync(client, payload, ct);
+
+                // HTTP 200 only means the RPC call was answered. An RPC error can still
+                // carry an empty torrents array, which must not read as an empty queue.
+                if (!response.TryGetProperty("result", out var resultProp) ||
+                    resultProp.ValueKind != JsonValueKind.String ||
+                    !string.Equals(resultProp.GetString(), "success", StringComparison.OrdinalIgnoreCase))
+                {
+                    var message = $"Transmission RPC did not report success for client {LogRedaction.SanitizeText(client.Name ?? client.Id)}.";
+                    logger.LogWarning("Transmission RPC did not report success for client {ClientName}", LogRedaction.SanitizeText(client.Name ?? client.Id));
+                    throw new DownloadClientAdapterPollingException(message);
+                }
+
                 if (!response.TryGetProperty("arguments", out var args) || !args.TryGetProperty("torrents", out var torrents) || torrents.ValueKind != JsonValueKind.Array)
                 {
                     var message = $"Transmission returned an invalid queue response for client {LogRedaction.SanitizeText(client.Name ?? client.Id)}.";
