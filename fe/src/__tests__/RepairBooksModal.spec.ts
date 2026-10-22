@@ -417,8 +417,8 @@ describe('RepairBooksModal', () => {
 
     answer([])
     await flushPromises()
-    expect(row(wrapper).get('[data-testid="match-search-empty"]').text()).toContain(
-      'No results for "Primal Hunter, Vol. 7" by "Zogarth" in France (FR)',
+    expect(row(wrapper).get('[data-testid="match-search-empty"]').text()).toMatch(
+      /^No results for "Primal Hunter, Vol\. 7" by "Zogarth" in France \(FR\) - Request: [\d.]+ s$/,
     )
     // Nothing found is orange, not a failure
     expect(row(wrapper).attributes('data-match-state')).toBe('warning')
@@ -434,10 +434,14 @@ describe('RepairBooksModal', () => {
     await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
     const header = () => row(wrapper).get('[data-testid="match-results-header"]').text()
-    expect(header()).toBe('Results for "Primal Hunter, Vol. 7" by "Zogarth" in France (FR)')
+    expect(header()).toMatch(
+      /^Results for "Primal Hunter, Vol\. 7" by "Zogarth" in France \(FR\) - Request: [\d.]+ s$/,
+    )
 
     await row(wrapper).get('[data-testid="match-title"]').setValue('Something else')
-    expect(header()).toBe('Results for "Primal Hunter, Vol. 7" by "Zogarth" in France (FR)')
+    expect(header()).toMatch(
+      /^Results for "Primal Hunter, Vol\. 7" by "Zogarth" in France \(FR\) - Request: [\d.]+ s$/,
+    )
   })
 
   it('empties the ASIN field with its erase button, shown while the field holds something', async () => {
@@ -499,8 +503,8 @@ describe('RepairBooksModal', () => {
     await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
 
-    expect(row(wrapper).get('[data-testid="match-results-header"]').text()).toBe(
-      'Results for ASIN "B0BK9W82PQ" in United States (US)',
+    expect(row(wrapper).get('[data-testid="match-results-header"]').text()).toMatch(
+      /^Results for ASIN "B0BK9W82PQ" in United States \(US\) - Request: [\d.]+ s$/,
     )
   })
 
@@ -576,8 +580,12 @@ describe('RepairBooksModal', () => {
     expect(row(wrapper).find('[data-testid="match-retry"]').exists()).toBe(true)
     expect(row(wrapper).find('[data-testid="match-search"]').exists()).toBe(false)
 
-    await row(wrapper).get('[data-testid="match-author"]').setValue('Zogarth ')
+    // Another author: a different search, Search again
+    await row(wrapper).get('[data-testid="match-author"]').setValue('Zogarth Junior')
     expect(row(wrapper).find('[data-testid="match-retry"]').exists()).toBe(false)
+    expect(row(wrapper).find('[data-testid="match-search"]').exists()).toBe(true)
+    // Changed back to what was searched: still Search, a field was changed
+    await row(wrapper).get('[data-testid="match-author"]').setValue('Zogarth')
     expect(row(wrapper).find('[data-testid="match-search"]').exists()).toBe(true)
   })
 
@@ -595,7 +603,109 @@ describe('RepairBooksModal', () => {
     await row(wrapper).get('[data-testid="match-retry"]').trigger('click')
     await flushPromises()
     expect(row(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(1)
+    // Found this time: still Retry, the fields unchanged
+    expect(row(wrapper).find('[data-testid="match-retry"]').exists()).toBe(true)
+  })
+
+  it('serves a search already answered while the dialog is open without a request; Retry asks again', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    const region = (value: string) =>
+      row(wrapper).get('[data-testid="match-region"]').setValue(value).then(flushPromises)
+
+    await region('us')
+    await region('fr')
+    expect(apiMocks.getAudibleMetadata).toHaveBeenCalledTimes(2)
+
+    // Back to the US: already answered, no request, the same answer
+    await region('us')
+    expect(apiMocks.getAudibleMetadata).toHaveBeenCalledTimes(2)
+    expect(row(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(0)
+    // The answer says it comes from the dialog's answered searches: maybe stale, Retry to check
+    expect(row(wrapper).get('[data-testid="match-asin-error"]').text()).toBe(
+      'No record for B0HM45F8MW in Audible United States (US) - Cached results',
+    )
+
+    // Retry is the way to ask Audible again
+    await row(wrapper).get('[data-testid="match-retry"]').trigger('click')
+    await flushPromises()
+    expect(apiMocks.getAudibleMetadata).toHaveBeenCalledTimes(3)
+  })
+
+  it('shows Search once a field is changed, even back to what was searched, and serves it without a request', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    await row(wrapper).get('[data-testid="match-region"]').setValue('us')
+    await flushPromises()
+    await emptyAsin(wrapper)
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
+    await flushPromises()
+    expect(row(wrapper).find('[data-testid="match-retry"]').exists()).toBe(true)
+
+    await row(wrapper).get('[data-testid="match-author"]').setValue('Someone')
+    await row(wrapper).get('[data-testid="match-author"]').setValue('Zogarth')
     expect(row(wrapper).find('[data-testid="match-search"]').exists()).toBe(true)
+
+    apiMocks.advancedSearch.mockClear()
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
+    await flushPromises()
+    expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
+    expect(row(wrapper).get('[data-testid="match-results-header"]').text()).toMatch(
+      / - Cached results$/,
+    )
+    expect(row(wrapper).find('[data-testid="match-retry"]').exists()).toBe(true)
+  })
+
+  it('never keeps a failed search: the same values ask again', async () => {
+    apiMocks.getAudibleMetadata.mockRejectedValueOnce(new Error('API error: 502 Bad Gateway'))
+    const wrapper = mountModal()
+    await flushPromises()
+    const region = (value: string) =>
+      row(wrapper).get('[data-testid="match-region"]').setValue(value).then(flushPromises)
+
+    await region('us')
+    await region('fr')
+    await region('us')
+    expect(apiMocks.getAudibleMetadata).toHaveBeenCalledTimes(3)
+  })
+
+  it('shares the answered searches between the books of the dialog', async () => {
+    const wrapper = mountModal([7, 8])
+    await flushPromises()
+    // Both books have the same title, author and ASIN
+    for (const id of [7, 8]) {
+      await row(wrapper, id).get('[data-testid="match-region"]').setValue('us')
+      await flushPromises()
+      await emptyAsin(wrapper, id)
+      await row(wrapper, id).get('[data-testid="match-search"]').trigger('click')
+      await flushPromises()
+    }
+
+    expect(apiMocks.getAudibleMetadata).toHaveBeenCalledTimes(1)
+    expect(apiMocks.advancedSearch).toHaveBeenCalledTimes(1)
+    expect(row(wrapper, 8).findAll('[data-testid="find-match-result"]').length).toBeGreaterThan(0)
+    // The header says where they come from
+    expect(row(wrapper).get('[data-testid="match-results-header"]').text()).toMatch(
+      / - Request: [\d.]+ s$/,
+    )
+    expect(row(wrapper, 8).get('[data-testid="match-results-header"]').text()).toMatch(
+      / - Cached results$/,
+    )
+  })
+
+  it('asks Audible afresh each time the dialog opens', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    await row(wrapper).get('[data-testid="match-region"]').setValue('us')
+    await flushPromises()
+    expect(apiMocks.getAudibleMetadata).toHaveBeenCalledTimes(1)
+
+    await wrapper.setProps({ visible: false })
+    await wrapper.setProps({ visible: true })
+    await flushPromises()
+    await row(wrapper).get('[data-testid="match-region"]').setValue('us')
+    await flushPromises()
+    expect(apiMocks.getAudibleMetadata).toHaveBeenCalledTimes(2)
   })
 
   it('offers Retry when the ASIN lookup fails, and Retry looks it up again', async () => {
@@ -616,7 +726,7 @@ describe('RepairBooksModal', () => {
     // Found, offered to pick: nothing picked for the user
     expect(row(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(1)
     expect(row(wrapper).attributes('data-match-state')).toBe('ignored')
-    expect(row(wrapper).find('[data-testid="match-search"]').exists()).toBe(true)
+    expect(row(wrapper).find('[data-testid="match-retry"]').exists()).toBe(true)
   })
 
   it('sums the book up next to Revert: ASIN - Title: Subtitle - Author - Region', async () => {
@@ -731,10 +841,10 @@ describe('RepairBooksModal', () => {
     expect(results().classes()).not.toContain('match-results-pending')
     expect(row(wrapper).find('[data-testid="match-results-pending"]').exists()).toBe(false)
 
-    // A new search: the previous results stay, greyed out, under a spinning wheel
+    // Retry, a new request: the previous results stay, greyed out, under a spinning wheel
     let answer!: (results: unknown[]) => void
     apiMocks.advancedSearch.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)))
-    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
+    await row(wrapper).get('[data-testid="match-retry"]').trigger('click')
     await flushPromises()
     expect(results().classes()).toContain('match-results-pending')
     expect(results().attributes('aria-busy')).toBe('true')

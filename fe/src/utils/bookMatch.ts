@@ -15,6 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+import type { InjectionKey } from 'vue'
 import type { SearchResult } from '@/types'
 import { useSearch } from '@/composables/useSearch'
 import { searchRegionOptions } from '@/utils/languageMapping'
@@ -57,6 +58,18 @@ export function createBookMatch(
   current: { asin: string; region: string },
 ): BookMatch {
   return { ...initial, picked: null, asinError: null, initial: { ...initial }, current }
+}
+
+// In seconds, with up to 2 decimals: 1.23 s, 1.5 s, 2 s
+export function formatDuration(durationMs: number): string {
+  return `${Number((durationMs / 1000).toFixed(2))} s`
+}
+
+// Where a search's answer comes from, after its results, its "No results" or its "No record": a
+// request and how long it took, or the searches answered while the dialog is open (then possibly
+// stale: Retry asks again)
+export function answerSource(requestMs: number | null): string {
+  return requestMs === null ? 'Cached results' : `Request: ${formatDuration(requestMs)}`
 }
 
 export function regionLabel(region: string): string {
@@ -172,6 +185,17 @@ export function addNewQuery(match: BookMatch): string {
   const author = match.author.trim()
   if (ASIN_PATTERN.test(title) || !author) return title
   return `TITLE:${title} AUTHOR:${author}`
+}
+
+// The searches answered while a dialog is open, shared by its book cards: a search with values
+// already answered (back to a region, a field typed back, Revert, another book searched the same
+// way) is served from here, without a request. Retry skips it; a failed search is never kept. The
+// dialog provides it and empties it each time it opens.
+export type SearchCache = Map<string, SearchResult[]>
+export const SEARCH_CACHE: InjectionKey<SearchCache> = Symbol('bookMatchSearchCache')
+
+export function searchCacheKey(query: string, region: string): string {
+  return `${region}|${query}`
 }
 
 // Add New's own search (useSearch), so a book is searched the way it is added: titles through the

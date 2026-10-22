@@ -70,7 +70,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, provide, ref } from 'vue'
 import { PhCheckCircle, PhInfo, PhX } from '@phosphor-icons/vue'
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '@/components/feedback'
 import BookMatchCard from './BookMatchCard.vue'
@@ -85,8 +85,10 @@ import {
   createBookMatch,
   matchState,
   recordFromResult,
+  SEARCH_CACHE,
   type BookMatch,
   type BookRecord,
+  type SearchCache,
 } from '@/utils/bookMatch'
 import type { SearchResult } from '@/types'
 
@@ -97,6 +99,8 @@ const emit = defineEmits<{
 }>()
 
 const store = useLibraryImportStore()
+// The searches answered while this dialog is open (it is created each time it opens)
+provide<SearchCache>(SEARCH_CACHE, new Map())
 const configuredRegion = ref('')
 // Built once the configured region is known: the card searches as soon as it shows
 const match = ref<BookMatch | null>(null)
