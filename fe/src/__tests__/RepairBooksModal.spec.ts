@@ -719,6 +719,76 @@ describe('RepairBooksModal', () => {
     )
   })
 
+  it('greys the previous results out under a spinner while a new search runs, and keeps them unpickable', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    await row(wrapper).get('[data-testid="match-region"]').setValue('us')
+    await flushPromises()
+    await emptyAsin(wrapper)
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
+    await flushPromises()
+    const results = () => row(wrapper).get('[data-testid="match-results"]')
+    expect(results().classes()).not.toContain('match-results-pending')
+    expect(row(wrapper).find('[data-testid="match-results-pending"]').exists()).toBe(false)
+
+    // A new search: the previous results stay, greyed out, under a spinning wheel
+    let answer!: (results: unknown[]) => void
+    apiMocks.advancedSearch.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)))
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
+    await flushPromises()
+    expect(results().classes()).toContain('match-results-pending')
+    expect(results().attributes('aria-busy')).toBe('true')
+    expect(row(wrapper).get('[data-testid="match-results-pending-text"]').text()).toBe(
+      'Searching "Primal Hunter, Vol. 7" by "Zogarth" in United States (US)…',
+    )
+
+    // A stale result can't be picked
+    await row(wrapper).get('[data-testid="find-match-result"]').trigger('click')
+    expect(row(wrapper).find('[data-testid="match-picked"]').exists()).toBe(false)
+
+    // The answer replaces them, pickable again
+    answer([englishPh4])
+    await flushPromises()
+    expect(results().classes()).not.toContain('match-results-pending')
+    expect(row(wrapper).find('[data-testid="match-results-pending"]').exists()).toBe(false)
+    await row(wrapper).get('[data-testid="find-match-result"]').trigger('click')
+    expect(row(wrapper).get('[data-testid="match-picked"]').text()).toContain('Primal Hunter 4')
+  })
+
+  it("greys a book's results out too while another book is searched, and says why", async () => {
+    apiMocks.getAudiobook.mockImplementation(async (id: number) =>
+      id === 7 ? mismatched : { ...mismatched, id: 8, title: 'Other book' },
+    )
+    const wrapper = mountModal([7, 8])
+    await flushPromises()
+    await row(wrapper).get('[data-testid="match-region"]').setValue('us')
+    await flushPromises()
+    await emptyAsin(wrapper)
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
+    await flushPromises()
+
+    // Book 8 is searched: book 7's results wait, greyed out, and can't be picked
+    let answer!: (results: unknown[]) => void
+    apiMocks.advancedSearch.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)))
+    await emptyAsin(wrapper, 8)
+    await row(wrapper, 8).get('[data-testid="match-search"]').trigger('click')
+    await flushPromises()
+    expect(row(wrapper).get('[data-testid="match-results"]').classes()).toContain(
+      'match-results-pending',
+    )
+    expect(row(wrapper).get('[data-testid="match-results-pending-text"]').text()).toBe(
+      'Waiting: a search is running on another book',
+    )
+    await row(wrapper).get('[data-testid="find-match-result"]').trigger('click')
+    expect(row(wrapper).find('[data-testid="match-picked"]').exists()).toBe(false)
+
+    answer([])
+    await flushPromises()
+    expect(row(wrapper).get('[data-testid="match-results"]').classes()).not.toContain(
+      'match-results-pending',
+    )
+  })
+
   it('searches one book at a time: the other cards wait for it, locked', async () => {
     apiMocks.getAudiobook.mockImplementation(async (id: number) =>
       id === 7 ? mismatched : { ...mismatched, id: 8, title: 'Other book' },
