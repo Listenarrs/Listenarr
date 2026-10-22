@@ -36,7 +36,8 @@ public sealed class LibraryPreviewPathWorkflow(
                 audiobook,
                 request.Metadata.SeriesMemberships,
                 request.Metadata.Series,
-                request.Metadata.SeriesNumber);
+                request.Metadata.SeriesNumber,
+                request.Metadata.SeriesAsin);
 
             var namingPattern = !string.IsNullOrWhiteSpace(settings.FolderNamingPattern)
                 ? settings.FolderNamingPattern
