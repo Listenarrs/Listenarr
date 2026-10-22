@@ -26,8 +26,11 @@ import type { ApplicationSettings, SearchResult } from '@/types'
 const record = (asin: string, language?: string) =>
   ({ asin, title: `Primal Hunter ${asin}`, language }) as unknown as SearchResult
 
-function mountResults(results: SearchResult[]) {
-  return mount(FindMatchResults, { props: { results } })
+function mountResults(
+  results: SearchResult[],
+  records: { current?: { asin: string; region?: string } } = {},
+) {
+  return mount(FindMatchResults, { props: { results, ...records } })
 }
 
 function preferLanguage(defaultSearchLanguage: string) {
@@ -72,6 +75,31 @@ describe('FindMatchResults', () => {
     const wrapper = mountResults([record('B0XX000002', 'klingon')])
 
     expect(tags(wrapper)).toEqual([{ text: 'Klingon', preferred: false }])
+  })
+
+  it('tags the book\'s ASIN in another region "Other region", in grey, and says why', () => {
+    preferLanguage('english')
+    // The book points at its US record; a title search finds its ASIN in France and in the US
+    const wrapper = mountResults(
+      [
+        { ...record('B0BK9W82PQ', 'english'), region: 'fr' },
+        { ...record('b0bk9w82pq', 'english'), region: 'us' },
+        { ...record('B0OTHER001', 'french'), region: 'fr' },
+      ] as SearchResult[],
+      { current: { asin: 'B0BK9W82PQ', region: 'us' } },
+    )
+
+    const items = wrapper.findAll('[data-testid="find-match-result"]')
+    const tag = (index: number) =>
+      ['current', 'other-region']
+        .filter((kind) => items[index]!.find(`[data-testid="find-match-${kind}"]`).exists())
+        .join()
+    expect([0, 1, 2].map(tag)).toEqual(['other-region', 'current', ''])
+    const otherRegion = items[0]!.get('[data-testid="find-match-other-region"]')
+    expect(otherRegion.text()).toBe('Other region')
+    expect(otherRegion.attributes('title')).toBe(
+      "Same ASIN as the book's current record, but in France (FR), not United States (US)",
+    )
   })
 
   it('prefers no language when the search language is All', () => {
