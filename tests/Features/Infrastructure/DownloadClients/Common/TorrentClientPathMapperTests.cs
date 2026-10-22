@@ -242,6 +242,45 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Common
             Assert.True(FileUtils.IsPathSameOrInside(contentPath, savePath));
         }
 
+        [Fact]
+        public void BuildQbittorrentSourceFiles_ExcludesPriorityZeroFiles()
+        {
+            var savePath = FileUtils.GetAbsolutePath("downloads");
+            var files = ParseFiles(
+                """
+                [
+                  { "name": "Book/chapter1.m4b", "priority": 1 },
+                  { "name": "Book/cover.jpg", "priority": 0 },
+                  { "name": "Book/notes.txt", "priority": 0 }
+                ]
+                """);
+
+            var sourceFiles = TorrentClientPathMapper.BuildQbittorrentSourceFiles(savePath, files);
+
+            // Only the file qBittorrent was asked to download is a source file; the excluded
+            // (priority 0) cover and notes are never on disk and must not be required.
+            Assert.Equal([Path.Join(savePath, "Book", "chapter1.m4b")], sourceFiles);
+        }
+
+        [Fact]
+        public void ResolveQbittorrentContentPath_IgnoresPriorityZeroFiles()
+        {
+            var savePath = FileUtils.GetAbsolutePath("downloads");
+            var files = ParseFiles(
+                """
+                [
+                  { "name": "Book/chapter1.m4b", "priority": 1 },
+                  { "name": "cover.jpg", "priority": 0 }
+                ]
+                """);
+
+            var contentPath = TorrentClientPathMapper.ResolveQbittorrentContentPath(savePath, files);
+
+            // With the excluded top-level cover removed, the only downloaded file is nested under
+            // "Book", so the content path is that folder rather than the whole save path.
+            Assert.Equal(Path.Join(savePath, "Book"), contentPath);
+        }
+
         private static List<Dictionary<string, JsonElement>> ParseFiles(string json)
         {
             using var document = JsonDocument.Parse(json);

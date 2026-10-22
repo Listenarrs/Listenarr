@@ -36,6 +36,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Common
             // whitespace from path segments; only strip separators when intentionally
             // converting a rooted-looking child path into a relative child path.
             return files
+                .Where(IsQbittorrentFileDownloaded)
                 .Select(file => file.TryGetValue("name", out var nameEl) ? nameEl.GetString() ?? string.Empty : string.Empty)
                 .Where(name => !string.IsNullOrEmpty(name))
                 .Select(name => CombineClientReportedPath(savePath, name))
@@ -85,6 +86,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Common
             }
 
             var fileNames = files
+                .Where(IsQbittorrentFileDownloaded)
                 .Select(f => f.TryGetValue("name", out var nameEl) ? nameEl.GetString() ?? string.Empty : string.Empty)
                 .Where(name => !string.IsNullOrEmpty(name))
                 .Where(name => !FileUtils.ContainsParentDirectorySegment(name, '/', '\\'))
@@ -121,6 +123,26 @@ namespace Listenarr.Infrastructure.DownloadClients.Common
             return allShareTopLevel
                 ? CombineClientReportedPath(savePath, topLevel)
                 : savePath;
+        }
+
+        // qBittorrent lists every file in the torrent, including ones the user excluded —
+        // priority 0 ("Do not download"), set manually or by the "Excluded file names" setting.
+        // Those are never written to disk, so counting them as source files makes the on-disk
+        // file count never match and the import stalls out (#1005). Treat only priority-0 as
+        // skipped; an absent or non-zero priority is a file qBittorrent was asked to download.
+        private static bool IsQbittorrentFileDownloaded(Dictionary<string, JsonElement> file)
+        {
+            if (!file.TryGetValue("priority", out var priorityElement))
+            {
+                return true;
+            }
+
+            return priorityElement.ValueKind switch
+            {
+                JsonValueKind.Number => !(priorityElement.TryGetInt32(out var priority) && priority == 0),
+                JsonValueKind.String => !(int.TryParse(priorityElement.GetString(), out var priority) && priority == 0),
+                _ => true
+            };
         }
 
         private static string CombineClientReportedPath(string? basePath, string candidatePath)
