@@ -23,6 +23,10 @@ namespace Listenarr.Tests.Mocks
         public int FullSnapshotQueueRequestCount { get; private set; }
         public int FilteredQueueRequestCount { get; private set; }
         public Exception? FilteredQueueException { get; set; }
+        public int TrackedQueueRequestCount { get; private set; }
+        public List<string>? LastTrackedQueueIds { get; private set; }
+        public List<QueueItem>? TrackedQueueItemsMock { get; set; }
+        public Exception? TrackedQueueException { get; set; }
         private int CurrentProgress = 0;
 
         public async Task<DownloadClientSubmissionResult> AddAsync(
@@ -77,6 +81,22 @@ namespace Listenarr.Tests.Mocks
 
             var idSet = ids.ToHashSet(StringComparer.OrdinalIgnoreCase);
             return Task.FromResult(BuildQueueItems(advanceProgress: true)
+                .Where(item => !string.IsNullOrWhiteSpace(item.Id) && idSet.Contains(item.Id))
+                .ToList());
+        }
+
+        public Task<List<QueueItem>> GetTrackedQueueAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default)
+        {
+            LastTrackedQueueIds = [.. ids];
+            TrackedQueueRequestCount++;
+
+            if (TrackedQueueException != null)
+            {
+                throw TrackedQueueException;
+            }
+
+            var idSet = ids.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            return Task.FromResult((TrackedQueueItemsMock ?? BuildQueueItems(advanceProgress: false))
                 .Where(item => !string.IsNullOrWhiteSpace(item.Id) && idSet.Contains(item.Id))
                 .ToList());
         }

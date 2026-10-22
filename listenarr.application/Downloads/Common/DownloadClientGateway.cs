@@ -97,6 +97,22 @@ namespace Listenarr.Application.Downloads.Common
             return [.. await Task.WhenAll(tasks)];
         }
 
+        public async Task<List<QueueItem>> GetTrackedQueueItemsAsync(DownloadClientConfiguration client, List<Download> downloads, CancellationToken ct = default)
+        {
+            var ids = downloads
+                .SelectMany(download => DownloadQueueMetadataMatcher.GetKnownClientItemIds(download.Metadata))
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (ids.Count == 0)
+            {
+                return [];
+            }
+
+            var adapter = ResolveAdapter(client);
+            return await adapter.GetTrackedQueueAsync(client, ids, ct);
+        }
+
         public async Task<bool> MarkItemAsImportedAsync(DownloadClientConfiguration client, Download download, CancellationToken ct = default)
         {
             if (client == null)

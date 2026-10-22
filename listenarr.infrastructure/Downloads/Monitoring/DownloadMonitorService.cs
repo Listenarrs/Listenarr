@@ -218,6 +218,7 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
                             client,
                             clientDownloads,
                             clientQueuePoller,
+                            downloadClientGateway,
                             orphanCleanupService);
                         ScheduleNextOrphanCleanup(client);
                     }
@@ -255,6 +256,7 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
             DownloadClientConfiguration client,
             List<Download> clientDownloads,
             DownloadClientQueuePoller clientQueuePoller,
+            IDownloadClientGateway downloadClientGateway,
             DownloadOrphanCleanupService orphanCleanupService)
         {
             try
@@ -268,11 +270,35 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
                     OrphanCleanupQueueTimeout,
                     maxParallelClientPolls: 1);
                 var clientQueueResult = queueResults.Single();
+                var liveItems = clientQueueResult.QueueItems;
+
+                if (!clientQueueResult.IsUnavailable)
+                {
+                    // The full snapshot is scoped to the client's category. A tracked job
+                    // whose category changed is missing from it but still in the client,
+                    // so look tracked jobs up by ID too. If that lookup fails, skip cleanup.
+                    List<QueueItem> trackedItems;
+                    try
+                    {
+                        using var timeoutCts = new CancellationTokenSource(OrphanCleanupQueueTimeout);
+                        trackedItems = await downloadClientGateway.GetTrackedQueueItemsAsync(client, clientDownloads, timeoutCts.Token);
+                    }
+                    catch (Exception ex) when (ex is not OutOfMemoryException && ex is not StackOverflowException)
+                    {
+                        logger.LogWarning(
+                            ex,
+                            "Skipping orphan cleanup for client {ClientName}: tracked download lookup failed",
+                            client.Name ?? client.Id);
+                        return;
+                    }
+
+                    liveItems = [.. liveItems, .. trackedItems];
+                }
 
                 await orphanCleanupService.RemoveOrphansAsync(
                     client,
                     clientQueueResult,
-                    clientQueueResult.QueueItems,
+                    liveItems,
                     clientDownloads);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)

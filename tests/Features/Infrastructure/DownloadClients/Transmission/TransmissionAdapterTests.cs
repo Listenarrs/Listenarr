@@ -52,6 +52,23 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Transmission
 
         [Theory]
         [Trait("Method", "GetQueueAsync")]
+        [Trait("Scenario", "RpcErrorFailsPoll")]
+        [InlineData("""{ "arguments": { "torrents": [] }, "result": "invalid argument" }""")]
+        [InlineData("""{ "arguments": { "torrents": [] } }""")]
+        public async Task GetQueueAsync_Throws_WhenRpcResultIsNotSuccess(string torrentsBody)
+        {
+            var transmissionApiMock = _provider.GetRequiredService<TransmissionApiMock>();
+            transmissionApiMock.FullQueueResponseOverride = torrentsBody;
+            var adapter = MockUtils.CreateTransmissionAdapter(_provider);
+
+            await Assert.ThrowsAsync<DownloadClientAdapterPollingException>(
+                () => adapter.GetQueueAsync(_client!));
+            await Assert.ThrowsAsync<DownloadClientAdapterPollingException>(
+                () => adapter.GetQueueAsync(_client!, ["abc"]));
+        }
+
+        [Theory]
+        [Trait("Method", "GetQueueAsync")]
         [Trait("Scenario", "FullSnapshotWithUnreadableTorrentFails")]
         [InlineData("""{ "arguments": { "torrents": [ { "name": "No id" } ] }, "result": "success" }""")]
         [InlineData("""{ "arguments": { "torrents": [ { "id": "not-a-number", "name": "Bad id" } ] }, "result": "success" }""")]
