@@ -123,7 +123,7 @@ async function searchAndPick(
   { region = 'us', title = 'Primal Hunter 4' } = {},
 ) {
   await row(wrapper).get('[data-testid="match-region"]').setValue(region)
-  // Changing the region looks the ASIN up there first
+  // Changing the region searches there first (the ASIN, which is filled)
   await flushPromises()
   await emptyAsin(wrapper)
   await row(wrapper).get('[data-testid="match-search"]').trigger('click')
@@ -894,6 +894,45 @@ describe('RepairBooksModal', () => {
     // The record found for the ASIN left the title and author as they were
     expect(apiMocks.advancedSearch).toHaveBeenCalledWith(
       expect.objectContaining({ title: 'Primal Hunter, Vol. 7', author: 'Zogarth' }),
+    )
+  })
+
+  it('starts the search Search would with Enter in any field or a new region: ASIN first', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    const enter = (testid: string) =>
+      row(wrapper).get(`[data-testid="${testid}"]`).trigger('keydown', { key: 'Enter' })
+    const searched = () => ({
+      asin: apiMocks.getAudibleMetadata.mock.calls.length,
+      title: apiMocks.advancedSearch.mock.calls.length,
+    })
+    const reset = () => {
+      apiMocks.getAudibleMetadata.mockClear()
+      apiMocks.advancedSearch.mockClear()
+    }
+
+    // The ASIN is filled: Enter in the title or the author looks it up, on its own
+    for (const testid of ['match-title', 'match-author']) {
+      reset()
+      await enter(testid)
+      await flushPromises()
+      expect(searched()).toEqual({ asin: 1, title: 0 })
+    }
+
+    // The ASIN is empty: Enter in it searches the title and author, as Search would
+    await emptyAsin(wrapper)
+    reset()
+    await enter('match-asin')
+    await flushPromises()
+    expect(searched()).toEqual({ asin: 0, title: 1 })
+
+    // And so does a new region, there
+    reset()
+    await row(wrapper).get('[data-testid="match-region"]').setValue('us')
+    await flushPromises()
+    expect(searched()).toEqual({ asin: 0, title: 1 })
+    expect(apiMocks.advancedSearch).toHaveBeenLastCalledWith(
+      expect.objectContaining({ title: 'Primal Hunter, Vol. 7', region: 'us' }),
     )
   })
 

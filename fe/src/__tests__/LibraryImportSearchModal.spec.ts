@@ -162,9 +162,9 @@ describe('LibraryImportSearchModal', () => {
     expect(search.mock.lastCall![0]).not.toHaveProperty('language')
     expect((field(wrapper, 'match-region').element as HTMLSelectElement).value).toBe('fr')
 
+    // A new region searches there by itself: no ASIN, so the title and author, as Search would
     search.mockResolvedValue([ph4])
     await field(wrapper, 'match-region').setValue('us')
-    await field(wrapper, 'match-search').trigger('click')
     await flushPromises()
     expect(search).toHaveBeenLastCalledWith(expect.objectContaining({ region: 'us' }))
     expect(search.mock.lastCall![0]).not.toHaveProperty('language')
