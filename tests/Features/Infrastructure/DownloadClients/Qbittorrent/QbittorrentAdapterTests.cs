@@ -520,6 +520,126 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
         }
 
         [Fact]
+        public async Task GetQueueAsync_NumericFieldsAsDecimalOrString_ParseInsteadOfFailingQueue()
+        {
+            // Before the fix, reading these with JsonElement.GetInt64() threw FormatException and
+            // the whole queue fetch failed (#1008). A decimal/exponent/string number must parse.
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = """
+            [
+                {
+                    "hash": "abcdef",
+                    "name": "Book",
+                    "progress": 0.5,
+                    "size": 1.0e3,
+                    "downloaded": 500.0,
+                    "added_on": "1600000000",
+                    "num_seeds": 3.0,
+                    "state": "downloading",
+                    "save_path": "/downloads/book"
+                }
+            ]
+            """;
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            var items = await adapter.GetQueueAsync(_client);
+
+            var item = Assert.Single(items);
+            Assert.Equal(1000L, item.Size);
+            Assert.Equal(500L, item.Downloaded);
+            Assert.Equal(3, item.Seeders);
+        }
+
+        [Fact]
+        public async Task GetQueueAsync_OutOfRangeTimestamp_PreservesTorrentAndItsHash()
+        {
+            // An out-of-range added_on must not drop the torrent: a hash missing from the snapshot
+            // is treated by orphan cleanup as a removed torrent, deleting its tracking record while
+            // qBittorrent still reports it (#1008 review). The timestamp is clamped instead.
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = """
+            [
+                { "hash": "bad", "name": "Bad", "progress": 0.1, "size": 10, "downloaded": 1, "added_on": 99999999999999, "state": "downloading", "save_path": "/downloads/bad" },
+                { "hash": "good", "name": "Good", "progress": 0.5, "size": 100, "downloaded": 50, "added_on": 1600000000, "state": "downloading", "save_path": "/downloads/good" }
+            ]
+            """;
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            var items = await adapter.GetQueueAsync(_client);
+
+            Assert.Equal(["bad", "good"], items.Select(item => item.Id).OrderBy(id => id).ToArray());
+        }
+
+        [Fact]
+        public void MapQueueItem_NonFiniteProgress_DefaultsToZeroInsteadOfBreakingSerialization()
+        {
+            // progress "NaN" previously mapped through to Progress and then threw when the queue was
+            // serialized, outside the per-torrent guard (#1008 review). It must be rejected.
+            var torrent = ParseTorrent("""
+                { "hash": "x", "name": "Book", "progress": "NaN", "size": 10, "downloaded": 1, "state": "downloading", "save_path": "/d" }
+                """);
+
+            var item = QbittorrentResponseMapper.MapQueueItem(torrent, _client, []);
+
+            Assert.Equal(0d, item.Progress);
+            Assert.True(double.IsFinite(item.Progress));
+            // The returned item must round-trip through System.Text.Json without throwing.
+            _ = JsonSerializer.Serialize(item);
+        }
+
+        [Theory]
+        [InlineData("\"oops\"")]
+        [InlineData("null")]
+        public void MapDownloadClientItem_UnreadableRatioLimit_BlocksRemovalAndMovement(string ratioLimitJson)
+        {
+            // A present but unreadable seed-limit must not fall back to -2 ("inherit global") and
+            // authorize removal/movement that the real policy would block (#1008 review).
+            var torrent = ParseTorrent($$"""
+                { "hash": "x", "name": "Book", "state": "stoppedUP", "progress": 1, "ratio": 3,
+                  "ratio_limit": {{ratioLimitJson}}, "seeding_time_limit": -2 }
+                """);
+
+            var item = QbittorrentResponseMapper.MapDownloadClientItem(
+                torrent, _client, removeCompletedDownloads: true,
+                globalMaxRatioEnabled: false, globalMaxRatio: 0,
+                globalMaxSeedingTimeEnabled: false, globalMaxSeedingTime: 0);
+
+            Assert.False(item.CanBeRemoved);
+            Assert.False(item.CanMoveFiles);
+        }
+
+        [Fact]
+        public void MapDownloadClientItem_ValidNumericStringRatioLimit_StillAllowsRemoval()
+        {
+            // The tolerant parsing must keep working for valid numeric strings.
+            var torrent = ParseTorrent("""
+                { "hash": "x", "name": "Book", "state": "stoppedUP", "progress": 1, "ratio": 3,
+                  "ratio_limit": "2", "seeding_time_limit": -2 }
+                """);
+
+            var item = QbittorrentResponseMapper.MapDownloadClientItem(
+                torrent, _client, removeCompletedDownloads: true,
+                globalMaxRatioEnabled: false, globalMaxRatio: 0,
+                globalMaxSeedingTimeEnabled: false, globalMaxSeedingTime: 0);
+
+            Assert.True(item.CanBeRemoved);
+        }
+
+        private static Dictionary<string, JsonElement> ParseTorrent(string json)
+        {
+            using var document = JsonDocument.Parse(json);
+            var map = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                map[property.Name] = property.Value.Clone();
+            }
+
+            return map;
+        }
+
+        [Fact]
         public async Task MarkItemAsImportedAsync_SetsConfiguredPostImportCategory()
         {
             _client.Settings = new Dictionary<string, object>
