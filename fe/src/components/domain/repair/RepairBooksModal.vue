@@ -116,6 +116,11 @@
                 </template>
               </BookMatchCard>
             </div>
+            <!-- On a narrow screen the legend sits under the books, so the footer keeps one line -->
+            <MatchLegend
+              v-if="narrowLayout && !finished && rows.length"
+              class="repair-legend-under-list"
+            />
           </div>
         </div>
 
@@ -147,7 +152,7 @@
     </template>
 
     <template #footer>
-      <ModalFooter :showCancel="false">
+      <ModalFooter class="repair-footer" :showCancel="false">
         <template #left>
           <button
             type="button"
@@ -158,7 +163,7 @@
             <PhX :size="16" />
             {{ finished ? 'Close' : 'Cancel' }}
           </button>
-          <MatchLegend v-if="!finished && rows.length" />
+          <MatchLegend v-if="!narrowLayout && !finished && rows.length" />
         </template>
         <template #default>
           <span
@@ -203,7 +208,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   PhCheckCircle,
   PhCheckSquare,
@@ -278,6 +283,21 @@ const results = ref<RepairResult[]>([])
 const progress = ref(0)
 // One book is searched at a time: the others wait for it
 const searchingRowId = ref<number | null>(null)
+
+// The book card's breakpoint: below it, the legend leaves the footer for under the books
+const NARROW_LAYOUT_QUERY = '(max-width: 720px)'
+const narrowLayout = ref(false)
+let narrowLayoutMedia: MediaQueryList | null = null
+function onNarrowLayoutChanged(event: MediaQueryListEvent) {
+  narrowLayout.value = event.matches
+}
+onMounted(() => {
+  if (typeof window.matchMedia !== 'function') return
+  narrowLayoutMedia = window.matchMedia(NARROW_LAYOUT_QUERY)
+  narrowLayout.value = narrowLayoutMedia.matches
+  narrowLayoutMedia.addEventListener('change', onNarrowLayoutChanged)
+})
+onBeforeUnmount(() => narrowLayoutMedia?.removeEventListener('change', onNarrowLayoutChanged))
 
 // Only a book with a new record, looked up in its region, is repaired
 const selectedRows = computed(() => rows.value.filter(isIncluded))
@@ -518,6 +538,30 @@ watch(
 .repair-count {
   font-size: 0.85rem;
   color: #aaa;
+}
+
+.repair-legend-under-list {
+  margin-top: 0.75rem;
+}
+
+/* On a phone the footer stays one line: Cancel on the left, "n skipped" and Repair on the right
+   (the shared footer stacks its buttons in a column there). Only the results' three buttons may
+   wrap, when they don't fit */
+@media (max-width: 480px) {
+  .modal-footer.repair-footer {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 0.75rem 1rem;
+  }
+
+  .repair-footer :deep(.modal-footer-left) {
+    margin-bottom: 0;
+  }
+
+  .repair-footer :deep(.modal-footer-actions .btn) {
+    width: auto;
+  }
 }
 
 .repair-heading {

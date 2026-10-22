@@ -192,6 +192,41 @@ describe('RepairBooksModal', () => {
     )
   })
 
+  it('keeps the legend in the footer on a wide screen', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+
+    expect(wrapper.find('.modal-footer [data-testid="match-legend"]').exists()).toBe(true)
+    expect(wrapper.find('.repair-legend-under-list').exists()).toBe(false)
+  })
+
+  it('moves the legend under the books on a narrow screen, so the footer keeps one line', async () => {
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn((query: string) => ({
+        matches: query === '(max-width: 720px)',
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    )
+    try {
+      const wrapper = mountModal()
+      await flushPromises()
+
+      expect(wrapper.find('.modal-footer [data-testid="match-legend"]').exists()).toBe(false)
+      const legend = wrapper.get('.repair-legend-under-list')
+      // Right under the list of books
+      expect(legend.element.previousElementSibling?.classList).toContain('repair-list')
+      // Cancel, the skipped count and Repair stay in the footer
+      const footer = wrapper.get('.modal-footer')
+      expect(footer.text()).toContain('Cancel')
+      expect(footer.find('[data-testid="repair-count"]').exists()).toBe(true)
+      expect(footer.find('[data-testid="repair-confirm"]').exists()).toBe(true)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('counts only the books with a new record, ticked when found, and the skipped ones', async () => {
     const wrapper = mountModal([7, 8])
     await flushPromises()
