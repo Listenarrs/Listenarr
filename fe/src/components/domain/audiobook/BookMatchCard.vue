@@ -23,7 +23,10 @@
 <template>
   <div
     class="form-control-card match-card"
-    :class="[`match-card-${barState}`, { 'match-card-locked': searchLocked }]"
+    :class="[
+      `match-card-${barState}`,
+      { 'match-card-locked': searchLocked, 'match-card-narrow': narrow },
+    ]"
     :data-match-state="barState"
     :title="searchLocked ? 'Another book is being searched' : undefined"
   >
@@ -307,8 +310,11 @@ const props = withDefaults(
     excluded?: boolean
     // Search as soon as the card shows, and focus the title
     searchOnMount?: boolean
+    // The dialog is short of room (Repair measures its footer): the fields take the narrow
+    // screen's layout before the screen itself is narrow
+    narrow?: boolean
   }>(),
-  { searchLocked: false, excluded: false, searchOnMount: false },
+  { searchLocked: false, excluded: false, searchOnMount: false, narrow: false },
 )
 
 const match = defineModel<BookMatch>('match', { required: true })
@@ -837,6 +843,8 @@ defineExpose({ search, cancelSearch })
   white-space: nowrap;
 }
 
+/* A narrow screen, or a dialog short of room: the fields two by two, Search on a line of its own,
+   and two lines kept for Current and New */
 @media (max-width: 720px) {
   .match-fields {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -850,6 +858,19 @@ defineExpose({ search, cancelSearch })
   .match-records dd {
     min-height: 2.8em;
   }
+}
+
+.match-card-narrow .match-fields {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.match-card-narrow .match-search-btn {
+  grid-column: 1 / -1;
+  width: auto;
+}
+
+.match-card-narrow .match-records dd {
+  min-height: 2.8em;
 }
 
 .match-search-state {

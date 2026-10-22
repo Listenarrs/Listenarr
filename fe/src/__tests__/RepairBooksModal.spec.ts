@@ -240,6 +240,8 @@ describe('RepairBooksModal', () => {
 
       expect(wrapper.get('.repair-footer').classes()).toContain('repair-footer-legend-above')
       expect(wrapper.get('[data-testid="match-legend"]').classes()).toContain('repair-legend-above')
+      // The same lack of room: the book's fields take the narrow layout already
+      expect(row(wrapper).classes()).toContain('match-card-narrow')
       // Cancel and the actions (200px) still fit: the count stays on one line
       expect(wrapper.get('[data-testid="repair-count"]').classes()).not.toContain(
         'repair-count-wraps',
@@ -262,6 +264,7 @@ describe('RepairBooksModal', () => {
 
       expect(wrapper.get('.repair-footer').classes()).not.toContain('repair-footer-legend-above')
       expect(wrapper.find('.repair-legend-above').exists()).toBe(false)
+      expect(row(wrapper).classes()).not.toContain('match-card-narrow')
     })
   })
 
