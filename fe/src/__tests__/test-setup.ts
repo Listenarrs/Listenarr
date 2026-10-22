@@ -56,6 +56,11 @@ try {
 // Provide default component stubs for Modal teleporting components so unit tests
 // render modal content inline instead of using real teleport behavior.
 import { config as vtConfig } from '@vue/test-utils'
+import { resultsReveal } from '@/utils/resultsReveal'
+
+// Results show at once in tests; the tests about their reveal set its duration
+resultsReveal.holdMs = 0
+resultsReveal.fadeMs = 0
 const globalConfig = (vtConfig.global ??= {} as unknown) as unknown
 globalConfig.components = {
   ...(globalConfig.components || {}),

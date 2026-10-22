@@ -246,8 +246,15 @@
       <div
         v-if="state.results.length"
         class="match-results"
-        :class="{ 'match-results-pending': resultsPending }"
-        :aria-busy="resultsPending"
+        :class="{
+          'match-results-pending': resultsPending,
+          'match-results-revealing': revealing && !resultsPending,
+        }"
+        :style="{
+          '--match-reveal-hold': `${resultsReveal.holdMs}ms`,
+          '--match-reveal-fade': `${resultsReveal.fadeMs}ms`,
+        }"
+        :aria-busy="resultsPending || revealing"
         data-testid="match-results"
       >
         <p v-if="state.searched" class="match-results-header" data-testid="match-results-header">
@@ -270,6 +277,15 @@
           <span class="match-results-pending-text" data-testid="match-results-pending-text">
             {{ pendingResultsText }}
           </span>
+        </span>
+        <!-- The answer: the spinner's line says what was found, then fades out to the results -->
+        <span
+          v-else-if="revealing"
+          class="match-results-spinner match-results-found"
+          data-testid="match-results-found"
+        >
+          <PhCheckCircle :size="28" weight="fill" />
+          <span class="match-results-pending-text">{{ foundText }}</span>
         </span>
       </div>
       <p
@@ -302,6 +318,7 @@ import {
   PhXCircle,
 } from '@phosphor-icons/vue'
 import FindMatchResults from './FindMatchResults.vue'
+import { resultsReveal, revealMs } from '@/utils/resultsReveal'
 import { orderedSearchRegionOptions } from '@/utils/languageMapping'
 import {
   FALLBACK_REGION,
@@ -451,6 +468,29 @@ const resultsPending = computed(
     state.value.results.length > 0 && (state.value.status === 'searching' || props.searchLocked),
 )
 
+// Results just answered, shown under an overlay fading out ("Found 3 results"): not pickable
+// until it is gone
+const revealing = ref(false)
+let revealTimer: ReturnType<typeof setTimeout> | null = null
+
+const foundText = computed(() => {
+  const count = state.value.results.length
+  return `Found ${count} ${count === 1 ? 'result' : 'results'}`
+})
+
+function startReveal() {
+  endReveal()
+  if (revealMs() <= 0 || !state.value.results.length) return
+  revealing.value = true
+  revealTimer = setTimeout(endReveal, revealMs())
+}
+
+function endReveal() {
+  if (revealTimer) clearTimeout(revealTimer)
+  revealTimer = null
+  revealing.value = false
+}
+
 const pendingResultsText = computed(() =>
   state.value.status === 'searching'
     ? pendingText.value
@@ -502,6 +542,7 @@ function showResults(
 ) {
   if (kind === 'title') {
     state.value = { status: 'done', kind, results, error: null, searched, requestMs }
+    startReveal()
     return
   }
   const found = results
@@ -511,6 +552,7 @@ function showResults(
   // the user
   if (found.length) {
     state.value = { status: 'done', kind, results: found, error: null, searched, requestMs }
+    startReveal()
   } else {
     // Found nothing (orange): searching the title there is what comes next
     match.value.asinError = `${noRecordError(searched.asin, searched.region)} - ${answerSource(requestMs)}`
@@ -545,6 +587,7 @@ async function search(kind: SearchKind = 'title', fresh = false) {
   // New goes back to no record (nothing stays picked that the user can't see)
   match.value.picked = null
   match.value.asinError = null
+  endReveal()
   const answered = fresh ? undefined : searchCache?.get(cacheKey)
   if (answered) {
     showResults(kind, searched, answered, null)
@@ -591,6 +634,7 @@ function stopSearch() {
   controller?.abort()
   controller = null
   running.value = null
+  endReveal()
 }
 
 // Cancel search: the search stops, its results stay, and the card says it was canceled (orange)
@@ -603,8 +647,10 @@ function cancelSearch() {
 // The record picked in the results: its ASIN in the region it was found in. The results stay,
 // with the selection moved to it. Clicking the selected row again unpicks it: no new record.
 function pick(result: SearchResult) {
-  // Not while a search runs: the results shown are the previous search's
-  if (!result.asin || props.searchLocked || state.value.status === 'searching') return
+  // Not while a search runs (the results shown are the previous search's), nor while new ones are
+  // revealed
+  if (!result.asin || props.searchLocked || state.value.status === 'searching' || revealing.value)
+    return
   const picked = pickedRecord.value
   if (
     picked &&
@@ -902,7 +948,8 @@ defineExpose({ search, cancelSearch })
   min-height: 1.4em;
 }
 
-/* The new record flows as text, so "checked" follows its last line instead of taking a line of its own */
+/* The new record flows as text, so "checked" follows its last line instead of taking a line of
+   its own */
 .match-records dd.match-new-picked {
   display: block;
 }
@@ -1048,7 +1095,8 @@ defineExpose({ search, cancelSearch })
 }
 
 /* While a new search runs: the previous results greyed out, not clickable, under a spinning
-   wheel laid over them (it takes no room) */
+   wheel laid over them (it takes no room). Once answered, the wheel's line says what was found,
+   stays readable, then fades out while the results come out of grey, still not clickable */
 .match-results {
   position: relative;
 }
@@ -1058,6 +1106,47 @@ defineExpose({ search, cancelSearch })
   opacity: 0.35;
   pointer-events: none;
   filter: grayscale(1);
+}
+
+.match-results-revealing .match-results-header,
+.match-results-revealing .match-search-results {
+  pointer-events: none;
+  animation: match-results-unveil var(--match-reveal-fade) ease-out var(--match-reveal-hold) both;
+}
+
+/* Over the spinner's colour, which comes later */
+.match-results-spinner.match-results-found {
+  color: var(--status-success);
+  animation: match-results-fade var(--match-reveal-fade) ease-in var(--match-reveal-hold) both;
+}
+
+@keyframes match-results-unveil {
+  from {
+    opacity: 0.35;
+    filter: grayscale(1);
+  }
+  to {
+    opacity: 1;
+    filter: none;
+  }
+}
+
+@keyframes match-results-fade {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* No fade with reduced motion: the line says what was found for the same time, then goes */
+@media (prefers-reduced-motion: reduce) {
+  .match-results-revealing .match-results-header,
+  .match-results-revealing .match-search-results,
+  .match-results-spinner.match-results-found {
+    animation: none;
+  }
 }
 
 .match-results-spinner {
