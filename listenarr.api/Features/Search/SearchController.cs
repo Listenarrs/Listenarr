@@ -17,6 +17,7 @@
  */
 
 using System.Text.Json;
+using Listenarr.Application.Notifications.Progress;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Features.Search
@@ -36,6 +37,7 @@ namespace Listenarr.Api.Features.Search
         private readonly SearchByTitleWorkflow _searchByTitleWorkflow;
         private readonly IDownloadReferenceService? _downloadReferenceService;
         private readonly IConfigurationService? _configurationService;
+        private readonly ISearchActivityTracker? _searchActivityTracker;
 
         public SearchController(
             ISearchService searchService,
@@ -48,7 +50,8 @@ namespace Listenarr.Api.Features.Search
             StructuredSearchWorkflow? structuredSearchWorkflow = null,
             SearchByTitleWorkflow? searchByTitleWorkflow = null,
             IDownloadReferenceService? downloadReferenceService = null,
-            IConfigurationService? configurationService = null)
+            IConfigurationService? configurationService = null,
+            ISearchActivityTracker? searchActivityTracker = null)
         {
             _searchService = searchService;
             _logger = logger;
@@ -77,6 +80,7 @@ namespace Listenarr.Api.Features.Search
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<SearchByTitleWorkflow>.Instance,
                 configurationService);
             _downloadReferenceService = downloadReferenceService;
+            _searchActivityTracker = searchActivityTracker;
         }
 
         /// <summary>

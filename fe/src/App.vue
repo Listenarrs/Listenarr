@@ -474,6 +474,7 @@
             </RouterLink>
           </div>
         </nav>
+        <SidebarSearchActivity />
         <div v-if="version && version.length > 0" class="sidebar-footer">
           <span class="sidebar-version-text">v{{ version }}</span>
           <a
@@ -594,6 +595,7 @@ import GlobalToast from '@/components/ui/GlobalToast.vue'
 import { useToast } from '@/services/toastService'
 import { logger } from '@/utils/logger'
 import BrandLogo from '@/components/base/BrandLogo.vue'
+import SidebarSearchActivity from '@/components/layout/SidebarSearchActivity.vue'
 import {
   SECURITY_WARNING_BANNER_PREF_EVENT,
   SECURITY_WARNING_BANNER_PREF_KEY,
