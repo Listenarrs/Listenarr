@@ -18,6 +18,10 @@ namespace Listenarr.Tests.Mocks.Api
         public HttpStatusCode? FullQueueStatusCode { get; set; }
         public string? FullQueueResponseOverride { get; set; }
 
+        // Applied only to requests that carry a category filter, so a test can model a
+        // tracked torrent that moved to another category.
+        public string? CategoryFilteredResponseOverride { get; set; }
+
         public QbittorrentApiMock()
         {
             AddRoute("api/v2/auth/login", DoLogin, HttpMethod.Post);
@@ -80,6 +84,12 @@ namespace Listenarr.Tests.Mocks.Api
             if (isFullQueueRequest && FullQueueResponseOverride != null)
             {
                 return MockUtils.GetCannedResponse(FullQueueResponseOverride);
+            }
+
+            var hasCategoryFilter = !string.IsNullOrEmpty(HttpUtility.ParseQueryString(request.RequestUri!.Query)["category"]);
+            if (hasCategoryFilter && CategoryFilteredResponseOverride != null)
+            {
+                return MockUtils.GetCannedResponse(CategoryFilteredResponseOverride);
             }
 
             return MockUtils.GetCannedResponse(InfoResponseOverride ?? """

@@ -48,14 +48,13 @@ namespace Listenarr.Application.Downloads.Queue
                 return;
             }
 
-            // A snapshot that reaches this point is guaranteed live: the UsedCachedSnapshot
-            // and IsUnavailable guards above already excluded every unreachable path. Adapters
-            // throw on any failed full-queue request (auth, HTTP status, empty or malformed
-            // body), and the poller surfaces timeout/cancel/error as cached or unavailable,
-            // never as a live empty snapshot. An empty live queue therefore means the items really are gone,
-            // so an empty snapshot must be allowed to terminalize orphans - otherwise deleting
-            // your only active torrent strands its Download record forever and blocks re-grabs
-            // with 409. The per-item grace period below still protects fresh adds.
+            // A snapshot that reaches this point is live and complete. Adapters throw on
+            // any failed or incomplete full-queue response, and the poller reports every
+            // failure as unavailable, never as a live empty snapshot. The caller also adds
+            // tracked jobs found by ID, so a category change does not hide them. An item
+            // missing from both is gone, so an empty live queue may terminalize orphans;
+            // otherwise deleting your only active torrent strands its Download record and
+            // blocks re-grabs with 409. The per-item grace period below protects fresh adds.
             var clientQueue = clientQueueResult.QueueItems;
             var liveClientItemIds = BuildLiveClientItemIds(clientQueue, mappedQueueItems);
             var now = DateTime.UtcNow;

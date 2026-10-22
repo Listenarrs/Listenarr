@@ -145,6 +145,50 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
         }
 
         [Fact]
+        [Trait("Scenario", "TransmissionTrackedLookupIgnoresLabels")]
+        public async Task Transmission_GetTrackedQueue_IgnoresConfiguredCategory()
+        {
+            const string body = """
+            {
+              "result":"success",
+              "arguments":{
+                "torrents":[
+                  { "id":1, "hashString":"HASH1", "name":"Book One", "labels":["audiobooks"] },
+                  { "id":2, "hashString":"HASH2", "name":"Book Relabeled", "labels":["movies"] }
+                ]
+              }
+            }
+            """;
+            var handler = new DelegatingHandlerMock((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json")
+            }));
+            using var httpClient = new HttpClient(handler);
+            var httpFactory = new Mock<IHttpClientFactory>();
+            httpFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(httpClient);
+            var adapter = new TransmissionAdapter(httpFactory.Object, Mock.Of<ITorrentFileDownloader>(), NullLogger<TransmissionAdapter>.Instance);
+            var client = new DownloadClientConfiguration
+            {
+                Id = "tr-1",
+                Name = "Transmission",
+                Type = "transmission",
+                Host = "localhost",
+                Port = 9091,
+                Settings = new Dictionary<string, object>
+                {
+                    ["category"] = "audiobooks"
+                }
+            };
+
+            var monitored = await adapter.GetQueueAsync(client, ["HASH2"], CancellationToken.None);
+            var tracked = await adapter.GetTrackedQueueAsync(client, ["HASH2"], CancellationToken.None);
+
+            Assert.Empty(monitored);
+            var item = Assert.Single(tracked);
+            Assert.Equal("Book Relabeled", item.Title);
+        }
+
+        [Fact]
         [Trait("Scenario", "QbittorrentCategoryParameterConsistency")]
         public void QBittorrent_CategoryParameter_IsAvailableForQueueAndItemSurfaces()
         {

@@ -34,14 +34,17 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
         public async Task<List<QueueItem>> GetQueueAsync(
             DownloadClientConfiguration client,
             IReadOnlyCollection<string>? monitoredIds = null,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            bool ignoreCategory = false)
         {
             var items = new List<QueueItem>();
             if (client == null) return items;
 
             var monitoredIdSet = BuildMonitoredIdSet(monitoredIds);
             var isMonitorPoll = monitoredIdSet.Count > 0;
-            var configuredCategory = DownloadClientCategoryFilter.GetConfiguredCategory(client);
+            // Tracked lookups for orphan cleanup ignore the category. Monitor polls
+            // already keep tracked nzo_ids across a category change (#759).
+            var configuredCategory = ignoreCategory ? null : DownloadClientCategoryFilter.GetConfiguredCategory(client);
 
             try
             {

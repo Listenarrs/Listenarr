@@ -520,6 +520,35 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
                 () => adapter.GetQueueAsync(_client));
         }
 
+        [Fact]
+        public async Task GetTrackedQueueAsync_OmitsCategory_WhileIdPollKeepsIt()
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            var categorizedClient = await _downloadClientConfigurationRepository.SaveAsync(new DownloadClientConfigurationBuilder()
+                .WithHost("localhost")
+                .WithPort(443)
+                .WithSsl()
+                .WithUsername("admin")
+                .WithPassword("admin")
+                .WithType("qbittorrent")
+                .WithSettings("category", "audiobooks")
+                .Build());
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(categorizedClient);
+
+            apiMock.ResetRequestHistory();
+            await adapter.GetQueueAsync(categorizedClient, ["NEWHASH"]);
+            var idPoll = Assert.Single(apiMock.RequestHistory, request => request.RequestUri.AbsolutePath.EndsWith("/torrents/info", StringComparison.Ordinal));
+            Assert.Contains("category=audiobooks", idPoll.RequestUri.Query, StringComparison.Ordinal);
+
+            apiMock.ResetRequestHistory();
+            var tracked = await adapter.GetTrackedQueueAsync(categorizedClient, ["NEWHASH"]);
+            var trackedLookup = Assert.Single(apiMock.RequestHistory, request => request.RequestUri.AbsolutePath.EndsWith("/torrents/info", StringComparison.Ordinal));
+            Assert.DoesNotContain("category=", trackedLookup.RequestUri.Query, StringComparison.Ordinal);
+            Assert.Contains("hashes=", trackedLookup.RequestUri.Query, StringComparison.Ordinal);
+            Assert.Single(tracked);
+        }
+
         [Theory]
         [InlineData("{not json")]
         [InlineData("null")]

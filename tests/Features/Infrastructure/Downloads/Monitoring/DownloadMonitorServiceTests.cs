@@ -1,5 +1,6 @@
 using System.Net;
 using System.Reflection;
+using Listenarr.Domain.Downloads.Exceptions;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Mocks;
@@ -234,6 +235,77 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Monitoring
             await downloadMonitorService.MonitorDownloadsAsync(CancellationToken.None);
 
             Assert.Null(await _downloadRepository.GetByIdAsync(orphan.Id));
+        }
+
+        [Fact]
+        [Trait("Method", "MonitorDownloadsAsync")]
+        public async Task MonitorDownloadsAsync_TrackedTorrentMovedToOtherCategory_KeepsDownload()
+        {
+            // The torrent moved out of the configured category, so the category-scoped
+            // full snapshot is empty while the torrent is still in qBittorrent. The
+            // tracked lookup ignores the category and keeps the record.
+            var qbittorrentClient = await _downloadClientConfigurationRepository.SaveAsync(new DownloadClientConfigurationBuilder()
+                .WithHost("localhost")
+                .WithPort(443)
+                .WithSsl()
+                .WithUsername("admin")
+                .WithPassword("admin")
+                .WithType("qbittorrent")
+                .WithName("qBittorrent")
+                .WithSettings("category", "audiobooks")
+                .Build());
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = """
+            [
+                {
+                    "hash": "abcdef",
+                    "name": "Book",
+                    "progress": 0.5,
+                    "size": 1000,
+                    "downloaded": 500,
+                    "state": "downloading",
+                    "category": "movies",
+                    "save_path": "/downloads/book"
+                }
+            ]
+            """;
+            apiMock.CategoryFilteredResponseOverride = "[]";
+            var tracked = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithId("recategorized-download")
+                .WithDownloading(0)
+                .WithExternalId("abcdef")
+                .WithStartDate(DateTime.UtcNow.AddMinutes(-10))
+                .WithDownloadClientConfiguration(qbittorrentClient)
+                .Build());
+
+            await downloadMonitorService.MonitorDownloadsAsync(CancellationToken.None);
+
+            var persisted = await _downloadRepository.GetByIdAsync(tracked.Id);
+            Assert.NotNull(persisted);
+            Assert.Equal(DownloadStatus.Downloading, persisted.Status);
+            Assert.Contains(apiMock.RequestHistory, request =>
+                request.RequestUri.AbsolutePath.EndsWith("/torrents/info", StringComparison.Ordinal) &&
+                !request.RequestUri.Query.Contains("category=", StringComparison.Ordinal));
+        }
+
+        [Fact]
+        [Trait("Method", "MonitorDownloadsAsync")]
+        public async Task MonitorDownloadsAsync_TrackedLookupFailure_SkipsOrphanCleanup()
+        {
+            var adapter = _provider.GetServices<IDownloadClientAdapter>().OfType<DownloadCLientAdapterMock>().Single();
+            adapter.TrackedQueueException = new DownloadClientAdapterPollingException("tracked lookup failed");
+            var orphanCandidate = await _downloadRepository.AddAsync(new DownloadBuilder()
+                .WithId("unconfirmed-orphan")
+                .WithDownloading(0)
+                .WithExternalId("missing-client-id")
+                .WithStartDate(DateTime.UtcNow.AddMinutes(-10))
+                .WithDownloadClientConfiguration(client)
+                .Build());
+
+            await downloadMonitorService.MonitorDownloadsAsync(CancellationToken.None);
+
+            Assert.Equal(1, adapter.TrackedQueueRequestCount);
+            Assert.NotNull(await _downloadRepository.GetByIdAsync(orphanCandidate.Id));
         }
 
         private Task<DownloadClientConfiguration> SaveQbittorrentClientAsync() =>
