@@ -105,6 +105,17 @@ describe('LibraryImportSearchModal', () => {
     vi.restoreAllMocks()
   })
 
+  it('keeps the room of the results from the start, the list at its full height', async () => {
+    vi.mocked(apiService.advancedSearch).mockReturnValue(new Promise(() => {}))
+    const wrapper = mountModal(primalHunter)
+    await flushPromises()
+
+    // Searching as it opens, over the empty list kept at its place
+    expect(field(wrapper, 'match-results-header').text()).toBe('No search request done')
+    expect(field(wrapper, 'match-results-placeholder').exists()).toBe(true)
+    expect(field(wrapper, 'match-results-pending').exists()).toBe(true)
+  })
+
   it('shows the book in the same card as Repair: ASIN, Title, Author, Region, without a checkbox', async () => {
     const wrapper = mountModal()
     await flushPromises()

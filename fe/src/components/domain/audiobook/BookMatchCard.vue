@@ -244,9 +244,9 @@
            under a spinning wheel and can't be picked until it answers. The same while another
            book is searched: one search at a time -->
       <div
-        v-if="state.results.length"
         class="match-results"
         :class="{
+          'match-results-placeholders': placeholders,
           'match-results-pending': resultsPending,
           'match-results-revealing': revealing && !resultsPending,
         }"
@@ -257,16 +257,27 @@
         :aria-busy="resultsPending || revealing"
         data-testid="match-results"
       >
-        <p v-if="state.searched" class="match-results-header" data-testid="match-results-header">
-          Results for {{ describeSearch(state.searched) }} in
-          {{ regionLabel(state.searched.region) }} - {{ answerSource(state.requestMs) }}
+        <!-- Always there: "No search request done" until a search, then what was found or not,
+             and where the answer comes from -->
+        <p
+          class="match-results-header"
+          :class="{ 'match-search-warning': resultsHeader.empty && !resultsPending }"
+          :data-testid="resultsHeader.empty ? 'match-search-empty' : 'match-results-header'"
+        >
+          {{ resultsHeader.text }}
         </p>
         <FindMatchResults
+          v-if="state.results.length"
           class="match-search-results"
           :results="state.results"
           :selected="pickedRecord"
           :current="match.current"
           @select="pick"
+        />
+        <div
+          v-else-if="placeholders"
+          class="match-results-empty"
+          data-testid="match-results-placeholder"
         />
         <span
           v-if="resultsPending"
@@ -288,14 +299,6 @@
           <span class="match-results-pending-text">{{ foundText }}</span>
         </span>
       </div>
-      <p
-        v-else-if="state.status === 'done' && state.kind === 'title' && state.searched"
-        class="match-search-state match-search-warning"
-        data-testid="match-search-empty"
-      >
-        No results for {{ describeSearch(state.searched) }} in
-        {{ regionLabel(state.searched.region) }} - {{ answerSource(state.requestMs) }}
-      </p>
     </fieldset>
 
     <div class="match-bar" :title="pendingText ?? undefined" />
@@ -359,10 +362,21 @@ const props = withDefaults(
     // The dialog is short of room (Repair measures its footer): the fields take the narrow
     // screen's layout before the screen itself is narrow
     narrow?: boolean
+    // The results list's room kept from the start, at its full height whatever it holds. For a
+    // card alone in its dialog (Find Match, Repair of one book), so nothing moves when a search
+    // answers; with several books, the results open under each one when found
+    placeholders?: boolean
     // A task run on the book once its record is chosen (Repair's repair): the search is over
     task?: BookTask | null
   }>(),
-  { searchLocked: false, excluded: false, searchOnMount: false, narrow: false, task: null },
+  {
+    searchLocked: false,
+    excluded: false,
+    searchOnMount: false,
+    narrow: false,
+    task: null,
+    placeholders: false,
+  },
 )
 
 const match = defineModel<BookMatch>('match', { required: true })
@@ -465,8 +479,26 @@ const pickedRecord = computed(() => {
 // or another book's (one search at a time). Not to be picked until it answers
 const resultsPending = computed(
   () =>
-    state.value.results.length > 0 && (state.value.status === 'searching' || props.searchLocked),
+    (state.value.results.length > 0 || props.placeholders) &&
+    (state.value.status === 'searching' || props.searchLocked),
 )
+
+// The results' header line: what was searched, where, and where the answer comes from. Empty
+// (orange) when it found nothing, or failed or was canceled with nothing to show
+const resultsHeader = computed(() => {
+  const { searched, results, status, requestMs } = state.value
+  if (!searched) return { text: 'No search request done', empty: false }
+  const what = `${describeSearch(searched)} in ${regionLabel(searched.region)}`
+  if (results.length)
+    return { text: `Results for ${what} - ${answerSource(requestMs)}`, empty: false }
+  const outcome =
+    status === 'failed'
+      ? 'Search failed'
+      : status === 'canceled'
+        ? 'Search canceled'
+        : answerSource(requestMs)
+  return { text: `No results for ${what} - ${outcome}`, empty: true }
+})
 
 // Results just answered, shown under an overlay fading out ("Found 3 results"): not pickable
 // until it is gone
@@ -1166,6 +1198,19 @@ defineExpose({ search, cancelSearch })
   font-size: 0.8rem;
   color: #ddd;
   text-align: center;
+}
+
+/* Kept room: the list at its full height, results or not */
+.match-results-placeholders .match-search-results,
+.match-results-empty {
+  height: 320px;
+  box-sizing: border-box;
+}
+
+.match-results-empty {
+  margin-top: 0.4rem;
+  border: 1px dashed #333;
+  border-radius: 6px;
 }
 
 .match-results-header {
