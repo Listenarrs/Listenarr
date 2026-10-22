@@ -1203,10 +1203,14 @@ describe('RepairBooksModal', () => {
 
     await repair(wrapper)
 
-    expect(wrapper.get('[data-testid="repair-result-duration"]').text()).toBe('1.23 s')
+    // The card turns light green and says how it ended, and how long it took
+    expect(row(wrapper).attributes('data-task-state')).toBe('done')
+    expect(row(wrapper).get('[data-testid="match-task"]').text()).toBe(
+      'Repaired in 1.23 s: B0HM45F8MW · fr',
+    )
   })
 
-  it('shows how long a failed repair took too, without trailing zeros', async () => {
+  it('shows a repair done in part in orange: the new ASIN saved, its metadata not read', async () => {
     let now = 1000
     vi.spyOn(performance, 'now').mockImplementation(() => now)
     apiMocks.rescanAudiobookMetadata.mockImplementationOnce(async () => {
@@ -1219,8 +1223,70 @@ describe('RepairBooksModal', () => {
 
     await repair(wrapper)
 
-    expect(wrapper.text()).toContain('Audible is down')
-    expect(wrapper.get('[data-testid="repair-result-duration"]').text()).toBe('0.5 s')
+    expect(row(wrapper).attributes('data-task-state')).toBe('warning')
+    expect(row(wrapper).get('[data-testid="match-task"]').text()).toBe(
+      'The new ASIN is saved, but the metadata rescan failed (0.5 s): Audible is down',
+    )
+  })
+
+  it('shows a failed repair in red, with how long it took, without trailing zeros', async () => {
+    let now = 1000
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
+    apiMocks.updateAudiobookIdentifiers.mockImplementationOnce(async () => {
+      now += 250
+      throw new Error('Database locked')
+    })
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+
+    await repair(wrapper)
+
+    expect(row(wrapper).attributes('data-task-state')).toBe('failed')
+    expect(row(wrapper).get('[data-testid="match-task"]').text()).toBe(
+      'Repair failed (0.25 s): Database locked',
+    )
+    expect(apiMocks.rescanAudiobookMetadata).not.toHaveBeenCalled()
+    // Nothing repaired: Organize stays, disabled, and says why
+    const organize = wrapper.get('[data-testid="repair-organize"]')
+    expect(organize.attributes('disabled')).toBeDefined()
+    expect(organize.attributes('title')).toBe('No book was repaired: nothing to organize')
+  })
+
+  it('keeps the books during the repair: each card shows its turn, and the search is over', async () => {
+    apiMocks.getAudiobook.mockImplementation(async (id: number) =>
+      id === 7 ? mismatched : { ...mismatched, id: 8, title: 'Other book' },
+    )
+    let rescanned!: (value: unknown) => void
+    apiMocks.rescanAudiobookMetadata.mockReturnValue(
+      new Promise((resolve) => (rescanned = resolve)),
+    )
+    const wrapper = mountModal([7, 8])
+    await flushPromises()
+    await searchAndPick(wrapper)
+    expect(row(wrapper).findAll('[data-testid="find-match-result"]').length).toBeGreaterThan(0)
+
+    await wrapper.get('[data-testid="repair-confirm"]').trigger('click')
+    await flushPromises()
+
+    // The book being repaired breathes blue; the unticked one is skipped
+    expect(row(wrapper).attributes('data-task-state')).toBe('running')
+    expect(row(wrapper).get('[data-testid="match-task"]').text()).toBe('Repairing…')
+    expect(row(wrapper, 8).attributes('data-task-state')).toBe('skipped')
+    expect(row(wrapper, 8).get('[data-testid="match-task"]').text()).toBe('Skipped: not repaired')
+    // Its search results are gone, and nothing in the cards can be used
+    expect(row(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(0)
+    for (const id of [7, 8])
+      expect(
+        row(wrapper, id).get('[data-testid="match-lock"]').attributes('disabled'),
+      ).toBeDefined()
+    expect(wrapper.get('[data-testid="repair-confirm"]').text()).toContain('Repairing 1 of 1…')
+
+    rescanned({ message: 'ok', audiobookId: 7, asin: 'B0BK9W82PQ', region: 'us' })
+    await flushPromises()
+    expect(row(wrapper).attributes('data-task-state')).toBe('done')
+    // The card shows the book as it is now
+    expect(row(wrapper).get('[data-testid="match-current"]').text()).toContain('B0BK9W82PQ')
   })
 
   it('offers to organize the repaired books', async () => {

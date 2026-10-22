@@ -19,18 +19,22 @@
      Title, Author and Region fields, and the search under the book (Repair Books and Find Match).
      The bar along its bottom tells its state: grey ignored, green matched, orange for a field error
      or no result, red for a failed request, and breathes in blue while a search runs. While another
-     book is searched, the whole card waits: nothing in it can be edited, searched or picked. -->
+     book is searched, the whole card waits: nothing in it can be edited, searched or picked. A task
+     run on the book (Repair's repair) ends the search: its results go, the card is locked, and the
+     whole card shows the task's progress, with a line saying where it is. -->
 <template>
   <div
     class="form-control-card match-card"
     :class="[
       `match-card-${barState}`,
       { 'match-card-locked': searchLocked, 'match-card-narrow': narrow },
+      task ? `match-card-task match-card-task-${task.state}` : '',
     ]"
+    :data-task-state="task?.state"
     :data-match-state="barState"
     :title="searchLocked ? 'Another book is being searched' : undefined"
   >
-    <fieldset class="match-lock" :disabled="searchLocked" data-testid="match-lock">
+    <fieldset class="match-lock" :disabled="searchLocked || !!task" data-testid="match-lock">
       <div class="match-header">
         <span class="match-heading">
           <slot name="heading" />
@@ -213,6 +217,8 @@
         </dd>
       </dl>
 
+      <p v-if="task" class="match-task" data-testid="match-task">{{ task.text }}</p>
+
       <!-- The rules, where they apply -->
 
       <!-- The search under the book: its message (failed in red; invalid or canceled in orange), and
@@ -292,6 +298,7 @@ import {
   searchLikeAddNew,
   type BookMatch,
   type BookRecord,
+  type BookTask,
 } from '@/utils/bookMatch'
 import type { SearchResult } from '@/types'
 
@@ -313,8 +320,10 @@ const props = withDefaults(
     // The dialog is short of room (Repair measures its footer): the fields take the narrow
     // screen's layout before the screen itself is narrow
     narrow?: boolean
+    // A task run on the book once its record is chosen (Repair's repair): the search is over
+    task?: BookTask | null
   }>(),
-  { searchLocked: false, excluded: false, searchOnMount: false, narrow: false },
+  { searchLocked: false, excluded: false, searchOnMount: false, narrow: false, task: null },
 )
 
 const match = defineModel<BookMatch>('match', { required: true })
@@ -603,6 +612,16 @@ onMounted(() => {
   void search()
 })
 
+// A task starting ends the search: the running one stops, its results and messages go
+watch(
+  () => !!props.task,
+  (hasTask) => {
+    if (!hasTask) return
+    stopSearch()
+    state.value = idle()
+  },
+)
+
 onBeforeUnmount(stopSearch)
 
 defineExpose({ search, cancelSearch })
@@ -657,6 +676,69 @@ defineExpose({ search, cancelSearch })
   animation: match-bar-breathe 1.6s ease-in-out infinite alternate;
 }
 
+/* A task on the book: the whole card shows it, its bar in the same colour */
+.match-task {
+  margin: 0.75rem 0 0;
+  font-size: 0.85rem;
+  color: #ccc;
+}
+
+.form-control-card.match-card-task-running {
+  animation: match-card-task-breathe 1.6s ease-in-out infinite alternate;
+}
+
+.form-control-card.match-card-task-done {
+  background-color: color-mix(in srgb, var(--status-success) 14%, #232323);
+  border-color: color-mix(in srgb, var(--status-success) 50%, #333);
+}
+
+.form-control-card.match-card-task-warning {
+  background-color: color-mix(in srgb, var(--status-warning) 14%, #232323);
+  border-color: color-mix(in srgb, var(--status-warning) 50%, #333);
+}
+
+.form-control-card.match-card-task-failed {
+  background-color: color-mix(in srgb, var(--status-error) 14%, #232323);
+  border-color: color-mix(in srgb, var(--status-error) 50%, #333);
+}
+
+.match-card-task-skipped {
+  opacity: 0.6;
+}
+
+.match-card-task-running .match-bar {
+  background: var(--status-progress);
+  animation: match-bar-breathe 1.6s ease-in-out infinite alternate;
+}
+
+.match-card-task-done .match-bar {
+  background: var(--status-success);
+}
+
+.match-card-task-warning .match-bar {
+  background: var(--status-warning);
+}
+
+.match-card-task-failed .match-bar {
+  background: var(--status-error);
+}
+
+.match-card-task-waiting .match-bar,
+.match-card-task-skipped .match-bar {
+  background: var(--status-idle);
+}
+
+@keyframes match-card-task-breathe {
+  from {
+    background-color: color-mix(in srgb, var(--status-progress) 4%, #232323);
+    border-color: #333;
+  }
+  to {
+    background-color: color-mix(in srgb, var(--status-progress) 18%, #232323);
+    border-color: color-mix(in srgb, var(--status-progress) 60%, #333);
+  }
+}
+
 @keyframes match-bar-breathe {
   from {
     opacity: 0.2;
@@ -667,8 +749,14 @@ defineExpose({ search, cancelSearch })
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .match-card-searching .match-bar {
+  .match-card-searching .match-bar,
+  .match-card-task-running .match-bar {
     animation: none;
+  }
+
+  .form-control-card.match-card-task-running {
+    animation: none;
+    background-color: color-mix(in srgb, var(--status-progress) 14%, #232323);
   }
 }
 
