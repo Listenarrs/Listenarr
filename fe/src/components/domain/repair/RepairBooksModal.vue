@@ -175,7 +175,9 @@
         <template #default>
           <span
             v-if="!finished && !loading && rows.length"
+            ref="countRef"
             class="repair-count"
+            :class="{ 'repair-count-wraps': countWraps }"
             data-testid="repair-count"
           >
             {{ skippedCount ? `${skippedCount} skipped` : '' }}
@@ -298,11 +300,22 @@ const footerRef = ref<ComponentPublicInstance | null>(null)
 const cancelRef = ref<HTMLElement | null>(null)
 const legendRef = ref<ComponentPublicInstance | null>(null)
 const legendAbove = ref(false)
+const countRef = ref<HTMLElement | null>(null)
+// The skipped count on two lines, the last resort: even Cancel, it and Repair don't fit one line
+const countWraps = ref(false)
 let footerObserver: ResizeObserver | null = null
 
 // A length in pixels, 0 when the style has none
 const px = (value: string) => parseFloat(value) || 0
 const gapOf = (element: Element) => px(getComputedStyle(element).columnGap)
+
+// The width of an element's text on one line, even while it is wrapped: the sum of its lines
+function oneLineWidth(element: HTMLElement): number {
+  const range = document.createRange()
+  range.selectNodeContents(element)
+  const lines = typeof range.getClientRects === 'function' ? Array.from(range.getClientRects()) : []
+  return lines.length ? lines.reduce((width, line) => width + line.width, 0) : element.offsetWidth
+}
 
 function placeLegend() {
   const footer = footerRef.value?.$el as HTMLElement | undefined
@@ -317,9 +330,14 @@ function placeLegend() {
   const legendWidth =
     entries.reduce((width, entry) => width + entry.offsetWidth, 0) +
     gapOf(legend) * Math.max(entries.length - 1, 0)
-  const needed =
-    cancelRef.value.offsetWidth + gapOf(left) + legendWidth + gapOf(footer) + actions.offsetWidth
-  legendAbove.value = needed > room
+  // The skipped count and Repair, the count on one line whatever it shows now
+  const count = countRef.value
+  const actionsWidth = count
+    ? actions.offsetWidth - count.offsetWidth + oneLineWidth(count)
+    : actions.offsetWidth
+  const cancelAndActions = cancelRef.value.offsetWidth + gapOf(footer) + actionsWidth
+  legendAbove.value = cancelAndActions + gapOf(left) + legendWidth > room
+  countWraps.value = cancelAndActions > room
 }
 
 // Measured again when the modal resizes, the skipped count changes, or the legend shows
@@ -576,8 +594,8 @@ watch(
   gap: 0.75rem;
 }
 
-/* One line while the legend shares the footer line, so it is measured whole: it only wraps,
-   centred, once the legend is above and Cancel, the count and Repair still don't fit */
+/* Always on one line, unless even Cancel, the count and Repair don't fit one line (measured):
+   only then it wraps, centred */
 .repair-count {
   font-size: 0.85rem;
   color: #aaa;
@@ -585,7 +603,7 @@ watch(
   text-align: center;
 }
 
-.repair-footer-legend-above .repair-count {
+.repair-count.repair-count-wraps {
   white-space: normal;
 }
 
