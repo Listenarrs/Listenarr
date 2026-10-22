@@ -16,7 +16,8 @@
   along with this program. If not, see <https://www.gnu.org/licenses/>.
 -->
 <!-- The results of a Find Match search: cover, title, author, series, ASIN and narrators; a click
-     picks one, which turns green. The record the book points at today wears a "Current" tag, and
+     picks one, which turns green. The record the book points at today wears a "Current" tag (its
+     ASIN in another region, a grey "Other region" one), and
      each record its language in the bottom right corner: green when it is the preferred search
      language (Settings, Search), grey otherwise or when Audible gives none. Editions of one book in
      a catalogue (Audible France also sells the German and US ones) then tell apart at a glance.
@@ -53,6 +54,14 @@
         Current
       </span>
       <span
+        v-else-if="isOtherRegion(result)"
+        class="result-other-region"
+        :title="otherRegionTitle(result)"
+        data-testid="find-match-other-region"
+      >
+        Other region
+      </span>
+      <span
         class="result-language"
         :class="{ preferred: isPreferredLanguage(result) }"
         data-testid="find-match-language"
@@ -74,14 +83,14 @@ import {
 } from '@/utils/languageMapping'
 import { getPlaceholderUrl } from '@/utils/placeholder'
 import { extractNarrators, type NormalizedResult } from '@/utils/searchResultHelpers'
-import { fullTitle } from '@/utils/bookMatch'
+import { fullTitle, regionLabel } from '@/utils/bookMatch'
 import type { SearchResult } from '@/types'
 
 // A record by its ASIN and, when known, its region
 type RecordRef = { asin: string; region?: string | null } | null
 
 // selected: the record picked (green); current: the one the book points at today (tagged)
-defineProps<{
+const props = defineProps<{
   results: SearchResult[]
   selected?: RecordRef
   current?: RecordRef
@@ -115,6 +124,23 @@ function languageLabel(result: SearchResult): string {
 function isSame(result: SearchResult, record: RecordRef | undefined): boolean {
   if (!record?.asin || result.asin?.toUpperCase() !== record.asin.toUpperCase()) return false
   return !record.region || !result.region || result.region === record.region
+}
+
+// The book's ASIN, found in another catalogue than the one it points at: a different record
+function isOtherRegion(result: SearchResult): boolean {
+  const current = props.current
+  if (!current?.asin || !current.region || !result.region) return false
+  return (
+    result.asin?.toUpperCase() === current.asin.toUpperCase() &&
+    result.region.toLowerCase() !== current.region.toLowerCase()
+  )
+}
+
+function otherRegionTitle(result: SearchResult): string {
+  return (
+    `Same ASIN as the book's current record, but in ${regionLabel(result.region!)}, ` +
+    `not ${regionLabel(props.current!.region!)}`
+  )
 }
 
 function narrators(result: SearchResult): string {
@@ -207,6 +233,7 @@ function seriesName(result: SearchResult): string | undefined {
   text-overflow: ellipsis;
 }
 .result-current,
+.result-other-region,
 .result-language {
   position: absolute;
   right: 0.6rem;
@@ -214,6 +241,12 @@ function seriesName(result: SearchResult): string | undefined {
   border-radius: 999px;
   font-size: 0.7rem;
   white-space: nowrap;
+}
+
+.result-other-region {
+  top: 0.4rem;
+  border: 1px solid #555;
+  color: #aaa;
 }
 
 .result-language {
