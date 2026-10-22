@@ -701,6 +701,49 @@ describe('RepairBooksModal', () => {
     }
   })
 
+  it('keeps the room of the results from the start when the dialog repairs one book', async () => {
+    catalogue({ fr: [] })
+    const wrapper = mountModal()
+    await flushPromises()
+
+    // Before any search: the header line and the empty list, at their place
+    expect(row(wrapper).get('[data-testid="match-results-header"]').text()).toBe(
+      'No search request done',
+    )
+    expect(row(wrapper).find('[data-testid="match-results-placeholder"]').exists()).toBe(true)
+
+    // The first search waits over the empty list, under the spinner
+    let answer!: (results: unknown[]) => void
+    apiMocks.advancedSearch.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)))
+    await emptyAsin(wrapper)
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
+    await flushPromises()
+    expect(row(wrapper).find('[data-testid="match-results-pending"]').exists()).toBe(true)
+
+    // Nothing found: said on the header line, over the empty list
+    answer([])
+    await flushPromises()
+    expect(row(wrapper).get('[data-testid="match-search-empty"]').text()).toMatch(
+      /^No results for "Primal Hunter, Vol\. 7" by "Zogarth" in France \(FR\) - Request: [\d.]+ s$/,
+    )
+    expect(row(wrapper).find('[data-testid="match-results-placeholder"]').exists()).toBe(true)
+  })
+
+  it('says no search was done for every book, but keeps the list room for one book only', async () => {
+    const wrapper = mountModal([7, 8])
+    await flushPromises()
+
+    for (const id of [7, 8]) {
+      expect(row(wrapper, id).get('[data-testid="match-results-header"]').text()).toBe(
+        'No search request done',
+      )
+      // Several books: the results open under each one when found
+      expect(row(wrapper, id).find('[data-testid="match-results-placeholder"]').exists()).toBe(
+        false,
+      )
+    }
+  })
+
   it('never keeps a failed search: the same values ask again', async () => {
     apiMocks.getAudibleMetadata.mockRejectedValueOnce(new Error('API error: 502 Bad Gateway'))
     const wrapper = mountModal()
