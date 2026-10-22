@@ -187,7 +187,7 @@
         {{ bookSummary(currentRecord) || 'None' }}
       </dd>
       <dt>New</dt>
-      <dd v-if="match.picked" data-testid="match-picked">
+      <dd v-if="match.picked" class="match-new-picked" data-testid="match-picked">
         {{ bookSummary(recordFromResult(match.picked, match.region)) }}
         <span class="match-status">
           <PhCheckCircle :size="14" weight="fill" />
@@ -718,10 +718,18 @@ defineExpose({ search, cancelSearch })
   min-width: 0;
 }
 
+/* The new record flows as text, so "checked" follows its last line instead of taking a line of its own */
+.match-records dd.match-new-picked {
+  display: block;
+}
+
 .match-status {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
+  margin-left: 0.4rem;
+  vertical-align: middle;
+  white-space: nowrap;
   color: var(--status-success);
 }
 
