@@ -108,16 +108,30 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                         files = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(filesJson) ?? [];
                     }
 
-                    // Map each torrent in isolation. A single unexpected value (e.g. an
-                    // out-of-range timestamp) must skip only that torrent, not fail the whole
-                    // queue fetch and have it misreported as the client being unreachable (#1008).
+                    // Map each torrent in isolation. A single unexpected value must not fail the
+                    // whole queue fetch and have it misreported as the client being unreachable
+                    // (#1008). If one still can't be mapped, keep a placeholder carrying its hash:
+                    // orphan cleanup treats a hash missing from the snapshot as a removed torrent,
+                    // so dropping it would delete the tracking record for a torrent qBittorrent
+                    // still reports (#1008 review).
                     try
                     {
                         items.Add(QbittorrentResponseMapper.MapQueueItem(torrent, client, files));
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                     {
-                        logger.LogWarning(ex, "Skipping qBittorrent torrent {Hash} after a queue mapping error", LogRedaction.SanitizeText(hash));
+                        logger.LogWarning(ex, "Preserving qBittorrent torrent {Hash} as an unmapped placeholder after a queue mapping error", LogRedaction.SanitizeText(hash));
+                        if (!string.IsNullOrEmpty(hash))
+                        {
+                            items.Add(new QueueItem
+                            {
+                                Id = hash,
+                                DownloadClient = client.Name,
+                                DownloadClientId = client.Id,
+                                DownloadClientType = "qbittorrent",
+                                Status = "unknown"
+                            });
+                        }
                     }
                 }
             }

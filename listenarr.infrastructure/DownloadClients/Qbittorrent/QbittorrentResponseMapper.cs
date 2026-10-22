@@ -23,6 +23,11 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
 {
     internal static class QbittorrentResponseMapper
     {
+        // Valid argument range for DateTimeOffset.FromUnixTimeSeconds; a garbage timestamp outside
+        // it would otherwise throw and drop the whole torrent from the snapshot (#1008 review).
+        private const long MinUnixSeconds = -62135596800;
+        private const long MaxUnixSeconds = 253402300799;
+
         public static QueueItem MapQueueItem(
             Dictionary<string, JsonElement> torrent,
             DownloadClientConfiguration client,
@@ -57,7 +62,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 DownloadClient = client.Name,
                 DownloadClientId = client.Id,
                 DownloadClientType = "qbittorrent",
-                AddedAt = DateTimeOffset.FromUnixTimeSeconds(addedOn).DateTime,
+                AddedAt = DateTimeOffset.FromUnixTimeSeconds(
+                    Math.Clamp(addedOn, MinUnixSeconds, MaxUnixSeconds)).DateTime,
                 Seeders = numSeeds,
                 Leechers = numLeechs,
                 Ratio = ratio,
@@ -90,8 +96,10 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
             var numSeeds = GetNullableInt32(torrent, "num_seeds");
             var numLeechs = GetNullableInt32(torrent, "num_leechs");
             var ratio = GetNullableDouble(torrent, "ratio");
-            var ratioLimit = (float)GetDouble(torrent, "ratio_limit", -2);
-            var seedingTimeLimit = GetInt64(torrent, "seeding_time_limit", -2);
+            var ratioLimitReadable = TryGetSeedLimitDouble(torrent, "ratio_limit", out var ratioLimitValue);
+            var ratioLimit = (float)ratioLimitValue;
+            var seedingTimeLimitReadable = TryGetSeedLimitInt64(torrent, "seeding_time_limit", out var seedingTimeLimit);
+            var seedPolicyReadable = ratioLimitReadable && seedingTimeLimitReadable;
             var seedingTime = GetNullableInt64(torrent, "seeding_time");
             var savePath = GetString(torrent, "save_path");
             var category = GetString(torrent, "category");
@@ -108,7 +116,10 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 globalMaxRatio,
                 globalMaxSeedingTimeEnabled,
                 globalMaxSeedingTime);
-            var canBeRemoved = removeCompletedDownloads && seedLimitReached;
+            // When a seed-limit field is present but unreadable, the policy is unknown; do not let
+            // the tolerant -2 ("inherit global") fallback silently authorize movement/removal that
+            // the configured limits would block (#1008 review).
+            var canBeRemoved = removeCompletedDownloads && seedLimitReached && seedPolicyReadable;
 
             return new DownloadClientItem
             {
@@ -233,6 +244,43 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
             return values.TryGetValue(key, out var element) && TryReadDouble(element, out var result) ? result : null;
         }
 
+        // Seed-limit fields default to -2 ("inherit global") only when absent. A present but
+        // unreadable value returns false so the caller can refuse movement/removal instead of
+        // defaulting to the permissive inherit-global behavior.
+        private static bool TryGetSeedLimitDouble(Dictionary<string, JsonElement> values, string key, out double value)
+        {
+            value = -2;
+            if (!values.TryGetValue(key, out var element))
+            {
+                return true;
+            }
+
+            if (TryReadDouble(element, out var parsed))
+            {
+                value = parsed;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryGetSeedLimitInt64(Dictionary<string, JsonElement> values, string key, out long value)
+        {
+            value = -2;
+            if (!values.TryGetValue(key, out var element))
+            {
+                return true;
+            }
+
+            if (TryReadInt64(element, out var parsed))
+            {
+                value = parsed;
+                return true;
+            }
+
+            return false;
+        }
+
         // qBittorrent and the various libtorrent builds behind it are not consistent about numeric
         // JSON: a field can arrive as an integer, as a decimal or exponent, or as a quoted string.
         // Reading it with JsonElement.GetInt64()/GetInt32() throws FormatException on anything but a
@@ -248,9 +296,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                         return true;
                     }
 
-                    if (element.TryGetDouble(out var numeric))
+                    if (element.TryGetDouble(out var numeric) && TryConvertFiniteDoubleToInt64(numeric, out value))
                     {
-                        value = (long)numeric;
                         return true;
                     }
 
@@ -262,13 +309,30 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                         return true;
                     }
 
-                    if (double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed))
+                    if (double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed)
+                        && TryConvertFiniteDoubleToInt64(parsed, out value))
                     {
-                        value = (long)parsed;
                         return true;
                     }
 
                     break;
+            }
+
+            value = 0;
+            return false;
+        }
+
+        // A double that is NaN, infinite, or outside the Int64 range cannot be cast to long
+        // safely (the cast is undefined/overflows), so treat it as unreadable.
+        private static bool TryConvertFiniteDoubleToInt64(double candidate, out long value)
+        {
+            // 9.2e18 is safely inside Int64's range (long.MaxValue is ~9.223e18), so the cast
+            // cannot overflow. long.MaxValue itself rounds up when converted to double, which is
+            // why an explicit sub-range bound is used instead of comparing against long.MaxValue.
+            if (double.IsFinite(candidate) && candidate > -9.2e18 && candidate < 9.2e18)
+            {
+                value = (long)candidate;
+                return true;
             }
 
             value = 0;
@@ -280,14 +344,17 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
             switch (element.ValueKind)
             {
                 case JsonValueKind.Number:
-                    if (element.TryGetDouble(out value))
+                    // Reject NaN/Infinity: they map through to fields like Progress and then throw
+                    // when the queue is serialized, outside the per-torrent guard (#1008 review).
+                    if (element.TryGetDouble(out value) && double.IsFinite(value))
                     {
                         return true;
                     }
 
                     break;
                 case JsonValueKind.String:
-                    if (double.TryParse(element.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out value))
+                    if (double.TryParse(element.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out value)
+                        && double.IsFinite(value))
                     {
                         return true;
                     }

@@ -552,9 +552,11 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
         }
 
         [Fact]
-        public async Task GetQueueAsync_OneTorrentWithUnmappableValue_SkipsItAndKeepsTheRest()
+        public async Task GetQueueAsync_OutOfRangeTimestamp_PreservesTorrentAndItsHash()
         {
-            // One torrent with an out-of-range timestamp must not sink the rest of the queue.
+            // An out-of-range added_on must not drop the torrent: a hash missing from the snapshot
+            // is treated by orphan cleanup as a removed torrent, deleting its tracking record while
+            // qBittorrent still reports it (#1008 review). The timestamp is clamped instead.
             var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
             apiMock.InfoResponseOverride = """
             [
@@ -567,8 +569,74 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
 
             var items = await adapter.GetQueueAsync(_client);
 
-            var item = Assert.Single(items);
-            Assert.Equal("good", item.Id);
+            Assert.Equal(["bad", "good"], items.Select(item => item.Id).OrderBy(id => id).ToArray());
+        }
+
+        [Fact]
+        public void MapQueueItem_NonFiniteProgress_DefaultsToZeroInsteadOfBreakingSerialization()
+        {
+            // progress "NaN" previously mapped through to Progress and then threw when the queue was
+            // serialized, outside the per-torrent guard (#1008 review). It must be rejected.
+            var torrent = ParseTorrent("""
+                { "hash": "x", "name": "Book", "progress": "NaN", "size": 10, "downloaded": 1, "state": "downloading", "save_path": "/d" }
+                """);
+
+            var item = QbittorrentResponseMapper.MapQueueItem(torrent, _client, []);
+
+            Assert.Equal(0d, item.Progress);
+            Assert.True(double.IsFinite(item.Progress));
+            // The returned item must round-trip through System.Text.Json without throwing.
+            _ = JsonSerializer.Serialize(item);
+        }
+
+        [Theory]
+        [InlineData("\"oops\"")]
+        [InlineData("null")]
+        public void MapDownloadClientItem_UnreadableRatioLimit_BlocksRemovalAndMovement(string ratioLimitJson)
+        {
+            // A present but unreadable seed-limit must not fall back to -2 ("inherit global") and
+            // authorize removal/movement that the real policy would block (#1008 review).
+            var torrent = ParseTorrent($$"""
+                { "hash": "x", "name": "Book", "state": "stoppedUP", "progress": 1, "ratio": 3,
+                  "ratio_limit": {{ratioLimitJson}}, "seeding_time_limit": -2 }
+                """);
+
+            var item = QbittorrentResponseMapper.MapDownloadClientItem(
+                torrent, _client, removeCompletedDownloads: true,
+                globalMaxRatioEnabled: false, globalMaxRatio: 0,
+                globalMaxSeedingTimeEnabled: false, globalMaxSeedingTime: 0);
+
+            Assert.False(item.CanBeRemoved);
+            Assert.False(item.CanMoveFiles);
+        }
+
+        [Fact]
+        public void MapDownloadClientItem_ValidNumericStringRatioLimit_StillAllowsRemoval()
+        {
+            // The tolerant parsing must keep working for valid numeric strings.
+            var torrent = ParseTorrent("""
+                { "hash": "x", "name": "Book", "state": "stoppedUP", "progress": 1, "ratio": 3,
+                  "ratio_limit": "2", "seeding_time_limit": -2 }
+                """);
+
+            var item = QbittorrentResponseMapper.MapDownloadClientItem(
+                torrent, _client, removeCompletedDownloads: true,
+                globalMaxRatioEnabled: false, globalMaxRatio: 0,
+                globalMaxSeedingTimeEnabled: false, globalMaxSeedingTime: 0);
+
+            Assert.True(item.CanBeRemoved);
+        }
+
+        private static Dictionary<string, JsonElement> ParseTorrent(string json)
+        {
+            using var document = JsonDocument.Parse(json);
+            var map = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                map[property.Name] = property.Value.Clone();
+            }
+
+            return map;
         }
 
         [Fact]
