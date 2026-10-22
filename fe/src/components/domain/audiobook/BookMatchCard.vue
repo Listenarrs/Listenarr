@@ -66,7 +66,7 @@
               class="form-input"
               maxlength="10"
               data-testid="match-asin"
-              @input="onAsinTyped"
+              @input="onEdited"
               @keydown.enter.prevent="searchByPriority"
             />
             <button
@@ -165,9 +165,11 @@
           data-testid="match-retry"
           :disabled="!canSearchFor(retryKind)"
           :title="
-            searchLocked ? 'Another book is being searched' : 'Search again with the same values'
+            searchLocked
+              ? 'Another book is being searched'
+              : 'Ask Audible again with the same values (a new request)'
           "
-          @click="search(retryKind)"
+          @click="searchByPriority"
         >
           <PhArrowCounterClockwise :size="16" />
           Retry
@@ -250,7 +252,7 @@
       >
         <p v-if="state.searched" class="match-results-header" data-testid="match-results-header">
           Results for {{ describeSearch(state.searched) }} in
-          {{ regionLabel(state.searched.region) }}
+          {{ regionLabel(state.searched.region) }} - {{ answerSource(state.requestMs) }}
         </p>
         <FindMatchResults
           class="match-search-results"
@@ -276,7 +278,7 @@
         data-testid="match-search-empty"
       >
         No results for {{ describeSearch(state.searched) }} in
-        {{ regionLabel(state.searched.region) }}.
+        {{ regionLabel(state.searched.region) }} - {{ answerSource(state.requestMs) }}
       </p>
     </fieldset>
 
@@ -288,7 +290,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   PhArrowCounterClockwise,
   PhCheckCircle,
@@ -312,7 +314,10 @@ import {
   regionLabel,
   recordFromResult,
   addNewQuery,
+  answerSource,
+  searchCacheKey,
   searchLikeAddNew,
+  SEARCH_CACHE,
   type BookMatch,
   type BookRecord,
   type BookTask,
@@ -364,6 +369,8 @@ interface SearchState {
   error: string | null
   // What the results shown were searched with, for their header
   searched: Searched | null
+  // How long their request took, or null when the dialog had them already (answered before)
+  requestMs: number | null
 }
 
 // The parameters of one search, taken when it starts: typing afterwards doesn't change them
@@ -385,8 +392,12 @@ const titleEl = ref<HTMLInputElement | null>(null)
 const state = ref<SearchState>(idle())
 // The search running, if any
 const running = ref<Searched | null>(null)
-// A field changed since the last search: Retry goes back to Search
+// The kind of the last search started (answered, failed or canceled), and whether a field was
+// edited since: Retry until one is
+const lastSearchKind = ref<SearchKind | null>(null)
 const edited = ref(false)
+// The dialog's answered searches, when it keeps them
+const searchCache = inject(SEARCH_CACHE, null)
 let controller: AbortController | null = null
 
 // Every Audible region stays available, in canary's order (as in Add to Library): the book's
@@ -450,15 +461,12 @@ const pendingResultsText = computed(() =>
 // One search at a time keeps answers from racing each other.
 const regionLocked = computed(() => props.searchLocked || state.value.status === 'searching')
 
-// The last search, with the values still in the fields, found nothing or failed: Search becomes
-// Retry. Editing a field forgets that search, and Search comes back. An ASIN its region has no
-// record for keeps Search: searching the title there is what comes next.
+// Search becomes Retry once a search ran, whatever its outcome, until a field is edited: from then
+// on it is Search, even if the field is changed back. Retry asks Audible again (a new request),
+// where Search may be served by the dialog's answered searches
 const retryKind = computed<SearchKind | null>(() => {
-  if (edited.value) return null
-  const { status, results, kind } = state.value
-  if (status === 'failed' || status === 'canceled') return kind
-  if (status === 'done' && results.length === 0 && kind === 'title') return kind
-  return null
+  if (edited.value || state.value.status === 'searching') return null
+  return lastSearchKind.value
 })
 
 function canSearchFor(kind: SearchKind): boolean {
@@ -468,7 +476,14 @@ function canSearchFor(kind: SearchKind): boolean {
 }
 
 function idle(): SearchState {
-  return { status: 'idle', kind: 'title', results: [], error: null, searched: null }
+  return {
+    status: 'idle',
+    kind: 'title',
+    results: [],
+    error: null,
+    searched: null,
+    requestMs: null,
+  }
 }
 
 function setMatched(record: SearchResult) {
@@ -477,9 +492,36 @@ function setMatched(record: SearchResult) {
   emit('matched', record)
 }
 
+// The answer to a search, under the book: a title search's results, or the records found for the
+// ASIN (none is an error)
+function showResults(
+  kind: SearchKind,
+  searched: Searched,
+  results: SearchResult[],
+  requestMs: number | null,
+) {
+  if (kind === 'title') {
+    state.value = { status: 'done', kind, results, error: null, searched, requestMs }
+    return
+  }
+  const found = results
+    .filter((r) => r.asin?.toUpperCase() === searched.asin)
+    .map((r) => ({ ...r, region: r.region || searched.region }))
+  // The records found are offered to pick from, like a title search's: nothing is picked for
+  // the user
+  if (found.length) {
+    state.value = { status: 'done', kind, results: found, error: null, searched, requestMs }
+  } else {
+    // Found nothing (orange): searching the title there is what comes next
+    match.value.asinError = `${noRecordError(searched.asin, searched.region)} - ${answerSource(requestMs)}`
+    state.value = { status: 'done', kind, results: [], error: null, searched, requestMs }
+  }
+}
+
 // Search the title and author in the region, or look the ASIN up there; the results open under
-// the book, to pick from. An ASIN its region has no record for is an error
-async function search(kind: SearchKind = 'title') {
+// the book, to pick from. An ASIN its region has no record for is an error. Values already
+// answered while the dialog is open are served without a request, unless fresh (Retry)
+async function search(kind: SearchKind = 'title', fresh = false) {
   if (!canSearchFor(kind)) return
   if (kind === 'asin' && !asinValid(match.value)) {
     // A field error, not a request one: nothing is sent
@@ -495,6 +537,19 @@ async function search(kind: SearchKind = 'title') {
     author: match.value.author.trim(),
     region,
   }
+  const query = kind === 'asin' ? asin : addNewQuery(match.value)
+  const cacheKey = searchCacheKey(query, region)
+  lastSearchKind.value = kind
+  edited.value = false
+  // A new search starts over: the record picked in the previous results is no longer selected, and
+  // New goes back to no record (nothing stays picked that the user can't see)
+  match.value.picked = null
+  match.value.asinError = null
+  const answered = fresh ? undefined : searchCache?.get(cacheKey)
+  if (answered) {
+    showResults(kind, searched, answered, null)
+    return
+  }
   const current = new AbortController()
   controller = current
   let timedOut = false
@@ -505,32 +560,13 @@ async function search(kind: SearchKind = 'title') {
   // The previous results stay on screen until this search answers
   state.value = { ...state.value, status: 'searching', kind, error: null }
   running.value = searched
-  edited.value = false
-  // A new search starts over: the record picked in the previous results is no longer selected, and
-  // New goes back to no record (nothing stays picked that the user can't see)
-  match.value.picked = null
-  match.value.asinError = null
+  const startedAt = performance.now()
   try {
-    const query = kind === 'asin' ? asin : addNewQuery(match.value)
     const results = await searchLikeAddNew(query, region, current.signal)
     // A canceled search answers to nobody: the card already went back to its fields
     if (controller !== current) return
-    if (kind === 'title') {
-      state.value = { status: 'done', kind, results, error: null, searched }
-      return
-    }
-    const found = results
-      .filter((r) => r.asin?.toUpperCase() === asin)
-      .map((r) => ({ ...r, region: r.region || region }))
-    // The records found are offered to pick from, like a title search's: nothing is picked for
-    // the user
-    if (found.length) {
-      state.value = { status: 'done', kind, results: found, error: null, searched }
-    } else {
-      // Found nothing (orange): a title search is what comes next, so Search stays
-      match.value.asinError = noRecordError(asin, region)
-      state.value = { status: 'done', kind, results: [], error: null, searched }
-    }
+    searchCache?.set(cacheKey, results)
+    showResults(kind, searched, results, performance.now() - startedAt)
   } catch (e) {
     if (controller !== current) return
     const error = timedOut
@@ -539,7 +575,7 @@ async function search(kind: SearchKind = 'title') {
     // An ASIN that could not be looked up stays unusable until it is (its error shows on the New
     // line)
     if (kind === 'asin') match.value.asinError = error
-    state.value = { status: 'failed', kind, results: [], error, searched }
+    state.value = { status: 'failed', kind, results: [], error, searched, requestMs: null }
   } finally {
     clearTimeout(timer)
     if (controller === current) {
@@ -595,21 +631,21 @@ function forgetRecord() {
   }
 }
 
-// Typing only prepares the next search: the results, the record and any error stay until it runs
-function onEdited() {
-  edited.value = true
-}
-
+// Typing only prepares the next search: the results, the record and any error stay until it runs.
 // Search, Enter in any field and a region change all start the same search: the ASIN when it is
-// filled, the title and author otherwise
+// filled, the title and author otherwise. With no field edited since the last search, that is
+// Retry: a new request
 function searchByPriority() {
-  void search(searchKind.value)
+  const retry = retryKind.value
+  void (retry ? search(retry, true) : search(searchKind.value))
 }
 
 // Another region keeps the fields and searches there right away, by the same priority: the one
 // change that searches by itself
 function onRegionChanged() {
   forgetRecord()
+  // A field changed: a search by priority, not a Retry of the previous one
+  edited.value = true
   searchByPriority()
 }
 
@@ -620,8 +656,8 @@ function clearField(field: 'asin' | 'query' | 'author') {
   edited.value = true
 }
 
-// A typed ASIN only prepares the next search too: Enter or Search then looks it up
-function onAsinTyped() {
+// Any change to a field, even back to what was searched: Search, no longer Retry
+function onEdited() {
   edited.value = true
 }
 
@@ -632,7 +668,7 @@ watch(
 
 function revert() {
   Object.assign(match.value, match.value.initial)
-  edited.value = false
+  edited.value = true
   forgetRecord()
 }
 

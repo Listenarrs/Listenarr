@@ -207,7 +207,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch, type ComponentPublicInstance } from 'vue'
+import { computed, onBeforeUnmount, provide, ref, watch, type ComponentPublicInstance } from 'vue'
 import {
   PhCheckSquare,
   PhFolderOpen,
@@ -227,10 +227,13 @@ import {
   FALLBACK_REGION,
   asinChanged,
   createBookMatch,
+  formatDuration,
   matchState,
+  SEARCH_CACHE,
   type BookMatch,
   type BookRecord,
   type BookTask,
+  type SearchCache,
 } from '@/utils/bookMatch'
 import type { AudiobookExternalIdentifier, AudiobookExternalIdentifierInput } from '@/types'
 
@@ -270,6 +273,9 @@ const emit = defineEmits<{
 
 // The search Find Match uses and the configured region live in the Library Import store
 const libraryImportStore = useLibraryImportStore()
+// The searches answered while the dialog is open, shared by its books; emptied each time it opens
+const searchCache: SearchCache = new Map()
+provide(SEARCH_CACHE, searchCache)
 const configuredRegion = ref(FALLBACK_REGION)
 const loading = ref(false)
 const executing = ref(false)
@@ -379,6 +385,7 @@ async function load() {
   finished.value = false
   error.value = null
   rows.value = []
+  searchCache.clear()
   organizeIds.value = []
   repairCompleted.value = 0
   repairTotal.value = 0
@@ -529,11 +536,6 @@ async function repair() {
   organizeIds.value = rows.value.filter((r) => r.task?.state === 'done').map((r) => r.id)
   executing.value = false
   finished.value = true
-}
-
-// In seconds, with up to 2 decimals: 1.23 s, 1.5 s, 2 s
-function formatDuration(durationMs: number) {
-  return `${Number((durationMs / 1000).toFixed(2))} s`
 }
 
 // Every book with a new record
