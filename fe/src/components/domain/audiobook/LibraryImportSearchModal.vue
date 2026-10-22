@@ -37,6 +37,7 @@
         :configured-region="configuredRegion"
         :book="book"
         search-on-mount
+        placeholders
         data-testid="find-match-card"
         @searching="onSearching"
       >
