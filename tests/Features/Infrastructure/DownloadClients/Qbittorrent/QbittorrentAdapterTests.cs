@@ -564,10 +564,22 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
         [InlineData("uploading")]
         [InlineData("stalledUP")]
         [InlineData("stoppedUP")]
+        [InlineData("pausedUP")] // qBittorrent < 5.0 / rdt-client (#1047)
         public void CompletedTorrentStates_MapToCompleted(string state)
         {
             Assert.Equal(DownloadItemStatus.Completed, QbittorrentResponseMapper.MapDownloadItemStatus(state, 100));
             Assert.Equal("completed", QbittorrentResponseMapper.MapQueueStatus(state, 100));
+        }
+
+        [Theory]
+        [InlineData("pausedDL")]
+        [InlineData("pausedUP")]
+        public void LegacyPausedStates_MapToPaused_WhenIncomplete(string state)
+        {
+            // Before #1047 these pre-5.0 states fell through to Warning/unknown, so an rdt-client
+            // or old-qBittorrent download never progressed to completion or import.
+            Assert.Equal(DownloadItemStatus.Paused, QbittorrentResponseMapper.MapDownloadItemStatus(state, 50));
+            Assert.Equal("paused", QbittorrentResponseMapper.MapQueueStatus(state, 50));
         }
     }
 }
