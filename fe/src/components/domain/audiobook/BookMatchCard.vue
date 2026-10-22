@@ -63,7 +63,7 @@
               maxlength="10"
               data-testid="match-asin"
               @input="onAsinTyped"
-              @keydown.enter.prevent="onAsinEntered"
+              @keydown.enter.prevent="searchByPriority"
             />
             <button
               v-if="match.asin"
@@ -87,7 +87,7 @@
               class="form-input"
               data-testid="match-title"
               @input="onEdited"
-              @keydown.enter.prevent="search(searchKind)"
+              @keydown.enter.prevent="searchByPriority"
             />
             <button
               v-if="match.query"
@@ -110,7 +110,7 @@
               class="form-input"
               data-testid="match-author"
               @input="onEdited"
-              @keydown.enter.prevent="search(searchKind)"
+              @keydown.enter.prevent="searchByPriority"
             />
             <button
               v-if="match.author"
@@ -179,7 +179,7 @@
               ? 'Another book is being searched'
               : 'The search Add New and Library Import use, with the same rules and priorities'
           "
-          @click="search(searchKind)"
+          @click="searchByPriority"
         >
           <PhMagnifyingGlass :size="16" />
           Search
@@ -383,8 +383,8 @@ const barState = computed(() => {
   return matchState(match.value) === 'matched' && !props.excluded ? 'matched' : 'ignored'
 })
 
-// A filled ASIN has priority: Search looks it up on its own, leaving the title and author out.
-// With the ASIN field empty, Search looks for the title and author
+// A filled ASIN has priority: a search looks it up on its own, leaving the title and author out.
+// With the ASIN field empty, it looks for the title and author
 const searchKind = computed<SearchKind>(() => (match.value.asin.trim() ? 'asin' : 'title'))
 
 // The book as it is today, as a record
@@ -407,7 +407,7 @@ const pickedRecord = computed(() => {
   return picked?.asin ? { asin: picked.asin, region: picked.region ?? match.value.region } : null
 })
 
-// Changing the region looks the ASIN up there: not while a search runs, here or on another book.
+// Changing the region searches there: not while a search runs, here or on another book.
 // One search at a time keeps answers from racing each other.
 const regionLocked = computed(() => props.searchLocked || state.value.status === 'searching')
 
@@ -560,11 +560,17 @@ function onEdited() {
   edited.value = true
 }
 
-// Another region keeps the ASIN and looks it up there right away: the one change that searches by
-// itself
+// Search, Enter in any field and a region change all start the same search: the ASIN when it is
+// filled, the title and author otherwise
+function searchByPriority() {
+  void search(searchKind.value)
+}
+
+// Another region keeps the fields and searches there right away, by the same priority: the one
+// change that searches by itself
 function onRegionChanged() {
   forgetRecord()
-  void search('asin')
+  searchByPriority()
 }
 
 // The erase buttons of the ASIN, Title and Author fields: like typing, emptying a field only
@@ -577,11 +583,6 @@ function clearField(field: 'asin' | 'query' | 'author') {
 // A typed ASIN only prepares the next search too: Enter or Search then looks it up
 function onAsinTyped() {
   edited.value = true
-}
-
-function onAsinEntered() {
-  if (!match.value.asin.trim()) return
-  void search('asin')
 }
 
 watch(
