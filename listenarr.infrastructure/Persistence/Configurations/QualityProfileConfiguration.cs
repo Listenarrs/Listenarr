@@ -27,6 +27,14 @@ namespace Listenarr.Infrastructure.Persistence.Configurations
         {
             builder.HasKey(q => q.Id);
 
+            // Rows that predate this column were written when a blank CutoffQuality was the only
+            // way to record "do not upgrade", so they have to arrive as upgrades-ON and be turned
+            // off by the startup backfill that reads their cutoff. Defaulting the column the other
+            // way would leave the backfill having to turn upgrades ON for everybody instead, which
+            // is the direction that cannot be run twice safely.
+            builder.Property(q => q.UpgradeAllowed)
+                .HasDefaultValue(true);
+
             // Serialize Qualities list into a JSON TEXT column to avoid creating a separate entity type.
             var converter = new JsonValueConverter<List<QualityDefinition>>();
             var comparer = JsonValueComparer.Create<List<QualityDefinition>>();
