@@ -129,16 +129,28 @@ export function fullTitle(title?: string | null, subtitle?: string | null): stri
   return [title?.trim(), subtitle?.trim()].filter(Boolean).join(': ')
 }
 
-// One line for a book record, the same next to Revert, on Current and on New:
-// ASIN - Title: Subtitle - Author(s) - Region, without the parts it doesn't have
-export function bookSummary(record: BookRecord): string {
-  const title = fullTitle(record.title, record.subtitle)
+export type RecordPartKey = 'asin' | 'title' | 'authors' | 'region'
+
+// The parts of a book record's one line, in order, without the ones it doesn't have
+export function recordParts(record: BookRecord): { key: RecordPartKey; text: string }[] {
   const authors = (record.authors ?? [])
     .map((a) => a.trim())
     .filter(Boolean)
     .join(', ')
-  return [record.asin?.trim(), title, authors, record.region ? regionLabel(record.region) : '']
-    .filter(Boolean)
+  const parts: { key: RecordPartKey; text: string }[] = [
+    { key: 'asin', text: record.asin?.trim() ?? '' },
+    { key: 'title', text: fullTitle(record.title, record.subtitle) },
+    { key: 'authors', text: authors },
+    { key: 'region', text: record.region ? regionLabel(record.region) : '' },
+  ]
+  return parts.filter((part) => part.text)
+}
+
+// One line for a book record, the same next to Revert, on Current and on New:
+// ASIN - Title: Subtitle - Author(s) - Region, without the parts it doesn't have
+export function bookSummary(record: BookRecord): string {
+  return recordParts(record)
+    .map((part) => part.text)
     .join(' - ')
 }
 

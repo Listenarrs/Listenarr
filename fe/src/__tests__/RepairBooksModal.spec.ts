@@ -112,6 +112,10 @@ function mountModal(ids = [7]) {
 const row = (wrapper: ReturnType<typeof mountModal>, id = 7) =>
   wrapper.get(`[data-testid="repair-row-${id}"]`)
 
+// A book on the results step, once repaired
+const result = (wrapper: ReturnType<typeof mountModal>, id = 7) =>
+  wrapper.get(`[data-testid="repair-result-${id}"]`)
+
 // Search the row's title and author in a region, then pick the result with that title
 // A filled ASIN has priority: emptying it lets Search look for the title and author
 async function emptyAsin(wrapper: ReturnType<typeof mountModal>, id = 7) {
@@ -1203,9 +1207,9 @@ describe('RepairBooksModal', () => {
 
     await repair(wrapper)
 
-    // The card turns light green and says how it ended, and how long it took
-    expect(row(wrapper).attributes('data-task-state')).toBe('done')
-    expect(row(wrapper).get('[data-testid="match-task"]').text()).toBe(
+    // The results say how it ended, and how long it took
+    expect(result(wrapper).attributes('data-result-state')).toBe('done')
+    expect(result(wrapper).get('[data-testid="repair-result-message"]').text()).toBe(
       'Repaired in 1.23 s: B0HM45F8MW · fr',
     )
   })
@@ -1223,10 +1227,14 @@ describe('RepairBooksModal', () => {
 
     await repair(wrapper)
 
-    expect(row(wrapper).attributes('data-task-state')).toBe('warning')
-    expect(row(wrapper).get('[data-testid="match-task"]').text()).toBe(
+    expect(result(wrapper).attributes('data-result-state')).toBe('warning')
+    expect(result(wrapper).get('[data-testid="repair-result-message"]').text()).toBe(
       'The new ASIN is saved, but the metadata rescan failed (0.5 s): Audible is down',
     )
+    // Repaired in part: it can't be organized
+    expect(
+      result(wrapper).get('[data-testid="repair-result-include"]').attributes('disabled'),
+    ).toBeDefined()
   })
 
   it('shows a failed repair in red, with how long it took, without trailing zeros', async () => {
@@ -1242,15 +1250,18 @@ describe('RepairBooksModal', () => {
 
     await repair(wrapper)
 
-    expect(row(wrapper).attributes('data-task-state')).toBe('failed')
-    expect(row(wrapper).get('[data-testid="match-task"]').text()).toBe(
+    expect(result(wrapper).attributes('data-result-state')).toBe('failed')
+    expect(result(wrapper).get('[data-testid="repair-result-message"]').text()).toBe(
       'Repair failed (0.25 s): Database locked',
     )
     expect(apiMocks.rescanAudiobookMetadata).not.toHaveBeenCalled()
-    // Nothing repaired: Organize stays, disabled, and says why
+    // Nothing repaired: nothing to organize, and the message says so
+    expect(wrapper.get('[data-testid="repair-results-message"]').text()).toBe(
+      'No book was repaired: there is nothing to organize.',
+    )
     const organize = wrapper.get('[data-testid="repair-organize"]')
+    expect(organize.text()).toContain('Organize 0')
     expect(organize.attributes('disabled')).toBeDefined()
-    expect(organize.attributes('title')).toBe('No book was repaired: nothing to organize')
   })
 
   it('keeps the books during the repair: each card shows its turn, and the search is over', async () => {
@@ -1281,12 +1292,45 @@ describe('RepairBooksModal', () => {
         row(wrapper, id).get('[data-testid="match-lock"]').attributes('disabled'),
       ).toBeDefined()
     expect(wrapper.get('[data-testid="repair-confirm"]').text()).toContain('Repairing 1 of 1…')
+    // The progress bar along the bottom: none of the one repair over yet
+    const progress = () => wrapper.get('[data-testid="repair-progress"]')
+    expect(progress().attributes('aria-valuemax')).toBe('1')
+    expect(progress().attributes('aria-valuenow')).toBe('0')
 
+    apiMocks.getAudiobook.mockResolvedValue({ ...mismatched, title: 'Primal Hunter 4' })
     rescanned({ message: 'ok', audiobookId: 7, asin: 'B0BK9W82PQ', region: 'us' })
     await flushPromises()
-    expect(row(wrapper).attributes('data-task-state')).toBe('done')
-    // The card shows the book as it is now
-    expect(row(wrapper).get('[data-testid="match-current"]').text()).toContain('B0BK9W82PQ')
+    expect(progress().attributes('aria-valuenow')).toBe('1')
+
+    // The results: every book, the repaired one ticked for Organize, the skipped one not tickable
+    expect(result(wrapper).attributes('data-result-state')).toBe('done')
+    expect(result(wrapper, 8).attributes('data-result-state')).toBe('skipped')
+    expect(result(wrapper).get('[data-testid="repair-result-include"]').element).toHaveProperty(
+      'checked',
+      true,
+    )
+    expect(
+      result(wrapper, 8).get('[data-testid="repair-result-include"]').attributes('disabled'),
+    ).toBeDefined()
+    // Old and new records, the parts that changed in green
+    expect(result(wrapper).get('[data-testid="repair-result-old"]').text()).toBe(
+      'B0HM45F8MW - Primal Hunter, Vol. 7 - Zogarth - France (FR)',
+    )
+    const changed = result(wrapper)
+      .findAll('[data-testid="repair-result-new"] [data-changed]')
+      .map((part) => part.text())
+    expect(changed).toEqual(['B0BK9W82PQ', 'Primal Hunter 4', 'United States (US)'])
+    // The message not to miss, and Organize for the ticked books, the others counted as skipped
+    expect(wrapper.get('[data-testid="repair-results-message"]').text()).toContain(
+      '1 book repaired',
+    )
+    expect(wrapper.get('[data-testid="repair-organize"]').text()).toContain('Organize 1')
+    expect(wrapper.get('[data-testid="repair-count"]').text()).toBe('1 skipped')
+
+    // Unticked: left out of Organize
+    await result(wrapper).get('[data-testid="repair-result-include"]').trigger('change')
+    expect(wrapper.get('[data-testid="repair-organize"]').text()).toContain('Organize 0')
+    expect(wrapper.get('[data-testid="repair-count"]').text()).toBe('2 skipped')
   })
 
   it('offers to organize the repaired books', async () => {
