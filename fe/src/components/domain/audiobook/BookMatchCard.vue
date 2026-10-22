@@ -223,23 +223,10 @@
 
       <!-- The rules, where they apply -->
 
-      <!-- The search under the book: its message (failed in red; invalid or canceled in orange), and
-         its results, which stay until a new search on this book answers. A running search only
-         shows on the bottom bar, so nothing moves under the book; its text is for screen
-         readers. -->
-      <p
-        v-if="
-          (state.status === 'failed' && state.kind === 'title') ||
-          state.status === 'invalid' ||
-          state.status === 'canceled'
-        "
-        class="match-search-state"
-        :class="state.status === 'failed' ? 'match-search-error' : 'match-search-warning'"
-        data-testid="match-search-error"
-      >
-        <PhWarningCircle :size="16" />
-        <span>{{ state.error }}</span>
-      </p>
+      <!-- The search under the book: its header line says how it went (failed in red; nothing
+         found, invalid or canceled in orange), over its results, which stay until a new search on
+         this book answers. A running search only shows on the bottom bar and over the results, so
+         nothing moves under the book; its text is for screen readers. -->
       <!-- The last results stay while a new search runs, so nothing moves; they are greyed out
            under a spinning wheel and can't be picked until it answers. The same while another
            book is searched: one search at a time -->
@@ -261,22 +248,27 @@
              and where the answer comes from -->
         <p
           class="match-results-header"
-          :class="{ 'match-search-warning': resultsHeader.empty && !resultsPending }"
-          :data-testid="resultsHeader.empty ? 'match-search-empty' : 'match-results-header'"
+          :class="resultsPending ? undefined : resultsHeader.tone"
+          :data-testid="resultsHeader.testId"
         >
+          <PhWarningCircle v-if="resultsHeader.tone === 'match-search-error'" :size="14" />
           {{ resultsHeader.text }}
         </p>
         <FindMatchResults
           v-if="state.results.length"
+          ref="resultsListEl"
           class="match-search-results"
           :results="state.results"
           :selected="pickedRecord"
           :current="match.current"
           @select="pick"
         />
+        <!-- No results: the empty list, at its full height when the card keeps its room, else at
+             the height of the results a failed or canceled search took away -->
         <div
-          v-else-if="placeholders"
+          v-else-if="placeholders || keptHeight !== null"
           class="match-results-empty"
+          :style="placeholders ? undefined : { height: `${keptHeight}px` }"
           data-testid="match-results-placeholder"
         />
         <span
@@ -309,7 +301,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  computed,
+  inject,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+  type ComponentPublicInstance,
+} from 'vue'
 import {
   PhArrowCounterClockwise,
   PhCheckCircle,
@@ -485,19 +485,39 @@ const resultsPending = computed(
 
 // The results' header line: what was searched, where, and where the answer comes from. Empty
 // (orange) when it found nothing, or failed or was canceled with nothing to show
-const resultsHeader = computed(() => {
-  const { searched, results, status, requestMs } = state.value
-  if (!searched) return { text: 'No search request done', empty: false }
+// The results' header line, the one place the search says how it went: what was searched, where,
+// and where the answer comes from; or why there are no results (nothing found, the search failed
+// and why, canceled, an ASIN that isn't one). A failed or canceled search shows no results: the
+// empty list again, as before any search
+const resultsHeader = computed<{ text: string; tone?: string; testId: string }>(() => {
+  const { searched, results, status, error, requestMs } = state.value
+  const warning = 'match-search-warning'
+  if (status === 'invalid')
+    return { text: error ?? '', tone: warning, testId: 'match-search-error' }
+  if (!searched) return { text: 'No search request done', testId: 'match-results-header' }
   const what = `${describeSearch(searched)} in ${regionLabel(searched.region)}`
+  if (status === 'canceled')
+    return {
+      text: `No results for ${what} - Search canceled`,
+      tone: warning,
+      testId: 'match-search-error',
+    }
+  if (status === 'failed')
+    return {
+      text: `No results for ${what} - ${error}`,
+      tone: 'match-search-error',
+      testId: 'match-search-error',
+    }
   if (results.length)
-    return { text: `Results for ${what} - ${answerSource(requestMs)}`, empty: false }
-  const outcome =
-    status === 'failed'
-      ? 'Search failed'
-      : status === 'canceled'
-        ? 'Search canceled'
-        : answerSource(requestMs)
-  return { text: `No results for ${what} - ${outcome}`, empty: true }
+    return {
+      text: `Results for ${what} - ${answerSource(requestMs)}`,
+      testId: 'match-results-header',
+    }
+  return {
+    text: `No results for ${what} - ${answerSource(requestMs)}`,
+    tone: warning,
+    testId: 'match-search-empty',
+  }
 })
 
 // Results just answered, shown under an overlay fading out ("Found 3 results"): not pickable
@@ -562,6 +582,17 @@ function setMatched(record: SearchResult) {
   match.value.picked = record
   match.value.asinError = null
   emit('matched', record)
+}
+
+// The results list on screen, and the height an empty one keeps when a failed or canceled search
+// takes them away (cards that don't keep the room from the start): nothing moves until the next
+// results replace it
+const resultsListEl = ref<ComponentPublicInstance | null>(null)
+const keptHeight = ref<number | null>(null)
+
+function keepResultsHeight() {
+  if (props.placeholders || !state.value.results.length) return
+  keptHeight.value = (resultsListEl.value?.$el as HTMLElement | undefined)?.offsetHeight ?? 0
 }
 
 // The answer to a search, under the book: a title search's results, or the records found for the
@@ -650,6 +681,7 @@ async function search(kind: SearchKind = 'title', fresh = false) {
     // An ASIN that could not be looked up stays unusable until it is (its error shows on the New
     // line)
     if (kind === 'asin') match.value.asinError = error
+    keepResultsHeight()
     state.value = { status: 'failed', kind, results: [], error, searched, requestMs: null }
   } finally {
     clearTimeout(timer)
@@ -672,8 +704,17 @@ function stopSearch() {
 // Cancel search: the search stops, its results stay, and the card says it was canceled (orange)
 function cancelSearch() {
   if (state.value.status !== 'searching') return
+  const canceled = running.value
+  keepResultsHeight()
   stopSearch()
-  state.value = { ...state.value, status: 'canceled', error: 'Search canceled.' }
+  // The previous results go: they don't answer the search canceled, which the header names
+  state.value = {
+    ...state.value,
+    status: 'canceled',
+    results: [],
+    error: 'Search canceled.',
+    searched: canceled ?? state.value.searched,
+  }
 }
 
 // The record picked in the results: its ASIN in the region it was found in. The results stay,
@@ -1108,24 +1149,6 @@ defineExpose({ search, cancelSearch })
   min-height: 2.8em;
 }
 
-.match-search-state {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin: 0.75rem 0 0;
-  font-size: 0.85rem;
-  color: #aaa;
-}
-
-.match-search-warning {
-  color: var(--status-warning);
-}
-
-.match-search-error {
-  color: var(--status-error);
-}
-
 /* While a new search runs: the previous results greyed out, not clickable, under a spinning
    wheel laid over them (it takes no room). Once answered, the wheel's line says what was found,
    stays readable, then fades out while the results come out of grey, still not clickable */
@@ -1217,6 +1240,18 @@ defineExpose({ search, cancelSearch })
   margin: 0.75rem 0 0;
   font-size: 0.8rem;
   color: #aaa;
+}
+
+/* How the search went, in its colour: the header's own grey comes first */
+.match-results-header.match-search-warning {
+  color: var(--status-warning);
+}
+
+.match-results-header.match-search-error {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--status-error);
 }
 
 .match-search-results {

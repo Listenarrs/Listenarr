@@ -509,7 +509,7 @@ describe('RepairBooksModal', () => {
     )
   })
 
-  it('keeps the results while a new search runs, and after Cancel search says it was canceled', async () => {
+  it('keeps the results while a new search runs; Cancel search empties them and says so', async () => {
     catalogue({ fr: [frenchVol7] })
     const wrapper = mountModal()
     await flushPromises()
@@ -533,11 +533,16 @@ describe('RepairBooksModal', () => {
     await row(wrapper).get('[data-testid="match-cancel-search"]').trigger('click')
     await flushPromises()
 
+    // The previous results don't answer the search canceled: the empty list in their place, and
+    // the header line names the search canceled
     const message = row(wrapper).get('[data-testid="match-search-error"]')
-    expect(message.text()).toBe('Search canceled.')
+    expect(message.text()).toBe(
+      'No results for "Primal Hunter, Vol. 7" by "Zogarth" in France (FR) - Search canceled',
+    )
     expect(message.classes()).toContain('match-search-warning')
     expect(row(wrapper).attributes('data-match-state')).toBe('warning')
-    expect(row(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(1)
+    expect(row(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(0)
+    expect(row(wrapper).find('[data-testid="match-results-placeholder"]').exists()).toBe(true)
     expect(row(wrapper).find('[data-testid="match-search-pending"]').exists()).toBe(false)
     expect(row(wrapper).find('[data-testid="match-retry"]').exists()).toBe(true)
   })
@@ -727,6 +732,54 @@ describe('RepairBooksModal', () => {
       /^No results for "Primal Hunter, Vol\. 7" by "Zogarth" in France \(FR\) - Request: [\d.]+ s$/,
     )
     expect(row(wrapper).find('[data-testid="match-results-placeholder"]').exists()).toBe(true)
+  })
+
+  it('puts the empty list back when a search fails, and says why on its header line', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    await row(wrapper).get('[data-testid="match-region"]').setValue('us')
+    await flushPromises()
+    await emptyAsin(wrapper)
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
+    await flushPromises()
+    expect(row(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(1)
+
+    apiMocks.advancedSearch.mockRejectedValueOnce(new Error('API error: 502 Bad Gateway'))
+    await row(wrapper).get('[data-testid="match-retry"]').trigger('click')
+    await flushPromises()
+
+    // No results to show: the empty list, as before any search, and the reason in red
+    expect(row(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(0)
+    expect(row(wrapper).find('[data-testid="match-results-placeholder"]').exists()).toBe(true)
+    const header = row(wrapper).get('[data-testid="match-search-error"]')
+    expect(header.text()).toBe(
+      'No results for "Primal Hunter, Vol. 7" by "Zogarth" in United States (US) - The search failed: API error: 502 Bad Gateway',
+    )
+    expect(header.classes()).toContain('match-search-error')
+    expect(header.classes()).toContain('match-results-header')
+  })
+
+  it('keeps the height of the results a canceled search empties, with several books', async () => {
+    const wrapper = mountModal([7, 8])
+    await flushPromises()
+    await row(wrapper).get('[data-testid="match-region"]').setValue('us')
+    await flushPromises()
+    await emptyAsin(wrapper)
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
+    await flushPromises()
+    // No room kept from the start with several books
+    expect(row(wrapper).find('[data-testid="match-results-placeholder"]').exists()).toBe(false)
+
+    // jsdom has no layout: the results list is 180px high
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(180)
+    apiMocks.advancedSearch.mockImplementationOnce(() => new Promise(() => {}))
+    await row(wrapper).get('[data-testid="match-retry"]').trigger('click')
+    await flushPromises()
+    await row(wrapper).get('[data-testid="match-cancel-search"]').trigger('click')
+    await flushPromises()
+
+    const placeholder = row(wrapper).get('[data-testid="match-results-placeholder"]')
+    expect((placeholder.element as HTMLElement).style.height).toBe('180px')
   })
 
   it('says no search was done for every book, but keeps the list room for one book only', async () => {
