@@ -17,12 +17,17 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
         NzbgetHistoryEnrichmentWorkflow historyEnrichmentWorkflow,
         ILogger<NzbgetAdapter> logger)
     {
-        public async Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default)
+        private const string IncompleteSnapshotMessage = "Incomplete NZBGet queue snapshot.";
+
+        public async Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default, bool ignoreCategory = false)
         {
             var items = new List<QueueItem>();
             if (client == null) return items;
 
-            var configuredCategory = DownloadClientCategoryFilter.GetConfiguredCategory(client);
+            // Tracked lookups for orphan cleanup ignore the category, so a tracked job
+            // stays visible after its category changes. Display and discovery keep it.
+            var isFullPoll = ids.Count == 0;
+            var configuredCategory = ignoreCategory ? null : DownloadClientCategoryFilter.GetConfiguredCategory(client);
             var activeIdentities = new List<NzbgetHistoryEnrichmentWorkflow.ActiveHistoryIdentity>();
 
             try
@@ -49,6 +54,11 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
                     try
                     {
                         var structElement = valueElement.Element("struct");
+                        if (structElement == null && isFullPoll)
+                        {
+                            throw new DownloadClientAdapterPollingException(IncompleteSnapshotMessage);
+                        }
+
                         if (structElement != null)
                         {
                             var groupCategory = structElement.Elements("member")
@@ -69,8 +79,15 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
                                     queueItem.Title));
                         }
                     }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                    catch (Exception ex) when (ex is not DownloadClientAdapterPollingException && ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                     {
+                        // A full poll drives orphan cleanup, so an entry we cannot read
+                        // must fail the snapshot instead of silently dropping out of it.
+                        if (isFullPoll)
+                        {
+                            throw new DownloadClientAdapterPollingException(IncompleteSnapshotMessage, ex);
+                        }
+
                         logger.LogDebug(ex, "Failed to map NZBGet queue item (non-fatal)");
                     }
                 }

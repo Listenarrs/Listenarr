@@ -98,6 +98,9 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
         public Task<DownloadClientQueueSnapshot> GetQueueSnapshotAsync(DownloadClientConfiguration client, CancellationToken ct = default)
             => _queueFetchWorkflow.GetQueueSnapshotAsync(client, [], ct);
 
+        public Task<List<QueueItem>> GetTrackedQueueAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default)
+            => _queueFetchWorkflow.GetQueueAsync(client, ids, ct, ignoreCategory: true);
+
         public Task<List<(string Id, string Name)>> GetRecentHistoryAsync(DownloadClientConfiguration client, int limit = 100, CancellationToken ct = default)
             => Task.FromResult(new List<(string Id, string Name)>());
 
