@@ -33,7 +33,6 @@ namespace Listenarr.Application.Downloads.Queue
         ILogger<DownloadQueueService> logger) : IDownloadQueueService
     {
         internal TimeSpan _clientQueueTimeout = TimeSpan.FromSeconds(15);
-        internal TimeSpan _staleSnapshotMaxAge = TimeSpan.FromMinutes(3);
         private readonly int _maxParallelClientPolls = 4;
 
         private const int QueueCacheExpirationSeconds = 10;
@@ -82,7 +81,6 @@ namespace Listenarr.Application.Downloads.Queue
             var clientQueueResults = await clientQueuePoller.FetchAsync(
                 enabledClients,
                 _clientQueueTimeout,
-                _staleSnapshotMaxAge,
                 _maxParallelClientPolls);
             var clientStatuses = DownloadQueueSnapshotMapper.BuildClientStatuses(clientQueueResults);
 
@@ -292,8 +290,16 @@ namespace Listenarr.Application.Downloads.Queue
                 {
                     var existingIds = queueItems.Select(q => q.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+                    // An unavailable client's records are kept, but not shown, until
+                    // the client answers a live poll again.
+                    var unavailableClientIds = clientQueueResults
+                        .Where(result => result.IsUnavailable)
+                        .Select(result => result.Client.Id)
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
                     var completedExternal = listenarrDownloads
                         .Where(d => !string.Equals(d.DownloadClientId, DirectDownloadMetadataKeys.ClientId, StringComparison.OrdinalIgnoreCase) && d.Status == DownloadStatus.Completed)
+                        .Where(d => !unavailableClientIds.Contains(d.DownloadClientId ?? string.Empty))
                         .ToList();
 
                     foreach (var download in completedExternal)

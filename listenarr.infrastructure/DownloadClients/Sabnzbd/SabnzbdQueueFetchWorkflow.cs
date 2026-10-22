@@ -29,6 +29,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
     {
         private const int DisplayHistoryLimit = 30;
         private const int MonitorHistoryLimit = 100;
+        private const string IncompleteSnapshotMessage = "Incomplete SABnzbd queue snapshot.";
 
         public async Task<List<QueueItem>> GetQueueAsync(
             DownloadClientConfiguration client,
@@ -99,11 +100,23 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                         var queueItem = SabnzbdResponseMapper.MapQueueSlotToQueueItem(client, slot, configuredCategory ?? string.Empty, speed, monitoredIdSet);
                         if (queueItem != null)
                         {
+                            if (!isMonitorPoll && string.IsNullOrWhiteSpace(queueItem.Id))
+                            {
+                                throw new DownloadClientAdapterPollingException(IncompleteSnapshotMessage);
+                            }
+
                             items.Add(queueItem);
                         }
                     }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                    catch (Exception ex) when (ex is not DownloadClientAdapterPollingException && ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                     {
+                        // A full poll drives orphan cleanup, so a slot we cannot read
+                        // must fail the snapshot instead of silently dropping out of it.
+                        if (!isMonitorPoll)
+                        {
+                            throw new DownloadClientAdapterPollingException(IncompleteSnapshotMessage, ex);
+                        }
+
                         logger.LogError(ex, "Error parsing SABnzbd queue item");
                     }
                 }
@@ -124,7 +137,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                 }
 
                 var historyLimit = isMonitorPoll ? MonitorHistoryLimit : DisplayHistoryLimit;
-                var historyFailureIsFatal = isMonitorPoll && missingTrackedIds.Count > 0;
+                var historyFailureIsFatal = !isMonitorPoll || missingTrackedIds.Count > 0;
                 await AddHistoryItemsAsync(client, requestContext, configuredCategory, items, http, historyLimit, historyFailureIsFatal, monitoredIdSet, ct);
             }
             catch (DownloadClientAdapterPollingException)
@@ -198,18 +211,29 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                     return;
                 }
 
+                var isFullPoll = monitoredIdSet.Count == 0;
                 foreach (var slot in histSlots.EnumerateArray())
                 {
                     try
                     {
+                        if (isFullPoll && !HasUsableNzoId(slot))
+                        {
+                            throw new DownloadClientAdapterPollingException(IncompleteSnapshotMessage);
+                        }
+
                         var historyItem = SabnzbdResponseMapper.MapHistorySlotToQueueItem(client, slot, configuredCategory ?? string.Empty, existingNzoIds, monitoredIdSet);
                         if (historyItem != null)
                         {
                             items.Add(historyItem);
                         }
                     }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                    catch (Exception ex) when (ex is not DownloadClientAdapterPollingException && ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                     {
+                        if (isFullPoll)
+                        {
+                            throw new DownloadClientAdapterPollingException(IncompleteSnapshotMessage, ex);
+                        }
+
                         logger.LogDebug(ex, "Error parsing SABnzbd history item");
                     }
                 }
@@ -227,6 +251,13 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                     throw new DownloadClientAdapterPollingException("Error polling SABnzbd history.", ex);
                 }
             }
+        }
+
+        private static bool HasUsableNzoId(JsonElement slot)
+        {
+            return slot.TryGetProperty("nzo_id", out var nzoId) &&
+                nzoId.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(nzoId.GetString());
         }
 
         private static HashSet<string> BuildMonitoredIdSet(IReadOnlyCollection<string>? monitoredIds)

@@ -862,7 +862,6 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
             var snapshot = Assert.Single(await poller.FetchAsync(
                 [_client],
                 TimeSpan.FromSeconds(15),
-                TimeSpan.FromMinutes(3),
                 maxParallelClientPolls: 1));
 
             await _provider.GetRequiredService<DownloadOrphanCleanupService>()

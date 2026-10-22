@@ -15,6 +15,7 @@ namespace Listenarr.Tests.Mocks.Api
         public bool GetCatsTimesOut { get; set; }
         public System.Net.HttpStatusCode HistoryStatusCode { get; set; } = System.Net.HttpStatusCode.OK;
         public string? HistoryResponseOverride { get; set; }
+        public string? QueueResponseOverride { get; set; }
         public List<Uri> RemovalRequests { get; } = [];
 
         public SabnzbdApiMock()
@@ -67,6 +68,11 @@ namespace Listenarr.Tests.Mocks.Api
 
         public async Task<HttpResponseMessage> GetQueue(HttpRequestMessage request, CancellationToken ct)
         {
+            if (QueueResponseOverride != null)
+            {
+                return MockUtils.GetCannedResponse(QueueResponseOverride);
+            }
+
             var response = """
             {
                 "queue": {
