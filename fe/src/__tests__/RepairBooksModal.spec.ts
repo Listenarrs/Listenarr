@@ -782,6 +782,28 @@ describe('RepairBooksModal', () => {
     expect((placeholder.element as HTMLElement).style.height).toBe('180px')
   })
 
+  it('gives a book of several an empty list one result high with its first search', async () => {
+    const wrapper = mountModal([7, 8])
+    await flushPromises()
+    expect(row(wrapper).find('[data-testid="match-results-placeholder"]').exists()).toBe(false)
+
+    // The first search waits over an empty list one result high, under the spinner
+    let answer!: (results: unknown[]) => void
+    apiMocks.advancedSearch.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)))
+    await emptyAsin(wrapper)
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
+    await flushPromises()
+    const placeholder = row(wrapper).get('[data-testid="match-results-placeholder"]')
+    expect(placeholder.classes()).toContain('match-results-empty-row')
+    expect(row(wrapper).find('[data-testid="match-results-pending"]').exists()).toBe(true)
+
+    // Nothing found: the empty list stays, the card doesn't shrink back
+    answer([])
+    await flushPromises()
+    expect(row(wrapper).find('[data-testid="match-results-placeholder"]').exists()).toBe(true)
+    expect(row(wrapper).find('[data-testid="match-search-empty"]').exists()).toBe(true)
+  })
+
   it('says no search was done for every book, but keeps the list room for one book only', async () => {
     const wrapper = mountModal([7, 8])
     await flushPromises()
