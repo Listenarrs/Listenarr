@@ -33,7 +33,10 @@
           <p>{{ error }}</p>
         </div>
 
-        <!-- The books stay through the repair: each card shows its own progress and result -->
+        <!-- Once repaired: what happened to each book, and which ones to organize -->
+        <RepairResults v-else-if="finished" v-model:selected="organizeIds" :outcomes="outcomes" />
+
+        <!-- The books stay through the repair: each card shows its own progress -->
         <div v-else-if="rows.length" class="repair-list-wrapper">
           <div class="info-section repair-info-section">
             <PhInfo />
@@ -150,15 +153,14 @@
         </template>
         <template #default>
           <!-- Always shown, 0 included, from the start: a count that appears and disappears would
-               move Repair -->
+               move Repair. Once repaired, the books left out of Organize -->
           <span
-            v-if="!finished"
             ref="countRef"
             class="repair-count"
             :class="{ 'repair-count-wraps': countWraps }"
             data-testid="repair-count"
           >
-            {{ skippedCount }} skipped
+            {{ finished ? rows.length - organizeIds.length : skippedCount }} skipped
           </span>
           <button
             v-if="!finished"
@@ -174,24 +176,30 @@
               executing ? `Repairing ${progress} of ${selectedCount}…` : `Repair ${selectedCount}`
             }}
           </button>
-          <template v-else>
-            <!-- Always there after a repair, so the footer doesn't change with the outcome -->
-            <button
-              type="button"
-              class="btn btn-secondary"
-              data-testid="repair-organize"
-              :disabled="!repairedIds.length"
-              :title="repairedIds.length ? undefined : 'No book was repaired: nothing to organize'"
-              @click="emit('organize', repairedIds)"
-            >
-              <PhFolderOpen :size="16" />
-              Organize repaired
-            </button>
-            <button type="button" class="btn btn-primary" @click="handleDone">
-              <PhCheckCircle :size="16" />
-              Done
-            </button>
-          </template>
+          <button
+            v-else
+            type="button"
+            class="btn btn-primary"
+            data-testid="repair-organize"
+            :disabled="!organizeIds.length"
+            :title="organizeIds.length ? undefined : 'Tick a repaired book to organize it'"
+            @click="emit('organize', organizeIds)"
+          >
+            <PhFolderOpen :size="16" />
+            Organize {{ organizeIds.length }}
+          </button>
+          <!-- Along the dialog's bottom edge: grey until a repair runs, then filled in blue as
+               the books are repaired -->
+          <div
+            class="repair-progress"
+            role="progressbar"
+            aria-label="Repair progress"
+            :aria-valuemax="repairTotal"
+            :aria-valuenow="repairCompleted"
+            data-testid="repair-progress"
+          >
+            <div class="repair-progress-fill" :style="{ width: `${progressPercent}%` }" />
+          </div>
         </template>
       </ModalFooter>
     </template>
@@ -201,7 +209,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch, type ComponentPublicInstance } from 'vue'
 import {
-  PhCheckCircle,
   PhCheckSquare,
   PhFolderOpen,
   PhInfo,
@@ -214,6 +221,7 @@ import { Modal, ModalBody, ModalFooter, ModalHeader } from '@/components/feedbac
 import { apiService } from '@/services/api'
 import { useLibraryImportStore } from '@/stores/libraryImport'
 import BookMatchCard from '@/components/domain/audiobook/BookMatchCard.vue'
+import RepairResults, { type RepairOutcome } from './RepairResults.vue'
 import MatchLegend from '@/components/domain/audiobook/MatchLegend.vue'
 import {
   FALLBACK_REGION,
@@ -221,6 +229,7 @@ import {
   createBookMatch,
   matchState,
   type BookMatch,
+  type BookRecord,
   type BookTask,
 } from '@/utils/bookMatch'
 import type { AudiobookExternalIdentifier, AudiobookExternalIdentifierInput } from '@/types'
@@ -237,6 +246,9 @@ interface RepairRow {
   selected: boolean
   // Its repair, once started: waiting, running, then how it ended (shown by its card)
   task: BookTask | null
+  // Its record when the repair started, and after it when its ASIN changed
+  before: BookRecord | null
+  after: BookRecord | null
 }
 
 const props = withDefaults(
@@ -265,6 +277,14 @@ const finished = ref(false)
 const error = ref<string | null>(null)
 const rows = ref<RepairRow[]>([])
 const progress = ref(0)
+// The repairs over (whatever their outcome), of how many: the progress bar
+const repairCompleted = ref(0)
+const repairTotal = ref(0)
+const progressPercent = computed(() =>
+  repairTotal.value ? (repairCompleted.value / repairTotal.value) * 100 : 0,
+)
+// The repaired books to organize: all of them at first
+const organizeIds = ref<number[]>([])
 // One book is searched at a time: the others wait for it
 const searchingRowId = ref<number | null>(null)
 
@@ -297,35 +317,36 @@ function placeLegend() {
   const legend = legendRef.value?.$el as HTMLElement | undefined
   const left = footer?.querySelector<HTMLElement>('.modal-footer-left')
   const actions = footer?.querySelector<HTMLElement>('.modal-footer-actions')
-  if (!footer || !legend || !left || !actions || !cancelRef.value) return
+  if (!footer || !left || !actions || !cancelRef.value) return
   const footerStyle = getComputedStyle(footer)
   const room = footer.clientWidth - px(footerStyle.paddingLeft) - px(footerStyle.paddingRight)
-  // The legend's width on one line, whatever line it is on now
-  const entries = Array.from(legend.children) as HTMLElement[]
+  // The legend's width on one line, whatever line it is on now (none once repaired)
+  const entries = legend ? (Array.from(legend.children) as HTMLElement[]) : []
   const legendWidth =
     entries.reduce((width, entry) => width + entry.offsetWidth, 0) +
-    gapOf(legend) * Math.max(entries.length - 1, 0)
+    (legend ? gapOf(legend) : 0) * Math.max(entries.length - 1, 0)
   // The skipped count and Repair, the count on one line whatever it shows now
   const count = countRef.value
   const actionsWidth = count
     ? actions.offsetWidth - count.offsetWidth + oneLineWidth(count)
     : actions.offsetWidth
   const cancelAndActions = cancelRef.value.offsetWidth + gapOf(footer) + actionsWidth
-  legendAbove.value = cancelAndActions + gapOf(left) + legendWidth > room
+  legendAbove.value = !!legend && cancelAndActions + gapOf(left) + legendWidth > room
   countWraps.value = cancelAndActions > room
 }
 
-// Measured again when the modal resizes, the skipped count changes, or the legend shows
+// Measured again when the modal resizes, the skipped count or the button changes, or the legend
+// shows or goes (the results step has none)
 watch(
   [footerRef, legendRef],
   ([footer, legend]) => {
     footerObserver?.disconnect()
     footerObserver = null
-    if (!footer || !legend || typeof ResizeObserver !== 'function') return
+    if (!footer || typeof ResizeObserver !== 'function') return
     footerObserver = new ResizeObserver(placeLegend)
     const footerElement = footer.$el as HTMLElement
     footerObserver.observe(footerElement)
-    footerObserver.observe(legend.$el as HTMLElement)
+    if (legend) footerObserver.observe(legend.$el as HTMLElement)
     const actions = footerElement.querySelector('.modal-footer-actions')
     if (actions) footerObserver.observe(actions)
   },
@@ -337,8 +358,15 @@ onBeforeUnmount(() => footerObserver?.disconnect())
 const selectedRows = computed(() => rows.value.filter(isIncluded))
 const selectedCount = computed(() => selectedRows.value.length)
 const skippedCount = computed(() => rows.value.length - selectedCount.value)
-const repairedIds = computed(() =>
-  rows.value.filter((r) => r.task?.state === 'done').map((r) => r.id),
+const outcomes = computed<RepairOutcome[]>(() =>
+  rows.value.map((row) => ({
+    id: row.id,
+    title: row.title,
+    state: row.task?.state ?? 'skipped',
+    message: row.task?.text ?? '',
+    before: row.before ?? {},
+    after: row.after,
+  })),
 )
 
 function primaryAsin(identifiers: AudiobookExternalIdentifier[]) {
@@ -351,6 +379,9 @@ async function load() {
   finished.value = false
   error.value = null
   rows.value = []
+  organizeIds.value = []
+  repairCompleted.value = 0
+  repairTotal.value = 0
   searchingRowId.value = null
   try {
     configuredRegion.value = await libraryImportStore.configuredRegion()
@@ -379,6 +410,8 @@ async function load() {
           match,
           selected: false,
           task: null,
+          before: null,
+          after: null,
         }
       }),
     )
@@ -439,10 +472,20 @@ async function repair() {
   const toRepair = [...selectedRows.value]
   executing.value = true
   progress.value = 0
-  for (const row of rows.value)
+  repairCompleted.value = 0
+  repairTotal.value = toRepair.length
+  for (const row of rows.value) {
+    row.before = {
+      title: row.title,
+      subtitle: row.subtitle,
+      authors: row.authors,
+      asin: row.match.current.asin,
+      region: row.match.current.region,
+    }
     row.task = toRepair.includes(row)
       ? { state: 'waiting', text: 'Waiting to be repaired' }
       : { state: 'skipped', text: 'Skipped: not repaired' }
+  }
   for (const row of toRepair) {
     progress.value++
     row.task = { state: 'running', text: 'Repairing…' }
@@ -463,10 +506,17 @@ async function repair() {
       row.subtitle = book.subtitle ?? row.subtitle
       row.authors = book.authors ?? row.authors
       row.match.current = { asin, region }
+      row.after = { title: row.title, subtitle: row.subtitle, authors: row.authors, asin, region }
       row.task = { state: 'done', text: `Repaired in ${took()}: ${asin} · ${region}` }
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Repair failed'
       // The new ASIN saved but its metadata not read: repaired in part
+      if (saved)
+        row.after = {
+          ...row.before,
+          asin: row.match.picked?.asin ?? '',
+          region: row.match.picked?.region || row.match.region,
+        }
       row.task = saved
         ? {
             state: 'warning',
@@ -474,7 +524,9 @@ async function repair() {
           }
         : { state: 'failed', text: `Repair failed (${took()}): ${message}` }
     }
+    repairCompleted.value++
   }
+  organizeIds.value = rows.value.filter((r) => r.task?.state === 'done').map((r) => r.id)
   executing.value = false
   finished.value = true
 }
@@ -498,10 +550,6 @@ function handleClose() {
   if (executing.value) return
   if (finished.value) emit('done')
   else emit('close')
-}
-
-function handleDone() {
-  emit('done')
 }
 
 watch(
@@ -613,6 +661,27 @@ watch(
    moves: a change here would play the footer buttons' transition, Cancel stretching for a moment */
 .repair-footer .cancel-button {
   flex: 0 0 auto;
+}
+
+/* The progress bar along the dialog's bottom edge, under the footer */
+.modal-footer.repair-footer {
+  position: relative;
+}
+
+.repair-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: var(--status-idle);
+  overflow: hidden;
+}
+
+.repair-progress-fill {
+  height: 100%;
+  background: var(--status-progress);
+  transition: width 0.3s ease;
 }
 
 .repair-legend-above {
