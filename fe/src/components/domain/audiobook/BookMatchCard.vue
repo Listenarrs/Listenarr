@@ -18,238 +18,242 @@
 <!-- One book and the Audible record it should point at: its current and new records, the ASIN,
      Title, Author and Region fields, and the search under the book (Repair Books and Find Match).
      The bar along its bottom tells its state: grey ignored, green matched, orange for a field error
-     or no result, red for a failed request, and breathes in blue while a search runs. -->
+     or no result, red for a failed request, and breathes in blue while a search runs. While another
+     book is searched, the whole card waits: nothing in it can be edited, searched or picked. -->
 <template>
   <div
     class="form-control-card match-card"
-    :class="`match-card-${barState}`"
+    :class="[`match-card-${barState}`, { 'match-card-locked': searchLocked }]"
     :data-match-state="barState"
+    :title="searchLocked ? 'Another book is being searched' : undefined"
   >
-    <div class="match-header">
-      <span class="match-heading">
-        <slot name="heading" />
-      </span>
-      <span class="match-header-right">
-        <span class="match-meta" data-testid="match-summary">
-          {{ bookSummary(currentRecord) }}
+    <fieldset class="match-lock" :disabled="searchLocked" data-testid="match-lock">
+      <div class="match-header">
+        <span class="match-heading">
+          <slot name="heading" />
         </span>
+        <span class="match-header-right">
+          <span class="match-meta" data-testid="match-summary">
+            {{ bookSummary(currentRecord) }}
+          </span>
+          <button
+            type="button"
+            class="btn btn-secondary match-revert-btn"
+            title="Revert"
+            aria-label="Revert to the values before your changes"
+            data-testid="match-revert"
+            :disabled="!isEdited(match)"
+            @click.prevent.stop="revert"
+          >
+            <PhArrowCounterClockwise :size="14" />
+          </button>
+        </span>
+      </div>
+
+      <div class="match-fields">
+        <label class="match-field match-field-asin">
+          <span class="match-field-label">ASIN</span>
+          <span class="match-clearable">
+            <input
+              v-model.trim="match.asin"
+              class="form-input"
+              maxlength="10"
+              data-testid="match-asin"
+              @input="onAsinTyped"
+              @keydown.enter.prevent="onAsinEntered"
+            />
+            <button
+              v-if="match.asin"
+              type="button"
+              class="match-clear-btn"
+              title="Empty the ASIN field"
+              aria-label="Empty the ASIN field"
+              data-testid="match-asin-clear"
+              @click.prevent="clearField('asin')"
+            >
+              <PhBackspace :size="18" />
+            </button>
+          </span>
+        </label>
+        <label class="match-field">
+          <span class="match-field-label">Title</span>
+          <span class="match-clearable">
+            <input
+              ref="titleEl"
+              v-model="match.query"
+              class="form-input"
+              data-testid="match-title"
+              @input="onEdited"
+              @keydown.enter.prevent="search(searchKind)"
+            />
+            <button
+              v-if="match.query"
+              type="button"
+              class="match-clear-btn"
+              title="Empty the Title field"
+              aria-label="Empty the Title field"
+              data-testid="match-title-clear"
+              @click.prevent="clearField('query')"
+            >
+              <PhBackspace :size="18" />
+            </button>
+          </span>
+        </label>
+        <label class="match-field">
+          <span class="match-field-label">Author</span>
+          <span class="match-clearable">
+            <input
+              v-model="match.author"
+              class="form-input"
+              data-testid="match-author"
+              @input="onEdited"
+              @keydown.enter.prevent="search(searchKind)"
+            />
+            <button
+              v-if="match.author"
+              type="button"
+              class="match-clear-btn"
+              title="Empty the Author field"
+              aria-label="Empty the Author field"
+              data-testid="match-author-clear"
+              @click.prevent="clearField('author')"
+            >
+              <PhBackspace :size="18" />
+            </button>
+          </span>
+        </label>
+        <label class="match-field">
+          <span class="match-field-label">Region</span>
+          <select
+            v-model="match.region"
+            class="form-input"
+            data-testid="match-region"
+            :disabled="regionLocked"
+            :title="
+              regionLocked
+                ? 'Wait for the search to end: changing the region searches'
+                : regionLabel(match.region)
+            "
+            @change="onRegionChanged"
+          >
+            <option v-for="o in regionOptions" :key="o.value" :value="o.value" :title="o.label">
+              {{ o.value.toUpperCase() }}
+            </option>
+          </select>
+        </label>
         <button
+          v-if="state.status === 'searching'"
           type="button"
-          class="btn btn-secondary match-revert-btn"
-          title="Revert"
-          aria-label="Revert to the values before your changes"
-          data-testid="match-revert"
-          :disabled="!isEdited(match)"
-          @click.prevent.stop="revert"
+          class="btn btn-danger match-search-btn"
+          data-testid="match-cancel-search"
+          @click="cancelSearch"
         >
-          <PhArrowCounterClockwise :size="14" />
+          <PhX :size="16" />
+          Cancel search
         </button>
-      </span>
-    </div>
-
-    <div class="match-fields">
-      <label class="match-field match-field-asin">
-        <span class="match-field-label">ASIN</span>
-        <span class="match-clearable">
-          <input
-            v-model.trim="match.asin"
-            class="form-input"
-            maxlength="10"
-            data-testid="match-asin"
-            @input="onAsinTyped"
-            @keydown.enter.prevent="onAsinEntered"
-          />
-          <button
-            v-if="match.asin"
-            type="button"
-            class="match-clear-btn"
-            title="Empty the ASIN field"
-            aria-label="Empty the ASIN field"
-            data-testid="match-asin-clear"
-            @click.prevent="clearField('asin')"
-          >
-            <PhBackspace :size="18" />
-          </button>
-        </span>
-      </label>
-      <label class="match-field">
-        <span class="match-field-label">Title</span>
-        <span class="match-clearable">
-          <input
-            ref="titleEl"
-            v-model="match.query"
-            class="form-input"
-            data-testid="match-title"
-            @input="onEdited"
-            @keydown.enter.prevent="search(searchKind)"
-          />
-          <button
-            v-if="match.query"
-            type="button"
-            class="match-clear-btn"
-            title="Empty the Title field"
-            aria-label="Empty the Title field"
-            data-testid="match-title-clear"
-            @click.prevent="clearField('query')"
-          >
-            <PhBackspace :size="18" />
-          </button>
-        </span>
-      </label>
-      <label class="match-field">
-        <span class="match-field-label">Author</span>
-        <span class="match-clearable">
-          <input
-            v-model="match.author"
-            class="form-input"
-            data-testid="match-author"
-            @input="onEdited"
-            @keydown.enter.prevent="search(searchKind)"
-          />
-          <button
-            v-if="match.author"
-            type="button"
-            class="match-clear-btn"
-            title="Empty the Author field"
-            aria-label="Empty the Author field"
-            data-testid="match-author-clear"
-            @click.prevent="clearField('author')"
-          >
-            <PhBackspace :size="18" />
-          </button>
-        </span>
-      </label>
-      <label class="match-field">
-        <span class="match-field-label">Region</span>
-        <select
-          v-model="match.region"
-          class="form-input"
-          data-testid="match-region"
-          :disabled="regionLocked"
+        <button
+          v-else-if="retryKind"
+          type="button"
+          class="btn btn-secondary match-search-btn"
+          data-testid="match-retry"
+          :disabled="!canSearchFor(retryKind)"
           :title="
-            regionLocked
-              ? 'Wait for the search to end: changing the region searches'
-              : regionLabel(match.region)
+            searchLocked ? 'Another book is being searched' : 'Search again with the same values'
           "
-          @change="onRegionChanged"
+          @click="search(retryKind)"
         >
-          <option v-for="o in regionOptions" :key="o.value" :value="o.value" :title="o.label">
-            {{ o.value.toUpperCase() }}
-          </option>
-        </select>
-      </label>
-      <button
-        v-if="state.status === 'searching'"
-        type="button"
-        class="btn btn-danger match-search-btn"
-        data-testid="match-cancel-search"
-        @click="cancelSearch"
-      >
-        <PhX :size="16" />
-        Cancel search
-      </button>
-      <button
-        v-else-if="retryKind"
-        type="button"
-        class="btn btn-secondary match-search-btn"
-        data-testid="match-retry"
-        :disabled="!canSearchFor(retryKind)"
-        :title="
-          searchLocked ? 'Another book is being searched' : 'Search again with the same values'
-        "
-        @click="search(retryKind)"
-      >
-        <PhArrowCounterClockwise :size="16" />
-        Retry
-      </button>
-      <button
-        v-else
-        type="button"
-        class="btn btn-secondary match-search-btn"
-        data-testid="match-search"
-        :disabled="!canSearchFor(searchKind)"
-        :title="
-          searchLocked
-            ? 'Another book is being searched'
-            : 'The search Add New and Library Import use, with the same rules and priorities'
-        "
-        @click="search(searchKind)"
-      >
-        <PhMagnifyingGlass :size="16" />
-        Search
-      </button>
-    </div>
+          <PhArrowCounterClockwise :size="16" />
+          Retry
+        </button>
+        <button
+          v-else
+          type="button"
+          class="btn btn-secondary match-search-btn"
+          data-testid="match-search"
+          :disabled="!canSearchFor(searchKind)"
+          :title="
+            searchLocked
+              ? 'Another book is being searched'
+              : 'The search Add New and Library Import use, with the same rules and priorities'
+          "
+          @click="search(searchKind)"
+        >
+          <PhMagnifyingGlass :size="16" />
+          Search
+        </button>
+      </div>
 
-    <!-- What the book points at today, and the record it will point at -->
-    <dl class="match-records">
-      <dt>Current</dt>
-      <dd data-testid="match-current">
-        {{ bookSummary(currentRecord) || 'None' }}
-      </dd>
-      <dt>New</dt>
-      <dd v-if="match.picked" class="match-new-picked" data-testid="match-picked">
-        {{ bookSummary(recordFromResult(match.picked, match.region)) }}
-        <span class="match-status">
-          <PhCheckCircle :size="14" weight="fill" />
-          checked
-        </span>
-      </dd>
-      <dd
-        v-else-if="match.asinError"
-        :class="state.status === 'failed' ? 'match-new-error' : 'match-new-warning'"
-        data-testid="match-asin-error"
-      >
-        <PhXCircle :size="14" weight="fill" />
-        <span>{{ match.asinError }}</span>
-      </dd>
-      <dd v-else data-testid="match-none">
-        No new record yet: search the book and pick it, or type its ASIN
-      </dd>
-    </dl>
+      <!-- What the book points at today, and the record it will point at -->
+      <dl class="match-records">
+        <dt>Current</dt>
+        <dd data-testid="match-current">
+          {{ bookSummary(currentRecord) || 'None' }}
+        </dd>
+        <dt>New</dt>
+        <dd v-if="match.picked" class="match-new-picked" data-testid="match-picked">
+          {{ bookSummary(recordFromResult(match.picked, match.region)) }}
+          <span class="match-status">
+            <PhCheckCircle :size="14" weight="fill" />
+            checked
+          </span>
+        </dd>
+        <dd
+          v-else-if="match.asinError"
+          :class="state.status === 'failed' ? 'match-new-error' : 'match-new-warning'"
+          data-testid="match-asin-error"
+        >
+          <PhXCircle :size="14" weight="fill" />
+          <span>{{ match.asinError }}</span>
+        </dd>
+        <dd v-else data-testid="match-none">
+          No new record yet: search the book and pick it, or type its ASIN
+        </dd>
+      </dl>
 
-    <!-- The rules, where they apply -->
+      <!-- The rules, where they apply -->
 
-    <!-- The search under the book: its message (failed in red; invalid or canceled in orange), and
+      <!-- The search under the book: its message (failed in red; invalid or canceled in orange), and
          its results, which stay until a new search on this book answers. A running search only
          shows on the bottom bar, so nothing moves under the book; its text is for screen
          readers. -->
-    <p
-      v-if="
-        (state.status === 'failed' && state.kind === 'title') ||
-        state.status === 'invalid' ||
-        state.status === 'canceled'
-      "
-      class="match-search-state"
-      :class="state.status === 'failed' ? 'match-search-error' : 'match-search-warning'"
-      data-testid="match-search-error"
-    >
-      <PhWarningCircle :size="16" />
-      <span>{{ state.error }}</span>
-    </p>
-    <p
-      v-if="state.results.length && state.searched"
-      class="match-results-header"
-      data-testid="match-results-header"
-    >
-      Results for {{ describeSearch(state.searched) }} in
-      {{ regionLabel(state.searched.region) }}
-    </p>
-    <FindMatchResults
-      v-if="state.results.length"
-      class="match-search-results"
-      :results="state.results"
-      :selected="pickedRecord"
-      :current="match.current"
-      @select="pick"
-    />
-    <p
-      v-else-if="state.status === 'done' && state.kind === 'title' && state.searched"
-      class="match-search-state match-search-warning"
-      data-testid="match-search-empty"
-    >
-      No results for {{ describeSearch(state.searched) }} in
-      {{ regionLabel(state.searched.region) }}.
-    </p>
+      <p
+        v-if="
+          (state.status === 'failed' && state.kind === 'title') ||
+          state.status === 'invalid' ||
+          state.status === 'canceled'
+        "
+        class="match-search-state"
+        :class="state.status === 'failed' ? 'match-search-error' : 'match-search-warning'"
+        data-testid="match-search-error"
+      >
+        <PhWarningCircle :size="16" />
+        <span>{{ state.error }}</span>
+      </p>
+      <p
+        v-if="state.results.length && state.searched"
+        class="match-results-header"
+        data-testid="match-results-header"
+      >
+        Results for {{ describeSearch(state.searched) }} in
+        {{ regionLabel(state.searched.region) }}
+      </p>
+      <FindMatchResults
+        v-if="state.results.length"
+        class="match-search-results"
+        :results="state.results"
+        :selected="pickedRecord"
+        :current="match.current"
+        @select="pick"
+      />
+      <p
+        v-else-if="state.status === 'done' && state.kind === 'title' && state.searched"
+        class="match-search-state match-search-warning"
+        data-testid="match-search-empty"
+      >
+        No results for {{ describeSearch(state.searched) }} in
+        {{ regionLabel(state.searched.region) }}.
+      </p>
+    </fieldset>
 
     <div class="match-bar" :title="pendingText ?? undefined" />
     <span class="match-sr-only" role="status">
@@ -518,7 +522,7 @@ function cancelSearch() {
 // The record picked in the results: its ASIN in the region it was found in. The results stay,
 // with the selection moved to it. Clicking the selected row again unpicks it: no new record.
 function pick(result: SearchResult) {
-  if (!result.asin) return
+  if (!result.asin || props.searchLocked) return
   const picked = pickedRecord.value
   if (
     picked &&
@@ -605,6 +609,19 @@ defineExpose({ search, cancelSearch })
   position: relative;
   overflow: hidden;
   padding-bottom: calc(1rem + 3px);
+}
+
+/* Only disables what it holds: the card keeps its own layout */
+.match-lock {
+  display: contents;
+}
+
+.match-card-locked {
+  opacity: 0.6;
+}
+
+.match-card-locked :deep(.result-item) {
+  cursor: not-allowed;
 }
 
 .match-bar {

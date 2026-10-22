@@ -626,7 +626,7 @@ describe('RepairBooksModal', () => {
     )
   })
 
-  it('searches one book at a time: the others wait for it', async () => {
+  it('searches one book at a time: the other cards wait for it, locked', async () => {
     apiMocks.getAudiobook.mockImplementation(async (id: number) =>
       id === 7 ? mismatched : { ...mismatched, id: 8, title: 'Other book' },
     )
@@ -642,6 +642,14 @@ describe('RepairBooksModal', () => {
     const otherSearch = row(wrapper, 8).get('[data-testid="match-search"]')
     expect(otherSearch.attributes('disabled')).toBeDefined()
     expect(otherSearch.attributes('title')).toBe('Another book is being searched')
+    // The whole other card waits: its checkbox, fields and Revert can't be used either
+    for (const control of row(wrapper, 8).findAll('input, select, button'))
+      expect(control.element.matches(':disabled')).toBe(true)
+    // Enter in one of its fields doesn't start a second search
+    apiMocks.advancedSearch.mockClear()
+    await row(wrapper, 8).get('[data-testid="match-title"]').trigger('keydown.enter')
+    await flushPromises()
+    expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
     // Changing a region searches: locked too, on every book
     for (const id of [7, 8])
       expect(
@@ -653,6 +661,9 @@ describe('RepairBooksModal', () => {
     expect(
       row(wrapper, 8).get('[data-testid="match-search"]').attributes('disabled'),
     ).toBeUndefined()
+    expect(row(wrapper, 8).get('[data-testid="match-title"]').element.matches(':disabled')).toBe(
+      false,
+    )
     for (const id of [7, 8])
       expect(
         row(wrapper, id).get('[data-testid="match-region"]').attributes('disabled'),
