@@ -600,6 +600,13 @@ watch(
   display: contents;
 }
 
+/* Cancel keeps its own width wherever the legend is (modal footers stretch their buttons below
+   768px), and so does it in the measure. Set on both layouts, so nothing changes when the legend
+   moves: a change here would play the footer buttons' transition, Cancel stretching for a moment */
+.repair-footer .cancel-button {
+  flex: 0 0 auto;
+}
+
 .repair-legend-above {
   order: -1;
   flex-basis: 100%;
