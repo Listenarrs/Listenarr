@@ -268,6 +268,19 @@ describe('RepairBooksModal', () => {
     })
   })
 
+  it('shows the skipped count and the legend from the start, and the count at 0 too', async () => {
+    const wrapper = mountModal()
+    // Still loading: the footer already has its final shape
+    expect(wrapper.get('[data-testid="repair-count"]').text()).toBe('0 skipped')
+    expect(wrapper.find('[data-testid="match-legend"]').exists()).toBe(true)
+    await flushPromises()
+    expect(wrapper.get('[data-testid="repair-count"]').text()).toBe('1 skipped')
+
+    // Every book repaired: none skipped, and the count says so
+    await searchAndPick(wrapper)
+    expect(wrapper.get('[data-testid="repair-count"]').text()).toBe('0 skipped')
+  })
+
   it('counts only the books with a new record, ticked when found, and the skipped ones', async () => {
     const wrapper = mountModal([7, 8])
     await flushPromises()
