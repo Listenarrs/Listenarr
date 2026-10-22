@@ -130,6 +130,10 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                 return $"SABnzbd: connected, but category '{configuredCategory}' does not exist in SABnzbd. " +
                        "Jobs will fall into Default and may not import. Create the category in SABnzbd (Config > Categories).";
             }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                return null;
+            }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 logger.LogDebug(ex, "SABnzbd get_cats probe failed (non-fatal)");

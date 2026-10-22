@@ -531,6 +531,26 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Sabnzbd
         }
 
         [Fact]
+        public async Task TestConnectionAsync_CategoryProbeTimesOut_StillPasses()
+        {
+            sabnzbdApiMock.GetCatsTimesOut = true;
+            var client = new DownloadClientConfigurationBuilder()
+                .WithHost("http://192.168.50.111/sab")
+                .WithPort(8080)
+                .WithoutSsl()
+                .WithApiKey("secret")
+                .WithType("sabnzbd")
+                .WithSettings("category", "audiobooks")
+                .Build();
+
+            var gateway = _provider.GetRequiredService<IDownloadClientGateway>();
+            var (success, message) = await gateway.TestConnectionAsync(client);
+
+            Assert.True(success);
+            Assert.Equal("SABnzbd: connected", message);
+        }
+
+        [Fact]
         public async Task TestConnectionAsync_CategoryPresentInSabnzbd_ReturnsCleanPass()
         {
             sabnzbdApiMock.Categories = ["*", "Default", "audiobooks"];
