@@ -209,17 +209,41 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Sabnzbd
         }
 
         [Fact]
-        public async Task GetQueueAsync_FullSnapshot_DoesNotThrow_WhenHistoryFails()
+        public async Task GetQueueAsync_FullSnapshot_Throws_WhenHistoryFails()
         {
             sabnzbdApiMock.HistoryStatusCode = HttpStatusCode.InternalServerError;
             sabnzbdApiMock.ResetRequestHistory();
             var adapter = MockUtils.CreateSabnzbdAdapter(_provider);
 
-            var items = await adapter.GetQueueAsync(_client);
+            await Assert.ThrowsAsync<DownloadClientAdapterPollingException>(
+                () => adapter.GetQueueAsync(_client));
 
-            Assert.NotEmpty(items);
             Assert.Contains(sabnzbdApiMock.RequestHistory,
                 request => request.RequestUri.Query.Contains("mode=history", StringComparison.Ordinal));
+        }
+
+        [Theory]
+        [InlineData("""{ "queue": { "slots": [ { "filename": "No id", "status": "Downloading" } ] } }""")]
+        [InlineData("""{ "queue": { "slots": [ { "nzo_id": "SABnzbd_nzo_bad", "status": 42 } ] } }""")]
+        public async Task GetQueueAsync_FullSnapshot_Throws_WhenQueueSlotCannotBeRead(string queueBody)
+        {
+            sabnzbdApiMock.QueueResponseOverride = queueBody;
+            var adapter = MockUtils.CreateSabnzbdAdapter(_provider);
+
+            await Assert.ThrowsAsync<DownloadClientAdapterPollingException>(
+                () => adapter.GetQueueAsync(_client));
+        }
+
+        [Theory]
+        [InlineData("""{ "history": { "slots": [ { "name": "No id", "status": "Completed" } ] } }""")]
+        [InlineData("""{ "history": { "slots": [ { "nzo_id": 42, "status": "Completed" } ] } }""")]
+        public async Task GetQueueAsync_FullSnapshot_Throws_WhenHistorySlotHasNoUsableId(string historyBody)
+        {
+            sabnzbdApiMock.HistoryResponseOverride = historyBody;
+            var adapter = MockUtils.CreateSabnzbdAdapter(_provider);
+
+            await Assert.ThrowsAsync<DownloadClientAdapterPollingException>(
+                () => adapter.GetQueueAsync(_client));
         }
 
         [Fact]

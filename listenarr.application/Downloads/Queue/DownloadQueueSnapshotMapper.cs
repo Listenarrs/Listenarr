@@ -20,11 +20,6 @@ namespace Listenarr.Application.Downloads.Queue
 {
     public static class DownloadQueueSnapshotMapper
     {
-        public static string GetClientQueueSnapshotCacheKey(DownloadClientConfiguration client)
-        {
-            return $"download-queue:snapshot:{client.Id}";
-        }
-
         public static List<QueueItem> CloneQueueItems(IEnumerable<QueueItem>? queueItems)
         {
             if (queueItems == null)
