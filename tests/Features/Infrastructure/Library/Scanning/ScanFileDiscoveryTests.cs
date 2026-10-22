@@ -446,6 +446,66 @@ public sealed class ScanFileDiscoveryTests : BaseTests, IDisposable
         Assert.Empty(Discover(audiobook));
     }
 
+    [Theory]
+    [InlineData("Jane Doe, Ph.D., CPA")]
+    [InlineData("Jane Doe, CPA, Ph.D.")]
+    public void FindMatchingAudioFiles_MixedCredentialStack_MatchesCleanFolder(string author)
+    {
+        // A stack mixing a dotted and a plain credential, in either order, must still reduce to
+        // the clean name so a bare author folder matches. The walk crosses the plain credential
+        // to reach the dotted one instead of stopping at it (#990 review).
+        var requested = CreateAudioFile("Jane Doe", "Study", "Study.m4b");
+        var audiobook = new AudiobookBuilder()
+            .WithTitle("Study")
+            .WithAuthor(author)
+            .Build();
+
+        Assert.Equal(requested, Assert.Single(Discover(audiobook)));
+    }
+
+    [Fact]
+    public void FindMatchingAudioFiles_SpacedCredentialFolder_MatchesDottedRecord()
+    {
+        // Regression: a "Jane Doe Ph D" folder must still match a "Jane Doe, Ph.D." record.
+        // Preserving the original author token restores this; the collapsed/stripped aliases
+        // alone missed the spaced spelling (#990 review).
+        var requested = CreateAudioFile("Jane Doe Ph D", "Study", "Study.m4b");
+        var audiobook = new AudiobookBuilder()
+            .WithTitle("Study")
+            .WithAuthor("Jane Doe, Ph.D.")
+            .Build();
+
+        Assert.Equal(requested, Assert.Single(Discover(audiobook)));
+    }
+
+    [Fact]
+    public void FindMatchingAudioFiles_DottedCredentialFolder_MatchesSpacedRecord()
+    {
+        // The reverse direction: a dotted-credential folder must match a spaced-credential record.
+        // Keeping the folder's original normalization (before collapsing) restores it (#990 review).
+        var requested = CreateAudioFile("Jane Doe Ph.D", "Study", "Study.m4b");
+        var audiobook = new AudiobookBuilder()
+            .WithTitle("Study")
+            .WithAuthor("Jane Doe Ph D")
+            .Build();
+
+        Assert.Equal(requested, Assert.Single(Discover(audiobook)));
+    }
+
+    [Fact]
+    public void FindMatchingAudioFiles_CredentialLikeTokenWithExtraCharacters_IsNotStripped()
+    {
+        // "Ph.D.2" is not a credential. Stripping only the periods keeps it as "phd2" (not a
+        // curated post-nominal), so a bare "Jane Doe" folder is not wrongly captured (#990 review).
+        _ = CreateAudioFile("Jane Doe", "Study", "Study.m4b");
+        var audiobook = new AudiobookBuilder()
+            .WithTitle("Study")
+            .WithAuthor("Jane Doe, Ph.D.2")
+            .Build();
+
+        Assert.Empty(Discover(audiobook));
+    }
+
     private List<string> Discover(Audiobook audiobook) =>
         DiscoverResult(audiobook).AttributedFiles.ToList();
 
