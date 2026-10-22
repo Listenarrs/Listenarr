@@ -232,13 +232,27 @@ describe('RepairBooksModal', () => {
     afterEach(() => vi.unstubAllGlobals())
 
     it('puts the legend on its own line above Cancel, the skipped count and Repair', async () => {
-      // Cancel, the five legend entries and the actions: 700px, more than the footer has
+      // Cancel, the five legend entries and the actions (count and Repair): 700px, more than the
+      // footer has
       layout(500)
       const wrapper = mountModal()
       await flushPromises()
 
       expect(wrapper.get('.repair-footer').classes()).toContain('repair-footer-legend-above')
       expect(wrapper.get('[data-testid="match-legend"]').classes()).toContain('repair-legend-above')
+      // Cancel and the actions (200px) still fit: the count stays on one line
+      expect(wrapper.get('[data-testid="repair-count"]').classes()).not.toContain(
+        'repair-count-wraps',
+      )
+    })
+
+    it('wraps the skipped count only when even Cancel, it and Repair do not fit one line', async () => {
+      layout(150)
+      const wrapper = mountModal()
+      await flushPromises()
+
+      expect(wrapper.get('[data-testid="match-legend"]').classes()).toContain('repair-legend-above')
+      expect(wrapper.get('[data-testid="repair-count"]').classes()).toContain('repair-count-wraps')
     })
 
     it('leaves it between Cancel and the skipped count when the line has room', async () => {
