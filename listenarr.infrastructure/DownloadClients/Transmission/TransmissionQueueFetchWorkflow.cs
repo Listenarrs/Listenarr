@@ -16,6 +16,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Transmission
         TransmissionRpcClient rpcClient,
         ILogger<TransmissionAdapter> logger)
     {
+        private const string IncompleteSnapshotMessage = "Incomplete Transmission queue snapshot.";
+
         public async Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default)
         {
             var items = new List<QueueItem>();
@@ -59,10 +61,23 @@ namespace Listenarr.Infrastructure.DownloadClients.Transmission
                             continue;
                         }
 
-                        items.Add(TransmissionResponseMapper.MapQueueItem(client, torrent));
+                        var item = TransmissionResponseMapper.MapQueueItem(client, torrent);
+                        if (ids.Count == 0 && string.IsNullOrWhiteSpace(item.Id))
+                        {
+                            throw new DownloadClientAdapterPollingException(IncompleteSnapshotMessage);
+                        }
+
+                        items.Add(item);
                     }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                    catch (Exception ex) when (ex is not DownloadClientAdapterPollingException && ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                     {
+                        // A full poll drives orphan cleanup, so a torrent we cannot read
+                        // must fail the snapshot instead of silently dropping out of it.
+                        if (ids.Count == 0)
+                        {
+                            throw new DownloadClientAdapterPollingException(IncompleteSnapshotMessage, ex);
+                        }
+
                         logger.LogDebug(ex, "Failed to map Transmission torrent entry (non-fatal)");
                     }
                 }
