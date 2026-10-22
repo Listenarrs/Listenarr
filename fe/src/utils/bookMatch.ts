@@ -17,10 +17,7 @@
  */
 import type { SearchResult } from '@/types'
 import { useSearch } from '@/composables/useSearch'
-import {
-  getPrimaryPreferredSearchLanguageForRegion,
-  searchRegionOptions,
-} from '@/utils/languageMapping'
+import { searchRegionOptions } from '@/utils/languageMapping'
 
 // The Audible record a book points at, as edited in a book match card (Repair and Find Match)
 
@@ -155,9 +152,11 @@ export function addNewQuery(match: BookMatch): string {
 }
 
 // Add New's own search (useSearch), so a book is searched the way it is added: titles through the
-// search endpoint filtered on the region's language, an ASIN through the metadata sources in their
-// priority order. Results are tagged with the region they were found in; aborting the signal
-// rejects at once. An ASIN the region has no record for answers no result.
+// search endpoint, an ASIN through the metadata sources in their priority order. No language
+// filter: language isn't a search field here, a region's catalogue also sells other languages'
+// editions (Audible France sells English books), and each result shows its language. Results are
+// tagged with the region they were found in; aborting the signal rejects at once. An ASIN the
+// region has no record for answers no result.
 export async function searchLikeAddNew(
   query: string,
   region: string,
@@ -166,7 +165,7 @@ export async function searchLikeAddNew(
   const search = useSearch()
   search.searchQuery.value = query
   search.searchLanguage.value = region
-  search.preferredSearchLanguage.value = getPrimaryPreferredSearchLanguageForRegion(region)
+  search.preferredSearchLanguage.value = 'all'
   const aborted = new Promise<never>((_, reject) =>
     signal.addEventListener('abort', () => {
       search.cancelSearch()
