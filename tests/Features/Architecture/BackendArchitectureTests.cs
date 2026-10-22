@@ -310,6 +310,7 @@ public sealed class BackendArchitectureTests : BaseTests
         Type[] serviceTypes =
         [
             typeof(AudiobookFileService),
+            typeof(AudiobookFileTransferService),
             typeof(AudiobookDestinationRewriteService),
             typeof(RenameService),
             typeof(DownloadImportService),
@@ -346,6 +347,7 @@ public sealed class BackendArchitectureTests : BaseTests
         Type[] serviceTypes =
         [
             typeof(AudiobookFileService),
+            typeof(AudiobookFileTransferService),
             typeof(AudiobookDestinationRewriteService),
             typeof(DownloadImportService),
             typeof(LibraryAddService),
