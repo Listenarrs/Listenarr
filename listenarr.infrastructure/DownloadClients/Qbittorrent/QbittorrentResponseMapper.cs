@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using System.Globalization;
 using System.Text.Json;
 
 namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
@@ -207,27 +208,95 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
 
         private static double GetDouble(Dictionary<string, JsonElement> values, string key, double defaultValue = 0)
         {
-            return values.TryGetValue(key, out var element) ? element.GetDouble() : defaultValue;
+            return values.TryGetValue(key, out var element) && TryReadDouble(element, out var result) ? result : defaultValue;
         }
 
         private static long GetInt64(Dictionary<string, JsonElement> values, string key, long defaultValue = 0)
         {
-            return values.TryGetValue(key, out var element) ? element.GetInt64() : defaultValue;
+            return values.TryGetValue(key, out var element) && TryReadInt64(element, out var result) ? result : defaultValue;
         }
 
         private static int? GetNullableInt32(Dictionary<string, JsonElement> values, string key)
         {
-            return values.TryGetValue(key, out var element) ? element.GetInt32() : null;
+            return values.TryGetValue(key, out var element) && TryReadInt64(element, out var result)
+                ? (int)Math.Clamp(result, int.MinValue, int.MaxValue)
+                : null;
         }
 
         private static long? GetNullableInt64(Dictionary<string, JsonElement> values, string key)
         {
-            return values.TryGetValue(key, out var element) ? element.GetInt64() : null;
+            return values.TryGetValue(key, out var element) && TryReadInt64(element, out var result) ? result : null;
         }
 
         private static double? GetNullableDouble(Dictionary<string, JsonElement> values, string key)
         {
-            return values.TryGetValue(key, out var element) ? element.GetDouble() : null;
+            return values.TryGetValue(key, out var element) && TryReadDouble(element, out var result) ? result : null;
+        }
+
+        // qBittorrent and the various libtorrent builds behind it are not consistent about numeric
+        // JSON: a field can arrive as an integer, as a decimal or exponent, or as a quoted string.
+        // Reading it with JsonElement.GetInt64()/GetInt32() throws FormatException on anything but a
+        // plain integer, and a single such value used to fail the entire queue fetch (#1008). Read
+        // numbers tolerantly and fall back to the default rather than throwing.
+        private static bool TryReadInt64(JsonElement element, out long value)
+        {
+            switch (element.ValueKind)
+            {
+                case JsonValueKind.Number:
+                    if (element.TryGetInt64(out value))
+                    {
+                        return true;
+                    }
+
+                    if (element.TryGetDouble(out var numeric))
+                    {
+                        value = (long)numeric;
+                        return true;
+                    }
+
+                    break;
+                case JsonValueKind.String:
+                    var text = element.GetString();
+                    if (long.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out value))
+                    {
+                        return true;
+                    }
+
+                    if (double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed))
+                    {
+                        value = (long)parsed;
+                        return true;
+                    }
+
+                    break;
+            }
+
+            value = 0;
+            return false;
+        }
+
+        private static bool TryReadDouble(JsonElement element, out double value)
+        {
+            switch (element.ValueKind)
+            {
+                case JsonValueKind.Number:
+                    if (element.TryGetDouble(out value))
+                    {
+                        return true;
+                    }
+
+                    break;
+                case JsonValueKind.String:
+                    if (double.TryParse(element.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out value))
+                    {
+                        return true;
+                    }
+
+                    break;
+            }
+
+            value = 0;
+            return false;
         }
     }
 }

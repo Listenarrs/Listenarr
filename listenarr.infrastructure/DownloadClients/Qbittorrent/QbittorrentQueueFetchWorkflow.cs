@@ -108,7 +108,17 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                         files = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(filesJson) ?? [];
                     }
 
-                    items.Add(QbittorrentResponseMapper.MapQueueItem(torrent, client, files));
+                    // Map each torrent in isolation. A single unexpected value (e.g. an
+                    // out-of-range timestamp) must skip only that torrent, not fail the whole
+                    // queue fetch and have it misreported as the client being unreachable (#1008).
+                    try
+                    {
+                        items.Add(QbittorrentResponseMapper.MapQueueItem(torrent, client, files));
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                    {
+                        logger.LogWarning(ex, "Skipping qBittorrent torrent {Hash} after a queue mapping error", LogRedaction.SanitizeText(hash));
+                    }
                 }
             }
             catch (DownloadClientAdapterPollingException)

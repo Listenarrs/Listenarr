@@ -520,6 +520,58 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
         }
 
         [Fact]
+        public async Task GetQueueAsync_NumericFieldsAsDecimalOrString_ParseInsteadOfFailingQueue()
+        {
+            // Before the fix, reading these with JsonElement.GetInt64() threw FormatException and
+            // the whole queue fetch failed (#1008). A decimal/exponent/string number must parse.
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = """
+            [
+                {
+                    "hash": "abcdef",
+                    "name": "Book",
+                    "progress": 0.5,
+                    "size": 1.0e3,
+                    "downloaded": 500.0,
+                    "added_on": "1600000000",
+                    "num_seeds": 3.0,
+                    "state": "downloading",
+                    "save_path": "/downloads/book"
+                }
+            ]
+            """;
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            var items = await adapter.GetQueueAsync(_client);
+
+            var item = Assert.Single(items);
+            Assert.Equal(1000L, item.Size);
+            Assert.Equal(500L, item.Downloaded);
+            Assert.Equal(3, item.Seeders);
+        }
+
+        [Fact]
+        public async Task GetQueueAsync_OneTorrentWithUnmappableValue_SkipsItAndKeepsTheRest()
+        {
+            // One torrent with an out-of-range timestamp must not sink the rest of the queue.
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = """
+            [
+                { "hash": "bad", "name": "Bad", "progress": 0.1, "size": 10, "downloaded": 1, "added_on": 99999999999999, "state": "downloading", "save_path": "/downloads/bad" },
+                { "hash": "good", "name": "Good", "progress": 0.5, "size": 100, "downloaded": 50, "added_on": 1600000000, "state": "downloading", "save_path": "/downloads/good" }
+            ]
+            """;
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            var items = await adapter.GetQueueAsync(_client);
+
+            var item = Assert.Single(items);
+            Assert.Equal("good", item.Id);
+        }
+
+        [Fact]
         public async Task MarkItemAsImportedAsync_SetsConfiguredPostImportCategory()
         {
             _client.Settings = new Dictionary<string, object>
