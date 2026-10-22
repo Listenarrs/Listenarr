@@ -34,6 +34,7 @@ vi.mock('@/services/api', () => ({
 }))
 
 import RepairBooksModal from '@/components/domain/repair/RepairBooksModal.vue'
+import { resultsReveal } from '@/utils/resultsReveal'
 
 // An English book matched to the French translation on a French instance
 const mismatched = {
@@ -654,6 +655,50 @@ describe('RepairBooksModal', () => {
       / - Cached results$/,
     )
     expect(row(wrapper).find('[data-testid="match-retry"]').exists()).toBe(true)
+  })
+
+  it('says what was found, holds it, then fades out to the results, pickable once it is gone', async () => {
+    resultsReveal.holdMs = 300
+    resultsReveal.fadeMs = 200
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const wrapper = mountModal()
+      await flushPromises()
+      await row(wrapper).get('[data-testid="match-region"]').setValue('us')
+      await flushPromises()
+      await emptyAsin(wrapper)
+      const found = () => row(wrapper).find('[data-testid="match-results-found"]')
+      const pickFirst = () => row(wrapper).get('[data-testid="find-match-result"]').trigger('click')
+
+      // Asked Audible: the answer is said, over the results, which can't be picked yet
+      await row(wrapper).get('[data-testid="match-search"]').trigger('click')
+      await flushPromises()
+      expect(found().text()).toBe('Found 1 result')
+      expect(row(wrapper).get('[data-testid="match-results"]').classes()).toContain(
+        'match-results-revealing',
+      )
+      await pickFirst()
+      expect(row(wrapper).find('[data-testid="match-picked"]').exists()).toBe(false)
+
+      // Readable for 300 ms, then a 200 ms fade: pickable after 500 ms
+      await vi.advanceTimersByTimeAsync(499)
+      expect(found().exists()).toBe(true)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(found().exists()).toBe(false)
+      await pickFirst()
+      expect(row(wrapper).find('[data-testid="match-picked"]').exists()).toBe(true)
+
+      // Served from the answered searches, at once: the same reveal
+      await row(wrapper).get('[data-testid="match-author"]').setValue('Zogarth')
+      await row(wrapper).get('[data-testid="match-search"]').trigger('click')
+      await flushPromises()
+      expect(found().text()).toBe('Found 1 result')
+      await vi.advanceTimersByTimeAsync(500)
+      expect(found().exists()).toBe(false)
+    } finally {
+      resultsReveal.holdMs = 0
+      resultsReveal.fadeMs = 0
+    }
   })
 
   it('never keeps a failed search: the same values ask again', async () => {
