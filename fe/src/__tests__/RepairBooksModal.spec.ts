@@ -342,16 +342,16 @@ describe('RepairBooksModal', () => {
     await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
 
-    // Add New's title search: the region, its language, up to 50 results
+    // Add New's title search: the region, up to 50 results, every language of its catalogue
     expect(apiMocks.advancedSearch).toHaveBeenCalledWith(
       expect.objectContaining({
         title: 'Primal Hunter, Vol. 7',
         author: 'Zogarth',
         region: 'us',
-        language: 'english',
         pagination: { page: 1, limit: 50 },
       }),
     )
+    expect(apiMocks.advancedSearch.mock.calls[0]![0]).not.toHaveProperty('language')
     const results = row(wrapper).findAll('[data-testid="find-match-result"]')
     expect(results.map((r) => r.text())).toEqual([expect.stringContaining('Primal Hunter 4')])
   })

@@ -157,18 +157,17 @@ describe('LibraryImportSearchModal', () => {
     const search = vi.mocked(apiService.advancedSearch)
     const wrapper = mountModal(primalHunter)
     await flushPromises()
-    expect(search).toHaveBeenLastCalledWith(
-      expect.objectContaining({ region: 'fr', language: 'french' }),
-    )
+    // The region's whole catalogue: no language filter (Audible France also sells English books)
+    expect(search).toHaveBeenLastCalledWith(expect.objectContaining({ region: 'fr' }))
+    expect(search.mock.lastCall![0]).not.toHaveProperty('language')
     expect((field(wrapper, 'match-region').element as HTMLSelectElement).value).toBe('fr')
 
     search.mockResolvedValue([ph4])
     await field(wrapper, 'match-region').setValue('us')
     await field(wrapper, 'match-search').trigger('click')
     await flushPromises()
-    expect(search).toHaveBeenLastCalledWith(
-      expect.objectContaining({ region: 'us', language: 'english' }),
-    )
+    expect(search).toHaveBeenLastCalledWith(expect.objectContaining({ region: 'us' }))
+    expect(search.mock.lastCall![0]).not.toHaveProperty('language')
 
     await wrapper.get('[data-testid="find-match-result"]').trigger('click')
     expect(field(wrapper, 'match-picked').text()).toContain('Primal Hunter 4')
