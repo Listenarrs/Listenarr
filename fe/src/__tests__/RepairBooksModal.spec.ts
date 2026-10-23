@@ -533,13 +533,14 @@ describe('RepairBooksModal', () => {
     await row(wrapper).get('[data-testid="match-cancel-search"]').trigger('click')
     await flushPromises()
 
-    // The previous results don't answer the search canceled: the empty list in their place, and
-    // the header line names the search canceled
-    const message = row(wrapper).get('[data-testid="match-search-error"]')
-    expect(message.text()).toBe(
-      'No results for "Primal Hunter, Vol. 7" by "Zogarth" in France (FR) - Search canceled',
-    )
-    expect(message.classes()).toContain('match-search-warning')
+    // The previous results don't answer the search canceled: the empty list in their place, the
+    // header line naming the search canceled, and why in the middle of the list
+    const header = row(wrapper).get('[data-testid="match-search-error"]')
+    expect(header.text()).toBe('No results for "Primal Hunter, Vol. 7" by "Zogarth" in France (FR)')
+    expect(header.classes()).toContain('match-search-warning')
+    const reason = row(wrapper).get('[data-testid="match-results-reason"]')
+    expect(reason.text()).toBe('Search canceled')
+    expect(reason.classes()).toContain('match-search-warning')
     expect(row(wrapper).attributes('data-match-state')).toBe('warning')
     expect(row(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(0)
     expect(row(wrapper).find('[data-testid="match-results-placeholder"]').exists()).toBe(true)
@@ -560,7 +561,7 @@ describe('RepairBooksModal', () => {
     await vi.advanceTimersByTimeAsync(30_000)
     await flushPromises()
 
-    expect(row(wrapper).get('[data-testid="match-search-error"]').text()).toContain(
+    expect(row(wrapper).get('[data-testid="match-results-reason"]').text()).toContain(
       'The search took longer than 30 seconds',
     )
     catalogue({ fr: [frenchVol7] })
@@ -578,7 +579,7 @@ describe('RepairBooksModal', () => {
     await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
 
-    expect(row(wrapper).get('[data-testid="match-search-error"]').text()).toContain(
+    expect(row(wrapper).get('[data-testid="match-results-reason"]').text()).toContain(
       'The search failed: API error: 502 Bad Gateway',
     )
     // A failed request is red
@@ -628,8 +629,11 @@ describe('RepairBooksModal', () => {
     expect(apiMocks.getAudibleMetadata).toHaveBeenCalledTimes(2)
     expect(row(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(0)
     // The answer says it comes from the dialog's answered searches: maybe stale, Retry to check
-    expect(row(wrapper).get('[data-testid="match-asin-error"]').text()).toBe(
-      'No record for B0HM45F8MW in Audible United States (US) - Cached results',
+    expect(row(wrapper).get('[data-testid="match-search-empty"]').text()).toBe(
+      'No results for ASIN "B0HM45F8MW" in United States (US) - Cached results',
+    )
+    expect(row(wrapper).get('[data-testid="match-results-reason"]').text()).toBe(
+      'No record for B0HM45F8MW in Audible United States (US)',
     )
 
     // Retry is the way to ask Audible again
@@ -748,15 +752,19 @@ describe('RepairBooksModal', () => {
     await row(wrapper).get('[data-testid="match-retry"]').trigger('click')
     await flushPromises()
 
-    // No results to show: the empty list, as before any search, and the reason in red
+    // No results to show: the empty list, as before any search, and the reason in red in its
+    // middle
     expect(row(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(0)
-    expect(row(wrapper).find('[data-testid="match-results-placeholder"]').exists()).toBe(true)
+    const placeholder = row(wrapper).get('[data-testid="match-results-placeholder"]')
     const header = row(wrapper).get('[data-testid="match-search-error"]')
     expect(header.text()).toBe(
-      'No results for "Primal Hunter, Vol. 7" by "Zogarth" in United States (US) - The search failed: API error: 502 Bad Gateway',
+      'No results for "Primal Hunter, Vol. 7" by "Zogarth" in United States (US)',
     )
     expect(header.classes()).toContain('match-search-error')
     expect(header.classes()).toContain('match-results-header')
+    const reason = placeholder.get('[data-testid="match-results-reason"]')
+    expect(reason.text()).toBe('The search failed: API error: 502 Bad Gateway')
+    expect(reason.classes()).toContain('match-search-error')
   })
 
   it('keeps the height of the results a canceled search empties, with several books', async () => {
@@ -878,7 +886,7 @@ describe('RepairBooksModal', () => {
 
     await row(wrapper).get('[data-testid="match-region"]').setValue('us')
     await flushPromises()
-    expect(row(wrapper).get('[data-testid="match-asin-error"]').text()).toContain(
+    expect(row(wrapper).get('[data-testid="match-results-reason"]').text()).toContain(
       'The search failed: API error: 502 Bad Gateway',
     )
 
@@ -1212,8 +1220,12 @@ describe('RepairBooksModal', () => {
     await flushPromises()
 
     expect(field(wrapper, 'match-asin').value).toBe('B0HM45F8MW')
-    expect(row(wrapper).get('[data-testid="match-asin-error"]').text()).toContain(
+    expect(row(wrapper).get('[data-testid="match-results-reason"]').text()).toContain(
       'No record for B0HM45F8MW in Audible United States (US)',
+    )
+    // New only shows a record picked in the results: no record, its default text
+    expect(row(wrapper).get('[data-testid="match-none"]').text()).toBe(
+      'No new record yet: search the book and pick it, or type its ASIN',
     )
     // No record is a search that found nothing: orange
     expect(row(wrapper).attributes('data-match-state')).toBe('warning')
@@ -1223,7 +1235,7 @@ describe('RepairBooksModal', () => {
     await row(wrapper).get('[data-testid="match-asin"]').setValue('B0BK9W82PQ')
     await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
-    expect(row(wrapper).find('[data-testid="match-asin-error"]').exists()).toBe(false)
+    expect(row(wrapper).find('[data-testid="match-results-reason"]').exists()).toBe(false)
     await row(wrapper).get('[data-testid="find-match-result"]').trigger('click')
     expect(row(wrapper).attributes('data-match-state')).toBe('matched')
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeUndefined()
@@ -1328,7 +1340,7 @@ describe('RepairBooksModal', () => {
     await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
 
-    expect(row(wrapper).get('[data-testid="match-asin-error"]').text()).toContain(
+    expect(row(wrapper).get('[data-testid="match-results-reason"]').text()).toContain(
       'No record for B0BK9W82PQ in Audible France (FR)',
     )
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
@@ -1386,7 +1398,10 @@ describe('RepairBooksModal', () => {
     await search.trigger('click')
     await flushPromises()
 
-    const error = row(wrapper).get('[data-testid="match-search-error"]')
+    expect(row(wrapper).get('[data-testid="match-search-error"]').text()).toBe(
+      'No search request done',
+    )
+    const error = row(wrapper).get('[data-testid="match-results-reason"]')
     expect(error.text()).toContain('Not an ASIN: an ASIN is B followed by 9 letters or digits')
     expect(error.classes()).toContain('match-search-warning')
     expect(row(wrapper).attributes('data-match-state')).toBe('warning')

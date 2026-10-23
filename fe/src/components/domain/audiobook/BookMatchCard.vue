@@ -192,7 +192,8 @@
         </button>
       </div>
 
-      <!-- What the book points at today, and the record it will point at -->
+      <!-- What the book points at today, and the record picked in the results shown (no record
+           otherwise: why a search found none is said over the results' room) -->
       <dl class="match-records">
         <dt>Current</dt>
         <dd data-testid="match-current">
@@ -205,14 +206,6 @@
             <PhCheckCircle :size="14" weight="fill" />
             checked
           </span>
-        </dd>
-        <dd
-          v-else-if="match.asinError"
-          :class="state.status === 'failed' ? 'match-new-error' : 'match-new-warning'"
-          data-testid="match-asin-error"
-        >
-          <PhXCircle :size="14" weight="fill" />
-          <span>{{ match.asinError }}</span>
         </dd>
         <dd v-else data-testid="match-none">
           No new record yet: search the book and pick it, or type its ASIN
@@ -266,13 +259,24 @@
         <!-- No results: the empty list, at its full height when the card keeps its room, else at
              the height of the results a failed or canceled search took away, or of one result from
              the first search on (the spinner and the reveal need something to cover) -->
+        <!-- Why there are no results, in the middle of that room: once the spinner is gone -->
         <div
           v-else-if="emptyList"
           class="match-results-empty"
           :class="{ 'match-results-empty-row': !placeholders && keptHeight === null }"
           :style="placeholders || keptHeight === null ? undefined : { height: `${keptHeight}px` }"
           data-testid="match-results-placeholder"
-        />
+        >
+          <p
+            v-if="noResultsReason && !resultsPending"
+            class="match-results-reason"
+            :class="noResultsReason.tone"
+            data-testid="match-results-reason"
+          >
+            <PhWarningCircle :size="16" />
+            {{ noResultsReason.text }}
+          </p>
+        </div>
         <span
           v-if="resultsPending"
           class="match-results-spinner"
@@ -320,7 +324,6 @@ import {
   PhSpinner,
   PhWarningCircle,
   PhX,
-  PhXCircle,
 } from '@phosphor-icons/vue'
 import FindMatchResults from './FindMatchResults.vue'
 import { resultsReveal, revealMs } from '@/utils/resultsReveal'
@@ -485,28 +488,22 @@ const resultsPending = computed(
     (state.value.status === 'searching' || props.searchLocked),
 )
 
-// The results' header line: what was searched, where, and where the answer comes from. Empty
-// (orange) when it found nothing, or failed or was canceled with nothing to show
-// The results' header line, the one place the search says how it went: what was searched, where,
-// and where the answer comes from; or why there are no results (nothing found, the search failed
-// and why, canceled, an ASIN that isn't one). A failed or canceled search shows no results: the
-// empty list again, as before any search
+// The results' header line, always there: what was searched, where, and where the answer comes
+// from (orange when it found nothing, red when it failed). Why there are no results is said in the
+// middle of their room. A failed, canceled or refused search shows no results: the empty list
+// again, as before any search
 const resultsHeader = computed<{ text: string; tone?: string; testId: string }>(() => {
-  const { searched, results, status, error, requestMs } = state.value
+  const { searched, results, status, requestMs } = state.value
   const warning = 'match-search-warning'
   if (status === 'invalid')
-    return { text: error ?? '', tone: warning, testId: 'match-search-error' }
+    return { text: 'No search request done', tone: warning, testId: 'match-search-error' }
   if (!searched) return { text: 'No search request done', testId: 'match-results-header' }
   const what = `${describeSearch(searched)} in ${regionLabel(searched.region)}`
   if (status === 'canceled')
-    return {
-      text: `No results for ${what} - Search canceled`,
-      tone: warning,
-      testId: 'match-search-error',
-    }
+    return { text: `No results for ${what}`, tone: warning, testId: 'match-search-error' }
   if (status === 'failed')
     return {
-      text: `No results for ${what} - ${error}`,
+      text: `No results for ${what}`,
       tone: 'match-search-error',
       testId: 'match-search-error',
     }
@@ -519,6 +516,24 @@ const resultsHeader = computed<{ text: string; tone?: string; testId: string }>(
     text: `No results for ${what} - ${answerSource(requestMs)}`,
     tone: warning,
     testId: 'match-search-empty',
+  }
+})
+
+// Why a search left no results, in the middle of their room: a failed request (red), or nothing
+// found, the search canceled, an ASIN that isn't one (orange). Nothing before any search
+const noResultsReason = computed<{ text: string; tone: string } | null>(() => {
+  const { searched, results, status, error } = state.value
+  const warning = 'match-search-warning'
+  if (status === 'invalid') return { text: error ?? '', tone: warning }
+  if (status === 'canceled') return { text: 'Search canceled', tone: warning }
+  if (status === 'failed') return { text: error ?? '', tone: 'match-search-error' }
+  if (status !== 'done' || results.length || !searched) return null
+  return {
+    text:
+      searched.kind === 'asin'
+        ? noRecordError(searched.asin, searched.region)
+        : 'Nothing found: no book for this title and author',
+    tone: warning,
   }
 })
 
@@ -626,7 +641,7 @@ function showResults(
     startReveal()
   } else {
     // Found nothing (orange): searching the title there is what comes next
-    match.value.asinError = `${noRecordError(searched.asin, searched.region)} - ${answerSource(requestMs)}`
+    match.value.asinError = noRecordError(searched.asin, searched.region)
     state.value = { status: 'done', kind, results: [], error: null, searched, requestMs }
   }
 }
@@ -637,8 +652,19 @@ function showResults(
 async function search(kind: SearchKind = 'title', fresh = false) {
   if (!canSearchFor(kind)) return
   if (kind === 'asin' && !asinValid(match.value)) {
-    // A field error, not a request one: nothing is sent
-    state.value = { ...state.value, status: 'invalid', kind, error: INVALID_ASIN_MESSAGE }
+    // A field error, not a request one: nothing is sent. The previous results go, so the error
+    // shows in their room
+    match.value.picked = null
+    endReveal()
+    keepResultsHeight()
+    if (!state.value.results.length) firstSearchRoom.value = true
+    state.value = {
+      ...state.value,
+      status: 'invalid',
+      kind,
+      results: [],
+      error: INVALID_ASIN_MESSAGE,
+    }
     return
   }
   const asin = match.value.asin.trim().toUpperCase()
@@ -687,8 +713,8 @@ async function search(kind: SearchKind = 'title', fresh = false) {
     const error = timedOut
       ? `The search took longer than ${SEARCH_TIMEOUT_MS / 1000} seconds and was stopped.`
       : `The search failed: ${(e as Error)?.message ?? 'unknown error'}`
-    // An ASIN that could not be looked up stays unusable until it is (its error shows on the New
-    // line)
+    // An ASIN that could not be looked up stays unusable until it is (its error shows over the
+    // results' room)
     if (kind === 'asin') match.value.asinError = error
     keepResultsHeight()
     state.value = { status: 'failed', kind, results: [], error, searched, requestMs: null }
@@ -1049,14 +1075,6 @@ defineExpose({ search, cancelSearch })
   color: var(--status-success);
 }
 
-.match-records dd.match-new-warning {
-  color: var(--status-warning);
-}
-
-.match-records dd.match-new-error {
-  color: var(--status-error);
-}
-
 /* ASIN, Title, Author, Region and Search always share the whole row */
 .match-fields {
   display: grid;
@@ -1252,6 +1270,31 @@ defineExpose({ search, cancelSearch })
   margin-top: 0.4rem;
   border: 1px dashed #333;
   border-radius: 6px;
+}
+
+/* Why there are no results, in the middle of their room, in the search's colour */
+.match-results-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.match-results-reason {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0 1rem;
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+.match-results-reason.match-search-warning {
+  color: var(--status-warning);
+}
+
+.match-results-reason.match-search-error {
+  color: var(--status-error);
 }
 
 .match-results-header {
