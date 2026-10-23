@@ -102,6 +102,13 @@
             <span class="repair-result-title">{{
               outcome.title || `Audiobook #${outcome.id}`
             }}</span>
+            <!-- Repaired: how long it took, next to the title; its new record under it -->
+            <span
+              v-if="outcome.state === 'done'"
+              class="repair-result-took"
+              data-testid="repair-result-took"
+              >{{ outcome.message }}</span
+            >
           </label>
           <!-- The records, closed at first to keep the list short; the tooltip gives them without
              opening (the open details mark what changes) -->
@@ -141,21 +148,26 @@
             :size="14"
             data-testid="repair-result-loading"
           />
-          <span>
-            {{ outcome.message
-            }}<template v-if="outcome.state === 'done' && outcome.after"
-              >:
-              <BookRecordDiff
-                class="repair-result-message-record"
-                :record="outcome.after"
-                :base="outcome.before"
-                data-testid="repair-result-record"
-            /></template>
-          </span>
+          <BookRecordDiff
+            v-if="outcome.state === 'done' && outcome.after"
+            class="repair-result-message-record"
+            :record="outcome.after"
+            :base="outcome.before"
+            data-testid="repair-result-record"
+          />
+          <span v-else>{{ outcome.message }}</span>
         </p>
         <dl v-if="opened.has(outcome.id)" class="repair-result-records">
           <dt>Old</dt>
-          <dd data-testid="repair-result-old">{{ bookSummary(outcome.before) || 'None' }}</dd>
+          <dd data-testid="repair-result-old">
+            <BookRecordDiff
+              v-if="newRecord(outcome)"
+              :record="outcome.before"
+              :base="newRecord(outcome)!"
+              replaced
+            />
+            <template v-else>{{ bookSummary(outcome.before) || 'None' }}</template>
+          </dd>
           <dt>New</dt>
           <dd v-if="newRecord(outcome)" data-testid="repair-result-new">
             <BookRecordDiff :record="newRecord(outcome)!" :base="outcome.before" />
@@ -424,6 +436,11 @@ function toggle(id: number) {
   align-items: center;
   gap: 0.5rem;
   cursor: pointer;
+}
+
+.repair-result-took {
+  font-size: 0.85rem;
+  color: var(--status-success);
 }
 
 .repair-result-title {

@@ -192,8 +192,15 @@
            otherwise: why a search found none is said over the results' room) -->
       <dl class="match-records">
         <dt>Current</dt>
+        <!-- With a new record picked, the parts it replaces in orange -->
         <dd data-testid="match-current">
-          {{ bookSummary(currentRecord) || 'None' }}
+          <BookRecordDiff
+            v-if="match.picked"
+            :record="currentRecord"
+            :base="recordFromResult(match.picked, match.region)"
+            replaced
+          />
+          <template v-else>{{ bookSummary(currentRecord) || 'None' }}</template>
         </dd>
         <dt>New</dt>
         <dd v-if="match.picked" class="match-new-picked" data-testid="match-picked">

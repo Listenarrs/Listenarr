@@ -16,14 +16,15 @@
   along with this program. If not, see <https://www.gnu.org/licenses/>.
 -->
 <!-- A book record on one line (ASIN - Title: Subtitle - Author(s) - Region), each part that differs
-     from the record it replaces highlighted. The same record again (metadata read anew) has nothing
-     highlighted. Repair's New lines, on the book card and on the results -->
+     from the other record highlighted: in green on the new record (what it brings), in orange on
+     the old one (replaced: what goes). The same record again (metadata read anew) has nothing
+     highlighted. Repair's Current/Old and New lines, on the book card and on step 2 -->
 <template>
   <span class="book-record-diff">
     <template v-for="(part, index) in parts" :key="part.key">
       <template v-if="index"> - </template>
       <span
-        :class="{ 'book-record-changed': part.changed }"
+        :class="{ [replaced ? 'book-record-replaced' : 'book-record-changed']: part.changed }"
         :data-changed="part.changed || undefined"
         >{{ part.text }}</span
       >
@@ -37,8 +38,10 @@ import { recordParts, type BookRecord } from '@/utils/bookMatch'
 
 const props = defineProps<{
   record: BookRecord
-  // The record it replaces
+  // The other record: the one it replaces, or with replaced, the one replacing it
   base: BookRecord
+  // The old record: its parts the new one changes are the replaced ones (orange)
+  replaced?: boolean
 }>()
 
 // Compared part by part, regardless of case
@@ -54,6 +57,11 @@ const parts = computed(() => {
 <style scoped>
 .book-record-changed {
   color: var(--status-success);
+  font-weight: 600;
+}
+
+.book-record-replaced {
+  color: var(--status-warning);
   font-weight: 600;
 }
 </style>
