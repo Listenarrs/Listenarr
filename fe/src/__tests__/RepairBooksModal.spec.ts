@@ -1633,7 +1633,7 @@ describe('RepairBooksModal', () => {
       'Repair failed (0.25 s): Database locked',
     )
     expect(apiMocks.rescanAudiobookMetadata).not.toHaveBeenCalled()
-    expect(wrapper.get('#modal-title h2').text()).toBe('Repair Books - Results - Step 2/3')
+    expect(wrapper.get('#modal-title h2').text()).toBe('Repair Books - Repair process - Step 2/3')
     // The footer warns: its bar orange, and what went wrong
     expect(wrapper.get('[data-testid="repair-problems"]').text()).toBe('Not all repaired: 1 failed')
     expect(wrapper.get('[data-testid="repair-progress"]').classes()).toContain(
@@ -1664,7 +1664,7 @@ describe('RepairBooksModal', () => {
     await flushPromises()
 
     // Step 2 at once: the book cards are gone, every book shows on the results step
-    expect(wrapper.get('#modal-title h2').text()).toBe('Repair Books - Results - Step 2/3')
+    expect(wrapper.get('#modal-title h2').text()).toBe('Repair Books - Repair process - Step 2/3')
     expect(wrapper.find('[data-testid="repair-row-7"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="repair-results-message"]').text()).toContain(
       'Repairing 1 of 1…',
@@ -1839,6 +1839,34 @@ describe('RepairBooksModal', () => {
     expect(wrapper.get('[data-testid="repair-cancel"]').text()).toBe('Close')
     expect(wrapper.get('[data-testid="repair-organize"]').text()).toContain('Organize 2')
     expect(wrapper.get('[data-testid="repair-organize"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it("keeps step 1's height on step 2 with one book: an empty room under its row", async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+    // The body's visible height on step 1, as the browser would measure it
+    vi.spyOn(
+      wrapper.get('.repair-modal-body').element as HTMLElement,
+      'clientHeight',
+      'get',
+    ).mockReturnValue(640)
+
+    await repair(wrapper)
+
+    expect(wrapper.get('.repair-results').attributes('style')).toContain('min-height: 640px')
+    expect(wrapper.find('[data-testid="repair-results-room"]').exists()).toBe(true)
+  })
+
+  it('keeps no room on step 2 with several books', async () => {
+    apiMocks.getAudiobook.mockImplementation(async (id: number) => ({ ...mismatched, id }))
+    const wrapper = mountModal([7, 8])
+    await flushPromises()
+    await searchAndPick(wrapper)
+
+    await repair(wrapper)
+
+    expect(wrapper.find('[data-testid="repair-results-room"]').exists()).toBe(false)
   })
 
   it('offers to organize the repaired books', async () => {

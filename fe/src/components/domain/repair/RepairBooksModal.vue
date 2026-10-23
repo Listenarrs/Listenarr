@@ -41,10 +41,11 @@
           v-model:selected="organizeIds"
           :outcomes="outcomes"
           :running="executing"
+          :min-height="stepOneHeight"
         />
 
         <!-- The books stay through the repair: each card shows its own progress -->
-        <div v-else-if="rows.length" class="repair-list-wrapper">
+        <div v-else-if="rows.length" ref="stepOneRef" class="repair-list-wrapper">
           <div class="info-section repair-info-section">
             <PhInfo />
             <div class="repair-info-lines">
@@ -242,7 +243,15 @@ export const REPAIR_ORGANIZE_TITLE = 'Repair Books - Organize - Step 3/3'
 </script>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, provide, ref, watch, type ComponentPublicInstance } from 'vue'
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  provide,
+  ref,
+  watch,
+  type ComponentPublicInstance,
+} from 'vue'
 import {
   PhFolderOpen,
   PhInfo,
@@ -324,6 +333,28 @@ const canceling = ref(false)
 const canceledCount = ref(0)
 // Step 2 from Repair on: the repairs as they run, then their results
 const repairStep = computed(() => executing.value || finished.value)
+// One book: the room step 1 took in the dialog's body, measured on Repair, kept by step 2 so the
+// dialog keeps its height
+const stepOneRef = ref<HTMLElement | null>(null)
+const stepOneHeight = ref<number | null>(null)
+
+// Measures step 1 before it goes; the returned function, called once step 2 shows, keeps its room.
+// The body's visible height (capped by its maximum, step 1 often scrolls), less its padding and
+// what step 2's footer takes more (its legend on a line of its own)
+function keepStepOneRoom(): () => Promise<void> {
+  stepOneHeight.value = null
+  const body = stepOneRef.value?.closest<HTMLElement>('.repair-modal-body')
+  const footer = footerRef.value?.$el as HTMLElement | undefined
+  if (rows.value.length !== 1 || !body || !footer) return async () => {}
+  const style = getComputedStyle(body)
+  const room = body.clientHeight - px(style.paddingTop) - px(style.paddingBottom)
+  const footerBefore = footer.offsetHeight
+  return async () => {
+    await nextTick()
+    const kept = room - (footer.offsetHeight - footerBefore)
+    stepOneHeight.value = kept > 0 ? kept : null
+  }
+}
 const error = ref<string | null>(null)
 const rows = ref<RepairRow[]>([])
 // The repairs over (whatever their outcome), of how many: the progress bar
@@ -337,10 +368,12 @@ const organizeIds = ref<number[]>([])
 // One book is searched at a time: the others wait for it
 const searchingRowId = ref<number | null>(null)
 
-// Steps 1 and 2 of three: pick each book's new record and repair, then the results, to choose
-// what to organize (step 3, in the Organize dialog)
+// Steps 1 and 2 of three: pick each book's new record, then the repair process and its results,
+// to choose what to organize (step 3, in the Organize dialog)
 const title = computed(() =>
-  repairStep.value ? 'Repair Books - Results - Step 2/3' : 'Repair Books - Matching - Step 1/3',
+  repairStep.value
+    ? 'Repair Books - Repair process - Step 2/3'
+    : 'Repair Books - Matching - Step 1/3',
 )
 
 // The legend stays in the footer, in sight however long the list is: between Cancel and the
@@ -582,6 +615,7 @@ async function rescan(id: number) {
 // took, and shows the book as it is now. Cancel leaves out the books still waiting
 async function repair() {
   const toRepair = [...selectedRows.value]
+  const keepRoom = keepStepOneRoom()
   executing.value = true
   canceling.value = false
   canceledCount.value = 0
@@ -600,6 +634,7 @@ async function repair() {
     row.planned = picked ? recordFromResult(picked, row.match.region) : null
     row.task = picked ? { state: 'waiting', text: 'Waiting to be repaired' } : null
   }
+  await keepRoom()
   for (const row of toRepair) {
     // Canceled while it waited
     if (row.task?.state !== 'waiting') continue

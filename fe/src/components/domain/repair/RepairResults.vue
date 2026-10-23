@@ -22,7 +22,7 @@
      the parts that change in green; once repaired it can be ticked to be organized (ticked at
      first). A book whose repair failed or was canceled says why, and can't be. -->
 <template>
-  <div class="repair-results">
+  <div class="repair-results" :style="minHeight ? { minHeight: `${minHeight}px` } : undefined">
     <div
       class="repair-results-message"
       :class="{
@@ -144,6 +144,9 @@
         <div class="repair-result-bar" />
       </div>
     </div>
+
+    <!-- The room left by step 1 (one book), kept so the dialog keeps its height -->
+    <div v-if="minHeight" class="repair-results-room" data-testid="repair-results-room" />
   </div>
 </template>
 
@@ -170,8 +173,12 @@ export interface RepairOutcome {
   after: BookRecord | null
 }
 
-// running: the repairs aren't over yet
-const props = defineProps<{ outcomes: RepairOutcome[]; running: boolean }>()
+// running: the repairs aren't over yet. minHeight: the height to keep (step 1's, with one book)
+const props = defineProps<{
+  outcomes: RepairOutcome[]
+  running: boolean
+  minHeight?: number | null
+}>()
 
 // The books to organize: repaired ones only
 const selected = defineModel<number[]>('selected', { required: true })
@@ -283,6 +290,18 @@ function toggle(id: number) {
 /* The list's own gap spaces the selection */
 .repair-results .repair-group {
   margin-bottom: 0;
+}
+
+/* Only the room takes the height kept: everything else keeps its own */
+.repair-results > * {
+  flex: none;
+}
+
+.repair-results > .repair-results-room {
+  flex: 1 1 auto;
+  min-height: 0;
+  border: 1px dashed #333;
+  border-radius: 6px;
 }
 
 .repair-results-list {
