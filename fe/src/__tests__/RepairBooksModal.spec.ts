@@ -804,8 +804,11 @@ describe('RepairBooksModal', () => {
     await emptyAsin(wrapper)
     await row(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
-    const placeholder = row(wrapper).get('[data-testid="match-results-placeholder"]')
-    expect(placeholder.classes()).toContain('match-results-empty-row')
+    expect(row(wrapper).find('[data-testid="match-results-placeholder"]').exists()).toBe(true)
+    // One result high: an unseen result with every line a result can have
+    const sizer = () => row(wrapper).find('[data-testid="match-results-sizer"]')
+    expect(sizer().attributes('aria-hidden')).toBe('true')
+    expect(sizer().text()).toContain('Narrated by Room')
     expect(row(wrapper).find('[data-testid="match-results-pending"]').exists()).toBe(true)
 
     // Nothing found: the empty list stays, the card doesn't shrink back
@@ -813,6 +816,24 @@ describe('RepairBooksModal', () => {
     await flushPromises()
     expect(row(wrapper).find('[data-testid="match-results-placeholder"]').exists()).toBe(true)
     expect(row(wrapper).find('[data-testid="match-search-empty"]').exists()).toBe(true)
+    expect(sizer().exists()).toBe(true)
+  })
+
+  it('keeps one result high under a short answer with several books', async () => {
+    catalogue({ fr: [frenchVol7] })
+    const wrapper = mountModal([7, 8])
+    await flushPromises()
+    await emptyAsin(wrapper)
+    await row(wrapper).get('[data-testid="match-search"]').trigger('click')
+    await flushPromises()
+
+    // The answer shows, the unseen result stays under it: the list never gets shorter than it
+    expect(
+      row(wrapper).findAll(
+        '.match-search-results:not(.match-results-sizer) [data-testid="find-match-result"]',
+      ).length,
+    ).toBeGreaterThan(0)
+    expect(row(wrapper).find('[data-testid="match-results-sizer"]').exists()).toBe(true)
   })
 
   it('says no search was done for every book, but keeps the list room for one book only', async () => {
