@@ -770,6 +770,16 @@ watch(
   flex: 0 0 auto;
 }
 
+/* Red while the repairs run: the modal footer's grey Cancel would win over .btn-danger */
+.modal-footer.repair-footer .cancel-button.btn-danger {
+  background-color: #f44336;
+  border-color: #f44336;
+}
+
+.modal-footer.repair-footer .cancel-button.btn-danger:hover:not(:disabled) {
+  background-color: #e53935;
+}
+
 /* The progress bar along the dialog's bottom edge, under the footer */
 .modal-footer.repair-footer {
   position: relative;
