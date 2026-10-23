@@ -41,6 +41,7 @@
           v-model:selected="organizeIds"
           :outcomes="outcomes"
           :running="executing"
+          @retry="retryRepair"
           :min-height="stepOneHeight"
         />
 
@@ -658,52 +659,70 @@ async function repair() {
   for (const row of toRepair) {
     // Canceled while it waited
     if (row.task?.state !== 'waiting') continue
-    row.task = { state: 'running', text: 'Repairing…' }
-    const startedAt = performance.now()
-    const took = () => formatDuration(performance.now() - startedAt)
-    let saved = false
-    try {
-      // The new record was looked up in its region: saved, then the metadata read from it
-      if (asinChanged(row.match)) {
-        await apiService.updateAudiobookIdentifiers(row.id, identifiersWithPrimaryAsin(row))
-        saved = true
-        libraryChanged.value = true
-      }
-      const rescanned = await rescan(row.id)
-      const book = await apiService.getAudiobook(row.id)
-      const asin = rescanned.asin ?? row.match.picked?.asin ?? ''
-      const region = rescanned.region ?? row.match.picked?.region ?? row.match.region
-      row.title = book.title || row.title
-      row.subtitle = book.subtitle ?? row.subtitle
-      row.authors = book.authors ?? row.authors
-      row.match.current = { asin, region }
-      row.after = { title: row.title, subtitle: row.subtitle, authors: row.authors, asin, region }
-      // The record it now points at follows, drawn like New (step 2)
-      row.task = { state: 'done', text: `Repaired in ${took()}` }
-      libraryChanged.value = true
-      // Ticked for Organize as soon as it is repaired
-      organizeIds.value = [...organizeIds.value, row.id]
-    } catch (e) {
-      const message = e instanceof Error ? e.message : 'Repair failed'
-      // The new ASIN saved but its metadata not read: repaired in part
-      if (saved)
-        row.after = {
-          ...row.before,
-          asin: row.match.picked?.asin ?? '',
-          region: row.match.picked?.region || row.match.region,
-        }
-      row.task = saved
-        ? {
-            state: 'warning',
-            text: `The new ASIN is saved, but the metadata rescan failed (${took()}): ${message}`,
-          }
-        : { state: 'failed', text: `Repair failed (${took()}): ${message}` }
-    }
+    await repairOne(row)
     repairCompleted.value++
   }
   executing.value = false
   canceling.value = false
   finished.value = true
+}
+
+// One book's repair: its new record saved (when its ASIN or region changes), then its metadata
+// rescanned and the book read again. Its row says where it is, then how it ended
+async function repairOne(row: RepairRow) {
+  row.task = { state: 'running', text: 'Repairing…' }
+  const startedAt = performance.now()
+  const took = () => formatDuration(performance.now() - startedAt)
+  let saved = false
+  try {
+    // The new record was looked up in its region: saved, then the metadata read from it
+    if (asinChanged(row.match)) {
+      await apiService.updateAudiobookIdentifiers(row.id, identifiersWithPrimaryAsin(row))
+      saved = true
+      libraryChanged.value = true
+    }
+    const rescanned = await rescan(row.id)
+    const book = await apiService.getAudiobook(row.id)
+    const asin = rescanned.asin ?? row.match.picked?.asin ?? ''
+    const region = rescanned.region ?? row.match.picked?.region ?? row.match.region
+    row.title = book.title || row.title
+    row.subtitle = book.subtitle ?? row.subtitle
+    row.authors = book.authors ?? row.authors
+    row.match.current = { asin, region }
+    row.after = { title: row.title, subtitle: row.subtitle, authors: row.authors, asin, region }
+    // The record it now points at follows, drawn like New (step 2)
+    row.task = { state: 'done', text: `Repaired in ${took()}` }
+    libraryChanged.value = true
+    // Ticked for Organize as soon as it is repaired
+    organizeIds.value = [...organizeIds.value, row.id]
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Repair failed'
+    // The new ASIN saved but its metadata not read: repaired in part
+    if (saved)
+      row.after = {
+        ...row.before,
+        asin: row.match.picked?.asin ?? '',
+        region: row.match.picked?.region || row.match.region,
+      }
+    row.task = saved
+      ? {
+          state: 'warning',
+          text: `The new ASIN is saved, but the metadata rescan failed (${took()}): ${message}`,
+        }
+      : { state: 'failed', text: `Repair failed (${took()}): ${message}` }
+  }
+}
+
+// Retry on a book whose repair failed or was done in part, once the repairs are over: that book
+// repaired again, the dialog repairing meanwhile (red Cancel, Organize waiting)
+async function retryRepair(id: number) {
+  const row = rows.value.find((r) => r.id === id)
+  if (!row || executing.value || (row.task?.state !== 'failed' && row.task?.state !== 'warning'))
+    return
+  executing.value = true
+  await repairOne(row)
+  executing.value = false
+  canceling.value = false
 }
 
 // The books still waiting are left out at once; the one being repaired ends first (its request
@@ -743,7 +762,7 @@ const cancelLabels = [
   { text: 'Back', icon: PhArrowLeft, spin: false },
 ]
 const cancelLabel = computed(() =>
-  canceling.value ? 'Canceling…' : finished.value ? 'Back' : 'Cancel',
+  canceling.value ? 'Canceling…' : finished.value && !executing.value ? 'Back' : 'Cancel',
 )
 
 // Back from step 2 to step 1, loaded as when the dialog opens: the books show what the repairs
