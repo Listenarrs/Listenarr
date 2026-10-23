@@ -929,6 +929,95 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
         }
 
         [Fact]
+        [Trait("Scenario", "DoesNotRebindRecordedHashToTitleMatchedTorrent")]
+        public async Task GetQueueAsync_TitleMatchedPreExistingTorrent_DoesNotOverwriteRecordedHash()
+        {
+            // Regression for #1055: the download already carries the hash captured when it was
+            // grabbed. A different, pre-existing torrent for the same book also title-matches it;
+            // reconciliation must NOT rebind the recorded hash, or a later removal would delete
+            // that unrelated torrent (and its files).
+            var client = new DownloadClientConfiguration
+            {
+                Id = "qb-1",
+                Name = "local qbit",
+                Type = "qbittorrent",
+                IsEnabled = true
+            };
+
+            var configMock = new Mock<IConfigurationService>();
+            configMock.Setup(c => c.GetDownloadClientConfigurationsAsync())
+                .ReturnsAsync(new List<DownloadClientConfiguration> { client });
+            configMock.Setup(c => c.GetApplicationSettingsAsync())
+                .ReturnsAsync(new ApplicationSettings { ShowCompletedExternalDownloads = false });
+
+            const string grabbedHash = "c86d5412aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+            const string preexistingHash = "82e3f9adf097143fc8129f31338b3aad1d7412fd";
+            var trackedDownload = new Download
+            {
+                Id = "tracked-xo",
+                DownloadClientId = "qb-1",
+                Title = "Jeffery Deaver - XO",
+                Artist = "Jeffery Deaver",
+                Status = DownloadStatus.Downloading,
+                StartedAt = DateTime.UtcNow.AddMinutes(-5),
+                Metadata = new Dictionary<string, object>
+                {
+                    ["ClientDownloadId"] = grabbedHash,
+                    ["TorrentHash"] = grabbedHash
+                }
+            };
+
+            var downloadRepoMock = new Mock<IDownloadRepository>();
+            SetupQueueRepository(downloadRepoMock, new List<Download> { trackedDownload });
+            downloadRepoMock
+                .Setup(r => r.UpdateMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<object?>()))
+                .Returns(Task.CompletedTask);
+
+            var processingJobRepoMock = new Mock<IDownloadProcessingJobRepository>();
+            processingJobRepoMock.Setup(r => r.GetPendingDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+            processingJobRepoMock.Setup(r => r.GetAllJobDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+
+            var gatewayMock = new Mock<IDownloadClientGateway>();
+            gatewayMock.Setup(g => g.GetQueueAsync(client, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<QueueItem>
+                {
+                    // The pre-existing torrent for the same book, title-matching the download.
+                    new QueueItem
+                    {
+                        Id = preexistingHash,
+                        Title = "Jeffery Deaver - XO",
+                        Status = "stalledDL",
+                        DownloadClient = "local qbit",
+                        DownloadClientId = "qb-1",
+                        DownloadClientType = "qbittorrent",
+                        AddedAt = DateTime.UtcNow.AddMonths(-1)
+                    }
+                });
+
+            var metricsMock = new Mock<IAppMetricsService>();
+
+            var service = CreateService(
+                configMock.Object,
+                downloadRepoMock.Object,
+                processingJobRepoMock.Object,
+                gatewayMock.Object,
+                metricsMock.Object);
+
+            await service.GetQueueAsync();
+
+            // The recorded (grabbed) hash is preserved; the pre-existing torrent's hash is never
+            // written, so removal will target the correct torrent.
+            Assert.Equal(grabbedHash, trackedDownload.Metadata?["TorrentHash"]?.ToString());
+            Assert.Equal(grabbedHash, trackedDownload.Metadata?["ClientDownloadId"]?.ToString());
+            downloadRepoMock.Verify(
+                r => r.UpdateMetadataAsync("tracked-xo", "TorrentHash", preexistingHash),
+                Times.Never);
+            downloadRepoMock.Verify(
+                r => r.UpdateMetadataAsync("tracked-xo", "ClientDownloadId", preexistingHash),
+                Times.Never);
+        }
+
+        [Fact]
         [Trait("Scenario", "HideUntrackedExternalActivity")]
         public async Task GetQueueAsync_UnmatchedActiveTransmissionItem_IsHiddenFromActivity()
         {
