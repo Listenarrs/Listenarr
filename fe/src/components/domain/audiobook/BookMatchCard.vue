@@ -1036,11 +1036,14 @@ defineExpose({ search, cancelSearch })
   display: block;
 }
 
+/* Line height 1: a "checked" box as tall as the text line, centred on it, would stick out of it
+   and make the picked record taller than "No new record yet" */
 .match-status {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
   margin-left: 0.4rem;
+  line-height: 1;
   vertical-align: middle;
   white-space: nowrap;
   color: var(--status-success);
