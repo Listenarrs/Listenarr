@@ -501,6 +501,7 @@ export interface StartupConfig {
   port?: number
   sslPort?: number
   urlBase?: string
+  applicationUrl?: string
   bindAddress?: string
   apiKey?: string
   authenticationMethod?: string
