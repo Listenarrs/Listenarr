@@ -37,10 +37,19 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
 
         private static bool IsZero(Dictionary<string, JsonElement> file, string key)
         {
-            return file.TryGetValue(key, out var value)
-                && value.ValueKind == JsonValueKind.Number
-                && value.TryGetDouble(out var number)
-                && number == 0;
+            if (!file.TryGetValue(key, out var value) || value.ValueKind != JsonValueKind.Number)
+            {
+                return false;
+            }
+
+            // Inspect the validated JSON mantissa so nonzero values cannot underflow to zero.
+            foreach (var character in value.GetRawText())
+            {
+                if (character is 'e' or 'E') break;
+                if (character is >= '1' and <= '9') return false;
+            }
+
+            return true;
         }
 
         public static List<string> TranslateSourceFiles(IEnumerable<string> sourceFiles)

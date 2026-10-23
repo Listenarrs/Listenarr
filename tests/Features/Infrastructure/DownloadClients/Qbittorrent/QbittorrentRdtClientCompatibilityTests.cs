@@ -10,6 +10,45 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent;
 public class QbittorrentRdtClientCompatibilityTests : BaseTests
 {
     [Theory]
+    [InlineData("0", true)]
+    [InlineData("0.0", true)]
+    [InlineData("-0", true)]
+    [InlineData("-0.00E+12", true)]
+    [InlineData("0e400", true)]
+    [InlineData("0e-400", true)]
+    [InlineData("1e-12", false)]
+    [InlineData("5e-324", false)]
+    [InlineData("2e-324", false)]
+    [InlineData("1e-324", false)]
+    [InlineData("1e-400", false)]
+    [InlineData("-1e-400", false)]
+    [InlineData("0.0001e-400", false)]
+    [InlineData("1e400", false)]
+    [InlineData("\"0\"", false)]
+    [InlineData("null", false)]
+    [InlineData("false", false)]
+    [InlineData("[]", false)]
+    [InlineData("{}", false)]
+    public void MetadataCompatibility_RequiresExactJsonZeroInBothFields(string rawNumber, bool expected)
+    {
+        foreach (var key in new[] { "priority", "progress" })
+        {
+            var files = ParseFiles("""[{"name":"Book/a.mp3","priority":0,"progress":0}]""");
+            files[0][key] = JsonSerializer.Deserialize<JsonElement>(rawNumber);
+
+            Assert.Equal(expected, QbittorrentImportPathResolver.HasUnusableFileMetadata(files));
+        }
+
+        var item = QbittorrentResponseMapper.MapQueueItem(
+            ParseObject("""{"hash":"exact","state":"pausedUP","progress":1,"save_path":"/downloads"}"""),
+            new DownloadClientConfiguration(),
+            ParseFiles("[{\"name\":\"Book/a.mp3\",\"priority\":0,\"progress\":" + rawNumber + "}]"),
+            isRdtClient: true);
+
+        Assert.Equal(expected ? 1 : 0, item.SourceFiles!.Count);
+    }
+
+    [Theory]
     [InlineData(false, "pausedUP", 1, 0, 0, 0)]
     [InlineData(true, "pausedUP", 1, 0, 0, 1)]
     [InlineData(true, "stoppedUP", 1, 0, 0, 1)]
