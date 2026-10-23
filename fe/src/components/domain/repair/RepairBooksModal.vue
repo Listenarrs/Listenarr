@@ -208,6 +208,11 @@
   </Modal>
 </template>
 
+<script lang="ts">
+// Repair takes three steps, the last in the Organize dialog it opens: its title there
+export const REPAIR_ORGANIZE_TITLE = 'Repair Books - Organize - Step 3/3'
+</script>
+
 <script setup lang="ts">
 import { computed, onBeforeUnmount, provide, ref, watch, type ComponentPublicInstance } from 'vue'
 import {
@@ -296,11 +301,10 @@ const organizeIds = ref<number[]>([])
 // One book is searched at a time: the others wait for it
 const searchingRowId = ref<number | null>(null)
 
-// Two steps: pick each book's new record and repair, then the results, to choose what to organize
+// Steps 1 and 2 of three: pick each book's new record and repair, then the results, to choose
+// what to organize (step 3, in the Organize dialog)
 const title = computed(() =>
-  finished.value
-    ? 'Repair Books - Step 2 of 2: Results'
-    : 'Repair Books - Step 1 of 2: New records',
+  finished.value ? 'Repair Books - Results - Step 2/3' : 'Repair Books - Matching - Step 1/3',
 )
 
 // The legend stays in the footer, in sight however long the list is: between Cancel and the
