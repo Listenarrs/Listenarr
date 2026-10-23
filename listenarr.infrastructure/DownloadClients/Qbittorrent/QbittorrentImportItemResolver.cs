@@ -44,7 +44,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 return result;
             }
 
-            var outputPath = QbittorrentImportPathResolver.ResolveContentPath(resolved.Value.SavePath, resolved.Value.Files);
+            var outputPath = QbittorrentImportPathResolver.ResolveContentPath(
+                resolved.Value.SavePath, resolved.Value.Files, resolved.Value.IncludePriorityZeroFiles);
             if (string.IsNullOrEmpty(outputPath))
             {
                 logger.LogWarning("Unable to resolve content path from torrent files for hash {Hash}", hash);
@@ -95,7 +96,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 return result;
             }
 
-            var outputPath = QbittorrentImportPathResolver.ResolveContentPath(resolved.Value.SavePath, resolved.Value.Files);
+            var outputPath = QbittorrentImportPathResolver.ResolveContentPath(
+                resolved.Value.SavePath, resolved.Value.Files, resolved.Value.IncludePriorityZeroFiles);
             if (string.IsNullOrEmpty(outputPath) && string.IsNullOrWhiteSpace(resolvedExistingContentPath))
             {
                 logger.LogWarning("Unable to resolve content path from torrent files for hash {Hash}", hash);
@@ -103,7 +105,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
             }
 
             result.SourceFiles = QbittorrentImportPathResolver.TranslateSourceFiles(
-                QbittorrentImportPathResolver.BuildSourceFiles(resolved.Value.SavePath, resolved.Value.Files));
+                QbittorrentImportPathResolver.BuildSourceFiles(
+                    resolved.Value.SavePath, resolved.Value.Files, resolved.Value.IncludePriorityZeroFiles));
             if (!string.IsNullOrWhiteSpace(outputPath))
             {
                 result.ContentPath = outputPath;
@@ -113,7 +116,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
             return result;
         }
 
-        private async Task<(string SavePath, List<Dictionary<string, JsonElement>> Files)?> ResolveTorrentFilesAsync(
+        private async Task<(string SavePath, List<Dictionary<string, JsonElement>> Files, bool IncludePriorityZeroFiles)?> ResolveTorrentFilesAsync(
             DownloadClientConfiguration client,
             string hash,
             CancellationToken ct)
@@ -167,7 +170,36 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                     return null;
                 }
 
-                return (savePath, files);
+                var includePriorityZeroFiles = false;
+                if (QbittorrentImportPathResolver.HasUnusableFileMetadata(files)
+                    && await QbittorrentCompatibilityDetector.IsRdtClientAsync(httpClient, baseUrl, props, ct))
+                {
+                    // The import caller synthesizes a "completed" queue item. Verify the
+                    // current torrent itself before overriding unusable per-file metadata.
+                    using var infoResp = await httpClient.GetAsync(
+                        $"{baseUrl}/api/v2/torrents/info?hashes={Uri.EscapeDataString(hash)}", ct);
+                    if (!infoResp.IsSuccessStatusCode)
+                    {
+                        return null;
+                    }
+
+                    var infoJson = await infoResp.Content.ReadAsStringAsync(ct);
+                    var torrents = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(infoJson);
+                    var matches = torrents?.Where(torrent =>
+                        torrent.TryGetValue("hash", out var hashElement)
+                        && hashElement.ValueKind == JsonValueKind.String
+                        && string.Equals(hashElement.GetString(), hash, StringComparison.OrdinalIgnoreCase)).ToList();
+                    if (matches?.Count != 1
+                        || QbittorrentResponseMapper.MapQueueItem(matches[0], client, files).Status != "completed")
+                    {
+                        return null;
+                    }
+
+                    includePriorityZeroFiles = true;
+                    logger.LogInformation("Using rdt-client compatibility for completed torrent {Hash}", hash);
+                }
+
+                return (savePath, files, includePriorityZeroFiles);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {

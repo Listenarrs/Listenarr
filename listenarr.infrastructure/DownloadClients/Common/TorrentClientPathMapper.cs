@@ -25,7 +25,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Common
     {
         public static List<string> BuildQbittorrentSourceFiles(
             string savePath,
-            List<Dictionary<string, JsonElement>> files)
+            List<Dictionary<string, JsonElement>> files,
+            bool includePriorityZeroFiles = false)
         {
             if (string.IsNullOrEmpty(savePath) || files == null || files.Count == 0)
             {
@@ -36,7 +37,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Common
             // whitespace from path segments; only strip separators when intentionally
             // converting a rooted-looking child path into a relative child path.
             return files
-                .Where(IsQbittorrentFileDownloaded)
+                .Where(file => includePriorityZeroFiles || IsQbittorrentFileDownloaded(file))
                 .Select(file => file.TryGetValue("name", out var nameEl) ? nameEl.GetString() ?? string.Empty : string.Empty)
                 .Where(name => !string.IsNullOrEmpty(name))
                 .Select(name => CombineClientReportedPath(savePath, name))
@@ -78,7 +79,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Common
 
         public static string ResolveQbittorrentContentPath(
             string savePath,
-            List<Dictionary<string, JsonElement>> files)
+            List<Dictionary<string, JsonElement>> files,
+            bool includePriorityZeroFiles = false)
         {
             if (string.IsNullOrEmpty(savePath) || files == null || files.Count == 0)
             {
@@ -86,7 +88,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Common
             }
 
             var fileNames = files
-                .Where(IsQbittorrentFileDownloaded)
+                .Where(file => includePriorityZeroFiles || IsQbittorrentFileDownloaded(file))
                 .Select(f => f.TryGetValue("name", out var nameEl) ? nameEl.GetString() ?? string.Empty : string.Empty)
                 .Where(name => !string.IsNullOrEmpty(name))
                 .Where(name => !FileUtils.ContainsParentDirectorySegment(name, '/', '\\'))

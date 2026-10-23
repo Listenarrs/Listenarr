@@ -108,7 +108,24 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                         files = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(filesJson) ?? [];
                     }
 
-                    items.Add(QbittorrentResponseMapper.MapQueueItem(torrent, client, files));
+                    var item = QbittorrentResponseMapper.MapQueueItem(torrent, client, files);
+                    if (item.Status == "completed"
+                        && QbittorrentImportPathResolver.HasUnusableFileMetadata(files))
+                    {
+                        using var propertiesResp = await httpClient.GetAsync(
+                            $"{baseUrl}/api/v2/torrents/properties?hash={Uri.EscapeDataString(hash)}", ct);
+                        if (propertiesResp.IsSuccessStatusCode)
+                        {
+                            var propertiesJson = await propertiesResp.Content.ReadAsStringAsync(ct);
+                            var properties = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(propertiesJson);
+                            if (await QbittorrentCompatibilityDetector.IsRdtClientAsync(httpClient, baseUrl, properties, ct))
+                            {
+                                item = QbittorrentResponseMapper.MapQueueItem(torrent, client, files, isRdtClient: true);
+                            }
+                        }
+                    }
+
+                    items.Add(item);
                 }
             }
             catch (DownloadClientAdapterPollingException)
