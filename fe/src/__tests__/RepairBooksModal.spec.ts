@@ -1836,11 +1836,16 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal([7, 8, 9])
     await flushPromises()
     for (const id of [7, 8, 9]) await searchAndPick(wrapper, { id, query: 'Primal Hunter' })
+    // Step 1: the footer's bar unseen (standby), its room kept
+    expect(wrapper.get('[data-testid="repair-progress"]').classes()).toContain(
+      'repair-progress-standby',
+    )
 
     await repair(wrapper)
 
     // The footer's bar: empty, breathing while the repairs run
     const progress = () => wrapper.get('[data-testid="repair-progress"]')
+    expect(progress().classes()).not.toContain('repair-progress-standby')
     expect(progress().attributes('aria-valuenow')).toBe('0')
     expect(progress().attributes('aria-valuemax')).toBe('3')
     expect(progress().classes()).toContain('repair-progress-running')

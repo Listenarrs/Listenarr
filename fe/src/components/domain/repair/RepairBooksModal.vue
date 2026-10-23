@@ -213,13 +213,15 @@
             <PhFolderOpen :size="16" />
             Organize {{ organizeIds.length }}
           </button>
-          <!-- Along the dialog's bottom edge: grey until a repair runs, then filled from left to
+          <!-- Along the dialog's bottom edge: unseen on step 1 (standby, its room kept), grey from
+               Repair on, then filled from left to
                right as each book's repair ends, breathing until the last one. Blue, orange as
                soon as a repair goes wrong. Once canceled, the books left out count as over, so it
                fills up when the running one ends -->
           <div
             class="repair-progress"
             :class="{
+              'repair-progress-standby': !repairStep,
               'repair-progress-running': executing,
               'repair-progress-problem': !!problemText,
             }"
@@ -835,6 +837,11 @@ watch(
   height: 100%;
   background: var(--status-progress);
   transition: width 0.3s ease;
+}
+
+/* Standby (step 1, no repair yet): unseen, the dialog's own colour, but it keeps its room */
+.repair-progress.repair-progress-standby {
+  background: transparent;
 }
 
 .repair-progress-running .repair-progress-fill {
