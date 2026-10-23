@@ -150,6 +150,20 @@
           />
           {{ outcome.message }}
         </p>
+        <!-- A failed repair, or one done in part: Retry, at the row's bottom right. Laid over the
+             row's room (the status line always leaves it free), so showing it moves nothing -->
+        <button
+          v-if="outcome.state === 'failed' || outcome.state === 'warning'"
+          type="button"
+          class="btn btn-secondary repair-result-retry"
+          :disabled="running"
+          :title="running ? 'Wait for the repair running to end' : 'Repair this book again'"
+          data-testid="repair-result-retry"
+          @click="emit('retry', outcome.id)"
+        >
+          <PhArrowCounterClockwise :size="14" />
+          Retry
+        </button>
         <dl v-if="opened.has(outcome.id)" class="repair-result-records">
           <dt>Old</dt>
           <dd data-testid="repair-result-old">
@@ -178,7 +192,13 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { PhCaretDown, PhCaretUp, PhFolderOpen, PhSpinner } from '@phosphor-icons/vue'
+import {
+  PhArrowCounterClockwise,
+  PhCaretDown,
+  PhCaretUp,
+  PhFolderOpen,
+  PhSpinner,
+} from '@phosphor-icons/vue'
 import RepairSelection from './RepairSelection.vue'
 import BookRecordDiff from '@/components/domain/audiobook/BookRecordDiff.vue'
 import { bookSummary, type BookRecord, type BookTaskState } from '@/utils/bookMatch'
@@ -208,6 +228,9 @@ const props = defineProps<{
 
 // The books to organize: repaired ones only
 const selected = defineModel<number[]>('selected', { required: true })
+
+// Retry: repair that book again
+const emit = defineEmits<{ retry: [id: number] }>()
 
 const repairedIds = computed(() =>
   props.outcomes.filter((o) => o.state === 'done').map((o) => o.id),
@@ -414,6 +437,20 @@ function toggle(id: number) {
   font-size: 0.8rem;
 }
 
+.repair-result-retry {
+  position: absolute;
+  right: 1rem;
+  bottom: calc(0.55rem + 3px);
+  /* Its own width on a phone too, where modal buttons stretch */
+  width: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
 .repair-result-details-labels {
   display: grid;
 }
@@ -443,6 +480,8 @@ function toggle(id: number) {
 }
 
 .repair-result-message {
+  /* Room always left free on the right for Retry */
+  padding-right: 6.5rem;
   display: flex;
   align-items: center;
   gap: 0.4rem;
