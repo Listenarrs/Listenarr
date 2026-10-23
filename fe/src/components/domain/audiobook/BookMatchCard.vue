@@ -244,35 +244,46 @@
           <PhWarningCircle v-if="resultsHeader.tone === 'match-search-error'" :size="14" />
           {{ resultsHeader.text }}
         </p>
-        <FindMatchResults
-          v-if="state.results.length"
-          ref="resultsListEl"
-          class="match-search-results"
-          :results="state.results"
-          :selected="pickedRecord"
-          :current="match.current"
-          @select="pick"
-        />
-        <!-- No results: the empty list, at its full height when the card keeps its room, else at
+        <!-- The list and its empty room share one place; from the first search on (several books),
+             an unseen result with every line a result can have keeps that place at least one
+             result high, so a short answer doesn't move what is under the book -->
+        <div class="match-results-cell">
+          <FindMatchResults
+            v-if="state.results.length"
+            ref="resultsListEl"
+            class="match-search-results"
+            :results="state.results"
+            :selected="pickedRecord"
+            :current="match.current"
+            @select="pick"
+          />
+          <!-- No results: the empty list, at its full height when the card keeps its room, else at
              the height of the results a failed or canceled search took away, or of one result from
              the first search on (the spinner and the reveal need something to cover) -->
-        <!-- Why there are no results, in the middle of that room: once the spinner is gone -->
-        <div
-          v-else-if="emptyList"
-          class="match-results-empty"
-          :class="{ 'match-results-empty-row': !placeholders && keptHeight === null }"
-          :style="placeholders || keptHeight === null ? undefined : { height: `${keptHeight}px` }"
-          data-testid="match-results-placeholder"
-        >
-          <p
-            v-if="noResultsReason && !resultsPending"
-            class="match-results-reason"
-            :class="noResultsReason.tone"
-            data-testid="match-results-reason"
+          <!-- Why there are no results, in the middle of that room: once the spinner is gone -->
+          <div
+            v-else-if="emptyList"
+            class="match-results-empty"
+            :style="placeholders || keptHeight === null ? undefined : { height: `${keptHeight}px` }"
+            data-testid="match-results-placeholder"
           >
-            <PhWarningCircle :size="16" />
-            {{ noResultsReason.text }}
-          </p>
+            <p
+              v-if="noResultsReason && !resultsPending"
+              class="match-results-reason"
+              :class="noResultsReason.tone"
+              data-testid="match-results-reason"
+            >
+              <PhWarningCircle :size="16" />
+              {{ noResultsReason.text }}
+            </p>
+          </div>
+          <FindMatchResults
+            v-if="oneResultRoom"
+            class="match-search-results match-results-sizer"
+            :results="[ROOM_SAMPLE]"
+            aria-hidden="true"
+            data-testid="match-results-sizer"
+          />
         </div>
         <span
           v-if="resultsPending"
@@ -603,6 +614,16 @@ const keptHeight = ref<number | null>(null)
 // A card that doesn't keep the room from the start gets an empty list one result high with its
 // first search, kept until results replace it: the spinner and the reveal show over it
 const firstSearchRoom = ref(false)
+const oneResultRoom = computed(() => !props.placeholders && firstSearchRoom.value)
+// The result the room is measured with: a title, an author and an ASIN, and a narrator (the
+// tallest a result gets)
+const ROOM_SAMPLE: SearchResult = {
+  asin: 'B000000000',
+  title: 'Room',
+  authors: [{ name: 'Room' }],
+  narrators: [{ name: 'Room' }],
+  language: 'english',
+} as unknown as SearchResult
 const emptyList = computed(
   () => props.placeholders || keptHeight.value !== null || firstSearchRoom.value,
 )
@@ -1175,9 +1196,18 @@ defineExpose({ search, cancelSearch })
   box-sizing: border-box;
 }
 
-/* One result's height (its row and the list's border), from the first search on */
-.match-results-empty-row {
-  height: 5rem;
+/* The list, its empty room and the unseen result in one place: as tall as the tallest */
+.match-results-cell {
+  display: grid;
+}
+
+.match-results-cell > * {
+  grid-area: 1 / 1;
+}
+
+.match-results-sizer {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .match-results-empty {
