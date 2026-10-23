@@ -56,37 +56,13 @@
             </div>
           </div>
 
-          <div class="form-group repair-group">
-            <label class="form-label">
-              <PhCheckSquare />
-              Selection
-            </label>
-            <div class="form-control-card">
-              <div class="repair-toolbar">
-                <p class="repair-toolbar-title">
-                  <strong>{{ selectedCount }}</strong> of {{ rows.length }} book(s) to repair
-                </p>
-                <div class="toolbar-actions">
-                  <button
-                    type="button"
-                    class="btn btn-secondary repair-action-btn"
-                    :disabled="executing || finished"
-                    @click="selectAll"
-                  >
-                    Select All
-                  </button>
-                  <button
-                    type="button"
-                    class="btn btn-secondary repair-action-btn"
-                    :disabled="executing || finished"
-                    @click="clearSelection"
-                  >
-                    Clear
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+          <RepairSelection
+            :selected="selectedCount"
+            :total="rows.length"
+            action="repair"
+            @select-all="selectAll"
+            @clear="clearSelection"
+          />
 
           <div class="form-group repair-group">
             <label class="form-label">
@@ -135,7 +111,7 @@
       <ModalFooter
         ref="footerRef"
         class="repair-footer"
-        :class="{ 'repair-footer-legend-above': legendAbove }"
+        :class="{ 'repair-footer-legend-above': legendAbove || repairStep }"
         :showCancel="false"
       >
         <template #left>
@@ -162,12 +138,38 @@
             ref="legendRef"
             :class="{ 'repair-legend-above': legendAbove }"
           />
-          <!-- As soon as a book's repair goes wrong (failed, done in part, canceled), between
-               Close and the skipped count -->
-          <span v-else-if="problemText" class="repair-problems" data-testid="repair-problems">
-            <PhWarningCircle :size="16" />
-            {{ problemText }}
-          </span>
+          <template v-else>
+            <!-- Step 2's bar colours, always on their own line above the buttons: the line of
+                 the buttons keeps its room for the warning -->
+            <MatchLegend
+              :entries="REPAIR_LEGEND"
+              class="repair-legend-above"
+              data-testid="repair-legend"
+            />
+            <!-- The warning's place, kept from the start of step 2: between Close and the skipped
+                 count when the line has room for its longest text, on its own line above them
+                 otherwise. Filled as soon as a book's repair goes wrong (failed, done in part,
+                 canceled) -->
+            <span
+              class="repair-problems"
+              :class="{ 'repair-problems-above': problemsAbove }"
+              data-testid="repair-problems-slot"
+            >
+              <template v-if="problemText">
+                <PhWarningCircle :size="16" />
+                <span data-testid="repair-problems">{{ problemText }}</span>
+              </template>
+            </span>
+            <!-- The longest warning step 2 can show, unseen: what the place is measured with -->
+            <span
+              ref="problemsSizerRef"
+              class="repair-problems repair-problems-sizer"
+              aria-hidden="true"
+            >
+              <PhWarningCircle :size="16" />
+              {{ longestProblemText }}
+            </span>
+          </template>
         </template>
         <template #default>
           <!-- Always shown, 0 included, from the start: a count that appears and disappears would
@@ -241,7 +243,6 @@ export const REPAIR_ORGANIZE_TITLE = 'Repair Books - Organize - Step 3/3'
 <script setup lang="ts">
 import { computed, onBeforeUnmount, provide, ref, watch, type ComponentPublicInstance } from 'vue'
 import {
-  PhCheckSquare,
   PhFolderOpen,
   PhInfo,
   PhSpinner,
@@ -254,7 +255,8 @@ import { apiService } from '@/services/api'
 import { useLibraryImportStore } from '@/stores/libraryImport'
 import BookMatchCard from '@/components/domain/audiobook/BookMatchCard.vue'
 import RepairResults, { type RepairOutcome } from './RepairResults.vue'
-import MatchLegend from '@/components/domain/audiobook/MatchLegend.vue'
+import RepairSelection from './RepairSelection.vue'
+import MatchLegend, { type LegendEntry } from '@/components/domain/audiobook/MatchLegend.vue'
 import {
   FALLBACK_REGION,
   asinChanged,
@@ -347,6 +349,9 @@ const footerRef = ref<ComponentPublicInstance | null>(null)
 const cancelRef = ref<HTMLElement | null>(null)
 const legendRef = ref<ComponentPublicInstance | null>(null)
 const legendAbove = ref(false)
+// Step 2: the warning's place on its own line, above the buttons
+const problemsSizerRef = ref<HTMLElement | null>(null)
+const problemsAbove = ref(false)
 const countRef = ref<HTMLElement | null>(null)
 // The skipped count on two lines, the last resort: even Cancel, it and Repair don't fit one line
 const countWraps = ref(false)
@@ -384,14 +389,16 @@ function placeLegend() {
     : actions.offsetWidth
   const cancelAndActions = cancelRef.value.offsetWidth + gapOf(footer) + actionsWidth
   legendAbove.value = !!legend && cancelAndActions + gapOf(left) + legendWidth > room
+  const sizer = problemsSizerRef.value
+  problemsAbove.value = !!sizer && cancelAndActions + gapOf(footer) + sizer.offsetWidth > room
   countWraps.value = cancelAndActions > room
 }
 
 // Measured again when the modal resizes, the skipped count or the button changes, or the legend
-// shows or goes (the results step has none)
+// or the warning's longest text shows or goes
 watch(
-  [footerRef, legendRef],
-  ([footer, legend]) => {
+  [footerRef, legendRef, problemsSizerRef],
+  ([footer, legend, sizer]) => {
     footerObserver?.disconnect()
     footerObserver = null
     if (!footer || typeof ResizeObserver !== 'function') return
@@ -399,6 +406,7 @@ watch(
     const footerElement = footer.$el as HTMLElement
     footerObserver.observe(footerElement)
     if (legend) footerObserver.observe(legend.$el as HTMLElement)
+    if (sizer) footerObserver.observe(sizer)
     const actions = footerElement.querySelector('.modal-footer-actions')
     if (actions) footerObserver.observe(actions)
   },
@@ -417,6 +425,21 @@ const skippedText = computed(() => {
   if (executing.value) return canceledCount.value
   return skippedCount.value
 })
+// What the bar along the bottom of each book means on step 2
+const REPAIR_LEGEND: LegendEntry[] = [
+  { tone: 'idle', label: 'Waiting or canceled' },
+  { tone: 'progress', label: 'Repairing' },
+  { tone: 'success', label: 'Repaired' },
+  { tone: 'warning', label: 'Repaired in part' },
+  { tone: 'error', label: 'Failed' },
+]
+
+// The longest warning the books on step 2 can bring: every kind, each counting them all
+const longestProblemText = computed(() => {
+  const n = repairTotal.value
+  return `Not all repaired: ${n} failed, ${n} repaired in part, ${n} canceled`
+})
+
 // What went wrong on step 2, counted by kind: the footer's warning, and its bar orange
 const problemText = computed(() => {
   const count = (state: string) => rows.value.filter((row) => row.task?.state === state).length
@@ -675,14 +698,6 @@ watch(
   margin-bottom: 1rem;
 }
 
-.repair-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
 /* Same info box as the Organize dialog */
 .repair-info-section {
   display: flex;
@@ -706,16 +721,6 @@ watch(
   font-size: 0.95rem;
   line-height: 1.4;
   color: #ccc;
-}
-
-.repair-toolbar-title {
-  margin: 0;
-  color: #ccc;
-}
-
-.toolbar-actions {
-  display: flex;
-  gap: 0.5rem;
 }
 
 .repair-list {
@@ -800,6 +805,9 @@ watch(
 }
 
 .repair-problems {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 1.3em;
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
@@ -807,9 +815,20 @@ watch(
   color: var(--status-warning);
 }
 
-.repair-legend-above {
+.repair-legend-above,
+.repair-problems-above {
   order: -1;
   flex-basis: 100%;
+}
+
+.repair-problems-sizer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  visibility: hidden;
+  white-space: nowrap;
+  pointer-events: none;
+  flex: none;
 }
 
 /* On a phone the footer stays one line: Cancel on the left, "n skipped" and Repair on the right

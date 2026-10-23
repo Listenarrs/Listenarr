@@ -47,6 +47,16 @@
       <p v-else>No book was repaired: there is nothing to organize.</p>
     </div>
 
+    <!-- The books to organize: only repaired ones can be, once the repairs are over -->
+    <RepairSelection
+      :selected="selected.length"
+      :total="outcomes.length"
+      action="organize"
+      :disabled="running"
+      @select-all="selected = repairedIds"
+      @clear="selected = []"
+    />
+
     <div class="repair-results-list">
       <div
         v-for="outcome in outcomes"
@@ -105,6 +115,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { PhFolderOpen, PhSpinner } from '@phosphor-icons/vue'
+import RepairSelection from './RepairSelection.vue'
 import { bookSummary, recordParts, type BookRecord, type BookTaskState } from '@/utils/bookMatch'
 
 // One book to repair, from the moment the repair starts
@@ -129,7 +140,10 @@ const props = defineProps<{ outcomes: RepairOutcome[]; running: boolean }>()
 // The books to organize: repaired ones only
 const selected = defineModel<number[]>('selected', { required: true })
 
-const repairedCount = computed(() => props.outcomes.filter((o) => o.state === 'done').length)
+const repairedIds = computed(() =>
+  props.outcomes.filter((o) => o.state === 'done').map((o) => o.id),
+)
+const repairedCount = computed(() => repairedIds.value.length)
 const toRepairCount = computed(() => props.outcomes.length)
 // The book being repaired, counted from 1 among the books to repair
 const current = computed(
@@ -195,6 +209,11 @@ function newParts(outcome: RepairOutcome) {
   font-size: 0.95rem;
   line-height: 1.4;
   color: #ddd;
+}
+
+/* The list's own gap spaces the selection */
+.repair-results .repair-group {
+  margin-bottom: 0;
 }
 
 .repair-results-list {

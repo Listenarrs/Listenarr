@@ -1665,6 +1665,21 @@ describe('RepairBooksModal', () => {
     ).toBeDefined()
     // The unticked one stays behind on step 1
     expect(wrapper.find('[data-testid="repair-result-8"]').exists()).toBe(false)
+    // The footer: step 2's legend, and the warning's place kept, empty while nothing went wrong
+    expect(wrapper.findAll('[data-testid="repair-legend"] li').map((li) => li.text())).toEqual([
+      'Waiting or canceled',
+      'Repairing',
+      'Repaired',
+      'Repaired in part',
+      'Failed',
+    ])
+    expect(wrapper.find('[data-testid="repair-problems-slot"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="repair-problems"]').exists()).toBe(false)
+    // The selection stays, for Organize, not usable while the repairs run
+    expect(wrapper.get('[data-testid="repair-selection-count"]').text()).toBe(
+      '0 of 1 book(s) to organize',
+    )
+    expect(wrapper.get('[data-testid="repair-select-all"]').attributes('disabled')).toBeDefined()
     // Organize waits for the repairs; Cancel is red
     expect(wrapper.find('[data-testid="repair-confirm"]').exists()).toBe(false)
     const organize = wrapper.get('[data-testid="repair-organize"]')
@@ -1712,10 +1727,20 @@ describe('RepairBooksModal', () => {
     expect(wrapper.get('[data-testid="repair-cancel"]').classes()).not.toContain('btn-danger')
     expect(result(wrapper).find('[data-testid="repair-result-loading"]').exists()).toBe(false)
 
+    expect(wrapper.get('[data-testid="repair-selection-count"]').text()).toBe(
+      '1 of 1 book(s) to organize',
+    )
+
     // Unticked: left out of Organize
     await result(wrapper).get('[data-testid="repair-result-include"]').trigger('change')
     expect(wrapper.get('[data-testid="repair-organize"]').text()).toContain('Organize 0')
     expect(wrapper.get('[data-testid="repair-count"]').text()).toBe('1 skipped')
+
+    // Select All ticks the repaired books again, Clear unticks them
+    await wrapper.get('[data-testid="repair-select-all"]').trigger('click')
+    expect(wrapper.get('[data-testid="repair-organize"]').text()).toContain('Organize 1')
+    await wrapper.get('[data-testid="repair-clear"]').trigger('click')
+    expect(wrapper.get('[data-testid="repair-organize"]').text()).toContain('Organize 0')
   })
 
   it('repairs one book after the other; Cancel leaves out the ones still waiting', async () => {
