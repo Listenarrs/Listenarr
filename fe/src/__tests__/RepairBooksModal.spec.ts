@@ -1596,6 +1596,9 @@ describe('RepairBooksModal', () => {
     expect(
       result(wrapper).get('[data-testid="repair-result-include"]').attributes('disabled'),
     ).toBeDefined()
+    expect(wrapper.get('[data-testid="repair-problems"]').text()).toBe(
+      'Not all repaired: 1 repaired in part',
+    )
   })
 
   it('shows a failed repair in red, with how long it took, without trailing zeros', async () => {
@@ -1617,6 +1620,11 @@ describe('RepairBooksModal', () => {
     )
     expect(apiMocks.rescanAudiobookMetadata).not.toHaveBeenCalled()
     expect(wrapper.get('#modal-title h2').text()).toBe('Repair Books - Results - Step 2/3')
+    // The footer warns: its bar orange, and what went wrong
+    expect(wrapper.get('[data-testid="repair-problems"]').text()).toBe('Not all repaired: 1 failed')
+    expect(wrapper.get('[data-testid="repair-progress"]').classes()).toContain(
+      'repair-progress-problem',
+    )
     // Nothing repaired: nothing to organize, and the message says so
     expect(wrapper.get('[data-testid="repair-results-message"]').text()).toBe(
       'No book was repaired: there is nothing to organize.',
@@ -1655,12 +1663,8 @@ describe('RepairBooksModal', () => {
     expect(
       result(wrapper).get('[data-testid="repair-result-include"]').attributes('disabled'),
     ).toBeDefined()
-    // The unticked one is skipped, without a loading state
-    expect(result(wrapper, 8).attributes('data-result-state')).toBe('skipped')
-    expect(result(wrapper, 8).get('[data-testid="repair-result-message"]').text()).toBe(
-      'Skipped: not repaired',
-    )
-    expect(result(wrapper, 8).find('[data-testid="repair-result-loading"]').exists()).toBe(false)
+    // The unticked one stays behind on step 1
+    expect(wrapper.find('[data-testid="repair-result-8"]').exists()).toBe(false)
     // Organize waits for the repairs; Cancel is red
     expect(wrapper.find('[data-testid="repair-confirm"]').exists()).toBe(false)
     const organize = wrapper.get('[data-testid="repair-organize"]')
@@ -1669,7 +1673,7 @@ describe('RepairBooksModal', () => {
     const cancel = wrapper.get('[data-testid="repair-cancel"]')
     expect(cancel.text()).toBe('Cancel')
     expect(cancel.classes()).toContain('btn-danger')
-    expect(wrapper.get('[data-testid="repair-count"]').text()).toBe('1 skipped')
+    expect(wrapper.get('[data-testid="repair-count"]').text()).toBe('0 skipped')
     // The progress bar along the bottom: none of the one repair over yet
     const progress = () => wrapper.get('[data-testid="repair-progress"]')
     expect(progress().attributes('aria-valuemax')).toBe('1')
@@ -1680,16 +1684,14 @@ describe('RepairBooksModal', () => {
     await flushPromises()
     expect(progress().attributes('aria-valuenow')).toBe('1')
 
-    // The results: every book, the repaired one ticked for Organize, the skipped one not tickable
+    // The results: the repaired book ticked for Organize, nothing went wrong
     expect(result(wrapper).attributes('data-result-state')).toBe('done')
-    expect(result(wrapper, 8).attributes('data-result-state')).toBe('skipped')
     expect(result(wrapper).get('[data-testid="repair-result-include"]').element).toHaveProperty(
       'checked',
       true,
     )
-    expect(
-      result(wrapper, 8).get('[data-testid="repair-result-include"]').attributes('disabled'),
-    ).toBeDefined()
+    expect(wrapper.find('[data-testid="repair-problems"]').exists()).toBe(false)
+    expect(progress().classes()).not.toContain('repair-progress-problem')
     // Old and new records, the parts that changed in green
     expect(result(wrapper).get('[data-testid="repair-result-old"]').text()).toBe(
       'B0HM45F8MW - Primal Hunter, Vol. 7 - Zogarth - France (FR)',
@@ -1703,7 +1705,7 @@ describe('RepairBooksModal', () => {
       '1 book repaired',
     )
     expect(wrapper.get('[data-testid="repair-organize"]').text()).toContain('Organize 1')
-    expect(wrapper.get('[data-testid="repair-count"]').text()).toBe('1 skipped')
+    expect(wrapper.get('[data-testid="repair-count"]').text()).toBe('0 skipped')
 
     // Close again, no longer red
     expect(wrapper.get('[data-testid="repair-cancel"]').text()).toBe('Close')
@@ -1713,7 +1715,7 @@ describe('RepairBooksModal', () => {
     // Unticked: left out of Organize
     await result(wrapper).get('[data-testid="repair-result-include"]').trigger('change')
     expect(wrapper.get('[data-testid="repair-organize"]').text()).toContain('Organize 0')
-    expect(wrapper.get('[data-testid="repair-count"]').text()).toBe('2 skipped')
+    expect(wrapper.get('[data-testid="repair-count"]').text()).toBe('1 skipped')
   })
 
   it('repairs one book after the other; Cancel leaves out the ones still waiting', async () => {
@@ -1733,7 +1735,7 @@ describe('RepairBooksModal', () => {
     expect(progress().attributes('aria-valuenow')).toBe('0')
     expect(progress().attributes('aria-valuemax')).toBe('3')
     expect(progress().classes()).toContain('repair-progress-running')
-    expect(wrapper.find('[data-testid="repair-canceled"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="repair-problems"]').exists()).toBe(false)
 
     // One at a time: the first runs, the others wait in a loading state
     const states = () => [7, 8, 9].map((id) => result(wrapper, id).attributes('data-result-state'))
@@ -1752,7 +1754,7 @@ describe('RepairBooksModal', () => {
     )
     // A third of the way
     expect(progress().attributes('aria-valuenow')).toBe('1')
-    expect(progress().classes()).not.toContain('repair-progress-canceled')
+    expect(progress().classes()).not.toContain('repair-progress-problem')
 
     // Cancel: the waiting book is left out at once, the running one ends first
     await wrapper.get('[data-testid="repair-cancel"]').trigger('click')
@@ -1767,10 +1769,10 @@ describe('RepairBooksModal', () => {
     expect(cancel.text()).toBe('Canceling…')
     expect(cancel.attributes('disabled')).toBeDefined()
     // The bar turns orange, the book left out counted as over; the footer says what was left out
-    expect(progress().classes()).toContain('repair-progress-canceled')
+    expect(progress().classes()).toContain('repair-progress-problem')
     expect(progress().attributes('aria-valuenow')).toBe('2')
-    expect(wrapper.get('[data-testid="repair-canceled"]').text()).toBe(
-      'Canceled: 1 book not repaired',
+    expect(wrapper.get('[data-testid="repair-problems"]').text()).toBe(
+      'Not all repaired: 1 canceled',
     )
 
     rescans[1]!({ message: 'ok', audiobookId: 8, asin: 'B0BK9W82PQ', region: 'us' })
@@ -1779,9 +1781,9 @@ describe('RepairBooksModal', () => {
     expect(rescans).toHaveLength(2)
     // Full and orange, no longer breathing; the warning stays
     expect(progress().attributes('aria-valuenow')).toBe('3')
-    expect(progress().classes()).toContain('repair-progress-canceled')
+    expect(progress().classes()).toContain('repair-progress-problem')
     expect(progress().classes()).not.toContain('repair-progress-running')
-    expect(wrapper.find('[data-testid="repair-canceled"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="repair-problems"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="repair-cancel"]').text()).toBe('Close')
     expect(wrapper.get('[data-testid="repair-organize"]').text()).toContain('Organize 2')
     expect(wrapper.get('[data-testid="repair-organize"]').attributes('disabled')).toBeUndefined()
