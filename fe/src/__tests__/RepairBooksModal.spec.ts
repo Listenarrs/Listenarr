@@ -1164,7 +1164,12 @@ describe('RepairBooksModal', () => {
       ]),
     )
     expect(apiMocks.rescanAudiobookMetadata).toHaveBeenCalledWith(7)
-    expect(wrapper.text()).toContain('B0BK9W82PQ · us')
+    expect(result(wrapper).get('[data-testid="repair-result-record"]').text()).toContain(
+      'B0BK9W82PQ',
+    )
+    expect(result(wrapper).get('[data-testid="repair-result-record"]').text()).toContain(
+      'United States (US)',
+    )
   })
 
   it('saves the new ASIN as primary, drops the identifiers of the old match and keeps manual ones', async () => {
@@ -1586,7 +1591,9 @@ describe('RepairBooksModal', () => {
     await flushPromises()
 
     expect(apiMocks.rescanAudiobookMetadata).toHaveBeenCalledTimes(2)
-    expect(wrapper.text()).toContain('B0HM45F8MW · fr')
+    expect(result(wrapper).get('[data-testid="repair-result-record"]').text()).toBe(
+      'B0HM45F8MW - Primal Hunter, Vol. 7 - Zogarth - France (FR)',
+    )
   })
 
   it('shows how long each repair took, in seconds with up to 2 decimals', async () => {
@@ -1606,8 +1613,13 @@ describe('RepairBooksModal', () => {
     // The results say how it ended, and how long it took
     expect(result(wrapper).attributes('data-result-state')).toBe('done')
     expect(result(wrapper).get('[data-testid="repair-result-message"]').text()).toBe(
-      'Repaired in 1.23 s: B0HM45F8MW · fr',
+      'Repaired in 1.23 s: B0HM45F8MW - Primal Hunter, Vol. 7 - Zogarth - France (FR)',
     )
+    // The record it now points at, drawn like New: nothing changed here (the rescan answered with
+    // the same record), so nothing highlighted
+    expect(
+      result(wrapper).findAll('[data-testid="repair-result-record"] [data-changed]'),
+    ).toHaveLength(0)
   })
 
   it('shows a repair done in part in orange: the new ASIN saved, its metadata not read', async () => {

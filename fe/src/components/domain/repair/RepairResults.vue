@@ -141,7 +141,17 @@
             :size="14"
             data-testid="repair-result-loading"
           />
-          {{ outcome.message }}
+          <span>
+            {{ outcome.message
+            }}<template v-if="outcome.state === 'done' && outcome.after"
+              >:
+              <BookRecordDiff
+                class="repair-result-message-record"
+                :record="outcome.after"
+                :base="outcome.before"
+                data-testid="repair-result-record"
+            /></template>
+          </span>
         </p>
         <dl v-if="opened.has(outcome.id)" class="repair-result-records">
           <dt>Old</dt>
@@ -432,6 +442,11 @@ function toggle(id: number) {
 
 .repair-result-done .repair-result-message {
   color: var(--status-success);
+}
+
+/* The record a repaired book now points at, drawn like New: grey, what changed in green */
+.repair-result-message-record {
+  color: #aaa;
 }
 
 .repair-result-warning .repair-result-message {
