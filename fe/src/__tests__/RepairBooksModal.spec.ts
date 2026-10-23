@@ -1728,6 +1728,13 @@ describe('RepairBooksModal', () => {
 
     await repair(wrapper)
 
+    // The footer's bar: empty, breathing while the repairs run
+    const progress = () => wrapper.get('[data-testid="repair-progress"]')
+    expect(progress().attributes('aria-valuenow')).toBe('0')
+    expect(progress().attributes('aria-valuemax')).toBe('3')
+    expect(progress().classes()).toContain('repair-progress-running')
+    expect(wrapper.find('[data-testid="repair-canceled"]').exists()).toBe(false)
+
     // One at a time: the first runs, the others wait in a loading state
     const states = () => [7, 8, 9].map((id) => result(wrapper, id).attributes('data-result-state'))
     expect(states()).toEqual(['running', 'waiting', 'waiting'])
@@ -1743,6 +1750,9 @@ describe('RepairBooksModal', () => {
     expect(wrapper.get('[data-testid="repair-results-message"]').text()).toContain(
       'Repairing 2 of 3…',
     )
+    // A third of the way
+    expect(progress().attributes('aria-valuenow')).toBe('1')
+    expect(progress().classes()).not.toContain('repair-progress-canceled')
 
     // Cancel: the waiting book is left out at once, the running one ends first
     await wrapper.get('[data-testid="repair-cancel"]').trigger('click')
@@ -1756,11 +1766,22 @@ describe('RepairBooksModal', () => {
     const cancel = wrapper.get('[data-testid="repair-cancel"]')
     expect(cancel.text()).toBe('Canceling…')
     expect(cancel.attributes('disabled')).toBeDefined()
+    // The bar turns orange, the book left out counted as over; the footer says what was left out
+    expect(progress().classes()).toContain('repair-progress-canceled')
+    expect(progress().attributes('aria-valuenow')).toBe('2')
+    expect(wrapper.get('[data-testid="repair-canceled"]').text()).toBe(
+      'Canceled: 1 book not repaired',
+    )
 
     rescans[1]!({ message: 'ok', audiobookId: 8, asin: 'B0BK9W82PQ', region: 'us' })
     await flushPromises()
     expect(states()).toEqual(['done', 'done', 'skipped'])
     expect(rescans).toHaveLength(2)
+    // Full and orange, no longer breathing; the warning stays
+    expect(progress().attributes('aria-valuenow')).toBe('3')
+    expect(progress().classes()).toContain('repair-progress-canceled')
+    expect(progress().classes()).not.toContain('repair-progress-running')
+    expect(wrapper.find('[data-testid="repair-canceled"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="repair-cancel"]').text()).toBe('Close')
     expect(wrapper.get('[data-testid="repair-organize"]').text()).toContain('Organize 2')
     expect(wrapper.get('[data-testid="repair-organize"]').attributes('disabled')).toBeUndefined()
