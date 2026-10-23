@@ -1556,6 +1556,14 @@ describe('RepairBooksModal', () => {
       .findAll('[data-testid="match-picked"] [data-changed]')
       .map((part) => part.text())
     expect(changed).toEqual(['B0BK9W82PQ', 'Primal Hunter 4', 'United States (US)'])
+    // Current: the parts the new record replaces, in orange
+    const replaced = row(wrapper).findAll('[data-testid="match-current"] [data-changed]')
+    expect(replaced.map((part) => part.text())).toEqual([
+      'B0HM45F8MW',
+      'Primal Hunter, Vol. 7',
+      'France (FR)',
+    ])
+    expect(replaced[0]!.classes()).toContain('book-record-replaced')
   })
 
   it('only rescans when the current record is picked', async () => {
@@ -1612,8 +1620,12 @@ describe('RepairBooksModal', () => {
 
     // The results say how it ended, and how long it took
     expect(result(wrapper).attributes('data-result-state')).toBe('done')
+    // How long it took next to the title; the record it now points at under it
+    expect(result(wrapper).get('[data-testid="repair-result-took"]').text()).toBe(
+      'Repaired in 1.23 s',
+    )
     expect(result(wrapper).get('[data-testid="repair-result-message"]').text()).toBe(
-      'Repaired in 1.23 s: B0HM45F8MW - Primal Hunter, Vol. 7 - Zogarth - France (FR)',
+      'B0HM45F8MW - Primal Hunter, Vol. 7 - Zogarth - France (FR)',
     )
     // The record it now points at, drawn like New: nothing changed here (the rescan answered with
     // the same record), so nothing highlighted
@@ -1779,6 +1791,14 @@ describe('RepairBooksModal', () => {
       .findAll('[data-testid="repair-result-new"] [data-changed]')
       .map((part) => part.text())
     expect(changed).toEqual(['B0BK9W82PQ', 'Primal Hunter 4', 'United States (US)'])
+    // Old: the parts replaced, in orange
+    const replaced = result(wrapper).findAll('[data-testid="repair-result-old"] [data-changed]')
+    expect(replaced.map((part) => part.text())).toEqual([
+      'B0HM45F8MW',
+      'Primal Hunter, Vol. 7',
+      'France (FR)',
+    ])
+    expect(replaced[0]!.classes()).toContain('book-record-replaced')
     // The message not to miss, and Organize for the ticked books, the others counted as skipped
     expect(wrapper.get('[data-testid="repair-results-message"]').text()).toContain(
       '1 book repaired',
