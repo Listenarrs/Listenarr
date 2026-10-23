@@ -216,7 +216,7 @@ describe('LibraryImportSearchModal', () => {
 
     await field(wrapper, 'match-asin').setValue('B0BK9')
     await field(wrapper, 'match-search').trigger('click')
-    expect(field(wrapper, 'match-search-error').text()).toContain('Not an ASIN')
+    expect(field(wrapper, 'match-results-reason').text()).toContain('Not an ASIN')
     expect(field(wrapper, 'find-match-confirm').attributes('disabled')).toBeDefined()
 
     await field(wrapper, 'match-asin').setValue('B000APXZHK')
@@ -238,7 +238,7 @@ describe('LibraryImportSearchModal', () => {
     await field(wrapper, 'match-asin').trigger('keydown', { key: 'Enter' })
     await flushPromises()
     expect(metadata).toHaveBeenLastCalledWith('B0BK9W82PQ', 'fr')
-    expect(field(wrapper, 'match-asin-error').text()).toContain(
+    expect(field(wrapper, 'match-results-reason').text()).toContain(
       'No record for B0BK9W82PQ in Audible France (FR)',
     )
     expect(field(wrapper, 'find-match-confirm').attributes('disabled')).toBeDefined()
@@ -264,7 +264,7 @@ describe('LibraryImportSearchModal', () => {
     metadata.mockImplementation(notFound)
     await field(wrapper, 'match-region').setValue('de')
     await flushPromises()
-    expect(field(wrapper, 'match-asin-error').text()).toContain(
+    expect(field(wrapper, 'match-results-reason').text()).toContain(
       'No record for B0BK9W82PQ in Audible Germany (DE)',
     )
     expect(field(wrapper, 'find-match-confirm').attributes('disabled')).toBeDefined()
