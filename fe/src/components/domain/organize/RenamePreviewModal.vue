@@ -18,7 +18,7 @@
 <template>
   <Modal :visible="visible" size="lg" @close="handleClose">
     <template #header>
-      <ModalHeader title="Organize Files" :icon="PhFolderOpen" @close="handleClose" />
+      <ModalHeader :title="title" :icon="PhFolderOpen" @close="handleClose" />
     </template>
 
     <template #default>
@@ -220,10 +220,13 @@ const props = withDefaults(
   defineProps<{
     visible?: boolean
     audiobookIds?: number[]
+    // Opened by another dialog's last step (Repair): its title says which
+    title?: string
   }>(),
   {
     visible: false,
     audiobookIds: () => [],
+    title: 'Organize Files',
   },
 )
 

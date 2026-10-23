@@ -670,6 +670,7 @@
   <RenamePreviewModal
     :visible="showOrganizeModal"
     :audiobook-ids="audiobook ? [audiobook.id] : []"
+    :title="organizeFromRepair ? REPAIR_ORGANIZE_TITLE : undefined"
     @close="showOrganizeModal = false"
     @done="handleOrganizeDone"
   />
@@ -716,7 +717,9 @@ import { buildAudibleProductUrl } from '@/utils/marketDomains'
 import EditAudiobookModal from '@/components/domain/audiobook/EditAudiobookModal.vue'
 import ManualSearchModal from '@/components/domain/search/ManualSearchModal.vue'
 import RenamePreviewModal from '@/components/domain/organize/RenamePreviewModal.vue'
-import RepairBooksModal from '@/components/domain/repair/RepairBooksModal.vue'
+import RepairBooksModal, {
+  REPAIR_ORGANIZE_TITLE,
+} from '@/components/domain/repair/RepairBooksModal.vue'
 import CustomSelect from '@/components/form/CustomSelect.vue'
 import DeleteConfirmationModal from '@/components/feedback/DeleteConfirmationModal.vue'
 import { Pill } from '@/components/base'
@@ -809,6 +812,8 @@ const displayedScanStatus = computed(() => {
 })
 const showEditModal = ref(false)
 const showOrganizeModal = ref(false)
+// Organize opened by Repair, as its last step
+const organizeFromRepair = ref(false)
 const showRepairModal = ref(false)
 const showMoreActions = ref(false)
 
@@ -922,6 +927,7 @@ const topActions = computed<DetailTopAction[]>(() => [
     disabled: !audiobook.value?.files?.length && !audiobook.value?.filePath,
     desktopGroup: 'secondary',
     onClick: () => {
+      organizeFromRepair.value = false
       showOrganizeModal.value = true
     },
   },
@@ -1843,6 +1849,7 @@ async function handleRepairDone() {
 async function organizeAfterRepair() {
   showRepairModal.value = false
   await loadAudiobook()
+  organizeFromRepair.value = true
   showOrganizeModal.value = true
 }
 

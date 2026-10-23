@@ -155,6 +155,21 @@ describe('RenamePreviewModal', () => {
     },
   )
 
+  it('is titled Organize Files, or with the title of the dialog that opens it as its last step', async () => {
+    vi.mocked(apiService.previewRename).mockResolvedValue([])
+    const wrapper = mount(RenamePreviewModal, {
+      props: { visible: true, audiobookIds: [7] },
+      global: { plugins: [createFilesystemPinia('Ready')] },
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Organize Files')
+
+    await wrapper.setProps({ title: 'Repair Books - Organize - Step 3/3' })
+    expect(wrapper.text()).toContain('Repair Books - Organize - Step 3/3')
+    expect(wrapper.text()).not.toContain('Organize Files')
+    wrapper.unmount()
+  })
+
   it('keeps preview available but disables organize while filesystem initialization is running', async () => {
     vi.mocked(apiService.previewRename).mockResolvedValue([
       {
