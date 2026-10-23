@@ -15,16 +15,33 @@
   You should have received a copy of the GNU Affero General Public License
   along with this program. If not, see <https://www.gnu.org/licenses/>.
 -->
-<!-- What the bar along the bottom of each book match card means (Repair Books and Find Match) -->
+<!-- What the bar along the bottom of each card means: by default the book match card's (Repair
+     Books and Find Match), or the entries given (Repair's step 2) -->
 <template>
   <ul class="match-legend" data-testid="match-legend">
-    <li><span class="match-legend-bar ignored" />Ignored</li>
-    <li><span class="match-legend-bar matched" />Matched</li>
-    <li><span class="match-legend-bar warning" />Invalid</li>
-    <li><span class="match-legend-bar error" />Error</li>
-    <li><span class="match-legend-bar searching" />Searching</li>
+    <li v-for="entry in entries" :key="entry.label">
+      <span class="match-legend-bar" :class="entry.tone" />{{ entry.label }}
+    </li>
   </ul>
 </template>
+
+<script setup lang="ts">
+// A bar colour, from the status palette, and what it means
+export interface LegendEntry {
+  tone: 'idle' | 'success' | 'warning' | 'error' | 'progress'
+  label: string
+}
+
+withDefaults(defineProps<{ entries?: LegendEntry[] }>(), {
+  entries: () => [
+    { tone: 'idle', label: 'Ignored' },
+    { tone: 'success', label: 'Matched' },
+    { tone: 'warning', label: 'Invalid' },
+    { tone: 'error', label: 'Error' },
+    { tone: 'progress', label: 'Searching' },
+  ],
+})
+</script>
 
 <style scoped>
 .match-legend {
@@ -54,7 +71,7 @@
   background: var(--status-idle);
 }
 
-.match-legend-bar.matched {
+.match-legend-bar.success {
   background: var(--status-success);
 }
 
@@ -66,7 +83,7 @@
   background: var(--status-error);
 }
 
-.match-legend-bar.searching {
+.match-legend-bar.progress {
   background: var(--status-progress);
 }
 </style>
