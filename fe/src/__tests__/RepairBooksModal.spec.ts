@@ -1659,6 +1659,19 @@ describe('RepairBooksModal', () => {
     expect(result(wrapper).attributes('data-result-state')).toBe('running')
     expect(result(wrapper).get('[data-testid="repair-result-message"]').text()).toBe('Repairing…')
     expect(result(wrapper).find('[data-testid="repair-result-loading"]').exists()).toBe(true)
+    // Its records closed: the details button's tooltip gives them on two lines
+    const details = result(wrapper).get('[data-testid="repair-result-details"]')
+    expect(details.text()).toBe('Show details')
+    expect(details.attributes('aria-expanded')).toBe('false')
+    expect(details.attributes('title')).toBe(
+      'Old: B0HM45F8MW - Primal Hunter, Vol. 7 - Zogarth - France (FR)\n' +
+        'New: B0BK9W82PQ - Primal Hunter 4 - Zogarth - United States (US)',
+    )
+    expect(result(wrapper).find('[data-testid="repair-result-new"]').exists()).toBe(false)
+    // Opened: the records, the parts that change marked
+    await details.trigger('click')
+    expect(details.text()).toBe('Hide details')
+    expect(details.attributes('aria-expanded')).toBe('true')
     expect(result(wrapper).get('[data-testid="repair-result-new"]').text()).toContain('B0BK9W82PQ')
     expect(
       result(wrapper).get('[data-testid="repair-result-include"]').attributes('disabled'),
@@ -1787,9 +1800,9 @@ describe('RepairBooksModal', () => {
     expect(result(wrapper, 9).get('[data-testid="repair-result-message"]').text()).toBe(
       'Canceled: not repaired',
     )
-    expect(result(wrapper, 9).get('[data-testid="repair-result-new"]').text()).toBe(
-      'None: the book keeps its old record',
-    )
+    expect(
+      result(wrapper, 9).get('[data-testid="repair-result-details"]').attributes('title'),
+    ).toContain('New: None: the book keeps its old record')
     const cancel = wrapper.get('[data-testid="repair-cancel"]')
     expect(cancel.text()).toBe('Canceling…')
     expect(cancel.attributes('disabled')).toBeDefined()
