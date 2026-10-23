@@ -17,6 +17,7 @@
  */
 
 using Listenarr.Api.Attributes;
+using Listenarr.Domain.Notifications;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Features.Notifications
@@ -39,6 +40,25 @@ namespace Listenarr.Api.Features.Notifications
             _configurationService = configurationService;
             _logger = logger;
             _notificationService = notificationService;
+        }
+
+        /// <summary>
+        /// The catalog of notification triggers spanning the book lifecycle (acquisition +
+        /// library management). Served so clients render the trigger list from a single source
+        /// of truth rather than hardcoding it.
+        /// </summary>
+        [HttpGet("triggers")]
+        public ActionResult<object> GetTriggers()
+        {
+            var triggers = NotificationTriggers.Catalog
+                .OrderBy(trigger => trigger.Order)
+                .Select(trigger => new
+                {
+                    id = trigger.Id,
+                    name = trigger.DisplayName,
+                    description = trigger.Description,
+                });
+            return Ok(triggers);
         }
 
         /// <summary>
