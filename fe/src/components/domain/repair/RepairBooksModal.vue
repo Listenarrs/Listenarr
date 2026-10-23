@@ -18,7 +18,8 @@
 <template>
   <Modal :visible="visible" size="lg" @close="handleClose">
     <template #header>
-      <ModalHeader title="Repair Books" :icon="PhWrench" @close="handleClose" />
+      <!-- The step on the title, so the dialog says where the repair is and how much is left -->
+      <ModalHeader :title="title" :icon="PhWrench" @close="handleClose" />
     </template>
 
     <template #default>
@@ -294,6 +295,13 @@ const progressPercent = computed(() =>
 const organizeIds = ref<number[]>([])
 // One book is searched at a time: the others wait for it
 const searchingRowId = ref<number | null>(null)
+
+// Two steps: pick each book's new record and repair, then the results, to choose what to organize
+const title = computed(() =>
+  finished.value
+    ? 'Repair Books - Step 2 of 2: Results'
+    : 'Repair Books - Step 1 of 2: New records',
+)
 
 // The legend stays in the footer, in sight however long the list is: between Cancel and the
 // skipped count when the line has room for all of them, on its own line above them otherwise.
