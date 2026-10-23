@@ -137,6 +137,7 @@
             v-if="!repairStep"
             ref="legendRef"
             :class="{ 'repair-legend-above': legendAbove }"
+            :style="legendAbove ? undefined : { marginLeft: `${legendShift}px` }"
           />
           <template v-else>
             <!-- Step 2's bar colours, always on their own line above the buttons: the line of
@@ -344,11 +345,14 @@ const title = computed(() =>
 
 // The legend stays in the footer, in sight however long the list is: between Cancel and the
 // skipped count when the line has room for all of them, on its own line above them otherwise.
-// Wrapping alone would put it under them, hence the measure.
+// Wrapping alone would put it under them, hence the measure. Centred on the dialog either way: on
+// the buttons' line, moved towards the side with more room only as far as the buttons need.
 const footerRef = ref<ComponentPublicInstance | null>(null)
 const cancelRef = ref<HTMLElement | null>(null)
 const legendRef = ref<ComponentPublicInstance | null>(null)
 const legendAbove = ref(false)
+// How far the legend on the buttons' line stands from Cancel, to be centred on the dialog
+const legendShift = ref(0)
 // Step 2: the warning's place on its own line, above the buttons
 const problemsSizerRef = ref<HTMLElement | null>(null)
 const problemsAbove = ref(false)
@@ -389,6 +393,12 @@ function placeLegend() {
     : actions.offsetWidth
   const cancelAndActions = cancelRef.value.offsetWidth + gapOf(footer) + actionsWidth
   legendAbove.value = !!legend && cancelAndActions + gapOf(left) + legendWidth > room
+  // Its left edge, from the footer's content box: centred, but between Cancel and the skipped count
+  const nearest = cancelRef.value.offsetWidth + gapOf(left)
+  const farthest = room - actionsWidth - gapOf(footer) - legendWidth
+  legendShift.value = legendAbove.value
+    ? 0
+    : Math.max(0, Math.min((room - legendWidth) / 2, farthest) - nearest)
   const sizer = problemsSizerRef.value
   problemsAbove.value = !!sizer && cancelAndActions + gapOf(footer) + sizer.offsetWidth > room
   countWraps.value = cancelAndActions > room
@@ -819,6 +829,11 @@ watch(
 .repair-problems-above {
   order: -1;
   flex-basis: 100%;
+}
+
+/* Above the buttons, centred on the dialog */
+.repair-legend-above {
+  justify-content: center;
 }
 
 .repair-problems-sizer {
