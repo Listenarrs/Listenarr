@@ -113,14 +113,25 @@
             data-testid="repair-result-details"
             @click="toggleDetails(outcome.id)"
           >
-            <template v-if="opened.has(outcome.id)">
-              Hide details
-              <PhCaretUp :size="14" />
-            </template>
-            <template v-else>
-              Show details
-              <PhCaretDown :size="14" />
-            </template>
+            <!-- Both labels in one place, only the current one seen: the button keeps its size -->
+            <span class="repair-result-details-labels">
+              <span
+                :class="{ 'repair-result-details-unseen': opened.has(outcome.id) }"
+                :aria-hidden="opened.has(outcome.id)"
+                :data-testid="opened.has(outcome.id) ? undefined : 'repair-result-details-label'"
+              >
+                Show details
+                <PhCaretDown :size="14" />
+              </span>
+              <span
+                :class="{ 'repair-result-details-unseen': !opened.has(outcome.id) }"
+                :aria-hidden="!opened.has(outcome.id)"
+                :data-testid="opened.has(outcome.id) ? 'repair-result-details-label' : undefined"
+              >
+                Hide details
+                <PhCaretUp :size="14" />
+              </span>
+            </span>
           </button>
         </div>
         <p class="repair-result-message" data-testid="repair-result-message">
@@ -380,6 +391,22 @@ function toggle(id: number) {
   flex: none;
   padding: 0.25rem 0.6rem;
   font-size: 0.8rem;
+}
+
+.repair-result-details-labels {
+  display: grid;
+}
+
+.repair-result-details-labels > span {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+}
+
+.repair-result-details-unseen {
+  visibility: hidden;
 }
 
 .repair-result-heading {
