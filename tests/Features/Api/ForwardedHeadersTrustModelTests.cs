@@ -43,6 +43,7 @@ namespace Listenarr.Tests.Features.Api
             Assert.True(options.ForwardedHeaders.HasFlag(ForwardedHeaders.XForwardedFor));
             Assert.True(options.ForwardedHeaders.HasFlag(ForwardedHeaders.XForwardedProto));
             Assert.True(options.ForwardedHeaders.HasFlag(ForwardedHeaders.XForwardedHost));
+            Assert.True(options.ForwardedHeaders.HasFlag(ForwardedHeaders.XForwardedPrefix));
 
             Assert.Contains(options.KnownIPNetworks, network => Matches(network, "10.0.0.0", 8));
             Assert.Contains(options.KnownIPNetworks, network => Matches(network, "172.16.0.0", 12));
