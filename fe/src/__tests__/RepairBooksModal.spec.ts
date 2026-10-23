@@ -125,15 +125,16 @@ async function emptyAsin(wrapper: ReturnType<typeof mountModal>, id = 7) {
 
 async function searchAndPick(
   wrapper: ReturnType<typeof mountModal>,
-  { region = 'us', title = 'Primal Hunter 4' } = {},
+  { region = 'us', title = 'Primal Hunter 4', id = 7, query = '' } = {},
 ) {
-  await row(wrapper).get('[data-testid="match-region"]').setValue(region)
+  await row(wrapper, id).get('[data-testid="match-region"]').setValue(region)
   // Changing the region searches there first (the ASIN, which is filled)
   await flushPromises()
-  await emptyAsin(wrapper)
-  await row(wrapper).get('[data-testid="match-search"]').trigger('click')
+  await emptyAsin(wrapper, id)
+  if (query) await row(wrapper, id).get('[data-testid="match-title"]').setValue(query)
+  await row(wrapper, id).get('[data-testid="match-search"]').trigger('click')
   await flushPromises()
-  const result = row(wrapper)
+  const result = row(wrapper, id)
     .findAll('[data-testid="find-match-result"]')
     .find((r) => r.text().includes(title))
   await result!.trigger('click')
@@ -1625,7 +1626,7 @@ describe('RepairBooksModal', () => {
     expect(organize.attributes('disabled')).toBeDefined()
   })
 
-  it('keeps the books during the repair: each card shows its turn, and the search is over', async () => {
+  it('moves to step 2 on Repair: each book waits its turn in a loading state, Organize disabled', async () => {
     apiMocks.getAudiobook.mockImplementation(async (id: number) =>
       id === 7 ? mismatched : { ...mismatched, id: 8, title: 'Other book' },
     )
@@ -1636,23 +1637,39 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal([7, 8])
     await flushPromises()
     await searchAndPick(wrapper)
-    expect(row(wrapper).findAll('[data-testid="find-match-result"]').length).toBeGreaterThan(0)
 
     await wrapper.get('[data-testid="repair-confirm"]').trigger('click')
     await flushPromises()
 
-    // The book being repaired breathes blue; the unticked one is skipped
-    expect(row(wrapper).attributes('data-task-state')).toBe('running')
-    expect(row(wrapper).get('[data-testid="match-task"]').text()).toBe('Repairing…')
-    expect(row(wrapper, 8).attributes('data-task-state')).toBe('skipped')
-    expect(row(wrapper, 8).get('[data-testid="match-task"]').text()).toBe('Skipped: not repaired')
-    // Its search results are gone, and nothing in the cards can be used
-    expect(row(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(0)
-    for (const id of [7, 8])
-      expect(
-        row(wrapper, id).get('[data-testid="match-lock"]').attributes('disabled'),
-      ).toBeDefined()
-    expect(wrapper.get('[data-testid="repair-confirm"]').text()).toContain('Repairing 1 of 1…')
+    // Step 2 at once: the book cards are gone, every book shows on the results step
+    expect(wrapper.get('#modal-title h2').text()).toBe('Repair Books - Results - Step 2/3')
+    expect(wrapper.find('[data-testid="repair-row-7"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="repair-results-message"]').text()).toContain(
+      'Repairing 1 of 1…',
+    )
+    // The book being repaired: loading, its bar breathing blue, its records before and to come
+    expect(result(wrapper).attributes('data-result-state')).toBe('running')
+    expect(result(wrapper).get('[data-testid="repair-result-message"]').text()).toBe('Repairing…')
+    expect(result(wrapper).find('[data-testid="repair-result-loading"]').exists()).toBe(true)
+    expect(result(wrapper).get('[data-testid="repair-result-new"]').text()).toContain('B0BK9W82PQ')
+    expect(
+      result(wrapper).get('[data-testid="repair-result-include"]').attributes('disabled'),
+    ).toBeDefined()
+    // The unticked one is skipped, without a loading state
+    expect(result(wrapper, 8).attributes('data-result-state')).toBe('skipped')
+    expect(result(wrapper, 8).get('[data-testid="repair-result-message"]').text()).toBe(
+      'Skipped: not repaired',
+    )
+    expect(result(wrapper, 8).find('[data-testid="repair-result-loading"]').exists()).toBe(false)
+    // Organize waits for the repairs; Cancel is red
+    expect(wrapper.find('[data-testid="repair-confirm"]').exists()).toBe(false)
+    const organize = wrapper.get('[data-testid="repair-organize"]')
+    expect(organize.attributes('disabled')).toBeDefined()
+    expect(organize.attributes('title')).toBe('Wait for the repairs to end')
+    const cancel = wrapper.get('[data-testid="repair-cancel"]')
+    expect(cancel.text()).toBe('Cancel')
+    expect(cancel.classes()).toContain('btn-danger')
+    expect(wrapper.get('[data-testid="repair-count"]').text()).toBe('1 skipped')
     // The progress bar along the bottom: none of the one repair over yet
     const progress = () => wrapper.get('[data-testid="repair-progress"]')
     expect(progress().attributes('aria-valuemax')).toBe('1')
@@ -1688,10 +1705,65 @@ describe('RepairBooksModal', () => {
     expect(wrapper.get('[data-testid="repair-organize"]').text()).toContain('Organize 1')
     expect(wrapper.get('[data-testid="repair-count"]').text()).toBe('1 skipped')
 
+    // Close again, no longer red
+    expect(wrapper.get('[data-testid="repair-cancel"]').text()).toBe('Close')
+    expect(wrapper.get('[data-testid="repair-cancel"]').classes()).not.toContain('btn-danger')
+    expect(result(wrapper).find('[data-testid="repair-result-loading"]').exists()).toBe(false)
+
     // Unticked: left out of Organize
     await result(wrapper).get('[data-testid="repair-result-include"]').trigger('change')
     expect(wrapper.get('[data-testid="repair-organize"]').text()).toContain('Organize 0')
     expect(wrapper.get('[data-testid="repair-count"]').text()).toBe('2 skipped')
+  })
+
+  it('repairs one book after the other; Cancel leaves out the ones still waiting', async () => {
+    apiMocks.getAudiobook.mockImplementation(async (id: number) => ({ ...mismatched, id }))
+    const rescans: ((value: unknown) => void)[] = []
+    apiMocks.rescanAudiobookMetadata.mockImplementation(
+      () => new Promise((resolve) => rescans.push(resolve)),
+    )
+    const wrapper = mountModal([7, 8, 9])
+    await flushPromises()
+    for (const id of [7, 8, 9]) await searchAndPick(wrapper, { id, query: 'Primal Hunter' })
+
+    await repair(wrapper)
+
+    // One at a time: the first runs, the others wait in a loading state
+    const states = () => [7, 8, 9].map((id) => result(wrapper, id).attributes('data-result-state'))
+    expect(states()).toEqual(['running', 'waiting', 'waiting'])
+    expect(rescans).toHaveLength(1)
+    expect(result(wrapper, 8).get('[data-testid="repair-result-message"]').text()).toBe(
+      'Waiting to be repaired',
+    )
+    expect(result(wrapper, 8).find('[data-testid="repair-result-loading"]').exists()).toBe(true)
+
+    rescans[0]!({ message: 'ok', audiobookId: 7, asin: 'B0BK9W82PQ', region: 'us' })
+    await flushPromises()
+    expect(states()).toEqual(['done', 'running', 'waiting'])
+    expect(wrapper.get('[data-testid="repair-results-message"]').text()).toContain(
+      'Repairing 2 of 3…',
+    )
+
+    // Cancel: the waiting book is left out at once, the running one ends first
+    await wrapper.get('[data-testid="repair-cancel"]').trigger('click')
+    expect(states()).toEqual(['done', 'running', 'skipped'])
+    expect(result(wrapper, 9).get('[data-testid="repair-result-message"]').text()).toBe(
+      'Canceled: not repaired',
+    )
+    expect(result(wrapper, 9).get('[data-testid="repair-result-new"]').text()).toBe(
+      'None: the book keeps its old record',
+    )
+    const cancel = wrapper.get('[data-testid="repair-cancel"]')
+    expect(cancel.text()).toBe('Canceling…')
+    expect(cancel.attributes('disabled')).toBeDefined()
+
+    rescans[1]!({ message: 'ok', audiobookId: 8, asin: 'B0BK9W82PQ', region: 'us' })
+    await flushPromises()
+    expect(states()).toEqual(['done', 'done', 'skipped'])
+    expect(rescans).toHaveLength(2)
+    expect(wrapper.get('[data-testid="repair-cancel"]').text()).toBe('Close')
+    expect(wrapper.get('[data-testid="repair-organize"]').text()).toContain('Organize 2')
+    expect(wrapper.get('[data-testid="repair-organize"]').attributes('disabled')).toBeUndefined()
   })
 
   it('offers to organize the repaired books', async () => {

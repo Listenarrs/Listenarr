@@ -34,8 +34,14 @@
           <p>{{ error }}</p>
         </div>
 
-        <!-- Once repaired: what happened to each book, and which ones to organize -->
-        <RepairResults v-else-if="finished" v-model:selected="organizeIds" :outcomes="outcomes" />
+        <!-- From Repair on: each book's repair as it runs, then how it ended and which ones to
+             organize -->
+        <RepairResults
+          v-else-if="repairStep"
+          v-model:selected="organizeIds"
+          :outcomes="outcomes"
+          :running="executing"
+        />
 
         <!-- The books stay through the repair: each card shows its own progress -->
         <div v-else-if="rows.length" class="repair-list-wrapper">
@@ -134,21 +140,26 @@
         :showCancel="false"
       >
         <template #left>
+          <!-- Red while the repairs run: it cancels the books still waiting (the one being repaired
+               ends first) -->
           <button
             ref="cancelRef"
             type="button"
             class="btn cancel-button"
-            :disabled="executing"
-            @click="handleClose"
+            :class="{ 'btn-danger': executing }"
+            :disabled="canceling"
+            data-testid="repair-cancel"
+            @click="executing ? cancelRepair() : handleClose()"
           >
-            <PhX :size="16" />
-            {{ finished ? 'Close' : 'Cancel' }}
+            <PhSpinner v-if="canceling" class="ph-spin" :size="16" />
+            <PhX v-else :size="16" />
+            {{ canceling ? 'Canceling…' : finished ? 'Close' : 'Cancel' }}
           </button>
           <!-- Always in sight: between Cancel and the skipped count when the line has room for it,
                on its own line above them otherwise. There from the start, loading included, so
                the footer never changes shape -->
           <MatchLegend
-            v-if="!finished"
+            v-if="!repairStep"
             ref="legendRef"
             :class="{ 'repair-legend-above': legendAbove }"
           />
@@ -162,29 +173,32 @@
             :class="{ 'repair-count-wraps': countWraps }"
             data-testid="repair-count"
           >
-            {{ finished ? rows.length - organizeIds.length : skippedCount }} skipped
+            {{ skippedText }} skipped
           </span>
           <button
-            v-if="!finished"
+            v-if="!repairStep"
             type="button"
             class="btn btn-primary"
             data-testid="repair-confirm"
-            :disabled="loading || executing || searchingRowId !== null || selectedCount === 0"
+            :disabled="loading || searchingRowId !== null || selectedCount === 0"
             @click="repair"
           >
-            <PhSpinner v-if="executing" class="ph-spin" :size="16" />
-            <PhWrench v-else :size="16" />
-            {{
-              executing ? `Repairing ${progress} of ${selectedCount}…` : `Repair ${selectedCount}`
-            }}
+            <PhWrench :size="16" />
+            Repair {{ selectedCount }}
           </button>
           <button
             v-else
             type="button"
             class="btn btn-primary"
             data-testid="repair-organize"
-            :disabled="!organizeIds.length"
-            :title="organizeIds.length ? undefined : 'Tick a repaired book to organize it'"
+            :disabled="executing || !organizeIds.length"
+            :title="
+              executing
+                ? 'Wait for the repairs to end'
+                : organizeIds.length
+                  ? undefined
+                  : 'Tick a repaired book to organize it'
+            "
             @click="emit('organize', organizeIds)"
           >
             <PhFolderOpen :size="16" />
@@ -234,6 +248,7 @@ import {
   FALLBACK_REGION,
   asinChanged,
   createBookMatch,
+  recordFromResult,
   formatDuration,
   matchState,
   SEARCH_CACHE,
@@ -256,8 +271,10 @@ interface RepairRow {
   selected: boolean
   // Its repair, once started: waiting, running, then how it ended (shown by its card)
   task: BookTask | null
-  // Its record when the repair started, and after it when its ASIN changed
+  // Its record when the repair started, the one it is to get (repaired books only), and its record
+  // after the repair
   before: BookRecord | null
+  planned: BookRecord | null
   after: BookRecord | null
 }
 
@@ -287,9 +304,12 @@ const configuredRegion = ref(FALLBACK_REGION)
 const loading = ref(false)
 const executing = ref(false)
 const finished = ref(false)
+// Cancel asked while the repairs run: the books still waiting are left out
+const canceling = ref(false)
+// Step 2 from Repair on: the repairs as they run, then their results
+const repairStep = computed(() => executing.value || finished.value)
 const error = ref<string | null>(null)
 const rows = ref<RepairRow[]>([])
-const progress = ref(0)
 // The repairs over (whatever their outcome), of how many: the progress bar
 const repairCompleted = ref(0)
 const repairTotal = ref(0)
@@ -304,7 +324,7 @@ const searchingRowId = ref<number | null>(null)
 // Steps 1 and 2 of three: pick each book's new record and repair, then the results, to choose
 // what to organize (step 3, in the Organize dialog)
 const title = computed(() =>
-  finished.value ? 'Repair Books - Results - Step 2/3' : 'Repair Books - Matching - Step 1/3',
+  repairStep.value ? 'Repair Books - Results - Step 2/3' : 'Repair Books - Matching - Step 1/3',
 )
 
 // The legend stays in the footer, in sight however long the list is: between Cancel and the
@@ -377,6 +397,13 @@ onBeforeUnmount(() => footerObserver?.disconnect())
 const selectedRows = computed(() => rows.value.filter(isIncluded))
 const selectedCount = computed(() => selectedRows.value.length)
 const skippedCount = computed(() => rows.value.length - selectedCount.value)
+// Matching: the books left out of the repair. Repairing: the same. Repaired: the books left out
+// of Organize
+const skippedText = computed(() => {
+  if (finished.value) return rows.value.length - organizeIds.value.length
+  if (executing.value) return rows.value.length - repairTotal.value
+  return skippedCount.value
+})
 const outcomes = computed<RepairOutcome[]>(() =>
   rows.value.map((row) => ({
     id: row.id,
@@ -384,6 +411,7 @@ const outcomes = computed<RepairOutcome[]>(() =>
     state: row.task?.state ?? 'skipped',
     message: row.task?.text ?? '',
     before: row.before ?? {},
+    planned: row.planned,
     after: row.after,
   })),
 )
@@ -396,6 +424,7 @@ function primaryAsin(identifiers: AudiobookExternalIdentifier[]) {
 async function load() {
   loading.value = true
   finished.value = false
+  canceling.value = false
   error.value = null
   rows.value = []
   searchCache.clear()
@@ -431,6 +460,7 @@ async function load() {
           selected: false,
           task: null,
           before: null,
+          planned: null,
           after: null,
         }
       }),
@@ -485,13 +515,14 @@ async function rescan(id: number) {
   }
 }
 
-// Every card shows its book's repair: the ticked books wait their turn, the others are skipped.
+// Step 2 shows every book's repair: the ticked books wait their turn, the others are skipped.
 // The repairs run one after the other; each card then says how its repair ended and how long it
-// took, and shows the book as it is now
+// took, and shows the book as it is now. Cancel leaves out the books still waiting
 async function repair() {
   const toRepair = [...selectedRows.value]
   executing.value = true
-  progress.value = 0
+  canceling.value = false
+  organizeIds.value = []
   repairCompleted.value = 0
   repairTotal.value = toRepair.length
   for (const row of rows.value) {
@@ -502,12 +533,15 @@ async function repair() {
       asin: row.match.current.asin,
       region: row.match.current.region,
     }
-    row.task = toRepair.includes(row)
+    const picked = toRepair.includes(row) ? row.match.picked : null
+    row.planned = picked ? recordFromResult(picked, row.match.region) : null
+    row.task = picked
       ? { state: 'waiting', text: 'Waiting to be repaired' }
       : { state: 'skipped', text: 'Skipped: not repaired' }
   }
   for (const row of toRepair) {
-    progress.value++
+    // Canceled while it waited
+    if (row.task?.state !== 'waiting') continue
     row.task = { state: 'running', text: 'Repairing…' }
     const startedAt = performance.now()
     const took = () => formatDuration(performance.now() - startedAt)
@@ -528,6 +562,8 @@ async function repair() {
       row.match.current = { asin, region }
       row.after = { title: row.title, subtitle: row.subtitle, authors: row.authors, asin, region }
       row.task = { state: 'done', text: `Repaired in ${took()}: ${asin} · ${region}` }
+      // Ticked for Organize as soon as it is repaired
+      organizeIds.value = [...organizeIds.value, row.id]
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Repair failed'
       // The new ASIN saved but its metadata not read: repaired in part
@@ -546,9 +582,19 @@ async function repair() {
     }
     repairCompleted.value++
   }
-  organizeIds.value = rows.value.filter((r) => r.task?.state === 'done').map((r) => r.id)
   executing.value = false
+  canceling.value = false
   finished.value = true
+}
+
+// The books still waiting are left out at once; the one being repaired ends first (its request
+// can't be taken back)
+function cancelRepair() {
+  if (!executing.value) return
+  canceling.value = true
+  for (const row of rows.value)
+    if (row.task?.state === 'waiting')
+      row.task = { state: 'skipped', text: 'Canceled: not repaired' }
 }
 
 // Every book with a new record

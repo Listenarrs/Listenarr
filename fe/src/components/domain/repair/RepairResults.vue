@@ -15,18 +15,29 @@
   You should have received a copy of the GNU Affero General Public License
   along with this program. If not, see <https://www.gnu.org/licenses/>.
 -->
-<!-- The outcome of a repair, book by book: every book of the dialog, repaired or not. A repaired
-     book shows its record before and after, the parts that changed in green, and can be ticked to
-     be organized (ticked at first); the others say why they weren't repaired, and can't be. -->
+<!-- The repair, book by book, from the moment it starts: every book of the dialog, repaired or
+     not. The books to repair wait in a loading state for their turn, one repair at a time; the
+     bar along each card's bottom breathes in blue while its book is repaired, then turns green,
+     orange or red by how it ended. A book to repair shows its record before and the one it gets,
+     the parts that change in green; once repaired it can be ticked to be organized (ticked at
+     first). The others say why they weren't repaired, and can't be. -->
 <template>
   <div class="repair-results">
     <div
       class="repair-results-message"
-      :class="{ 'repair-results-message-none': !repairedCount }"
+      :class="{
+        'repair-results-message-running': running,
+        'repair-results-message-none': !running && !repairedCount,
+      }"
       data-testid="repair-results-message"
     >
-      <PhFolderOpen />
-      <p v-if="repairedCount">
+      <PhSpinner v-if="running" class="ph-spin" />
+      <PhFolderOpen v-else />
+      <p v-if="running">
+        <strong>Repairing {{ current }} of {{ toRepairCount }}…</strong> The books are repaired one
+        after the other; Cancel stops before the next one.
+      </p>
+      <p v-else-if="repairedCount">
         <strong>{{ repairedCount }} {{ repairedCount === 1 ? 'book' : 'books' }} repaired</strong>,
         {{ repairedCount === 1 ? 'its' : 'their' }} metadata refreshed from the new Audible record.
         Organize {{ repairedCount === 1 ? 'it' : 'them' }} now?
@@ -60,13 +71,20 @@
           <span class="repair-result-title">{{ outcome.title || `Audiobook #${outcome.id}` }}</span>
         </label>
         <p class="repair-result-message" data-testid="repair-result-message">
+          <PhSpinner
+            v-if="outcome.state === 'waiting' || outcome.state === 'running'"
+            class="ph-spin"
+            :size="14"
+            data-testid="repair-result-loading"
+          />
           {{ outcome.message }}
         </p>
-        <dl v-if="outcome.after" class="repair-result-records">
+        <!-- From the start for a book to repair, so the card keeps its height when it ends -->
+        <dl v-if="outcome.planned" class="repair-result-records">
           <dt>Old</dt>
           <dd data-testid="repair-result-old">{{ bookSummary(outcome.before) || 'None' }}</dd>
           <dt>New</dt>
-          <dd data-testid="repair-result-new">
+          <dd v-if="newRecord(outcome)" data-testid="repair-result-new">
             <template v-for="(part, index) in newParts(outcome)" :key="part.key">
               <template v-if="index"> - </template>
               <span
@@ -76,6 +94,7 @@
               >
             </template>
           </dd>
+          <dd v-else data-testid="repair-result-new">None: the book keeps its old record</dd>
         </dl>
         <div class="repair-result-bar" />
       </div>
@@ -85,7 +104,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { PhFolderOpen } from '@phosphor-icons/vue'
+import { PhFolderOpen, PhSpinner } from '@phosphor-icons/vue'
 import { bookSummary, recordParts, type BookRecord, type BookTaskState } from '@/utils/bookMatch'
 
 // One book of the dialog once the repair is over
@@ -96,17 +115,34 @@ export interface RepairOutcome {
   state: BookTaskState
   // The line saying how it ended
   message: string
-  // Its record before the repair, and after it when its ASIN changed (null otherwise)
+  // Its record before the repair; the record it is to get (null when it isn't repaired); and its
+  // record after the repair (null until it is, or when it failed)
   before: BookRecord
+  planned: BookRecord | null
   after: BookRecord | null
 }
 
-const props = defineProps<{ outcomes: RepairOutcome[] }>()
+// running: the repairs aren't over yet
+const props = defineProps<{ outcomes: RepairOutcome[]; running: boolean }>()
 
 // The books to organize: repaired ones only
 const selected = defineModel<number[]>('selected', { required: true })
 
 const repairedCount = computed(() => props.outcomes.filter((o) => o.state === 'done').length)
+const toRepairCount = computed(() => props.outcomes.filter((o) => o.planned).length)
+// The book being repaired, counted from 1 among the books to repair
+const current = computed(
+  () =>
+    props.outcomes.filter((o) => o.planned).findIndex((o) => o.state === 'running') + 1 ||
+    toRepairCount.value,
+)
+
+// The record a book gets: the one it got, or until its repair ends the one it is to get. None once
+// its repair failed or was canceled
+function newRecord(outcome: RepairOutcome): BookRecord | null {
+  if (outcome.after) return outcome.after
+  return outcome.state === 'waiting' || outcome.state === 'running' ? outcome.planned : null
+}
 
 function toggle(id: number) {
   selected.value = selected.value.includes(id)
@@ -117,7 +153,7 @@ function toggle(id: number) {
 // The new record's parts, each marked when it differs from the old record's (the ASIN in any case)
 function newParts(outcome: RepairOutcome) {
   const before = new Map(recordParts(outcome.before).map((part) => [part.key, part.text]))
-  return recordParts(outcome.after!).map((part) => ({
+  return recordParts(newRecord(outcome)!).map((part) => ({
     ...part,
     changed: (before.get(part.key) ?? '').toUpperCase() !== part.text.toUpperCase(),
   }))
@@ -143,6 +179,12 @@ function newParts(outcome: RepairOutcome) {
   color: var(--status-warning);
 }
 
+.repair-results-message-running {
+  background-color: color-mix(in srgb, var(--status-progress) 10%, transparent);
+  border-color: color-mix(in srgb, var(--status-progress) 45%, transparent);
+  color: var(--status-progress);
+}
+
 .repair-results-message-none {
   background-color: rgba(255, 255, 255, 0.04);
   border-color: #444;
@@ -162,8 +204,8 @@ function newParts(outcome: RepairOutcome) {
   gap: 0.75rem;
 }
 
-/* The outcome's colour on the bar along the card's bottom, as on the book cards during the
-   repair */
+/* The book's state on the bar along the card's bottom, as on the book cards: grey while it
+   waits or when it isn't repaired, blue breathing while it is repaired, then its outcome */
 .form-control-card.repair-result {
   position: relative;
   overflow: hidden;
@@ -191,6 +233,26 @@ function newParts(outcome: RepairOutcome) {
   background: var(--status-error);
 }
 
+.repair-result-running .repair-result-bar {
+  background: var(--status-progress);
+  animation: repair-result-bar-breathe 1.6s ease-in-out infinite alternate;
+}
+
+@keyframes repair-result-bar-breathe {
+  from {
+    opacity: 0.2;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .repair-result-running .repair-result-bar {
+    animation: none;
+  }
+}
+
 .repair-result-skipped {
   opacity: 0.6;
 }
@@ -208,6 +270,9 @@ function newParts(outcome: RepairOutcome) {
 }
 
 .repair-result-message {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
   margin: 0.4rem 0 0;
   font-size: 0.85rem;
   color: #aaa;
