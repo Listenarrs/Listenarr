@@ -162,6 +162,11 @@
             ref="legendRef"
             :class="{ 'repair-legend-above': legendAbove }"
           />
+          <!-- Once canceled, between Close and the skipped count: books left unrepaired -->
+          <span v-else-if="canceledCount" class="repair-canceled" data-testid="repair-canceled">
+            <PhWarningCircle :size="16" />
+            Canceled: {{ canceledCount }} {{ canceledCount === 1 ? 'book' : 'books' }} not repaired
+          </span>
         </template>
         <template #default>
           <!-- Always shown, 0 included, from the start: a count that appears and disappears would
@@ -203,10 +208,15 @@
             <PhFolderOpen :size="16" />
             Organize {{ organizeIds.length }}
           </button>
-          <!-- Along the dialog's bottom edge: grey until a repair runs, then filled in blue as
-               the books are repaired -->
+          <!-- Along the dialog's bottom edge: grey until a repair runs, then filled from left to
+               right as each book's repair ends, breathing in blue until the last one. Orange once
+               canceled: the books left out count as over, so it fills up when the running one ends -->
           <div
             class="repair-progress"
+            :class="{
+              'repair-progress-running': executing,
+              'repair-progress-canceled': canceledCount > 0,
+            }"
             role="progressbar"
             aria-label="Repair progress"
             :aria-valuemax="repairTotal"
@@ -305,6 +315,8 @@ const executing = ref(false)
 const finished = ref(false)
 // Cancel asked while the repairs run: the books still waiting are left out
 const canceling = ref(false)
+// The books Cancel left out, until the dialog opens again or a new repair starts
+const canceledCount = ref(0)
 // Step 2 from Repair on: the repairs as they run, then their results
 const repairStep = computed(() => executing.value || finished.value)
 const error = ref<string | null>(null)
@@ -424,6 +436,7 @@ async function load() {
   loading.value = true
   finished.value = false
   canceling.value = false
+  canceledCount.value = 0
   error.value = null
   rows.value = []
   searchCache.clear()
@@ -521,6 +534,7 @@ async function repair() {
   const toRepair = [...selectedRows.value]
   executing.value = true
   canceling.value = false
+  canceledCount.value = 0
   organizeIds.value = []
   repairCompleted.value = 0
   repairTotal.value = toRepair.length
@@ -592,8 +606,11 @@ function cancelRepair() {
   if (!executing.value) return
   canceling.value = true
   for (const row of rows.value)
-    if (row.task?.state === 'waiting')
+    if (row.task?.state === 'waiting') {
       row.task = { state: 'skipped', text: 'Canceled: not repaired' }
+      canceledCount.value++
+      repairCompleted.value++
+    }
 }
 
 // Every book with a new record
@@ -742,6 +759,37 @@ watch(
   height: 100%;
   background: var(--status-progress);
   transition: width 0.3s ease;
+}
+
+.repair-progress-running .repair-progress-fill {
+  animation: repair-progress-breathe 1.6s ease-in-out infinite alternate;
+}
+
+.repair-progress-canceled .repair-progress-fill {
+  background: var(--status-warning);
+}
+
+@keyframes repair-progress-breathe {
+  from {
+    opacity: 0.35;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .repair-progress-running .repair-progress-fill {
+    animation: none;
+  }
+}
+
+.repair-canceled {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--status-warning);
 }
 
 .repair-legend-above {
