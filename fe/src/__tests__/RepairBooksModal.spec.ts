@@ -1696,7 +1696,9 @@ describe('RepairBooksModal', () => {
     expect(result(wrapper).find('[data-testid="repair-result-loading"]').exists()).toBe(true)
     // Its records closed: the details button's tooltip gives them on two lines
     const details = result(wrapper).get('[data-testid="repair-result-details"]')
-    expect(details.text()).toBe('Show details')
+    expect(result(wrapper).get('[data-testid="repair-result-details-label"]').text()).toBe(
+      'Show details',
+    )
     expect(details.attributes('aria-expanded')).toBe('false')
     expect(details.attributes('title')).toBe(
       'Old: B0HM45F8MW - Primal Hunter, Vol. 7 - Zogarth - France (FR)\n' +
@@ -1705,7 +1707,9 @@ describe('RepairBooksModal', () => {
     expect(result(wrapper).find('[data-testid="repair-result-new"]').exists()).toBe(false)
     // Opened: the records, the parts that change marked
     await details.trigger('click')
-    expect(details.text()).toBe('Hide details')
+    expect(result(wrapper).get('[data-testid="repair-result-details-label"]').text()).toBe(
+      'Hide details',
+    )
     expect(details.attributes('aria-expanded')).toBe('true')
     expect(result(wrapper).get('[data-testid="repair-result-new"]').text()).toContain('B0BK9W82PQ')
     expect(
