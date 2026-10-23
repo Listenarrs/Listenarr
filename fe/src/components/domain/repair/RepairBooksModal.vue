@@ -162,10 +162,11 @@
             ref="legendRef"
             :class="{ 'repair-legend-above': legendAbove }"
           />
-          <!-- Once canceled, between Close and the skipped count: books left unrepaired -->
-          <span v-else-if="canceledCount" class="repair-canceled" data-testid="repair-canceled">
+          <!-- As soon as a book's repair goes wrong (failed, done in part, canceled), between
+               Close and the skipped count -->
+          <span v-else-if="problemText" class="repair-problems" data-testid="repair-problems">
             <PhWarningCircle :size="16" />
-            Canceled: {{ canceledCount }} {{ canceledCount === 1 ? 'book' : 'books' }} not repaired
+            {{ problemText }}
           </span>
         </template>
         <template #default>
@@ -209,13 +210,14 @@
             Organize {{ organizeIds.length }}
           </button>
           <!-- Along the dialog's bottom edge: grey until a repair runs, then filled from left to
-               right as each book's repair ends, breathing in blue until the last one. Orange once
-               canceled: the books left out count as over, so it fills up when the running one ends -->
+               right as each book's repair ends, breathing until the last one. Blue, orange as
+               soon as a repair goes wrong. Once canceled, the books left out count as over, so it
+               fills up when the running one ends -->
           <div
             class="repair-progress"
             :class="{
               'repair-progress-running': executing,
-              'repair-progress-canceled': canceledCount > 0,
+              'repair-progress-problem': !!problemText,
             }"
             role="progressbar"
             aria-label="Repair progress"
@@ -408,23 +410,38 @@ onBeforeUnmount(() => footerObserver?.disconnect())
 const selectedRows = computed(() => rows.value.filter(isIncluded))
 const selectedCount = computed(() => selectedRows.value.length)
 const skippedCount = computed(() => rows.value.length - selectedCount.value)
-// Matching: the books left out of the repair. Repairing: the same. Repaired: the books left out
-// of Organize
+// Matching: the books left out of the repair. Step 2 only holds the books to repair: while they
+// are repaired, the ones Cancel left out; once over, the ones left out of Organize
 const skippedText = computed(() => {
-  if (finished.value) return rows.value.length - organizeIds.value.length
-  if (executing.value) return rows.value.length - repairTotal.value
+  if (finished.value) return repairTotal.value - organizeIds.value.length
+  if (executing.value) return canceledCount.value
   return skippedCount.value
 })
+// What went wrong on step 2, counted by kind: the footer's warning, and its bar orange
+const problemText = computed(() => {
+  const count = (state: string) => rows.value.filter((row) => row.task?.state === state).length
+  const parts = [
+    [count('failed'), 'failed'],
+    [count('warning'), 'repaired in part'],
+    [canceledCount.value, 'canceled'],
+  ]
+    .filter(([n]) => n)
+    .map(([n, what]) => `${n} ${what}`)
+  return parts.length ? `Not all repaired: ${parts.join(', ')}` : null
+})
+// Step 2: the books to repair only, the unticked or unmatched ones stay behind on step 1
 const outcomes = computed<RepairOutcome[]>(() =>
-  rows.value.map((row) => ({
-    id: row.id,
-    title: row.title,
-    state: row.task?.state ?? 'skipped',
-    message: row.task?.text ?? '',
-    before: row.before ?? {},
-    planned: row.planned,
-    after: row.after,
-  })),
+  rows.value
+    .filter((row): row is RepairRow & { planned: BookRecord } => !!row.planned)
+    .map((row) => ({
+      id: row.id,
+      title: row.title,
+      state: row.task?.state ?? 'skipped',
+      message: row.task?.text ?? '',
+      before: row.before ?? {},
+      planned: row.planned,
+      after: row.after,
+    })),
 )
 
 function primaryAsin(identifiers: AudiobookExternalIdentifier[]) {
@@ -527,7 +544,7 @@ async function rescan(id: number) {
   }
 }
 
-// Step 2 shows every book's repair: the ticked books wait their turn, the others are skipped.
+// Step 2 shows the ticked books' repairs: they wait their turn, the others aren't on it.
 // The repairs run one after the other; each card then says how its repair ended and how long it
 // took, and shows the book as it is now. Cancel leaves out the books still waiting
 async function repair() {
@@ -548,9 +565,7 @@ async function repair() {
     }
     const picked = toRepair.includes(row) ? row.match.picked : null
     row.planned = picked ? recordFromResult(picked, row.match.region) : null
-    row.task = picked
-      ? { state: 'waiting', text: 'Waiting to be repaired' }
-      : { state: 'skipped', text: 'Skipped: not repaired' }
+    row.task = picked ? { state: 'waiting', text: 'Waiting to be repaired' } : null
   }
   for (const row of toRepair) {
     // Canceled while it waited
@@ -765,7 +780,7 @@ watch(
   animation: repair-progress-breathe 1.6s ease-in-out infinite alternate;
 }
 
-.repair-progress-canceled .repair-progress-fill {
+.repair-progress-problem .repair-progress-fill {
   background: var(--status-warning);
 }
 
@@ -784,7 +799,7 @@ watch(
   }
 }
 
-.repair-canceled {
+.repair-problems {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;

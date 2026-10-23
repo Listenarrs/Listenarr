@@ -15,12 +15,12 @@
   You should have received a copy of the GNU Affero General Public License
   along with this program. If not, see <https://www.gnu.org/licenses/>.
 -->
-<!-- The repair, book by book, from the moment it starts: every book of the dialog, repaired or
-     not. The books to repair wait in a loading state for their turn, one repair at a time; the
+<!-- The repair, book by book, from the moment it starts: the books ticked for it on step 1. They
+     wait in a loading state for their turn, one repair at a time; the
      bar along each card's bottom breathes in blue while its book is repaired, then turns green,
      orange or red by how it ended. A book to repair shows its record before and the one it gets,
      the parts that change in green; once repaired it can be ticked to be organized (ticked at
-     first). The others say why they weren't repaired, and can't be. -->
+     first). A book whose repair failed or was canceled says why, and can't be. -->
 <template>
   <div class="repair-results">
     <div
@@ -79,8 +79,8 @@
           />
           {{ outcome.message }}
         </p>
-        <!-- From the start for a book to repair, so the card keeps its height when it ends -->
-        <dl v-if="outcome.planned" class="repair-result-records">
+        <!-- From the start, so the card keeps its height when its repair ends -->
+        <dl class="repair-result-records">
           <dt>Old</dt>
           <dd data-testid="repair-result-old">{{ bookSummary(outcome.before) || 'None' }}</dd>
           <dt>New</dt>
@@ -107,18 +107,19 @@ import { computed } from 'vue'
 import { PhFolderOpen, PhSpinner } from '@phosphor-icons/vue'
 import { bookSummary, recordParts, type BookRecord, type BookTaskState } from '@/utils/bookMatch'
 
-// One book of the dialog once the repair is over
+// One book to repair, from the moment the repair starts
 export interface RepairOutcome {
   id: number
   title: string
-  // How its repair ended: done, warning (in part), failed, or skipped (not ticked)
+  // Waiting, running, then how its repair ended: done, warning (in part), failed, or skipped
+  // (canceled before its turn)
   state: BookTaskState
-  // The line saying how it ended
+  // The line saying where its repair is or how it ended
   message: string
-  // Its record before the repair; the record it is to get (null when it isn't repaired); and its
-  // record after the repair (null until it is, or when it failed)
+  // Its record before the repair; the record it is to get; and its record after the repair (null
+  // until it is, or when it failed)
   before: BookRecord
-  planned: BookRecord | null
+  planned: BookRecord
   after: BookRecord | null
 }
 
@@ -129,12 +130,10 @@ const props = defineProps<{ outcomes: RepairOutcome[]; running: boolean }>()
 const selected = defineModel<number[]>('selected', { required: true })
 
 const repairedCount = computed(() => props.outcomes.filter((o) => o.state === 'done').length)
-const toRepairCount = computed(() => props.outcomes.filter((o) => o.planned).length)
+const toRepairCount = computed(() => props.outcomes.length)
 // The book being repaired, counted from 1 among the books to repair
 const current = computed(
-  () =>
-    props.outcomes.filter((o) => o.planned).findIndex((o) => o.state === 'running') + 1 ||
-    toRepairCount.value,
+  () => props.outcomes.findIndex((o) => o.state === 'running') + 1 || toRepairCount.value,
 )
 
 // The record a book gets: the one it got, or until its repair ends the one it is to get. None once
