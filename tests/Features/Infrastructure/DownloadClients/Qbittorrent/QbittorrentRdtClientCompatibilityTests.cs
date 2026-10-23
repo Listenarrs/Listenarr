@@ -7,6 +7,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent;
 
+[Trait("Name", nameof(QbittorrentRdtClientCompatibilityTests))]
+[Trait("Category", "DownloadClients")]
 public class QbittorrentRdtClientCompatibilityTests : BaseTests
 {
     [Theory]
