@@ -77,6 +77,7 @@
             </template>
           </dd>
         </dl>
+        <div class="repair-result-bar" />
       </div>
     </div>
   </div>
@@ -161,21 +162,33 @@ function newParts(outcome: RepairOutcome) {
   gap: 0.75rem;
 }
 
-/* The outcome's colour on the card's edge, as on the book cards during the repair */
+/* The outcome's colour on the bar along the card's bottom, as on the book cards during the
+   repair */
 .form-control-card.repair-result {
-  border-left: 3px solid var(--status-idle);
+  position: relative;
+  overflow: hidden;
+  padding-bottom: calc(1rem + 3px);
 }
 
-.form-control-card.repair-result-done {
-  border-left-color: var(--status-success);
+.repair-result-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: var(--status-idle);
 }
 
-.form-control-card.repair-result-warning {
-  border-left-color: var(--status-warning);
+.repair-result-done .repair-result-bar {
+  background: var(--status-success);
 }
 
-.form-control-card.repair-result-failed {
-  border-left-color: var(--status-error);
+.repair-result-warning .repair-result-bar {
+  background: var(--status-warning);
+}
+
+.repair-result-failed .repair-result-bar {
+  background: var(--status-error);
 }
 
 .repair-result-skipped {
