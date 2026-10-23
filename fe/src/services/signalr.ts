@@ -237,7 +237,7 @@ class SignalRService {
     (payload?: { created?: number; skipped?: number }) => void
   > = new Set()
   private unmatchedScanCompleteCallbacks: Set<
-    (payload: { jobId: string; count: number; error?: string }) => void
+    (payload: { jobId: string; count: number; error?: string; canceled?: boolean }) => void
   > = new Set()
   private pingInterval: number | null = null
   private visibilityListener: (() => void) | null = null
@@ -839,7 +839,12 @@ class SignalRService {
 
   // Subscribe to unmatched scan completion notifications
   onUnmatchedScanComplete(
-    callback: (payload: { jobId: string; count: number; error?: string }) => void,
+    callback: (payload: {
+      jobId: string
+      count: number
+      error?: string
+      canceled?: boolean
+    }) => void,
   ): () => void {
     this.unmatchedScanCompleteCallbacks.add(callback)
     return () => {
