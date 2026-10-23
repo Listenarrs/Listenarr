@@ -657,7 +657,8 @@ async function repair() {
       row.authors = book.authors ?? row.authors
       row.match.current = { asin, region }
       row.after = { title: row.title, subtitle: row.subtitle, authors: row.authors, asin, region }
-      row.task = { state: 'done', text: `Repaired in ${took()}: ${asin} · ${region}` }
+      // The record it now points at follows, drawn like New (step 2)
+      row.task = { state: 'done', text: `Repaired in ${took()}` }
       // Ticked for Organize as soon as it is repaired
       organizeIds.value = [...organizeIds.value, row.id]
     } catch (e) {
