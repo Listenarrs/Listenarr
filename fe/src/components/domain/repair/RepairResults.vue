@@ -102,13 +102,6 @@
             <span class="repair-result-title">{{
               outcome.title || `Audiobook #${outcome.id}`
             }}</span>
-            <!-- Repaired: how long it took, next to the title; its new record under it -->
-            <span
-              v-if="outcome.state === 'done'"
-              class="repair-result-took"
-              data-testid="repair-result-took"
-              >{{ outcome.message }}</span
-            >
           </label>
           <!-- The records, closed at first to keep the list short; the tooltip gives them without
              opening (the open details mark what changes) -->
@@ -141,6 +134,13 @@
             </span>
           </button>
         </div>
+        <!-- Two lines under the title from the start, so the row keeps its height: the record
+             the book points at (the one it is to get while it waits, the one it got once
+             repaired, its old one when the repair failed or was canceled), then where its
+             repair is or how it ended -->
+        <p class="repair-result-record" data-testid="repair-result-record">
+          <BookRecordDiff :record="rowRecord(outcome)" :base="outcome.before" />
+        </p>
         <p class="repair-result-message" data-testid="repair-result-message">
           <PhSpinner
             v-if="outcome.state === 'waiting' || outcome.state === 'running'"
@@ -148,14 +148,7 @@
             :size="14"
             data-testid="repair-result-loading"
           />
-          <BookRecordDiff
-            v-if="outcome.state === 'done' && outcome.after"
-            class="repair-result-message-record"
-            :record="outcome.after"
-            :base="outcome.before"
-            data-testid="repair-result-record"
-          />
-          <span v-else>{{ outcome.message }}</span>
+          {{ outcome.message }}
         </p>
         <dl v-if="opened.has(outcome.id)" class="repair-result-records">
           <dt>Old</dt>
@@ -253,6 +246,12 @@ function toggleDetails(id: number) {
   const next = new Set(opened.value)
   if (!next.delete(id)) next.add(id)
   opened.value = next
+}
+
+// The record on the row's first line: the one it is to get or got, else (failed, canceled) the
+// one it keeps
+function rowRecord(outcome: RepairOutcome): BookRecord {
+  return newRecord(outcome) ?? outcome.before
 }
 
 // The records on two lines, for the details button's tooltip
@@ -438,11 +437,6 @@ function toggle(id: number) {
   cursor: pointer;
 }
 
-.repair-result-took {
-  font-size: 0.85rem;
-  color: var(--status-success);
-}
-
 .repair-result-title {
   color: #e0e0e0;
   font-weight: 500;
@@ -461,8 +455,10 @@ function toggle(id: number) {
   color: var(--status-success);
 }
 
-/* The record a repaired book now points at, drawn like New: grey, what changed in green */
-.repair-result-message-record {
+/* The record the book points at, drawn like New: grey, what changes in green */
+.repair-result-record {
+  margin: 0.4rem 0 0;
+  font-size: 0.85rem;
   color: #aaa;
 }
 

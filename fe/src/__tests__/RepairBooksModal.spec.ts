@@ -1620,12 +1620,12 @@ describe('RepairBooksModal', () => {
 
     // The results say how it ended, and how long it took
     expect(result(wrapper).attributes('data-result-state')).toBe('done')
-    // How long it took next to the title; the record it now points at under it
-    expect(result(wrapper).get('[data-testid="repair-result-took"]').text()).toBe(
-      'Repaired in 1.23 s',
+    // The record it now points at right under the title, then how long it took
+    expect(result(wrapper).get('[data-testid="repair-result-record"]').text()).toBe(
+      'B0HM45F8MW - Primal Hunter, Vol. 7 - Zogarth - France (FR)',
     )
     expect(result(wrapper).get('[data-testid="repair-result-message"]').text()).toBe(
-      'B0HM45F8MW - Primal Hunter, Vol. 7 - Zogarth - France (FR)',
+      'Repaired in 1.23 s',
     )
     // The record it now points at, drawn like New: nothing changed here (the rescan answered with
     // the same record), so nothing highlighted
@@ -1854,6 +1854,10 @@ describe('RepairBooksModal', () => {
       'Waiting to be repaired',
     )
     expect(result(wrapper, 8).find('[data-testid="repair-result-loading"]').exists()).toBe(true)
+    // Its first line: the record it is to get
+    expect(result(wrapper, 8).get('[data-testid="repair-result-record"]').text()).toContain(
+      'B0BK9W82PQ',
+    )
 
     rescans[0]!({ message: 'ok', audiobookId: 7, asin: 'B0BK9W82PQ', region: 'us' })
     await flushPromises()
@@ -1870,6 +1874,10 @@ describe('RepairBooksModal', () => {
     expect(states()).toEqual(['done', 'running', 'skipped'])
     expect(result(wrapper, 9).get('[data-testid="repair-result-message"]').text()).toBe(
       'Canceled: not repaired',
+    )
+    // Canceled: its first line goes back to the record it keeps
+    expect(result(wrapper, 9).get('[data-testid="repair-result-record"]').text()).toBe(
+      'B0HM45F8MW - Primal Hunter, Vol. 7 - Zogarth - France (FR)',
     )
     expect(
       result(wrapper, 9).get('[data-testid="repair-result-details"]').attributes('title'),
