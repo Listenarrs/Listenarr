@@ -116,8 +116,9 @@
         :showCancel="false"
       >
         <template #left>
-          <!-- Red while the repairs run: it cancels the books still waiting (the one being repaired
-               ends first) -->
+          <!-- Cancel on step 1. Red while the repairs run: it cancels the books still waiting (the
+               one being repaired ends first). Once they are over, Back to step 1, loaded afresh
+               (the books may have been repaired) -->
           <button
             ref="cancelRef"
             type="button"
@@ -125,11 +126,21 @@
             :class="{ 'btn-danger': executing }"
             :disabled="canceling"
             data-testid="repair-cancel"
-            @click="executing ? cancelRepair() : handleClose()"
+            @click="executing ? cancelRepair() : finished ? backToMatching() : handleClose()"
           >
-            <PhSpinner v-if="canceling" class="ph-spin" :size="16" />
-            <PhX v-else :size="16" />
-            {{ canceling ? 'Canceling…' : finished ? 'Close' : 'Cancel' }}
+            <!-- Every label in one place, only the current one seen: the button keeps its size -->
+            <span class="repair-cancel-labels">
+              <span
+                v-for="label in cancelLabels"
+                :key="label.text"
+                :class="{ 'repair-cancel-unseen': label.text !== cancelLabel }"
+                :aria-hidden="label.text !== cancelLabel"
+                :data-testid="label.text === cancelLabel ? 'repair-cancel-label' : undefined"
+              >
+                <component :is="label.icon" :size="16" :class="{ 'ph-spin': label.spin }" />
+                {{ label.text }}
+              </span>
+            </span>
           </button>
           <!-- Always in sight: between Cancel and the skipped count when the line has room for it,
                on its own line above them otherwise. There from the start, loading included, so
@@ -255,6 +266,7 @@ import {
   type ComponentPublicInstance,
 } from 'vue'
 import {
+  PhArrowLeft,
   PhFolderOpen,
   PhInfo,
   PhSpinner,
@@ -307,10 +319,13 @@ const props = withDefaults(
   defineProps<{
     visible?: boolean
     audiobookIds?: number[]
+    // Shown again after its step 3 (Back from Organize): as it was left, not loaded afresh
+    resume?: boolean
   }>(),
   {
     visible: false,
     audiobookIds: () => [],
+    resume: false,
   },
 )
 
@@ -331,6 +346,9 @@ const executing = ref(false)
 const finished = ref(false)
 // Cancel asked while the repairs run: the books still waiting are left out
 const canceling = ref(false)
+// A repair saved something since the dialog opened: closing it, even from step 1 after Back,
+// refreshes the page behind
+const libraryChanged = ref(false)
 // The books Cancel left out, until the dialog opens again or a new repair starts
 const canceledCount = ref(0)
 // Step 2 from Repair on: the repairs as they run, then their results
@@ -649,6 +667,7 @@ async function repair() {
       if (asinChanged(row.match)) {
         await apiService.updateAudiobookIdentifiers(row.id, identifiersWithPrimaryAsin(row))
         saved = true
+        libraryChanged.value = true
       }
       const rescanned = await rescan(row.id)
       const book = await apiService.getAudiobook(row.id)
@@ -661,6 +680,7 @@ async function repair() {
       row.after = { title: row.title, subtitle: row.subtitle, authors: row.authors, asin, region }
       // The record it now points at follows, drawn like New (step 2)
       row.task = { state: 'done', text: `Repaired in ${took()}` }
+      libraryChanged.value = true
       // Ticked for Organize as soon as it is repaired
       organizeIds.value = [...organizeIds.value, row.id]
     } catch (e) {
@@ -711,14 +731,33 @@ function clearSelection() {
 // Closing stops the running search: the cards go away with the modal
 function handleClose() {
   if (executing.value) return
-  if (finished.value) emit('done')
+  if (finished.value || libraryChanged.value) emit('done')
   else emit('close')
+}
+
+// The footer's left button: Cancel, Canceling… while the running repair ends, Back once they are
+// over
+const cancelLabels = [
+  { text: 'Cancel', icon: PhX, spin: false },
+  { text: 'Canceling…', icon: PhSpinner, spin: true },
+  { text: 'Back', icon: PhArrowLeft, spin: false },
+]
+const cancelLabel = computed(() =>
+  canceling.value ? 'Canceling…' : finished.value ? 'Back' : 'Cancel',
+)
+
+// Back from step 2 to step 1, loaded as when the dialog opens: the books show what the repairs
+// made of them
+function backToMatching() {
+  void load()
 }
 
 watch(
   () => props.visible,
   (visible) => {
-    if (visible) void load()
+    if (!visible || props.resume) return
+    libraryChanged.value = false
+    void load()
   },
   { immediate: true },
 )
@@ -806,6 +845,22 @@ watch(
    moves: a change here would play the footer buttons' transition, Cancel stretching for a moment */
 .repair-footer .cancel-button {
   flex: 0 0 auto;
+}
+
+.repair-cancel-labels {
+  display: grid;
+}
+
+.repair-cancel-labels > span {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+
+.repair-cancel-unseen {
+  visibility: hidden;
 }
 
 /* Red while the repairs run: the modal footer's grey Cancel would win over .btn-danger */

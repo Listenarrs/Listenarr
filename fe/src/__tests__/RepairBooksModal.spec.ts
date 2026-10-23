@@ -1762,7 +1762,7 @@ describe('RepairBooksModal', () => {
     expect(organize.attributes('disabled')).toBeDefined()
     expect(organize.attributes('title')).toBe('Wait for the repairs to end')
     const cancel = wrapper.get('[data-testid="repair-cancel"]')
-    expect(cancel.text()).toBe('Cancel')
+    expect(wrapper.get('[data-testid="repair-cancel-label"]').text()).toBe('Cancel')
     expect(cancel.classes()).toContain('btn-danger')
     expect(wrapper.get('[data-testid="repair-count"]').text()).toBe('0 skipped')
     // The progress bar along the bottom: none of the one repair over yet
@@ -1806,8 +1806,8 @@ describe('RepairBooksModal', () => {
     expect(wrapper.get('[data-testid="repair-organize"]').text()).toContain('Organize 1')
     expect(wrapper.get('[data-testid="repair-count"]').text()).toBe('0 skipped')
 
-    // Close again, no longer red
-    expect(wrapper.get('[data-testid="repair-cancel"]').text()).toBe('Close')
+    // Back to step 1 now, no longer red
+    expect(wrapper.get('[data-testid="repair-cancel-label"]').text()).toBe('Back')
     expect(wrapper.get('[data-testid="repair-cancel"]').classes()).not.toContain('btn-danger')
     expect(result(wrapper).find('[data-testid="repair-result-loading"]').exists()).toBe(false)
 
@@ -1888,7 +1888,7 @@ describe('RepairBooksModal', () => {
       result(wrapper, 9).get('[data-testid="repair-result-details"]').attributes('title'),
     ).toContain('New: None: the book keeps its old record')
     const cancel = wrapper.get('[data-testid="repair-cancel"]')
-    expect(cancel.text()).toBe('Canceling…')
+    expect(wrapper.get('[data-testid="repair-cancel-label"]').text()).toBe('Canceling…')
     expect(cancel.attributes('disabled')).toBeDefined()
     // The bar turns orange, the book left out counted as over; the footer says what was left out
     expect(progress().classes()).toContain('repair-progress-problem')
@@ -1906,7 +1906,7 @@ describe('RepairBooksModal', () => {
     expect(progress().classes()).toContain('repair-progress-problem')
     expect(progress().classes()).not.toContain('repair-progress-running')
     expect(wrapper.find('[data-testid="repair-problems"]').exists()).toBe(true)
-    expect(wrapper.get('[data-testid="repair-cancel"]').text()).toBe('Close')
+    expect(wrapper.get('[data-testid="repair-cancel-label"]').text()).toBe('Back')
     expect(wrapper.get('[data-testid="repair-organize"]').text()).toContain('Organize 2')
     expect(wrapper.get('[data-testid="repair-organize"]').attributes('disabled')).toBeUndefined()
   })
@@ -1937,6 +1937,80 @@ describe('RepairBooksModal', () => {
     await repair(wrapper)
 
     expect(wrapper.find('[data-testid="repair-results-room"]').exists()).toBe(false)
+  })
+
+  it('comes back from Organize (Back) on step 2 as it was left, without loading again', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+    await repair(wrapper)
+    await wrapper.get('[data-testid="repair-organize"]').trigger('click')
+    const loads = apiMocks.getAudiobook.mock.calls.length
+
+    // Hidden while Organize shows, then shown again by Back
+    await wrapper.setProps({ visible: false })
+    await wrapper.setProps({ resume: true, visible: true })
+    await flushPromises()
+
+    expect(apiMocks.getAudiobook).toHaveBeenCalledTimes(loads)
+    expect(wrapper.get('#modal-title h2').text()).toBe('Repair Books - Repair process - Step 2/3')
+    expect(result(wrapper).attributes('data-result-state')).toBe('done')
+    expect(wrapper.get('[data-testid="repair-organize"]').text()).toContain('Organize 1')
+  })
+
+  it('loads afresh when opened again otherwise', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+    await repair(wrapper)
+
+    await wrapper.setProps({ visible: false })
+    await wrapper.setProps({ visible: true })
+    await flushPromises()
+
+    expect(wrapper.get('#modal-title h2').text()).toBe('Repair Books - Matching - Step 1/3')
+  })
+
+  it('goes Back from step 2 to step 1 loaded afresh, and closing then refreshes the page', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+    apiMocks.getAudiobook.mockResolvedValue({
+      ...mismatched,
+      title: 'Primal Hunter 4',
+      asin: 'B0BK9W82PQ',
+    })
+    apiMocks.getAudiobookIdentifiers.mockResolvedValue({
+      audiobookId: 7,
+      identifiers: [
+        { type: 'Asin', value: 'B0BK9W82PQ', region: 'us', isPrimary: true, source: 'Manual' },
+      ],
+    })
+    await repair(wrapper)
+
+    await wrapper.get('[data-testid="repair-cancel"]').trigger('click')
+    await flushPromises()
+
+    // Step 1 again, each book as it is now: its repaired record, nothing picked
+    expect(wrapper.get('#modal-title h2').text()).toBe('Repair Books - Matching - Step 1/3')
+    expect(row(wrapper).get('[data-testid="match-current"]').text()).toBe(
+      'B0BK9W82PQ - Primal Hunter 4 - Zogarth - United States (US)',
+    )
+    expect(row(wrapper).find('[data-testid="match-picked"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="repair-cancel-label"]').text()).toBe('Cancel')
+
+    // A repair changed the library: Cancel closes it as done, so the page behind refreshes
+    await wrapper.get('[data-testid="repair-cancel"]').trigger('click')
+    expect(wrapper.emitted('done')).toHaveLength(1)
+    expect(wrapper.emitted('close')).toBeUndefined()
+  })
+
+  it('closes as canceled when nothing was repaired', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    await wrapper.get('[data-testid="repair-cancel"]').trigger('click')
+    expect(wrapper.emitted('close')).toHaveLength(1)
+    expect(wrapper.emitted('done')).toBeUndefined()
   })
 
   it('offers to organize the repaired books', async () => {

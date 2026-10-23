@@ -671,6 +671,8 @@
     :visible="showOrganizeModal"
     :audiobook-ids="audiobook ? [audiobook.id] : []"
     :title="organizeFromRepair ? REPAIR_ORGANIZE_TITLE : undefined"
+    :back="organizeFromRepair"
+    @back="backToRepair"
     @close="showOrganizeModal = false"
     @done="handleOrganizeDone"
   />
@@ -678,6 +680,7 @@
   <RepairBooksModal
     :visible="showRepairModal"
     :audiobook-ids="audiobook ? [audiobook.id] : []"
+    :resume="repairResumed"
     @close="showRepairModal = false"
     @done="handleRepairDone"
     @organize="organizeAfterRepair"
@@ -815,6 +818,8 @@ const showOrganizeModal = ref(false)
 // Organize opened by Repair, as its last step
 const organizeFromRepair = ref(false)
 const showRepairModal = ref(false)
+// Repair shown again by Back from its step 3 (Organize): as it was left
+const repairResumed = ref(false)
 const showMoreActions = ref(false)
 
 // History state
@@ -915,6 +920,7 @@ const topActions = computed<DetailTopAction[]>(() => [
     desktopGroup: 'secondary',
     desktopClass: 'warning',
     onClick: () => {
+      repairResumed.value = false
       showRepairModal.value = true
     },
   },
@@ -1851,6 +1857,13 @@ async function organizeAfterRepair() {
   await loadAudiobook()
   organizeFromRepair.value = true
   showOrganizeModal.value = true
+}
+
+// Back from Organize to Repair's step 2, as it was left
+function backToRepair() {
+  showOrganizeModal.value = false
+  repairResumed.value = true
+  showRepairModal.value = true
 }
 
 async function handleOrganizeDone() {
