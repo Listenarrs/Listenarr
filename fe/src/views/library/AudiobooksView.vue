@@ -708,6 +708,8 @@
       :visible="showOrganizeModal"
       :audiobook-ids="organizeAudiobookIds"
       :title="organizeFromRepair ? REPAIR_ORGANIZE_TITLE : undefined"
+      :back="organizeFromRepair"
+      @back="backToRepair"
       @close="closeOrganize"
       @done="handleOrganizeDone"
     />
@@ -715,6 +717,7 @@
     <RepairBooksModal
       :visible="showRepairModal"
       :audiobook-ids="repairAudiobookIds"
+      :resume="repairResumed"
       @close="showRepairModal = false"
       @done="handleRepairDone"
       @organize="organizeRepaired"
@@ -1844,6 +1847,8 @@ const organizeAudiobookIds = ref<number[]>([])
 const organizeFromRepair = ref(false)
 const showRepairModal = ref(false)
 const repairAudiobookIds = ref<number[]>([])
+// Repair shown again by Back from its step 3 (Organize): as it was left
+const repairResumed = ref(false)
 const showEditModal = ref(false)
 const editAudiobook = ref<Audiobook | null>(null)
 const lastClickedIndex = ref<number | null>(null)
@@ -2365,6 +2370,7 @@ function closeOrganize() {
 
 function showRepair() {
   repairAudiobookIds.value = Array.from(libraryStore.selectedIds)
+  repairResumed.value = false
   showRepairModal.value = true
 }
 
@@ -2379,6 +2385,13 @@ async function organizeRepaired(ids: number[]) {
   organizeAudiobookIds.value = ids
   organizeFromRepair.value = true
   showOrganizeModal.value = true
+}
+
+// Back from Organize to Repair's step 2, as it was left
+function backToRepair() {
+  showOrganizeModal.value = false
+  repairResumed.value = true
+  showRepairModal.value = true
 }
 
 async function handleOrganizeDone() {
