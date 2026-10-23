@@ -170,6 +170,23 @@ describe('RenamePreviewModal', () => {
     wrapper.unmount()
   })
 
+  it("offers Back instead of Cancel when it is another dialog's step, until it has organized", async () => {
+    vi.mocked(apiService.previewRename).mockResolvedValue([])
+    const wrapper = mount(RenamePreviewModal, {
+      props: { visible: true, audiobookIds: [7], back: true },
+      global: { plugins: [createFilesystemPinia('Ready')] },
+    })
+    await flushPromises()
+
+    const back = wrapper.get('[data-testid="organize-back"]')
+    expect(back.text()).toBe('Back')
+    expect(wrapper.text()).not.toContain('Cancel')
+    await back.trigger('click')
+    expect(wrapper.emitted('back')).toHaveLength(1)
+    expect(wrapper.emitted('close')).toBeUndefined()
+    wrapper.unmount()
+  })
+
   it('keeps preview available but disables organize while filesystem initialization is running', async () => {
     vi.mocked(apiService.previewRename).mockResolvedValue([
       {
