@@ -197,7 +197,10 @@
         </dd>
         <dt>New</dt>
         <dd v-if="match.picked" class="match-new-picked" data-testid="match-picked">
-          {{ bookSummary(recordFromResult(match.picked, match.region)) }}
+          <BookRecordDiff
+            :record="recordFromResult(match.picked, match.region)"
+            :base="currentRecord"
+          />
           <span class="match-status">
             <PhCheckCircle :size="14" weight="fill" />
             checked
@@ -320,6 +323,7 @@ import {
   PhX,
 } from '@phosphor-icons/vue'
 import FindMatchResults from './FindMatchResults.vue'
+import BookRecordDiff from './BookRecordDiff.vue'
 import { resultsReveal, revealMs } from '@/utils/resultsReveal'
 import { orderedSearchRegionOptions } from '@/utils/languageMapping'
 import {
