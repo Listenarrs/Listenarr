@@ -51,6 +51,40 @@
       </div>
     </div>
 
+    <!-- Quality profile recovery: automatic search skips books without a valid profile -->
+    <div
+      v-if="!loading && wantedNeedingProfile.length > 0"
+      class="profile-warning"
+      data-testid="profile-warning"
+    >
+      <PhWarning :size="20" />
+      <div class="profile-warning-text">
+        <strong>
+          {{ wantedNeedingProfile.length }} wanted
+          {{ wantedNeedingProfile.length === 1 ? 'audiobook has' : 'audiobooks have' }} no quality
+          profile.
+        </strong>
+        Automatic search skips a book until it has one, so these will never be searched or
+        downloaded automatically.
+        <template v-if="configurationStore.qualityProfiles.length === 0">
+          No quality profiles exist yet — create one in
+          <RouterLink to="/settings#quality-profiles" class="profile-warning-link"
+            >Settings → Quality Profiles</RouterLink
+          >
+          and come back to assign it.
+        </template>
+      </div>
+      <button
+        v-if="configurationStore.qualityProfiles.length > 0"
+        class="btn btn-secondary"
+        data-testid="assign-profile-open"
+        @click="openAssignProfile"
+      >
+        <PhStar />
+        Assign profile…
+      </button>
+    </div>
+
     <!-- Loading State -->
     <LoadingState v-if="loading" message="Loading wanted audiobooks..." />
 
@@ -122,8 +156,15 @@
               <span v-else class="muted">-</span>
             </div>
             <div class="col-quality">
-              <span class="quality-tag">
-                {{ getQualityProfileForAudiobook(item)?.name ?? item.quality ?? 'Unknown' }}
+              <span v-if="getQualityProfileForAudiobook(item)" class="quality-tag">
+                {{ getQualityProfileForAudiobook(item)!.name }}
+              </span>
+              <span
+                v-else
+                class="quality-tag quality-tag-missing"
+                title="Automatic search skips this book until a quality profile is assigned"
+              >
+                No profile
               </span>
             </div>
             <div class="col-status">
@@ -189,6 +230,15 @@
       @cancel="closeConfirmSearchAll"
     />
 
+    <!-- Assign Quality Profile Modal -->
+    <AssignQualityProfileModal
+      :visible="showAssignProfileModal"
+      :audiobooks="wantedNeedingProfile"
+      :profiles="configurationStore.qualityProfiles"
+      :after-assign="handleProfilesAssigned"
+      @cancel="closeAssignProfile"
+    />
+
     <!-- Manual Search Modal -->
     <ManualSearchModal
       :is-open="showManualSearchModal"
@@ -215,6 +265,10 @@ import { errorTracking } from '@/services/errorTracking'
 import { handleImageError } from '@/utils/imageFallback'
 import ManualSearchModal from '@/components/domain/search/ManualSearchModal.vue'
 import ManualImportModal from '@/components/feedback/ManualImportModal.vue'
+import AssignQualityProfileModal, {
+  type AssignQualityProfileResult,
+} from '@/components/domain/audiobook/AssignQualityProfileModal.vue'
+import { useToast } from '@/services/toastService'
 import { ConfirmModal } from '@/components/feedback'
 import { EmptyState, LoadingState } from '@/components/base'
 import type { Audiobook, SearchResult, Download } from '@/types'
@@ -228,6 +282,8 @@ import {
   PhX,
   PhCheckCircle,
   PhDownloadSimple,
+  PhStar,
+  PhWarning,
 } from '@phosphor-icons/vue'
 import { logger } from '@/utils/logger'
 import { useDownloadsStore } from '@/stores/downloads'
@@ -238,6 +294,7 @@ const downloadsStore = useDownloadsStore()
 const { getProtectedImageSrc } = useProtectedImages()
 const libraryStore = useLibraryStore()
 const configurationStore = useConfigurationStore()
+const toast = useToast()
 
 // Filter
 const filterText = ref('')
@@ -305,6 +362,7 @@ const showManualSearchModal = ref(false)
 const selectedAudiobook = ref<Audiobook | null>(null)
 const showManualImportModal = ref(false)
 const showConfirmSearchAll = ref(false)
+const showAssignProfileModal = ref(false)
 const isSearchingAll = ref(false)
 const isCancelled = ref(false)
 let activeDelayTimer: ReturnType<typeof setTimeout> | null = null
@@ -380,6 +438,22 @@ const wantedAudiobooks = computed(() => {
     return !!audiobook.monitored && !hasFiles && !hasPrimaryFile
   })
 })
+
+// Wanted audiobooks the automatic search will skip: no profile assigned, or one that
+// no longer exists. Not scoped to the text filter — the recovery flow repairs all of them.
+// Books whose profile was just assigned but whose refreshed row has not confirmed it yet. They
+// are kept out of the picker so a retry — or a reopen after a failed refresh — cannot overwrite
+// the profile they already received. The store's fetchLibrary() swallows API failures, so a
+// book only leaves this set once a reloaded row carries a valid profile.
+const profileAssignedPendingRefresh = ref(new Set<number>())
+
+const wantedNeedingProfile = computed(() =>
+  wantedAudiobooks.value.filter(
+    (audiobook) =>
+      !profileAssignedPendingRefresh.value.has(audiobook.id) &&
+      getQualityProfileForAudiobook(audiobook) === null,
+  ),
+)
 
 // Actionable wanted audiobooks: scoped to visible filter, excluding active downloads and in-flight searches (Issue #936)
 const actionableMissingWanted = computed(() => {
@@ -523,6 +597,62 @@ const searchMissing = async () => {
     abortDelay()
   }
 }
+function openAssignProfile() {
+  if (wantedNeedingProfile.value.length === 0) return
+  showAssignProfileModal.value = true
+}
+
+function closeAssignProfile() {
+  showAssignProfileModal.value = false
+}
+
+async function handleProfilesAssigned(result: AssignQualityProfileResult) {
+  // The server has already accepted these assignments: reflect them on the local rows right
+  // away so the books leave the picker whether or not the reload below succeeds.
+  for (const id of result.assignedIds) {
+    profileAssignedPendingRefresh.value.add(id)
+    const row = libraryStore.audiobooks.find((audiobook) => audiobook.id === id)
+    if (row && result.profile.id != null) row.qualityProfileId = result.profile.id
+  }
+
+  // fetchLibrary() never throws — a failed reload leaves the previous rows in place and sets
+  // libraryStore.error — so only a successful reload can confirm the assignments.
+  await libraryStore.fetchLibrary()
+  if (libraryStore.error === null) {
+    for (const id of [...profileAssignedPendingRefresh.value]) {
+      const row = libraryStore.audiobooks.find((audiobook) => audiobook.id === id)
+      if (row && getQualityProfileForAudiobook(row) !== null) {
+        profileAssignedPendingRefresh.value.delete(id)
+      }
+    }
+  }
+  if (result.assignedIds.some((id) => profileAssignedPendingRefresh.value.has(id))) {
+    toast.warning(
+      'Library refresh failed',
+      'The books that were assigned stay hidden from this picker until the list reloads.',
+    )
+  }
+
+  if (result.failures.length === 0) {
+    toast.success(
+      'Quality profile assigned',
+      `Assigned "${result.profile.name}" to ${result.assigned} wanted ${
+        result.assigned === 1 ? 'audiobook' : 'audiobooks'
+      }.`,
+    )
+    closeAssignProfile()
+    return
+  }
+
+  // Keep the modal open so the failed books stay visible.
+  toast.warning(
+    'Assignment incomplete',
+    `Assigned "${result.profile.name}" to ${result.assigned} of ${
+      result.assigned + result.failures.length
+    }; ${result.failures.length} could not be updated.`,
+  )
+}
+
 function openManualSearch(item: Audiobook) {
   selectedAudiobook.value = item
   showManualSearchModal.value = true
@@ -647,6 +777,43 @@ const markAsSkipped = async (item: Audiobook) => {
   display: flex;
   gap: 0.75rem;
   align-items: center;
+}
+
+/* Quality profile recovery banner */
+.profile-warning {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+  padding: 0.75rem 1rem;
+  background: rgba(250, 176, 5, 0.12);
+  border: 1px solid rgba(250, 176, 5, 0.4);
+  border-radius: 6px;
+  color: #ffd43b;
+}
+
+.profile-warning > svg {
+  flex-shrink: 0;
+}
+
+.profile-warning-text {
+  flex: 1;
+  color: #e9ecef;
+  font-size: 0.9rem;
+}
+
+.profile-warning-text strong {
+  color: #ffd43b;
+}
+
+.profile-warning-link {
+  color: #ffd43b;
+  text-decoration: underline;
+}
+
+.quality-tag-missing {
+  background: rgba(250, 82, 82, 0.15);
+  color: #ffa8a8;
 }
 
 /* Filter input */
