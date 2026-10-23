@@ -2013,6 +2013,51 @@ describe('RepairBooksModal', () => {
     expect(wrapper.emitted('done')).toBeUndefined()
   })
 
+  it('offers Retry on a failed repair: that book repaired again, the dialog repairing meanwhile', async () => {
+    apiMocks.updateAudiobookIdentifiers.mockRejectedValueOnce(new Error('Database locked'))
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+    await repair(wrapper)
+    expect(result(wrapper).attributes('data-result-state')).toBe('failed')
+    expect(wrapper.get('[data-testid="repair-problems"]').text()).toBe('Not all repaired: 1 failed')
+
+    // Retry: the book repaired again; meanwhile the footer's button is a red Cancel and Organize waits
+    let rescanned!: (value: unknown) => void
+    apiMocks.rescanAudiobookMetadata.mockReturnValueOnce(
+      new Promise((resolve) => (rescanned = resolve)),
+    )
+    await result(wrapper).get('[data-testid="repair-result-retry"]').trigger('click')
+    await flushPromises()
+    expect(result(wrapper).attributes('data-result-state')).toBe('running')
+    expect(wrapper.get('[data-testid="repair-cancel-label"]').text()).toBe('Cancel')
+    expect(wrapper.get('[data-testid="repair-organize"]').attributes('disabled')).toBeDefined()
+
+    rescanned({ message: 'ok', audiobookId: 7, asin: 'B0BK9W82PQ', region: 'us' })
+    await flushPromises()
+    expect(result(wrapper).attributes('data-result-state')).toBe('done')
+    expect(result(wrapper).find('[data-testid="repair-result-retry"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="repair-problems"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="repair-organize"]').text()).toContain('Organize 1')
+    expect(wrapper.get('[data-testid="repair-cancel-label"]').text()).toBe('Back')
+  })
+
+  it('offers Retry on a repair done in part, not on a repaired book', async () => {
+    apiMocks.getAudiobook.mockImplementation(async (id: number) => ({ ...mismatched, id }))
+    apiMocks.rescanAudiobookMetadata
+      .mockRejectedValueOnce(new Error('Audible is down'))
+      .mockResolvedValue({ message: 'ok', audiobookId: 8, asin: 'B0BK9W82PQ', region: 'us' })
+    const wrapper = mountModal([7, 8])
+    await flushPromises()
+    for (const id of [7, 8]) await searchAndPick(wrapper, { id, query: 'Primal Hunter' })
+    await repair(wrapper)
+
+    expect(result(wrapper).attributes('data-result-state')).toBe('warning')
+    expect(result(wrapper).find('[data-testid="repair-result-retry"]').exists()).toBe(true)
+    expect(result(wrapper, 8).attributes('data-result-state')).toBe('done')
+    expect(result(wrapper, 8).find('[data-testid="repair-result-retry"]').exists()).toBe(false)
+  })
+
   it('offers to organize the repaired books', async () => {
     const wrapper = mountModal()
     await flushPromises()
