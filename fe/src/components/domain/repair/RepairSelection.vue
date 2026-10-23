@@ -89,4 +89,10 @@ const emit = defineEmits<{ selectAll: []; clear: [] }>()
   display: flex;
   gap: 0.5rem;
 }
+
+/* On one line, at their own width, even where buttons stretch */
+.repair-action-btn {
+  width: auto;
+  white-space: nowrap;
+}
 </style>

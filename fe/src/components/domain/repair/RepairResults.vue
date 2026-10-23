@@ -137,14 +137,7 @@
           <dd data-testid="repair-result-old">{{ bookSummary(outcome.before) || 'None' }}</dd>
           <dt>New</dt>
           <dd v-if="newRecord(outcome)" data-testid="repair-result-new">
-            <template v-for="(part, index) in newParts(outcome)" :key="part.key">
-              <template v-if="index"> - </template>
-              <span
-                :class="{ 'repair-result-changed': part.changed }"
-                :data-changed="part.changed || undefined"
-                >{{ part.text }}</span
-              >
-            </template>
+            <BookRecordDiff :record="newRecord(outcome)!" :base="outcome.before" />
           </dd>
           <dd v-else data-testid="repair-result-new">None: the book keeps its old record</dd>
         </dl>
@@ -158,7 +151,8 @@
 import { computed, ref } from 'vue'
 import { PhCaretDown, PhCaretUp, PhFolderOpen, PhSpinner } from '@phosphor-icons/vue'
 import RepairSelection from './RepairSelection.vue'
-import { bookSummary, recordParts, type BookRecord, type BookTaskState } from '@/utils/bookMatch'
+import BookRecordDiff from '@/components/domain/audiobook/BookRecordDiff.vue'
+import { bookSummary, type BookRecord, type BookTaskState } from '@/utils/bookMatch'
 
 // One book to repair, from the moment the repair starts
 export interface RepairOutcome {
@@ -232,15 +226,6 @@ function toggle(id: number) {
   selected.value = selected.value.includes(id)
     ? selected.value.filter((s) => s !== id)
     : [...selected.value, id]
-}
-
-// The new record's parts, each marked when it differs from the old record's (the ASIN in any case)
-function newParts(outcome: RepairOutcome) {
-  const before = new Map(recordParts(outcome.before).map((part) => [part.key, part.text]))
-  return recordParts(newRecord(outcome)!).map((part) => ({
-    ...part,
-    changed: (before.get(part.key) ?? '').toUpperCase() !== part.text.toUpperCase(),
-  }))
 }
 </script>
 
@@ -367,6 +352,9 @@ function newParts(outcome: RepairOutcome) {
 }
 
 .repair-result-details-btn {
+  /* Its own width on a phone too, where modal buttons stretch */
+  width: auto;
+  white-space: nowrap;
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
@@ -420,10 +408,5 @@ function newParts(outcome: RepairOutcome) {
 .repair-result-records dd {
   margin: 0;
   min-width: 0;
-}
-
-.repair-result-changed {
-  color: var(--status-success);
-  font-weight: 600;
 }
 </style>

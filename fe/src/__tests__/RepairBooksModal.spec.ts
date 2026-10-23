@@ -1521,6 +1521,17 @@ describe('RepairBooksModal', () => {
     expect(fields()).toEqual(['', 'Primal Hunter, Vol. 7', 'Zogarth', 'us'])
   })
 
+  it('highlights on New the parts of the picked record that differ from the current one', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+
+    const changed = row(wrapper)
+      .findAll('[data-testid="match-picked"] [data-changed]')
+      .map((part) => part.text())
+    expect(changed).toEqual(['B0BK9W82PQ', 'Primal Hunter 4', 'United States (US)'])
+  })
+
   it('only rescans when the current record is picked', async () => {
     catalogue({ fr: [frenchVol7] })
     const wrapper = mountModal()
@@ -1530,6 +1541,9 @@ describe('RepairBooksModal', () => {
 
     await row(wrapper).get('[data-testid="find-match-result"]').trigger('click')
     expect(row(wrapper).attributes('data-match-state')).toBe('matched')
+    // The same record again (its metadata read anew): nothing highlighted on New
+    expect(row(wrapper).get('[data-testid="match-picked"]').text()).toContain('B0HM45F8MW')
+    expect(row(wrapper).findAll('[data-testid="match-picked"] [data-changed]')).toHaveLength(0)
     await repair(wrapper)
 
     expect(apiMocks.updateAudiobookIdentifiers).not.toHaveBeenCalled()
