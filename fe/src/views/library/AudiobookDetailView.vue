@@ -670,8 +670,20 @@
   <RenamePreviewModal
     :visible="showOrganizeModal"
     :audiobook-ids="audiobook ? [audiobook.id] : []"
+    :title="organizeFromRepair ? REPAIR_ORGANIZE_TITLE : undefined"
+    :back="organizeFromRepair"
+    @back="backToRepair"
     @close="showOrganizeModal = false"
     @done="handleOrganizeDone"
+  />
+
+  <RepairBooksModal
+    :visible="showRepairModal"
+    :audiobook-ids="audiobook ? [audiobook.id] : []"
+    :resume="repairResumed"
+    @close="showRepairModal = false"
+    @done="handleRepairDone"
+    @organize="organizeAfterRepair"
   />
 </template>
 
@@ -708,6 +720,9 @@ import { buildAudibleProductUrl } from '@/utils/marketDomains'
 import EditAudiobookModal from '@/components/domain/audiobook/EditAudiobookModal.vue'
 import ManualSearchModal from '@/components/domain/search/ManualSearchModal.vue'
 import RenamePreviewModal from '@/components/domain/organize/RenamePreviewModal.vue'
+import RepairBooksModal, {
+  REPAIR_ORGANIZE_TITLE,
+} from '@/components/domain/repair/RepairBooksModal.vue'
 import CustomSelect from '@/components/form/CustomSelect.vue'
 import DeleteConfirmationModal from '@/components/feedback/DeleteConfirmationModal.vue'
 import { Pill } from '@/components/base'
@@ -718,6 +733,7 @@ import {
   PhSpinner,
   PhMagnifyingGlass,
   PhFolderOpen,
+  PhWrench,
   PhTrash,
   PhClock,
   PhFolder,
@@ -799,6 +815,11 @@ const displayedScanStatus = computed(() => {
 })
 const showEditModal = ref(false)
 const showOrganizeModal = ref(false)
+// Organize opened by Repair, as its last step
+const organizeFromRepair = ref(false)
+const showRepairModal = ref(false)
+// Repair shown again by Back from its step 3 (Organize): as it was left
+const repairResumed = ref(false)
 const showMoreActions = ref(false)
 
 // History state
@@ -890,6 +911,20 @@ const topActions = computed<DetailTopAction[]>(() => [
     },
   },
   {
+    key: 'repair',
+    label: 'Repair Book',
+    title: 'Repair Book',
+    ariaLabel: 'Repair Book',
+    icon: PhWrench,
+    disabled: !audiobook.value,
+    desktopGroup: 'secondary',
+    desktopClass: 'warning',
+    onClick: () => {
+      repairResumed.value = false
+      showRepairModal.value = true
+    },
+  },
+  {
     key: 'organize',
     label: 'Organize Files',
     title: 'Organize Files',
@@ -898,6 +933,7 @@ const topActions = computed<DetailTopAction[]>(() => [
     disabled: !audiobook.value?.files?.length && !audiobook.value?.filePath,
     desktopGroup: 'secondary',
     onClick: () => {
+      organizeFromRepair.value = false
       showOrganizeModal.value = true
     },
   },
@@ -945,6 +981,7 @@ type DetailTopAction = {
     | 'monitor'
     | 'edit'
     | 'rescan-metadata'
+    | 'repair'
     | 'organize'
     | 'delete'
   label: string
@@ -1808,6 +1845,25 @@ function closeEditModal() {
 async function handleEditSaved() {
   // Refresh the audiobook data after edit
   await loadAudiobook()
+}
+
+async function handleRepairDone() {
+  showRepairModal.value = false
+  await loadAudiobook()
+}
+
+async function organizeAfterRepair() {
+  showRepairModal.value = false
+  await loadAudiobook()
+  organizeFromRepair.value = true
+  showOrganizeModal.value = true
+}
+
+// Back from Organize to Repair's step 2, as it was left
+function backToRepair() {
+  showOrganizeModal.value = false
+  repairResumed.value = true
+  showRepairModal.value = true
 }
 
 async function handleOrganizeDone() {

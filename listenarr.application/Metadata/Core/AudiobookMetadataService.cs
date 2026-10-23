@@ -69,8 +69,8 @@ namespace Listenarr.Application.Metadata.Core
             {
                 try
                 {
-                    _logger.LogInformation("Attempting to fetch metadata from {SourceName} (Priority: {Priority}) for ASIN: {Asin}",
-                        source.Name, source.Priority, asin);
+                    _logger.LogInformation("Attempting to fetch metadata from {SourceName} (Priority: {Priority}) for ASIN: {Asin} in region {Region}",
+                        source.Name, source.Priority, asin, region);
 
                     AudibleBookResponse? result = null;
 
@@ -120,7 +120,7 @@ namespace Listenarr.Application.Metadata.Core
 
                     if (result != null)
                     {
-                        _logger.LogInformation("Successfully fetched metadata from {SourceName} for ASIN: {Asin}", source.Name, asin);
+                        _logger.LogInformation("Successfully fetched metadata from {SourceName} for ASIN: {Asin} in region {Region}", source.Name, asin, region);
                         return new AudiobookMetadataEnvelope(
                             result,
                             source.Name,
