@@ -90,6 +90,25 @@ namespace Listenarr.Infrastructure.FileSystem
                 : new CompatibilityFilePublicationJournalStore(
                     dbContextFactory,
                     timeProvider ?? TimeProvider.System);
+
+            WireDurableBarrierDegradeLogging(logger);
+        }
+
+        // Surface when a durable directory barrier is skipped because the volume cannot
+        // honor it (SMB / network-mapped drives return ERROR_INVALID_FUNCTION/NOT_SUPPORTED
+        // for FlushFileBuffers). The move/rename still completes — the file is already in
+        // place and registered — so this logs the reduced crash-safety as a warning rather
+        // than letting the barrier failure fail the whole import.
+        private static void WireDurableBarrierDegradeLogging(ILogger<FileMover> logger)
+        {
+            PinnedDirectoryCreation.DurableBarrierDegradeObserver = degrade =>
+                logger.LogWarning(
+                    "Skipped a durable directory barrier at {Site} because the volume does not "
+                        + "support it (Win32 error {Win32Error}); the file is already in place and "
+                        + "registered, so the operation still succeeded. Target: {Target}",
+                    degrade.Site,
+                    degrade.Win32Error,
+                    LogRedaction.SanitizeFilePath(degrade.Target));
         }
 
     }
