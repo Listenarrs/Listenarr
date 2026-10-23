@@ -178,7 +178,7 @@ describe('RepairBooksModal', () => {
     await flushPromises()
 
     // The title says the step, and how many there are
-    expect(wrapper.get('#modal-title h2').text()).toBe('Repair Books - Step 1 of 2: New records')
+    expect(wrapper.get('#modal-title h2').text()).toBe('Repair Books - Matching - Step 1/3')
     expect(row(wrapper).text()).toContain('Primal Hunter, Vol. 7')
     expect(row(wrapper).get('[data-testid="match-current"]').text()).toMatch(
       /^B0HM45F8MW - Primal Hunter, Vol. 7 - Zogarth - France \(FR\)$/,
@@ -1615,7 +1615,7 @@ describe('RepairBooksModal', () => {
       'Repair failed (0.25 s): Database locked',
     )
     expect(apiMocks.rescanAudiobookMetadata).not.toHaveBeenCalled()
-    expect(wrapper.get('#modal-title h2').text()).toBe('Repair Books - Step 2 of 2: Results')
+    expect(wrapper.get('#modal-title h2').text()).toBe('Repair Books - Results - Step 2/3')
     // Nothing repaired: nothing to organize, and the message says so
     expect(wrapper.get('[data-testid="repair-results-message"]').text()).toBe(
       'No book was repaired: there is nothing to organize.',

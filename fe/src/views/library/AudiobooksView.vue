@@ -707,6 +707,7 @@
     <RenamePreviewModal
       :visible="showOrganizeModal"
       :audiobook-ids="organizeAudiobookIds"
+      :title="organizeFromRepair ? REPAIR_ORGANIZE_TITLE : undefined"
       @close="closeOrganize"
       @done="handleOrganizeDone"
     />
@@ -849,7 +850,9 @@ import { logger } from '@/utils/logger'
 import BulkEditModal from '@/components/domain/collection/BulkEditModal.vue'
 import EditAudiobookModal from '@/components/domain/audiobook/EditAudiobookModal.vue'
 import RenamePreviewModal from '@/components/domain/organize/RenamePreviewModal.vue'
-import RepairBooksModal from '@/components/domain/repair/RepairBooksModal.vue'
+import RepairBooksModal, {
+  REPAIR_ORGANIZE_TITLE,
+} from '@/components/domain/repair/RepairBooksModal.vue'
 import DeleteConfirmationModal from '@/components/feedback/DeleteConfirmationModal.vue'
 import CustomSelect from '@/components/form/CustomSelect.vue'
 import FiltersDropdown from '@/components/ui/FiltersDropdown.vue'
@@ -1837,6 +1840,8 @@ const qualityProfiles = ref<QualityProfile[]>([])
 const showBulkEditModal = ref(false)
 const showOrganizeModal = ref(false)
 const organizeAudiobookIds = ref<number[]>([])
+// Organize opened by Repair, as its last step
+const organizeFromRepair = ref(false)
 const showRepairModal = ref(false)
 const repairAudiobookIds = ref<number[]>([])
 const showEditModal = ref(false)
@@ -2350,6 +2355,7 @@ function closeBulkEdit() {
 
 function showOrganize() {
   organizeAudiobookIds.value = Array.from(libraryStore.selectedIds)
+  organizeFromRepair.value = false
   showOrganizeModal.value = true
 }
 
@@ -2371,6 +2377,7 @@ async function organizeRepaired(ids: number[]) {
   showRepairModal.value = false
   await libraryStore.fetchLibrary()
   organizeAudiobookIds.value = ids
+  organizeFromRepair.value = true
   showOrganizeModal.value = true
 }
 
