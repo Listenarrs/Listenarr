@@ -29,22 +29,42 @@
         'repair-results-message-running': running,
         'repair-results-message-none': !running && !repairedCount,
       }"
-      data-testid="repair-results-message"
+      data-testid="repair-results-box"
     >
       <PhSpinner v-if="running" class="ph-spin" />
       <PhFolderOpen v-else />
-      <p v-if="running">
-        <strong>Repairing {{ current }} of {{ toRepairCount }}…</strong> The books are repaired one
-        after the other; Cancel stops before the next one.
-      </p>
-      <p v-else-if="repairedCount">
-        <strong>{{ repairedCount }} {{ repairedCount === 1 ? 'book' : 'books' }} repaired</strong>,
-        {{ repairedCount === 1 ? 'its' : 'their' }} metadata refreshed from the new Audible record.
-        Organize {{ repairedCount === 1 ? 'it' : 'them' }} now?
-        {{ repairedCount === 1 ? 'Its files were' : 'Their files were' }} last organized with the
-        metadata from before, which may have been wrong.
-      </p>
-      <p v-else>No book was repaired: there is nothing to organize.</p>
+      <!-- Every message in the same place, only the current one seen: the box keeps the height of
+           the longest from the start, so nothing moves when the repairs end -->
+      <div class="repair-results-texts">
+        <p
+          :class="{ 'repair-results-unseen': !running }"
+          :aria-hidden="!running"
+          :data-testid="running ? 'repair-results-message' : undefined"
+        >
+          <strong>Repairing {{ current }} of {{ toRepairCount }}…</strong> The books are repaired
+          one after the other; Cancel stops before the next one.
+        </p>
+        <p
+          :class="{ 'repair-results-unseen': running || !repairedCount }"
+          :aria-hidden="running || !repairedCount"
+          :data-testid="!running && repairedCount ? 'repair-results-message' : undefined"
+        >
+          <strong>{{ booksRepaired(repairedCount) }}</strong
+          >{{ organizeQuestion(repairedCount) }}
+        </p>
+        <p
+          :class="{ 'repair-results-unseen': running || repairedCount }"
+          :aria-hidden="running || !!repairedCount"
+          :data-testid="!running && !repairedCount ? 'repair-results-message' : undefined"
+        >
+          No book was repaired: there is nothing to organize.
+        </p>
+        <!-- The longest message these books can bring: every one of them repaired -->
+        <p class="repair-results-unseen" aria-hidden="true">
+          <strong>{{ booksRepaired(toRepairCount) }}</strong
+          >{{ organizeQuestion(toRepairCount) }}
+        </p>
+      </div>
     </div>
 
     <!-- The books to organize: only repaired ones can be, once the repairs are over -->
@@ -145,6 +165,19 @@ const repairedIds = computed(() =>
 )
 const repairedCount = computed(() => repairedIds.value.length)
 const toRepairCount = computed(() => props.outcomes.length)
+
+function booksRepaired(count: number) {
+  return `${count} ${count === 1 ? 'book' : 'books'} repaired`
+}
+
+function organizeQuestion(count: number) {
+  const one = count === 1
+  return (
+    `, ${one ? 'its' : 'their'} metadata refreshed from the new Audible record. ` +
+    `Organize ${one ? 'it' : 'them'} now? ${one ? 'Its files were' : 'Their files were'} last ` +
+    'organized with the metadata from before, which may have been wrong.'
+  )
+}
 // The book being repaired, counted from 1 among the books to repair
 const current = computed(
   () => props.outcomes.findIndex((o) => o.state === 'running') + 1 || toRepairCount.value,
@@ -190,6 +223,19 @@ function newParts(outcome: RepairOutcome) {
   border: 1px solid color-mix(in srgb, var(--status-warning) 45%, transparent);
   border-radius: 6px;
   color: var(--status-warning);
+}
+
+.repair-results-texts {
+  display: grid;
+}
+
+/* All in one cell: the box as tall as the longest */
+.repair-results-texts p {
+  grid-area: 1 / 1;
+}
+
+.repair-results-unseen {
+  visibility: hidden;
 }
 
 .repair-results-message-running {
