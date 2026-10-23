@@ -86,20 +86,43 @@
         :data-result-state="outcome.state"
         :data-testid="`repair-result-${outcome.id}`"
       >
-        <label
-          class="repair-result-heading"
-          :title="outcome.state === 'done' ? undefined : 'Only a repaired book can be organized'"
-        >
-          <input
-            type="checkbox"
-            class="repair-result-checkbox"
-            data-testid="repair-result-include"
-            :checked="selected.includes(outcome.id)"
-            :disabled="outcome.state !== 'done'"
-            @change="toggle(outcome.id)"
-          />
-          <span class="repair-result-title">{{ outcome.title || `Audiobook #${outcome.id}` }}</span>
-        </label>
+        <div class="repair-result-header">
+          <label
+            class="repair-result-heading"
+            :title="outcome.state === 'done' ? undefined : 'Only a repaired book can be organized'"
+          >
+            <input
+              type="checkbox"
+              class="repair-result-checkbox"
+              data-testid="repair-result-include"
+              :checked="selected.includes(outcome.id)"
+              :disabled="outcome.state !== 'done'"
+              @change="toggle(outcome.id)"
+            />
+            <span class="repair-result-title">{{
+              outcome.title || `Audiobook #${outcome.id}`
+            }}</span>
+          </label>
+          <!-- The records, closed at first to keep the list short; the tooltip gives them without
+             opening (the open details mark what changes) -->
+          <button
+            type="button"
+            class="btn btn-secondary repair-result-details-btn"
+            :title="recordsText(outcome)"
+            :aria-expanded="opened.has(outcome.id)"
+            data-testid="repair-result-details"
+            @click="toggleDetails(outcome.id)"
+          >
+            <template v-if="opened.has(outcome.id)">
+              Hide details
+              <PhCaretUp :size="14" />
+            </template>
+            <template v-else>
+              Show details
+              <PhCaretDown :size="14" />
+            </template>
+          </button>
+        </div>
         <p class="repair-result-message" data-testid="repair-result-message">
           <PhSpinner
             v-if="outcome.state === 'waiting' || outcome.state === 'running'"
@@ -109,8 +132,7 @@
           />
           {{ outcome.message }}
         </p>
-        <!-- From the start, so the card keeps its height when its repair ends -->
-        <dl class="repair-result-records">
+        <dl v-if="opened.has(outcome.id)" class="repair-result-records">
           <dt>Old</dt>
           <dd data-testid="repair-result-old">{{ bookSummary(outcome.before) || 'None' }}</dd>
           <dt>New</dt>
@@ -133,8 +155,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import { PhFolderOpen, PhSpinner } from '@phosphor-icons/vue'
+import { computed, ref } from 'vue'
+import { PhCaretDown, PhCaretUp, PhFolderOpen, PhSpinner } from '@phosphor-icons/vue'
 import RepairSelection from './RepairSelection.vue'
 import { bookSummary, recordParts, type BookRecord, type BookTaskState } from '@/utils/bookMatch'
 
@@ -188,6 +210,22 @@ const current = computed(
 function newRecord(outcome: RepairOutcome): BookRecord | null {
   if (outcome.after) return outcome.after
   return outcome.state === 'waiting' || outcome.state === 'running' ? outcome.planned : null
+}
+
+// The books whose records are open
+const opened = ref(new Set<number>())
+
+function toggleDetails(id: number) {
+  const next = new Set(opened.value)
+  if (!next.delete(id)) next.add(id)
+  opened.value = next
+}
+
+// The records on two lines, for the details button's tooltip
+function recordsText(outcome: RepairOutcome) {
+  const record = newRecord(outcome)
+  const after = record ? bookSummary(record) : 'None: the book keeps its old record'
+  return `Old: ${bookSummary(outcome.before) || 'None'}\nNew: ${after}`
 }
 
 function toggle(id: number) {
@@ -319,6 +357,22 @@ function newParts(outcome: RepairOutcome) {
 
 .repair-result-skipped {
   opacity: 0.6;
+}
+
+.repair-result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.repair-result-details-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: none;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.8rem;
 }
 
 .repair-result-heading {
