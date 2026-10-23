@@ -116,7 +116,7 @@ namespace Listenarr.Application.Search.Audible
             string region,
             string? language)
         {
-            try { _logger.LogInformation("Entering AUTHOR_TITLE branch: author='{Author}', title='{Title}', isbn='{Isbn}'", author, title, isbn); }
+            try { _logger.LogInformation("Entering AUTHOR_TITLE branch: author='{Author}', title='{Title}', isbn='{Isbn}', region='{Region}', language='{Language}'", author, title, isbn, region, language ?? "any"); }
             catch (Exception caughtEx) when (caughtEx is not OperationCanceledException && caughtEx is not OutOfMemoryException && caughtEx is not StackOverflowException)
             {
                 System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
