@@ -118,7 +118,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                         {
                             var propertiesJson = await propertiesResp.Content.ReadAsStringAsync(ct);
                             var properties = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(propertiesJson);
-                            if (await QbittorrentCompatibilityDetector.IsRdtClientAsync(httpClient, baseUrl, properties, ct))
+                            if (await QbittorrentCompatibilityDetector.CanRecoverLegacyFileMetadataAsync(httpClient, baseUrl, properties, ct))
                             {
                                 item = QbittorrentResponseMapper.MapQueueItem(torrent, client, files, isRdtClient: true);
                             }

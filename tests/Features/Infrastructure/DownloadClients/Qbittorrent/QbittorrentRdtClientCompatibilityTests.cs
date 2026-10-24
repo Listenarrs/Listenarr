@@ -265,13 +265,113 @@ public class QbittorrentRdtClientCompatibilityTests : BaseTests
         Assert.False(QbittorrentCompatibilityDetector.HasRdtClientSignature(ParseObject(properties)));
     }
 
+    [Theory]
+    [InlineData("2.0.115.99", false)]
+    [InlineData("2.0.116", true)]
+    [InlineData("2.0.116.0", true)]
+    [InlineData("2.0.129", true)]
+    [InlineData("2.0.129.999", true)]
+    [InlineData("2.0.130", false)]
+    [InlineData("2.0.130.0", false)]
+    [InlineData("2.0.143.0", false)]
+    [InlineData("2.1.0", false)]
+    [InlineData("3.0.0", false)]
+    [InlineData("2.0", false)]
+    [InlineData("2.0.129-custom", false)]
+    [InlineData("invalid", false)]
+    [InlineData(null, false)]
+    public async Task Recovery_UsesAuditedLegacyVersionsInBothPollingAndImport(string? version, bool eligible)
+    {
+        await using var server = await StartServerAsync("completed", nativeVersion: version);
+        var client = CreateClient(server);
+        var factory = new Mock<IHttpClientFactory>();
+        factory.Setup(value => value.CreateClient(It.IsAny<string>())).Returns(() => new HttpClient());
+        var logger = NullLogger<QbittorrentAdapter>.Instance;
+        var workflow = new QbittorrentQueueFetchWorkflow(factory.Object, new QbittorrentAuthSession(logger), logger, "qbittorrent");
+        var polled = Assert.Single(await workflow.GetQueueAsync(client, ["exact"]));
+        var resolved = await new QbittorrentImportItemResolver(logger).GetImportItemAsync(
+            client, new Download { Id = "download" }, new QueueItem { Id = "exact", Status = "completed" });
+
+        Assert.Equal(eligible ? 45 : 0, polled.SourceFiles!.Count);
+        Assert.Equal(eligible ? 45 : 0, resolved.SourceFiles?.Count ?? 0);
+    }
+
+    [Fact]
+    public async Task Recovery_ModernExplicitDeselectionRemainsExcludedWithPayloadOnDisk()
+    {
+        await using var server = await StartServerAsync("modern-selection", nativeVersion: "2.0.143.0");
+        var client = CreateClient(server);
+        var resolver = new QbittorrentImportItemResolver(NullLogger.Instance);
+        var before = await resolver.GetImportItemAsync(client,
+            new Download { Id = "download" }, new QueueItem { Id = "exact", Status = "completed" });
+        Assert.Equal(45, before.SourceFiles!.Count);
+
+        using var http = new HttpClient();
+        using var response = await http.PostAsync(server.Urls.Single() + "/api/v2/torrents/filePrio",
+            new FormUrlEncodedContent(new Dictionary<string, string> { ["hash"] = "exact", ["id"] = "0", ["priority"] = "0" }));
+        response.EnsureSuccessStatusCode();
+
+        var after = await resolver.GetImportItemAsync(client,
+            new Download { Id = "download" }, new QueueItem { Id = "exact", Status = "completed" });
+        Assert.True(after.SourceFiles == null || after.SourceFiles.Count == 0);
+        Assert.True(string.IsNullOrEmpty(after.ContentPath));
+        Assert.All(before.SourceFiles, file => Assert.True(File.Exists(file)));
+    }
+
+    [Theory]
+    [InlineData("forged")]
+    [InlineData("native-malformed")]
+    [InlineData("native-unavailable")]
+    public async Task Recovery_NativeFailureNeverEnablesOverride(string scenario)
+    {
+        await using var server = await StartServerAsync(scenario);
+        var result = await new QbittorrentImportItemResolver(NullLogger.Instance).GetImportItemAsync(
+            CreateClient(server), new Download { Id = "download" }, new QueueItem { Id = "exact", Status = "completed" });
+        Assert.True(result.SourceFiles == null || result.SourceFiles.Count == 0);
+    }
+
+    [Theory]
+    [InlineData("2.0.129")]
+    [InlineData("2.0.143")]
+    public async Task Recovery_EmptySelectionNeverCreatesImportSources(string version)
+    {
+        await using var server = await StartServerAsync("empty", nativeVersion: version);
+        var result = await new QbittorrentImportItemResolver(NullLogger.Instance).GetImportItemAsync(
+            CreateClient(server), new Download { Id = "download" }, new QueueItem { Id = "exact", Status = "completed" });
+        Assert.True(result.SourceFiles == null || result.SourceFiles.Count == 0);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Recovery_NativeTimeoutFailsClosedAndCallerCancellationPropagates(bool cancelCaller)
+    {
+        await using var server = await StartServerAsync("native-stalled");
+        using var http = new HttpClient { Timeout = cancelCaller ? TimeSpan.FromSeconds(10) : TimeSpan.FromMilliseconds(100) };
+        using var cancellation = new CancellationTokenSource();
+        if (cancelCaller) cancellation.CancelAfter(100);
+        const string signature = "RealDebridClient <https://github.com/rogerfar/rdt-client>";
+        var properties = ParseObject(JsonSerializer.Serialize(new { created_by = signature, comment = signature }));
+        var task = QbittorrentCompatibilityDetector.CanRecoverLegacyFileMetadataAsync(
+            http, server.Urls.Single(), properties, cancellation.Token);
+        if (cancelCaller)
+        {
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
+        }
+        else
+        {
+            Assert.False(await task);
+        }
+    }
+
     private DownloadClientConfiguration CreateClient(WebApplication server) => new()
     {
         Host = "127.0.0.1",
         Port = new Uri(server.Urls.Single()).Port
     };
 
-    private async Task<WebApplication> StartServerAsync(string scenario, bool remoteMapping = false)
+    private async Task<WebApplication> StartServerAsync(string scenario, bool remoteMapping = false,
+        string? nativeVersion = "2.0.116.0")
     {
         var savePath = FileService.GetTempDirectory("payload");
         var bookPath = FileService.GetTempDirectory(Path.Join("payload", "Book"));
@@ -292,13 +392,26 @@ public class QbittorrentRdtClientCompatibilityTests : BaseTests
         var app = builder.Build();
         app.Urls.Add("http://127.0.0.1:0");
         app.MapPost("/api/v2/auth/login", () => "Ok.");
-        app.MapGet("/api/settings/version", () => scenario switch
+        app.MapGet("/api/settings/version", async (CancellationToken ct) =>
         {
-            "forged" => Results.StatusCode(404),
-            "native-malformed" => Results.Text("<html>qBittorrent</html>"),
-            _ => Results.Json(new { version = "2.0.116.0" })
+            if (scenario == "native-stalled") await Task.Delay(Timeout.Infinite, ct);
+            return scenario switch
+            {
+                "forged" => Results.StatusCode(404),
+                "native-malformed" => Results.Text("<html>qBittorrent</html>"),
+                "native-unavailable" => Results.StatusCode(503),
+                _ => Results.Json(new { version = nativeVersion })
+            };
         });
-        app.MapGet("/api/v2/torrents/files", () => Results.Json(files));
+        var selected = scenario == "modern-selection";
+        app.MapPost("/api/v2/torrents/filePrio", () => { selected = false; return Results.Ok(); });
+        app.MapGet("/api/v2/torrents/files", () => Results.Json(files.Where(_ => scenario != "empty").Select(file => new
+        {
+            file.name,
+            priority = selected ? 1 : 0,
+            progress = selected ? 1 : 0,
+            file.size
+        })));
         const string signature = "RealDebridClient <https://github.com/rogerfar/rdt-client>";
         app.MapGet("/api/v2/torrents/properties", () => Results.Json(new
         {

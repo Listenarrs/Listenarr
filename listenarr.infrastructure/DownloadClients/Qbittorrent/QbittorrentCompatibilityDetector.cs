@@ -13,7 +13,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent;
 
 internal static class QbittorrentCompatibilityDetector
 {
-    public static async Task<bool> IsRdtClientAsync(
+    public static async Task<bool> CanRecoverLegacyFileMetadataAsync(
         HttpClient httpClient,
         string baseUrl,
         Dictionary<string, JsonElement>? properties,
@@ -35,10 +35,21 @@ internal static class QbittorrentCompatibilityDetector
             }
 
             using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
-            return document.RootElement.ValueKind == JsonValueKind.Object
+            if (!(document.RootElement.ValueKind == JsonValueKind.Object
                 && document.RootElement.TryGetProperty("version", out var version)
                 && version.ValueKind == JsonValueKind.String
-                && Version.TryParse(version.GetString(), out _);
+                && Version.TryParse(version.GetString(), out var parsedVersion)))
+            {
+                return false;
+            }
+
+            // 2.0.130 started reporting real file priorities (upstream commit 797c58e).
+            // All-zero metadata on newer clients can mean deliberate deselection.
+            // Keep recovery within the audited legacy range; unknown releases fail closed.
+            var normalizedVersion = new Version(parsedVersion.Major, parsedVersion.Minor,
+                Math.Max(parsedVersion.Build, 0), Math.Max(parsedVersion.Revision, 0));
+            return normalizedVersion >= new Version(2, 0, 116, 0)
+                && normalizedVersion < new Version(2, 0, 130, 0);
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException
             || ex is OperationCanceledException && !ct.IsCancellationRequested)

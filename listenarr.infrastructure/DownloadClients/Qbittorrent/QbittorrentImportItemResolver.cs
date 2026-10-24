@@ -172,7 +172,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
 
                 var includePriorityZeroFiles = false;
                 if (QbittorrentImportPathResolver.HasUnusableFileMetadata(files)
-                    && await QbittorrentCompatibilityDetector.IsRdtClientAsync(httpClient, baseUrl, props, ct))
+                    && await QbittorrentCompatibilityDetector.CanRecoverLegacyFileMetadataAsync(httpClient, baseUrl, props, ct))
                 {
                     // The import caller synthesizes a "completed" queue item. Verify the
                     // current torrent itself before overriding unusable per-file metadata.
