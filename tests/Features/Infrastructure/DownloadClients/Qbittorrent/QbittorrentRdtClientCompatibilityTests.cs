@@ -44,27 +44,25 @@ public class QbittorrentRdtClientCompatibilityTests : BaseTests
         var item = QbittorrentResponseMapper.MapQueueItem(
             ParseObject("""{"hash":"exact","state":"pausedUP","progress":1,"save_path":"/downloads"}"""),
             new DownloadClientConfiguration(),
-            ParseFiles("[{\"name\":\"Book/a.mp3\",\"priority\":0,\"progress\":" + rawNumber + "}]"),
-            isRdtClient: true);
+            ParseFiles("[{\"name\":\"Book/a.mp3\",\"priority\":0,\"progress\":" + rawNumber + "}]"));
 
-        Assert.Equal(expected ? 1 : 0, item.SourceFiles!.Count);
+        Assert.Empty(item.SourceFiles!);
     }
 
     [Theory]
-    [InlineData(false, "pausedUP", 1, 0, 0, 0)]
-    [InlineData(true, "pausedUP", 1, 0, 0, 1)]
-    [InlineData(true, "stoppedUP", 1, 0, 0, 1)]
-    [InlineData(true, "uploading", 1, 0, 0, 1)]
-    [InlineData(true, "pausedUP", 0.5, 0, 0, 0)]
-    [InlineData(true, "downloading", 0.5, 0, 0, 0)]
-    [InlineData(true, "checkingResumeData", 1, 0, 0, 0)]
-    [InlineData(true, "moving", 1, 0, 0, 0)]
-    [InlineData(true, "error", 1, 0, 0, 0)]
-    [InlineData(true, "missingFiles", 1, 0, 0, 0)]
-    [InlineData(true, "pausedUP", 1, 0, 1, 0)]
-    [InlineData(true, "pausedUP", 1, 1, 1, 1)]
-    public void QueueMapping_CompatibilityRequiresDetectionCompletionAndAllZeroMetadata(
-        bool detected, string state, double progress, int priority, double fileProgress, int expectedFiles)
+    [InlineData("pausedUP", 1, 0, 0, 0)]
+    [InlineData("stoppedUP", 1, 0, 0, 0)]
+    [InlineData("uploading", 1, 0, 0, 0)]
+    [InlineData("pausedUP", 0.5, 0, 0, 0)]
+    [InlineData("downloading", 0.5, 0, 0, 0)]
+    [InlineData("checkingResumeData", 1, 0, 0, 0)]
+    [InlineData("moving", 1, 0, 0, 0)]
+    [InlineData("error", 1, 0, 0, 0)]
+    [InlineData("missingFiles", 1, 0, 0, 0)]
+    [InlineData("pausedUP", 1, 0, 1, 0)]
+    [InlineData("pausedUP", 1, 1, 1, 1)]
+    public void QueueMapping_NeverOverridesPriorityZeroWithoutReconciliation(
+        string state, double progress, int priority, double fileProgress, int expectedFiles)
     {
         var client = new DownloadClientConfiguration();
         var torrent = ParseObject(JsonSerializer.Serialize(new
@@ -77,7 +75,7 @@ public class QbittorrentRdtClientCompatibilityTests : BaseTests
         }));
         var files = ParseFiles(JsonSerializer.Serialize(new[] { new { name = "Book/chapter.mp3", priority, progress = fileProgress } }));
 
-        var item = QbittorrentResponseMapper.MapQueueItem(torrent, client, files, isRdtClient: detected);
+        var item = QbittorrentResponseMapper.MapQueueItem(torrent, client, files);
 
         Assert.Equal(expectedFiles, item.SourceFiles!.Count);
         Assert.Equal(expectedFiles > 0 ? "/downloads/Book" : "", item.ContentPath);
@@ -93,7 +91,7 @@ public class QbittorrentRdtClientCompatibilityTests : BaseTests
         var item = QbittorrentResponseMapper.MapQueueItem(
             ParseObject("""{"hash":"exact","state":"pausedUP","progress":1,"save_path":"/downloads"}"""),
             new DownloadClientConfiguration(),
-            ParseFiles(json), isRdtClient: true);
+            ParseFiles(json));
 
         Assert.Empty(item.SourceFiles!);
         Assert.Empty(item.ContentPath!);
@@ -105,7 +103,7 @@ public class QbittorrentRdtClientCompatibilityTests : BaseTests
         var item = QbittorrentResponseMapper.MapQueueItem(
             ParseObject("""{"hash":"exact","state":"pausedUP","progress":1,"save_path":"/downloads"}"""),
             new DownloadClientConfiguration(),
-            ParseFiles("""[{"name":"Book/a.mp3","priority":1,"progress":1},{"name":"Other/b.mp3","priority":0,"progress":0}]"""), isRdtClient: true);
+            ParseFiles("""[{"name":"Book/a.mp3","priority":1,"progress":1},{"name":"Other/b.mp3","priority":0,"progress":0}]"""));
 
         Assert.Equal(["/downloads/Book/a.mp3"], item.SourceFiles);
         Assert.Equal("/downloads/Book", item.ContentPath);
@@ -119,7 +117,7 @@ public class QbittorrentRdtClientCompatibilityTests : BaseTests
         var item = QbittorrentResponseMapper.MapQueueItem(
             ParseObject("""{"hash":"exact","state":"pausedUP","progress":1,"save_path":"/downloads"}"""),
             new DownloadClientConfiguration(),
-            ParseFiles(JsonSerializer.Serialize(new[] { new { name, priority = 0, progress = 0 } })), isRdtClient: true);
+            ParseFiles(JsonSerializer.Serialize(new[] { new { name, priority = 1, progress = 1 } })));
 
         Assert.Empty(item.SourceFiles!);
         Assert.Empty(item.ContentPath!);
@@ -237,12 +235,12 @@ public class QbittorrentRdtClientCompatibilityTests : BaseTests
     }
 
     [Theory]
-    [InlineData("completed", 45)]
+    [InlineData("completed", 0)]
     [InlineData("ordinary", 0)]
     [InlineData("incomplete", 0)]
     [InlineData("forged", 0)]
     [InlineData("native-malformed", 0)]
-    public async Task QueuePolling_AutomaticallyDetectsRdtClientOverHttp(string scenario, int expectedFiles)
+    public async Task QueuePolling_PreservesExclusionsUntilImportReconciliation(string scenario, int expectedFiles)
     {
         await using var server = await StartServerAsync(scenario);
         var factory = new Mock<IHttpClientFactory>();
@@ -266,21 +264,21 @@ public class QbittorrentRdtClientCompatibilityTests : BaseTests
     }
 
     [Theory]
-    [InlineData("2.0.115.99", false)]
+    [InlineData("2.0.115.99", true)]
     [InlineData("2.0.116", true)]
     [InlineData("2.0.116.0", true)]
     [InlineData("2.0.129", true)]
     [InlineData("2.0.129.999", true)]
-    [InlineData("2.0.130", false)]
-    [InlineData("2.0.130.0", false)]
-    [InlineData("2.0.143.0", false)]
-    [InlineData("2.1.0", false)]
-    [InlineData("3.0.0", false)]
-    [InlineData("2.0", false)]
+    [InlineData("2.0.130", true)]
+    [InlineData("2.0.130.0", true)]
+    [InlineData("2.0.143.0", true)]
+    [InlineData("2.1.0", true)]
+    [InlineData("3.0.0", true)]
+    [InlineData("2.0", true)]
     [InlineData("2.0.129-custom", false)]
     [InlineData("invalid", false)]
     [InlineData(null, false)]
-    public async Task Recovery_UsesAuditedLegacyVersionsInBothPollingAndImport(string? version, bool eligible)
+    public async Task Recovery_RequiresNativeEvidenceWithoutVersionCutoffs(string? version, bool eligible)
     {
         await using var server = await StartServerAsync("completed", nativeVersion: version);
         var client = CreateClient(server);
@@ -292,7 +290,7 @@ public class QbittorrentRdtClientCompatibilityTests : BaseTests
         var resolved = await new QbittorrentImportItemResolver(logger).GetImportItemAsync(
             client, new Download { Id = "download" }, new QueueItem { Id = "exact", Status = "completed" });
 
-        Assert.Equal(eligible ? 45 : 0, polled.SourceFiles!.Count);
+        Assert.Empty(polled.SourceFiles!);
         Assert.Equal(eligible ? 45 : 0, resolved.SourceFiles?.Count ?? 0);
     }
 
@@ -323,6 +321,22 @@ public class QbittorrentRdtClientCompatibilityTests : BaseTests
     [InlineData("forged")]
     [InlineData("native-malformed")]
     [InlineData("native-unavailable")]
+    [InlineData("native-unselected")]
+    [InlineData("native-foreign")]
+    [InlineData("native-duplicate")]
+    [InlineData("native-detail-foreign")]
+    [InlineData("native-id-mismatch")]
+    [InlineData("native-incomplete")]
+    [InlineData("native-download-incomplete")]
+    [InlineData("native-download-error")]
+    [InlineData("native-path-mismatch")]
+    [InlineData("native-size-mismatch")]
+    [InlineData("native-file-duplicate")]
+    [InlineData("native-record-duplicate")]
+    [InlineData("native-selection-missing")]
+    [InlineData("native-list-malformed")]
+    [InlineData("native-link-missing")]
+    [InlineData("native-link-mismatch")]
     public async Task Recovery_NativeFailureNeverEnablesOverride(string scenario)
     {
         await using var server = await StartServerAsync(scenario);
@@ -353,15 +367,15 @@ public class QbittorrentRdtClientCompatibilityTests : BaseTests
         if (cancelCaller) cancellation.CancelAfter(100);
         const string signature = "RealDebridClient <https://github.com/rogerfar/rdt-client>";
         var properties = ParseObject(JsonSerializer.Serialize(new { created_by = signature, comment = signature }));
-        var task = QbittorrentCompatibilityDetector.CanRecoverLegacyFileMetadataAsync(
-            http, server.Urls.Single(), properties, cancellation.Token);
+        var task = QbittorrentCompatibilityDetector.RecoverSelectedFilesAsync(
+            http, server.Urls.Single(), properties, "exact", [], cancellation.Token);
         if (cancelCaller)
         {
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
         }
         else
         {
-            Assert.False(await task);
+            Assert.Null(await task);
         }
     }
 
@@ -413,6 +427,37 @@ public class QbittorrentRdtClientCompatibilityTests : BaseTests
             progress = selected ? 1 : 0,
             file.size
         })));
+        var nativeId = Guid.Parse("a595dbbf-2769-47a4-87a0-d80c588c846a");
+        var nativeTorrent = new { hash = scenario == "native-foreign" ? "foreign" : "exact", torrentId = nativeId };
+        app.MapGet("/Api/Torrents", () => scenario == "native-list-malformed"
+            ? Results.Json(new { unexpected = true })
+            : Results.Json(scenario == "native-duplicate" ? new[] { nativeTorrent, nativeTorrent } : new[] { nativeTorrent }));
+        app.MapGet("/Api/Torrents/Get/{id}", () =>
+        {
+            var nativeFiles = files.Select(file => new
+            {
+                path = scenario == "native-path-mismatch" ? "Other/" + file.name : file.name,
+                selected = scenario == "native-selection-missing" ? (bool?)null
+                    : scenario == "modern-selection" ? selected : scenario != "native-unselected",
+                bytes = file.size + (scenario == "native-size-mismatch" ? 1 : 0),
+                downloadLink = scenario == "native-link-missing" ? null : "https://provider.invalid/" + file.name
+            }).ToArray();
+            var nativeDownloads = files.Select(file => new
+            {
+                path = "https://provider.invalid/" + (scenario == "native-link-mismatch" ? "Other/" : "") + file.name,
+                completed = scenario == "native-download-incomplete" ? null : "2026-10-23T12:00:00Z",
+                error = scenario == "native-download-error" ? "failed" : (string?)null
+            }).ToArray();
+            return Results.Json(new
+            {
+                hash = scenario == "native-detail-foreign" ? "foreign" : "exact",
+                torrentId = scenario == "native-id-mismatch" ? Guid.Empty : nativeId,
+                completed = scenario == "native-incomplete" ? null : "2026-10-23T12:00:00Z",
+                error = (string?)null,
+                files = scenario == "native-file-duplicate" ? nativeFiles.Concat(nativeFiles.Take(1)).ToArray() : nativeFiles,
+                downloads = scenario == "native-record-duplicate" ? nativeDownloads.Concat(nativeDownloads.Take(1)).ToArray() : nativeDownloads
+            });
+        });
         const string signature = "RealDebridClient <https://github.com/rogerfar/rdt-client>";
         app.MapGet("/api/v2/torrents/properties", () => Results.Json(new
         {

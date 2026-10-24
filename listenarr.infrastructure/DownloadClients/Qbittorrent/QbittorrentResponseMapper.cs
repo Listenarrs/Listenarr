@@ -25,8 +25,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
         public static QueueItem MapQueueItem(
             Dictionary<string, JsonElement> torrent,
             DownloadClientConfiguration client,
-            List<Dictionary<string, JsonElement>> files,
-            bool isRdtClient = false)
+            List<Dictionary<string, JsonElement>> files)
         {
             var name = GetString(torrent, "name");
             var progress = GetDouble(torrent, "progress") * 100;
@@ -42,9 +41,6 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
             var ratio = GetNullableDouble(torrent, "ratio");
             var savePath = GetString(torrent, "save_path");
             var status = MapQueueStatus(state, progress);
-            var includePriorityZeroFiles = status == "completed"
-                && isRdtClient
-                && QbittorrentImportPathResolver.HasUnusableFileMetadata(files);
 
             return new QueueItem
             {
@@ -68,8 +64,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 CanRemove = true,
                 RemotePath = savePath,
                 LocalPath = savePath,
-                SourceFiles = TorrentClientPathMapper.BuildQbittorrentSourceFiles(savePath, files, includePriorityZeroFiles),
-                ContentPath = TorrentClientPathMapper.ResolveQbittorrentContentPath(savePath, files, includePriorityZeroFiles)
+                SourceFiles = TorrentClientPathMapper.BuildQbittorrentSourceFiles(savePath, files),
+                ContentPath = TorrentClientPathMapper.ResolveQbittorrentContentPath(savePath, files)
             };
         }
 

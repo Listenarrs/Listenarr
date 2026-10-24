@@ -23,10 +23,9 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
     {
         public static List<string> BuildSourceFiles(
             string savePath,
-            List<Dictionary<string, JsonElement>> files,
-            bool includePriorityZeroFiles = false)
+            List<Dictionary<string, JsonElement>> files)
         {
-            return TorrentClientPathMapper.BuildQbittorrentSourceFiles(savePath, files, includePriorityZeroFiles);
+            return TorrentClientPathMapper.BuildQbittorrentSourceFiles(savePath, files);
         }
 
         public static bool HasUnusableFileMetadata(List<Dictionary<string, JsonElement>> files)
@@ -62,10 +61,9 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
 
         public static string ResolveContentPath(
             string savePath,
-            List<Dictionary<string, JsonElement>> files,
-            bool includePriorityZeroFiles = false)
+            List<Dictionary<string, JsonElement>> files)
         {
-            return TorrentClientPathMapper.ResolveQbittorrentContentPath(savePath, files, includePriorityZeroFiles);
+            return TorrentClientPathMapper.ResolveQbittorrentContentPath(savePath, files);
         }
     }
 }

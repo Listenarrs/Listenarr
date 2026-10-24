@@ -45,7 +45,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
             }
 
             var outputPath = QbittorrentImportPathResolver.ResolveContentPath(
-                resolved.Value.SavePath, resolved.Value.Files, resolved.Value.IncludePriorityZeroFiles);
+                resolved.Value.SavePath, resolved.Value.Files);
             if (string.IsNullOrEmpty(outputPath))
             {
                 logger.LogWarning("Unable to resolve content path from torrent files for hash {Hash}", hash);
@@ -97,7 +97,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
             }
 
             var outputPath = QbittorrentImportPathResolver.ResolveContentPath(
-                resolved.Value.SavePath, resolved.Value.Files, resolved.Value.IncludePriorityZeroFiles);
+                resolved.Value.SavePath, resolved.Value.Files);
             if (string.IsNullOrEmpty(outputPath) && string.IsNullOrWhiteSpace(resolvedExistingContentPath))
             {
                 logger.LogWarning("Unable to resolve content path from torrent files for hash {Hash}", hash);
@@ -106,7 +106,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
 
             result.SourceFiles = QbittorrentImportPathResolver.TranslateSourceFiles(
                 QbittorrentImportPathResolver.BuildSourceFiles(
-                    resolved.Value.SavePath, resolved.Value.Files, resolved.Value.IncludePriorityZeroFiles));
+                    resolved.Value.SavePath, resolved.Value.Files));
             if (!string.IsNullOrWhiteSpace(outputPath))
             {
                 result.ContentPath = outputPath;
@@ -116,7 +116,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
             return result;
         }
 
-        private async Task<(string SavePath, List<Dictionary<string, JsonElement>> Files, bool IncludePriorityZeroFiles)?> ResolveTorrentFilesAsync(
+        private async Task<(string SavePath, List<Dictionary<string, JsonElement>> Files)?> ResolveTorrentFilesAsync(
             DownloadClientConfiguration client,
             string hash,
             CancellationToken ct)
@@ -170,10 +170,12 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                     return null;
                 }
 
-                var includePriorityZeroFiles = false;
-                if (QbittorrentImportPathResolver.HasUnusableFileMetadata(files)
-                    && await QbittorrentCompatibilityDetector.CanRecoverLegacyFileMetadataAsync(httpClient, baseUrl, props, ct))
+                if (QbittorrentImportPathResolver.HasUnusableFileMetadata(files))
                 {
+                    var recovered = await QbittorrentCompatibilityDetector.RecoverSelectedFilesAsync(
+                        httpClient, baseUrl, props, hash, files, ct);
+                    if (recovered == null || recovered.Count == 0) return null;
+
                     // The import caller synthesizes a "completed" queue item. Verify the
                     // current torrent itself before overriding unusable per-file metadata.
                     using var infoResp = await httpClient.GetAsync(
@@ -195,11 +197,11 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                         return null;
                     }
 
-                    includePriorityZeroFiles = true;
-                    logger.LogInformation("Using rdt-client compatibility for completed torrent {Hash}", hash);
+                    files = recovered;
+                    logger.LogInformation("Recovered native selected files for completed rdt-client torrent {Hash}", hash);
                 }
 
-                return (savePath, files, includePriorityZeroFiles);
+                return (savePath, files);
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
