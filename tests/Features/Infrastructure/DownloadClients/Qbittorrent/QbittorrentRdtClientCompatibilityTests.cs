@@ -307,8 +307,9 @@ public class QbittorrentRdtClientCompatibilityTests : BaseTests
         Assert.Equal(45, before.SourceFiles!.Count);
 
         using var http = new HttpClient();
+        using var content = new FormUrlEncodedContent(new Dictionary<string, string> { ["hash"] = "exact", ["id"] = "0", ["priority"] = "0" });
         using var response = await http.PostAsync(server.Urls.Single() + "/api/v2/torrents/filePrio",
-            new FormUrlEncodedContent(new Dictionary<string, string> { ["hash"] = "exact", ["id"] = "0", ["priority"] = "0" }));
+            content);
         response.EnsureSuccessStatusCode();
 
         var after = await resolver.GetImportItemAsync(client,
