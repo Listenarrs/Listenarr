@@ -103,15 +103,30 @@ public partial class AudiobookFileService
             return false;
         }
 
-        // The size comes from the same lease the metadata was read through —
-        // never from an lstat of the metadata path, which on Linux is the
-        // /proc/self/fd link's own size (see TryGetRegisteredFileLength).
+        // Only record the new size when real audio metadata was extracted. A path-only read can
+        // fall back to filename-derived metadata when ffprobe can't read the file; recording the
+        // size for that fallback would advance the scan's size gate and suppress a retry even
+        // though the audio metadata is still stale, so the file would never be re-probed after
+        // ffprobe recovers (#1084 review). Leaving the size unchanged keeps it eligible for retry.
+        //
+        // The size comes from the same lease the metadata was read through — never from an lstat
+        // of the metadata path, which on Linux is the /proc/self/fd link's own size (see
+        // TryGetRegisteredFileLength).
+        var registeredLength = HasExtractedAudioMetadata(metadata)
+            ? TryGetRegisteredFileLength(lease.MetadataPath)
+            : null;
         return await audiobookFileRepository.RefreshMetadataAsync(
             expectedFile,
             metadata,
-            TryGetRegisteredFileLength(lease.MetadataPath),
+            registeredLength,
             cancellationToken);
     }
+
+    // Distinguishes a real ffprobe extraction from a filename-only fallback, mirroring the retry
+    // signal in ExtractMetadataAsync: a genuine read yields a duration and/or a format.
+    private static bool HasExtractedAudioMetadata(AudioMetadata metadata) =>
+        metadata.Duration > TimeSpan.Zero
+        || !string.IsNullOrEmpty(metadata.Format);
 
     private async Task<bool> CanRefreshOwnedMetadataAsync(
         Audiobook audiobook,
