@@ -99,6 +99,42 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
                     .SelectMany(d => GetKnownClientItemIds(d.Metadata))
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList());
+
+            // Emulate the real conditional write: fill only missing identifiers against current
+            // state, never overwrite a different recorded one, and return the resulting metadata.
+            downloadRepoMock
+                .Setup(r => r.FillMissingClientIdentifiersAsync(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string id, string clientItemId, bool isTorrent, CancellationToken _) =>
+                {
+                    var d = downloads.FirstOrDefault(x => x.Id == id);
+                    if (d == null)
+                    {
+                        return null;
+                    }
+
+                    d.Metadata ??= new Dictionary<string, object>();
+                    var existingId = d.Metadata.TryGetValue("ClientDownloadId", out var cid) ? cid?.ToString() : null;
+                    var existingHash = d.Metadata.TryGetValue("TorrentHash", out var th) ? th?.ToString() : null;
+                    var idConflict = !string.IsNullOrWhiteSpace(existingId)
+                        && !string.Equals(existingId, clientItemId, StringComparison.OrdinalIgnoreCase);
+                    var hashConflict = isTorrent && !string.IsNullOrWhiteSpace(existingHash)
+                        && !string.Equals(existingHash, clientItemId, StringComparison.OrdinalIgnoreCase);
+                    if (!idConflict && !hashConflict)
+                    {
+                        if (string.IsNullOrWhiteSpace(existingId))
+                        {
+                            d.Metadata["ClientDownloadId"] = clientItemId;
+                        }
+
+                        if (isTorrent && string.IsNullOrWhiteSpace(existingHash))
+                        {
+                            d.Metadata["TorrentHash"] = clientItemId;
+                        }
+                    }
+
+                    return (IReadOnlyDictionary<string, object>)d.Metadata;
+                });
         }
 
         private static IEnumerable<string> GetKnownClientItemIds(Dictionary<string, object>? metadata)
@@ -844,7 +880,8 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
             Assert.Equal("tracked-1", result[0].Id);
             Assert.Equal("completed", result[0].Status, ignoreCase: true, ignoreLineEndingDifferences: false, ignoreWhiteSpaceDifferences: false, ignoreAllWhiteSpace: false);
             downloadRepoMock.Verify(
-                r => r.UpdateMetadataAsync("tracked-1", "ClientDownloadId", "061850ead3eb6f1c5c6d8420211b4bbf2d4ee3e2"),
+                r => r.FillMissingClientIdentifiersAsync(
+                    "tracked-1", "061850ead3eb6f1c5c6d8420211b4bbf2d4ee3e2", true, It.IsAny<CancellationToken>()),
                 Times.Once);
         }
 
@@ -877,13 +914,8 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
                 StartedAt = DateTime.UtcNow.AddMinutes(-20)
             };
 
-            var persistedMetadata = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
             var downloadRepoMock = new Mock<IDownloadRepository>();
             SetupQueueRepository(downloadRepoMock, new List<Download> { trackedDownload });
-            downloadRepoMock
-                .Setup(r => r.UpdateMetadataAsync("tracked-artemis", It.IsAny<string>(), It.IsAny<object?>()))
-                .Callback<string, string, object?>((_, key, value) => persistedMetadata[key] = value)
-                .Returns(Task.CompletedTask);
 
             var processingJobRepoMock = new Mock<IDownloadProcessingJobRepository>();
             processingJobRepoMock.Setup(r => r.GetPendingDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
@@ -922,10 +954,10 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
             Assert.Equal("Artemis", result[0].Title);
             Assert.Equal("HASH-ARTEMIS", trackedDownload.Metadata?["ClientDownloadId"]?.ToString());
             Assert.Equal("HASH-ARTEMIS", trackedDownload.Metadata?["TorrentHash"]?.ToString());
-            Assert.Equal("HASH-ARTEMIS", persistedMetadata["ClientDownloadId"]?.ToString());
-            Assert.Equal("HASH-ARTEMIS", persistedMetadata["TorrentHash"]?.ToString());
-            downloadRepoMock.Verify(r => r.UpdateMetadataAsync("tracked-artemis", "ClientDownloadId", "HASH-ARTEMIS"), Times.Once);
-            downloadRepoMock.Verify(r => r.UpdateMetadataAsync("tracked-artemis", "TorrentHash", "HASH-ARTEMIS"), Times.Once);
+            downloadRepoMock.Verify(
+                r => r.FillMissingClientIdentifiersAsync(
+                    "tracked-artemis", "HASH-ARTEMIS", true, It.IsAny<CancellationToken>()),
+                Times.Once);
         }
 
         [Fact]
@@ -1228,13 +1260,8 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
                 StartedAt = DateTime.UtcNow.AddMinutes(-20)
             };
 
-            var persistedMetadata = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
             var downloadRepoMock = new Mock<IDownloadRepository>();
             SetupQueueRepository(downloadRepoMock, new List<Download> { trackedDownload });
-            downloadRepoMock
-                .Setup(r => r.UpdateMetadataAsync("tracked-artemis-transmission", It.IsAny<string>(), It.IsAny<object?>()))
-                .Callback<string, string, object?>((_, key, value) => persistedMetadata[key] = value)
-                .Returns(Task.CompletedTask);
 
             var processingJobRepoMock = new Mock<IDownloadProcessingJobRepository>();
             processingJobRepoMock.Setup(r => r.GetPendingDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
@@ -1272,10 +1299,10 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
             Assert.Equal("Artemis", result[0].Title);
             Assert.Equal("HASH-ARTEMIS-TRANSMISSION", trackedDownload.Metadata?["ClientDownloadId"]?.ToString());
             Assert.Equal("HASH-ARTEMIS-TRANSMISSION", trackedDownload.Metadata?["TorrentHash"]?.ToString());
-            Assert.Equal("HASH-ARTEMIS-TRANSMISSION", persistedMetadata["ClientDownloadId"]?.ToString());
-            Assert.Equal("HASH-ARTEMIS-TRANSMISSION", persistedMetadata["TorrentHash"]?.ToString());
-            downloadRepoMock.Verify(r => r.UpdateMetadataAsync("tracked-artemis-transmission", "ClientDownloadId", "HASH-ARTEMIS-TRANSMISSION"), Times.Once);
-            downloadRepoMock.Verify(r => r.UpdateMetadataAsync("tracked-artemis-transmission", "TorrentHash", "HASH-ARTEMIS-TRANSMISSION"), Times.Once);
+            downloadRepoMock.Verify(
+                r => r.FillMissingClientIdentifiersAsync(
+                    "tracked-artemis-transmission", "HASH-ARTEMIS-TRANSMISSION", true, It.IsAny<CancellationToken>()),
+                Times.Once);
         }
 
         [Theory]
@@ -1377,7 +1404,8 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
             var downloadRepoMock = new Mock<IDownloadRepository>();
             SetupQueueRepository(downloadRepoMock, new List<Download> { trackedDownload });
             downloadRepoMock
-                .Setup(r => r.UpdateMetadataAsync("tracked-persistence-error", "ClientDownloadId", "HASH-PERSISTENCE-ERROR"))
+                .Setup(r => r.FillMissingClientIdentifiersAsync(
+                    "tracked-persistence-error", "HASH-PERSISTENCE-ERROR", It.IsAny<bool>(), It.IsAny<CancellationToken>()))
                 .ThrowsAsync(new InvalidOperationException("metadata persistence failed"));
 
             var processingJobRepoMock = new Mock<IDownloadProcessingJobRepository>();

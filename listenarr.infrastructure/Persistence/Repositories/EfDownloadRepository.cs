@@ -84,6 +84,73 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             if (transaction != null) await transaction.CommitAsync();
         }
 
+        public async Task<IReadOnlyDictionary<string, object>?> FillMissingClientIdentifiersAsync(
+            string id,
+            string clientItemId,
+            bool isTorrentClient,
+            CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(clientItemId))
+            {
+                return null;
+            }
+
+            await using var ctx = await _dbFactory.CreateDbContextAsync(ct);
+            await using var transaction = ctx.Database.IsRelational()
+                ? await ctx.Database.BeginTransactionAsync(ct) : null;
+
+            // Read current database state inside the transaction rather than trusting a snapshot
+            // captured before the download client was queried: a grab may have recorded the real
+            // identifier in the meantime.
+            var d = await ctx.Downloads.FindAsync([id], ct);
+            if (d == null)
+            {
+                return null;
+            }
+
+            d.Metadata ??= new Dictionary<string, object>();
+            var hasClientDownloadId = TryGetMetadataString(d.Metadata, "ClientDownloadId", out var existingClientDownloadId);
+            var hasTorrentHash = TryGetMetadataString(d.Metadata, "TorrentHash", out var existingTorrentHash);
+
+            // A stored identifier that differs from this queue item means the download already
+            // knows its real client item (often recorded by the grab, possibly concurrently). Leave
+            // both alone so a later removal can't act on an unrelated same-title item (#1055).
+            var clientDownloadIdConflicts = hasClientDownloadId
+                && !string.Equals(existingClientDownloadId, clientItemId, StringComparison.OrdinalIgnoreCase);
+            var torrentHashConflicts = isTorrentClient && hasTorrentHash
+                && !string.Equals(existingTorrentHash, clientItemId, StringComparison.OrdinalIgnoreCase);
+            if (clientDownloadIdConflicts || torrentHashConflicts)
+            {
+                return d.Metadata;
+            }
+
+            var changed = false;
+            if (!hasClientDownloadId)
+            {
+                d.Metadata["ClientDownloadId"] = clientItemId;
+                changed = true;
+            }
+
+            if (isTorrentClient && !hasTorrentHash)
+            {
+                d.Metadata["TorrentHash"] = clientItemId;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                ctx.Downloads.Update(d);
+                await ctx.SaveChangesAsync(ct);
+            }
+
+            if (transaction != null)
+            {
+                await transaction.CommitAsync(ct);
+            }
+
+            return d.Metadata;
+        }
+
         public async Task RemoveAsync(string id)
         {
             await using var ctx = await _dbFactory.CreateDbContextAsync();

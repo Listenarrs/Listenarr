@@ -24,6 +24,20 @@ namespace Listenarr.Application.Downloads.Contracts.Repositories
         Task<Download?> FindAsync(string id);
         Task UpdateAsync(Download download);
         Task UpdateMetadataAsync(string id, string key, object? value);
+
+        /// <summary>
+        /// Conditionally fills the download's client identifiers against current database state, as
+        /// a single atomic read-and-write. Fills ClientDownloadId (and, for torrent clients,
+        /// TorrentHash) only when they are missing. If either already holds a different nonblank
+        /// value, nothing is written and both are left as they are, so a concurrently grabbed hash
+        /// is never overwritten by a title-matched queue item (#1055). Returns the download's
+        /// client-identifier metadata after the operation, or null if the download no longer exists.
+        /// </summary>
+        Task<IReadOnlyDictionary<string, object>?> FillMissingClientIdentifiersAsync(
+            string id,
+            string clientItemId,
+            bool isTorrentClient,
+            CancellationToken ct = default);
         Task RemoveAsync(string id);
         Task<List<Download>> GetAllAsync();
         Task<List<Download>> GetQueueDisplayCandidatesAsync();
