@@ -20,11 +20,11 @@
      Typing only prepares the next search; Enter in a field, the button and a region change ask
      for it. -->
 <template>
-  <div class="match-fields" :class="{ 'match-fields-narrow': narrow }">
+  <div class="match-fields" :class="{ 'match-fields-narrow': isNarrow }">
     <label class="match-field match-field-asin">
       <span class="match-field-label">ASIN</span>
       <ClearableInput
-        v-model.trim="match.asin"
+        v-model.trim="bookMatch.asin"
         maxlength="10"
         clear-label="Empty the ASIN field"
         clear-test-id="match-asin-clear"
@@ -37,8 +37,8 @@
     <label class="match-field">
       <span class="match-field-label">Title</span>
       <ClearableInput
-        ref="titleInput"
-        v-model="match.query"
+        ref="titleInputRef"
+        v-model="bookMatch.query"
         clear-label="Empty the Title field"
         clear-test-id="match-title-clear"
         data-testid="match-title"
@@ -50,7 +50,7 @@
     <label class="match-field">
       <span class="match-field-label">Author</span>
       <ClearableInput
-        v-model="match.author"
+        v-model="bookMatch.author"
         clear-label="Empty the Author field"
         clear-test-id="match-author-clear"
         data-testid="match-author"
@@ -62,24 +62,29 @@
     <label class="match-field">
       <span class="match-field-label">Region</span>
       <select
-        v-model="match.region"
+        v-model="bookMatch.region"
         class="form-input"
         data-testid="match-region"
-        :disabled="regionLocked"
+        :disabled="isRegionLocked"
         :title="
-          regionLocked
+          isRegionLocked
             ? 'Wait for the search to end: changing the region searches'
-            : regionLabel(match.region)
+            : regionLabel(bookMatch.region)
         "
         @change="emit('regionChanged')"
       >
-        <option v-for="o in regionOptions" :key="o.value" :value="o.value" :title="o.label">
-          {{ o.value.toUpperCase() }}
+        <option
+          v-for="regionOption in regionOptions"
+          :key="regionOption.value"
+          :value="regionOption.value"
+          :title="regionOption.label"
+        >
+          {{ regionOption.value.toUpperCase() }}
         </option>
       </select>
     </label>
     <button
-      v-if="action === 'cancel'"
+      v-if="searchAction === 'cancel'"
       type="button"
       class="btn btn-danger match-search-btn"
       data-testid="match-cancel-search"
@@ -89,13 +94,13 @@
       Cancel search
     </button>
     <button
-      v-else-if="action === 'retry'"
+      v-else-if="searchAction === 'retry'"
       type="button"
       class="btn btn-secondary match-search-btn"
       data-testid="match-retry"
       :disabled="!canSearch"
       :title="
-        searchLocked
+        isSearchLocked
           ? 'Another book is being searched'
           : 'Ask Audible again with the same values (a new request)'
       "
@@ -111,7 +116,7 @@
       data-testid="match-search"
       :disabled="!canSearch"
       :title="
-        searchLocked
+        isSearchLocked
           ? 'Another book is being searched'
           : 'The search Add New and Library Import use, with the same rules and priorities'
       "
@@ -134,18 +139,18 @@ const props = defineProps<{
   configuredRegion: string
   // The button at the row's end: Search, Retry (no field edited since the last search) or Cancel
   // search (one runs)
-  action: 'search' | 'retry' | 'cancel'
+  searchAction: 'search' | 'retry' | 'cancel'
   // Search or Retry can run now
   canSearch: boolean
   // Another book is being searched
-  searchLocked: boolean
+  isSearchLocked: boolean
   // Changing the region searches: not while a search runs, here or on another book
-  regionLocked: boolean
+  isRegionLocked: boolean
   // The dialog is short of room: the narrow screen's layout
-  narrow: boolean
+  isNarrow: boolean
 }>()
 
-const match = defineModel<BookMatch>('match', { required: true })
+const bookMatch = defineModel<BookMatch>('bookMatch', { required: true })
 
 const emit = defineEmits<{
   // Any change to a field, even back to what was searched
@@ -155,18 +160,22 @@ const emit = defineEmits<{
   regionChanged: []
 }>()
 
-const titleInput = ref<InstanceType<typeof ClearableInput> | null>(null)
+const titleInputRef = ref<InstanceType<typeof ClearableInput> | null>(null)
 
 // Every Audible region stays available, in canary's order (as in Add to Library): the book's
 // region, then the preferred (configured) one and the US, then the others alphabetically by name
 // (each option's tooltip; the field shows the codes)
 const regionOptions = computed(() =>
-  orderedSearchRegionOptions([match.value.initial.region, props.configuredRegion, FALLBACK_REGION]),
+  orderedSearchRegionOptions([
+    bookMatch.value.initialValues.region,
+    props.configuredRegion,
+    FALLBACK_REGION,
+  ]),
 )
 
 // The title focused with its text selected, ready to be typed over
 function focusTitle() {
-  titleInput.value?.focusAndSelect()
+  titleInputRef.value?.focusAndSelect()
 }
 
 defineExpose({ focusTitle })
@@ -214,7 +223,7 @@ defineExpose({ focusTitle })
   white-space: nowrap;
 }
 
-/* A narrow screen, or a dialog short of room: the fields two by two, Search on a line of its own */
+/* A isNarrow screen, or a dialog short of room: the fields two by two, Search on a line of its own */
 @media (max-width: 720px) {
   .match-fields {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

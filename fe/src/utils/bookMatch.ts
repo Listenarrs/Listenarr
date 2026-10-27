@@ -43,21 +43,27 @@ export interface BookMatchValues {
 export interface BookMatch extends BookMatchValues {
   // The book's new record, looked up in its region: picked in the search results, or the one
   // record found for its ASIN. Only a book with one can be repaired or matched.
-  picked: SearchResult | null
+  pickedSearchResult: SearchResult | null
   // Why the ASIN can't be used in its region, once checked there (no record, or the check failed):
   // the book can't be repaired or matched until it changes
   asinError: string | null
   // Values when the card opened, restored by Revert
-  initial: BookMatchValues
+  initialValues: BookMatchValues
   // The record the book points at today (empty when it has none)
-  current: { asin: string; region: string }
+  currentRecordKey: { asin: string; region: string }
 }
 
 export function createBookMatch(
-  initial: BookMatchValues,
-  current: { asin: string; region: string },
+  initialValues: BookMatchValues,
+  currentRecordKey: { asin: string; region: string },
 ): BookMatch {
-  return { ...initial, picked: null, asinError: null, initial: { ...initial }, current }
+  return {
+    ...initialValues,
+    pickedSearchResult: null,
+    asinError: null,
+    initialValues: { ...initialValues },
+    currentRecordKey,
+  }
 }
 
 // In seconds, with up to 2 decimals: 1.23 s, 1.5 s, 2 s
@@ -73,20 +79,20 @@ export function answerSource(requestMs: number | null): string {
 }
 
 export function regionLabel(region: string): string {
-  return searchRegionOptions.find((o) => o.value === region)?.label ?? region
+  return searchRegionOptions.find((option) => option.value === region)?.label ?? region
 }
 
-export function asinValid(match: BookMatch): boolean {
-  return ASIN_PATTERN.test(match.asin.trim())
+export function isAsinValid(bookMatch: BookMatch): boolean {
+  return ASIN_PATTERN.test(bookMatch.asin.trim())
 }
 
 // A new record (the picked one) whose ASIN or region differs from the one the book points at today
-export function asinChanged(match: BookMatch): boolean {
-  const { picked, current } = match
-  if (!picked?.asin) return false
+export function hasAsinChanged(bookMatch: BookMatch): boolean {
+  const { pickedSearchResult, currentRecordKey } = bookMatch
+  if (!pickedSearchResult?.asin) return false
   return (
-    picked.asin.toUpperCase() !== current.asin.toUpperCase() ||
-    (picked.region || match.region) !== current.region
+    pickedSearchResult.asin.toUpperCase() !== currentRecordKey.asin.toUpperCase() ||
+    (pickedSearchResult.region || bookMatch.region) !== currentRecordKey.region
   )
 }
 
@@ -94,10 +100,10 @@ export function asinChanged(match: BookMatch): boolean {
 // its region rejects (error), or nothing to do yet (ignored)
 export type MatchState = 'ignored' | 'matched' | 'error'
 
-export function matchState(match: BookMatch): MatchState {
+export function matchState(bookMatch: BookMatch): MatchState {
   // A record the user picked (a new search unpicks it first)
-  if (match.picked) return 'matched'
-  return match.asinError ? 'error' : 'ignored'
+  if (bookMatch.pickedSearchResult) return 'matched'
+  return bookMatch.asinError ? 'error' : 'ignored'
 }
 
 // A task run on a book once its record is chosen (Repair's repair), shown by its whole card:
@@ -125,13 +131,22 @@ export interface BookRecord {
   region?: string | null
 }
 
+// What tells one Audible record from another: its ASIN and, when known, its region (an ASIN can be
+// sold in several regions)
+export interface RecordKey {
+  asin: string
+  region?: string | null
+}
+
 // A search result as a book record, in the region it was found in
 export function recordFromResult(result: SearchResult, region: string): BookRecord {
   return {
     asin: result.asin,
     title: result.title,
     subtitle: result.subtitle,
-    authors: (result.authors ?? []).map((a) => a.name).filter((name): name is string => !!name),
+    authors: (result.authors ?? [])
+      .map((author) => author.name)
+      .filter((name): name is string => !!name),
     region: result.region || region,
   }
 }
@@ -147,16 +162,16 @@ export type RecordPartKey = 'asin' | 'title' | 'authors' | 'region'
 // The parts of a book record's one line, in order, without the ones it doesn't have
 export function recordParts(record: BookRecord): { key: RecordPartKey; text: string }[] {
   const authors = (record.authors ?? [])
-    .map((a) => a.trim())
+    .map((author) => author.trim())
     .filter(Boolean)
     .join(', ')
-  const parts: { key: RecordPartKey; text: string }[] = [
+  const allParts: { key: RecordPartKey; text: string }[] = [
     { key: 'asin', text: record.asin?.trim() ?? '' },
     { key: 'title', text: fullTitle(record.title, record.subtitle) },
     { key: 'authors', text: authors },
     { key: 'region', text: record.region ? regionLabel(record.region) : '' },
   ]
-  return parts.filter((part) => part.text)
+  return allParts.filter((part) => part.text)
 }
 
 // One line for a book record, the same next to Revert, on Current and on New:
@@ -167,22 +182,22 @@ export function bookSummary(record: BookRecord): string {
     .join(' - ')
 }
 
-export function isEdited(match: BookMatch): boolean {
-  const { initial } = match
+export function isEdited(bookMatch: BookMatch): boolean {
+  const { initialValues } = bookMatch
   return (
-    match.asin !== initial.asin ||
-    match.region !== initial.region ||
-    match.query !== initial.query ||
-    match.author !== initial.author ||
-    !!match.picked
+    bookMatch.asin !== initialValues.asin ||
+    bookMatch.region !== initialValues.region ||
+    bookMatch.query !== initialValues.query ||
+    bookMatch.author !== initialValues.author ||
+    !!bookMatch.pickedSearchResult
   )
 }
 
 // What Add New's search box would hold for this book: the title and author as TITLE:/AUTHOR:
 // tokens, or the title alone when it is an ASIN (Add New then looks the ASIN up)
-export function addNewQuery(match: BookMatch): string {
-  const title = match.query.trim()
-  const author = match.author.trim()
+export function addNewQuery(bookMatch: BookMatch): string {
+  const title = bookMatch.query.trim()
+  const author = bookMatch.author.trim()
   if (ASIN_PATTERN.test(title) || !author) return title
   return `TITLE:${title} AUTHOR:${author}`
 }
@@ -209,21 +224,21 @@ export async function searchLikeAddNew(
   region: string,
   signal: AbortSignal,
 ): Promise<SearchResult[]> {
-  const search = useSearch()
-  search.searchQuery.value = query
-  search.searchLanguage.value = region
-  search.preferredSearchLanguage.value = 'all'
-  const aborted = new Promise<never>((_, reject) =>
+  const addNewSearch = useSearch()
+  addNewSearch.searchQuery.value = query
+  addNewSearch.searchLanguage.value = region
+  addNewSearch.preferredSearchLanguage.value = 'all'
+  const searchAborted = new Promise<never>((_, reject) =>
     signal.addEventListener('abort', () => {
-      search.cancelSearch()
+      addNewSearch.cancelSearch()
       reject(new DOMException('The search was stopped', 'AbortError'))
     }),
   )
   try {
-    const results = (await Promise.race([search.performSearch(), aborted])) ?? []
-    return (results as SearchResult[])
-      .filter((r) => !(r.asin && !r.title))
-      .map((r) => ({ ...r, region: r.region || region }))
+    const searchResults = (await Promise.race([addNewSearch.performSearch(), searchAborted])) ?? []
+    return (searchResults as SearchResult[])
+      .filter((searchResult) => !(searchResult.asin && !searchResult.title))
+      .map((searchResult) => ({ ...searchResult, region: searchResult.region || region }))
   } catch (e) {
     if ((e as { status?: number })?.status === 404) return []
     throw e

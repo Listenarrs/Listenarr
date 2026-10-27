@@ -20,7 +20,7 @@ import { apiService } from '@/services/api'
 import { useLibraryImportStore } from '@/stores/libraryImport'
 import {
   FALLBACK_REGION,
-  asinChanged,
+  hasAsinChanged,
   formatDuration,
   recordFromResult,
   type SearchCache,
@@ -29,9 +29,9 @@ import {
   identifiersWithPrimaryAsin,
   isIncluded,
   isMatched,
-  repairOutcomes,
   repairProblemText,
   repairRowFrom,
+  toRepairOutcomes,
   type RepairRow,
 } from '@/utils/repair'
 
@@ -44,76 +44,81 @@ export function useRepairBooks(audiobookIds: () => number[]) {
   // loads
   const searchCache: SearchCache = new Map()
   const configuredRegion = ref(FALLBACK_REGION)
-  const loading = ref(false)
-  const error = ref<string | null>(null)
-  const rows = ref<RepairRow[]>([])
-  const executing = ref(false)
-  const finished = ref(false)
+  const isLoading = ref(false)
+  const loadError = ref<string | null>(null)
+  const repairRows = ref<RepairRow[]>([])
+  const isExecuting = ref(false)
+  const isFinished = ref(false)
   // Cancel asked while the repairs run: the books still waiting are left out
-  const canceling = ref(false)
+  const isCanceling = ref(false)
   // A repair saved something since the dialog opened: closing it, even from step 1 after Back,
   // refreshes the page behind
-  const libraryChanged = ref(false)
+  const hasLibraryChanged = ref(false)
   // The books Cancel left out, until the dialog loads again or a new repair starts
   const canceledCount = ref(0)
   // The repairs over (whatever their outcome), of how many: the progress bar
-  const repairCompleted = ref(0)
-  const repairTotal = ref(0)
+  const completedRepairCount = ref(0)
+  const totalRepairCount = ref(0)
   // The repaired books to organize: all of them at first
-  const organizeIds = ref<number[]>([])
+  const audiobookIdsToOrganize = ref<number[]>([])
   // One book is searched at a time: the others wait for it
-  const searchingRowId = ref<number | null>(null)
+  const searchingAudiobookId = ref<number | null>(null)
 
   // Step 2 from Repair on: the repairs as they run, then their results
-  const repairStep = computed(() => executing.value || finished.value)
-  const selectedRows = computed(() => rows.value.filter(isIncluded))
-  const selectedCount = computed(() => selectedRows.value.length)
+  const isRepairStep = computed(() => isExecuting.value || isFinished.value)
+  const selectedRepairRows = computed(() => repairRows.value.filter(isIncluded))
+  const selectedCount = computed(() => selectedRepairRows.value.length)
   // Matching: the books left out of the repair. Step 2 only holds the books to repair: while they
   // are repaired, the ones Cancel left out; once over, the ones left out of Organize
   const skippedCount = computed(() => {
-    if (finished.value) return repairTotal.value - organizeIds.value.length
-    if (executing.value) return canceledCount.value
-    return rows.value.length - selectedCount.value
+    if (isFinished.value) return totalRepairCount.value - audiobookIdsToOrganize.value.length
+    if (isExecuting.value) return canceledCount.value
+    return repairRows.value.length - selectedCount.value
   })
-  const problemText = computed(() => repairProblemText(rows.value, canceledCount.value))
-  const outcomes = computed(() => repairOutcomes(rows.value))
+  const problemText = computed(() => repairProblemText(repairRows.value, canceledCount.value))
+  const repairOutcomes = computed(() => toRepairOutcomes(repairRows.value))
 
   async function load() {
-    loading.value = true
-    finished.value = false
-    canceling.value = false
+    isLoading.value = true
+    isFinished.value = false
+    isCanceling.value = false
     canceledCount.value = 0
-    error.value = null
-    rows.value = []
+    loadError.value = null
+    repairRows.value = []
     searchCache.clear()
-    organizeIds.value = []
-    repairCompleted.value = 0
-    repairTotal.value = 0
-    searchingRowId.value = null
+    audiobookIdsToOrganize.value = []
+    completedRepairCount.value = 0
+    totalRepairCount.value = 0
+    searchingAudiobookId.value = null
     try {
       configuredRegion.value = await libraryImportStore.configuredRegion()
-      rows.value = await Promise.all(
+      repairRows.value = await Promise.all(
         audiobookIds().map(async (audiobookId) => {
-          const [book, ids] = await Promise.all([
+          const [book, identifiersResponse] = await Promise.all([
             apiService.getAudiobook(audiobookId),
             apiService.getAudiobookIdentifiers(audiobookId),
           ])
-          return repairRowFrom(audiobookId, book, ids.identifiers ?? [], configuredRegion.value)
+          return repairRowFrom(
+            audiobookId,
+            book,
+            identifiersResponse.identifiers ?? [],
+            configuredRegion.value,
+          )
         }),
       )
     } catch (e) {
-      error.value = e instanceof Error ? e.message : 'Failed to load the selected audiobooks'
+      loadError.value = e instanceof Error ? e.message : 'Failed to load the selected audiobooks'
     } finally {
-      loading.value = false
+      isLoading.value = false
     }
   }
 
-  function onSearching(row: RepairRow, searching: boolean) {
-    if (searching) searchingRowId.value = row.id
-    else if (searchingRowId.value === row.id) searchingRowId.value = null
+  function onSearching(repairRow: RepairRow, isSearching: boolean) {
+    if (isSearching) searchingAudiobookId.value = repairRow.audiobookId
+    else if (searchingAudiobookId.value === repairRow.audiobookId) searchingAudiobookId.value = null
   }
 
-  async function rescan(audiobookId: number) {
+  async function rescanMetadata(audiobookId: number) {
     try {
       return await apiService.rescanAudiobookMetadata(audiobookId)
     } catch (e) {
@@ -129,136 +134,158 @@ export function useRepairBooks(audiobookIds: () => number[]) {
   // took, and shows the book as it is now. Cancel leaves out the books still waiting. beforeRun
   // is awaited once step 2 is set, before the first repair
   async function repair(beforeRun: () => Promise<void>) {
-    const toRepair = [...selectedRows.value]
-    executing.value = true
-    canceling.value = false
+    const queuedRepairRows = [...selectedRepairRows.value]
+    isExecuting.value = true
+    isCanceling.value = false
     canceledCount.value = 0
-    organizeIds.value = []
-    repairCompleted.value = 0
-    repairTotal.value = toRepair.length
-    for (const row of rows.value) {
-      row.before = {
-        title: row.title,
-        subtitle: row.subtitle,
-        authors: row.authors,
-        asin: row.match.current.asin,
-        region: row.match.current.region,
+    audiobookIdsToOrganize.value = []
+    completedRepairCount.value = 0
+    totalRepairCount.value = queuedRepairRows.length
+    for (const repairRow of repairRows.value) {
+      repairRow.recordBefore = {
+        title: repairRow.title,
+        subtitle: repairRow.subtitle,
+        authors: repairRow.authors,
+        asin: repairRow.bookMatch.currentRecordKey.asin,
+        region: repairRow.bookMatch.currentRecordKey.region,
       }
-      const picked = toRepair.includes(row) ? row.match.picked : null
-      row.planned = picked ? recordFromResult(picked, row.match.region) : null
-      row.task = picked ? { state: 'waiting', text: 'Waiting to be repaired' } : null
+      const pickedSearchResult = queuedRepairRows.includes(repairRow)
+        ? repairRow.bookMatch.pickedSearchResult
+        : null
+      repairRow.plannedRecord = pickedSearchResult
+        ? recordFromResult(pickedSearchResult, repairRow.bookMatch.region)
+        : null
+      repairRow.repairTask = pickedSearchResult
+        ? { state: 'waiting', text: 'Waiting to be repaired' }
+        : null
     }
     await beforeRun()
-    for (const row of toRepair) {
+    for (const repairRow of queuedRepairRows) {
       // Canceled while it waited
-      if (row.task?.state !== 'waiting') continue
-      await repairOne(row)
-      repairCompleted.value++
+      if (repairRow.repairTask?.state !== 'waiting') continue
+      await repairOne(repairRow)
+      completedRepairCount.value++
     }
-    executing.value = false
-    canceling.value = false
-    finished.value = true
+    isExecuting.value = false
+    isCanceling.value = false
+    isFinished.value = true
   }
 
   // One book's repair: its new record saved (when its ASIN or region changes), then its metadata
   // rescanned and the book read again. Its row says where it is, then how it ended
-  async function repairOne(row: RepairRow) {
-    row.task = { state: 'running', text: 'Repairing…' }
+  async function repairOne(repairRow: RepairRow) {
+    repairRow.repairTask = { state: 'running', text: 'Repairing…' }
     const startedAt = performance.now()
-    const took = () => formatDuration(performance.now() - startedAt)
-    let saved = false
+    const elapsedText = () => formatDuration(performance.now() - startedAt)
+    let isAsinSaved = false
     try {
       // The new record was looked up in its region: saved, then the metadata read from it
-      if (asinChanged(row.match)) {
-        await apiService.updateAudiobookIdentifiers(row.id, identifiersWithPrimaryAsin(row))
-        saved = true
-        libraryChanged.value = true
+      if (hasAsinChanged(repairRow.bookMatch)) {
+        await apiService.updateAudiobookIdentifiers(
+          repairRow.audiobookId,
+          identifiersWithPrimaryAsin(repairRow),
+        )
+        isAsinSaved = true
+        hasLibraryChanged.value = true
       }
-      const rescanned = await rescan(row.id)
-      const book = await apiService.getAudiobook(row.id)
-      const asin = rescanned.asin ?? row.match.picked?.asin ?? ''
-      const region = rescanned.region ?? row.match.picked?.region ?? row.match.region
-      row.title = book.title || row.title
-      row.subtitle = book.subtitle ?? row.subtitle
-      row.authors = book.authors ?? row.authors
-      row.match.current = { asin, region }
-      row.after = { title: row.title, subtitle: row.subtitle, authors: row.authors, asin, region }
+      const rescanResult = await rescanMetadata(repairRow.audiobookId)
+      const book = await apiService.getAudiobook(repairRow.audiobookId)
+      const asin = rescanResult.asin ?? repairRow.bookMatch.pickedSearchResult?.asin ?? ''
+      const region =
+        rescanResult.region ??
+        repairRow.bookMatch.pickedSearchResult?.region ??
+        repairRow.bookMatch.region
+      repairRow.title = book.title || repairRow.title
+      repairRow.subtitle = book.subtitle ?? repairRow.subtitle
+      repairRow.authors = book.authors ?? repairRow.authors
+      repairRow.bookMatch.currentRecordKey = { asin, region }
+      repairRow.recordAfter = {
+        title: repairRow.title,
+        subtitle: repairRow.subtitle,
+        authors: repairRow.authors,
+        asin,
+        region,
+      }
       // The record it now points at follows, drawn like New (step 2)
-      row.task = { state: 'done', text: `Repaired in ${took()}` }
-      libraryChanged.value = true
+      repairRow.repairTask = { state: 'done', text: `Repaired in ${elapsedText()}` }
+      hasLibraryChanged.value = true
       // Ticked for Organize as soon as it is repaired
-      organizeIds.value = [...organizeIds.value, row.id]
+      audiobookIdsToOrganize.value = [...audiobookIdsToOrganize.value, repairRow.audiobookId]
     } catch (e) {
-      const message = e instanceof Error ? e.message : 'Repair failed'
+      const errorMessage = e instanceof Error ? e.message : 'Repair failed'
       // The new ASIN saved but its metadata not read: repaired in part
-      if (saved)
-        row.after = {
-          ...row.before,
-          asin: row.match.picked?.asin ?? '',
-          region: row.match.picked?.region || row.match.region,
+      if (isAsinSaved)
+        repairRow.recordAfter = {
+          ...repairRow.recordBefore,
+          asin: repairRow.bookMatch.pickedSearchResult?.asin ?? '',
+          region: repairRow.bookMatch.pickedSearchResult?.region || repairRow.bookMatch.region,
         }
-      row.task = saved
+      repairRow.repairTask = isAsinSaved
         ? {
             state: 'warning',
-            text: `The new ASIN is saved, but the metadata rescan failed (${took()}): ${message}`,
+            text: `The new ASIN is saved, but the metadata rescan failed (${elapsedText()}): ${errorMessage}`,
           }
-        : { state: 'failed', text: `Repair failed (${took()}): ${message}` }
+        : { state: 'failed', text: `Repair failed (${elapsedText()}): ${errorMessage}` }
     }
   }
 
   // Retry on a book whose repair failed or was done in part, once the repairs are over: that book
   // repaired again, the dialog repairing meanwhile (red Cancel, Organize waiting)
   async function retryRepair(audiobookId: number) {
-    const row = rows.value.find((r) => r.id === audiobookId)
-    if (!row || executing.value || (row.task?.state !== 'failed' && row.task?.state !== 'warning'))
+    const repairRow = repairRows.value.find((candidate) => candidate.audiobookId === audiobookId)
+    if (
+      !repairRow ||
+      isExecuting.value ||
+      (repairRow.repairTask?.state !== 'failed' && repairRow.repairTask?.state !== 'warning')
+    )
       return
-    executing.value = true
-    await repairOne(row)
-    executing.value = false
-    canceling.value = false
+    isExecuting.value = true
+    await repairOne(repairRow)
+    isExecuting.value = false
+    isCanceling.value = false
   }
 
   // The books still waiting are left out at once; the one being repaired ends first (its request
   // can't be taken back)
   function cancelRepair() {
-    if (!executing.value) return
-    canceling.value = true
-    for (const row of rows.value)
-      if (row.task?.state === 'waiting') {
-        row.task = { state: 'skipped', text: 'Canceled: not repaired' }
+    if (!isExecuting.value) return
+    isCanceling.value = true
+    for (const repairRow of repairRows.value)
+      if (repairRow.repairTask?.state === 'waiting') {
+        repairRow.repairTask = { state: 'skipped', text: 'Canceled: not repaired' }
         canceledCount.value++
-        repairCompleted.value++
+        completedRepairCount.value++
       }
   }
 
   // Every book with a new record
   function selectAll() {
-    rows.value.forEach((r) => (r.selected = isMatched(r)))
+    repairRows.value.forEach((repairRow) => (repairRow.isSelected = isMatched(repairRow)))
   }
 
   function clearSelection() {
-    rows.value.forEach((r) => (r.selected = false))
+    repairRows.value.forEach((repairRow) => (repairRow.isSelected = false))
   }
 
   return {
     searchCache,
     configuredRegion,
-    loading,
-    error,
-    rows,
-    executing,
-    finished,
-    canceling,
-    libraryChanged,
-    repairCompleted,
-    repairTotal,
-    organizeIds,
-    searchingRowId,
-    repairStep,
+    isLoading,
+    loadError,
+    repairRows,
+    isExecuting,
+    isFinished,
+    isCanceling,
+    hasLibraryChanged,
+    completedRepairCount,
+    totalRepairCount,
+    audiobookIdsToOrganize,
+    searchingAudiobookId,
+    isRepairStep,
     selectedCount,
     skippedCount,
     problemText,
-    outcomes,
+    repairOutcomes,
     load,
     onSearching,
     repair,

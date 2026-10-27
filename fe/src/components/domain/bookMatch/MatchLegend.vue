@@ -19,7 +19,7 @@
      Books and Find Match), or the entries given (Repair's step 2) -->
 <template>
   <ul class="match-legend" data-testid="match-legend">
-    <li v-for="entry in entries" :key="entry.label">
+    <li v-for="entry in legendEntries" :key="entry.label">
       <span class="match-legend-bar" :class="entry.tone" />{{ entry.label }}
     </li>
   </ul>
@@ -34,8 +34,8 @@ export interface LegendEntry {
   label: string
 }
 
-withDefaults(defineProps<{ entries?: LegendEntry[] }>(), {
-  entries: () => [
+withDefaults(defineProps<{ legendEntries?: LegendEntry[] }>(), {
+  legendEntries: () => [
     { tone: 'idle', label: 'Ignored' },
     { tone: 'success', label: 'Matched' },
     { tone: 'warning', label: 'Invalid' },

@@ -19,15 +19,20 @@
      record otherwise: why a search found none is said over the results' room). With a new record
      picked, the parts of Current it replaces in orange. -->
 <template>
-  <dl class="match-records" :class="{ 'match-records-narrow': narrow }">
+  <dl class="match-records" :class="{ 'match-records-narrow': isNarrow }">
     <dt>Current</dt>
     <dd data-testid="match-current">
-      <BookRecordDiff v-if="picked" :record="current" :base="picked" replaced />
-      <template v-else>{{ bookSummary(current) || 'None' }}</template>
+      <BookRecordDiff
+        v-if="pickedRecord"
+        :record="currentRecord"
+        :base-record="pickedRecord"
+        is-replaced
+      />
+      <template v-else>{{ bookSummary(currentRecord) || 'None' }}</template>
     </dd>
     <dt>New</dt>
-    <dd v-if="picked" class="match-new-picked" data-testid="match-picked">
-      <BookRecordDiff :record="picked" :base="current" />
+    <dd v-if="pickedRecord" class="match-new-picked" data-testid="match-picked">
+      <BookRecordDiff :record="pickedRecord" :base-record="currentRecord" />
       <span class="match-status">
         <PhCheckCircle :size="14" weight="fill" />
         checked
@@ -45,10 +50,10 @@ import BookRecordDiff from './BookRecordDiff.vue'
 import { bookSummary, type BookRecord } from '@/utils/bookMatch'
 
 defineProps<{
-  current: BookRecord
-  picked: BookRecord | null
+  currentRecord: BookRecord
+  pickedRecord: BookRecord | null
   // The dialog is short of room: two lines kept for each, as on a narrow screen
-  narrow: boolean
+  isNarrow: boolean
 }>()
 </script>
 

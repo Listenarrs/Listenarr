@@ -25,12 +25,12 @@
     class="form-control-card match-card"
     :class="[
       `match-card-${barState}`,
-      { 'match-card-locked': searchLocked, 'match-card-narrow': narrow },
+      { 'match-card-locked': isSearchLocked, 'match-card-narrow': isNarrow },
     ]"
     :data-match-state="barState"
-    :title="searchLocked ? 'Another book is being searched' : undefined"
+    :title="isSearchLocked ? 'Another book is being searched' : undefined"
   >
-    <fieldset class="match-lock" :disabled="searchLocked" data-testid="match-lock">
+    <fieldset class="match-lock" :disabled="isSearchLocked" data-testid="match-lock">
       <div class="match-header">
         <span class="match-heading">
           <slot name="heading" />
@@ -45,7 +45,7 @@
             title="Revert"
             aria-label="Revert to the values before your changes"
             data-testid="match-revert"
-            :disabled="!isEdited(match)"
+            :disabled="!isEdited(bookMatch)"
             @click.prevent.stop="revert"
           >
             <PhArrowCounterClockwise :size="14" />
@@ -54,41 +54,45 @@
       </div>
 
       <BookMatchFields
-        ref="fieldsEl"
-        v-model:match="match"
+        ref="fieldsRef"
+        v-model:book-match="bookMatch"
         :configured-region="configuredRegion"
-        :action="fieldsAction"
+        :search-action="searchAction"
         :can-search="canSearchFor(retryKind ?? searchKind)"
-        :search-locked="searchLocked"
-        :region-locked="regionLocked"
-        :narrow="narrow"
-        @edited="edited = true"
+        :is-search-locked="isSearchLocked"
+        :is-region-locked="isRegionLocked"
+        :is-narrow="isNarrow"
+        @edited="isEditedSinceSearch = true"
         @search="searchByPriority"
         @cancel="cancelSearch"
         @region-changed="onRegionChanged"
       />
 
-      <BookMatchRecords :current="currentRecord" :picked="pickedAsRecord" :narrow="narrow" />
+      <BookMatchRecords
+        :current-record="currentRecord"
+        :picked-record="pickedRecord"
+        :is-narrow="isNarrow"
+      />
 
       <BookMatchResults
-        ref="resultsEl"
-        :results="state.results"
-        :header="searchHeader(state)"
-        :reason="noResultsReason(state)"
-        :searching="state.status === 'searching'"
+        ref="resultsRef"
+        :search-results="searchState.searchResults"
+        :header="searchHeader(searchState)"
+        :no-results-reason="noResultsReason(searchState)"
+        :is-searching="searchState.status === 'searching'"
         :pending-text="pendingText"
-        :locked="searchLocked"
-        :revealing="reveal.revealing.value"
-        :placeholders="placeholders"
-        :selected="pickedRecord"
-        :current="match.current"
+        :is-search-locked="isSearchLocked"
+        :is-revealing="resultsReveal.isRevealing.value"
+        :should-keep-results-room="shouldKeepResultsRoom"
+        :selected-record-key="pickedRecordKey"
+        :current-record-key="bookMatch.currentRecordKey"
         @select="pick"
       />
     </fieldset>
 
     <StatusBar
-      :tone="BAR_TONES[barState]"
-      :breathing="barState === 'searching'"
+      :tone="BAR_TONE_BY_STATE[barState]"
+      :is-breathing="barState === 'searching'"
       :title="pendingText ?? undefined"
       data-testid="match-bar"
     />
@@ -108,7 +112,7 @@ import BookMatchResults from './BookMatchResults.vue'
 import { useAbortableRequest } from '@/composables/useAbortableRequest'
 import { useResultsReveal } from '@/composables/useResultsReveal'
 import {
-  asinValid,
+  isAsinValid,
   INVALID_ASIN_MESSAGE,
   bookSummary,
   isEdited,
@@ -134,7 +138,7 @@ import {
   type CardBarState,
   type SearchKind,
   type SearchState,
-  type Searched,
+  type SearchParameters,
 } from '@/utils/bookSearch'
 import type { SearchResult } from '@/types'
 
@@ -145,39 +149,39 @@ const props = withDefaults(
     // Current
     book: Pick<BookRecord, 'title' | 'subtitle' | 'authors'>
     // Another book is being searched: this one waits for it
-    searchLocked?: boolean
+    isSearchLocked?: boolean
     // Left out by the user (Repair's checkbox): a matched book then shows as ignored
-    excluded?: boolean
+    isExcluded?: boolean
     // Search as soon as the card shows, and focus the title
-    searchOnMount?: boolean
+    shouldSearchOnMount?: boolean
     // The dialog is short of room (Repair measures its footer): the fields take the narrow
     // screen's layout before the screen itself is narrow
-    narrow?: boolean
+    isNarrow?: boolean
     // The results list's room kept from the start, at its full height whatever it holds. For a
     // card alone in its dialog (Find Match, Repair of one book), so nothing moves when a search
     // answers; with several books, the results open under each one when found
-    placeholders?: boolean
+    shouldKeepResultsRoom?: boolean
   }>(),
   {
-    searchLocked: false,
-    excluded: false,
-    searchOnMount: false,
-    narrow: false,
-    placeholders: false,
+    isSearchLocked: false,
+    isExcluded: false,
+    shouldSearchOnMount: false,
+    isNarrow: false,
+    shouldKeepResultsRoom: false,
   },
 )
 
-const match = defineModel<BookMatch>('match', { required: true })
+const bookMatch = defineModel<BookMatch>('bookMatch', { required: true })
 
 const emit = defineEmits<{
   // A search starts or ends, however it ends (except by unmounting the card)
-  searching: [searching: boolean]
+  searching: [isSearching: boolean]
   // A record is now the book's new one, picked in the results or found for its ASIN
-  matched: [record: SearchResult]
+  matched: [searchResult: SearchResult]
 }>()
 
 // The bar's colour for each state of the card
-const BAR_TONES: Record<CardBarState, StatusTone> = {
+const BAR_TONE_BY_STATE: Record<CardBarState, StatusTone> = {
   searching: 'progress',
   error: 'error',
   warning: 'warning',
@@ -185,101 +189,115 @@ const BAR_TONES: Record<CardBarState, StatusTone> = {
   ignored: 'idle',
 }
 
-const fieldsEl = ref<InstanceType<typeof BookMatchFields> | null>(null)
-const resultsEl = ref<InstanceType<typeof BookMatchResults> | null>(null)
-const state = ref<SearchState>(idleSearch())
+const fieldsRef = ref<InstanceType<typeof BookMatchFields> | null>(null)
+const resultsRef = ref<InstanceType<typeof BookMatchResults> | null>(null)
+const searchState = ref<SearchState>(idleSearch())
 // The search running, if any
-const running = ref<Searched | null>(null)
+const runningSearch = ref<SearchParameters | null>(null)
 // The kind of the last search started (answered, failed or canceled), and whether a field was
 // edited since: Retry until one is
 const lastSearchKind = ref<SearchKind | null>(null)
-const edited = ref(false)
+const isEditedSinceSearch = ref(false)
 // The dialog's answered searches, when it keeps them
 const searchCache = inject(SEARCH_CACHE, null)
-const request = useAbortableRequest(SEARCH_TIMEOUT_MS)
-const reveal = useResultsReveal()
+const searchRequest = useAbortableRequest(SEARCH_TIMEOUT_MS)
+const resultsReveal = useResultsReveal()
 
 const barState = computed(() =>
-  cardBarState(state.value, matchState(match.value) === 'matched', props.excluded),
+  cardBarState(searchState.value, matchState(bookMatch.value) === 'matched', props.isExcluded),
 )
 
 // A filled ASIN has priority: a search looks it up on its own, leaving the title and author out.
 // With the ASIN field empty, it looks for the title and author
-const searchKind = computed<SearchKind>(() => (match.value.asin.trim() ? 'asin' : 'title'))
+const searchKind = computed<SearchKind>(() => (bookMatch.value.asin.trim() ? 'asin' : 'title'))
 
 // The book as it is today, as a record
 const currentRecord = computed<BookRecord>(() => ({
   ...props.book,
-  asin: match.value.current.asin,
-  region: match.value.current.region,
+  asin: bookMatch.value.currentRecordKey.asin,
+  region: bookMatch.value.currentRecordKey.region,
 }))
 
-const pendingText = computed(() => pendingSearchText(running.value))
+const pendingText = computed(() => pendingSearchText(runningSearch.value))
 
 // The record picked, green in the results; the current one only wears a tag there
-const pickedRecord = computed(() => {
-  const { picked } = match.value
-  return picked?.asin ? { asin: picked.asin, region: picked.region ?? match.value.region } : null
+const pickedRecordKey = computed(() => {
+  const { pickedSearchResult } = bookMatch.value
+  return pickedSearchResult?.asin
+    ? { asin: pickedSearchResult.asin, region: pickedSearchResult.region ?? bookMatch.value.region }
+    : null
 })
 
-const pickedAsRecord = computed(() =>
-  match.value.picked ? recordFromResult(match.value.picked, match.value.region) : null,
+const pickedRecord = computed(() =>
+  bookMatch.value.pickedSearchResult
+    ? recordFromResult(bookMatch.value.pickedSearchResult, bookMatch.value.region)
+    : null,
 )
 
 // Changing the region searches there: not while a search runs, here or on another book.
 // One search at a time keeps answers from racing each other.
-const regionLocked = computed(() => props.searchLocked || state.value.status === 'searching')
+const isRegionLocked = computed(
+  () => props.isSearchLocked || searchState.value.status === 'searching',
+)
 
 // Search becomes Retry once a search ran, whatever its outcome, until a field is edited: from then
 // on it is Search, even if the field is changed back. Retry asks Audible again (a new request),
 // where Search may be served by the dialog's answered searches
 const retryKind = computed<SearchKind | null>(() => {
-  if (edited.value || state.value.status === 'searching') return null
+  if (isEditedSinceSearch.value || searchState.value.status === 'searching') return null
   return lastSearchKind.value
 })
 
-const fieldsAction = computed(() =>
-  state.value.status === 'searching' ? 'cancel' : retryKind.value ? 'retry' : 'search',
+const searchAction = computed(() =>
+  searchState.value.status === 'searching' ? 'cancel' : retryKind.value ? 'retry' : 'search',
 )
 
 function canSearchFor(kind: SearchKind): boolean {
-  if (props.searchLocked || state.value.status === 'searching') return false
+  if (props.isSearchLocked || searchState.value.status === 'searching') return false
   // An ASIN that isn't one can still be searched: Search then says what an ASIN is
-  return kind === 'asin' ? !!match.value.asin.trim() : !!match.value.query.trim()
+  return kind === 'asin' ? !!bookMatch.value.asin.trim() : !!bookMatch.value.query.trim()
 }
 
-function setMatched(record: SearchResult) {
-  match.value.picked = record
-  match.value.asinError = null
-  emit('matched', record)
+function setMatched(searchResult: SearchResult) {
+  bookMatch.value.pickedSearchResult = searchResult
+  bookMatch.value.asinError = null
+  emit('matched', searchResult)
 }
 
 // The results on screen go: the empty list keeps their height
 function keepResultsHeight() {
-  if (state.value.results.length) resultsEl.value?.keepHeight()
+  if (searchState.value.searchResults.length) resultsRef.value?.keepHeight()
 }
 
 // A search starts: with no results on screen, the empty list opens one result high
 function openResultsRoom() {
-  if (!state.value.results.length) resultsEl.value?.openRoom()
+  if (!searchState.value.searchResults.length) resultsRef.value?.openRoom()
 }
 
 // The answer to a search, under the book: a title search's results, or the records found for the
 // ASIN (none is an error)
 function showResults(
   kind: SearchKind,
-  searched: Searched,
-  results: SearchResult[],
+  searchParameters: SearchParameters,
+  searchResults: SearchResult[],
   requestMs: number | null,
 ) {
   // The records found for an ASIN are offered to pick from, like a title search's: nothing is
   // picked for the user
-  const found = kind === 'title' ? results : recordsForAsin(results, searched)
+  const foundResults =
+    kind === 'title' ? searchResults : recordsForAsin(searchResults, searchParameters)
   // An ASIN that found nothing (orange): searching the title there is what comes next
-  if (kind === 'asin' && !found.length)
-    match.value.asinError = noRecordError(searched.asin, searched.region)
-  state.value = { status: 'done', kind, results: found, error: null, searched, requestMs }
-  if (found.length) reveal.start()
+  if (kind === 'asin' && !foundResults.length)
+    bookMatch.value.asinError = noRecordError(searchParameters.asin, searchParameters.region)
+  searchState.value = {
+    status: 'done',
+    kind,
+    searchResults: foundResults,
+    error: null,
+    searchParameters,
+    requestMs,
+  }
+  if (foundResults.length) resultsReveal.start()
 }
 
 // Search the title and author in the region, or look the ASIN up there; the results open under
@@ -287,124 +305,131 @@ function showResults(
 // answered while the dialog is open are served without a request, unless fresh (Retry)
 async function search(kind: SearchKind = 'title', fresh = false) {
   if (!canSearchFor(kind)) return
-  if (kind === 'asin' && !asinValid(match.value)) {
+  if (kind === 'asin' && !isAsinValid(bookMatch.value)) {
     // A field error, not a request one: nothing is sent. The previous results go, so the error
     // shows in their room
-    match.value.picked = null
-    reveal.end()
+    bookMatch.value.pickedSearchResult = null
+    resultsReveal.end()
     keepResultsHeight()
     openResultsRoom()
-    state.value = {
-      ...state.value,
+    searchState.value = {
+      ...searchState.value,
       status: 'invalid',
       kind,
-      results: [],
+      searchResults: [],
       error: INVALID_ASIN_MESSAGE,
     }
     return
   }
-  const asin = match.value.asin.trim().toUpperCase()
-  const region = match.value.region
-  const searched: Searched = {
+  const asin = bookMatch.value.asin.trim().toUpperCase()
+  const region = bookMatch.value.region
+  const searchParameters: SearchParameters = {
     kind,
     asin,
-    title: match.value.query.trim(),
-    author: match.value.author.trim(),
+    title: bookMatch.value.query.trim(),
+    author: bookMatch.value.author.trim(),
     region,
   }
-  const query = kind === 'asin' ? asin : addNewQuery(match.value)
+  const query = kind === 'asin' ? asin : addNewQuery(bookMatch.value)
   const cacheKey = searchCacheKey(query, region)
   lastSearchKind.value = kind
-  edited.value = false
+  isEditedSinceSearch.value = false
   // A new search starts over: the record picked in the previous results is no longer selected, and
   // New goes back to no record (nothing stays picked that the user can't see)
-  match.value.picked = null
-  match.value.asinError = null
-  reveal.end()
+  bookMatch.value.pickedSearchResult = null
+  bookMatch.value.asinError = null
+  resultsReveal.end()
   openResultsRoom()
-  const answered = fresh ? undefined : searchCache?.get(cacheKey)
-  if (answered) {
-    showResults(kind, searched, answered, null)
+  const cachedSearchResults = fresh ? undefined : searchCache?.get(cacheKey)
+  if (cachedSearchResults) {
+    showResults(kind, searchParameters, cachedSearchResults, null)
     return
   }
   // The previous results stay on screen until this search answers
-  state.value = { ...state.value, status: 'searching', kind, error: null }
-  running.value = searched
+  searchState.value = { ...searchState.value, status: 'searching', kind, error: null }
+  runningSearch.value = searchParameters
   const startedAt = performance.now()
-  const outcome = await request.run((signal) => searchLikeAddNew(query, region, signal))
+  const searchOutcome = await searchRequest.run((signal) => searchLikeAddNew(query, region, signal))
   // A canceled search answers to nobody: the card already went back to its fields
-  if (outcome.status === 'stale') return
-  running.value = null
-  if (outcome.status === 'done') {
-    searchCache?.set(cacheKey, outcome.value)
-    showResults(kind, searched, outcome.value, performance.now() - startedAt)
+  if (searchOutcome.status === 'stale') return
+  runningSearch.value = null
+  if (searchOutcome.status === 'done') {
+    searchCache?.set(cacheKey, searchOutcome.value)
+    showResults(kind, searchParameters, searchOutcome.value, performance.now() - startedAt)
     return
   }
-  const error = searchErrorText(outcome.error, outcome.timedOut)
+  const errorText = searchErrorText(searchOutcome.error, searchOutcome.hasTimedOut)
   // An ASIN that could not be looked up stays unusable until it is (its error shows over the
   // results' room)
-  if (kind === 'asin') match.value.asinError = error
+  if (kind === 'asin') bookMatch.value.asinError = errorText
   keepResultsHeight()
-  state.value = { status: 'failed', kind, results: [], error, searched, requestMs: null }
+  searchState.value = {
+    status: 'failed',
+    kind,
+    searchResults: [],
+    error: errorText,
+    searchParameters,
+    requestMs: null,
+  }
 }
 
 // Stops the running search, if any, leaving the card as it is
 function stopSearch() {
-  request.stop()
-  running.value = null
-  reveal.end()
+  searchRequest.stop()
+  runningSearch.value = null
+  resultsReveal.end()
 }
 
 // Cancel search: the search stops, and the card says it was canceled (orange)
 function cancelSearch() {
-  if (state.value.status !== 'searching') return
-  const canceled = running.value
+  if (searchState.value.status !== 'searching') return
+  const canceledSearch = runningSearch.value
   keepResultsHeight()
   stopSearch()
   // The previous results go: they don't answer the search canceled, which the header names
-  state.value = {
-    ...state.value,
+  searchState.value = {
+    ...searchState.value,
     status: 'canceled',
-    results: [],
+    searchResults: [],
     error: 'Search canceled.',
-    searched: canceled ?? state.value.searched,
+    searchParameters: canceledSearch ?? searchState.value.searchParameters,
   }
 }
 
 // The record picked in the results: its ASIN in the region it was found in. The results stay,
 // with the selection moved to it. Clicking the selected row again unpicks it: no new record.
-function pick(result: SearchResult) {
+function pick(searchResult: SearchResult) {
   // Not while a search runs (the results shown are the previous search's), nor while new ones are
   // revealed
   if (
-    !result.asin ||
-    props.searchLocked ||
-    state.value.status === 'searching' ||
-    reveal.revealing.value
+    !searchResult.asin ||
+    props.isSearchLocked ||
+    searchState.value.status === 'searching' ||
+    resultsReveal.isRevealing.value
   )
     return
-  const picked = pickedRecord.value
+  const pickedKey = pickedRecordKey.value
   if (
-    picked &&
-    picked.asin.toUpperCase() === result.asin.toUpperCase() &&
-    (!result.region || result.region === picked.region)
+    pickedKey &&
+    pickedKey.asin.toUpperCase() === searchResult.asin.toUpperCase() &&
+    (!searchResult.region || searchResult.region === pickedKey.region)
   ) {
-    match.value.picked = null
+    bookMatch.value.pickedSearchResult = null
     return
   }
   // The record only: the fields keep the search as typed, so a wrong pick undone leaves them as
   // they were
-  setMatched({ ...result, region: result.region || match.value.region })
+  setMatched({ ...searchResult, region: searchResult.region || bookMatch.value.region })
 }
 
 // The record and its error no longer apply; the results stay until a new search replaces them
 function forgetRecord() {
-  match.value.picked = null
-  match.value.asinError = null
+  bookMatch.value.pickedSearchResult = null
+  bookMatch.value.asinError = null
   stopSearch()
-  state.value = {
-    ...state.value,
-    status: state.value.results.length ? 'done' : 'idle',
+  searchState.value = {
+    ...searchState.value,
+    status: searchState.value.searchResults.length ? 'done' : 'idle',
     error: null,
   }
 }
@@ -414,8 +439,8 @@ function forgetRecord() {
 // filled, the title and author otherwise. With no field edited since the last search, that is
 // Retry: a new request
 function searchByPriority() {
-  const retry = retryKind.value
-  void (retry ? search(retry, true) : search(searchKind.value))
+  const kindToRetry = retryKind.value
+  void (kindToRetry ? search(kindToRetry, true) : search(searchKind.value))
 }
 
 // Another region keeps the fields and searches there right away, by the same priority: the one
@@ -423,24 +448,24 @@ function searchByPriority() {
 function onRegionChanged() {
   forgetRecord()
   // A field changed: a search by priority, not a Retry of the previous one
-  edited.value = true
+  isEditedSinceSearch.value = true
   searchByPriority()
 }
 
 function revert() {
-  Object.assign(match.value, match.value.initial)
-  edited.value = true
+  Object.assign(bookMatch.value, bookMatch.value.initialValues)
+  isEditedSinceSearch.value = true
   forgetRecord()
 }
 
 watch(
-  () => state.value.status === 'searching',
-  (searching) => emit('searching', searching),
+  () => searchState.value.status === 'searching',
+  (isSearching) => emit('searching', isSearching),
 )
 
 onMounted(() => {
-  if (!props.searchOnMount) return
-  fieldsEl.value?.focusTitle()
+  if (!props.shouldSearchOnMount) return
+  fieldsRef.value?.focusTitle()
   void search()
 })
 

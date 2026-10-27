@@ -25,48 +25,55 @@
 <template>
   <div class="results-list">
     <div
-      v-for="result in results"
-      :key="result.asin ?? result.title"
+      v-for="searchResult in searchResults"
+      :key="searchResult.asin ?? searchResult.title"
       class="result-item"
-      :class="{ selected: isSame(result, selected), 'has-current': isSame(result, current) }"
-      :aria-selected="isSame(result, selected)"
+      :class="{
+        selected: isSameRecord(searchResult, selectedRecordKey),
+        'has-current': isSameRecord(searchResult, currentRecordKey),
+      }"
+      :aria-selected="isSameRecord(searchResult, selectedRecordKey)"
       data-testid="find-match-result"
-      @click="emit('select', result)"
+      @click="emit('select', searchResult)"
     >
       <img
-        v-if="result.imageUrl"
-        :src="getProtectedImageSrc(result.imageUrl, placeholderUrl)"
+        v-if="searchResult.imageUrl"
+        :src="getProtectedImageSrc(searchResult.imageUrl, placeholderUrl)"
         class="result-thumb"
         alt=""
       />
       <div class="result-info">
-        <span class="result-title">{{ fullTitle(result.title, result.subtitle) }}</span>
+        <span class="result-title">{{ fullTitle(searchResult.title, searchResult.subtitle) }}</span>
         <span class="result-meta">
-          {{ result.authors?.[0]?.name }}
-          <span v-if="seriesName(result)"> · {{ seriesName(result) }}</span>
-          <span v-if="result.asin" class="result-asin"> · {{ result.asin }}</span>
+          {{ searchResult.authors?.[0]?.name }}
+          <span v-if="seriesName(searchResult)"> · {{ seriesName(searchResult) }}</span>
+          <span v-if="searchResult.asin" class="result-asin"> · {{ searchResult.asin }}</span>
         </span>
-        <span v-if="narrators(result)" class="result-narrator">
-          Narrated by {{ narrators(result) }}
+        <span v-if="narratorNames(searchResult)" class="result-narrator">
+          Narrated by {{ narratorNames(searchResult) }}
         </span>
       </div>
-      <span v-if="isSame(result, current)" class="result-current" data-testid="find-match-current">
+      <span
+        v-if="isSameRecord(searchResult, currentRecordKey)"
+        class="result-current"
+        data-testid="find-match-current"
+      >
         Current
       </span>
       <span
-        v-else-if="isOtherRegion(result)"
+        v-else-if="isOtherRegion(searchResult)"
         class="result-other-region"
-        :title="otherRegionTitle(result)"
+        :title="otherRegionTitle(searchResult)"
         data-testid="find-match-other-region"
       >
         Other region
       </span>
       <span
         class="result-language"
-        :class="{ preferred: isPreferredLanguage(result) }"
+        :class="{ preferred: isPreferredLanguage(searchResult) }"
         data-testid="find-match-language"
       >
-        {{ languageLabel(result) }}
+        {{ languageLabel(searchResult) }}
       </span>
     </div>
   </div>
@@ -83,19 +90,17 @@ import {
 } from '@/utils/languageMapping'
 import { getPlaceholderUrl } from '@/utils/placeholder'
 import { extractNarrators, type NormalizedResult } from '@/utils/searchResultHelpers'
-import { fullTitle, regionLabel } from '@/utils/bookMatch'
+import { fullTitle, regionLabel, type RecordKey } from '@/utils/bookMatch'
 import type { SearchResult } from '@/types'
 
-// A record by its ASIN and, when known, its region
-type RecordRef = { asin: string; region?: string | null } | null
-
-// selected: the record picked (green); current: the one the book points at today (tagged)
+// selectedRecordKey: the record picked (green); currentRecordKey: the one the book points at
+// today (tagged)
 const props = defineProps<{
-  results: SearchResult[]
-  selected?: RecordRef
-  current?: RecordRef
+  searchResults: SearchResult[]
+  selectedRecordKey?: RecordKey | null
+  currentRecordKey?: RecordKey | null
 }>()
-const emit = defineEmits<{ select: [result: SearchResult] }>()
+const emit = defineEmits<{ select: [searchResult: SearchResult] }>()
 
 const { getProtectedImageSrc } = useProtectedImages()
 const placeholderUrl = getPlaceholderUrl()
@@ -106,50 +111,56 @@ const preferredLanguage = computed(() =>
   normalizePreferredSearchLanguage(configStore.applicationSettings?.defaultSearchLanguage),
 )
 
-function isPreferredLanguage(result: SearchResult): boolean {
-  const language = normalizeSearchResultLanguage(result.language)
+function isPreferredLanguage(searchResult: SearchResult): boolean {
+  const language = normalizeSearchResultLanguage(searchResult.language)
   return !!language && preferredLanguage.value !== 'all' && language === preferredLanguage.value
 }
 
 // "French", "German"…; a language the list doesn't know keeps Audible's word, capitalised
-function languageLabel(result: SearchResult): string {
-  const language = normalizeSearchResultLanguage(result.language)
-  const raw = result.language?.trim()
-  if (!language && !raw) return 'Language unknown'
-  const option = preferredSearchLanguageOptions.find((o) => o.value === language)
-  if (option) return option.label
-  return raw!.charAt(0).toUpperCase() + raw!.slice(1)
+function languageLabel(searchResult: SearchResult): string {
+  const language = normalizeSearchResultLanguage(searchResult.language)
+  const rawLanguage = searchResult.language?.trim()
+  if (!language && !rawLanguage) return 'Language unknown'
+  const languageOption = preferredSearchLanguageOptions.find(
+    (candidateOption) => candidateOption.value === language,
+  )
+  if (languageOption) return languageOption.label
+  return rawLanguage!.charAt(0).toUpperCase() + rawLanguage!.slice(1)
 }
 
-function isSame(result: SearchResult, record: RecordRef | undefined): boolean {
-  if (!record?.asin || result.asin?.toUpperCase() !== record.asin.toUpperCase()) return false
-  return !record.region || !result.region || result.region === record.region
+function isSameRecord(
+  searchResult: SearchResult,
+  recordKey: RecordKey | null | undefined,
+): boolean {
+  if (!recordKey?.asin || searchResult.asin?.toUpperCase() !== recordKey.asin.toUpperCase())
+    return false
+  return !recordKey.region || !searchResult.region || searchResult.region === recordKey.region
 }
 
 // The book's ASIN, found in another catalogue than the one it points at: a different record
-function isOtherRegion(result: SearchResult): boolean {
-  const current = props.current
-  if (!current?.asin || !current.region || !result.region) return false
+function isOtherRegion(searchResult: SearchResult): boolean {
+  const currentRecordKey = props.currentRecordKey
+  if (!currentRecordKey?.asin || !currentRecordKey.region || !searchResult.region) return false
   return (
-    result.asin?.toUpperCase() === current.asin.toUpperCase() &&
-    result.region.toLowerCase() !== current.region.toLowerCase()
+    searchResult.asin?.toUpperCase() === currentRecordKey.asin.toUpperCase() &&
+    searchResult.region.toLowerCase() !== currentRecordKey.region.toLowerCase()
   )
 }
 
-function otherRegionTitle(result: SearchResult): string {
+function otherRegionTitle(searchResult: SearchResult): string {
   return (
-    `Same ASIN as the book's current record, but in ${regionLabel(result.region!)}, ` +
-    `not ${regionLabel(props.current!.region!)}`
+    `Same ASIN as the book's current record, but in ${regionLabel(searchResult.region!)}, ` +
+    `not ${regionLabel(props.currentRecordKey!.region!)}`
   )
 }
 
-function narrators(result: SearchResult): string {
-  return extractNarrators(result as unknown as NormalizedResult)
+function narratorNames(searchResult: SearchResult): string {
+  return extractNarrators(searchResult as unknown as NormalizedResult)
 }
 
 // The search returns the series as a list of { name } or as a name
-function seriesName(result: SearchResult): string | undefined {
-  const series = result.series as unknown
+function seriesName(searchResult: SearchResult): string | undefined {
+  const series = searchResult.series as unknown
   if (Array.isArray(series)) return (series[0] as { name?: string } | undefined)?.name
   return typeof series === 'string' ? series : undefined
 }

@@ -60,7 +60,7 @@ const primalHunter = {
   format: 'MP3',
 }
 
-const ph4 = {
+const primalHunter4 = {
   asin: 'B0BK9W82PQ',
   title: 'Primal Hunter 4',
   authors: [{ name: 'Zogarth' }],
@@ -174,7 +174,7 @@ describe('LibraryImportSearchModal', () => {
     expect((field(wrapper, 'match-region').element as HTMLSelectElement).value).toBe('fr')
 
     // A new region searches there by itself: no ASIN, so the title and author, as Search would
-    search.mockResolvedValue([ph4])
+    search.mockResolvedValue([primalHunter4])
     await field(wrapper, 'match-region').setValue('us')
     await flushPromises()
     expect(search).toHaveBeenLastCalledWith(expect.objectContaining({ region: 'us' }))
@@ -243,7 +243,7 @@ describe('LibraryImportSearchModal', () => {
     )
     expect(field(wrapper, 'find-match-confirm').attributes('disabled')).toBeDefined()
 
-    metadata.mockResolvedValue({ metadata: ph4 })
+    metadata.mockResolvedValue({ metadata: primalHunter4 })
     // Enter looks the ASIN up again
     await field(wrapper, 'match-asin').trigger('keydown', { key: 'Enter' })
     await flushPromises()
@@ -257,7 +257,10 @@ describe('LibraryImportSearchModal', () => {
   it('looks the ASIN up when the region changes: a record found is offered, none is an error', async () => {
     const wrapper = mountModal({
       ...primalHunter,
-      selectedMatch: { ...ph4, region: 'fr' } as unknown as typeof alchemised.selectedMatch,
+      selectedMatch: {
+        ...primalHunter4,
+        region: 'fr',
+      } as unknown as typeof alchemised.selectedMatch,
     })
     await flushPromises()
 
@@ -269,7 +272,7 @@ describe('LibraryImportSearchModal', () => {
     )
     expect(field(wrapper, 'find-match-confirm').attributes('disabled')).toBeDefined()
 
-    metadata.mockResolvedValue({ metadata: { ...ph4, title: 'Primal Hunter 4 (US)' } })
+    metadata.mockResolvedValue({ metadata: { ...primalHunter4, title: 'Primal Hunter 4 (US)' } })
     await field(wrapper, 'match-region').setValue('us')
     await flushPromises()
     expect(wrapper.get('[data-testid="find-match-result"]').classes()).not.toContain('selected')

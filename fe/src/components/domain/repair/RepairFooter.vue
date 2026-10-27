@@ -23,7 +23,7 @@
   <ModalFooter
     ref="footerRef"
     class="repair-footer"
-    :class="{ 'repair-footer-legend-above': legendAbove || repairStep }"
+    :class="{ 'repair-footer-legend-above': isLegendAbove || isRepairStep }"
     :showCancel="false"
   >
     <template #left>
@@ -31,15 +31,15 @@
            being repaired ends first). Once they are over, Back to step 1, loaded afresh (the books
            may have been repaired) -->
       <button
-        ref="cancelRef"
+        ref="cancelButtonRef"
         type="button"
         class="btn cancel-button"
-        :class="{ 'btn-danger': executing }"
-        :disabled="canceling"
+        :class="{ 'btn-danger': isExecuting }"
+        :disabled="isCanceling"
         data-testid="repair-cancel"
-        @click="executing ? emit('cancelRepair') : finished ? emit('back') : emit('close')"
+        @click="isExecuting ? emit('cancelRepair') : isFinished ? emit('back') : emit('close')"
       >
-        <SteadySwap :current="cancelLabel" inline current-test-id="repair-cancel-label">
+        <SteadySwap :current-slot="cancelLabel" is-inline current-test-id="repair-cancel-label">
           <template #cancel><PhX :size="16" />Cancel</template>
           <template #canceling><PhSpinner :size="16" class="ph-spin" />Canceling…</template>
           <template #back><PhArrowLeft :size="16" />Back</template>
@@ -48,16 +48,16 @@
       <!-- Always in sight: between Cancel and the skipped count when the line has room for it, on
            its own line above them otherwise. There from the start, loading included -->
       <MatchLegend
-        v-if="!repairStep"
+        v-if="!isRepairStep"
         ref="legendRef"
-        :class="{ 'repair-legend-above': legendAbove }"
-        :style="legendAbove ? undefined : { marginLeft: `${legendShift}px` }"
+        :class="{ 'repair-legend-above': isLegendAbove }"
+        :style="isLegendAbove ? undefined : { marginLeft: `${legendShift}px` }"
       />
       <template v-else>
         <!-- Step 2's bar colours, always on their own line above the buttons: the line of the
              buttons keeps its room for the warning -->
         <MatchLegend
-          :entries="REPAIR_LEGEND"
+          :legend-entries="REPAIR_LEGEND_ENTRIES"
           class="repair-legend-above"
           data-testid="repair-legend"
         />
@@ -66,7 +66,7 @@
              Filled as soon as a book's repair goes wrong (failed, done in part, canceled) -->
         <span
           class="repair-problems"
-          :class="{ 'repair-problems-above': problemsAbove }"
+          :class="{ 'repair-problems-above': isWarningAbove }"
           data-testid="repair-problems-slot"
         >
           <template v-if="problemText">
@@ -81,7 +81,7 @@
           aria-hidden="true"
         >
           <PhWarningCircle :size="16" />
-          {{ longestRepairProblemText(repairTotal) }}
+          {{ longestRepairProblemText(totalRepairCount) }}
         </span>
       </template>
     </template>
@@ -89,19 +89,19 @@
       <!-- Always shown, 0 included, from the start: a count that appears and disappears would move
            Repair. Once repaired, the books left out of Organize -->
       <span
-        ref="countRef"
+        ref="skippedCountRef"
         class="repair-count"
-        :class="{ 'repair-count-wraps': countWraps }"
+        :class="{ 'repair-count-wraps': isCountWrapped }"
         data-testid="repair-count"
       >
         {{ skippedCount }} skipped
       </span>
       <button
-        v-if="!repairStep"
+        v-if="!isRepairStep"
         type="button"
         class="btn btn-primary"
         data-testid="repair-confirm"
-        :disabled="repairDisabled"
+        :disabled="isRepairDisabled"
         @click="emit('repair')"
       >
         <PhWrench :size="16" />
@@ -112,9 +112,9 @@
         type="button"
         class="btn btn-primary"
         data-testid="repair-organize"
-        :disabled="executing || !organizeCount"
+        :disabled="isExecuting || !organizeCount"
         :title="
-          executing
+          isExecuting
             ? 'Wait for the repairs to end'
             : organizeCount
               ? undefined
@@ -131,13 +131,13 @@
            the running one ends -->
       <StatusBar
         :tone="problemText ? 'warning' : 'progress'"
-        :breathing="executing"
-        :standby="!repairStep"
-        :percent="repairTotal ? (repairCompleted / repairTotal) * 100 : 0"
+        :is-breathing="isExecuting"
+        :is-standby="!isRepairStep"
+        :percent="totalRepairCount ? (completedRepairCount / totalRepairCount) * 100 : 0"
         role="progressbar"
         aria-label="Repair progress"
-        :aria-valuemax="repairTotal"
-        :aria-valuenow="repairCompleted"
+        :aria-valuemax="totalRepairCount"
+        :aria-valuenow="completedRepairCount"
         data-testid="repair-progress"
       />
     </template>
@@ -163,18 +163,18 @@ import { longestRepairProblemText } from '@/utils/repair'
 
 const props = defineProps<{
   // Step 2, from Repair on
-  repairStep: boolean
-  executing: boolean
-  canceling: boolean
-  finished: boolean
-  repairDisabled: boolean
+  isRepairStep: boolean
+  isExecuting: boolean
+  isCanceling: boolean
+  isFinished: boolean
+  isRepairDisabled: boolean
   selectedCount: number
   organizeCount: number
   skippedCount: number
   // What went wrong on step 2, if anything
   problemText: string | null
-  repairCompleted: number
-  repairTotal: number
+  completedRepairCount: number
+  totalRepairCount: number
 }>()
 
 const emit = defineEmits<{
@@ -186,7 +186,7 @@ const emit = defineEmits<{
 }>()
 
 // What the bar along the bottom of each book means on step 2
-const REPAIR_LEGEND: LegendEntry[] = [
+const REPAIR_LEGEND_ENTRIES: LegendEntry[] = [
   { tone: 'idle', label: 'Waiting or canceled' },
   { tone: 'progress', label: 'Repairing' },
   { tone: 'success', label: 'Repaired' },
@@ -195,25 +195,25 @@ const REPAIR_LEGEND: LegendEntry[] = [
 ]
 
 const footerRef = ref<ComponentPublicInstance | null>(null)
-const cancelRef = ref<HTMLElement | null>(null)
+const cancelButtonRef = ref<HTMLElement | null>(null)
 const legendRef = ref<ComponentPublicInstance | null>(null)
 const problemsSizerRef = ref<HTMLElement | null>(null)
-const countRef = ref<HTMLElement | null>(null)
-const { legendAbove, legendShift, problemsAbove, countWraps } = useRepairFooterLayout({
-  footer: footerRef,
-  cancel: cancelRef,
-  legend: legendRef,
-  problemsSizer: problemsSizerRef,
-  count: countRef,
+const skippedCountRef = ref<HTMLElement | null>(null)
+const { isLegendAbove, legendShift, isWarningAbove, isCountWrapped } = useRepairFooterLayout({
+  footerRef,
+  cancelButtonRef,
+  legendRef,
+  problemsSizerRef,
+  skippedCountRef,
 })
 
 // The left button: Cancel, Canceling… while the running repair ends, Back once they are over
 const cancelLabel = computed(() =>
-  props.canceling ? 'canceling' : props.finished && !props.executing ? 'back' : 'cancel',
+  props.isCanceling ? 'canceling' : props.isFinished && !props.isExecuting ? 'back' : 'cancel',
 )
 
 // The cards take the narrow layout while the legend is above the buttons
-defineExpose({ legendAbove })
+defineExpose({ isLegendAbove })
 </script>
 
 <style scoped>
