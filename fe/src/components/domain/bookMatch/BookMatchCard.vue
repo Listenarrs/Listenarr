@@ -15,8 +15,9 @@
   You should have received a copy of the GNU Affero General Public License
   along with this program. If not, see <https://www.gnu.org/licenses/>.
 -->
-<!-- One book and the Audible record it should point at: its current and new records, the ASIN,
-     Title, Author and Region fields, and the search under the book (Repair Books and Find Match).
+<!-- One book and the Audible record it should point at: a search box read like Add New's and a
+     region, the search under the book, and its current and new records (Repair Books and Find
+     Match).
      The bar along its bottom tells its state: grey ignored, green matched, orange for a field error
      or no result, red for a failed request, and breathes in blue while a search runs. While another
      book is searched, the whole card waits: nothing in it can be edited, searched or picked. -->
@@ -58,12 +59,12 @@
         v-model:book-match="bookMatch"
         :configured-region="configuredRegion"
         :search-action="searchAction"
-        :can-search="canSearchFor(retryKind ?? searchKind)"
+        :can-search="canSearch"
         :is-search-locked="isSearchLocked"
         :is-region-locked="isRegionLocked"
         :is-narrow="isNarrow"
         @edited="isEditedSinceSearch = true"
-        @search="searchByPriority"
+        @search="searchOrRetry"
         @cancel="cancelSearch"
         @region-changed="onRegionChanged"
       />
@@ -112,14 +113,12 @@ import BookMatchResults from './BookMatchResults.vue'
 import { useAbortableRequest } from '@/composables/useAbortableRequest'
 import { useResultsReveal } from '@/composables/useResultsReveal'
 import {
-  isAsinValid,
   INVALID_ASIN_MESSAGE,
   bookSummary,
   isEdited,
   matchState,
   noRecordError,
   recordFromResult,
-  addNewQuery,
   searchCacheKey,
   searchLikeAddNew,
   SEARCH_CACHE,
@@ -141,6 +140,7 @@ import {
   type SearchParameters,
 } from '@/utils/bookSearch'
 import type { SearchResult } from '@/types'
+import { queryAsin } from '@/services/audiobookSearch'
 
 const props = withDefaults(
   defineProps<{
@@ -152,7 +152,7 @@ const props = withDefaults(
     isSearchLocked?: boolean
     // Left out by the user (Repair's checkbox): a matched book then shows as ignored
     isExcluded?: boolean
-    // Search as soon as the card shows, and focus the title
+    // Search as soon as the card shows, and focus the search box
     shouldSearchOnMount?: boolean
     // The dialog is short of room (Repair measures its footer): the fields take the narrow
     // screen's layout before the screen itself is narrow
@@ -194,9 +194,9 @@ const resultsRef = ref<InstanceType<typeof BookMatchResults> | null>(null)
 const searchState = ref<SearchState>(idleSearch())
 // The search running, if any
 const runningSearch = ref<SearchParameters | null>(null)
-// The kind of the last search started (answered, failed or canceled), and whether a field was
-// edited since: Retry until one is
-const lastSearchKind = ref<SearchKind | null>(null)
+// Whether a search ran (answered, failed or canceled), and whether the search box or region
+// changed since: Retry until one does
+const hasSearched = ref(false)
 const isEditedSinceSearch = ref(false)
 // The dialog's answered searches, when it keeps them
 const searchCache = inject(SEARCH_CACHE, null)
@@ -206,10 +206,6 @@ const resultsReveal = useResultsReveal()
 const barState = computed(() =>
   cardBarState(searchState.value, matchState(bookMatch.value) === 'matched', props.isExcluded),
 )
-
-// A filled ASIN has priority: a search looks it up on its own, leaving the title and author out.
-// With the ASIN field empty, it looks for the title and author
-const searchKind = computed<SearchKind>(() => (bookMatch.value.asin.trim() ? 'asin' : 'title'))
 
 // The book as it is today, as a record
 const currentRecord = computed<BookRecord>(() => ({
@@ -240,23 +236,23 @@ const isRegionLocked = computed(
   () => props.isSearchLocked || searchState.value.status === 'searching',
 )
 
-// Search becomes Retry once a search ran, whatever its outcome, until a field is edited: from then
-// on it is Search, even if the field is changed back. Retry asks Audible again (a new request),
-// where Search may be served by the dialog's answered searches
-const retryKind = computed<SearchKind | null>(() => {
-  if (isEditedSinceSearch.value || searchState.value.status === 'searching') return null
-  return lastSearchKind.value
-})
-
-const searchAction = computed(() =>
-  searchState.value.status === 'searching' ? 'cancel' : retryKind.value ? 'retry' : 'search',
+// Search becomes Retry once a search ran, whatever its outcome, until the search box or region
+// changes: from then on it is Search, even if changed back. Retry asks Audible again (a new
+// request), where Search may be served by the dialog's answered searches
+const isRetry = computed(
+  () => hasSearched.value && !isEditedSinceSearch.value && searchState.value.status !== 'searching',
 )
 
-function canSearchFor(kind: SearchKind): boolean {
-  if (props.isSearchLocked || searchState.value.status === 'searching') return false
-  // An ASIN that isn't one can still be searched: Search then says what an ASIN is
-  return kind === 'asin' ? !!bookMatch.value.asin.trim() : !!bookMatch.value.query.trim()
-}
+const searchAction = computed(() =>
+  searchState.value.status === 'searching' ? 'cancel' : isRetry.value ? 'retry' : 'search',
+)
+
+const canSearch = computed(
+  () =>
+    !props.isSearchLocked &&
+    searchState.value.status !== 'searching' &&
+    !!bookMatch.value.query.trim(),
+)
 
 function setMatched(searchResult: SearchResult) {
   bookMatch.value.pickedSearchResult = searchResult
@@ -274,19 +270,19 @@ function openResultsRoom() {
   if (!searchState.value.searchResults.length) resultsRef.value?.openRoom()
 }
 
-// The answer to a search, under the book: a title search's results, or the records found for the
-// ASIN (none is an error)
+// The answer to a search, under the book: a query's results, or the records found for the ASIN
+// (none is an error)
 function showResults(
-  kind: SearchKind,
   searchParameters: SearchParameters,
   searchResults: SearchResult[],
   requestMs: number | null,
 ) {
-  // The records found for an ASIN are offered to pick from, like a title search's: nothing is
-  // picked for the user
+  const { kind } = searchParameters
+  // The records found for an ASIN are offered to pick from, like a query's: nothing is picked for
+  // the user
   const foundResults =
-    kind === 'title' ? searchResults : recordsForAsin(searchResults, searchParameters)
-  // An ASIN that found nothing (orange): searching the title there is what comes next
+    kind === 'query' ? searchResults : recordsForAsin(searchResults, searchParameters)
+  // An ASIN that found nothing (orange): a title search is what comes next
   if (kind === 'asin' && !foundResults.length)
     bookMatch.value.asinError = noRecordError(searchParameters.asin, searchParameters.region)
   searchState.value = {
@@ -300,12 +296,16 @@ function showResults(
   if (foundResults.length) resultsReveal.start()
 }
 
-// Search the title and author in the region, or look the ASIN up there; the results open under
-// the book, to pick from. An ASIN its region has no record for is an error. Values already
+// Search what the search box holds, in the region, the way Add New does; the results open under
+// the book, to pick from. An ASIN alone the region has no record for is an error. Values already
 // answered while the dialog is open are served without a request, unless fresh (Retry)
-async function search(kind: SearchKind = 'title', fresh = false) {
-  if (!canSearchFor(kind)) return
-  if (kind === 'asin' && !isAsinValid(bookMatch.value)) {
+async function search(isFresh = false) {
+  if (!canSearch.value) return
+  const query = bookMatch.value.query.trim()
+  const asin = queryAsin(query)
+  const kind: SearchKind = asin ? 'asin' : 'query'
+  // ASIN: with something that isn't an ASIN
+  if (!asin && /^ASIN:/i.test(query)) {
     // A field error, not a request one: nothing is sent. The previous results go, so the error
     // shows in their room
     bookMatch.value.pickedSearchResult = null
@@ -315,24 +315,16 @@ async function search(kind: SearchKind = 'title', fresh = false) {
     searchState.value = {
       ...searchState.value,
       status: 'invalid',
-      kind,
+      kind: 'asin',
       searchResults: [],
       error: INVALID_ASIN_MESSAGE,
     }
     return
   }
-  const asin = bookMatch.value.asin.trim().toUpperCase()
   const region = bookMatch.value.region
-  const searchParameters: SearchParameters = {
-    kind,
-    asin,
-    title: bookMatch.value.query.trim(),
-    author: bookMatch.value.author.trim(),
-    region,
-  }
-  const query = kind === 'asin' ? asin : addNewQuery(bookMatch.value)
+  const searchParameters: SearchParameters = { kind, asin: asin ?? '', query, region }
   const cacheKey = searchCacheKey(query, region)
-  lastSearchKind.value = kind
+  hasSearched.value = true
   isEditedSinceSearch.value = false
   // A new search starts over: the record picked in the previous results is no longer selected, and
   // New goes back to no record (nothing stays picked that the user can't see)
@@ -340,9 +332,9 @@ async function search(kind: SearchKind = 'title', fresh = false) {
   bookMatch.value.asinError = null
   resultsReveal.end()
   openResultsRoom()
-  const cachedSearchResults = fresh ? undefined : searchCache?.get(cacheKey)
+  const cachedSearchResults = isFresh ? undefined : searchCache?.get(cacheKey)
   if (cachedSearchResults) {
-    showResults(kind, searchParameters, cachedSearchResults, null)
+    showResults(searchParameters, cachedSearchResults, null)
     return
   }
   // The previous results stay on screen until this search answers
@@ -355,13 +347,13 @@ async function search(kind: SearchKind = 'title', fresh = false) {
   runningSearch.value = null
   if (searchOutcome.status === 'done') {
     searchCache?.set(cacheKey, searchOutcome.value)
-    showResults(kind, searchParameters, searchOutcome.value, performance.now() - startedAt)
+    showResults(searchParameters, searchOutcome.value, performance.now() - startedAt)
     return
   }
   const errorText = searchErrorText(searchOutcome.error, searchOutcome.hasTimedOut)
   // An ASIN that could not be looked up stays unusable until it is (its error shows over the
   // results' room)
-  if (kind === 'asin') bookMatch.value.asinError = errorText
+  if (asin) bookMatch.value.asinError = errorText
   keepResultsHeight()
   searchState.value = {
     status: 'failed',
@@ -417,8 +409,8 @@ function pick(searchResult: SearchResult) {
     bookMatch.value.pickedSearchResult = null
     return
   }
-  // The record only: the fields keep the search as typed, so a wrong pick undone leaves them as
-  // they were
+  // The record only: the search box and region keep the search as typed, so a wrong pick undone
+  // leaves them as they were
   setMatched({ ...searchResult, region: searchResult.region || bookMatch.value.region })
 }
 
@@ -435,21 +427,18 @@ function forgetRecord() {
 }
 
 // Typing only prepares the next search: the results, the record and any error stay until it runs.
-// Search, Enter in any field and a region change all start the same search: the ASIN when it is
-// filled, the title and author otherwise. With no field edited since the last search, that is
-// Retry: a new request
-function searchByPriority() {
-  const kindToRetry = retryKind.value
-  void (kindToRetry ? search(kindToRetry, true) : search(searchKind.value))
+// Search, Enter and a region change all start it; with nothing changed since the last search,
+// that is Retry: a new request
+function searchOrRetry() {
+  void search(isRetry.value)
 }
 
-// Another region keeps the fields and searches there right away, by the same priority: the one
-// change that searches by itself
+// Another region: the search runs again there right away, the one change that searches by itself
 function onRegionChanged() {
   forgetRecord()
-  // A field changed: a search by priority, not a Retry of the previous one
+  // A field changed: a search, not a Retry of the previous one
   isEditedSinceSearch.value = true
-  searchByPriority()
+  searchOrRetry()
 }
 
 function revert() {
@@ -465,7 +454,7 @@ watch(
 
 onMounted(() => {
   if (!props.shouldSearchOnMount) return
-  fieldsRef.value?.focusTitle()
+  fieldsRef.value?.focusQuery()
   void search()
 })
 

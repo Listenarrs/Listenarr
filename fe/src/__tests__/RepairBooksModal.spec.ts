@@ -118,21 +118,22 @@ const resultCard = (wrapper: ReturnType<typeof mountModal>, audiobookId = 7) =>
   wrapper.get(`[data-testid="repair-result-${audiobookId}"]`)
 
 // Search the row's title and author in a region, then pick the result with that title
-// A filled ASIN has priority: emptying it lets Search look for the title and author
-async function emptyAsin(wrapper: ReturnType<typeof mountModal>, audiobookId = 7) {
-  await bookCard(wrapper, audiobookId).get('[data-testid="match-asin"]').setValue('')
+// Types in the search box and presses Enter
+async function searchFor(wrapper: ReturnType<typeof mountModal>, query: string, audiobookId = 7) {
+  await bookCard(wrapper, audiobookId).get('[data-testid="match-query"]').setValue(query)
+  await bookCard(wrapper, audiobookId)
+    .get('[data-testid="match-query"]')
+    .trigger('keydown', { key: 'Enter' })
+  await flushPromises()
 }
 
 async function searchAndPick(
   wrapper: ReturnType<typeof mountModal>,
   { region = 'us', title = 'Primal Hunter 4', audiobookId = 7, query = '' } = {},
 ) {
+  if (query) await bookCard(wrapper, audiobookId).get('[data-testid="match-query"]').setValue(query)
   await bookCard(wrapper, audiobookId).get('[data-testid="match-region"]').setValue(region)
-  // Changing the region searches there first (the ASIN, which is filled)
-  await flushPromises()
-  await emptyAsin(wrapper, audiobookId)
-  if (query) await bookCard(wrapper, audiobookId).get('[data-testid="match-title"]').setValue(query)
-  await bookCard(wrapper, audiobookId).get('[data-testid="match-search"]').trigger('click')
+  // Changing the region searches there
   await flushPromises()
   const searchResultItem = bookCard(wrapper, audiobookId)
     .findAll('[data-testid="find-match-result"]')
@@ -189,12 +190,13 @@ describe('RepairBooksModal', () => {
     expect(
       bookCard(wrapper).get('[data-testid="repair-include"]').attributes('disabled'),
     ).toBeDefined()
-    expect(field(wrapper, 'match-asin').value).toBe('B0HM45F8MW')
+    // The search box opens like Add New's, on the book's title and author
+    expect(field(wrapper, 'match-query').value).toBe('TITLE:Primal Hunter, Vol. 7 AUTHOR:Zogarth')
     expect(field(wrapper, 'match-region').value).toBe('fr')
     expect(wrapper.get('[data-testid="repair-confirm"]').text()).toContain('Repair 0')
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
-    expect(wrapper.get('[data-testid="repair-info-asin"]').text()).toBe(
-      'A filled ASIN is searched on its own: the title and author are left out of that search.',
+    expect(wrapper.get('[data-testid="repair-info-search"]').text()).toBe(
+      "The search box reads like Add New's: a title, an ASIN, or TITLE:, AUTHOR:, ASIN:, SERIES: and ISBN: tokens.",
     )
     expect(wrapper.get('[data-testid="repair-count"]').text()).toBe('1 skipped')
     expect(wrapper.get('[data-testid="match-legend"]').text()).toMatch(
@@ -320,7 +322,7 @@ describe('RepairBooksModal', () => {
       bookCard(wrapper)
         .findAll('.match-field-label')
         .map((l) => l.text()),
-    ).toEqual(['ASIN', 'Title', 'Author', 'Region'])
+    ).toEqual(['Search', 'Region'])
   })
 
   it('only prepares the next search while typing: the ASIN, results and record stay', async () => {
@@ -330,8 +332,7 @@ describe('RepairBooksModal', () => {
     apiMocks.advancedSearch.mockClear()
     apiMocks.getAudibleMetadata.mockClear()
 
-    for (const testid of ['match-title', 'match-author', 'match-asin'])
-      await bookCard(wrapper).get(`[data-testid="${testid}"]`).setValue('Something else')
+    await bookCard(wrapper).get('[data-testid="match-query"]').setValue('Something else')
 
     expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
     expect(apiMocks.getAudibleMetadata).not.toHaveBeenCalled()
@@ -341,11 +342,11 @@ describe('RepairBooksModal', () => {
     expect(bookCard(wrapper).find('.match-hint').exists()).toBe(false)
   })
 
-  it('repairs with the picked record, even after the ASIN field changed', async () => {
+  it('repairs with the picked record, even after the search box changed', async () => {
     const wrapper = mountModal()
     await flushPromises()
     await searchAndPick(wrapper)
-    await bookCard(wrapper).get('[data-testid="match-asin"]').setValue('B0SOMETHIN')
+    await bookCard(wrapper).get('[data-testid="match-query"]').setValue('B0SOMETHIN')
 
     await repair(wrapper)
 
@@ -358,11 +359,11 @@ describe('RepairBooksModal', () => {
   it('searches the title and author in the region and shows the results under the book', async () => {
     const wrapper = mountModal()
     await flushPromises()
+    // A new region searches there; Retry, the same values, asks again
     await bookCard(wrapper).get('[data-testid="match-region"]').setValue('us')
     await flushPromises()
 
-    await emptyAsin(wrapper)
-    await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
+    await bookCard(wrapper).get('[data-testid="match-retry"]').trigger('click')
     await flushPromises()
 
     // Add New's title search: the region, up to 50 results, every language of its catalogue
@@ -379,23 +380,17 @@ describe('RepairBooksModal', () => {
     expect(results.map((r) => r.text())).toEqual([expect.stringContaining('Primal Hunter 4')])
   })
 
-  it('searches with Enter in the title or author, and Revert restores them', async () => {
+  it('searches with Enter, the TITLE:/AUTHOR: tokens read as Add New reads them, and Revert restores', async () => {
     const wrapper = mountModal()
     await flushPromises()
-    expect(field(wrapper, 'match-title').value).toBe('Primal Hunter, Vol. 7')
-    expect(field(wrapper, 'match-author').value).toBe('Zogarth')
 
-    await emptyAsin(wrapper)
-    await bookCard(wrapper).get('[data-testid="match-title"]').setValue('The Primal Hunter 4')
-    await bookCard(wrapper).get('[data-testid="match-title"]').trigger('keydown', { key: 'Enter' })
-    await flushPromises()
+    await searchFor(wrapper, 'TITLE:The Primal Hunter 4 AUTHOR:Zogarth')
 
     expect(apiMocks.advancedSearch).toHaveBeenCalledWith(
       expect.objectContaining({ title: 'The Primal Hunter 4', author: 'Zogarth' }),
     )
     await bookCard(wrapper).get('[data-testid="match-revert"]').trigger('click')
-    expect(field(wrapper, 'match-title').value).toBe('Primal Hunter, Vol. 7')
-    expect(bookCard(wrapper).find('[data-testid="find-match-result"]').exists()).toBe(false)
+    expect(field(wrapper, 'match-query').value).toBe('TITLE:Primal Hunter, Vol. 7 AUTHOR:Zogarth')
   })
 
   it('shows the search pending, with a red Cancel search button instead of Search', async () => {
@@ -404,12 +399,11 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
 
-    await emptyAsin(wrapper)
     await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
 
     expect(bookCard(wrapper).get('[data-testid="match-search-pending"]').text()).toContain(
-      'Searching "Primal Hunter, Vol. 7" by "Zogarth" in France (FR)',
+      'Searching "TITLE:Primal Hunter, Vol. 7 AUTHOR:Zogarth" in France (FR)',
     )
     // Shown by the breathing blue bottom bar only: no line under the book, nothing moves
     expect(bookCard(wrapper).attributes('data-match-state')).toBe('searching')
@@ -425,8 +419,8 @@ describe('RepairBooksModal', () => {
 
     answer([])
     await flushPromises()
-    expect(bookCard(wrapper).get('[data-testid="match-search-empty"]').text()).toMatch(
-      /^No results for "Primal Hunter, Vol\. 7" by "Zogarth" in France \(FR\) - Request: [\d.]+ s$/,
+    expect(bookCard(wrapper).get('[data-testid="match-search-empty"]').text()).toContain(
+      'No results for "TITLE:Primal Hunter, Vol. 7 AUTHOR:Zogarth" in France (FR)',
     )
     // Nothing found is orange, not a failure
     expect(bookCard(wrapper).attributes('data-match-state')).toBe('warning')
@@ -438,78 +432,43 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
 
-    await emptyAsin(wrapper)
     await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
     const header = () => bookCard(wrapper).get('[data-testid="match-results-header"]').text()
     expect(header()).toMatch(
-      /^Results for "Primal Hunter, Vol\. 7" by "Zogarth" in France \(FR\) - Request: [\d.]+ s$/,
+      /^Results for "TITLE:Primal Hunter, Vol\. 7 AUTHOR:Zogarth" in France \(FR\) - Request: [\d.]+ s$/,
     )
 
-    await bookCard(wrapper).get('[data-testid="match-title"]').setValue('Something else')
+    await bookCard(wrapper).get('[data-testid="match-query"]').setValue('Something else')
     expect(header()).toMatch(
-      /^Results for "Primal Hunter, Vol\. 7" by "Zogarth" in France \(FR\) - Request: [\d.]+ s$/,
+      /^Results for "TITLE:Primal Hunter, Vol\. 7 AUTHOR:Zogarth" in France \(FR\) - Request: [\d.]+ s$/,
     )
   })
 
-  it('empties the ASIN field with its erase button, shown while the field holds something', async () => {
+  it('empties the search box with its erase button, shown while the box holds something', async () => {
     const wrapper = mountModal()
     await flushPromises()
-    const clear = bookCard(wrapper).get('[data-testid="match-asin-clear"]')
-    expect(clear.attributes('aria-label')).toBe('Empty the ASIN field')
+    const clear = bookCard(wrapper).get('[data-testid="match-query-clear"]')
+    expect(clear.attributes('aria-label')).toBe('Empty the Search field')
 
     await clear.trigger('click')
 
-    expect(field(wrapper, 'match-asin').value).toBe('')
-    expect(bookCard(wrapper).find('[data-testid="match-asin-clear"]').exists()).toBe(false)
-    // Nothing searched by itself
+    expect(field(wrapper, 'match-query').value).toBe('')
+    expect(bookCard(wrapper).find('[data-testid="match-query-clear"]').exists()).toBe(false)
+    // Nothing searched by itself, and nothing to search
     expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
-    await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
-    await flushPromises()
-    expect(apiMocks.advancedSearch).toHaveBeenCalledWith(
-      expect.objectContaining({ title: 'Primal Hunter, Vol. 7', author: 'Zogarth' }),
-    )
+    expect(
+      bookCard(wrapper).get('[data-testid="match-search"]').attributes('disabled'),
+    ).toBeDefined()
   })
 
-  it('empties the title and author with their erase buttons, without searching', async () => {
-    const wrapper = mountModal()
-    await flushPromises()
-
-    for (const [testid, label] of [
-      ['match-title', 'Title'],
-      ['match-author', 'Author'],
-    ]) {
-      const clear = bookCard(wrapper).get(`[data-testid="${testid}-clear"]`)
-      expect(clear.attributes('aria-label')).toBe(`Empty the ${label} field`)
-      await clear.trigger('click')
-      expect(field(wrapper, testid!).value).toBe('')
-      expect(bookCard(wrapper).find(`[data-testid="${testid}-clear"]`).exists()).toBe(false)
-    }
-    expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
-    expect(apiMocks.getAudibleMetadata).not.toHaveBeenCalled()
-  })
-
-  it('searches with Enter in the title like Search: a filled ASIN first', async () => {
-    const wrapper = mountModal()
-    await flushPromises()
-    apiMocks.advancedSearch.mockClear()
-
-    await bookCard(wrapper).get('[data-testid="match-title"]').trigger('keydown', { key: 'Enter' })
-    await flushPromises()
-
-    expect(apiMocks.getAudibleMetadata).toHaveBeenLastCalledWith('B0HM45F8MW', 'fr')
-    expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
-  })
-
-  it('heads the results of a filled ASIN with the ASIN, which has priority over the title', async () => {
+  it('heads the results of an ASIN search with the ASIN', async () => {
     const wrapper = mountModal()
     await flushPromises()
     await bookCard(wrapper).get('[data-testid="match-region"]').setValue('us')
     await flushPromises()
 
-    await bookCard(wrapper).get('[data-testid="match-asin"]').setValue('B0BK9W82PQ')
-    await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
-    await flushPromises()
+    await searchFor(wrapper, 'B0BK9W82PQ')
 
     expect(bookCard(wrapper).get('[data-testid="match-results-header"]').text()).toMatch(
       /^Results for ASIN "B0BK9W82PQ" in United States \(US\) - Request: [\d.]+ s$/,
@@ -520,18 +479,15 @@ describe('RepairBooksModal', () => {
     catalogue({ fr: [frenchPrimalHunterVolume7] })
     const wrapper = mountModal()
     await flushPromises()
-    await emptyAsin(wrapper)
     await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
     expect(bookCard(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(1)
-    await bookCard(wrapper).get('[data-testid="find-match-result"]').trigger('click')
-    expect(bookCard(wrapper).find('[data-testid="match-picked"]').exists()).toBe(true)
 
     // A search that never answers: only Cancel search or the timeout ends it
     apiMocks.advancedSearch.mockImplementation(() => new Promise(() => {}))
-    await bookCard(wrapper).get('[data-testid="match-title"]').trigger('keydown', { key: 'Enter' })
+    await bookCard(wrapper).get('[data-testid="match-query"]').trigger('keydown', { key: 'Enter' })
     await flushPromises()
-    // The previous results stay until the new search answers, nothing selected in them, New reset
+    // The previous results stay until the new search answers
     expect(bookCard(wrapper).attributes('data-match-state')).toBe('searching')
     expect(bookCard(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(1)
     expect(bookCard(wrapper).find('[data-testid="find-match-result"].selected').exists()).toBe(
@@ -545,7 +501,9 @@ describe('RepairBooksModal', () => {
     // The previous results don't answer the search canceled: the empty list in their place, the
     // header line naming the search canceled, and why in the middle of the list
     const header = bookCard(wrapper).get('[data-testid="match-search-error"]')
-    expect(header.text()).toBe('No results for "Primal Hunter, Vol. 7" by "Zogarth" in France (FR)')
+    expect(header.text()).toBe(
+      'No results for "TITLE:Primal Hunter, Vol. 7 AUTHOR:Zogarth" in France (FR)',
+    )
     expect(header.classes()).toContain('match-search-warning')
     const reason = bookCard(wrapper).get('[data-testid="match-results-reason"]')
     expect(reason.text()).toBe('Search canceled')
@@ -563,7 +521,6 @@ describe('RepairBooksModal', () => {
     apiMocks.advancedSearch.mockImplementation(() => new Promise(() => {}))
     const wrapper = mountModal()
     await flushPromises()
-    await emptyAsin(wrapper)
     await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
 
@@ -575,6 +532,8 @@ describe('RepairBooksModal', () => {
     )
     catalogue({ fr: [frenchPrimalHunterVolume7] })
     await bookCard(wrapper).get('[data-testid="match-retry"]').trigger('click')
+    // The clock is faked: the minimum loading time (0 in tests) has to pass too
+    await vi.advanceTimersByTimeAsync(0)
     await flushPromises()
     expect(bookCard(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(1)
   })
@@ -584,7 +543,6 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
 
-    await emptyAsin(wrapper)
     await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
 
@@ -596,31 +554,9 @@ describe('RepairBooksModal', () => {
     expect(bookCard(wrapper).find('[data-testid="match-retry"]').exists()).toBe(true)
     expect(bookCard(wrapper).find('[data-testid="match-search"]').exists()).toBe(false)
 
-    // Another author: a different search, Search again
-    await bookCard(wrapper).get('[data-testid="match-author"]').setValue('Zogarth Junior')
+    await bookCard(wrapper).get('[data-testid="match-query"]').setValue('Primal Hunter 7')
     expect(bookCard(wrapper).find('[data-testid="match-retry"]').exists()).toBe(false)
     expect(bookCard(wrapper).find('[data-testid="match-search"]').exists()).toBe(true)
-    // Changed back to what was searched: still Search, a field was changed
-    await bookCard(wrapper).get('[data-testid="match-author"]').setValue('Zogarth')
-    expect(bookCard(wrapper).find('[data-testid="match-search"]').exists()).toBe(true)
-  })
-
-  it('turns Search into Retry when the search finds nothing', async () => {
-    catalogue({ fr: [] })
-    const wrapper = mountModal()
-    await flushPromises()
-
-    await emptyAsin(wrapper)
-    await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
-    await flushPromises()
-
-    expect(bookCard(wrapper).find('[data-testid="match-search-empty"]').exists()).toBe(true)
-    catalogue({ fr: [frenchPrimalHunterVolume7] })
-    await bookCard(wrapper).get('[data-testid="match-retry"]').trigger('click')
-    await flushPromises()
-    expect(bookCard(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(1)
-    // Found this time: still Retry, the fields unchanged
-    expect(bookCard(wrapper).find('[data-testid="match-retry"]').exists()).toBe(true)
   })
 
   it('serves a search already answered while the dialog is open without a request; Retry asks again', async () => {
@@ -631,48 +567,31 @@ describe('RepairBooksModal', () => {
 
     await region('us')
     await region('fr')
-    expect(apiMocks.getAudibleMetadata).toHaveBeenCalledTimes(2)
+    expect(apiMocks.advancedSearch).toHaveBeenCalledTimes(2)
 
-    // Back to the US: already answered, no request, the same answer
+    // Back to the US: already answered, no request, the same results
     await region('us')
-    expect(apiMocks.getAudibleMetadata).toHaveBeenCalledTimes(2)
-    expect(bookCard(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(0)
-    // The answer says it comes from the dialog's answered searches: maybe stale, Retry to check
-    expect(bookCard(wrapper).get('[data-testid="match-search-empty"]').text()).toBe(
-      'No results for ASIN "B0HM45F8MW" in United States (US) - Cached results',
+    expect(apiMocks.advancedSearch).toHaveBeenCalledTimes(2)
+    expect(bookCard(wrapper).findAll('[data-testid="find-match-result"]').length).toBeGreaterThan(0)
+    expect(bookCard(wrapper).get('[data-testid="match-results-header"]').text()).toMatch(
+      / - Cached results$/,
     )
-    expect(bookCard(wrapper).get('[data-testid="match-results-reason"]').text()).toBe(
-      'No record for B0HM45F8MW in Audible United States (US)',
-    )
+
+    // A changed search box is Search, even changed back to what was searched; served without a
+    // request
+    await bookCard(wrapper).get('[data-testid="match-query"]').setValue('Something else')
+    await bookCard(wrapper)
+      .get('[data-testid="match-query"]')
+      .setValue('TITLE:Primal Hunter, Vol. 7 AUTHOR:Zogarth')
+    expect(bookCard(wrapper).find('[data-testid="match-search"]').exists()).toBe(true)
+    await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
+    await flushPromises()
+    expect(apiMocks.advancedSearch).toHaveBeenCalledTimes(2)
 
     // Retry is the way to ask Audible again
     await bookCard(wrapper).get('[data-testid="match-retry"]').trigger('click')
     await flushPromises()
-    expect(apiMocks.getAudibleMetadata).toHaveBeenCalledTimes(3)
-  })
-
-  it('shows Search once a field is changed, even back to what was searched, and serves it without a request', async () => {
-    const wrapper = mountModal()
-    await flushPromises()
-    await bookCard(wrapper).get('[data-testid="match-region"]').setValue('us')
-    await flushPromises()
-    await emptyAsin(wrapper)
-    await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
-    await flushPromises()
-    expect(bookCard(wrapper).find('[data-testid="match-retry"]').exists()).toBe(true)
-
-    await bookCard(wrapper).get('[data-testid="match-author"]').setValue('Someone')
-    await bookCard(wrapper).get('[data-testid="match-author"]').setValue('Zogarth')
-    expect(bookCard(wrapper).find('[data-testid="match-search"]').exists()).toBe(true)
-
-    apiMocks.advancedSearch.mockClear()
-    await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
-    await flushPromises()
-    expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
-    expect(bookCard(wrapper).get('[data-testid="match-results-header"]').text()).toMatch(
-      / - Cached results$/,
-    )
-    expect(bookCard(wrapper).find('[data-testid="match-retry"]').exists()).toBe(true)
+    expect(apiMocks.advancedSearch).toHaveBeenCalledTimes(3)
   })
 
   it('says what was found, holds it, then fades out to the results, pickable once it is gone', async () => {
@@ -682,15 +601,12 @@ describe('RepairBooksModal', () => {
     try {
       const wrapper = mountModal()
       await flushPromises()
-      await bookCard(wrapper).get('[data-testid="match-region"]').setValue('us')
-      await flushPromises()
-      await emptyAsin(wrapper)
       const found = () => bookCard(wrapper).find('[data-testid="match-results-found"]')
       const pickFirst = () =>
         bookCard(wrapper).get('[data-testid="find-match-result"]').trigger('click')
 
-      // Asked Audible: the answer is said, over the results, which can't be picked yet
-      await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
+      // A new region searches there: the answer is said, over the results, not pickable yet
+      await bookCard(wrapper).get('[data-testid="match-region"]').setValue('us')
       await flushPromises()
       expect(found().text()).toBe('Found 1 result')
       expect(bookCard(wrapper).get('[data-testid="match-results"]').classes()).toContain(
@@ -708,7 +624,9 @@ describe('RepairBooksModal', () => {
       expect(bookCard(wrapper).find('[data-testid="match-picked"]').exists()).toBe(true)
 
       // Served from the answered searches, at once: the same reveal
-      await bookCard(wrapper).get('[data-testid="match-author"]').setValue('Zogarth')
+      await bookCard(wrapper)
+        .get('[data-testid="match-query"]')
+        .setValue('TITLE:Primal Hunter, Vol. 7 AUTHOR:Zogarth')
       await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
       await flushPromises()
       expect(found().text()).toBe('Found 1 result')
@@ -734,7 +652,6 @@ describe('RepairBooksModal', () => {
     // The first search waits over the empty list, under the spinner
     let answer!: (results: unknown[]) => void
     apiMocks.advancedSearch.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)))
-    await emptyAsin(wrapper)
     await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
     expect(bookCard(wrapper).find('[data-testid="match-results-pending"]').exists()).toBe(true)
@@ -743,7 +660,7 @@ describe('RepairBooksModal', () => {
     answer([])
     await flushPromises()
     expect(bookCard(wrapper).get('[data-testid="match-search-empty"]').text()).toMatch(
-      /^No results for "Primal Hunter, Vol\. 7" by "Zogarth" in France \(FR\) - Request: [\d.]+ s$/,
+      /^No results for "TITLE:Primal Hunter, Vol\. 7 AUTHOR:Zogarth" in France \(FR\) - Request: [\d.]+ s$/,
     )
     expect(bookCard(wrapper).find('[data-testid="match-results-placeholder"]').exists()).toBe(true)
   })
@@ -751,10 +668,8 @@ describe('RepairBooksModal', () => {
   it('puts the empty list back when a search fails, and says why on its header line', async () => {
     const wrapper = mountModal()
     await flushPromises()
+    // A new region searches the search box there
     await bookCard(wrapper).get('[data-testid="match-region"]').setValue('us')
-    await flushPromises()
-    await emptyAsin(wrapper)
-    await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
     expect(bookCard(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(1)
 
@@ -768,7 +683,7 @@ describe('RepairBooksModal', () => {
     const placeholder = bookCard(wrapper).get('[data-testid="match-results-placeholder"]')
     const header = bookCard(wrapper).get('[data-testid="match-search-error"]')
     expect(header.text()).toBe(
-      'No results for "Primal Hunter, Vol. 7" by "Zogarth" in United States (US)',
+      'No results for "TITLE:Primal Hunter, Vol. 7 AUTHOR:Zogarth" in United States (US)',
     )
     expect(header.classes()).toContain('match-search-error')
     expect(header.classes()).toContain('match-results-header')
@@ -780,10 +695,8 @@ describe('RepairBooksModal', () => {
   it('keeps the height of the results a canceled search empties, with several books', async () => {
     const wrapper = mountModal([7, 8])
     await flushPromises()
+    // A new region searches the search box there
     await bookCard(wrapper).get('[data-testid="match-region"]').setValue('us')
-    await flushPromises()
-    await emptyAsin(wrapper)
-    await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
     // No room kept from the start with several books
     expect(bookCard(wrapper).find('[data-testid="match-results-placeholder"]').exists()).toBe(false)
@@ -808,7 +721,6 @@ describe('RepairBooksModal', () => {
     // The first search waits over an empty list one result high, under the spinner
     let answer!: (results: unknown[]) => void
     apiMocks.advancedSearch.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)))
-    await emptyAsin(wrapper)
     await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
     expect(bookCard(wrapper).find('[data-testid="match-results-placeholder"]').exists()).toBe(true)
@@ -830,9 +742,7 @@ describe('RepairBooksModal', () => {
     catalogue({ fr: [frenchPrimalHunterVolume7] })
     const wrapper = mountModal([7, 8])
     await flushPromises()
-    await emptyAsin(wrapper)
-    await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
-    await flushPromises()
+    await searchFor(wrapper, 'Primal Hunter')
 
     // The answer shows, the unseen result stays under it: the list never gets shorter than it
     expect(
@@ -859,7 +769,7 @@ describe('RepairBooksModal', () => {
   })
 
   it('never keeps a failed search: the same values ask again', async () => {
-    apiMocks.getAudibleMetadata.mockRejectedValueOnce(new Error('API error: 502 Bad Gateway'))
+    apiMocks.advancedSearch.mockRejectedValueOnce(new Error('API error: 502 Bad Gateway'))
     const wrapper = mountModal()
     await flushPromises()
     const region = (value: string) =>
@@ -868,22 +778,18 @@ describe('RepairBooksModal', () => {
     await region('us')
     await region('fr')
     await region('us')
-    expect(apiMocks.getAudibleMetadata).toHaveBeenCalledTimes(3)
+    expect(apiMocks.advancedSearch).toHaveBeenCalledTimes(3)
   })
 
   it('shares the answered searches between the books of the dialog', async () => {
+    // Both books have the same title and author
     const wrapper = mountModal([7, 8])
     await flushPromises()
-    // Both books have the same title, author and ASIN
     for (const audiobookId of [7, 8]) {
       await bookCard(wrapper, audiobookId).get('[data-testid="match-region"]').setValue('us')
       await flushPromises()
-      await emptyAsin(wrapper, audiobookId)
-      await bookCard(wrapper, audiobookId).get('[data-testid="match-search"]').trigger('click')
-      await flushPromises()
     }
 
-    expect(apiMocks.getAudibleMetadata).toHaveBeenCalledTimes(1)
     expect(apiMocks.advancedSearch).toHaveBeenCalledTimes(1)
     expect(
       bookCard(wrapper, 8).findAll('[data-testid="find-match-result"]').length,
@@ -897,40 +803,42 @@ describe('RepairBooksModal', () => {
     )
   })
 
-  it('asks Audible afresh each time the dialog opens', async () => {
+  it('turns Search into Retry when the search finds nothing', async () => {
+    catalogue({ fr: [] })
     const wrapper = mountModal()
     await flushPromises()
-    await bookCard(wrapper).get('[data-testid="match-region"]').setValue('us')
-    await flushPromises()
-    expect(apiMocks.getAudibleMetadata).toHaveBeenCalledTimes(1)
 
-    await wrapper.setProps({ visible: false })
-    await wrapper.setProps({ visible: true })
+    await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
-    await bookCard(wrapper).get('[data-testid="match-region"]').setValue('us')
+
+    // It says where it comes from: a request, so it is fresh
+    expect(bookCard(wrapper).get('[data-testid="match-search-empty"]').text()).toMatch(
+      / - Request: [\d.]+ s$/,
+    )
+    catalogue({ fr: [frenchPrimalHunterVolume7] })
+    await bookCard(wrapper).get('[data-testid="match-retry"]').trigger('click')
     await flushPromises()
-    expect(apiMocks.getAudibleMetadata).toHaveBeenCalledTimes(2)
+    expect(bookCard(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(1)
+    // Found this time: still Retry, the search box and region unchanged
+    expect(bookCard(wrapper).find('[data-testid="match-retry"]').exists()).toBe(true)
   })
 
-  it('offers Retry when the ASIN lookup fails, and Retry looks it up again', async () => {
+  it('offers Retry when an ASIN lookup fails, and Retry looks it up again', async () => {
     apiMocks.getAudibleMetadata.mockRejectedValueOnce(new Error('API error: 502 Bad Gateway'))
     const wrapper = mountModal()
     await flushPromises()
 
-    await bookCard(wrapper).get('[data-testid="match-region"]').setValue('us')
-    await flushPromises()
+    await searchFor(wrapper, 'B0HM45F8MW')
     expect(bookCard(wrapper).get('[data-testid="match-results-reason"]').text()).toContain(
       'The search failed: API error: 502 Bad Gateway',
     )
 
-    catalogue({ us: [{ ...frenchPrimalHunterVolume7, region: 'us' }] })
+    catalogue({ fr: [frenchPrimalHunterVolume7] })
     await bookCard(wrapper).get('[data-testid="match-retry"]').trigger('click')
     await flushPromises()
-    expect(apiMocks.getAudibleMetadata).toHaveBeenLastCalledWith('B0HM45F8MW', 'us')
-    // Found, offered to pick: nothing picked for the user
-    expect(bookCard(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(1)
-    expect(bookCard(wrapper).attributes('data-match-state')).toBe('ignored')
-    expect(bookCard(wrapper).find('[data-testid="match-retry"]').exists()).toBe(true)
+    expect(apiMocks.getAudibleMetadata).toHaveBeenLastCalledWith('B0HM45F8MW', 'fr')
+    // The book's own record: tagged Current, not picked
+    expect(bookCard(wrapper).find('[data-testid="find-match-current"]').exists()).toBe(true)
   })
 
   it('sums the book up next to Revert: ASIN - Title: Subtitle - Author - Region', async () => {
@@ -951,11 +859,8 @@ describe('RepairBooksModal', () => {
     catalogue({ us: [{ ...englishPrimalHunter4, title: 'The Primal Hunter', subtitle: 'Book 4' }] })
     const wrapper = mountModal()
     await flushPromises()
+    // A new region searches there
     await bookCard(wrapper).get('[data-testid="match-region"]').setValue('us')
-    await flushPromises()
-
-    await emptyAsin(wrapper)
-    await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
 
     expect(bookCard(wrapper).get('[data-testid="find-match-result"] .result-title').text()).toBe(
@@ -1002,7 +907,6 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
 
-    await emptyAsin(wrapper)
     await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
     const selected = () =>
@@ -1040,24 +944,23 @@ describe('RepairBooksModal', () => {
   it('greys the previous results out under a spinner while a new search runs, and keeps them unpickable', async () => {
     const wrapper = mountModal()
     await flushPromises()
+    // Changing the region searches there
     await bookCard(wrapper).get('[data-testid="match-region"]').setValue('us')
-    await flushPromises()
-    await emptyAsin(wrapper)
-    await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
     const results = () => bookCard(wrapper).get('[data-testid="match-results"]')
     expect(results().classes()).not.toContain('match-results-pending')
     expect(bookCard(wrapper).find('[data-testid="match-results-pending"]').exists()).toBe(false)
 
-    // Retry, a new request: the previous results stay, greyed out, under a spinning wheel
+    // A new search: the previous results stay, greyed out, under a spinning wheel
     let answer!: (results: unknown[]) => void
     apiMocks.advancedSearch.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)))
-    await bookCard(wrapper).get('[data-testid="match-retry"]').trigger('click')
+    await bookCard(wrapper).get('[data-testid="match-query"]').setValue('Primal Hunter')
+    await bookCard(wrapper).get('[data-testid="match-query"]').trigger('keydown', { key: 'Enter' })
     await flushPromises()
     expect(results().classes()).toContain('match-results-pending')
     expect(results().attributes('aria-busy')).toBe('true')
-    expect(bookCard(wrapper).get('[data-testid="match-results-pending-text"]').text()).toBe(
-      'Searching "Primal Hunter, Vol. 7" by "Zogarth" in United States (US)…',
+    expect(bookCard(wrapper).get('[data-testid="match-results-pending-text"]').text()).toContain(
+      'Searching',
     )
 
     // A stale result can't be picked
@@ -1083,15 +986,14 @@ describe('RepairBooksModal', () => {
     await flushPromises()
     await bookCard(wrapper).get('[data-testid="match-region"]').setValue('us')
     await flushPromises()
-    await emptyAsin(wrapper)
-    await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
-    await flushPromises()
 
     // Book 8 is searched: book 7's results wait, greyed out, and can't be picked
     let answer!: (results: unknown[]) => void
     apiMocks.advancedSearch.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)))
-    await emptyAsin(wrapper, 8)
-    await bookCard(wrapper, 8).get('[data-testid="match-search"]').trigger('click')
+    await bookCard(wrapper, 8).get('[data-testid="match-query"]').setValue('Other book')
+    await bookCard(wrapper, 8)
+      .get('[data-testid="match-query"]')
+      .trigger('keydown', { key: 'Enter' })
     await flushPromises()
     expect(bookCard(wrapper).get('[data-testid="match-results"]').classes()).toContain(
       'match-results-pending',
@@ -1118,7 +1020,6 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal([7, 8])
     await flushPromises()
 
-    await emptyAsin(wrapper)
     await bookCard(wrapper, 7).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
 
@@ -1130,7 +1031,7 @@ describe('RepairBooksModal', () => {
       expect(control.element.matches(':disabled')).toBe(true)
     // Enter in one of its fields doesn't start a second search
     apiMocks.advancedSearch.mockClear()
-    await bookCard(wrapper, 8).get('[data-testid="match-title"]').trigger('keydown.enter')
+    await bookCard(wrapper, 8).get('[data-testid="match-query"]').trigger('keydown.enter')
     await flushPromises()
     expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
     // Changing a region searches: locked too, on every book
@@ -1145,7 +1046,7 @@ describe('RepairBooksModal', () => {
       bookCard(wrapper, 8).get('[data-testid="match-search"]').attributes('disabled'),
     ).toBeUndefined()
     expect(
-      bookCard(wrapper, 8).get('[data-testid="match-title"]').element.matches(':disabled'),
+      bookCard(wrapper, 8).get('[data-testid="match-query"]').element.matches(':disabled'),
     ).toBe(false)
     for (const audiobookId of [7, 8])
       expect(
@@ -1159,8 +1060,8 @@ describe('RepairBooksModal', () => {
 
     await searchAndPick(wrapper)
 
-    expect(bookCard(wrapper).get('[data-testid="match-picked"]').text()).toContain('B0BK9W82PQ')
     expect(field(wrapper, 'match-region').value).toBe('us')
+    expect(bookCard(wrapper).get('[data-testid="match-picked"]').text()).toContain('B0BK9W82PQ')
     expect(bookCard(wrapper).get('[data-testid="match-picked"]').text()).toContain(
       'Primal Hunter 4',
     )
@@ -1202,7 +1103,7 @@ describe('RepairBooksModal', () => {
     ])
   })
 
-  it('keeps the ASIN when the region changes and looks it up there, with Cancel search', async () => {
+  it('searches again when the region changes, with Cancel search', async () => {
     let answer: () => void = () => {}
     apiMocks.getAudibleMetadata.mockImplementation(
       () =>
@@ -1213,9 +1114,10 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
 
+    await bookCard(wrapper).get('[data-testid="match-query"]').setValue('B0HM45F8MW')
+
     await bookCard(wrapper).get('[data-testid="match-region"]').setValue('de')
 
-    expect(field(wrapper, 'match-asin').value).toBe('B0HM45F8MW')
     // Add New's ASIN search: the metadata sources, in the region
     expect(apiMocks.getAudibleMetadata).toHaveBeenCalledWith('B0HM45F8MW', 'de')
     expect(bookCard(wrapper).get('[data-testid="match-search-pending"]').text()).toContain(
@@ -1226,54 +1128,43 @@ describe('RepairBooksModal', () => {
     await flushPromises()
   })
 
-  it('offers the one record the region has for the ASIN without picking it', async () => {
-    catalogue({
-      de: [
-        {
-          ...frenchPrimalHunterVolume7,
-          title: 'Primal Hunter 7',
-          authors: [{ name: 'Zogarth (DE)' }],
-        },
-      ],
-    })
+  it('offers the one record found for an ASIN searched alone, picked by the user', async () => {
+    catalogue({ de: [{ ...frenchPrimalHunterVolume7, title: 'Primal Hunter 7' }] })
     const wrapper = mountModal()
     await flushPromises()
+    await bookCard(wrapper).get('[data-testid="match-query"]').setValue('ASIN:B0HM45F8MW')
 
     await bookCard(wrapper).get('[data-testid="match-region"]').setValue('de')
     await flushPromises()
 
     const results = bookCard(wrapper).findAll('[data-testid="find-match-result"]')
     expect(results).toHaveLength(1)
+    // Offered, not picked
     expect(results[0]!.classes()).not.toContain('selected')
     expect(bookCard(wrapper).find('[data-testid="match-picked"]').exists()).toBe(false)
-    expect(wrapper.get('[data-testid="repair-confirm"]').text()).toContain('Repair 0')
-
-    // Picked by the user: the new record, the fields left as typed
     await results[0]!.trigger('click')
     expect(bookCard(wrapper).get('[data-testid="match-picked"]').text()).toContain(
       'Primal Hunter 7',
     )
-    expect(field(wrapper, 'match-title').value).toBe('Primal Hunter, Vol. 7')
-    expect(field(wrapper, 'match-author').value).toBe('Zogarth')
 
-    apiMocks.advancedSearch.mockClear()
+    apiMocks.getAudibleMetadata.mockClear()
     await repair(wrapper)
     // Already looked up: saved without a second lookup
-    expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
+    expect(apiMocks.getAudibleMetadata).not.toHaveBeenCalled()
     expect(apiMocks.updateAudiobookIdentifiers).toHaveBeenCalledWith(
       7,
       expect.arrayContaining([expect.objectContaining({ value: 'B0HM45F8MW', region: 'de' })]),
     )
   })
 
-  it('shows an error when the region has no record for the ASIN, and the book cannot be repaired', async () => {
+  it('shows an error when the region has no record for an ASIN, and the book cannot be repaired', async () => {
     const wrapper = mountModal()
     await flushPromises()
+    await bookCard(wrapper).get('[data-testid="match-query"]').setValue('B0HM45F8MW')
 
     await bookCard(wrapper).get('[data-testid="match-region"]').setValue('us')
     await flushPromises()
 
-    expect(field(wrapper, 'match-asin').value).toBe('B0HM45F8MW')
     expect(bookCard(wrapper).get('[data-testid="match-results-reason"]').text()).toContain(
       'No record for B0HM45F8MW in Audible United States (US)',
     )
@@ -1285,100 +1176,27 @@ describe('RepairBooksModal', () => {
     expect(bookCard(wrapper).attributes('data-match-state')).toBe('warning')
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
 
-    // Another ASIN clears the error, and Search looks it up
-    await bookCard(wrapper).get('[data-testid="match-asin"]').setValue('B0BK9W82PQ')
-    await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
-    await flushPromises()
+    // Another ASIN, searched: found, then picked
+    await searchFor(wrapper, 'B0BK9W82PQ')
     expect(bookCard(wrapper).find('[data-testid="match-results-reason"]').exists()).toBe(false)
     await bookCard(wrapper).get('[data-testid="find-match-result"]').trigger('click')
     expect(bookCard(wrapper).attributes('data-match-state')).toBe('matched')
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeUndefined()
   })
 
-  it('looks a filled ASIN up before the title and author, and the title once the ASIN is emptied', async () => {
-    catalogue({ fr: [frenchPrimalHunterVolume7, { ...englishPrimalHunter4, region: 'fr' }] })
-    const wrapper = mountModal()
-    await flushPromises()
-    apiMocks.advancedSearch.mockClear()
-
-    // Filled from the start with the book's ASIN: Search looks it up, the title left out
-    await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
-    await flushPromises()
-    expect(apiMocks.getAudibleMetadata).toHaveBeenLastCalledWith('B0HM45F8MW', 'fr')
-    expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
-    expect(field(wrapper, 'match-title').value).toBe('Primal Hunter, Vol. 7')
-
-    await bookCard(wrapper).get('[data-testid="match-asin"]').setValue('B0BK9W82PQ')
-    await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
-    await flushPromises()
-    expect(apiMocks.getAudibleMetadata).toHaveBeenLastCalledWith('B0BK9W82PQ', 'fr')
-    expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
-
-    await emptyAsin(wrapper)
-    await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
-    await flushPromises()
-    // The record found for the ASIN left the title and author as they were
-    expect(apiMocks.advancedSearch).toHaveBeenCalledWith(
-      expect.objectContaining({ title: 'Primal Hunter, Vol. 7', author: 'Zogarth' }),
-    )
-  })
-
-  it('starts the search Search would with Enter in any field or a new region: ASIN first', async () => {
-    const wrapper = mountModal()
-    await flushPromises()
-    const enter = (testid: string) =>
-      bookCard(wrapper).get(`[data-testid="${testid}"]`).trigger('keydown', { key: 'Enter' })
-    const searched = () => ({
-      asin: apiMocks.getAudibleMetadata.mock.calls.length,
-      title: apiMocks.advancedSearch.mock.calls.length,
-    })
-    const reset = () => {
-      apiMocks.getAudibleMetadata.mockClear()
-      apiMocks.advancedSearch.mockClear()
-    }
-
-    // The ASIN is filled: Enter in the title or the author looks it up, on its own
-    for (const testid of ['match-title', 'match-author']) {
-      reset()
-      await enter(testid)
-      await flushPromises()
-      expect(searched()).toEqual({ asin: 1, title: 0 })
-    }
-
-    // The ASIN is empty: Enter in it searches the title and author, as Search would
-    await emptyAsin(wrapper)
-    reset()
-    await enter('match-asin')
-    await flushPromises()
-    expect(searched()).toEqual({ asin: 0, title: 1 })
-
-    // And so does a new region, there
-    reset()
-    await bookCard(wrapper).get('[data-testid="match-region"]').setValue('us')
-    await flushPromises()
-    expect(searched()).toEqual({ asin: 0, title: 1 })
-    expect(apiMocks.advancedSearch).toHaveBeenLastCalledWith(
-      expect.objectContaining({ title: 'Primal Hunter, Vol. 7', region: 'us' }),
-    )
-  })
-
-  it('looks a typed ASIN up in its region with Enter, then saves it', async () => {
+  it('looks an ASIN up in its region with Enter, then saves it', async () => {
     const wrapper = mountModal()
     await flushPromises()
     await bookCard(wrapper).get('[data-testid="match-region"]').setValue('us')
     await flushPromises()
-    await bookCard(wrapper).get('[data-testid="match-asin"]').setValue('b0bk9w82pq')
-    await bookCard(wrapper).get('[data-testid="match-asin"]').trigger('keydown', { key: 'Enter' })
-    await flushPromises()
+
+    await searchFor(wrapper, 'B0BK9W82PQ')
 
     expect(apiMocks.getAudibleMetadata).toHaveBeenLastCalledWith('B0BK9W82PQ', 'us')
     await bookCard(wrapper).get('[data-testid="find-match-result"]').trigger('click')
     expect(bookCard(wrapper).get('[data-testid="match-picked"]').text()).toContain(
       'Primal Hunter 4',
     )
-    // The record picked leaves the title and author as typed
-    expect(field(wrapper, 'match-title').value).toBe('Primal Hunter, Vol. 7')
-    expect(field(wrapper, 'match-author').value).toBe('Zogarth')
 
     apiMocks.getAudibleMetadata.mockClear()
     await repair(wrapper)
@@ -1389,12 +1207,11 @@ describe('RepairBooksModal', () => {
     )
   })
 
-  it('does not let a typed ASIN its region has no record for be repaired', async () => {
+  it('does not let an ASIN its region has no record for be repaired', async () => {
     const wrapper = mountModal()
     await flushPromises()
-    await bookCard(wrapper).get('[data-testid="match-asin"]').setValue('B0BK9W82PQ')
-    await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
-    await flushPromises()
+
+    await searchFor(wrapper, 'B0BK9W82PQ')
 
     expect(bookCard(wrapper).get('[data-testid="match-results-reason"]').text()).toContain(
       'No record for B0BK9W82PQ in Audible France (FR)',
@@ -1402,7 +1219,7 @@ describe('RepairBooksModal', () => {
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
   })
 
-  it('keeps the new record while an ASIN is typed, and a new search unpicks it', async () => {
+  it('keeps the new record while the search box is edited, and a new search unpicks it', async () => {
     catalogue({
       us: [
         englishPrimalHunter4,
@@ -1412,17 +1229,15 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
     await searchAndPick(wrapper)
-    const asin = bookCard(wrapper).get('[data-testid="match-asin"]')
 
-    await asin.setValue('B0OTHER123')
+    await bookCard(wrapper).get('[data-testid="match-query"]').setValue('B0OTHER123')
     expect(bookCard(wrapper).get('[data-testid="match-picked"]').text()).toContain('B0BK9W82PQ')
 
-    await asin.trigger('keydown', { key: 'Enter' })
+    await bookCard(wrapper).get('[data-testid="match-query"]').trigger('keydown', { key: 'Enter' })
     await flushPromises()
     expect(apiMocks.getAudibleMetadata).toHaveBeenLastCalledWith('B0OTHER123', 'us')
     // The new search unpicked the previous record: New is back to no record
     expect(bookCard(wrapper).find('[data-testid="match-picked"]').exists()).toBe(false)
-    expect(bookCard(wrapper).get('[data-testid="match-none"]').exists()).toBe(true)
     await bookCard(wrapper).get('[data-testid="find-match-result"]').trigger('click')
     expect(bookCard(wrapper).get('[data-testid="match-picked"]').text()).toContain('B0OTHER123')
   })
@@ -1431,26 +1246,28 @@ describe('RepairBooksModal', () => {
     const wrapper = mountModal()
     await flushPromises()
 
-    await bookCard(wrapper).get('[data-testid="match-asin"]').setValue('B0BK9')
+    await bookCard(wrapper).get('[data-testid="match-query"]').setValue('ASIN:B0BK9')
 
     expect(bookCard(wrapper).find('[data-testid="match-search-error"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="repair-confirm"]').attributes('disabled')).toBeDefined()
   })
 
-  it('says nothing about an empty ASIN, and has nothing to search for it', async () => {
+  it('has nothing to search with an empty search box, and says nothing about it', async () => {
     const wrapper = mountModal()
     await flushPromises()
 
-    await bookCard(wrapper).get('[data-testid="match-asin"]').setValue('')
+    await bookCard(wrapper).get('[data-testid="match-query"]').setValue('')
 
+    expect(
+      bookCard(wrapper).get('[data-testid="match-search"]').attributes('disabled'),
+    ).toBeDefined()
     expect(bookCard(wrapper).find('[data-testid="match-search-error"]').exists()).toBe(false)
-    expect(bookCard(wrapper).find('.match-hint').exists()).toBe(false)
   })
 
   it('searches a malformed ASIN as a field error: its rules shown, orange, nothing sent', async () => {
     const wrapper = mountModal()
     await flushPromises()
-    await bookCard(wrapper).get('[data-testid="match-asin"]').setValue('B0BK9')
+    await bookCard(wrapper).get('[data-testid="match-query"]').setValue('ASIN:B0BK9')
     apiMocks.getAudibleMetadata.mockClear()
     apiMocks.advancedSearch.mockClear()
 
@@ -1470,21 +1287,21 @@ describe('RepairBooksModal', () => {
     expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
 
     // Typing only prepares the next search: the message stays until it runs
-    await bookCard(wrapper).get('[data-testid="match-asin"]').setValue('B0BK9W82PQ')
+    await bookCard(wrapper).get('[data-testid="match-query"]').setValue('B0BK9W82PQ')
     expect(bookCard(wrapper).find('[data-testid="match-search-error"]').exists()).toBe(true)
     await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
     await flushPromises()
     expect(bookCard(wrapper).find('[data-testid="match-search-error"]').exists()).toBe(false)
   })
 
-  it('reverts a book to its ASIN and region before the changes', async () => {
+  it('reverts a book to its search and region before the changes', async () => {
     const wrapper = mountModal()
     await flushPromises()
     await searchAndPick(wrapper)
 
     await bookCard(wrapper).get('[data-testid="match-revert"]').trigger('click')
 
-    expect(field(wrapper, 'match-asin').value).toBe('B0HM45F8MW')
+    expect(field(wrapper, 'match-query').value).toBe('TITLE:Primal Hunter, Vol. 7 AUTHOR:Zogarth')
     expect(field(wrapper, 'match-region').value).toBe('fr')
     expect(bookCard(wrapper).find('[data-testid="match-picked"]').exists()).toBe(false)
     expect(
@@ -1562,11 +1379,9 @@ describe('RepairBooksModal', () => {
     await flushPromises()
     await searchAndPick(wrapper)
     const fields = () =>
-      ['match-asin', 'match-title', 'match-author', 'match-region'].map(
-        (testId) => field(wrapper, testId).value,
-      )
+      ['match-query', 'match-region'].map((testId) => field(wrapper, testId).value)
     // Picking left the search as typed
-    expect(fields()).toEqual(['', 'Primal Hunter, Vol. 7', 'Zogarth', 'us'])
+    expect(fields()).toEqual(['TITLE:Primal Hunter, Vol. 7 AUTHOR:Zogarth', 'us'])
     expect(bookCard(wrapper).attributes('data-match-state')).toBe('matched')
     const selected = bookCard(wrapper).get('[data-testid="find-match-result"].selected')
 
@@ -1580,7 +1395,7 @@ describe('RepairBooksModal', () => {
     )
     expect(bookCard(wrapper).attributes('data-match-state')).toBe('ignored')
     expect(wrapper.get('[data-testid="repair-confirm"]').text()).toContain('Repair 0')
-    expect(fields()).toEqual(['', 'Primal Hunter, Vol. 7', 'Zogarth', 'us'])
+    expect(fields()).toEqual(['TITLE:Primal Hunter, Vol. 7 AUTHOR:Zogarth', 'us'])
   })
 
   it('highlights on New the parts of the picked record that differ from the current one', async () => {

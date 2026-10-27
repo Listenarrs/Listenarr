@@ -52,9 +52,9 @@
           <NoticeBox>
             <template #icon><PhInfo /></template>
             <p>Find the right Audible record for each book, then repair.</p>
-            <p data-testid="repair-info-asin">
-              A filled ASIN is searched on its own: the title and author are left out of that
-              search.
+            <p data-testid="repair-info-search">
+              The search box reads like Add New's: a title, an ASIN, or TITLE:, AUTHOR:, ASIN:,
+              SERIES: and ISBN: tokens.
             </p>
           </NoticeBox>
 

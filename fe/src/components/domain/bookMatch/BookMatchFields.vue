@@ -15,45 +15,22 @@
   You should have received a copy of the GNU Affero General Public License
   along with this program. If not, see <https://www.gnu.org/licenses/>.
 -->
-<!-- A book match card's fields: ASIN, Title, Author and Region, then Search (Retry once a search
-     ran, until a field is edited; Cancel search while one runs), always sharing the whole row.
-     Typing only prepares the next search; Enter in a field, the button and a region change ask
-     for it. -->
+<!-- A book match card's fields: a search box read like Add New's and the Region, then Search
+     (Retry once a search ran, until the search box or region changes; Cancel search while one
+     runs), always sharing the whole row. Typing only prepares the next search; Enter in the search
+     box, the button and a region change ask for it. -->
 <template>
   <div class="match-fields" :class="{ 'match-fields-narrow': isNarrow }">
-    <label class="match-field match-field-asin">
-      <span class="match-field-label">ASIN</span>
+    <label class="match-field match-field-query">
+      <span class="match-field-label">Search</span>
       <ClearableInput
-        v-model.trim="bookMatch.asin"
-        maxlength="10"
-        clear-label="Empty the ASIN field"
-        clear-test-id="match-asin-clear"
-        data-testid="match-asin"
-        @input="emit('edited')"
-        @cleared="emit('edited')"
-        @keydown.enter.prevent="emit('search')"
-      />
-    </label>
-    <label class="match-field">
-      <span class="match-field-label">Title</span>
-      <ClearableInput
-        ref="titleInputRef"
+        ref="queryInputRef"
         v-model="bookMatch.query"
-        clear-label="Empty the Title field"
-        clear-test-id="match-title-clear"
-        data-testid="match-title"
-        @input="emit('edited')"
-        @cleared="emit('edited')"
-        @keydown.enter.prevent="emit('search')"
-      />
-    </label>
-    <label class="match-field">
-      <span class="match-field-label">Author</span>
-      <ClearableInput
-        v-model="bookMatch.author"
-        clear-label="Empty the Author field"
-        clear-test-id="match-author-clear"
-        data-testid="match-author"
+        placeholder="Title, ASIN, or TITLE:… AUTHOR:… SERIES:…"
+        title="As in Add New: a title, an ASIN, or TITLE:, AUTHOR:, ASIN:, SERIES: and ISBN: tokens"
+        clear-label="Empty the Search field"
+        clear-test-id="match-query-clear"
+        data-testid="match-query"
         @input="emit('edited')"
         @cleared="emit('edited')"
         @keydown.enter.prevent="emit('search')"
@@ -118,7 +95,7 @@
       :title="
         isSearchLocked
           ? 'Another book is being searched'
-          : 'The search Add New and Library Import use, with the same rules and priorities'
+          : 'The search Add New uses, with the same rules and priorities'
       "
       @click="emit('search')"
     >
@@ -137,7 +114,7 @@ import { FALLBACK_REGION, regionLabel, type BookMatch } from '@/utils/bookMatch'
 
 const props = defineProps<{
   configuredRegion: string
-  // The button at the row's end: Search, Retry (no field edited since the last search) or Cancel
+  // The button at the row's end: Search, Retry (nothing changed since the last search) or Cancel
   // search (one runs)
   searchAction: 'search' | 'retry' | 'cancel'
   // Search or Retry can run now
@@ -153,14 +130,14 @@ const props = defineProps<{
 const bookMatch = defineModel<BookMatch>('bookMatch', { required: true })
 
 const emit = defineEmits<{
-  // Any change to a field, even back to what was searched
+  // Any change to the search box, even back to what was searched
   edited: []
   search: []
   cancel: []
   regionChanged: []
 }>()
 
-const titleInputRef = ref<InstanceType<typeof ClearableInput> | null>(null)
+const queryInputRef = ref<InstanceType<typeof ClearableInput> | null>(null)
 
 // Every Audible region stays available, in canary's order (as in Add to Library): the book's
 // region, then the preferred (configured) one and the US, then the others alphabetically by name
@@ -173,20 +150,18 @@ const regionOptions = computed(() =>
   ]),
 )
 
-// The title focused with its text selected, ready to be typed over
-function focusTitle() {
-  titleInputRef.value?.focusAndSelect()
+// The search box focused with its text selected, ready to be typed over
+function focusQuery() {
+  queryInputRef.value?.focusAndSelect()
 }
 
-defineExpose({ focusTitle })
+defineExpose({ focusQuery })
 </script>
 
 <style scoped>
 .match-fields {
   display: grid;
-  grid-template-columns:
-    minmax(10.5rem, 1.2fr) minmax(0, 2.5fr) minmax(0, 1.5fr) minmax(5rem, 0.5fr)
-    auto;
+  grid-template-columns: minmax(0, 1fr) minmax(5rem, 6rem) auto;
   align-items: end;
   gap: 0.75rem;
   margin-top: 0.75rem;
@@ -204,10 +179,6 @@ defineExpose({ focusTitle })
   box-sizing: border-box;
 }
 
-.match-field-asin :deep(input) {
-  font-family: monospace;
-}
-
 .match-field-label {
   font-size: 0.8rem;
   color: #aaa;
@@ -223,12 +194,14 @@ defineExpose({ focusTitle })
   white-space: nowrap;
 }
 
-/* A isNarrow screen, or a dialog short of room: the fields two by two, Search on a line of its own */
+/* A narrow screen, or a dialog short of room: the search box on a line of its own, then the region
+   and Search */
 @media (max-width: 720px) {
   .match-fields {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 
+  .match-field-query,
   .match-search-btn {
     grid-column: 1 / -1;
     width: auto;
@@ -239,6 +212,7 @@ defineExpose({ focusTitle })
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
+.match-fields-narrow .match-field-query,
 .match-fields-narrow .match-search-btn {
   grid-column: 1 / -1;
   width: auto;

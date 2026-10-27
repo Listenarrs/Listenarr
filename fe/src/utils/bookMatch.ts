@@ -17,14 +17,10 @@
  */
 import type { InjectionKey } from 'vue'
 import type { SearchResult } from '@/types'
-import { searchAudiobooks } from '@/services/audiobookSearch'
+import { queryAsin, searchAudiobooks } from '@/services/audiobookSearch'
 import { searchRegionOptions } from '@/utils/languageMapping'
 
 // The Audible record a book points at, as edited in a book match card (Repair and Find Match)
-
-// An ASIN as Add New's search reads one: B and 9 letters or digits, or 10 digits (an ISBN-10, the
-// last one possibly X)
-export const ASIN_PATTERN = /^(B[0-9A-Z]{9}|\d{9}(?:X|\d))$/i
 
 // What an ASIN must look like, shown when Search is asked for one that doesn't
 export const INVALID_ASIN_MESSAGE =
@@ -33,19 +29,18 @@ export const INVALID_ASIN_MESSAGE =
 export const FALLBACK_REGION = 'us'
 
 export interface BookMatchValues {
-  asin: string
-  region: string
-  // What the search looks for: a title (or an ASIN) and an author, editable
+  // What the search box holds, read like Add New's: a title, an ASIN, or TITLE:/AUTHOR:/ASIN:/
+  // SERIES:/ISBN: tokens
   query: string
-  author: string
+  region: string
 }
 
 export interface BookMatch extends BookMatchValues {
   // The book's new record, looked up in its region: picked in the search results, or the one
   // record found for its ASIN. Only a book with one can be repaired or matched.
   pickedSearchResult: SearchResult | null
-  // Why the ASIN can't be used in its region, once checked there (no record, or the check failed):
-  // the book can't be repaired or matched until it changes
+  // Why the ASIN searched can't be used in its region (no record, or the lookup failed): the book
+  // can't be repaired or matched until the search changes
   asinError: string | null
   // Values when the card opened, restored by Revert
   initialValues: BookMatchValues
@@ -80,10 +75,6 @@ export function answerSource(requestMs: number | null): string {
 
 export function regionLabel(region: string): string {
   return searchRegionOptions.find((option) => option.value === region)?.label ?? region
-}
-
-export function isAsinValid(bookMatch: BookMatch): boolean {
-  return ASIN_PATTERN.test(bookMatch.asin.trim())
 }
 
 // A new record (the picked one) whose ASIN or region differs from the one the book points at today
@@ -185,21 +176,19 @@ export function bookSummary(record: BookRecord): string {
 export function isEdited(bookMatch: BookMatch): boolean {
   const { initialValues } = bookMatch
   return (
-    bookMatch.asin !== initialValues.asin ||
-    bookMatch.region !== initialValues.region ||
     bookMatch.query !== initialValues.query ||
-    bookMatch.author !== initialValues.author ||
+    bookMatch.region !== initialValues.region ||
     !!bookMatch.pickedSearchResult
   )
 }
 
-// What Add New's search box would hold for this book: the title and author as TITLE:/AUTHOR:
-// tokens, or the title alone when it is an ASIN (Add New then looks the ASIN up)
-export function addNewQuery(bookMatch: BookMatch): string {
-  const title = bookMatch.query.trim()
-  const author = bookMatch.author.trim()
-  if (ASIN_PATTERN.test(title) || !author) return title
-  return `TITLE:${title} AUTHOR:${author}`
+// The search box a book opens with: its title and author as TITLE:/AUTHOR: tokens, or its title
+// (or ASIN) alone
+export function initialQuery(title?: string | null, author?: string | null): string {
+  const trimmedTitle = title?.trim() ?? ''
+  const trimmedAuthor = author?.trim() ?? ''
+  if (!trimmedTitle || !trimmedAuthor || queryAsin(trimmedTitle)) return trimmedTitle
+  return `TITLE:${trimmedTitle} AUTHOR:${trimmedAuthor}`
 }
 
 // The searches answered while a dialog is open, shared by its book cards: a search with values

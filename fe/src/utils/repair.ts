@@ -22,6 +22,7 @@ import type {
 } from '@/types'
 import {
   createBookMatch,
+  initialQuery,
   matchState,
   type BookMatch,
   type BookRecord,
@@ -83,8 +84,8 @@ function primaryAsin(identifiers: AudiobookExternalIdentifier[]) {
   return asinIdentifiers.find((identifier) => identifier.isPrimary) ?? asinIdentifiers[0]
 }
 
-// A book as step 1 shows it: its primary ASIN and region (the configured one when it has none),
-// its title and first author to search with
+// A book as step 1 shows it: its region (its primary ASIN's, the configured one when it has none)
+// and its title and first author in the search box
 export function repairRowFrom(
   audiobookId: number,
   book: Audiobook,
@@ -94,10 +95,8 @@ export function repairRowFrom(
   const primaryAsinIdentifier = primaryAsin(identifiers)
   const bookMatch = createBookMatch(
     {
-      asin: primaryAsinIdentifier?.value ?? book.asin ?? '',
+      query: initialQuery(book.title, book.authors?.[0]),
       region: primaryAsinIdentifier?.region || configuredRegion,
-      query: book.title ?? '',
-      author: book.authors?.[0] ?? '',
     },
     {
       asin: primaryAsinIdentifier?.value ?? book.asin ?? '',

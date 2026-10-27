@@ -116,21 +116,18 @@ describe('LibraryImportSearchModal', () => {
     expect(field(wrapper, 'match-results-pending').exists()).toBe(true)
   })
 
-  it('shows the book in the same card as Repair: ASIN, Title, Author, Region, without a checkbox', async () => {
+  it('shows the book in the same card as Repair: a search box and a region, without a checkbox', async () => {
     const wrapper = mountModal()
     await flushPromises()
 
-    expect(wrapper.findAll('.match-field-label').map((l) => l.text())).toEqual([
-      'ASIN',
-      'Title',
-      'Author',
-      'Region',
-    ])
-    expect((field(wrapper, 'match-title').element as HTMLInputElement).value).toBe('Alchemised')
-    expect((field(wrapper, 'match-author').element as HTMLInputElement).value).toBe('SenLinYu')
+    expect(wrapper.findAll('.match-field-label').map((l) => l.text())).toEqual(['Search', 'Region'])
+    // What the files say, as Add New's TITLE:/AUTHOR: tokens
+    expect((field(wrapper, 'match-query').element as HTMLInputElement).value).toBe(
+      'TITLE:Alchemised AUTHOR:SenLinYu',
+    )
     expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false)
-    expect(wrapper.get('[data-testid="find-match-info-asin"]').text()).toContain(
-      'A filled ASIN is searched on its own',
+    expect(wrapper.get('[data-testid="find-match-info-search"]').text()).toContain(
+      "The search box reads like Add New's",
     )
     // No match yet: what the files say, without ASIN or region
     expect(field(wrapper, 'match-summary').text()).toBe('Alchemised - SenLinYu')
@@ -175,6 +172,7 @@ describe('LibraryImportSearchModal', () => {
 
     // A new region searches there by itself: no ASIN, so the title and author, as Search would
     search.mockResolvedValue([primalHunter4])
+    // Changing the region searches there
     await field(wrapper, 'match-region').setValue('us')
     await flushPromises()
     expect(search).toHaveBeenLastCalledWith(expect.objectContaining({ region: 'us' }))
@@ -214,12 +212,12 @@ describe('LibraryImportSearchModal', () => {
     )
     expect(wrapper.get('[data-testid="match-legend"]').exists()).toBe(true)
 
-    await field(wrapper, 'match-asin').setValue('B0BK9')
+    await field(wrapper, 'match-query').setValue('ASIN:B0BK9')
     await field(wrapper, 'match-search').trigger('click')
     expect(field(wrapper, 'match-results-reason').text()).toContain('Not an ASIN')
     expect(field(wrapper, 'find-match-confirm').attributes('disabled')).toBeDefined()
 
-    await field(wrapper, 'match-asin').setValue('B000APXZHK')
+    await field(wrapper, 'match-query').setValue('B000APXZHK')
     await field(wrapper, 'match-search').trigger('click')
     await flushPromises()
     await wrapper.get('[data-testid="find-match-result"]').trigger('click')
@@ -234,8 +232,8 @@ describe('LibraryImportSearchModal', () => {
     await flushPromises()
 
     metadata.mockImplementation(notFound)
-    await field(wrapper, 'match-asin').setValue('B0BK9W82PQ')
-    await field(wrapper, 'match-asin').trigger('keydown', { key: 'Enter' })
+    await field(wrapper, 'match-query').setValue('B0BK9W82PQ')
+    await field(wrapper, 'match-query').trigger('keydown', { key: 'Enter' })
     await flushPromises()
     expect(metadata).toHaveBeenLastCalledWith('B0BK9W82PQ', 'fr')
     expect(field(wrapper, 'match-results-reason').text()).toContain(
@@ -245,7 +243,8 @@ describe('LibraryImportSearchModal', () => {
 
     metadata.mockResolvedValue({ metadata: primalHunter4 })
     // Enter looks the ASIN up again
-    await field(wrapper, 'match-asin').trigger('keydown', { key: 'Enter' })
+    await field(wrapper, 'match-query').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
     await flushPromises()
     await wrapper.get('[data-testid="find-match-result"]').trigger('click')
     await field(wrapper, 'find-match-confirm').trigger('click')
@@ -254,7 +253,7 @@ describe('LibraryImportSearchModal', () => {
     )
   })
 
-  it('looks the ASIN up when the region changes: a record found is offered, none is an error', async () => {
+  it('searches an ASIN again when the region changes: a record found is offered, none is an error', async () => {
     const wrapper = mountModal({
       ...primalHunter,
       selectedMatch: {
@@ -263,6 +262,7 @@ describe('LibraryImportSearchModal', () => {
       } as unknown as typeof alchemised.selectedMatch,
     })
     await flushPromises()
+    await field(wrapper, 'match-query').setValue('B0BK9W82PQ')
 
     metadata.mockImplementation(notFound)
     await field(wrapper, 'match-region').setValue('de')
@@ -278,10 +278,6 @@ describe('LibraryImportSearchModal', () => {
     expect(wrapper.get('[data-testid="find-match-result"]').classes()).not.toContain('selected')
     await wrapper.get('[data-testid="find-match-result"]').trigger('click')
     expect(field(wrapper, 'match-picked').text()).toContain('Primal Hunter 4 (US)')
-    // The fields stay as typed
-    expect((field(wrapper, 'match-title').element as HTMLInputElement).value).toBe(
-      'The Primal Hunter 4',
-    )
     expect(wrapper.get('[data-testid="find-match-result"]').classes()).toContain('selected')
 
     await field(wrapper, 'find-match-confirm').trigger('click')

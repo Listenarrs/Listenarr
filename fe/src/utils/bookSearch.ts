@@ -24,8 +24,9 @@ import { answerSource, noRecordError, regionLabel } from '@/utils/bookMatch'
 // A search slower than this is stopped and reported, with Retry
 export const SEARCH_TIMEOUT_MS = 30_000
 
-// A search for the title and author, or the check of the ASIN in its region
-export type SearchKind = 'title' | 'asin'
+// What the search box holds: an ASIN alone (bare or ASIN:), looked up in the region, or any other
+// query (a title, TITLE:/AUTHOR:/… tokens), searched like Add New
+export type SearchKind = 'query' | 'asin'
 
 // invalid: Search was asked for something it can't search (an ASIN that isn't one), a field error;
 // canceled: the user stopped the search. searchResults: the last answer, kept until a new one replaces it
@@ -43,9 +44,10 @@ export interface SearchState {
 // The parameters of one search, taken when it starts: typing afterwards doesn't change them
 export interface SearchParameters {
   kind: SearchKind
+  // The ASIN looked up, empty for any other query
   asin: string
-  title: string
-  author: string
+  // The search box as typed
+  query: string
   region: string
 }
 
@@ -68,7 +70,7 @@ export type CardBarState = 'searching' | 'error' | 'warning' | 'matched' | 'igno
 export function idleSearch(): SearchState {
   return {
     status: 'idle',
-    kind: 'title',
+    kind: 'query',
     searchResults: [],
     error: null,
     searchParameters: null,
@@ -76,10 +78,11 @@ export function idleSearch(): SearchState {
   }
 }
 
-// What a search looked for: the ASIN (which has priority when filled), or the title and author
+// What a search looked for: the ASIN, or the search box as typed
 export function describeSearch(searchParameters: SearchParameters): string {
-  if (searchParameters.kind === 'asin') return `ASIN "${searchParameters.asin}"`
-  return `"${searchParameters.title}"${searchParameters.author ? ` by "${searchParameters.author}"` : ''}`
+  return searchParameters.kind === 'asin'
+    ? `ASIN "${searchParameters.asin}"`
+    : `"${searchParameters.query}"`
 }
 
 // What the running search does, on the bar's tooltip and for screen readers
@@ -152,7 +155,7 @@ export function noResultsReason({
     text:
       searchParameters.kind === 'asin'
         ? noRecordError(searchParameters.asin, searchParameters.region)
-        : 'Nothing found: no book for this title and author',
+        : 'Nothing found for this search',
     tone: 'warning',
   }
 }
