@@ -21,30 +21,32 @@
 
 export type RequestOutcome<T> =
   | { status: 'done'; value: T }
-  | { status: 'failed'; error: unknown; timedOut: boolean }
+  | { status: 'failed'; error: unknown; hasTimedOut: boolean }
   | { status: 'stale' }
 
 export function useAbortableRequest(timeoutMs: number) {
   let abortController: AbortController | null = null
 
   async function run<T>(request: (signal: AbortSignal) => Promise<T>): Promise<RequestOutcome<T>> {
-    const current = new AbortController()
-    abortController = current
-    let timedOut = false
-    const timer = setTimeout(() => {
-      timedOut = true
-      current.abort()
+    const requestAbortController = new AbortController()
+    abortController = requestAbortController
+    let hasTimedOut = false
+    const timeoutTimer = setTimeout(() => {
+      hasTimedOut = true
+      requestAbortController.abort()
     }, timeoutMs)
     try {
-      const value = await request(current.signal)
-      return abortController === current ? { status: 'done', value } : { status: 'stale' }
+      const response = await request(requestAbortController.signal)
+      return abortController === requestAbortController
+        ? { status: 'done', value: response }
+        : { status: 'stale' }
     } catch (error) {
-      return abortController === current
-        ? { status: 'failed', error, timedOut }
+      return abortController === requestAbortController
+        ? { status: 'failed', error, hasTimedOut }
         : { status: 'stale' }
     } finally {
-      clearTimeout(timer)
-      if (abortController === current) abortController = null
+      clearTimeout(timeoutTimer)
+      if (abortController === requestAbortController) abortController = null
     }
   }
 

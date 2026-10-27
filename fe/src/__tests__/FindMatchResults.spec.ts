@@ -23,14 +23,14 @@ import FindMatchResults from '@/components/domain/bookMatch/FindMatchResults.vue
 import { useConfigurationStore } from '@/stores/configuration'
 import type { ApplicationSettings, SearchResult } from '@/types'
 
-const record = (asin: string, language?: string) =>
+const searchResult = (asin: string, language?: string) =>
   ({ asin, title: `Primal Hunter ${asin}`, language }) as unknown as SearchResult
 
 function mountResults(
-  results: SearchResult[],
-  records: { current?: { asin: string; region?: string } } = {},
+  searchResults: SearchResult[],
+  recordKeys: { currentRecordKey?: { asin: string; region?: string } } = {},
 ) {
-  return mount(FindMatchResults, { props: { results, ...records } })
+  return mount(FindMatchResults, { props: { searchResults, ...recordKeys } })
 }
 
 function preferLanguage(defaultSearchLanguage: string) {
@@ -51,9 +51,9 @@ describe('FindMatchResults', () => {
   it('tags each record with its language: green for the preferred one, grey for the others', () => {
     preferLanguage('french')
     const wrapper = mountResults([
-      record('B0FR000001', 'french'),
-      record('B0DE000001', 'german'),
-      record('B0US000001', 'English'),
+      searchResult('B0FR000001', 'french'),
+      searchResult('B0DE000001', 'german'),
+      searchResult('B0US000001', 'English'),
     ])
 
     expect(tags(wrapper)).toEqual([
@@ -65,14 +65,14 @@ describe('FindMatchResults', () => {
 
   it('tags a record Audible gives no language for in grey', () => {
     preferLanguage('english')
-    const wrapper = mountResults([record('B0XX000001')])
+    const wrapper = mountResults([searchResult('B0XX000001')])
 
     expect(tags(wrapper)).toEqual([{ text: 'Language unknown', preferred: false }])
   })
 
   it('keeps a language it does not know, in grey', () => {
     preferLanguage('english')
-    const wrapper = mountResults([record('B0XX000002', 'klingon')])
+    const wrapper = mountResults([searchResult('B0XX000002', 'klingon')])
 
     expect(tags(wrapper)).toEqual([{ text: 'Klingon', preferred: false }])
   })
@@ -82,11 +82,11 @@ describe('FindMatchResults', () => {
     // The book points at its US record; a title search finds its ASIN in France and in the US
     const wrapper = mountResults(
       [
-        { ...record('B0BK9W82PQ', 'english'), region: 'fr' },
-        { ...record('b0bk9w82pq', 'english'), region: 'us' },
-        { ...record('B0OTHER001', 'french'), region: 'fr' },
+        { ...searchResult('B0BK9W82PQ', 'english'), region: 'fr' },
+        { ...searchResult('b0bk9w82pq', 'english'), region: 'us' },
+        { ...searchResult('B0OTHER001', 'french'), region: 'fr' },
       ] as SearchResult[],
-      { current: { asin: 'B0BK9W82PQ', region: 'us' } },
+      { currentRecordKey: { asin: 'B0BK9W82PQ', region: 'us' } },
     )
 
     const items = wrapper.findAll('[data-testid="find-match-result"]')
@@ -104,7 +104,7 @@ describe('FindMatchResults', () => {
 
   it('prefers no language when the search language is All', () => {
     preferLanguage('all')
-    const wrapper = mountResults([record('B0US000002', 'english')])
+    const wrapper = mountResults([searchResult('B0US000002', 'english')])
 
     expect(tags(wrapper)).toEqual([{ text: 'English', preferred: false }])
   })

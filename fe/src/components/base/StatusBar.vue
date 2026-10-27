@@ -26,14 +26,14 @@
     :class="[
       `status-bar-${tone}`,
       {
-        'status-bar-breathing': breathing,
+        'status-bar-breathing': isBreathing,
         'status-bar-track': percent !== undefined,
-        'status-bar-standby': standby,
+        'status-bar-standby': isStandby,
       },
     ]"
     :data-tone="tone"
-    :data-breathing="breathing || undefined"
-    :data-standby="standby || undefined"
+    :data-breathing="isBreathing || undefined"
+    :data-standby="isStandby || undefined"
   >
     <div v-if="percent !== undefined" class="status-bar-fill" :style="{ width: `${percent}%` }" />
   </div>
@@ -45,16 +45,16 @@ export type StatusTone = 'idle' | 'success' | 'warning' | 'error' | 'progress'
 withDefaults(
   defineProps<{
     tone?: StatusTone
-    breathing?: boolean
+    isBreathing?: boolean
     // From 0 to 100: a progress bar
     percent?: number
-    standby?: boolean
+    isStandby?: boolean
   }>(),
   {
     tone: 'idle',
-    breathing: false,
+    isBreathing: false,
     percent: undefined,
-    standby: false,
+    isStandby: false,
   },
 )
 </script>
