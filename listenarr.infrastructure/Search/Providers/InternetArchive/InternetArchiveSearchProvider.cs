@@ -17,6 +17,7 @@
  */
 
 using System.Text.Json;
+using Listenarr.Application.Search.Matching;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Search.Providers.InternetArchive;
@@ -185,6 +186,7 @@ public class InternetArchiveSearchProvider : IIndexerSearchProvider
                     var identifier = item.TryGetProperty("identifier", out var idElem) ? ReadInternetArchiveField(idElem) : string.Empty;
                     var title = item.TryGetProperty("title", out var titleElem) ? ReadInternetArchiveField(titleElem) : string.Empty;
                     var creator = item.TryGetProperty("creator", out var creatorElem) ? ReadInternetArchiveField(creatorElem) : string.Empty;
+                    var creators = ReadInternetArchiveCreators(creatorElem);
                     var publishedDate = item.TryGetProperty("date", out var dateElem) ? ReadInternetArchiveField(dateElem) : string.Empty;
 
                     if (string.IsNullOrEmpty(identifier) || string.IsNullOrEmpty(title))
@@ -256,6 +258,7 @@ public class InternetArchiveSearchProvider : IIndexerSearchProvider
                             Id = Guid.NewGuid().ToString(),
                             Title = title,
                             Artist = string.IsNullOrWhiteSpace(creator) ? "Unknown" : creator,
+                            IdentityEvidence = new CandidateIdentityEvidence { ReleaseName = title, Authors = creators },
                             Album = title,
                             Category = "Audiobook",
                             Size = representation.Size,
@@ -289,6 +292,17 @@ public class InternetArchiveSearchProvider : IIndexerSearchProvider
         }
 
         return results;
+    }
+
+    private static ContributorEvidence[] ReadInternetArchiveCreators(JsonElement value)
+    {
+        var values = value.ValueKind == JsonValueKind.Array
+            ? value.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.String).Select(item => item.GetString())
+            : [value.ValueKind == JsonValueKind.String ? value.GetString() : null];
+        return values.Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name!.Trim()).Where(IdentityText.IsContributorName)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(name => new ContributorEvidence(name, IdentityEvidenceOrigin.ProviderSupplied)).ToArray();
     }
 
     private static string ReadInternetArchiveField(JsonElement value)
