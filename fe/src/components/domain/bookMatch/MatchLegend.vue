@@ -26,9 +26,11 @@
 </template>
 
 <script setup lang="ts">
+import type { StatusTone } from '@/components/base/StatusBar.vue'
+
 // A bar colour, from the status palette, and what it means
 export interface LegendEntry {
-  tone: 'idle' | 'success' | 'warning' | 'error' | 'progress'
+  tone: StatusTone
   label: string
 }
 
