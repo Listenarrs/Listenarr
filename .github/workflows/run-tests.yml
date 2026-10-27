@@ -34,8 +34,14 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version-file: '.node-version'
           cache: 'npm'
+
+      - name: Install Node tooling and Discord bot dependencies
+        run: |
+          npm ci --engine-strict
+          npm ci --prefix tools/discord-bot --engine-strict
+          node --check tools/discord-bot/index.js
 
       - name: Restore
         run: dotnet restore listenarr.slnx
@@ -75,7 +81,7 @@ jobs:
 
       - name: Install frontend deps
         working-directory: fe
-        run: npm ci
+        run: npm ci --engine-strict
 
       - name: Build frontend
         working-directory: fe
@@ -94,7 +100,8 @@ jobs:
         working-directory: fe
         run: |
           if npm run type-check --silent --if-present; then
-            echo "Frontend type check passed (or no type-check script present)."
+            npx vue-tsc --build tsconfig.node.json
+            echo "Frontend and Node tooling type checks passed."
           else
             echo "Frontend type check failed." >&2
             exit 1

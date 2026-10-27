@@ -2,12 +2,12 @@ import { fileURLToPath, URL } from 'node:url'
 import type { ServerResponse } from 'node:http'
 
 import { defineConfig } from 'vite'
-import type { PluginOption } from 'vite'
+import type { PluginOption, UserConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { visualizer } from 'rollup-plugin-visualizer'
 
 // https://vite.dev/config/
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode }): UserConfig => {
   const analyzeBundle =
     mode === 'analysis' ||
     process.env.LISTENARR_BUNDLE_ANALYZE === 'true' ||

@@ -145,7 +145,7 @@ chmod +x Listenarr.Api
 ```
 
 **Prerequisites:**
-- **Node.js 24.x or later** (required for Discord bot functionality)
+- **Node.js 26.x (26.12.1 or later)** (required for Discord bot functionality)
 - Set environment variable: `LISTENARR_PUBLIC_URL=https://your-domain.com`
 
 **Service will be available at:**
@@ -162,7 +162,7 @@ For custom deployments or when you need to build from source:
 
 **Prerequisites:**
 - .NET 10.0 Runtime or later (for framework-dependent deployments)
-- Node.js 24.x or later (for Discord bot)
+- Node.js 26.x (26.12.1 or later) (for Discord bot)
 - Set `LISTENARR_PUBLIC_URL` environment variable to your production domain
 
 **Option 1: Use Self-Contained Executables (Recommended)**
@@ -196,7 +196,7 @@ If you prefer to run the services separately:
 
 **Prerequisites:**
 - .NET 10.0 SDK or later
-- Node.js 24.x or later
+- Node.js 26.x (26.12.1 or later)
 
 **Install dependencies:**
 ```bash
@@ -221,7 +221,7 @@ Listenarr includes a small reference Discord bot (in `tools/discord-bot`) that r
 
 Prerequisites:
 - A running Listenarr instance (see steps above)
-- Node.js 24+ and npm
+- Node.js 26.x (26.12.1 or later) and npm
 - A Discord application with a bot token and application ID
 
 Quick start (development):
@@ -420,7 +420,7 @@ For complete API documentation, see our [API Reference](https://github.com/Liste
 ### Prerequisites
 
 - .NET 10.0 SDK or later
-- Node.js 24.x or later
+- Node.js 26.x (26.12.1 or later)
 - npm (comes with Node.js)
 
 ### Available Commands
