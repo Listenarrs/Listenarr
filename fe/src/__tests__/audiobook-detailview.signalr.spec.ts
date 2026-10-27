@@ -27,6 +27,8 @@ import type { Audiobook } from '@/types'
 vi.mock('vue-router', () => ({
   useRoute: () => ({ params: { id: '1' } }),
   useRouter: () => ({ push: vi.fn() }),
+  // Repair Books asks before the page is left while it repairs
+  onBeforeRouteLeave: vi.fn(),
 }))
 
 describe('AudiobookDetailView SignalR integration', () => {

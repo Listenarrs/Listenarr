@@ -30,6 +30,8 @@ const routeParams = vi.hoisted(() => ({ id: '5' }))
 vi.mock('vue-router', () => ({
   useRoute: () => ({ params: routeParams }),
   useRouter: () => ({ push: routerPushMock }),
+  // Repair Books asks before the page is left while it repairs
+  onBeforeRouteLeave: vi.fn(),
 }))
 
 // Mock api service ensureImageCached and getImageUrl
