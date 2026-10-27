@@ -85,7 +85,9 @@ jobs:
 
       - name: Build frontend
         working-directory: fe
-        run: npm run build --if-present
+        run: |
+          npm run build --if-present
+          npm run test:build-config
 
       - name: Repository path safety
         run: npm run --silent validate:repository-paths

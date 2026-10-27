@@ -18,17 +18,26 @@ export default defineConfig(({ mode }): UserConfig => {
       vue(),
       ...(analyzeBundle
         ? [
-            (visualizer({
+            visualizer({
               filename: 'dist/stats.html',
               title: 'Listenarr bundle analysis',
               open: false,
-            }) as unknown as PluginOption),
+            }) as unknown as PluginOption,
           ]
         : []),
     ],
     build: {
       sourcemap: analyzeBundle,
-      rollupOptions: {
+      rolldownOptions: {
+        ...(mode === 'production'
+          ? {
+              output: {
+                minify: {
+                  compress: { dropConsole: true, dropDebugger: true },
+                },
+              },
+            }
+          : {}),
         onLog(level, log, handler) {
           const code = typeof log === 'object' && log ? String(log.code ?? '') : ''
           const id = typeof log === 'object' && log ? String(log.id ?? '') : ''
@@ -55,13 +64,6 @@ export default defineConfig(({ mode }): UserConfig => {
         },
       },
     },
-    ...(mode === 'production'
-      ? {
-          esbuild: {
-            drop: ['console', 'debugger'],
-          },
-        }
-      : {}),
     resolve: {
       alias: {
         '@': fileURLToPath(new URL('./src', import.meta.url)),
