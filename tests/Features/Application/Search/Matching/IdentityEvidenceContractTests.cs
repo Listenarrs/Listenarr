@@ -29,6 +29,45 @@ namespace Listenarr.Tests.Features.Application.Search.Matching;
 public sealed class IdentityEvidenceContractTests : BaseTests
 {
     [Theory]
+    [InlineData("Nausea", "Jean-Paul Sartre", true)]
+    [InlineData("Nausea", "Jean-Paul Sartre", false)]
+    [InlineData("The Little Prince", "Antoine de Saint-Exupéry", true)]
+    [InlineData("The Little Prince", "Antoine de Saint-Exupéry", false)]
+    [InlineData("The Turn of the Screw", "James, Henry", true)]
+    [InlineData("The Turn of the Screw", "James, Henry", false)]
+    public async Task ParsedProviderAuthorSpansSurviveAnnotations(string title, string author, bool structured)
+    {
+        var release = title + " - " + author + " [M4B]";
+        var indexer = new Indexer { Id = 42, Name = "fixture", Url = "http://fixture.invalid", Implementation = structured ? "MyAnonamouse" : "Torznab", Type = "Torrent" };
+        List<IndexerSearchResult> parsed;
+        if (structured)
+        {
+            var payload = JsonSerializer.Serialize(new
+            {
+                data = new[] { new {
+                id = "1", title = release, author_info = JsonSerializer.Serialize(new Dictionary<string, string> { ["1"] = author }),
+                filetype = "M4B", size = 300000000, seeders = 20 } }
+            });
+            parsed = MyAnonamouseResponseParser.Parse(payload, indexer, NullLogger.Instance);
+        }
+        else
+        {
+            using var client = new HttpClient();
+            var xml = new System.Xml.Linq.XDocument(new System.Xml.Linq.XElement("rss", new System.Xml.Linq.XElement("channel",
+                new System.Xml.Linq.XElement("item", new System.Xml.Linq.XElement("title", release),
+                    new System.Xml.Linq.XElement("guid", "1"), new System.Xml.Linq.XElement("link", "http://fixture.invalid/download/1.torrent")))));
+            parsed = await new Listenarr.Application.Search.Indexers.Torznab.TorznabResponseParser(client, NullLogger.Instance).ParseAsync(xml.ToString(), indexer);
+        }
+        var result = SearchResultConverters.ToSearchResult(Assert.Single(parsed));
+        var target = BookMatchContext.From(new() { Title = title, Authors = [author] });
+        var matcher = new BookIdentityMatcher();
+        var assessment = matcher.Evaluate(target, BookIdentityMatcher.Snapshot(result));
+        Assert.True(assessment.IsConfirmed, assessment.ToString());
+        var evidence = BookIdentityMatcher.Snapshot(result);
+        Assert.False(matcher.Evaluate(target, evidence with { ReleaseName = release + " - Another Work" }).IsConfirmed);
+    }
+
+    [Theory]
     [InlineData("Unknown Author")]
     [InlineData("unknown")]
     public void DisplayPlaceholdersCannotCorroborateTheSameTitle(string author)

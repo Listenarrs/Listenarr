@@ -23,6 +23,23 @@ namespace Listenarr.Tests.Features.Infrastructure.HostedServices.Search
     [Trait("Category", "Infrastructure")]
     public sealed class AutomaticSearchProcessorRelevanceTests : BaseTests
     {
+        [Theory]
+        [InlineData("Nausea", "Jean-Paul Sartre")]
+        [InlineData("The Little Prince", "Antoine de Saint-Exupéry")]
+        [InlineData("The Turn of the Screw", "James, Henry")]
+        public async Task RunCycleAsync_CompleteAuthorSpanWithAnnotation_ReachesOnlyTheCorrectDownload(string title, string author)
+        {
+            var correct = Release(title + " - " + author + " [M4B]", artist: "");
+            var search = SearchReturning(Release(title + " - Other Writer [M4B]", artist: "Other Writer"), correct);
+            var download = new Mock<IDownloadService>();
+            download.Setup(d => d.StartDownloadAsync(It.IsAny<SearchResult>(), It.IsAny<string>(), It.IsAny<int?>())).ReturnsAsync("download-span");
+            Init(builder => { builder.WithSingleton(search.Object); builder.WithSingleton(download.Object); builder.WithSingleton(AcceptingQualityService().Object); });
+            var book = await SeedMonitoredAudiobookAsync(title, author);
+            await RunCycleAsync();
+            download.Verify(d => d.StartDownloadAsync(It.Is<SearchResult>(r => ReferenceEquals(r, correct)), DirectDownloadMetadataKeys.ClientId, book.Id), Times.Once);
+            download.Verify(d => d.StartDownloadAsync(It.IsAny<SearchResult>(), It.IsAny<string>(), It.IsAny<int?>()), Times.Once);
+        }
+
         [Fact]
         public async Task RunCycleAsync_GenericSubtitle_WrongAuthorReleases_AreNotDownloaded()
         {

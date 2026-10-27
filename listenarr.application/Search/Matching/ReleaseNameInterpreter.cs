@@ -24,13 +24,13 @@ public sealed record ReleaseTitleMatch(bool Complete, bool Credited, string? Tit
 /// <summary>First protect a complete reference title; classify only text outside its span.</summary>
 public static class ReleaseNameInterpreter
 {
-    private static readonly Regex Separators = new(@"[\[\]();:,]|[-‐‑‒–—―−]", RegexOptions.Compiled);
     private const string MetadataToken = @"(?:a novel|novels?|edition|unabridged|abridged|m4b|mp3|flac|aac|opus|audiobook|audio book|\d{4})";
     private static readonly Regex Metadata = new(
         "^" + MetadataToken + @"(?:[\s.!。]+" + MetadataToken + @")*[\s.!。]*$",
         RegexOptions.NonBacktracking | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private const int MaxText = 16384;
     private const int MaxOccurrences = 32;
+    private const int MaxExplanationWork = 1_000_000;
 
     public static ReleaseTitleMatch Match(string release, BookMatchContext context,
         IReadOnlyList<string> suppliedAuthors)
@@ -100,20 +100,85 @@ public static class ReleaseNameInterpreter
     private static (bool Explained, bool Credited) Explain(string extra, IReadOnlyList<string> names,
         IReadOnlyList<string> credited)
     {
-        extra = extra.Trim(' ', '\t', '-', '‐', '‑', '‒', '–', '—', '―', '−', ':', ';', ',', '[', ']', '(', ')');
+        extra = IdentityText.Canonical(extra).Trim(' ', '\t', '-', '‐', '‑', '‒', '–', '—', '―', '−', ':', ';', ',', '[', ']', '(', ')');
         if (extra.Length == 0) return (true, false);
-        // Check complete names before splitting punctuation: a name is never edition metadata.
-        if (names.Any(n => IdentityText.PersonEqual(n, extra)))
-            return (true, credited.Any(n => IdentityText.PersonEqual(n, extra)));
-        var author = false;
-        var metadataSeen = false;
-        foreach (var part in Separators.Split(extra).Select(s => s.Trim()).Where(s => s.Length > 0))
+        var remainingWork = MaxExplanationWork;
+        var people = new List<(string Name, int ContentLength)>();
+        foreach (var name in names)
         {
-            if (names.Any(n => IdentityText.PersonEqual(n, part)))
-                author |= credited.Any(n => IdentityText.PersonEqual(n, part));
-            else if (Metadata.IsMatch(part)) metadataSeen = true;
-            else if (!metadataSeen || !part.All(c => c is '.' or '!' or '。')) return (false, false);
+            if ((remainingWork -= name.Length) < 0) return (false, false);
+            people.Add((name, IdentityText.PersonKey(name, false).Count(c => !char.IsWhiteSpace(c))));
         }
-        return (true, author);
+        var maxNameContent = people.Count == 0 ? 0 : people.Max(person => person.ContentLength);
+        var pending = new Queue<(int Position, bool Credited, bool MetadataSeen)>();
+        var visited = new HashSet<(int Position, bool Credited, bool MetadataSeen)>();
+        var explained = false;
+        Add(0, false, false);
+        while (pending.TryDequeue(out var state))
+        {
+            if (--remainingWork < 0) return (false, false);
+            if (state.Position == extra.Length)
+            {
+                if (state.Credited) return (true, true);
+                explained = true;
+                continue;
+            }
+
+            // Metadata cannot cross a structural separator. Assess its whole chunk once.
+            var metadataEnd = state.Position;
+            while (metadataEnd < extra.Length && !IsExplanationSeparator(extra[metadataEnd]))
+            {
+                if (--remainingWork < 0) return (false, false);
+                metadataEnd++;
+            }
+            if ((remainingWork -= metadataEnd - state.Position) < 0) return (false, false);
+            var metadataPart = extra[state.Position..metadataEnd].Trim();
+            if (Metadata.IsMatch(metadataPart)) Add(metadataEnd, state.Credited, true);
+            else if (state.MetadataSeen && metadataPart.Length > 0 && metadataPart.All(c => c is '.' or '!' or '。'))
+                Add(metadataEnd, state.Credited, true);
+            if (remainingWork < 0) return (false, false);
+
+            // PersonEqual removes only periods and spacing. Stop probing once the span
+            // contains more other characters than any complete known name can contain.
+            var contentLength = 0;
+            for (var end = state.Position + 1; end <= extra.Length; end++)
+            {
+                if (--remainingWork < 0) return (false, false);
+                if (extra[end - 1] != '.' && !char.IsWhiteSpace(extra[end - 1])) contentLength++;
+                if (contentLength > maxNameContent || people.Count == 0) break;
+                if (end < extra.Length && !IsExplanationSeparator(extra[end])) continue;
+                if ((remainingWork -= end - state.Position) < 0) return (false, false);
+                var part = extra[state.Position..end].Trim();
+                foreach (var person in people)
+                {
+                    if (--remainingWork < 0) return (false, false);
+                    if (contentLength != person.ContentLength) continue;
+                    if ((remainingWork -= part.Length + person.Name.Length) < 0) return (false, false);
+                    if (!IdentityText.PersonEqual(person.Name, part)) continue;
+                    var isCredited = state.Credited;
+                    foreach (var author in credited)
+                    {
+                        if ((remainingWork -= part.Length + author.Length) < 0) return (false, false);
+                        if (IdentityText.PersonEqual(author, part)) { isCredited = true; break; }
+                    }
+                    Add(end, isCredited, state.MetadataSeen);
+                    break;
+                }
+                if (remainingWork < 0) return (false, false);
+            }
+        }
+        return (explained, false);
+
+        void Add(int position, bool author, bool metadata)
+        {
+            while (position < extra.Length && (char.IsWhiteSpace(extra[position]) || IsExplanationSeparator(extra[position])))
+            {
+                if (--remainingWork < 0) return;
+                position++;
+            }
+            if (visited.Add((position, author, metadata))) pending.Enqueue((position, author, metadata));
+        }
     }
+
+    private static bool IsExplanationSeparator(char value) => "[]();:,-‐‑‒–—―−".Contains(value);
 }

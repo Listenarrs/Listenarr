@@ -28,6 +28,56 @@ namespace Listenarr.Tests.Features.Application.Search.Matching;
 public sealed class BookIdentityPolicyTests : BaseTests
 {
     [Theory]
+    [InlineData("Jean-Paul Sartre", "Jean-Paul Sartre")]
+    [InlineData("Antoine de Saint-Exupéry", "Antoine de Saint-Exupéry")]
+    [InlineData("James, Henry", "James, Henry")]
+    [InlineData("Flannery O’Connor", "Flannery O'Connor")]
+    [InlineData("J. R. R. Tolkien", "J.R. R. Tolkien")]
+    [InlineData("René Writer", "Rene\u0301 Writer")]
+    public void CompleteAuthorSpansAndMetadataMustAccountForAllReleaseText(string requested, string supplied)
+    {
+        var matcher = new BookIdentityMatcher();
+        var target = BookMatchContext.From(new() { Title = "The Book", Authors = [requested] });
+        foreach (var annotation in new[] { " [M4B]", " (Unabridged Edition).", " - 2024 - M4B", " [M4B] (Unabridged Edition)." })
+            foreach (var release in new[] { supplied + " - The Book" + annotation, "The Book - " + supplied + annotation, "The Book" + annotation + " - " + supplied })
+                foreach (var structured in new[] { false, true })
+                {
+                    var evidence = new CandidateIdentityEvidence
+                    {
+                        ReleaseName = release,
+                        Authors = structured ? [new(supplied, IdentityEvidenceOrigin.ProviderSupplied)] : []
+                    };
+                    var result = matcher.Evaluate(target, evidence);
+                    Assert.True(result.IsConfirmed, $"{release}/{structured}: {result}");
+                    Assert.False(matcher.Evaluate(target, evidence with { ReleaseName = release + " - Another Work" }).IsConfirmed);
+                    Assert.False(matcher.Evaluate(target, evidence with { ReleaseName = release.Replace("The Book", "Another Title", StringComparison.Ordinal) }).IsConfirmed);
+                    Assert.False(matcher.Evaluate(target, evidence with { Authors = [new("Other Writer", IdentityEvidenceOrigin.ProviderSupplied)] }).IsConfirmed);
+                }
+    }
+
+    [Theory]
+    [InlineData("Jean-Paul Sartre")]
+    [InlineData("Jean")]
+    public void OverlappingKnownNamesDoNotHideUnmatchedRemainders(string firstAuthor)
+    {
+        var target = BookMatchContext.From(new() { Title = "The Book", Authors = firstAuthor == "Jean" ? ["Jean", "Jean-Paul Sartre"] : ["Jean-Paul Sartre", "Jean"] });
+        var matcher = new BookIdentityMatcher();
+        Assert.True(matcher.Evaluate(target, new() { ReleaseName = "The Book - Jean-Paul Sartre [M4B]" }).IsConfirmed);
+        foreach (var release in new[] { "The Book - Jean-X Sartre [M4B]", "The Book - Jean-Paul Sartre Extra [M4B]", "The Book - Jean-Paul Sartrex [M4B]" })
+            Assert.False(matcher.Evaluate(target, new() { ReleaseName = release }).IsConfirmed);
+    }
+
+    [Fact]
+    public void LongDelimiterAndNamePrefixInputDefersWithoutAcceptingTheUnknownTail()
+    {
+        var target = BookMatchContext.From(new() { Title = "The Book", Authors = ["Jean", "Jean-Paul Sartre"] });
+        var release = "The Book - " + string.Join(',', Enumerable.Repeat("Jean", 1800)) + " unknown";
+        Assert.False(new BookIdentityMatcher().Evaluate(target, new() { ReleaseName = release }).IsConfirmed);
+        var repeatedTitle = string.Join(" - ", Enumerable.Repeat("The Book - Jean", 32)) + " - " + release;
+        Assert.False(new BookIdentityMatcher().Evaluate(target, new() { ReleaseName = repeatedTitle }).IsConfirmed);
+    }
+
+    [Theory]
     [InlineData("J. R. R. Tolkien", "J.R.R. Tolkien")]
     [InlineData("J.R.R. Tolkien", "J. R. R. Tolkien")]
     [InlineData("J. R. R. Tolkien", "J.R. R. Tolkien")]
