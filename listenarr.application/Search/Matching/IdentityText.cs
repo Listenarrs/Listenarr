@@ -64,6 +64,46 @@ public static class IdentityText
             .Replace("-", " ", StringComparison.Ordinal);
 
     public static bool PersonEqual(string a, string b) =>
-        Equal(Canonical(a).Replace(".", "", StringComparison.Ordinal),
-            Canonical(b).Replace(".", "", StringComparison.Ordinal));
+        Equal(PersonKey(a, false), PersonKey(b, false))
+        || Equal(PersonKey(a, true), PersonKey(b, true));
+
+    // Preserve existing period-insensitive forms, then additionally join complete initial tokens.
+    // J.R. R. and J. R.R. both become JRR; multi-letter words retain their boundaries.
+    internal static string PersonKey(string value, bool normalizeInitialSpacing)
+    {
+        var text = Canonical(value);
+        if (!normalizeInitialSpacing)
+            return Canonical(text.Replace(".", "", StringComparison.Ordinal));
+
+        var output = new StringBuilder(text.Length);
+        var previousInitial = false;
+        foreach (var token in text.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var letters = token.Replace(".", "", StringComparison.Ordinal);
+            if (letters.Length == 0) continue;
+            var initial = IsInitialToken(token);
+            if (output.Length > 0 && !(previousInitial && initial)) output.Append(' ');
+            output.Append(letters);
+            previousInitial = initial;
+        }
+        return output.ToString();
+    }
+
+    private static bool IsInitialToken(string token)
+    {
+        var hasLetter = false;
+        foreach (var rune in token.EnumerateRunes())
+        {
+            if (Rune.IsLetter(rune))
+            {
+                if (hasLetter) return false;
+                hasLetter = true;
+            }
+            else if (rune.Value == '.' && hasLetter) hasLetter = false;
+            else if (!hasLetter || Rune.GetUnicodeCategory(rune) is not
+                (System.Globalization.UnicodeCategory.NonSpacingMark or System.Globalization.UnicodeCategory.SpacingCombiningMark))
+                return false;
+        }
+        return hasLetter || token.EndsWith('.');
+    }
 }

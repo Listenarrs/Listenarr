@@ -67,22 +67,26 @@ public static class ReleaseNameInterpreter
 
     private static bool HasCreditBoundary(string release, IReadOnlyList<string> authors)
     {
-        var hay = release.Replace(".", "", StringComparison.Ordinal);
-        var attempts = 0;
-        foreach (var author in authors)
+        foreach (var normalizeInitialSpacing in new[] { false, true })
         {
-            var name = author.Replace(".", "", StringComparison.Ordinal);
-            for (var offset = 0; offset <= hay.Length - name.Length && name.Length > 0;)
+            var hay = IdentityText.PersonKey(release, normalizeInitialSpacing);
+            var attempts = 0;
+            foreach (var author in authors)
             {
-                if (++attempts > MaxOccurrences) return false;
-                var at = hay.IndexOf(name, offset, StringComparison.OrdinalIgnoreCase);
-                if (at < 0) break;
-                offset = at + name.Length;
-                var before = hay[..at].TrimEnd();
-                var after = hay[(at + name.Length)..].TrimStart();
-                if (before.Length == 0 && after.Length > 0 && "-‐‑‒–—―−".Contains(after[0])) return true;
-                if (before.Length > 0 && "-‐‑‒–—―−".Contains(before[^1]) &&
-                    Explain(after, Array.Empty<string>(), Array.Empty<string>()).Explained) return true;
+                var name = IdentityText.PersonKey(author, normalizeInitialSpacing);
+                for (var offset = 0; offset <= hay.Length - name.Length && name.Length > 0;)
+                {
+                    if (++attempts > MaxOccurrences) break;
+                    var at = hay.IndexOf(name, offset, StringComparison.OrdinalIgnoreCase);
+                    if (at < 0) break;
+                    offset = at + name.Length;
+                    var before = hay[..at].TrimEnd();
+                    var after = hay[(at + name.Length)..].TrimStart();
+                    if (before.Length == 0 && after.Length > 0 && "-‐‑‒–—―−".Contains(after[0])) return true;
+                    if (before.Length > 0 && "-‐‑‒–—―−".Contains(before[^1]) &&
+                        Explain(after, Array.Empty<string>(), Array.Empty<string>()).Explained) return true;
+                }
+                if (attempts > MaxOccurrences) break;
             }
         }
         return false;

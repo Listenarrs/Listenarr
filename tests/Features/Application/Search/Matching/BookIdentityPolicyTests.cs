@@ -28,6 +28,58 @@ namespace Listenarr.Tests.Features.Application.Search.Matching;
 public sealed class BookIdentityPolicyTests : BaseTests
 {
     [Theory]
+    [InlineData("J. R. R. Tolkien", "J.R.R. Tolkien")]
+    [InlineData("J.R.R. Tolkien", "J. R. R. Tolkien")]
+    [InlineData("J. R. R. Tolkien", "J.R. R. Tolkien")]
+    [InlineData("J. R. R. Tolkien", "J. R.R. Tolkien")]
+    [InlineData("J R R Tolkien", "J.R.R. Tolkien")]
+    [InlineData("JRR Tolkien", "J. R. R. Tolkien")]
+    [InlineData("J. K. Rowling", "J.K. Rowling")]
+    [InlineData("Viktor E. Frankl", "Viktor E Frankl")]
+    [InlineData("É. J. Writer", "E\u0301.J. Writer")]
+    [InlineData("J.\u00a0R.\tR. Tolkien", "J.R.R. Tolkien")]
+    [InlineData("JR R Tolkien", "J.R. R. Tolkien")]
+    public void CompleteInitialFormattingMatchesBothContributorAndReleaseCredits(string requested, string supplied)
+    {
+        var context = BookMatchContext.From(new Audiobook { Title = "The Book", Authors = [requested] });
+        var matcher = new BookIdentityMatcher();
+        Assert.True(IdentityText.PersonEqual(requested, supplied));
+        foreach (var evidence in new CandidateIdentityEvidence[]
+        {
+            new() { ReleaseName = "The Book", Authors = [new(supplied, IdentityEvidenceOrigin.ProviderSupplied)] },
+            new() { ReleaseName = supplied + " - The Book [M4B]" },
+            new() { ReleaseName = "The Book - " + supplied + " [M4B]" }
+        })
+        {
+            var result = matcher.Evaluate(context, evidence);
+            Assert.True(result.IsConfirmed, $"{requested}/{supplied}/{evidence.ReleaseName}: {result}");
+            Assert.False(matcher.Evaluate(context, evidence with
+            { ReleaseName = evidence.ReleaseName.Replace("The Book", "Different Work", StringComparison.Ordinal) }).IsConfirmed);
+        }
+    }
+
+    [Theory]
+    [InlineData("J. R. R. Tolkien", "J. R. Tolkien")]
+    [InlineData("J. R. R. Tolkien", "J.R.T. Tolkien")]
+    [InlineData("J. R. T. Tolkien", "J.T.R. Tolkien")]
+    [InlineData("J. R. R. Tolkien", "John Ronald Reuel Tolkien")]
+    [InlineData("J. R. R. Tolkien", "J.R.R. Other")]
+    [InlineData("Anne.Marie Smith", "Anne Marie Smith")]
+    [InlineData("St.John Smith", "St. John Smith")]
+    public void InitialFormattingCannotDropOrReorderNameEvidence(string requested, string supplied)
+    {
+        var context = BookMatchContext.From(new Audiobook { Title = "The Book", Authors = [requested] });
+        var matcher = new BookIdentityMatcher();
+        Assert.False(IdentityText.PersonEqual(requested, supplied));
+        foreach (var evidence in new CandidateIdentityEvidence[]
+        {
+            new() { ReleaseName = "The Book", Authors = [new(supplied, IdentityEvidenceOrigin.ProviderSupplied)] },
+            new() { ReleaseName = supplied + " - The Book [M4B]" },
+            new() { ReleaseName = "The Book - " + supplied + " [M4B]" }
+        }) Assert.False(matcher.Evaluate(context, evidence).IsConfirmed);
+    }
+
+    [Theory]
     [InlineData("Good Omens:A Long Subtitle")]
     [InlineData("Good Omens: A Long Subtitle")]
     [InlineData("Good Omens : A Long Subtitle")]
