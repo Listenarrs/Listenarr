@@ -69,17 +69,8 @@ namespace Listenarr.Application.Downloads.Submission
                 return new SearchAndDownloadResult { Success = false, Message = "No search results found" };
             }
 
-            // Automatic path only: drop results irrelevant to THIS audiobook before scoring.
-            // The metadata-page filter pipeline is intentionally not run on raw indexer results.
-            searchResults = relevanceGate.Apply(searchResults, audiobook);
-            if (searchResults.Count == 0)
-            {
-                logger.LogWarning("All search results rejected as irrelevant for audiobook '{Title}'", LogRedaction.SanitizeText(audiobook.Title));
-                return new SearchAndDownloadResult { Success = false, Message = "No acceptable search results found" };
-            }
-
-            // Score results against quality profile
-            var scoredResults = await qualityProfileService.ScoreSearchResults(searchResults, audiobook.QualityProfile);
+            var assessment = await automaticScoring.ScoreAsync(audiobook, searchResults, audiobook.QualityProfile);
+            var scoredResults = assessment.Candidates;
 
             // Log all scored results for debugging
             logger.LogInformation("Scored {Count} search results for audiobook '{Title}':", scoredResults.Count, LogRedaction.SanitizeText(audiobook.Title));
@@ -96,10 +87,7 @@ namespace Listenarr.Application.Downloads.Submission
             }
 
             // Only consider non-rejected, score > 0 results
-            var topResult = scoredResults
-                .Where(s => !s.IsRejected && s.TotalScore > 0)
-                .OrderByDescending(s => s.TotalScore)
-                .FirstOrDefault();
+            var topResult = automaticScoring.SelectBest(assessment);
 
             if (topResult == null)
             {
@@ -121,6 +109,9 @@ namespace Listenarr.Application.Downloads.Submission
             }
 
             // Send to download client with audiobookId for proper metadata linking
+            if (!await automaticScoring.IsCurrentAsync(assessment, audiobookId))
+                return new SearchAndDownloadResult { Success = false, Message = "Search context changed; retry search" };
+
             var downloadId2 = await SendToDownloadClientAsync(candidate, downloadClientId, audiobookId);
 
             if (string.IsNullOrEmpty(downloadId2))
