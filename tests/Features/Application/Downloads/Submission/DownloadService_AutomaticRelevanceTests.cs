@@ -59,6 +59,8 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
             var builder = new AudiobookBuilder()
                 .WithBasePath(FileService.GetTempPath())
                 .WithTitle(title);
+            if (title.Contains(": ", StringComparison.Ordinal))
+                builder.WithSubtitle(title[(title.IndexOf(": ", StringComparison.Ordinal) + 2)..]);
             foreach (var author in authors) builder.WithAuthor(author);
             return await _audiobookRepository.AddAsync(Configure(builder.Build(), profile.Id));
         }
@@ -84,6 +86,7 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
         {
             Title = title,
             Artist = artist,
+            IdentityEvidence = new CandidateIdentityEvidence { ReleaseName = title, Authors = string.IsNullOrWhiteSpace(artist) ? [] : [new ContributorEvidence(artist, IdentityEvidenceOrigin.ProviderSupplied)] },
             DownloadType = "Torrent",
             Format = "M4B",
             Seeders = seeders,
@@ -91,11 +94,20 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
             Size = 400L * 1024 * 1024
         };
 
+        [Fact]
+        public async Task SearchAndDownloadAsync_UnverifiedContributorAlias_IsDeferred()
+        {
+            var book = await SeedAsync("Man's Search for Meaning", "Viktor E. Frankl");
+            IndexerReturns(Release("Viktor Frankl - Man's Search for Meaning [M4B]"));
+            var result = await _provider.GetRequiredService<DownloadService>().SearchAndDownloadAsync(book.Id);
+            Assert.False(result.Success);
+            Assert.Empty(_submitted);
+        }
+
         [Theory]
         // Review regressions: exact matches that the product-like / promotional metadata-page
         // filters reject on raw indexer titles ("ring", "search").
         [InlineData("The Lord of the Rings", "J. R. R. Tolkien", "J. R. R. Tolkien - The Lord of the Rings [M4B]", "")]
-        [InlineData("Man's Search for Meaning", "Viktor E. Frankl", "Viktor Frankl - Man's Search for Meaning [M4B]", "")]
         // Provider that returns title and author separately (MyAnonamouse author_info).
         [InlineData("Dune", "Frank Herbert", "Dune", "Frank Herbert")]
         // Control release with the author in the title.
@@ -143,7 +155,7 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
             string audiobookTitle, string author, string correctRelease, string decoyRelease)
         {
             var book = await SeedAsync(audiobookTitle, author);
-            IndexerReturns(Release(decoyRelease, seeders: 900), Release(correctRelease, seeders: 5));
+            IndexerReturns(Release(decoyRelease, seeders: 900), Release(correctRelease, artist: author, seeders: 5));
 
             var result = await _provider.GetRequiredService<DownloadService>().SearchAndDownloadAsync(book.Id);
 

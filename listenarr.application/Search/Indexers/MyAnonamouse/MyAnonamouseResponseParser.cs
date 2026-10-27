@@ -233,11 +233,13 @@ namespace Listenarr.Application.Search.Indexers.MyAnonamouse
 
                         // Extract author from author_info JSON
                         string? author = null;
+                        List<string> authorNames = [];
                         if (item.TryGetProperty("author_info", out var authorInfo))
                         {
                             try
                             {
-                                author = MyAnonamouseContributorParser.ParseContributorList(authorInfo.GetString());
+                                authorNames = MyAnonamouseContributorParser.ParseContributors(authorInfo.GetString());
+                                author = authorNames.Count > 0 ? string.Join(", ", authorNames) : null;
                             }
                             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                             {
@@ -342,6 +344,7 @@ namespace Listenarr.Application.Search.Indexers.MyAnonamouse
                             Id = id ?? Guid.NewGuid().ToString(),
                             Title = title,
                             Artist = author ?? "Unknown Author",
+                            IdentityEvidence = new CandidateIdentityEvidence { ReleaseName = title, Authors = authorNames.Select(a => new ContributorEvidence(a, IdentityEvidenceOrigin.ProviderSupplied)).ToArray() },
                             Album = narrator != null ? $"Narrated by {narrator}" : "Unknown",
                             Category = category ?? "Audiobook",
                             Size = size,
