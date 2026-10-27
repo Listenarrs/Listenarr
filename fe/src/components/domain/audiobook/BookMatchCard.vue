@@ -446,7 +446,7 @@ const lastSearchKind = ref<SearchKind | null>(null)
 const edited = ref(false)
 // The dialog's answered searches, when it keeps them
 const searchCache = inject(SEARCH_CACHE, null)
-let controller: AbortController | null = null
+let abortController: AbortController | null = null
 
 // Every Audible region stays available, in canary's order (as in Add to Library): the book's
 // region, then the preferred (configured) one and the US, then the others alphabetically by name
@@ -714,7 +714,7 @@ async function search(kind: SearchKind = 'title', fresh = false) {
     return
   }
   const current = new AbortController()
-  controller = current
+  abortController = current
   let timedOut = false
   const timer = setTimeout(() => {
     timedOut = true
@@ -727,11 +727,11 @@ async function search(kind: SearchKind = 'title', fresh = false) {
   try {
     const results = await searchLikeAddNew(query, region, current.signal)
     // A canceled search answers to nobody: the card already went back to its fields
-    if (controller !== current) return
+    if (abortController !== current) return
     searchCache?.set(cacheKey, results)
     showResults(kind, searched, results, performance.now() - startedAt)
   } catch (e) {
-    if (controller !== current) return
+    if (abortController !== current) return
     const error = timedOut
       ? `The search took longer than ${SEARCH_TIMEOUT_MS / 1000} seconds and was stopped.`
       : `The search failed: ${(e as Error)?.message ?? 'unknown error'}`
@@ -742,8 +742,8 @@ async function search(kind: SearchKind = 'title', fresh = false) {
     state.value = { status: 'failed', kind, results: [], error, searched, requestMs: null }
   } finally {
     clearTimeout(timer)
-    if (controller === current) {
-      controller = null
+    if (abortController === current) {
+      abortController = null
       running.value = null
     }
   }
@@ -752,8 +752,8 @@ async function search(kind: SearchKind = 'title', fresh = false) {
 // Back to the fields, nothing to report
 // Stops the running search, if any, leaving the card as it is
 function stopSearch() {
-  controller?.abort()
-  controller = null
+  abortController?.abort()
+  abortController = null
   running.value = null
   endReveal()
 }
