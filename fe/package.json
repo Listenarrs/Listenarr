@@ -20,7 +20,7 @@
     "build": "run-p type-check \"build-only {@}\" --",
     "preview": "vite preview",
     "test": "vitest",
-    "test:build-config": "node --test scripts/vite-production-build.test.mjs",
+    "test:build-config": "node --test scripts/check-vite-production-build.mjs",
     "test:unit": "vitest run --reporter=dot --silent",
     "prepare": "cypress install",
     "postinstall": "patch-package && npm run version:sync",
