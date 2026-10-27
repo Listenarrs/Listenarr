@@ -418,6 +418,11 @@ namespace Listenarr.Application.Search.Indexers.Torznab
                                 result.DownloadType = "Torrent";
                             }
 
+                            result.IdentityEvidence = new CandidateIdentityEvidence
+                            {
+                                ReleaseName = result.Title,
+                                Authors = result.Artist == "Unknown Author" ? [] : [new ContributorEvidence(result.Artist, IdentityEvidenceOrigin.ReleaseNameDerived)]
+                            };
                             results.Add(result);
                         }
                         else

@@ -37,4 +37,7 @@
 		<ProjectReference Include="..\listenarr.api\Listenarr.Api.csproj" />
 		<ProjectReference Include="..\listenarr.infrastructure\Listenarr.Infrastructure.csproj" />
 	</ItemGroup>
+  <ItemGroup>
+    <None Update="Fixtures/AutomaticSearch/identity-policy-v1.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
