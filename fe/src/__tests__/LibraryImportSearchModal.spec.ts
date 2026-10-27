@@ -254,7 +254,36 @@ describe('LibraryImportSearchModal', () => {
     )
   })
 
-  it('looks the ASIN up when the region changes: a record found is offered, none is an error', async () => {
+  it("opens with the same search from the folder's scan, whatever match it already has", async () => {
+    const unmatched = mountModal(primalHunter)
+    await flushPromises()
+    const unmatchedSearch = vi.mocked(apiService.advancedSearch).mock.calls[0]
+    unmatched.unmount()
+    vi.mocked(apiService.advancedSearch).mockClear()
+
+    // Matched before, to a record in another region
+    const matched = mountModal({
+      ...primalHunter,
+      selectedMatch: {
+        ...primalHunter4,
+        region: 'de',
+      } as unknown as typeof alchemised.selectedMatch,
+    })
+    await flushPromises()
+
+    expect(vi.mocked(apiService.advancedSearch).mock.calls[0]).toEqual(unmatchedSearch)
+    expect(unmatchedSearch?.[0]).toEqual(
+      expect.objectContaining({ title: 'The Primal Hunter 4', author: 'Zogarth', region: 'fr' }),
+    )
+    expect(metadata).not.toHaveBeenCalled()
+    // The match's ASIN and region aren't the search's: the scan's values, the configured region
+    expect((field(matched, 'match-asin').element as HTMLInputElement).value).toBe('')
+    expect((field(matched, 'match-region').element as HTMLSelectElement).value).toBe('fr')
+    // It stays the folder's current record
+    expect(field(matched, 'match-current').text()).toContain('B0BK9W82PQ')
+  })
+
+  it('looks a typed ASIN up when the region changes: a record found is offered, none is an error', async () => {
     const wrapper = mountModal({
       ...primalHunter,
       selectedMatch: {
@@ -263,6 +292,7 @@ describe('LibraryImportSearchModal', () => {
       } as unknown as typeof alchemised.selectedMatch,
     })
     await flushPromises()
+    await field(wrapper, 'match-asin').setValue('B0BK9W82PQ')
 
     metadata.mockImplementation(notFound)
     await field(wrapper, 'match-region').setValue('de')

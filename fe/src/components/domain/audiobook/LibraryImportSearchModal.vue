@@ -130,11 +130,13 @@ const canConfirm = computed(
 onMounted(async () => {
   configuredRegion.value = await store.configuredRegion()
   const selectedMatch = props.item.selectedMatch
+  // Always the same search, from the folder's scan, whatever match the folder has (it stays its
+  // current record, tagged Current): the scan's ASIN, else its title and author, in the configured
+  // region. The user can pick another region, which the match keeps
   bookMatch.value = createBookMatch(
     {
-      asin: selectedMatch?.asin ?? '',
-      // The configured region by default; the user can pick another one, which the match keeps
-      region: selectedMatch?.region || configuredRegion.value,
+      asin: '',
+      region: configuredRegion.value,
       // ASIN → filename stem (when more specific than folder) → folderName
       query: buildLibraryImportInitialQuery(props.item),
       author: buildLibraryImportInitialAuthor(props.item),
