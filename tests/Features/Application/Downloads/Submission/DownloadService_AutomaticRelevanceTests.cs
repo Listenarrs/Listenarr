@@ -112,6 +112,9 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
         [InlineData("The Hobbit", "J.R.R. Tolkien", "The Hobbit", "J. R. R. Tolkien")]
         [InlineData("The Hobbit", "J. R. R. Tolkien", "J.R.R. Tolkien - The Hobbit [M4B]", "")]
         [InlineData("The Hobbit", "J.R.R. Tolkien", "The Hobbit - J. R. R. Tolkien [M4B]", "")]
+        [InlineData("Nausea", "Jean-Paul Sartre", "Nausea - Jean-Paul Sartre [M4B]", "")]
+        [InlineData("The Little Prince", "Antoine de Saint-Exupéry", "The Little Prince - Antoine de Saint-Exupéry [M4B]", "Antoine de Saint-Exupéry")]
+        [InlineData("The Turn of the Screw", "James, Henry", "The Turn of the Screw - James, Henry [M4B]", "")]
         // Provider that returns title and author separately (MyAnonamouse author_info).
         [InlineData("Dune", "Frank Herbert", "Dune", "Frank Herbert")]
         // Control release with the author in the title.
