@@ -108,6 +108,10 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
         // Review regressions: exact matches that the product-like / promotional metadata-page
         // filters reject on raw indexer titles ("ring", "search").
         [InlineData("The Lord of the Rings", "J. R. R. Tolkien", "J. R. R. Tolkien - The Lord of the Rings [M4B]", "")]
+        [InlineData("The Hobbit", "J. R. R. Tolkien", "The Hobbit", "J.R.R. Tolkien")]
+        [InlineData("The Hobbit", "J.R.R. Tolkien", "The Hobbit", "J. R. R. Tolkien")]
+        [InlineData("The Hobbit", "J. R. R. Tolkien", "J.R.R. Tolkien - The Hobbit [M4B]", "")]
+        [InlineData("The Hobbit", "J.R.R. Tolkien", "The Hobbit - J. R. R. Tolkien [M4B]", "")]
         // Provider that returns title and author separately (MyAnonamouse author_info).
         [InlineData("Dune", "Frank Herbert", "Dune", "Frank Herbert")]
         // Control release with the author in the title.
