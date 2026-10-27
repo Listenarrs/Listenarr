@@ -95,10 +95,10 @@ import type { SearchResult } from '@/types'
 const props = defineProps<{ item: LibraryImportItem }>()
 const emit = defineEmits<{
   close: []
-  select: [searchResult: SearchResult]
+  select: [result: SearchResult]
 }>()
 
-const libraryImportStore = useLibraryImportStore()
+const store = useLibraryImportStore()
 // The searches answered while this dialog is open (it is created each time it opens)
 provide<SearchCache>(SEARCH_CACHE, new Map())
 const configuredRegion = ref('')
@@ -128,7 +128,7 @@ const canConfirm = computed(
 )
 
 onMounted(async () => {
-  configuredRegion.value = await libraryImportStore.configuredRegion()
+  configuredRegion.value = await store.configuredRegion()
   const selectedMatch = props.item.selectedMatch
   bookMatch.value = createBookMatch(
     {
@@ -147,10 +147,10 @@ function onSearching(isSearchRunning: boolean) {
   isSearching.value = isSearchRunning
   if (isSearchRunning && !isSearchCounted) {
     isSearchCounted = true
-    libraryImportStore.findMatchSearchStarted()
+    store.findMatchSearchStarted()
   } else if (!isSearchRunning && isSearchCounted) {
     isSearchCounted = false
-    libraryImportStore.findMatchSearchEnded()
+    store.findMatchSearchEnded()
   }
 }
 
