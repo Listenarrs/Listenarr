@@ -153,6 +153,8 @@ import RepairFooter from './RepairFooter.vue'
 import RepairResults from './RepairResults.vue'
 import RepairSelection from './RepairSelection.vue'
 import { useRepairBooks } from '@/composables/useRepairBooks'
+import { usePageLeaveGuard } from '@/composables/usePageLeaveGuard'
+import { showConfirm } from '@/composables/confirmService'
 import { SEARCH_CACHE } from '@/utils/bookMatch'
 import { pixels } from '@/utils/measure'
 import { isIncluded, isMatched, repairStepTitle } from '@/utils/repair'
@@ -205,6 +207,19 @@ const {
   clearSelection,
 } = useRepairBooks(() => props.audiobookIds)
 provide(SEARCH_CACHE, searchCache)
+
+// While the repairs run, leaving the page asks first (the dialog itself can't be closed then):
+// leaving cancels the books still waiting, the one being repaired ends on the server
+usePageLeaveGuard({
+  isActive: isExecuting,
+  confirmLeave: () =>
+    showConfirm(
+      'The book being repaired ends its repair, the ones still waiting are not repaired.',
+      'Leave while books are repaired?',
+      { confirmText: 'Leave', cancelText: 'Stay', danger: true },
+    ),
+  onLeave: cancelRepair,
+})
 
 const footerRef = ref<InstanceType<typeof RepairFooter> | null>(null)
 // One book: the room step 1 took in the dialog's body, measured on Repair, kept by step 2 so the

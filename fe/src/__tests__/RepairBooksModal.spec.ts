@@ -33,6 +33,20 @@ vi.mock('@/services/api', () => ({
   apiService: apiMocks,
 }))
 
+// The leave guard each dialog registers, and the confirmation it asks
+const leaveMocks = vi.hoisted(() => ({
+  routeLeaveGuards: [] as Array<() => Promise<boolean> | boolean>,
+  showConfirm: vi.fn(),
+}))
+
+vi.mock('vue-router', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-router')>()),
+  onBeforeRouteLeave: (guard: () => Promise<boolean> | boolean) =>
+    leaveMocks.routeLeaveGuards.push(guard),
+}))
+
+vi.mock('@/composables/confirmService', () => ({ showConfirm: leaveMocks.showConfirm }))
+
 import RepairBooksModal from '@/components/domain/repair/RepairBooksModal.vue'
 import { resultsReveal } from '@/utils/resultsReveal'
 
@@ -2049,6 +2063,105 @@ describe('RepairBooksModal', () => {
     await wrapper.get('[data-testid="repair-cancel"]').trigger('click')
     expect(wrapper.emitted('done')).toHaveLength(1)
     expect(wrapper.emitted('close')).toBeUndefined()
+  })
+
+  describe('leaving the page while books are repaired', () => {
+    // Two books picked, then repaired: the first one's rescan waits until resolved
+    async function startTwoRepairs() {
+      apiMocks.getAudiobook.mockImplementation(async (audiobookId: number) => ({
+        ...mismatched,
+        id: audiobookId,
+      }))
+      const rescans: ((value: unknown) => void)[] = []
+      apiMocks.rescanAudiobookMetadata.mockImplementation(
+        () => new Promise((resolve) => rescans.push(resolve)),
+      )
+      const wrapper = mountModal([7, 8])
+      await flushPromises()
+      for (const audiobookId of [7, 8])
+        await searchAndPick(wrapper, { audiobookId, query: 'Primal Hunter' })
+      await repair(wrapper)
+      const resultStates = () =>
+        [7, 8].map((audiobookId) =>
+          resultCard(wrapper, audiobookId).attributes('data-result-state'),
+        )
+      return { wrapper, rescans, resultStates }
+    }
+
+    const leaveGuard = () => leaveMocks.routeLeaveGuards.at(-1)!
+    // Whether the browser would warn before closing or reloading the tab
+    const isUnloadWarned = () => {
+      const event = new Event('beforeunload', { cancelable: true })
+      window.dispatchEvent(event)
+      return event.defaultPrevented
+    }
+
+    beforeEach(() => {
+      leaveMocks.routeLeaveGuards.length = 0
+    })
+
+    it('lets the page go without asking when no repair runs', async () => {
+      const wrapper = mountModal()
+      await flushPromises()
+
+      expect(await leaveGuard()()).toBe(true)
+      expect(leaveMocks.showConfirm).not.toHaveBeenCalled()
+      expect(isUnloadWarned()).toBe(false)
+      wrapper.unmount()
+    })
+
+    it('asks before leaving; Stay keeps the books repairing', async () => {
+      const { wrapper, rescans, resultStates } = await startTwoRepairs()
+      expect(resultStates()).toEqual(['running', 'waiting'])
+      // Closing or reloading the tab: the browser warns
+      expect(isUnloadWarned()).toBe(true)
+
+      leaveMocks.showConfirm.mockResolvedValue(false)
+      expect(await leaveGuard()()).toBe(false)
+      expect(leaveMocks.showConfirm).toHaveBeenCalledWith(
+        'The book being repaired ends its repair, the ones still waiting are not repaired.',
+        'Leave while books are repaired?',
+        { confirmText: 'Leave', cancelText: 'Stay', danger: true },
+      )
+      expect(resultStates()).toEqual(['running', 'waiting'])
+
+      rescans[0]!({ message: 'ok', audiobookId: 7, asin: 'B0BK9W82PQ', region: 'us' })
+      await flushPromises()
+      rescans[1]!({ message: 'ok', audiobookId: 8, asin: 'B0BK9W82PQ', region: 'us' })
+      await flushPromises()
+      expect(resultStates()).toEqual(['done', 'done'])
+      // Over: nothing to warn about any more
+      expect(isUnloadWarned()).toBe(false)
+      wrapper.unmount()
+    })
+
+    it('leaves once confirmed: the running book ends, the waiting ones are not repaired', async () => {
+      const { wrapper, rescans, resultStates } = await startTwoRepairs()
+
+      leaveMocks.showConfirm.mockResolvedValue(true)
+      expect(await leaveGuard()()).toBe(true)
+      expect(resultStates()).toEqual(['running', 'skipped'])
+
+      rescans[0]!({ message: 'ok', audiobookId: 7, asin: 'B0BK9W82PQ', region: 'us' })
+      await flushPromises()
+      expect(resultStates()).toEqual(['done', 'skipped'])
+      expect(apiMocks.rescanAudiobookMetadata).toHaveBeenCalledTimes(1)
+      wrapper.unmount()
+    })
+
+    it('stops the waiting books when the dialog goes during a repair, however it goes', async () => {
+      const { wrapper, rescans } = await startTwoRepairs()
+
+      wrapper.unmount()
+      // The browser no longer warns: nothing shows the repairs any more
+      expect(isUnloadWarned()).toBe(false)
+      rescans[0]!({ message: 'ok', audiobookId: 7, asin: 'B0BK9W82PQ', region: 'us' })
+      await flushPromises()
+
+      // The book being repaired ended; the waiting one never started
+      expect(apiMocks.rescanAudiobookMetadata).toHaveBeenCalledTimes(1)
+      expect(apiMocks.rescanAudiobookMetadata).toHaveBeenCalledWith(7)
+    })
   })
 
   it('closes as canceled when nothing was repaired', async () => {

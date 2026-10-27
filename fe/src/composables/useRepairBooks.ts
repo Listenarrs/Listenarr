@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-import { computed, ref } from 'vue'
+import { computed, onScopeDispose, ref } from 'vue'
 import { apiService } from '@/services/api'
 import { useLibraryImportStore } from '@/stores/libraryImport'
 import {
@@ -266,6 +266,10 @@ export function useRepairBooks(audiobookIds: () => number[]) {
   function clearSelection() {
     repairRows.value.forEach((repairRow) => (repairRow.isSelected = false))
   }
+
+  // The repairs run in the browser: once their dialog is gone (its page left), nothing would show
+  // them any more, so the books still waiting are left out, as by Cancel
+  onScopeDispose(cancelRepair)
 
   return {
     searchCache,
