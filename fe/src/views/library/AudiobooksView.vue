@@ -853,9 +853,8 @@ import { logger } from '@/utils/logger'
 import BulkEditModal from '@/components/domain/collection/BulkEditModal.vue'
 import EditAudiobookModal from '@/components/domain/audiobook/EditAudiobookModal.vue'
 import RenamePreviewModal from '@/components/domain/organize/RenamePreviewModal.vue'
-import RepairBooksModal, {
-  REPAIR_ORGANIZE_TITLE,
-} from '@/components/domain/repair/RepairBooksModal.vue'
+import RepairBooksModal from '@/components/domain/repair/RepairBooksModal.vue'
+import { REPAIR_ORGANIZE_TITLE } from '@/utils/repair'
 import DeleteConfirmationModal from '@/components/feedback/DeleteConfirmationModal.vue'
 import CustomSelect from '@/components/form/CustomSelect.vue'
 import FiltersDropdown from '@/components/ui/FiltersDropdown.vue'
