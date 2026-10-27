@@ -670,8 +670,8 @@
   <RenamePreviewModal
     :visible="showOrganizeModal"
     :audiobook-ids="audiobook ? [audiobook.id] : []"
-    :title="organizeFromRepair ? REPAIR_ORGANIZE_TITLE : undefined"
-    :back="organizeFromRepair"
+    :title="isOrganizeFromRepair ? REPAIR_ORGANIZE_TITLE : undefined"
+    :back="isOrganizeFromRepair"
     @back="backToRepair"
     @close="showOrganizeModal = false"
     @done="handleOrganizeDone"
@@ -680,7 +680,7 @@
   <RepairBooksModal
     :visible="showRepairModal"
     :audiobook-ids="audiobook ? [audiobook.id] : []"
-    :resume="repairResumed"
+    :is-resumed="isRepairResumed"
     @close="showRepairModal = false"
     @done="handleRepairDone"
     @organize="organizeAfterRepair"
@@ -815,10 +815,10 @@ const displayedScanStatus = computed(() => {
 const showEditModal = ref(false)
 const showOrganizeModal = ref(false)
 // Organize opened by Repair, as its last step
-const organizeFromRepair = ref(false)
+const isOrganizeFromRepair = ref(false)
 const showRepairModal = ref(false)
 // Repair shown again by Back from its step 3 (Organize): as it was left
-const repairResumed = ref(false)
+const isRepairResumed = ref(false)
 const showMoreActions = ref(false)
 
 // History state
@@ -919,7 +919,7 @@ const topActions = computed<DetailTopAction[]>(() => [
     desktopGroup: 'secondary',
     desktopClass: 'warning',
     onClick: () => {
-      repairResumed.value = false
+      isRepairResumed.value = false
       showRepairModal.value = true
     },
   },
@@ -932,7 +932,7 @@ const topActions = computed<DetailTopAction[]>(() => [
     disabled: !audiobook.value?.files?.length && !audiobook.value?.filePath,
     desktopGroup: 'secondary',
     onClick: () => {
-      organizeFromRepair.value = false
+      isOrganizeFromRepair.value = false
       showOrganizeModal.value = true
     },
   },
@@ -1854,14 +1854,14 @@ async function handleRepairDone() {
 async function organizeAfterRepair() {
   showRepairModal.value = false
   await loadAudiobook()
-  organizeFromRepair.value = true
+  isOrganizeFromRepair.value = true
   showOrganizeModal.value = true
 }
 
 // Back from Organize to Repair's step 2, as it was left
 function backToRepair() {
   showOrganizeModal.value = false
-  repairResumed.value = true
+  isRepairResumed.value = true
   showRepairModal.value = true
 }
 

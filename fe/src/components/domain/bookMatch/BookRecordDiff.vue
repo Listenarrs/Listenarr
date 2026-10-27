@@ -21,11 +21,11 @@
      highlighted. Repair's Current/Old and New lines, on the book card and on step 2 -->
 <template>
   <span class="book-record-diff">
-    <template v-for="(part, index) in parts" :key="part.key">
-      <template v-if="index"> - </template>
+    <template v-for="(part, partIndex) in comparedParts" :key="part.key">
+      <template v-if="partIndex"> - </template>
       <span
-        :class="{ [replaced ? 'book-record-replaced' : 'book-record-changed']: part.changed }"
-        :data-changed="part.changed || undefined"
+        :class="{ [isReplaced ? 'book-record-replaced' : 'book-record-changed']: part.isChanged }"
+        :data-changed="part.isChanged || undefined"
         >{{ part.text }}</span
       >
     </template>
@@ -39,17 +39,17 @@ import { recordParts, type BookRecord } from '@/utils/bookMatch'
 const props = defineProps<{
   record: BookRecord
   // The other record: the one it replaces, or with replaced, the one replacing it
-  base: BookRecord
+  baseRecord: BookRecord
   // The old record: its parts the new one changes are the replaced ones (orange)
-  replaced?: boolean
+  isReplaced?: boolean
 }>()
 
 // Compared part by part, regardless of case
-const parts = computed(() => {
-  const base = new Map(recordParts(props.base).map((part) => [part.key, part.text]))
+const comparedParts = computed(() => {
+  const baseTextByKey = new Map(recordParts(props.baseRecord).map((part) => [part.key, part.text]))
   return recordParts(props.record).map((part) => ({
     ...part,
-    changed: (base.get(part.key) ?? '').toUpperCase() !== part.text.toUpperCase(),
+    isChanged: (baseTextByKey.get(part.key) ?? '').toUpperCase() !== part.text.toUpperCase(),
   }))
 })
 </script>

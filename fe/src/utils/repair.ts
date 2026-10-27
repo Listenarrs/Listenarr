@@ -37,35 +37,34 @@ export const REPAIR_ORGANIZE_TITLE = 'Repair Books - Organize - Step 3/3'
 
 // Steps 1 and 2 of three: pick each book's new record, then the repair process and its results,
 // to choose what to organize
-export function repairStepTitle(repairStep: boolean): string {
-  return repairStep
+export function repairStepTitle(isRepairStep: boolean): string {
+  return isRepairStep
     ? 'Repair Books - Repair process - Step 2/3'
     : 'Repair Books - Matching - Step 1/3'
 }
 
 export interface RepairRow {
-  // The audiobook's
-  id: number
+  audiobookId: number
   title: string
   subtitle: string
   authors: string[]
   identifiers: AudiobookExternalIdentifier[]
   // The record the book should point at, edited in its card
-  match: BookMatch
+  bookMatch: BookMatch
   // Ticked: repaired once it has a new record (finding one ticks it)
-  selected: boolean
+  isSelected: boolean
   // Its repair, once started: waiting, running, then how it ended (shown by its card)
-  task: BookTask | null
+  repairTask: BookTask | null
   // Its record when the repair started, the one it is to get (repaired books only), and its record
   // after the repair
-  before: BookRecord | null
-  planned: BookRecord | null
-  after: BookRecord | null
+  recordBefore: BookRecord | null
+  plannedRecord: BookRecord | null
+  recordAfter: BookRecord | null
 }
 
 // One book to repair on step 2, from the moment the repair starts
 export interface RepairOutcome {
-  id: number
+  audiobookId: number
   title: string
   // Waiting, running, then how its repair ended: done, warning (in part), failed, or skipped
   // (canceled before its turn)
@@ -74,14 +73,14 @@ export interface RepairOutcome {
   message: string
   // Its record before the repair; the record it is to get; and its record after the repair (null
   // until it is, or when it failed)
-  before: BookRecord
-  planned: BookRecord
-  after: BookRecord | null
+  recordBefore: BookRecord
+  plannedRecord: BookRecord
+  recordAfter: BookRecord | null
 }
 
 function primaryAsin(identifiers: AudiobookExternalIdentifier[]) {
-  const asins = identifiers.filter((i) => i.type === 'Asin')
-  return asins.find((i) => i.isPrimary) ?? asins[0]
+  const asinIdentifiers = identifiers.filter((identifier) => identifier.type === 'Asin')
+  return asinIdentifiers.find((identifier) => identifier.isPrimary) ?? asinIdentifiers[0]
 }
 
 // A book as step 1 shows it: its primary ASIN and region (the configured one when it has none),
@@ -92,108 +91,124 @@ export function repairRowFrom(
   identifiers: AudiobookExternalIdentifier[],
   configuredRegion: string,
 ): RepairRow {
-  const asin = primaryAsin(identifiers)
-  const match = createBookMatch(
+  const primaryAsinIdentifier = primaryAsin(identifiers)
+  const bookMatch = createBookMatch(
     {
-      asin: asin?.value ?? book.asin ?? '',
-      region: asin?.region || configuredRegion,
+      asin: primaryAsinIdentifier?.value ?? book.asin ?? '',
+      region: primaryAsinIdentifier?.region || configuredRegion,
       query: book.title ?? '',
       author: book.authors?.[0] ?? '',
     },
-    { asin: asin?.value ?? book.asin ?? '', region: asin?.region ?? '' },
+    {
+      asin: primaryAsinIdentifier?.value ?? book.asin ?? '',
+      region: primaryAsinIdentifier?.region ?? '',
+    },
   )
   return {
-    id: audiobookId,
+    audiobookId,
     title: book.title ?? '',
     subtitle: book.subtitle ?? '',
     authors: book.authors ?? [],
     identifiers,
-    match,
-    selected: false,
-    task: null,
-    before: null,
-    planned: null,
-    after: null,
+    bookMatch,
+    isSelected: false,
+    repairTask: null,
+    recordBefore: null,
+    plannedRecord: null,
+    recordAfter: null,
   }
 }
 
-export function isMatched(row: RepairRow): boolean {
-  return matchState(row.match) === 'matched'
+export function isMatched(repairRow: RepairRow): boolean {
+  return matchState(repairRow.bookMatch) === 'matched'
 }
 
 // Only a book with a new record, looked up in its region, is repaired
-export function isIncluded(row: RepairRow): boolean {
-  return row.selected && isMatched(row)
+export function isIncluded(repairRow: RepairRow): boolean {
+  return repairRow.isSelected && isMatched(repairRow)
 }
 
 // The new ASIN becomes the primary one. Identifiers that came from the previous match (provider or
 // import) are dropped: an ISBN of the wrong book would let the rescan find it again. Manual ones stay.
-export function identifiersWithPrimaryAsin(row: RepairRow): AudiobookExternalIdentifierInput[] {
+export function identifiersWithPrimaryAsin(
+  repairRow: RepairRow,
+): AudiobookExternalIdentifierInput[] {
   // Only a matched book is repaired: its new record is the picked one, whatever the fields hold
-  const asin = (row.match.picked?.asin ?? '').toUpperCase()
-  const region = row.match.picked?.region || row.match.region
-  const manual = row.identifiers
-    .filter((i) => i.source === 'Manual')
-    .filter((i) => !(i.type === 'Asin' && i.value.toUpperCase() === asin))
-    .map((i) => ({
-      type: i.type,
-      value: i.value,
-      region: i.type === 'Asin' ? i.region || null : null,
-      isPrimary: i.type === 'Asin' ? false : Boolean(i.isPrimary),
+  const asin = (repairRow.bookMatch.pickedSearchResult?.asin ?? '').toUpperCase()
+  const region = repairRow.bookMatch.pickedSearchResult?.region || repairRow.bookMatch.region
+  const manualIdentifiers = repairRow.identifiers
+    .filter((identifier) => identifier.source === 'Manual')
+    .filter(
+      (identifier) => !(identifier.type === 'Asin' && identifier.value.toUpperCase() === asin),
+    )
+    .map((identifier) => ({
+      type: identifier.type,
+      value: identifier.value,
+      region: identifier.type === 'Asin' ? identifier.region || null : null,
+      isPrimary: identifier.type === 'Asin' ? false : Boolean(identifier.isPrimary),
       source: 'Manual' as const,
     }))
-  return [{ type: 'Asin', value: asin, region, isPrimary: true, source: 'Manual' }, ...manual]
+  return [
+    { type: 'Asin', value: asin, region, isPrimary: true, source: 'Manual' },
+    ...manualIdentifiers,
+  ]
 }
 
 // Step 2: the books to repair only, the unticked or unmatched ones stay behind on step 1
-export function repairOutcomes(rows: RepairRow[]): RepairOutcome[] {
-  return rows
-    .filter((row): row is RepairRow & { planned: BookRecord } => !!row.planned)
-    .map((row) => ({
-      id: row.id,
-      title: row.title,
-      state: row.task?.state ?? 'skipped',
-      message: row.task?.text ?? '',
-      before: row.before ?? {},
-      planned: row.planned,
-      after: row.after,
+export function toRepairOutcomes(repairRows: RepairRow[]): RepairOutcome[] {
+  return repairRows
+    .filter(
+      (repairRow): repairRow is RepairRow & { plannedRecord: BookRecord } =>
+        !!repairRow.plannedRecord,
+    )
+    .map((repairRow) => ({
+      audiobookId: repairRow.audiobookId,
+      title: repairRow.title,
+      state: repairRow.repairTask?.state ?? 'skipped',
+      message: repairRow.repairTask?.text ?? '',
+      recordBefore: repairRow.recordBefore ?? {},
+      plannedRecord: repairRow.plannedRecord,
+      recordAfter: repairRow.recordAfter,
     }))
 }
 
 // What went wrong on step 2, counted by kind: the footer's warning, and its bar orange
-export function repairProblemText(rows: RepairRow[], canceledCount: number): string | null {
-  const count = (state: BookTaskState) => rows.filter((row) => row.task?.state === state).length
-  const parts = [
-    [count('failed'), 'failed'],
-    [count('warning'), 'repaired in part'],
+export function repairProblemText(repairRows: RepairRow[], canceledCount: number): string | null {
+  const countInState = (state: BookTaskState) =>
+    repairRows.filter((repairRow) => repairRow.repairTask?.state === state).length
+  const problemParts = [
+    [countInState('failed'), 'failed'],
+    [countInState('warning'), 'repaired in part'],
     [canceledCount, 'canceled'],
   ]
-    .filter(([n]) => n)
-    .map(([n, what]) => `${n} ${what}`)
-  return parts.length ? `Not all repaired: ${parts.join(', ')}` : null
+    .filter(([problemCount]) => problemCount)
+    .map(([problemCount, problemLabel]) => `${problemCount} ${problemLabel}`)
+  return problemParts.length ? `Not all repaired: ${problemParts.join(', ')}` : null
 }
 
 // The longest warning the books on step 2 can bring: every kind, each counting them all
-export function longestRepairProblemText(total: number): string {
-  return `Not all repaired: ${total} failed, ${total} repaired in part, ${total} canceled`
+export function longestRepairProblemText(bookCount: number): string {
+  return `Not all repaired: ${bookCount} failed, ${bookCount} repaired in part, ${bookCount} canceled`
 }
 
 // The record a book gets: the one it got, or until its repair ends the one it is to get. None once
 // its repair failed or was canceled
-export function newRecord(outcome: RepairOutcome): BookRecord | null {
-  if (outcome.after) return outcome.after
-  return outcome.state === 'waiting' || outcome.state === 'running' ? outcome.planned : null
+export function newRecord(repairOutcome: RepairOutcome): BookRecord | null {
+  if (repairOutcome.recordAfter) return repairOutcome.recordAfter
+  return repairOutcome.state === 'waiting' || repairOutcome.state === 'running'
+    ? repairOutcome.plannedRecord
+    : null
 }
 
-export function booksRepaired(count: number): string {
-  return `${count} ${count === 1 ? 'book' : 'books'} repaired`
+export function booksRepairedText(bookCount: number): string {
+  return `${bookCount} ${bookCount === 1 ? 'book' : 'books'} repaired`
 }
 
-export function organizeQuestion(count: number): string {
-  const one = count === 1
+export function organizeQuestion(bookCount: number): string {
+  const isSingleBook = bookCount === 1
   return (
-    `, ${one ? 'its' : 'their'} metadata refreshed from the new Audible record. ` +
-    `Organize ${one ? 'it' : 'them'} now? ${one ? 'Its files were' : 'Their files were'} last ` +
+    `, ${isSingleBook ? 'its' : 'their'} metadata refreshed from the new Audible record. ` +
+    `Organize ${isSingleBook ? 'it' : 'them'} now? ${isSingleBook ? 'Its files were' : 'Their files were'} last ` +
     'organized with the metadata from before, which may have been wrong.'
   )
 }

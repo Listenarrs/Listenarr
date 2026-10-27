@@ -22,23 +22,27 @@
 <template>
   <div
     class="form-control-card repair-result"
-    :class="`repair-result-${outcome.state}`"
-    :data-result-state="outcome.state"
+    :class="`repair-result-${repairOutcome.state}`"
+    :data-result-state="repairOutcome.state"
   >
     <div class="repair-result-header">
       <label
         class="repair-result-heading"
-        :title="outcome.state === 'done' ? undefined : 'Only a repaired book can be organized'"
+        :title="
+          repairOutcome.state === 'done' ? undefined : 'Only a repaired book can be organized'
+        "
       >
         <input
           type="checkbox"
           class="repair-result-checkbox"
           data-testid="repair-result-include"
-          :checked="selected"
-          :disabled="outcome.state !== 'done'"
+          :checked="isSelected"
+          :disabled="repairOutcome.state !== 'done'"
           @change="emit('toggle')"
         />
-        <span class="repair-result-title">{{ outcome.title || `Audiobook #${outcome.id}` }}</span>
+        <span class="repair-result-title">{{
+          repairOutcome.title || `Audiobook #${repairOutcome.audiobookId}`
+        }}</span>
       </label>
       <!-- The records, closed at first to keep the list short; the tooltip gives them without
            opening (the open details mark what changes) -->
@@ -46,13 +50,13 @@
         type="button"
         class="btn btn-secondary repair-result-details-btn"
         :title="recordsText"
-        :aria-expanded="opened"
+        :aria-expanded="isDetailsOpen"
         data-testid="repair-result-details"
-        @click="opened = !opened"
+        @click="isDetailsOpen = !isDetailsOpen"
       >
         <SteadySwap
-          :current="opened ? 'hide' : 'show'"
-          inline
+          :current-slot="isDetailsOpen ? 'hide' : 'show'"
+          is-inline
           gap="0.35rem"
           current-test-id="repair-result-details-label"
         >
@@ -71,44 +75,55 @@
          points at (the one it is to get while it waits, the one it got once repaired, its old one
          when the repair failed or was canceled), then where its repair is or how it ended -->
     <p class="repair-result-record" data-testid="repair-result-record">
-      <BookRecordDiff :record="record ?? outcome.before" :base="outcome.before" />
+      <BookRecordDiff
+        :record="newBookRecord ?? repairOutcome.recordBefore"
+        :base-record="repairOutcome.recordBefore"
+      />
     </p>
     <p class="repair-result-message" data-testid="repair-result-message">
       <PhSpinner
-        v-if="outcome.state === 'waiting' || outcome.state === 'running'"
+        v-if="repairOutcome.state === 'waiting' || repairOutcome.state === 'running'"
         class="ph-spin"
         :size="14"
         data-testid="repair-result-loading"
       />
-      {{ outcome.message }}
+      {{ repairOutcome.message }}
     </p>
     <!-- At the row's bottom right, laid over the row's room (the status line always leaves it
          free), so showing it moves nothing -->
     <button
-      v-if="outcome.state === 'failed' || outcome.state === 'warning'"
+      v-if="repairOutcome.state === 'failed' || repairOutcome.state === 'warning'"
       type="button"
       class="btn btn-secondary repair-result-retry"
-      :disabled="running"
-      :title="running ? 'Wait for the repair running to end' : 'Repair this book again'"
+      :disabled="isRunning"
+      :title="isRunning ? 'Wait for the repair running to end' : 'Repair this book again'"
       data-testid="repair-result-retry"
       @click="emit('retry')"
     >
       <PhArrowCounterClockwise :size="14" />
       Retry
     </button>
-    <dl v-if="opened" class="repair-result-records">
+    <dl v-if="isDetailsOpen" class="repair-result-records">
       <dt>Old</dt>
       <dd data-testid="repair-result-old">
-        <BookRecordDiff v-if="record" :record="outcome.before" :base="record" replaced />
-        <template v-else>{{ bookSummary(outcome.before) || 'None' }}</template>
+        <BookRecordDiff
+          v-if="newBookRecord"
+          :record="repairOutcome.recordBefore"
+          :base-record="newBookRecord"
+          is-replaced
+        />
+        <template v-else>{{ bookSummary(repairOutcome.recordBefore) || 'None' }}</template>
       </dd>
       <dt>New</dt>
-      <dd v-if="record" data-testid="repair-result-new">
-        <BookRecordDiff :record="record" :base="outcome.before" />
+      <dd v-if="newBookRecord" data-testid="repair-result-new">
+        <BookRecordDiff :record="newBookRecord" :base-record="repairOutcome.recordBefore" />
       </dd>
       <dd v-else data-testid="repair-result-new">None: the book keeps its old record</dd>
     </dl>
-    <StatusBar :tone="BAR_TONES[outcome.state]" :breathing="outcome.state === 'running'" />
+    <StatusBar
+      :tone="BAR_TONE_BY_STATE[repairOutcome.state]"
+      :is-breathing="repairOutcome.state === 'running'"
+    />
   </div>
 </template>
 
@@ -122,11 +137,11 @@ import { bookSummary, type BookTaskState } from '@/utils/bookMatch'
 import { newRecord, type RepairOutcome } from '@/utils/repair'
 
 const props = defineProps<{
-  outcome: RepairOutcome
+  repairOutcome: RepairOutcome
   // Ticked to be organized
-  selected: boolean
+  isSelected: boolean
   // The repairs aren't over yet
-  running: boolean
+  isRunning: boolean
 }>()
 
 const emit = defineEmits<{
@@ -136,7 +151,7 @@ const emit = defineEmits<{
 }>()
 
 // Grey while it waits or when it isn't repaired, blue while it is repaired, then its outcome
-const BAR_TONES: Record<BookTaskState, StatusTone> = {
+const BAR_TONE_BY_STATE: Record<BookTaskState, StatusTone> = {
   waiting: 'idle',
   running: 'progress',
   done: 'success',
@@ -146,14 +161,16 @@ const BAR_TONES: Record<BookTaskState, StatusTone> = {
 }
 
 // Its records shown
-const opened = ref(false)
+const isDetailsOpen = ref(false)
 
-const record = computed(() => newRecord(props.outcome))
+const newBookRecord = computed(() => newRecord(props.repairOutcome))
 
 // The records on two lines, for the details button's tooltip
 const recordsText = computed(() => {
-  const after = record.value ? bookSummary(record.value) : 'None: the book keeps its old record'
-  return `Old: ${bookSummary(props.outcome.before) || 'None'}\nNew: ${after}`
+  const newRecordText = newBookRecord.value
+    ? bookSummary(newBookRecord.value)
+    : 'None: the book keeps its old record'
+  return `Old: ${bookSummary(props.repairOutcome.recordBefore) || 'None'}\nNew: ${newRecordText}`
 })
 </script>
 

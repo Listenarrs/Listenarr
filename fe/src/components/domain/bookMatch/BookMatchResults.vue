@@ -25,23 +25,23 @@
   <div
     class="match-results"
     :class="{
-      'match-results-placeholders': placeholders,
-      'match-results-pending': pending,
-      'match-results-revealing': revealing && !pending,
+      'match-results-placeholders': shouldKeepResultsRoom,
+      'match-results-pending': isPending,
+      'match-results-revealing': isRevealing && !isPending,
     }"
     :style="{
       '--match-reveal-hold': `${resultsReveal.holdMs}ms`,
       '--match-reveal-fade': `${resultsReveal.fadeMs}ms`,
     }"
-    :aria-busy="pending || revealing"
+    :aria-busy="isPending || isRevealing"
     data-testid="match-results"
   >
     <!-- Always there: "No search request done" until a search, then what was found or not,
          and where the answer comes from -->
     <p
       class="match-results-header"
-      :class="pending || !header.tone ? undefined : `match-search-${header.tone}`"
-      :data-testid="HEADER_TEST_IDS[header.outcome]"
+      :class="isPending || !header.tone ? undefined : `match-search-${header.tone}`"
+      :data-testid="HEADER_TEST_ID_BY_OUTCOME[header.outcome]"
     >
       <PhWarningCircle v-if="header.tone === 'error'" :size="14" />
       {{ header.text }}
@@ -51,50 +51,52 @@
          high, so a short answer doesn't move what is under the book -->
     <div class="match-results-cell">
       <FindMatchResults
-        v-if="results.length"
-        ref="listEl"
+        v-if="searchResults.length"
+        ref="listRef"
         class="match-search-results"
-        :results="results"
-        :selected="selected"
-        :current="current"
-        @select="(result) => emit('select', result)"
+        :search-results="searchResults"
+        :selected-record-key="selectedRecordKey"
+        :current-record-key="currentRecordKey"
+        @select="(searchResult) => emit('select', searchResult)"
       />
       <!-- No results: the empty list, at its full height when the card keeps its room, else at
            the height of the results a failed or canceled search took away, or of one result from
            the first search on (the spinner and the reveal need something to cover). Why there are
            no results, in the middle of that room: once the spinner is gone -->
       <div
-        v-else-if="emptyList"
+        v-else-if="hasEmptyList"
         class="match-results-empty"
-        :style="placeholders || keptHeight === null ? undefined : { height: `${keptHeight}px` }"
+        :style="
+          shouldKeepResultsRoom || keptHeight === null ? undefined : { height: `${keptHeight}px` }
+        "
         data-testid="match-results-placeholder"
       >
         <p
-          v-if="reason && !pending"
+          v-if="noResultsReason && !isPending"
           class="match-results-reason"
-          :class="`match-search-${reason.tone}`"
+          :class="`match-search-${noResultsReason.tone}`"
           data-testid="match-results-reason"
         >
           <PhWarningCircle :size="16" />
-          {{ reason.text }}
+          {{ noResultsReason.text }}
         </p>
       </div>
       <FindMatchResults
-        v-if="oneResultRoom"
+        v-if="hasOneResultRoom"
         class="match-search-results match-results-sizer"
-        :results="[ROOM_SAMPLE]"
+        :search-results="[ROOM_SAMPLE]"
         aria-hidden="true"
         data-testid="match-results-sizer"
       />
     </div>
-    <span v-if="pending" class="match-results-spinner" data-testid="match-results-pending">
+    <span v-if="isPending" class="match-results-spinner" data-testid="match-results-pending">
       <PhSpinner class="ph-spin" :size="28" />
       <span class="match-results-pending-text" data-testid="match-results-pending-text">
-        {{ searching ? pendingText : 'Waiting: a search is running on another book' }}
+        {{ isSearching ? pendingText : 'Waiting: a search is running on another book' }}
       </span>
     </span>
     <span
-      v-else-if="revealing"
+      v-else-if="isRevealing"
       class="match-results-spinner match-results-found"
       data-testid="match-results-found"
     >
@@ -110,30 +112,29 @@ import { PhCheckCircle, PhSpinner, PhWarningCircle } from '@phosphor-icons/vue'
 import FindMatchResults from './FindMatchResults.vue'
 import { resultsReveal } from '@/utils/resultsReveal'
 import type { SearchHeader, SearchHeaderOutcome, SearchTone } from '@/utils/bookSearch'
+import type { RecordKey } from '@/utils/bookMatch'
 import type { SearchResult } from '@/types'
 
-type RecordRef = { asin: string; region?: string | null } | null
-
 const props = defineProps<{
-  results: SearchResult[]
+  searchResults: SearchResult[]
   header: SearchHeader
-  reason: { text: string; tone: SearchTone } | null
+  noResultsReason: { text: string; tone: SearchTone } | null
   // This book's search runs, and what it does
-  searching: boolean
+  isSearching: boolean
   pendingText: string | null
   // Another book is being searched: one search at a time
-  locked: boolean
-  revealing: boolean
+  isSearchLocked: boolean
+  isRevealing: boolean
   // The list's room kept from the start, at its full height whatever it holds
-  placeholders: boolean
+  shouldKeepResultsRoom: boolean
   // The record picked (green) and the one the book points at today (tagged)
-  selected: RecordRef
-  current: RecordRef
+  selectedRecordKey: RecordKey | null
+  currentRecordKey: RecordKey | null
 }>()
 
-const emit = defineEmits<{ select: [result: SearchResult] }>()
+const emit = defineEmits<{ select: [searchResult: SearchResult] }>()
 
-const HEADER_TEST_IDS: Record<SearchHeaderOutcome, string> = {
+const HEADER_TEST_ID_BY_OUTCOME: Record<SearchHeaderOutcome, string> = {
   none: 'match-results-header',
   results: 'match-results-header',
   empty: 'match-search-empty',
@@ -153,36 +154,38 @@ const ROOM_SAMPLE: SearchResult = {
 // The results list on screen, and the height an empty one keeps when a failed or canceled search
 // takes them away (cards that don't keep the room from the start): nothing moves until the next
 // results replace it
-const listEl = ref<ComponentPublicInstance | null>(null)
+const listRef = ref<ComponentPublicInstance | null>(null)
 const keptHeight = ref<number | null>(null)
 // A card that doesn't keep the room from the start gets an empty list one result high with its
 // first search, kept until results replace it: the spinner and the reveal show over it
-const firstSearchRoom = ref(false)
-const oneResultRoom = computed(() => !props.placeholders && firstSearchRoom.value)
-const emptyList = computed(
-  () => props.placeholders || keptHeight.value !== null || firstSearchRoom.value,
+const hasFirstSearchRoom = ref(false)
+const hasOneResultRoom = computed(() => !props.shouldKeepResultsRoom && hasFirstSearchRoom.value)
+const hasEmptyList = computed(
+  () => props.shouldKeepResultsRoom || keptHeight.value !== null || hasFirstSearchRoom.value,
 )
 
 // The results shown are waiting for a search: this book's (they are the previous search's, stale)
 // or another book's. Not to be picked until it answers
-const pending = computed(
-  () => (props.results.length > 0 || emptyList.value) && (props.searching || props.locked),
+const isPending = computed(
+  () =>
+    (props.searchResults.length > 0 || hasEmptyList.value) &&
+    (props.isSearching || props.isSearchLocked),
 )
 
 const foundText = computed(() => {
-  const count = props.results.length
-  return `Found ${count} ${count === 1 ? 'result' : 'results'}`
+  const resultCount = props.searchResults.length
+  return `Found ${resultCount} ${resultCount === 1 ? 'result' : 'results'}`
 })
 
 // The results on screen are about to go: their height is kept by the empty list
 function keepHeight() {
-  if (props.placeholders) return
-  keptHeight.value = (listEl.value?.$el as HTMLElement | undefined)?.offsetHeight ?? 0
+  if (props.shouldKeepResultsRoom) return
+  keptHeight.value = (listRef.value?.$el as HTMLElement | undefined)?.offsetHeight ?? 0
 }
 
 // A search starts with no results on screen: the empty list one result high from now on
 function openRoom() {
-  firstSearchRoom.value = true
+  hasFirstSearchRoom.value = true
 }
 
 defineExpose({ keepHeight, openRoom })

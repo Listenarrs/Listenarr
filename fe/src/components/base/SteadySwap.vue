@@ -17,21 +17,21 @@
 -->
 <!-- Several contents in one place, only the current one seen: the place keeps the size of the
      largest from the start, so nothing moves when the current one changes (a button's labels, a
-     box's messages). Each named slot is one content, current names the one seen; a slot never
+     box's messages). Each named slot is one content, currentSlot names the one seen; a slot never
      current only sizes the place (the longest text a content can take). inline lays each content
      out like a button's label: its icon and text centred on one line. -->
 <template>
-  <span class="steady-swap" :class="{ 'steady-swap-inline': inline }">
+  <span class="steady-swap" :class="{ 'steady-swap-inline': isInline }">
     <span
-      v-for="name in names"
-      :key="name"
+      v-for="slotName in slotNames"
+      :key="slotName"
       class="steady-swap-item"
-      :class="{ 'steady-swap-unseen': name !== current }"
-      :style="inline ? { gap } : undefined"
-      :aria-hidden="name !== current"
-      :data-testid="name === current ? currentTestId : undefined"
+      :class="{ 'steady-swap-unseen': slotName !== currentSlot }"
+      :style="isInline ? { gap } : undefined"
+      :aria-hidden="slotName !== currentSlot"
+      :data-testid="slotName === currentSlot ? currentTestId : undefined"
     >
-      <slot :name="name" />
+      <slot :name="slotName" />
     </span>
   </span>
 </template>
@@ -41,21 +41,21 @@ import { computed, useSlots } from 'vue'
 
 withDefaults(
   defineProps<{
-    current: string
-    inline?: boolean
+    currentSlot: string
+    isInline?: boolean
     // Between an inline content's icon and text
     gap?: string
     currentTestId?: string
   }>(),
   {
-    inline: false,
+    isInline: false,
     gap: '0.4rem',
     currentTestId: undefined,
   },
 )
 
 const slots = useSlots()
-const names = computed(() => Object.keys(slots))
+const slotNames = computed(() => Object.keys(slots))
 </script>
 
 <style scoped>

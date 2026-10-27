@@ -22,33 +22,33 @@
   <Modal :visible="visible" size="lg" @close="handleClose">
     <template #header>
       <!-- The step on the title, so the dialog says where the repair is and how much is left -->
-      <ModalHeader :title="repairStepTitle(repairStep)" :icon="PhWrench" @close="handleClose" />
+      <ModalHeader :title="repairStepTitle(isRepairStep)" :icon="PhWrench" @close="handleClose" />
     </template>
 
     <template #default>
       <ModalBody compact maxHeight="72vh" class="repair-modal-body">
-        <div v-if="loading" class="repair-state">
+        <div v-if="isLoading" class="repair-state">
           <PhSpinner class="ph-spin repair-icon" />
           <p>Loading the selected audiobooks…</p>
         </div>
 
-        <div v-else-if="error" class="repair-state repair-error">
+        <div v-else-if="loadError" class="repair-state repair-error">
           <PhWarningCircle class="repair-icon" />
-          <p>{{ error }}</p>
+          <p>{{ loadError }}</p>
         </div>
 
         <!-- From Repair on: each book's repair as it runs, then how it ended and which ones to
              organize -->
         <RepairResults
-          v-else-if="repairStep"
-          v-model:selected="organizeIds"
-          :outcomes="outcomes"
-          :running="executing"
+          v-else-if="isRepairStep"
+          v-model:selected-audiobook-ids="audiobookIdsToOrganize"
+          :repair-outcomes="repairOutcomes"
+          :is-running="isExecuting"
           :min-height="stepOneHeight"
           @retry="retryRepair"
         />
 
-        <div v-else-if="rows.length" ref="stepOneRef" class="repair-list-wrapper">
+        <div v-else-if="repairRows.length" ref="stepOneRef" class="repair-list-wrapper">
           <NoticeBox>
             <template #icon><PhInfo /></template>
             <p>Find the right Audible record for each book, then repair.</p>
@@ -59,8 +59,8 @@
           </NoticeBox>
 
           <RepairSelection
-            :selected="selectedCount"
-            :total="rows.length"
+            :selected-count="selectedCount"
+            :total-count="repairRows.length"
             action="repair"
             @select-all="selectAll"
             @clear="clearSelection"
@@ -73,33 +73,41 @@
             </label>
             <div class="repair-list">
               <BookMatchCard
-                v-for="row in rows"
-                :key="row.id"
-                v-model:match="row.match"
+                v-for="repairRow in repairRows"
+                :key="repairRow.audiobookId"
+                v-model:book-match="repairRow.bookMatch"
                 :configured-region="configuredRegion"
-                :search-locked="searchingRowId !== null && searchingRowId !== row.id"
-                :excluded="!row.selected"
-                :narrow="footerRef?.legendAbove ?? false"
-                :placeholders="rows.length === 1"
-                :book="{ title: row.title, subtitle: row.subtitle, authors: row.authors }"
-                :data-testid="`repair-row-${row.id}`"
-                @searching="(searching) => onSearching(row, searching)"
-                @matched="row.selected = true"
+                :is-search-locked="
+                  searchingAudiobookId !== null && searchingAudiobookId !== repairRow.audiobookId
+                "
+                :is-excluded="!repairRow.isSelected"
+                :is-narrow="footerRef?.isLegendAbove ?? false"
+                :should-keep-results-room="repairRows.length === 1"
+                :book="{
+                  title: repairRow.title,
+                  subtitle: repairRow.subtitle,
+                  authors: repairRow.authors,
+                }"
+                :data-testid="`repair-row-${repairRow.audiobookId}`"
+                @searching="(isSearching) => onSearching(repairRow, isSearching)"
+                @matched="repairRow.isSelected = true"
               >
                 <template #heading>
                   <label
                     class="repair-heading"
-                    :title="isMatched(row) ? undefined : 'Find its new record first'"
+                    :title="isMatched(repairRow) ? undefined : 'Find its new record first'"
                   >
                     <input
                       type="checkbox"
                       class="repair-checkbox"
                       data-testid="repair-include"
-                      :checked="isIncluded(row)"
-                      :disabled="!isMatched(row)"
-                      @change="row.selected = !row.selected"
+                      :checked="isIncluded(repairRow)"
+                      :disabled="!isMatched(repairRow)"
+                      @change="repairRow.isSelected = !repairRow.isSelected"
                     />
-                    <span class="repair-title">{{ row.title || `Audiobook #${row.id}` }}</span>
+                    <span class="repair-title">{{
+                      repairRow.title || `Audiobook #${repairRow.audiobookId}`
+                    }}</span>
                   </label>
                 </template>
               </BookMatchCard>
@@ -114,22 +122,22 @@
       <RepairFooter
         ref="footerRef"
         data-modal-footer="true"
-        :repair-step="repairStep"
-        :executing="executing"
-        :canceling="canceling"
-        :finished="finished"
-        :repair-disabled="loading || searchingRowId !== null || selectedCount === 0"
+        :is-repair-step="isRepairStep"
+        :is-executing="isExecuting"
+        :is-canceling="isCanceling"
+        :is-finished="isFinished"
+        :is-repair-disabled="isLoading || searchingAudiobookId !== null || selectedCount === 0"
         :selected-count="selectedCount"
-        :organize-count="organizeIds.length"
+        :organize-count="audiobookIdsToOrganize.length"
         :skipped-count="skippedCount"
         :problem-text="problemText"
-        :repair-completed="repairCompleted"
-        :repair-total="repairTotal"
+        :completed-repair-count="completedRepairCount"
+        :total-repair-count="totalRepairCount"
         @close="handleClose"
         @cancel-repair="cancelRepair"
         @back="load"
         @repair="startRepair"
-        @organize="emit('organize', organizeIds)"
+        @organize="emit('organize', audiobookIdsToOrganize)"
       />
     </template>
   </Modal>
@@ -146,7 +154,7 @@ import RepairResults from './RepairResults.vue'
 import RepairSelection from './RepairSelection.vue'
 import { useRepairBooks } from '@/composables/useRepairBooks'
 import { SEARCH_CACHE } from '@/utils/bookMatch'
-import { px } from '@/utils/measure'
+import { pixels } from '@/utils/measure'
 import { isIncluded, isMatched, repairStepTitle } from '@/utils/repair'
 
 const props = withDefaults(
@@ -154,40 +162,40 @@ const props = withDefaults(
     visible?: boolean
     audiobookIds?: number[]
     // Shown again after its step 3 (Back from Organize): as it was left, not loaded afresh
-    resume?: boolean
+    isResumed?: boolean
   }>(),
   {
     visible: false,
     audiobookIds: () => [],
-    resume: false,
+    isResumed: false,
   },
 )
 
 const emit = defineEmits<{
   close: []
   done: []
-  organize: [ids: number[]]
+  organize: [audiobookIds: number[]]
 }>()
 
 const {
   searchCache,
   configuredRegion,
-  loading,
-  error,
-  rows,
-  executing,
-  finished,
-  canceling,
-  libraryChanged,
-  repairCompleted,
-  repairTotal,
-  organizeIds,
-  searchingRowId,
-  repairStep,
+  isLoading,
+  loadError,
+  repairRows,
+  isExecuting,
+  isFinished,
+  isCanceling,
+  hasLibraryChanged,
+  completedRepairCount,
+  totalRepairCount,
+  audiobookIdsToOrganize,
+  searchingAudiobookId,
+  isRepairStep,
   selectedCount,
   skippedCount,
   problemText,
-  outcomes,
+  repairOutcomes,
   load,
   onSearching,
   repair,
@@ -209,16 +217,17 @@ const stepOneHeight = ref<number | null>(null)
 // what step 2's footer takes more (its legend on a line of its own)
 function keepStepOneRoom(): () => Promise<void> {
   stepOneHeight.value = null
-  const body = stepOneRef.value?.closest<HTMLElement>('.repair-modal-body')
-  const footer = footerRef.value?.$el as HTMLElement | undefined
-  if (rows.value.length !== 1 || !body || !footer) return async () => {}
-  const style = getComputedStyle(body)
-  const room = body.clientHeight - px(style.paddingTop) - px(style.paddingBottom)
-  const footerBefore = footer.offsetHeight
+  const bodyElement = stepOneRef.value?.closest<HTMLElement>('.repair-modal-body')
+  const footerElement = footerRef.value?.$el as HTMLElement | undefined
+  if (repairRows.value.length !== 1 || !bodyElement || !footerElement) return async () => {}
+  const bodyStyle = getComputedStyle(bodyElement)
+  const bodyRoom =
+    bodyElement.clientHeight - pixels(bodyStyle.paddingTop) - pixels(bodyStyle.paddingBottom)
+  const footerHeightBefore = footerElement.offsetHeight
   return async () => {
     await nextTick()
-    const kept = room - (footer.offsetHeight - footerBefore)
-    stepOneHeight.value = kept > 0 ? kept : null
+    const keptHeight = bodyRoom - (footerElement.offsetHeight - footerHeightBefore)
+    stepOneHeight.value = keptHeight > 0 ? keptHeight : null
   }
 }
 
@@ -228,16 +237,16 @@ function startRepair() {
 
 // Closing stops the running search: the cards go away with the modal
 function handleClose() {
-  if (executing.value) return
-  if (finished.value || libraryChanged.value) emit('done')
+  if (isExecuting.value) return
+  if (isFinished.value || hasLibraryChanged.value) emit('done')
   else emit('close')
 }
 
 watch(
   () => props.visible,
   (visible) => {
-    if (!visible || props.resume) return
-    libraryChanged.value = false
+    if (!visible || props.isResumed) return
+    hasLibraryChanged.value = false
     void load()
   },
   { immediate: true },

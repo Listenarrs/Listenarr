@@ -707,8 +707,8 @@
     <RenamePreviewModal
       :visible="showOrganizeModal"
       :audiobook-ids="organizeAudiobookIds"
-      :title="organizeFromRepair ? REPAIR_ORGANIZE_TITLE : undefined"
-      :back="organizeFromRepair"
+      :title="isOrganizeFromRepair ? REPAIR_ORGANIZE_TITLE : undefined"
+      :back="isOrganizeFromRepair"
       @back="backToRepair"
       @close="closeOrganize"
       @done="handleOrganizeDone"
@@ -717,7 +717,7 @@
     <RepairBooksModal
       :visible="showRepairModal"
       :audiobook-ids="repairAudiobookIds"
-      :resume="repairResumed"
+      :is-resumed="isRepairResumed"
       @close="showRepairModal = false"
       @done="handleRepairDone"
       @organize="organizeRepaired"
@@ -1843,11 +1843,11 @@ const showBulkEditModal = ref(false)
 const showOrganizeModal = ref(false)
 const organizeAudiobookIds = ref<number[]>([])
 // Organize opened by Repair, as its last step
-const organizeFromRepair = ref(false)
+const isOrganizeFromRepair = ref(false)
 const showRepairModal = ref(false)
 const repairAudiobookIds = ref<number[]>([])
 // Repair shown again by Back from its step 3 (Organize): as it was left
-const repairResumed = ref(false)
+const isRepairResumed = ref(false)
 const showEditModal = ref(false)
 const editAudiobook = ref<Audiobook | null>(null)
 const lastClickedIndex = ref<number | null>(null)
@@ -2359,7 +2359,7 @@ function closeBulkEdit() {
 
 function showOrganize() {
   organizeAudiobookIds.value = Array.from(libraryStore.selectedIds)
-  organizeFromRepair.value = false
+  isOrganizeFromRepair.value = false
   showOrganizeModal.value = true
 }
 
@@ -2369,7 +2369,7 @@ function closeOrganize() {
 
 function showRepair() {
   repairAudiobookIds.value = Array.from(libraryStore.selectedIds)
-  repairResumed.value = false
+  isRepairResumed.value = false
   showRepairModal.value = true
 }
 
@@ -2378,18 +2378,18 @@ async function handleRepairDone() {
   await libraryStore.fetchLibrary()
 }
 
-async function organizeRepaired(ids: number[]) {
+async function organizeRepaired(audiobookIds: number[]) {
   showRepairModal.value = false
   await libraryStore.fetchLibrary()
-  organizeAudiobookIds.value = ids
-  organizeFromRepair.value = true
+  organizeAudiobookIds.value = audiobookIds
+  isOrganizeFromRepair.value = true
   showOrganizeModal.value = true
 }
 
 // Back from Organize to Repair's step 2, as it was left
 function backToRepair() {
   showOrganizeModal.value = false
-  repairResumed.value = true
+  isRepairResumed.value = true
   showRepairModal.value = true
 }
 

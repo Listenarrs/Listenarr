@@ -20,7 +20,7 @@
      the attributes and listeners given go to the input (v-model.trim trims what is typed). -->
 <template>
   <span class="clearable-input">
-    <input ref="inputEl" v-model="model" class="form-input" v-bind="$attrs" />
+    <input ref="inputRef" v-model="model" class="form-input" v-bind="$attrs" />
     <button
       v-if="model"
       type="button"
@@ -54,7 +54,7 @@ const [model, modifiers] = defineModel<string>({
 
 const emit = defineEmits<{ cleared: [] }>()
 
-const inputEl = ref<HTMLInputElement | null>(null)
+const inputRef = ref<HTMLInputElement | null>(null)
 
 function clear() {
   model.value = ''
@@ -63,8 +63,8 @@ function clear() {
 
 // Focused with its text selected, ready to be typed over
 function focusAndSelect() {
-  inputEl.value?.focus()
-  inputEl.value?.select()
+  inputRef.value?.focus()
+  inputRef.value?.select()
 }
 
 defineExpose({ focusAndSelect })

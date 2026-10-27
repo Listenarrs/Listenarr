@@ -21,53 +21,53 @@
 <template>
   <div class="repair-results" :style="minHeight ? { minHeight: `${minHeight}px` } : undefined">
     <NoticeBox
-      :tone="running ? 'progress' : repairedCount ? 'warning' : 'muted'"
+      :tone="isRunning ? 'progress' : repairedCount ? 'warning' : 'muted'"
       data-testid="repair-results-box"
     >
       <template #icon>
-        <PhSpinner v-if="running" class="ph-spin" />
+        <PhSpinner v-if="isRunning" class="ph-spin" />
         <PhFolderOpen v-else />
       </template>
       <!-- The box keeps the height of its longest message from the start, so nothing moves when
            the repairs end -->
-      <SteadySwap :current="message" current-test-id="repair-results-message">
+      <SteadySwap :current-slot="currentMessage" current-test-id="repair-results-message">
         <template #running>
-          <strong>Repairing {{ current }} of {{ toRepairCount }}…</strong> The books are repaired
-          one after the other; Cancel stops before the next one.
+          <strong>Repairing {{ runningPosition }} of {{ booksToRepairCount }}…</strong> The books
+          are repaired one after the other; Cancel stops before the next one.
         </template>
         <template #repaired>
-          <strong>{{ booksRepaired(repairedCount) }}</strong
+          <strong>{{ booksRepairedText(repairedCount) }}</strong
           >{{ organizeQuestion(repairedCount) }}
         </template>
         <template #none>No book was repaired: there is nothing to organize.</template>
         <!-- The longest message these books can bring: every one of them repaired -->
         <template #longest>
-          <strong>{{ booksRepaired(toRepairCount) }}</strong
-          >{{ organizeQuestion(toRepairCount) }}
+          <strong>{{ booksRepairedText(booksToRepairCount) }}</strong
+          >{{ organizeQuestion(booksToRepairCount) }}
         </template>
       </SteadySwap>
     </NoticeBox>
 
     <!-- The books to organize: only repaired ones can be, once the repairs are over -->
     <RepairSelection
-      :selected="selected.length"
-      :total="outcomes.length"
+      :selected-count="selectedAudiobookIds.length"
+      :total-count="repairOutcomes.length"
       action="organize"
-      :disabled="running"
-      @select-all="selected = repairedIds"
-      @clear="selected = []"
+      :disabled="isRunning"
+      @select-all="selectedAudiobookIds = repairedAudiobookIds"
+      @clear="selectedAudiobookIds = []"
     />
 
     <div class="repair-results-list">
       <RepairResultCard
-        v-for="outcome in outcomes"
-        :key="outcome.id"
-        :outcome="outcome"
-        :selected="selected.includes(outcome.id)"
-        :running="running"
-        :data-testid="`repair-result-${outcome.id}`"
-        @toggle="toggle(outcome.id)"
-        @retry="emit('retry', outcome.id)"
+        v-for="repairOutcome in repairOutcomes"
+        :key="repairOutcome.audiobookId"
+        :repair-outcome="repairOutcome"
+        :is-selected="selectedAudiobookIds.includes(repairOutcome.audiobookId)"
+        :is-running="isRunning"
+        :data-testid="`repair-result-${repairOutcome.audiobookId}`"
+        @toggle="toggle(repairOutcome.audiobookId)"
+        @retry="emit('retry', repairOutcome.audiobookId)"
       />
     </div>
 
@@ -83,40 +83,44 @@ import NoticeBox from '@/components/base/NoticeBox.vue'
 import SteadySwap from '@/components/base/SteadySwap.vue'
 import RepairResultCard from './RepairResultCard.vue'
 import RepairSelection from './RepairSelection.vue'
-import { booksRepaired, organizeQuestion, type RepairOutcome } from '@/utils/repair'
+import { booksRepairedText, organizeQuestion, type RepairOutcome } from '@/utils/repair'
 
-// running: the repairs aren't over yet. minHeight: the height to keep (step 1's, with one book)
+// isRunning: the repairs aren't over yet. minHeight: the height to keep (step 1's, with one book)
 const props = defineProps<{
-  outcomes: RepairOutcome[]
-  running: boolean
+  repairOutcomes: RepairOutcome[]
+  isRunning: boolean
   minHeight?: number | null
 }>()
 
 // The books to organize: repaired ones only
-const selected = defineModel<number[]>('selected', { required: true })
+const selectedAudiobookIds = defineModel<number[]>('selectedAudiobookIds', { required: true })
 
 // Retry: repair that book again
-const emit = defineEmits<{ retry: [id: number] }>()
+const emit = defineEmits<{ retry: [audiobookId: number] }>()
 
-const repairedIds = computed(() =>
-  props.outcomes.filter((o) => o.state === 'done').map((o) => o.id),
+const repairedAudiobookIds = computed(() =>
+  props.repairOutcomes
+    .filter((repairOutcome) => repairOutcome.state === 'done')
+    .map((repairOutcome) => repairOutcome.audiobookId),
 )
-const repairedCount = computed(() => repairedIds.value.length)
-const toRepairCount = computed(() => props.outcomes.length)
+const repairedCount = computed(() => repairedAudiobookIds.value.length)
+const booksToRepairCount = computed(() => props.repairOutcomes.length)
 
 // The book being repaired, counted from 1 among the books to repair
-const current = computed(
-  () => props.outcomes.findIndex((o) => o.state === 'running') + 1 || toRepairCount.value,
+const runningPosition = computed(
+  () =>
+    props.repairOutcomes.findIndex((repairOutcome) => repairOutcome.state === 'running') + 1 ||
+    booksToRepairCount.value,
 )
 
-const message = computed(() =>
-  props.running ? 'running' : repairedCount.value ? 'repaired' : 'none',
+const currentMessage = computed(() =>
+  props.isRunning ? 'running' : repairedCount.value ? 'repaired' : 'none',
 )
 
-function toggle(id: number) {
-  selected.value = selected.value.includes(id)
-    ? selected.value.filter((s) => s !== id)
-    : [...selected.value, id]
+function toggle(audiobookId: number) {
+  selectedAudiobookIds.value = selectedAudiobookIds.value.includes(audiobookId)
+    ? selectedAudiobookIds.value.filter((selectedId) => selectedId !== audiobookId)
+    : [...selectedAudiobookIds.value, audiobookId]
 }
 </script>
 

@@ -26,7 +26,7 @@
     <div class="form-control-card">
       <div class="repair-toolbar">
         <p class="repair-toolbar-title" data-testid="repair-selection-count">
-          <strong>{{ selected }}</strong> of {{ total }} book(s) to {{ action }}
+          <strong>{{ selectedCount }}</strong> of {{ totalCount }} book(s) to {{ action }}
         </p>
         <div class="toolbar-actions">
           <button
@@ -57,8 +57,8 @@
 import { PhCheckSquare } from '@phosphor-icons/vue'
 
 defineProps<{
-  selected: number
-  total: number
+  selectedCount: number
+  totalCount: number
   // What the ticked books are for
   action: 'repair' | 'organize'
   disabled?: boolean

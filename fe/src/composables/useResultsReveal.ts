@@ -21,23 +21,23 @@ import { revealMs } from '@/utils/resultsReveal'
 // Results just answered, shown under an overlay fading out ("Found 3 results"): not pickable
 // until it is gone (utils/resultsReveal holds its timing)
 export function useResultsReveal() {
-  const revealing = ref(false)
+  const isRevealing = ref(false)
   let revealTimer: ReturnType<typeof setTimeout> | null = null
 
   function start() {
     end()
     if (revealMs() <= 0) return
-    revealing.value = true
+    isRevealing.value = true
     revealTimer = setTimeout(end, revealMs())
   }
 
   function end() {
     if (revealTimer) clearTimeout(revealTimer)
     revealTimer = null
-    revealing.value = false
+    isRevealing.value = false
   }
 
   onBeforeUnmount(end)
 
-  return { revealing, start, end }
+  return { isRevealing, start, end }
 }

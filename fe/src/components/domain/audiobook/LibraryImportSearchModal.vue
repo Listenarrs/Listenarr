@@ -30,12 +30,12 @@
       </NoticeBox>
 
       <BookMatchCard
-        v-if="match"
-        v-model:match="match"
+        v-if="bookMatch"
+        v-model:book-match="bookMatch"
         :configured-region="configuredRegion"
         :book="book"
-        search-on-mount
-        placeholders
+        should-search-on-mount
+        should-keep-results-room
         data-testid="find-match-card"
         @searching="onSearching"
       >
@@ -81,7 +81,7 @@ import {
   buildLibraryImportInitialQuery,
 } from '@/utils/libraryImportSearch'
 import {
-  asinChanged,
+  hasAsinChanged,
   createBookMatch,
   matchState,
   recordFromResult,
@@ -95,23 +95,23 @@ import type { SearchResult } from '@/types'
 const props = defineProps<{ item: LibraryImportItem }>()
 const emit = defineEmits<{
   close: []
-  select: [result: SearchResult]
+  select: [searchResult: SearchResult]
 }>()
 
-const store = useLibraryImportStore()
+const libraryImportStore = useLibraryImportStore()
 // The searches answered while this dialog is open (it is created each time it opens)
 provide<SearchCache>(SEARCH_CACHE, new Map())
 const configuredRegion = ref('')
 // Built once the configured region is known: the card searches as soon as it shows
-const match = ref<BookMatch | null>(null)
-const searching = ref(false)
+const bookMatch = ref<BookMatch | null>(null)
+const isSearching = ref(false)
 // Importing waits for a running search; counted once, however it ends (also when the modal closes)
-let searchCounted = false
+let isSearchCounted = false
 
 // The folder's match when it has one (read like New), else what its files say
 const book = computed<BookRecord>(() => {
-  const selected = props.item.selectedMatch
-  if (selected) return recordFromResult(selected, selected.region ?? '')
+  const selectedMatch = props.item.selectedMatch
+  if (selectedMatch) return recordFromResult(selectedMatch, selectedMatch.region ?? '')
   return { title: props.item.detectedTitle, authors: [props.item.detectedAuthor ?? ''] }
 })
 
@@ -121,42 +121,42 @@ const bookTitle = computed(() => props.item.detectedTitle?.trim() || props.item.
 // folder already has is no change
 const canConfirm = computed(
   () =>
-    !!match.value &&
-    !searching.value &&
-    matchState(match.value) === 'matched' &&
-    asinChanged(match.value),
+    !!bookMatch.value &&
+    !isSearching.value &&
+    matchState(bookMatch.value) === 'matched' &&
+    hasAsinChanged(bookMatch.value),
 )
 
 onMounted(async () => {
-  configuredRegion.value = await store.configuredRegion()
-  const selected = props.item.selectedMatch
-  match.value = createBookMatch(
+  configuredRegion.value = await libraryImportStore.configuredRegion()
+  const selectedMatch = props.item.selectedMatch
+  bookMatch.value = createBookMatch(
     {
-      asin: selected?.asin ?? '',
+      asin: selectedMatch?.asin ?? '',
       // The configured region by default; the user can pick another one, which the match keeps
-      region: selected?.region || configuredRegion.value,
+      region: selectedMatch?.region || configuredRegion.value,
       // ASIN → filename stem (when more specific than folder) → folderName
       query: buildLibraryImportInitialQuery(props.item),
       author: buildLibraryImportInitialAuthor(props.item),
     },
-    { asin: selected?.asin ?? '', region: selected?.region ?? '' },
+    { asin: selectedMatch?.asin ?? '', region: selectedMatch?.region ?? '' },
   )
 })
 
-function onSearching(value: boolean) {
-  searching.value = value
-  if (value && !searchCounted) {
-    searchCounted = true
-    store.findMatchSearchStarted()
-  } else if (!value && searchCounted) {
-    searchCounted = false
-    store.findMatchSearchEnded()
+function onSearching(isSearchRunning: boolean) {
+  isSearching.value = isSearchRunning
+  if (isSearchRunning && !isSearchCounted) {
+    isSearchCounted = true
+    libraryImportStore.findMatchSearchStarted()
+  } else if (!isSearchRunning && isSearchCounted) {
+    isSearchCounted = false
+    libraryImportStore.findMatchSearchEnded()
   }
 }
 
 function confirm() {
-  if (!match.value?.picked || !canConfirm.value) return
-  emit('select', match.value.picked)
+  if (!bookMatch.value?.pickedSearchResult || !canConfirm.value) return
+  emit('select', bookMatch.value.pickedSearchResult)
   emit('close')
 }
 
