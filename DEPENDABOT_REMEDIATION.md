@@ -1,12 +1,26 @@
 # Dependabot remediation tracker - 2026-10-26
 
+## Remediation progress - 2026-10-27
+
+The remediation branch updates all three npm dependency trees and upgrades ImageSharp to 4.1.3. It also pins the vulnerable test dependency `Microsoft.AspNetCore.SignalR.Common` to 10.0.13, with the required Options and DependencyInjection.Abstractions patch versions. The approved assembly-scoped Community license and renewal details are in `licenses/`.
+
+The refreshed inventory contains 116 open alerts. The additional alert is [Dependabot 252](https://github.com/Listenarrs/Listenarr/security/dependabot/252), [GHSA-rj75-hqrm-r3gf](https://github.com/advisories/GHSA-rj75-hqrm-r3gf), for `postcss-selector-parser` in `fe/package-lock.json`; the candidate resolves it to 7.1.6.
+
+Validation completed so far: clean installs and complete npm audits for all three trees (zero vulnerabilities), installed dependency-tree checks, all 116 advisory ranges checked against every matching locked instance, 681 frontend tests, frontend lint/type/build checks, a licensed solution build, 31 focused image/security integration tests, and the production Docker build. Controlled runtime probes cover shell quoting, HTTP redirects/readiness, child-process orchestration, HTML sanitization, Discord REST, and malformed content-encoding recovery.
+
+The final production container serves PNG/JPEG/WebP cache fixtures byte-for-byte, handles the malformed BigTIFF fixture in 19 ms, remains ready, and starts the actual bundled bot with a real settings-hub connection. The bot check first asserts that Discord is disabled and no credentials are configured; real Discord gateway authentication and slash-command registration are not exercised.
+
+The full native backend suite and formatting check are being completed separately. Keep this issue open until final CI and default-branch alert reconciliation are complete. The checkboxes below preserve the original baseline and do not assert GitHub has closed the alerts before merge.
+
+## Original baseline inventory
+
 Track all 115 open Dependabot alerts returned by the paginated GitHub API on October 26, 2026 for Listenarrs/Listenarr. The snapshot covers 17 package names across three npm lockfiles: 2 critical, 44 high, 55 moderate (API: medium), and 14 low alerts.
 
 Source: [Dependabot alerts](https://github.com/Listenarrs/Listenarr/security/dependabot). Baseline: `canary` at `e81d83cbe2ac3a0cf23e1fe46de4412f67239ef2`. Alert state can change after this snapshot; refresh the complete paginated inventory before closing the tracker.
 
 Tracking issue: [#1104](https://github.com/Listenarrs/Listenarr/issues/1104). Use the issue checkboxes as the live progress record; the entries in this document preserve the initial baseline.
 
-This is an inventory and remediation plan. Dependency upgrades and runtime validation are pending. Severity and dependency scope below are reported by GitHub; they do not establish exploitability in Listenarr or whether a package ships in the deployed application.
+Severity and dependency scope below are reported by GitHub; they do not establish exploitability in Listenarr or whether a package ships in the deployed application. The progress section above records implementation and validation separately from alert state.
 
 ## Remediation plan
 
