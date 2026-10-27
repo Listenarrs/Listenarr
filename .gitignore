@@ -169,6 +169,9 @@ playwright-report/
 .env.production.local
 
 # Sensitive configuration files
+.licenses/
+**/sixlabors.lic
+!/licenses/sixlabors.lic
 appsettings.Development.json
 appsettings.Local.json
 appsettings.Production.json
