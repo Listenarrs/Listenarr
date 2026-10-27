@@ -1,4 +1,7 @@
 .git/
+.licenses/
+**/sixlabors.lic
+!licenses/sixlabors.lic
 **/bin/
 **/obj/
 **/node_modules/
