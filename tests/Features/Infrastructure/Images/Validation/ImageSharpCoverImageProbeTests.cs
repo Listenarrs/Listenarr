@@ -35,7 +35,13 @@ public class ImageSharpCoverImageProbeTests : BaseTests
         };
         using var stream = new MemoryStream();
         image.Save(stream, encoder);
-        var api = ConfigureProbe(stream.ToArray());
+        using var api = new BaseApiMock();
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(stream.ToArray())
+        };
+        using var httpClient = new HttpClient(api, disposeHandler: false);
+        ConfigureProbe(api, httpClient, response);
 
         // When the application probe fetches and decodes the cover.
         var dimensions = await _provider.GetRequiredService<ICoverImageProbe>()
@@ -59,7 +65,13 @@ public class ImageSharpCoverImageProbeTests : BaseTests
         bytes[4] = 0x08;
         BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(8), 16);
         BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(16), entryCount);
-        var api = ConfigureProbe(bytes);
+        using var api = new BaseApiMock();
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(bytes)
+        };
+        using var httpClient = new HttpClient(api, disposeHandler: false);
+        ConfigureProbe(api, httpClient, response);
 
         // When malformed remote bytes reach the real ImageSharp decoder.
         var dimensions = await _provider.GetRequiredService<ICoverImageProbe>()
@@ -70,15 +82,11 @@ public class ImageSharpCoverImageProbeTests : BaseTests
         Assert.Equal(1, api.GetCallCount());
     }
 
-    private BaseApiMock ConfigureProbe(byte[] bytes)
+    private void ConfigureProbe(BaseApiMock api, HttpClient httpClient, HttpResponseMessage response)
     {
-        var api = new BaseApiMock();
-        api.AddRoute("^https://covers\\.example/cover$", (_, _) => Task.FromResult(
-            new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) }));
-        var httpClient = new HttpClient(api);
+        api.AddRoute("^https://covers\\.example/cover$", (_, _) => Task.FromResult(response));
         Init(services => services
             .WithSingleton(httpClient)
             .WithSingleton<ICoverImageProbe, ImageSharpCoverImageProbe>());
-        return api;
     }
 }
