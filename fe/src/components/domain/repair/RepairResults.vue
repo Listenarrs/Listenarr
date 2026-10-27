@@ -15,57 +15,38 @@
   You should have received a copy of the GNU Affero General Public License
   along with this program. If not, see <https://www.gnu.org/licenses/>.
 -->
-<!-- The repair, book by book, from the moment it starts: the books ticked for it on step 1. They
-     wait in a loading state for their turn, one repair at a time; the
-     bar along each card's bottom breathes in blue while its book is repaired, then turns green,
-     orange or red by how it ended. A book to repair shows its record before and the one it gets,
-     the parts that change in green; once repaired it can be ticked to be organized (ticked at
-     first). A book whose repair failed or was canceled says why, and can't be. -->
+<!-- Repair's step 2, the repair book by book from the moment it starts: the books ticked for it on
+     step 1, one repair at a time, then which repaired ones to organize (all of them at first).
+     The box on top says where the repairs are, then what came of them. -->
 <template>
   <div class="repair-results" :style="minHeight ? { minHeight: `${minHeight}px` } : undefined">
-    <div
-      class="repair-results-message"
-      :class="{
-        'repair-results-message-running': running,
-        'repair-results-message-none': !running && !repairedCount,
-      }"
+    <NoticeBox
+      :tone="running ? 'progress' : repairedCount ? 'warning' : 'muted'"
       data-testid="repair-results-box"
     >
-      <PhSpinner v-if="running" class="ph-spin" />
-      <PhFolderOpen v-else />
-      <!-- Every message in the same place, only the current one seen: the box keeps the height of
-           the longest from the start, so nothing moves when the repairs end -->
-      <div class="repair-results-texts">
-        <p
-          :class="{ 'repair-results-unseen': !running }"
-          :aria-hidden="!running"
-          :data-testid="running ? 'repair-results-message' : undefined"
-        >
+      <template #icon>
+        <PhSpinner v-if="running" class="ph-spin" />
+        <PhFolderOpen v-else />
+      </template>
+      <!-- The box keeps the height of its longest message from the start, so nothing moves when
+           the repairs end -->
+      <SteadySwap :current="message" current-test-id="repair-results-message">
+        <template #running>
           <strong>Repairing {{ current }} of {{ toRepairCount }}…</strong> The books are repaired
           one after the other; Cancel stops before the next one.
-        </p>
-        <p
-          :class="{ 'repair-results-unseen': running || !repairedCount }"
-          :aria-hidden="running || !repairedCount"
-          :data-testid="!running && repairedCount ? 'repair-results-message' : undefined"
-        >
+        </template>
+        <template #repaired>
           <strong>{{ booksRepaired(repairedCount) }}</strong
           >{{ organizeQuestion(repairedCount) }}
-        </p>
-        <p
-          :class="{ 'repair-results-unseen': running || repairedCount }"
-          :aria-hidden="running || !!repairedCount"
-          :data-testid="!running && !repairedCount ? 'repair-results-message' : undefined"
-        >
-          No book was repaired: there is nothing to organize.
-        </p>
+        </template>
+        <template #none>No book was repaired: there is nothing to organize.</template>
         <!-- The longest message these books can bring: every one of them repaired -->
-        <p class="repair-results-unseen" aria-hidden="true">
+        <template #longest>
           <strong>{{ booksRepaired(toRepairCount) }}</strong
           >{{ organizeQuestion(toRepairCount) }}
-        </p>
-      </div>
-    </div>
+        </template>
+      </SteadySwap>
+    </NoticeBox>
 
     <!-- The books to organize: only repaired ones can be, once the repairs are over -->
     <RepairSelection
@@ -78,111 +59,16 @@
     />
 
     <div class="repair-results-list">
-      <div
+      <RepairResultCard
         v-for="outcome in outcomes"
         :key="outcome.id"
-        class="form-control-card repair-result"
-        :class="`repair-result-${outcome.state}`"
-        :data-result-state="outcome.state"
+        :outcome="outcome"
+        :selected="selected.includes(outcome.id)"
+        :running="running"
         :data-testid="`repair-result-${outcome.id}`"
-      >
-        <div class="repair-result-header">
-          <label
-            class="repair-result-heading"
-            :title="outcome.state === 'done' ? undefined : 'Only a repaired book can be organized'"
-          >
-            <input
-              type="checkbox"
-              class="repair-result-checkbox"
-              data-testid="repair-result-include"
-              :checked="selected.includes(outcome.id)"
-              :disabled="outcome.state !== 'done'"
-              @change="toggle(outcome.id)"
-            />
-            <span class="repair-result-title">{{
-              outcome.title || `Audiobook #${outcome.id}`
-            }}</span>
-          </label>
-          <!-- The records, closed at first to keep the list short; the tooltip gives them without
-             opening (the open details mark what changes) -->
-          <button
-            type="button"
-            class="btn btn-secondary repair-result-details-btn"
-            :title="recordsText(outcome)"
-            :aria-expanded="opened.has(outcome.id)"
-            data-testid="repair-result-details"
-            @click="toggleDetails(outcome.id)"
-          >
-            <!-- Both labels in one place, only the current one seen: the button keeps its size -->
-            <span class="repair-result-details-labels">
-              <span
-                :class="{ 'repair-result-details-unseen': opened.has(outcome.id) }"
-                :aria-hidden="opened.has(outcome.id)"
-                :data-testid="opened.has(outcome.id) ? undefined : 'repair-result-details-label'"
-              >
-                Show details
-                <PhCaretDown :size="14" />
-              </span>
-              <span
-                :class="{ 'repair-result-details-unseen': !opened.has(outcome.id) }"
-                :aria-hidden="!opened.has(outcome.id)"
-                :data-testid="opened.has(outcome.id) ? 'repair-result-details-label' : undefined"
-              >
-                Hide details
-                <PhCaretUp :size="14" />
-              </span>
-            </span>
-          </button>
-        </div>
-        <!-- Two lines under the title from the start, so the row keeps its height: the record
-             the book points at (the one it is to get while it waits, the one it got once
-             repaired, its old one when the repair failed or was canceled), then where its
-             repair is or how it ended -->
-        <p class="repair-result-record" data-testid="repair-result-record">
-          <BookRecordDiff :record="rowRecord(outcome)" :base="outcome.before" />
-        </p>
-        <p class="repair-result-message" data-testid="repair-result-message">
-          <PhSpinner
-            v-if="outcome.state === 'waiting' || outcome.state === 'running'"
-            class="ph-spin"
-            :size="14"
-            data-testid="repair-result-loading"
-          />
-          {{ outcome.message }}
-        </p>
-        <!-- A failed repair, or one done in part: Retry, at the row's bottom right. Laid over the
-             row's room (the status line always leaves it free), so showing it moves nothing -->
-        <button
-          v-if="outcome.state === 'failed' || outcome.state === 'warning'"
-          type="button"
-          class="btn btn-secondary repair-result-retry"
-          :disabled="running"
-          :title="running ? 'Wait for the repair running to end' : 'Repair this book again'"
-          data-testid="repair-result-retry"
-          @click="emit('retry', outcome.id)"
-        >
-          <PhArrowCounterClockwise :size="14" />
-          Retry
-        </button>
-        <dl v-if="opened.has(outcome.id)" class="repair-result-records">
-          <dt>Old</dt>
-          <dd data-testid="repair-result-old">
-            <BookRecordDiff
-              v-if="newRecord(outcome)"
-              :record="outcome.before"
-              :base="newRecord(outcome)!"
-              replaced
-            />
-            <template v-else>{{ bookSummary(outcome.before) || 'None' }}</template>
-          </dd>
-          <dt>New</dt>
-          <dd v-if="newRecord(outcome)" data-testid="repair-result-new">
-            <BookRecordDiff :record="newRecord(outcome)!" :base="outcome.before" />
-          </dd>
-          <dd v-else data-testid="repair-result-new">None: the book keeps its old record</dd>
-        </dl>
-        <div class="repair-result-bar" />
-      </div>
+        @toggle="toggle(outcome.id)"
+        @retry="emit('retry', outcome.id)"
+      />
     </div>
 
     <!-- The room left by step 1 (one book), kept so the dialog keeps its height -->
@@ -191,33 +77,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import {
-  PhArrowCounterClockwise,
-  PhCaretDown,
-  PhCaretUp,
-  PhFolderOpen,
-  PhSpinner,
-} from '@phosphor-icons/vue'
+import { computed } from 'vue'
+import { PhFolderOpen, PhSpinner } from '@phosphor-icons/vue'
+import NoticeBox from '@/components/base/NoticeBox.vue'
+import SteadySwap from '@/components/base/SteadySwap.vue'
+import RepairResultCard from './RepairResultCard.vue'
 import RepairSelection from './RepairSelection.vue'
-import BookRecordDiff from '@/components/domain/audiobook/BookRecordDiff.vue'
-import { bookSummary, type BookRecord, type BookTaskState } from '@/utils/bookMatch'
-
-// One book to repair, from the moment the repair starts
-export interface RepairOutcome {
-  id: number
-  title: string
-  // Waiting, running, then how its repair ended: done, warning (in part), failed, or skipped
-  // (canceled before its turn)
-  state: BookTaskState
-  // The line saying where its repair is or how it ended
-  message: string
-  // Its record before the repair; the record it is to get; and its record after the repair (null
-  // until it is, or when it failed)
-  before: BookRecord
-  planned: BookRecord
-  after: BookRecord | null
-}
+import { booksRepaired, organizeQuestion, type RepairOutcome } from '@/utils/repair'
 
 // running: the repairs aren't over yet. minHeight: the height to keep (step 1's, with one book)
 const props = defineProps<{
@@ -238,51 +104,14 @@ const repairedIds = computed(() =>
 const repairedCount = computed(() => repairedIds.value.length)
 const toRepairCount = computed(() => props.outcomes.length)
 
-function booksRepaired(count: number) {
-  return `${count} ${count === 1 ? 'book' : 'books'} repaired`
-}
-
-function organizeQuestion(count: number) {
-  const one = count === 1
-  return (
-    `, ${one ? 'its' : 'their'} metadata refreshed from the new Audible record. ` +
-    `Organize ${one ? 'it' : 'them'} now? ${one ? 'Its files were' : 'Their files were'} last ` +
-    'organized with the metadata from before, which may have been wrong.'
-  )
-}
 // The book being repaired, counted from 1 among the books to repair
 const current = computed(
   () => props.outcomes.findIndex((o) => o.state === 'running') + 1 || toRepairCount.value,
 )
 
-// The record a book gets: the one it got, or until its repair ends the one it is to get. None once
-// its repair failed or was canceled
-function newRecord(outcome: RepairOutcome): BookRecord | null {
-  if (outcome.after) return outcome.after
-  return outcome.state === 'waiting' || outcome.state === 'running' ? outcome.planned : null
-}
-
-// The books whose records are open
-const opened = ref(new Set<number>())
-
-function toggleDetails(id: number) {
-  const next = new Set(opened.value)
-  if (!next.delete(id)) next.add(id)
-  opened.value = next
-}
-
-// The record on the row's first line: the one it is to get or got, else (failed, canceled) the
-// one it keeps
-function rowRecord(outcome: RepairOutcome): BookRecord {
-  return newRecord(outcome) ?? outcome.before
-}
-
-// The records on two lines, for the details button's tooltip
-function recordsText(outcome: RepairOutcome) {
-  const record = newRecord(outcome)
-  const after = record ? bookSummary(record) : 'None: the book keeps its old record'
-  return `Old: ${bookSummary(outcome.before) || 'None'}\nNew: ${after}`
-}
+const message = computed(() =>
+  props.running ? 'running' : repairedCount.value ? 'repaired' : 'none',
+)
 
 function toggle(id: number) {
   selected.value = selected.value.includes(id)
@@ -296,50 +125,6 @@ function toggle(id: number) {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-}
-
-/* Not to be missed: what was repaired, and the question that comes next */
-.repair-results-message {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.6rem;
-  padding: 0.75rem;
-  background-color: color-mix(in srgb, var(--status-warning) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--status-warning) 45%, transparent);
-  border-radius: 6px;
-  color: var(--status-warning);
-}
-
-.repair-results-texts {
-  display: grid;
-}
-
-/* All in one cell: the box as tall as the longest */
-.repair-results-texts p {
-  grid-area: 1 / 1;
-}
-
-.repair-results-unseen {
-  visibility: hidden;
-}
-
-.repair-results-message-running {
-  background-color: color-mix(in srgb, var(--status-progress) 10%, transparent);
-  border-color: color-mix(in srgb, var(--status-progress) 45%, transparent);
-  color: var(--status-progress);
-}
-
-.repair-results-message-none {
-  background-color: rgba(255, 255, 255, 0.04);
-  border-color: #444;
-  color: #aaa;
-}
-
-.repair-results-message p {
-  margin: 0;
-  font-size: 0.95rem;
-  line-height: 1.4;
-  color: #ddd;
 }
 
 /* The list's own gap spaces the selection */
@@ -363,163 +148,5 @@ function toggle(id: number) {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-}
-
-/* The book's state on the bar along the card's bottom, as on the book cards: grey while it
-   waits or when it isn't repaired, blue breathing while it is repaired, then its outcome */
-.form-control-card.repair-result {
-  position: relative;
-  overflow: hidden;
-  padding-bottom: calc(1rem + 3px);
-}
-
-.repair-result-bar {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 3px;
-  background: var(--status-idle);
-}
-
-.repair-result-done .repair-result-bar {
-  background: var(--status-success);
-}
-
-.repair-result-warning .repair-result-bar {
-  background: var(--status-warning);
-}
-
-.repair-result-failed .repair-result-bar {
-  background: var(--status-error);
-}
-
-.repair-result-running .repair-result-bar {
-  background: var(--status-progress);
-  animation: repair-result-bar-breathe 1.6s ease-in-out infinite alternate;
-}
-
-@keyframes repair-result-bar-breathe {
-  from {
-    opacity: 0.2;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .repair-result-running .repair-result-bar {
-    animation: none;
-  }
-}
-
-.repair-result-skipped {
-  opacity: 0.6;
-}
-
-.repair-result-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.repair-result-details-btn {
-  /* Its own width on a phone too, where modal buttons stretch */
-  width: auto;
-  white-space: nowrap;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  flex: none;
-  padding: 0.25rem 0.6rem;
-  font-size: 0.8rem;
-}
-
-.repair-result-retry {
-  position: absolute;
-  right: 1rem;
-  bottom: calc(0.55rem + 3px);
-  /* Its own width on a phone too, where modal buttons stretch */
-  width: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.2rem 0.6rem;
-  font-size: 0.8rem;
-  white-space: nowrap;
-}
-
-.repair-result-details-labels {
-  display: grid;
-}
-
-.repair-result-details-labels > span {
-  grid-area: 1 / 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.35rem;
-}
-
-.repair-result-details-unseen {
-  visibility: hidden;
-}
-
-.repair-result-heading {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  cursor: pointer;
-}
-
-.repair-result-title {
-  color: #e0e0e0;
-  font-weight: 500;
-}
-
-.repair-result-message {
-  /* Room always left free on the right for Retry */
-  padding-right: 6.5rem;
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin: 0.4rem 0 0;
-  font-size: 0.85rem;
-  color: #aaa;
-}
-
-.repair-result-done .repair-result-message {
-  color: var(--status-success);
-}
-
-/* The record the book points at, drawn like New: grey, what changes in green */
-.repair-result-record {
-  margin: 0.4rem 0 0;
-  font-size: 0.85rem;
-  color: #aaa;
-}
-
-.repair-result-warning .repair-result-message {
-  color: var(--status-warning);
-}
-
-.repair-result-failed .repair-result-message {
-  color: var(--status-error);
-}
-
-.repair-result-records {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.3rem 0.75rem;
-  margin: 0.6rem 0 0;
-  font-size: 0.8rem;
-  color: #aaa;
-}
-
-.repair-result-records dd {
-  margin: 0;
-  min-width: 0;
 }
 </style>

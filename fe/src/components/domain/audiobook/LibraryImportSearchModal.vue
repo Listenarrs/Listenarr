@@ -21,15 +21,13 @@
       <ModalHeader :title="`Find Match — ${item.folderName}`" @close="emit('close')" />
     </template>
     <ModalBody>
-      <div class="info-section find-match-info">
-        <PhInfo />
-        <div class="find-match-info-lines">
-          <p>Find the right Audible record for this book.</p>
-          <p data-testid="find-match-info-asin">
-            A filled ASIN is searched on its own: the title and author are left out of that search.
-          </p>
-        </div>
-      </div>
+      <NoticeBox class="find-match-info">
+        <template #icon><PhInfo /></template>
+        <p>Find the right Audible record for this book.</p>
+        <p data-testid="find-match-info-asin">
+          A filled ASIN is searched on its own: the title and author are left out of that search.
+        </p>
+      </NoticeBox>
 
       <BookMatchCard
         v-if="match"
@@ -74,8 +72,9 @@
 import { computed, onBeforeUnmount, onMounted, provide, ref } from 'vue'
 import { PhCheckCircle, PhInfo, PhX } from '@phosphor-icons/vue'
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '@/components/feedback'
-import BookMatchCard from './BookMatchCard.vue'
-import MatchLegend from './MatchLegend.vue'
+import NoticeBox from '@/components/base/NoticeBox.vue'
+import BookMatchCard from '@/components/domain/bookMatch/BookMatchCard.vue'
+import MatchLegend from '@/components/domain/bookMatch/MatchLegend.vue'
 import { useLibraryImportStore, type LibraryImportItem } from '@/stores/libraryImport'
 import {
   buildLibraryImportInitialAuthor,
@@ -166,27 +165,6 @@ onBeforeUnmount(() => onSearching(false))
 
 <style scoped>
 .find-match-info {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.6rem;
   margin-bottom: 0.75rem;
-  padding: 0.75rem;
-  background-color: rgba(52, 152, 219, 0.09);
-  border: 1px solid rgba(52, 152, 219, 0.28);
-  border-radius: 6px;
-  color: #3498db;
-}
-
-.find-match-info-lines {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-}
-
-.find-match-info p {
-  margin: 0;
-  font-size: 0.95rem;
-  line-height: 1.4;
-  color: #ccc;
 }
 </style>

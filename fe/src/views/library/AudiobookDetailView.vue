@@ -720,9 +720,8 @@ import { buildAudibleProductUrl } from '@/utils/marketDomains'
 import EditAudiobookModal from '@/components/domain/audiobook/EditAudiobookModal.vue'
 import ManualSearchModal from '@/components/domain/search/ManualSearchModal.vue'
 import RenamePreviewModal from '@/components/domain/organize/RenamePreviewModal.vue'
-import RepairBooksModal, {
-  REPAIR_ORGANIZE_TITLE,
-} from '@/components/domain/repair/RepairBooksModal.vue'
+import RepairBooksModal from '@/components/domain/repair/RepairBooksModal.vue'
+import { REPAIR_ORGANIZE_TITLE } from '@/utils/repair'
 import CustomSelect from '@/components/form/CustomSelect.vue'
 import DeleteConfirmationModal from '@/components/feedback/DeleteConfirmationModal.vue'
 import { Pill } from '@/components/base'

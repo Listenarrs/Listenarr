@@ -19,7 +19,7 @@
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
-import FindMatchResults from '@/components/domain/audiobook/FindMatchResults.vue'
+import FindMatchResults from '@/components/domain/bookMatch/FindMatchResults.vue'
 import { useConfigurationStore } from '@/stores/configuration'
 import type { ApplicationSettings, SearchResult } from '@/types'
 

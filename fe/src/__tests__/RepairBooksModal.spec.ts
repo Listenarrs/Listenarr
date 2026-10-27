@@ -412,7 +412,9 @@ describe('RepairBooksModal', () => {
     // Shown by the breathing blue bottom bar only: no line under the book, nothing moves
     expect(row(wrapper).attributes('data-match-state')).toBe('searching')
     expect(row(wrapper).find('.match-search-state').exists()).toBe(false)
-    expect(row(wrapper).find('.match-bar').attributes('title')).toContain('Searching')
+    expect(row(wrapper).find('[data-testid="match-bar"]').attributes('title')).toContain(
+      'Searching',
+    )
     expect(row(wrapper).find('[data-testid="match-search"]').exists()).toBe(false)
     expect(row(wrapper).get('[data-testid="match-cancel-search"]').classes()).toContain(
       'btn-danger',
@@ -1681,9 +1683,7 @@ describe('RepairBooksModal', () => {
     expect(wrapper.get('#modal-title h2').text()).toBe('Repair Books - Repair process - Step 2/3')
     // The footer warns: its bar orange, and what went wrong
     expect(wrapper.get('[data-testid="repair-problems"]').text()).toBe('Not all repaired: 1 failed')
-    expect(wrapper.get('[data-testid="repair-progress"]').classes()).toContain(
-      'repair-progress-problem',
-    )
+    expect(wrapper.get('[data-testid="repair-progress"]').attributes('data-tone')).toBe('warning')
     // Nothing repaired: nothing to organize, and the message says so
     expect(wrapper.get('[data-testid="repair-results-message"]').text()).toBe(
       'No book was repaired: there is nothing to organize.',
@@ -1782,7 +1782,7 @@ describe('RepairBooksModal', () => {
       true,
     )
     expect(wrapper.find('[data-testid="repair-problems"]').exists()).toBe(false)
-    expect(progress().classes()).not.toContain('repair-progress-problem')
+    expect(progress().attributes('data-tone')).toBe('progress')
     // Old and new records, the parts that changed in green
     expect(result(wrapper).get('[data-testid="repair-result-old"]').text()).toBe(
       'B0HM45F8MW - Primal Hunter, Vol. 7 - Zogarth - France (FR)',
@@ -1837,18 +1837,16 @@ describe('RepairBooksModal', () => {
     await flushPromises()
     for (const id of [7, 8, 9]) await searchAndPick(wrapper, { id, query: 'Primal Hunter' })
     // Step 1: the footer's bar unseen (standby), its room kept
-    expect(wrapper.get('[data-testid="repair-progress"]').classes()).toContain(
-      'repair-progress-standby',
-    )
+    expect(wrapper.get('[data-testid="repair-progress"]').attributes('data-standby')).toBe('true')
 
     await repair(wrapper)
 
     // The footer's bar: empty, breathing while the repairs run
     const progress = () => wrapper.get('[data-testid="repair-progress"]')
-    expect(progress().classes()).not.toContain('repair-progress-standby')
+    expect(progress().attributes('data-standby')).toBeUndefined()
     expect(progress().attributes('aria-valuenow')).toBe('0')
     expect(progress().attributes('aria-valuemax')).toBe('3')
-    expect(progress().classes()).toContain('repair-progress-running')
+    expect(progress().attributes('data-breathing')).toBe('true')
     expect(wrapper.find('[data-testid="repair-problems"]').exists()).toBe(false)
 
     // One at a time: the first runs, the others wait in a loading state
@@ -1872,7 +1870,7 @@ describe('RepairBooksModal', () => {
     )
     // A third of the way
     expect(progress().attributes('aria-valuenow')).toBe('1')
-    expect(progress().classes()).not.toContain('repair-progress-problem')
+    expect(progress().attributes('data-tone')).toBe('progress')
 
     // Cancel: the waiting book is left out at once, the running one ends first
     await wrapper.get('[data-testid="repair-cancel"]').trigger('click')
@@ -1891,7 +1889,7 @@ describe('RepairBooksModal', () => {
     expect(wrapper.get('[data-testid="repair-cancel-label"]').text()).toBe('Canceling…')
     expect(cancel.attributes('disabled')).toBeDefined()
     // The bar turns orange, the book left out counted as over; the footer says what was left out
-    expect(progress().classes()).toContain('repair-progress-problem')
+    expect(progress().attributes('data-tone')).toBe('warning')
     expect(progress().attributes('aria-valuenow')).toBe('2')
     expect(wrapper.get('[data-testid="repair-problems"]').text()).toBe(
       'Not all repaired: 1 canceled',
@@ -1903,8 +1901,8 @@ describe('RepairBooksModal', () => {
     expect(rescans).toHaveLength(2)
     // Full and orange, no longer breathing; the warning stays
     expect(progress().attributes('aria-valuenow')).toBe('3')
-    expect(progress().classes()).toContain('repair-progress-problem')
-    expect(progress().classes()).not.toContain('repair-progress-running')
+    expect(progress().attributes('data-tone')).toBe('warning')
+    expect(progress().attributes('data-breathing')).toBeUndefined()
     expect(wrapper.find('[data-testid="repair-problems"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="repair-cancel-label"]').text()).toBe('Back')
     expect(wrapper.get('[data-testid="repair-organize"]').text()).toContain('Organize 2')
