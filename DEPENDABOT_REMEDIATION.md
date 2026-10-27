@@ -10,7 +10,7 @@ Validation completed so far: clean installs and complete npm audits for all thre
 
 The final production container serves PNG/JPEG/WebP cache fixtures byte-for-byte, handles the malformed BigTIFF fixture in 19 ms, remains ready, and starts the actual bundled bot with a real settings-hub connection. The bot check first asserts that Discord is disabled and no credentials are configured; real Discord gateway authentication and slash-command registration are not exercised.
 
-The full native backend suite and formatting check are being completed separately. Keep this issue open until final CI and default-branch alert reconciliation are complete. The checkboxes below preserve the original baseline and do not assert GitHub has closed the alerts before merge.
+The full native Linux backend suite passes with 3,872 passed, 148 platform/fixture skips, and zero failures (4,020 total). It runs as a non-root user with a complete writable repository layout and fresh temp storage on a native Docker volume. Backend formatting and locked NuGet restore also pass. Required hosted CI and default-branch alert reconciliation remain pending. Keep this issue open until they complete. The checkboxes below preserve the original baseline and do not assert GitHub has closed the alerts before merge.
 
 ## Original baseline inventory
 
