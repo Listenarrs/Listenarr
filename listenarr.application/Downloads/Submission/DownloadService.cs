@@ -17,7 +17,6 @@
  */
 
 using Listenarr.Application.Common;
-using Listenarr.Application.Search.Filters;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Downloads.Submission
@@ -27,9 +26,8 @@ namespace Listenarr.Application.Downloads.Submission
         IConfigurationService configurationService,
         IDownloadRepository downloadRepository,
         ILogger<DownloadService> logger,
-        IQualityProfileService qualityProfileService,
         ISearchService searchService,
-        AutomaticSearchRelevanceGate relevanceGate,
+        IAutomaticSearchScoringService automaticScoring,
         IDownloadClientGateway clientGateway,
         IDownloadQueueService downloadQueueService,
         INotificationService notificationService,

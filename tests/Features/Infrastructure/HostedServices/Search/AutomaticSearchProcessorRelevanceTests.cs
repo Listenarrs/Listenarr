@@ -82,6 +82,7 @@ namespace Listenarr.Tests.Features.Infrastructure.HostedServices.Search
         {
             Title = title,
             Artist = artist,
+            IdentityEvidence = new CandidateIdentityEvidence { ReleaseName = title, Authors = string.IsNullOrWhiteSpace(artist) ? [] : [new ContributorEvidence(artist, IdentityEvidenceOrigin.ProviderSupplied)] },
             DownloadType = DirectDownloadMetadataKeys.ClientId
         };
 
@@ -114,6 +115,7 @@ namespace Listenarr.Tests.Features.Infrastructure.HostedServices.Search
         private async Task<Audiobook> SeedMonitoredAudiobookAsync(string title, string author) =>
             await _audiobookRepository.AddAsync(new AudiobookBuilder()
                 .WithTitle(title)
+                .WithSubtitle(title.Contains(": ", StringComparison.Ordinal) ? title[(title.IndexOf(": ", StringComparison.Ordinal) + 2)..] : null)
                 .WithAuthor(author)
                 .WithMonitored()
                 .WithQualityProfile(new QualityProfile { Name = "Any" })
