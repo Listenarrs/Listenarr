@@ -2149,6 +2149,49 @@ describe('RepairBooksModal', () => {
       wrapper.unmount()
     })
 
+    // The question left open while the first book's repair ends: the second one waits for the
+    // answer. Returns the answer to give and the guard's result
+    async function askWhileFirstEnds() {
+      const repairs = await startTwoRepairs()
+      let answer!: (isLeaving: boolean) => void
+      leaveMocks.showConfirm.mockImplementation(
+        () => new Promise<boolean>((resolve) => (answer = resolve)),
+      )
+      const leaving = leaveGuard()()
+      await flushPromises()
+      repairs.rescans[0]!({ message: 'ok', audiobookId: 7, asin: 'B0BK9W82PQ', region: 'us' })
+      await flushPromises()
+      return { ...repairs, answer: (isLeaving: boolean) => answer(isLeaving), leaving }
+    }
+
+    it('holds the next book while it asks; Stay goes on with it', async () => {
+      const { wrapper, rescans, resultStates, answer, leaving } = await askWhileFirstEnds()
+      expect(resultStates()).toEqual(['done', 'waiting'])
+      expect(apiMocks.rescanAudiobookMetadata).toHaveBeenCalledTimes(1)
+
+      answer(false)
+      expect(await leaving).toBe(false)
+      await flushPromises()
+      expect(resultStates()).toEqual(['done', 'running'])
+      expect(apiMocks.rescanAudiobookMetadata).toHaveBeenCalledTimes(2)
+
+      rescans[1]!({ message: 'ok', audiobookId: 8, asin: 'B0BK9W82PQ', region: 'us' })
+      await flushPromises()
+      expect(resultStates()).toEqual(['done', 'done'])
+      wrapper.unmount()
+    })
+
+    it('holds the next book while it asks; Leave never starts it', async () => {
+      const { wrapper, resultStates, answer, leaving } = await askWhileFirstEnds()
+
+      answer(true)
+      expect(await leaving).toBe(true)
+      await flushPromises()
+      expect(resultStates()).toEqual(['done', 'skipped'])
+      expect(apiMocks.rescanAudiobookMetadata).toHaveBeenCalledTimes(1)
+      wrapper.unmount()
+    })
+
     it('stops the waiting books when the dialog goes during a repair, however it goes', async () => {
       const { wrapper, rescans } = await startTwoRepairs()
 

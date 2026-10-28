@@ -51,6 +51,10 @@ export function useRepairBooks(audiobookIds: () => number[]) {
   const isFinished = ref(false)
   // Cancel asked while the repairs run: the books still waiting are left out
   const isCanceling = ref(false)
+  // The repairs held while the user is asked something (leaving the page): the book being
+  // repaired ends, the next one waits until resumeRepair or cancelRepair
+  const isPaused = ref(false)
+  let resumeWaiters: (() => void)[] = []
   // A repair saved something since the dialog opened: closing it, even from step 1 after Back,
   // refreshes the page behind
   const hasLibraryChanged = ref(false)
@@ -161,6 +165,7 @@ export function useRepairBooks(audiobookIds: () => number[]) {
     }
     await beforeRun()
     for (const repairRow of queuedRepairRows) {
+      await untilResumed()
       // Canceled while it waited
       if (repairRow.repairTask?.state !== 'waiting') continue
       await repairOne(repairRow)
@@ -169,6 +174,24 @@ export function useRepairBooks(audiobookIds: () => number[]) {
     isExecuting.value = false
     isCanceling.value = false
     isFinished.value = true
+  }
+
+  // Holds the repairs before the next book; the one being repaired ends (its request can't be
+  // taken back)
+  function pauseRepair() {
+    if (isExecuting.value) isPaused.value = true
+  }
+
+  function resumeRepair() {
+    isPaused.value = false
+    const waiters = resumeWaiters
+    resumeWaiters = []
+    waiters.forEach((resume) => resume())
+  }
+
+  function untilResumed(): Promise<void> {
+    if (!isPaused.value) return Promise.resolve()
+    return new Promise((resolve) => resumeWaiters.push(resolve))
   }
 
   // One book's repair: its new record saved (when its ASIN or region changes), then its metadata
@@ -246,7 +269,7 @@ export function useRepairBooks(audiobookIds: () => number[]) {
   }
 
   // The books still waiting are left out at once; the one being repaired ends first (its request
-  // can't be taken back)
+  // can't be taken back). Paused repairs end too
   function cancelRepair() {
     if (!isExecuting.value) return
     isCanceling.value = true
@@ -256,6 +279,7 @@ export function useRepairBooks(audiobookIds: () => number[]) {
         canceledCount.value++
         completedRepairCount.value++
       }
+    resumeRepair()
   }
 
   // Every book with a new record
@@ -280,6 +304,7 @@ export function useRepairBooks(audiobookIds: () => number[]) {
     isExecuting,
     isFinished,
     isCanceling,
+    isPaused,
     hasLibraryChanged,
     completedRepairCount,
     totalRepairCount,
@@ -294,6 +319,8 @@ export function useRepairBooks(audiobookIds: () => number[]) {
     onSearching,
     repair,
     retryRepair,
+    pauseRepair,
+    resumeRepair,
     cancelRepair,
     selectAll,
     clearSelection,
