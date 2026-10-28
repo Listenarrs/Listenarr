@@ -16,7 +16,7 @@ Listenarr is an automated audiobook collection management system built as a full
 
 ### Prerequisites
 - .NET 10.0 SDK or later
-- Node.js 24.x or later (specified in `fe/package.json` engines)
+- Node.js 26.x (26.12.1 or later) (specified in `fe/package.json` engines)
 
 ### Common Development Tasks
 
@@ -291,6 +291,6 @@ This produces a single deployment artifact containing both backend and frontend.
 - Check that files actually exist on disk, not just in database
 
 ### Build Errors
-- Ensure running .NET 10.0 SDK and Node.js 24.x or later
+- Ensure running .NET 10.0 SDK and Node.js 26.x (26.12.1 or later)
 - Clear node_modules and run `npm install` in `fe/` directory
 - Clean solution: `dotnet clean` then `dotnet build`

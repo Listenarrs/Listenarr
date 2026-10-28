@@ -20,7 +20,7 @@ Setup guides, FAQ, troubleshooting tips - the more information we have in the do
 - **Rider** (optional alternative to Visual Studio, preferred by many) ([https://www.jetbrains.com/rider/](https://www.jetbrains.com/rider/))
 - **VS Code** (recommended for frontend) ([https://code.visualstudio.com/](https://code.visualstudio.com/))
 - **Git** ([https://git-scm.com/downloads](https://git-scm.com/downloads))
-- **Node.js** (Node 24.x or higher) ([https://nodejs.org/](https://nodejs.org/))
+- **Node.js 26.x (26.12.1 or later)** ([https://nodejs.org/](https://nodejs.org/))
 - **.NET 10.0 SDK or higher** ([https://dotnet.microsoft.com/download](https://dotnet.microsoft.com/download))
 
 ### Getting Started
