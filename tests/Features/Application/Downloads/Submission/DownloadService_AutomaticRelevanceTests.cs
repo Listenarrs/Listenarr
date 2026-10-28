@@ -82,6 +82,28 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
                 .ReturnsAsync(results.ToList());
         }
 
+        [Theory]
+        [InlineData("Around the World in 80 Days", "Jules Verne", "Around the World in 80 Days - Jules Verne [64 Kbps]", null, null)]
+        [InlineData("The Long Walk", "Stephen King", "The Long Walk - (Narrated by Kirby Heyborne) - Stephen King [M4B]", null, null)]
+        [InlineData("Morning Star", "Pierce Brown", "Pierce.Brown-Red.Rising.03-Morning.Star.Unabr-64k.[2016]", "Red Rising", "3")]
+        [InlineData("Memory's Legion: The Complete Expanse Story Collection", "James S. A. Corey", "Memorys.Legion-The.Complete.Expanse.Story.Collection.by.James.S.A.Corey", null, null)]
+        [InlineData("Fahrenheit 451", "Ray Bradbury", "Fahrenheit.451.by.Ray.Bradbury", null, null)]
+        public async Task SearchAndDownloadAsync_AnnotatedReleaseReachesOnlyTheCorrectSubmission(string title,
+            string author, string release, string? series, string? number)
+        {
+            var book = await SeedAsync(title, author);
+            book.Series = series;
+            book.SeriesNumber = number;
+            await _audiobookRepository.UpdateAsync(book);
+            var candidate = Release(release, seeders: 10);
+            candidate.IdentityEvidence = new() { ReleaseName = release };
+            IndexerReturns(Release("Another Work - " + author, seeders: 1000), candidate);
+            var result = await _provider.GetRequiredService<DownloadService>().SearchAndDownloadAsync(book.Id);
+            Assert.True(result.Success, result.Message);
+            Assert.Equal(release, Assert.Single(_submitted).Title);
+        }
+
+
         private static SearchResult Release(string title, string artist = "", int seeders = 50) => new()
         {
             Title = title,

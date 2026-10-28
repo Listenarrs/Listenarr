@@ -95,6 +95,31 @@ namespace Listenarr.Tests.Features.Infrastructure.HostedServices.Search
                 Times.Once);
         }
 
+        [Theory]
+        [InlineData("Around the World in 80 Days", "Jules Verne", "Around the World in 80 Days - Jules Verne [64 Kbps]", null, null)]
+        [InlineData("The Long Walk", "Stephen King", "The Long Walk - (Narrated by Kirby Heyborne) - Stephen King [M4B]", null, null)]
+        [InlineData("Morning Star", "Pierce Brown", "Pierce.Brown-Red.Rising.03-Morning.Star.Unabr-64k.[2016]", "Red Rising", "3")]
+        [InlineData("Memory's Legion: The Complete Expanse Story Collection", "James S. A. Corey", "Memorys.Legion-The.Complete.Expanse.Story.Collection.by.James.S.A.Corey", null, null)]
+        [InlineData("Fahrenheit 451", "Ray Bradbury", "Fahrenheit.451.by.Ray.Bradbury", null, null)]
+        public async Task RunCycleAsync_AnnotatedReleaseUsesTheSharedSelector(string title, string author,
+            string release, string? series, string? number)
+        {
+            var correct = Release(release, artist: "");
+            var search = SearchReturning(Release("Another Work - " + author, artist: ""), correct);
+            var download = new Mock<IDownloadService>();
+            download.Setup(d => d.StartDownloadAsync(It.IsAny<SearchResult>(), It.IsAny<string>(), It.IsAny<int?>())).ReturnsAsync("download-layout");
+            Init(builder => { builder.WithSingleton(search.Object); builder.WithSingleton(download.Object); builder.WithSingleton(AcceptingQualityService().Object); });
+            var book = await SeedMonitoredAudiobookAsync(title, author);
+            book.Series = series;
+            book.SeriesNumber = number;
+            await _audiobookRepository.UpdateAsync(book);
+            await RunCycleAsync();
+            download.Verify(d => d.StartDownloadAsync(It.Is<SearchResult>(r => ReferenceEquals(r, correct)),
+                DirectDownloadMetadataKeys.ClientId, book.Id), Times.Once);
+            download.Verify(d => d.StartDownloadAsync(It.IsAny<SearchResult>(), It.IsAny<string>(), It.IsAny<int?>()), Times.Once);
+        }
+
+
         private static SearchResult Release(string title, string artist) => new()
         {
             Title = title,
