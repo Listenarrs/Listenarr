@@ -173,7 +173,7 @@ describe('RenamePreviewModal', () => {
   it("offers Back instead of Cancel when it is another dialog's step, until it has organized", async () => {
     vi.mocked(apiService.previewRename).mockResolvedValue([])
     const wrapper = mount(RenamePreviewModal, {
-      props: { visible: true, audiobookIds: [7], back: true },
+      props: { visible: true, audiobookIds: [7], canGoBack: true },
       global: { plugins: [createFilesystemPinia('Ready')] },
     })
     await flushPromises()

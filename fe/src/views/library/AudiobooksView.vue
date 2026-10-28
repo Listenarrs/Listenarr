@@ -708,7 +708,7 @@
       :visible="showOrganizeModal"
       :audiobook-ids="organizeAudiobookIds"
       :title="isOrganizeFromRepair ? REPAIR_ORGANIZE_TITLE : undefined"
-      :back="isOrganizeFromRepair"
+      :can-go-back="isOrganizeFromRepair"
       @back="backToRepair"
       @close="closeOrganize"
       @done="handleOrganizeDone"
