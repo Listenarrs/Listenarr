@@ -165,7 +165,7 @@
           <!-- Opened as another dialog's step (Repair): Back to it instead of Cancel, until it has
                organized -->
           <button
-            v-if="back && !finished"
+            v-if="canGoBack && !finished"
             type="button"
             class="btn cancel-button"
             :disabled="executing"
@@ -237,13 +237,13 @@ const props = withDefaults(
     // Opened by another dialog's last step (Repair): its title says which
     title?: string
     // That dialog can be gone back to: Back instead of Cancel
-    back?: boolean
+    canGoBack?: boolean
   }>(),
   {
     visible: false,
     audiobookIds: () => [],
     title: 'Organize Files',
-    back: false,
+    canGoBack: false,
   },
 )
 
