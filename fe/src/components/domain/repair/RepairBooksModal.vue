@@ -202,22 +202,29 @@ const {
   onSearching,
   repair,
   retryRepair,
+  pauseRepair,
+  resumeRepair,
   cancelRepair,
   selectAll,
   clearSelection,
 } = useRepairBooks(() => props.audiobookIds)
 provide(SEARCH_CACHE, searchCache)
 
-// While the repairs run, leaving the page asks first (the dialog itself can't be closed then):
-// leaving cancels the books still waiting, the one being repaired ends on the server
+// While the repairs run, leaving the page asks first (the dialog itself can't be closed then).
+// The repairs hold while it asks: the one being repaired ends, the next one doesn't start. Stay
+// goes on with them; Leave cancels the books still waiting, as Cancel does
 usePageLeaveGuard({
   isActive: isExecuting,
-  confirmLeave: () =>
-    showConfirm(
+  confirmLeave: async () => {
+    pauseRepair()
+    const isLeaving = await showConfirm(
       'The book being repaired ends its repair, the ones still waiting are not repaired.',
       'Leave while books are repaired?',
       { confirmText: 'Leave', cancelText: 'Stay', danger: true },
-    ),
+    )
+    if (!isLeaving) resumeRepair()
+    return isLeaving
+  },
   onLeave: cancelRepair,
 })
 
