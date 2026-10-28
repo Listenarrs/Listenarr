@@ -33,9 +33,13 @@ namespace Listenarr.Application.Downloads.Contracts
 
         Task<bool> RemoveAsync(DownloadClientConfiguration client, string id, bool deleteFiles = false, CancellationToken ct = default);
 
+        /// <summary>
+        /// Given a download client, fetch all ongoing downloads in it
+        /// </summary>
+        /// <param name="client"></param>
+        /// <param name="ct"></param>
+        /// <returns>List of ongoing items in the download client related to listenarr downloads</returns>
         Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, CancellationToken ct = default);
-
-        Task<List<(string Id, string Name)>> GetRecentHistoryAsync(DownloadClientConfiguration client, int limit = 100, CancellationToken ct = default);
 
         Task<QueueItem> GetQueueItemAsync(
             DownloadClientConfiguration client,
@@ -45,6 +49,13 @@ namespace Listenarr.Application.Downloads.Contracts
 
         Task<bool> MarkItemAsImportedAsync(DownloadClientConfiguration client, Download download, CancellationToken ct = default);
 
+        /// <summary>
+        /// Given a list of downloads, update their data based on reported download client information
+        /// </summary>
+        /// <param name="client"></param>
+        /// <param name="downloads">List of downloads to update</param>
+        /// <param name="cancellationToken"></param>
+        /// <returns>Same list with updated values</returns>
         Task<List<Download>> FetchDownloadsAsync(DownloadClientConfiguration client, List<Download> downloads, CancellationToken cancellationToken = default);
     }
 }

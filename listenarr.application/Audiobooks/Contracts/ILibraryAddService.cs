@@ -50,7 +50,17 @@ namespace Listenarr.Application.Audiobooks.Contracts
 
         public bool AlreadyExists { get; set; }
 
+        public bool ValidationFailed { get; set; }
+
         public string Message { get; set; } = string.Empty;
+
+        public string? ValidationMessage { get; set; }
+
+        public string? ValidationCode { get; set; }
+
+        public string? ValidationField { get; set; }
+
+        public string? ResolvedDestination { get; set; }
 
         public Audiobook? Audiobook { get; set; }
     }

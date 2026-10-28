@@ -23,6 +23,7 @@ namespace Listenarr.Application.Audiobooks.Files
         public int DeletedFiles { get; set; }
         public bool DeletedFolder { get; set; }
         public bool DeletedParentFolder { get; set; }
+        public bool TrackedFileCleanupComplete { get; set; }
         public List<string> Warnings { get; } = new List<string>();
 
         public string BuildDeleteMessage()

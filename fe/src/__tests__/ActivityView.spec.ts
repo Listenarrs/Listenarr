@@ -80,6 +80,18 @@ const mockLibraryStore = (audiobooks: Array<{ id: number; title: string }> = [])
   }))
 }
 
+let currentMoveJobsStore: Record<string, unknown>
+
+const mockMoveJobsStore = (overrides: Record<string, unknown> = {}) => {
+  currentMoveJobsStore = {
+    trackedJobs: [],
+    start: vi.fn(),
+    ...overrides,
+  }
+
+  return currentMoveJobsStore
+}
+
 const mockDownloadsStore = (overrides: Record<string, unknown> = {}) => {
   const store = {
     activeDownloads: [],
@@ -116,6 +128,10 @@ describe('ActivityView', () => {
   beforeEach(() => {
     vi.resetModules()
     vi.clearAllMocks()
+    mockMoveJobsStore()
+    vi.doMock('@/stores/moveJobs', () => ({
+      useMoveJobsStore: () => currentMoveJobsStore,
+    }))
     vi.spyOn(globalThis, 'setInterval').mockReturnValue(
       1 as unknown as ReturnType<typeof setInterval>,
     )
@@ -124,6 +140,34 @@ describe('ActivityView', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  it('shows active library move progress in the unified activity list', async () => {
+    mockSignalR()
+    mockApi()
+    mockConfigurationStore(false)
+    mockLibraryStore([{ id: 42, title: 'Book' }])
+    mockDownloadsStore()
+    mockMoveJobsStore({
+      trackedJobs: [
+        {
+          jobId: 'job-1',
+          audiobookId: 42,
+          status: 'Running',
+          progress: 37.5,
+          phase: 'Copying',
+          target: '/library/book',
+        },
+      ],
+    })
+
+    const wrapper = await mountActivityView()
+    const vm = wrapper.vm as unknown as ActivityViewVm
+    const move = vm.allActivityItems.find((item) => item.id === 'move:job-1')
+
+    expect(move).toMatchObject({ status: 'moving', progress: 37.5 })
+    expect(wrapper.text()).toContain('38%')
+    expect(wrapper.text()).toContain('Moving')
   })
 
   it('includes completed external downloads from the downloads store in the unified list', async () => {
@@ -437,6 +481,61 @@ describe('ActivityView', () => {
     expect(vm.queueHealthClients[0]?.name).toBe('qBittorrent')
     expect(wrapper.text()).toContain('Some queue data is unavailable')
     expect(wrapper.text()).toContain('qBittorrent unavailable after a timeout')
+  })
+
+  it('prefers the queue snapshot over a DDL active download with the same tracked id', async () => {
+    mockSignalR()
+    mockApi({
+      getQueue: vi.fn(async () => ({
+        items: [
+          {
+            id: 'ddl-alice',
+            title: 'Alice in Wonderland',
+            status: 'downloading',
+            progress: 42,
+            size: 1000,
+            downloaded: 420,
+            downloadSpeed: 0,
+            quality: 'M4B',
+            downloadClient: 'Direct Download',
+            downloadClientId: 'DDL',
+            downloadClientType: 'ddl',
+            addedAt: new Date().toISOString(),
+            canPause: false,
+            canRemove: true,
+          },
+        ],
+        clients: [],
+        generatedAt: new Date().toISOString(),
+        hasStaleData: false,
+        hasUnavailableClients: false,
+      })),
+    })
+    mockConfigurationStore(false)
+    mockLibraryStore()
+    mockDownloadsStore({
+      activeDownloads: [
+        {
+          id: 'ddl-alice',
+          title: 'Alice in Wonderland',
+          status: 'Queued',
+          progress: 0,
+          totalSize: 1000,
+          downloadedSize: 0,
+          downloadClientId: 'DDL',
+          startedAt: new Date().toISOString(),
+        },
+      ],
+    })
+
+    const wrapper = await mountActivityView()
+    const vm = wrapper.vm as unknown as ActivityViewVm
+
+    expect(vm.allActivityItems).toHaveLength(1)
+    expect(vm.allActivityItems[0]?.id).toBe('ddl-alice')
+    expect(vm.allActivityItems[0]?.status).toBe('downloading')
+    expect(vm.allActivityItems[0]?.progress).toBe(42)
+    expect(vm.allActivityItems[0]?.downloadClientType).toBe('ddl')
   })
 
   it('prefers the queue snapshot over an external active download with the same tracked id', async () => {

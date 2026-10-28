@@ -39,6 +39,8 @@ internal static class PlatformRegistrationExtensions
     {
         services.AddSingleton<IFileStorage, FileStorage>();
         services.AddSingleton<IFileSystem, LocalFileSystem>();
+        services.AddSingleton<IFileSystemSemanticsResolver, FileSystemSemanticsResolver>();
+        services.AddSingleton<IFileSystemVolumeResolver, FileSystemVolumeResolver>();
         return services;
     }
 

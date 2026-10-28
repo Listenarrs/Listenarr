@@ -17,6 +17,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Processing
         {
             _services.AddSingleton<IDownloadClientGateway>(downloadClientGateway);
             Init();
+            await AddAuthorizedRootAsync(FileService.GetTempPath());
             await InitData();
         }
 
@@ -97,6 +98,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Processing
             _services.AddSingleton<IDownloadClientGateway>(downloadClientGatewayMock);
             _services.Replace(new ServiceDescriptor(typeof(IDownloadItemService), typeof(DownloadItemService), ServiceLifetime.Singleton));
             Init();
+            await AddAuthorizedRootAsync(FileService.GetTempPath());
             await InitData();
 
             await _applicationSettingsRepository.SaveAsync(new ApplicationSettingsBuilder()

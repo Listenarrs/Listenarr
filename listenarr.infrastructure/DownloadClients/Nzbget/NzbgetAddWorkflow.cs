@@ -15,6 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using System.Globalization;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.DownloadClients.Nzbget
@@ -41,19 +42,10 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
         {
             var category = NzbgetRequestPlanner.ResolveCategory(client);
             var priority = NzbgetRequestPlanner.ResolvePriority(client);
-            var droneId = Guid.NewGuid().ToString().Replace("-", string.Empty);
 
             var nzbContentBase64 = Convert.ToBase64String(submission.NzbBytes);
             var nzbFileName = submission.FileName;
-
-            var ppParams = new[]
-            {
-                new Dictionary<string, object>
-                {
-                    { "Name", "drone" },
-                    { "Value", droneId }
-                }
-            };
+            var ppParams = Array.Empty<Dictionary<string, object>>();
 
             try
             {
@@ -78,8 +70,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
                     throw new DownloadClientSubmissionException("NZBGet rejected the prepared NZB.");
                 }
 
-                logger.LogInformation("NZBGet XML-RPC queued '{Title}' with ID {QueueId}, droneId: {DroneId}", LogRedaction.SanitizeText(submission.Title), queueId, LogRedaction.SanitizeText(droneId));
-                return new DownloadClientSubmissionResult(queueId.ToString(), droneId);
+                logger.LogInformation("NZBGet XML-RPC queued '{Title}' with ID {QueueId}", LogRedaction.SanitizeText(submission.Title), queueId);
+                return new DownloadClientSubmissionResult(queueId.ToString(CultureInfo.InvariantCulture));
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {

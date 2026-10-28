@@ -15,6 +15,8 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using System.Net;
+using Listenarr.Domain.Downloads.Exceptions;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Mocks.Api;
@@ -30,6 +32,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Sabnzbd
         public override async Task InitializeAsync()
         {
             sabnzbdApiMock = _provider.GetRequiredService<SabnzbdApiMock>();
+            await AddAuthorizedRootAsync(FileService.GetTempPath());
 
             _client = await _downloadClientConfigurationRepository.SaveAsync(new DownloadClientConfigurationBuilder()
                 .WithHost("http://192.168.50.111/sab")
@@ -115,7 +118,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Sabnzbd
                 .WithDownloadClientConfiguration(_client)
                 .WithDownloading(0)
                 .WithPath(source)
-                .WithClientDownloadId(SabnzbdApiMock.COMPLETED_FILE_SABNZBD)
+                .WithExternalId(SabnzbdApiMock.COMPLETED_FILE_SABNZBD)
                 .Build());
 
             var monitor = _provider.GetRequiredService<DownloadMonitorService>();
@@ -178,6 +181,98 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Sabnzbd
         }
 
         [Fact]
+        public async Task GetQueueAsync_WithTrackedActiveItem_DoesNotCallHistory()
+        {
+            sabnzbdApiMock.HistoryStatusCode = HttpStatusCode.InternalServerError;
+            sabnzbdApiMock.ResetRequestHistory();
+            var adapter = MockUtils.CreateSabnzbdAdapter(_provider);
+
+            var items = await adapter.GetQueueAsync(_client, ["SABnzbd_nzo_20f9svw_"]);
+
+            Assert.Single(items);
+            Assert.DoesNotContain(sabnzbdApiMock.RequestHistory,
+                request => request.RequestUri.Query.Contains("mode=history", StringComparison.Ordinal));
+        }
+
+        [Fact]
+        public async Task GetQueueAsync_WithMissingTrackedItem_Throws_WhenHistoryFails()
+        {
+            sabnzbdApiMock.HistoryStatusCode = HttpStatusCode.InternalServerError;
+            sabnzbdApiMock.ResetRequestHistory();
+            var adapter = MockUtils.CreateSabnzbdAdapter(_provider);
+
+            await Assert.ThrowsAsync<DownloadClientAdapterPollingException>(
+                () => adapter.GetQueueAsync(_client, ["missing-nzo-id"]));
+
+            Assert.Contains(sabnzbdApiMock.RequestHistory,
+                request => request.RequestUri.Query.Contains("mode=history", StringComparison.Ordinal));
+        }
+
+        [Fact]
+        public async Task GetQueueAsync_FullSnapshot_DoesNotThrow_WhenHistoryFails()
+        {
+            sabnzbdApiMock.HistoryStatusCode = HttpStatusCode.InternalServerError;
+            sabnzbdApiMock.ResetRequestHistory();
+            var adapter = MockUtils.CreateSabnzbdAdapter(_provider);
+
+            var items = await adapter.GetQueueAsync(_client);
+
+            Assert.NotEmpty(items);
+            Assert.Contains(sabnzbdApiMock.RequestHistory,
+                request => request.RequestUri.Query.Contains("mode=history", StringComparison.Ordinal));
+        }
+
+        [Fact]
+        public async Task GetQueueAsync_WithTrackedIds_UsesMonitorHistoryLimit()
+        {
+            sabnzbdApiMock.ResetRequestHistory();
+            var adapter = MockUtils.CreateSabnzbdAdapter(_provider);
+
+            var items = await adapter.GetQueueAsync(_client, [SabnzbdApiMock.COMPLETED_FILE_SABNZBD]);
+
+            Assert.Single(items);
+            var historyRequest = Assert.Single(sabnzbdApiMock.RequestHistory,
+                request => request.RequestUri.Query.Contains("mode=history", StringComparison.Ordinal));
+            Assert.Contains("limit=100", historyRequest.RequestUri.Query, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public async Task GetQueueAsync_FullSnapshot_UsesDisplayHistoryLimit()
+        {
+            sabnzbdApiMock.ResetRequestHistory();
+            var adapter = MockUtils.CreateSabnzbdAdapter(_provider);
+
+            var items = await adapter.GetQueueAsync(_client);
+
+            Assert.NotEmpty(items);
+            var historyRequest = Assert.Single(sabnzbdApiMock.RequestHistory,
+                request => request.RequestUri.Query.Contains("mode=history", StringComparison.Ordinal));
+            Assert.Contains("limit=30", historyRequest.RequestUri.Query, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public async Task GetImportItemAsync_QueueItemWithStaleContentPath_ResolvesFromHistoryStorage()
+        {
+            var source = FileService.GetTempDirectory("sabnzbd-history-storage");
+            var stalePath = Path.Join(FileService.GetTempDirectory("sabnzbd-stale-path"), "missing-folder");
+            sabnzbdApiMock.contentPath = source;
+
+            var adapter = MockUtils.CreateSabnzbdAdapter(_provider);
+            var original = new QueueItem
+            {
+                Id = SabnzbdApiMock.COMPLETED_FILE_SABNZBD,
+                Title = "hello",
+                Status = "completed",
+                ContentPath = stalePath
+            };
+
+            var resolved = await adapter.GetImportItemAsync(_client, new Download { Id = "download-1" }, original);
+
+            Assert.Equal(source, resolved.ContentPath);
+            Assert.Equal(stalePath, original.ContentPath);
+        }
+
+        [Fact]
         public async Task PollSABnzbd_SchedulesRetry_AndFinalizes_WhenFileArrives()
         {
             var sourceDirectory = FileService.GetTempDirectory("listenarr-test");
@@ -196,7 +291,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Sabnzbd
                 .WithDownloadClientConfiguration(_client)
                 .WithAudiobook(audiobook)
                 .WithPath(sourceDirectory)
-                .WithClientDownloadId(SabnzbdApiMock.COMPLETED_FILE_SABNZBD)
+                .WithExternalId(SabnzbdApiMock.COMPLETED_FILE_SABNZBD)
                 .Build());
 
             var downloadProcessingJobService = _provider.GetRequiredService<IDownloadProcessingJobService>();
@@ -251,6 +346,64 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Sabnzbd
             });
         }
 
+        [Fact]
+        public void ActiveQueueItem_DoesNotInventImportContentPath_FromConfiguredDownloadPath()
+        {
+            _client.DownloadPath = FileUtils.GetAbsolutePath("sabnzbd-active-root");
+            using var document = System.Text.Json.JsonDocument.Parse(
+                """
+                {
+                  "nzo_id": "sab-active-1",
+                  "filename": "Book Folder",
+                  "status": "Downloading",
+                  "percentage": "50",
+                  "mb": "100",
+                  "mbleft": "50"
+                }
+                """);
+
+            var item = SabnzbdResponseMapper.MapQueueSlotToQueueItem(
+                _client,
+                document.RootElement,
+                string.Empty,
+                speed: 0);
+
+            Assert.NotNull(item);
+            Assert.Equal(_client.DownloadPath, item!.RemotePath);
+            Assert.Null(item.ContentPath);
+            Assert.NotNull(item.SourceFiles);
+            Assert.Empty(item.SourceFiles);
+        }
+
+        [Fact]
+        public void ActiveQueueItem_UsesExplicitStoragePath_WhenSabReportsOne()
+        {
+            _client.DownloadPath = FileUtils.GetAbsolutePath("sabnzbd-active-root");
+            var storagePath = FileUtils.GetAbsolutePath("sabnzbd-storage", "Book Folder");
+            using var document = System.Text.Json.JsonDocument.Parse(
+                $$"""
+                {
+                  "nzo_id": "sab-active-2",
+                  "filename": "Book Folder",
+                  "status": "Completed",
+                  "percentage": "100",
+                  "mb": "100",
+                  "mbleft": "0",
+                  "storage": "{{storagePath.Replace("\\", "\\\\")}}"
+                }
+                """);
+
+            var item = SabnzbdResponseMapper.MapQueueSlotToQueueItem(
+                _client,
+                document.RootElement,
+                string.Empty,
+                speed: 0);
+
+            Assert.NotNull(item);
+            Assert.Equal(storagePath, item!.RemotePath);
+            Assert.Equal(storagePath, item.ContentPath);
+        }
+
         [Theory]
         [InlineData("Completed", "completed")]
         [InlineData("Failed", "failed")]
@@ -267,6 +420,155 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Sabnzbd
 
             Assert.NotNull(item);
             Assert.Equal(expected, item!.Status);
+            Assert.Equal("/downloads/book", item.ContentPath);
+        }
+
+        [Fact]
+        public void QueueSlot_InDifferentCategory_ButTracked_IsReturned()
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(
+                """
+                {
+                  "nzo_id": "sab-tracked-1",
+                  "filename": "Book Folder",
+                  "status": "Downloading",
+                  "percentage": "40",
+                  "mb": "100",
+                  "mbleft": "60",
+                  "cat": "*"
+                }
+                """);
+
+            var item = SabnzbdResponseMapper.MapQueueSlotToQueueItem(
+                _client,
+                document.RootElement,
+                "audiobooks",
+                speed: 0,
+                monitoredIds: new HashSet<string> { "sab-tracked-1" });
+
+            Assert.NotNull(item);
+            Assert.Equal("sab-tracked-1", item!.Id);
+        }
+
+        [Fact]
+        public void QueueSlot_InDifferentCategory_NotTracked_IsFiltered()
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(
+                """
+                {
+                  "nzo_id": "sab-untracked-1",
+                  "filename": "Book Folder",
+                  "status": "Downloading",
+                  "percentage": "40",
+                  "mb": "100",
+                  "mbleft": "60",
+                  "cat": "*"
+                }
+                """);
+
+            var item = SabnzbdResponseMapper.MapQueueSlotToQueueItem(
+                _client,
+                document.RootElement,
+                "audiobooks",
+                speed: 0,
+                monitoredIds: new HashSet<string>());
+
+            Assert.Null(item);
+        }
+
+        [Fact]
+        public void HistorySlot_InDifferentCategory_ButTracked_IsReturned()
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(
+                """{"nzo_id":"sab-tracked-2","name":"Book","status":"Completed","category":"*","storage":"/downloads/book"}""");
+
+            var item = SabnzbdResponseMapper.MapHistorySlotToQueueItem(
+                _client,
+                document.RootElement,
+                "audiobooks",
+                new HashSet<string>(),
+                monitoredIds: new HashSet<string> { "sab-tracked-2" });
+
+            Assert.NotNull(item);
+            Assert.Equal("sab-tracked-2", item!.Id);
+        }
+
+        [Fact]
+        public void HistorySlot_InDifferentCategory_NotTracked_IsFiltered()
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(
+                """{"nzo_id":"sab-untracked-2","name":"Book","status":"Completed","category":"*","storage":"/downloads/book"}""");
+
+            var item = SabnzbdResponseMapper.MapHistorySlotToQueueItem(
+                _client,
+                document.RootElement,
+                "audiobooks",
+                new HashSet<string>(),
+                monitoredIds: new HashSet<string>());
+
+            Assert.Null(item);
+        }
+
+        [Fact]
+        public async Task TestConnectionAsync_CategoryMissingFromSabnzbd_ReturnsAdvisoryPass()
+        {
+            sabnzbdApiMock.Categories = ["*", "Default"];
+            var client = new DownloadClientConfigurationBuilder()
+                .WithHost("http://192.168.50.111/sab")
+                .WithPort(8080)
+                .WithoutSsl()
+                .WithApiKey("secret")
+                .WithType("sabnzbd")
+                .WithSettings("category", "audiobooks")
+                .Build();
+
+            var gateway = _provider.GetRequiredService<IDownloadClientGateway>();
+            var (success, message) = await gateway.TestConnectionAsync(client);
+
+            Assert.True(success);
+            Assert.Contains("does not exist", message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("audiobooks", message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public async Task TestConnectionAsync_CategoryProbeTimesOut_StillPasses()
+        {
+            sabnzbdApiMock.GetCatsTimesOut = true;
+            var client = new DownloadClientConfigurationBuilder()
+                .WithHost("http://192.168.50.111/sab")
+                .WithPort(8080)
+                .WithoutSsl()
+                .WithApiKey("secret")
+                .WithType("sabnzbd")
+                .WithSettings("category", "audiobooks")
+                .Build();
+
+            var gateway = _provider.GetRequiredService<IDownloadClientGateway>();
+            var (success, message) = await gateway.TestConnectionAsync(client);
+
+            Assert.True(success);
+            Assert.Equal("SABnzbd: connected", message);
+        }
+
+        [Fact]
+        public async Task TestConnectionAsync_CategoryPresentInSabnzbd_ReturnsCleanPass()
+        {
+            sabnzbdApiMock.Categories = ["*", "Default", "audiobooks"];
+            var client = new DownloadClientConfigurationBuilder()
+                .WithHost("http://192.168.50.111/sab")
+                .WithPort(8080)
+                .WithoutSsl()
+                .WithApiKey("secret")
+                .WithType("sabnzbd")
+                .WithSettings("category", "audiobooks")
+                .Build();
+
+            var gateway = _provider.GetRequiredService<IDownloadClientGateway>();
+            var (success, message) = await gateway.TestConnectionAsync(client);
+
+            Assert.True(success);
+            Assert.Contains("connected", message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("does not exist", message, StringComparison.OrdinalIgnoreCase);
         }
     }
 }

@@ -18,6 +18,8 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Listenarr.Infrastructure.DependencyInjection;
+using Listenarr.Infrastructure.Downloads.DirectDownload;
+using Listenarr.Tests.Common;
 
 namespace Listenarr.Tests.Features.Infrastructure.DependencyInjection
 {
@@ -29,6 +31,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DependencyInjection
             nameof(MoveBackgroundService),
             nameof(ImageCacheCleanupService),
             nameof(DownloadMonitorService),
+            nameof(DirectDownloadService),
             nameof(MovedDownloadCleanupService),
             nameof(QueueMonitorService),
             nameof(AutomaticSearchService),
@@ -37,13 +40,16 @@ namespace Listenarr.Tests.Features.Infrastructure.DependencyInjection
             nameof(FfmpegInstallBackgroundService),
             nameof(MetadataRescanService),
             nameof(DownloadProcessingJobProcessor),
+            nameof(DownloadProcessingJobCleanupService),
             nameof(UnmatchedScanBackgroundService)
         ];
 
         private static readonly Type[] ExpectedProcessorTypes =
         [
             typeof(DownloadMonitorProcessor),
+            typeof(DirectDownloadProcessor),
             typeof(DownloadProcessingJobProcessor),
+            typeof(DownloadProcessingJobCleanupProcessor),
             typeof(MovedDownloadCleanupProcessor),
             typeof(ScanJobProcessor),
             typeof(MoveJobProcessor),
@@ -72,6 +78,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DependencyInjection
             Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(MoveBackgroundService));
             AssertHostedServiceRegistered<ImageCacheCleanupService>(services);
             AssertHostedServiceRegistered<DownloadMonitorService>(services);
+            AssertHostedServiceRegistered<DirectDownloadService>(services);
             Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(QueueMonitorService));
             AssertHostedServiceRegistered<AutomaticSearchService>(services);
             AssertHostedServiceRegistered<AuthorMonitoringBackgroundService>(services);
@@ -79,11 +86,12 @@ namespace Listenarr.Tests.Features.Infrastructure.DependencyInjection
             AssertHostedServiceRegistered<FfmpegInstallBackgroundService>(services);
             AssertHostedServiceRegistered<MetadataRescanService>(services);
             AssertHostedServiceRegistered<DownloadProcessingJobProcessor>(services);
+            AssertHostedServiceRegistered<DownloadProcessingJobCleanupService>(services);
             AssertHostedServiceRegistered<UnmatchedScanBackgroundService>(services);
 
             // Assert - singletons / supporting services registered
             Assert.Contains(services, d => d.ServiceType == typeof(IScanQueueService) && d.Lifetime == ServiceLifetime.Singleton);
-            Assert.Contains(services, d => d.ServiceType == typeof(IMoveQueueService) && d.Lifetime == ServiceLifetime.Singleton);
+            Assert.DoesNotContain(services, d => d.ServiceType == typeof(IMoveQueueService));
             Assert.Contains(services, d => d.ServiceType == typeof(IWorkerCycleRunner) && d.Lifetime == ServiceLifetime.Singleton);
 
             foreach (var processorType in ExpectedProcessorTypes)
@@ -92,7 +100,9 @@ namespace Listenarr.Tests.Features.Infrastructure.DependencyInjection
             }
 
             AssertProcessorRegistered<IDownloadMonitorProcessor>(services);
+            AssertProcessorRegistered<IDirectDownloadProcessor>(services);
             AssertProcessorRegistered<IDownloadImportProcessor>(services);
+            AssertProcessorRegistered<IDownloadProcessingJobCleanupProcessor>(services);
             AssertProcessorRegistered<IMovedDownloadCleanupProcessor>(services);
             AssertProcessorRegistered<IScanJobProcessor>(services);
             AssertProcessorRegistered<IMoveJobProcessor>(services);
@@ -147,7 +157,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DependencyInjection
         {
             Assert.Contains(services, d =>
                 d.ServiceType == typeof(IHostedService) &&
-                (d.ImplementationType == typeof(TImplementation) || d.ImplementationFactory != null));
+                GetHostedServiceName(d) == typeof(TImplementation).Name);
             Assert.Contains(services, d =>
                 d.ServiceType == typeof(TImplementation) && d.Lifetime == ServiceLifetime.Singleton);
         }
@@ -168,21 +178,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DependencyInjection
             return factoryType?.Name ?? descriptor.ToString();
         }
 
-        private static string FindRepositoryFile(string fileName)
-        {
-            var directory = new DirectoryInfo(AppContext.BaseDirectory);
-            while (directory != null)
-            {
-                var candidate = Path.Join(directory.FullName, fileName);
-                if (File.Exists(candidate))
-                {
-                    return candidate;
-                }
-
-                directory = directory.Parent;
-            }
-
-            throw new FileNotFoundException($"Could not find {fileName} from {AppContext.BaseDirectory}");
-        }
+        private static string FindRepositoryFile(string fileName) =>
+            Path.Join(TestUtils.FindRepositoryRoot(), fileName);
     }
 }

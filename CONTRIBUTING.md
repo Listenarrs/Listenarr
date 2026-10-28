@@ -20,7 +20,7 @@ Setup guides, FAQ, troubleshooting tips - the more information we have in the do
 - **Rider** (optional alternative to Visual Studio, preferred by many) ([https://www.jetbrains.com/rider/](https://www.jetbrains.com/rider/))
 - **VS Code** (recommended for frontend) ([https://code.visualstudio.com/](https://code.visualstudio.com/))
 - **Git** ([https://git-scm.com/downloads](https://git-scm.com/downloads))
-- **Node.js** (Node 24.x or higher) ([https://nodejs.org/](https://nodejs.org/))
+- **Node.js 26.x (26.12.1 or later)** ([https://nodejs.org/](https://nodejs.org/))
 - **.NET 10.0 SDK or higher** ([https://dotnet.microsoft.com/download](https://dotnet.microsoft.com/download))
 
 ### Getting Started
@@ -135,6 +135,9 @@ This project follows a layered pattern: domain models in `listenarr.domain`, EF 
   - Register typed or named HttpClients directly in `listenarr.api/Program.cs`, or centralize them in `AddListenarrHttpClients` (`listenarr.infrastructure/Extensions/ServiceRegistrationExtensions.cs`).
   - Register adapter interfaces in the adapters module (see `listenarr.infrastructure/Extensions/ServiceRegistrationExtensions.cs`).
   - If adapter resolution by id/type is required, use `IDownloadClientAdapterFactory`.
+  - Keep concrete download-client adapters as thin facades. Put client-specific submission, queue polling, item listing, history lookup, removal, and import path behavior in dedicated workflows/resolvers under `listenarr.infrastructure/DownloadClients/<Client>`. This preserves unique client behavior while keeping adapter responsibilities uniform.
+  - Register download-client workflows, protocol helpers, and shared session helpers in `listenarr.infrastructure/DependencyInjection/DownloadClients/DownloadClientRegistrationExtensions.cs`. Keep workflow classes internal unless a real cross-layer seam requires a public interface.
+  - Adapters may return full external client snapshots. Do not surface unmatched active external client items in Activity; `DownloadQueueService` owns user-visible filtering after reconciliation so shared clients do not leak unrelated transfers into Listenarr.
 
 - Testing tips:
   - Add unit tests for ValueConverters and ValueComparers to ensure JSON behavior is stable (null handling, empty JSON).
@@ -147,6 +150,15 @@ This project follows a layered pattern: domain models in `listenarr.domain`, EF 
 - Run frontend tests: `cd fe && npm run test:unit`
 - Run frontend type checks: `cd fe && npm run type-check`
 - Ensure all tests pass before submitting PR
+
+### Compatibility and migration development policy
+
+The compatibility boundary for a pull request is the branch it targets. Databases, filesystem artifacts, API states, and recovery formats that were produced only by an unmerged feature branch or intermediate PR image are development artifacts, not supported upgrade inputs.
+
+- Do not keep production compatibility paths solely for intermediate versions of an unmerged PR.
+- Preserve and regression-test compatibility with schemas and persisted data that actually exist on the target branch.
+- Once an EF migration is merged into a supported branch it is immutable history. Before merge, superseded branch-only migrations should be removed and the final migration set regenerated with EF from the target branch model snapshot.
+- Do not hand-edit EF scaffolding to emulate intermediate branch schemas. Put unavoidable data repair for real target-branch upgrades in explicit, tested startup/reconciliation primitives.
 
 ### Branching Model
 
@@ -411,5 +423,6 @@ If you have any questions about contributing, please:
   4. In `listenarr.api/Program.cs` call the infrastructure registration extension instead of registering types inline.
   5. Delete the old API placeholder files and run `dotnet test` to verify no regressions.
 - Add a small DI/registration unit test (DependencyInjectionTests) that asserts required services are resolvable; run it early in CI to catch layering regressions.
+- Create EF Core migrations with `dotnet ef migrations add` only. Do not hand-author migration `.cs`, `.Designer.cs`, or model snapshot files; generated migrations may be reviewed, but the scaffold is the source of truth so EF discovery metadata and accumulated snapshots stay complete.
 
 Thank you for contributing to Listenarr! 🎵📚

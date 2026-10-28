@@ -61,26 +61,46 @@ namespace Listenarr.Tests.Common
             return Path.Combine(folder, filename);
         }
 
-        public static string GetTorrentDataPath(string filename)
+        public static string FindRepositoryRoot([CallerFilePath] string callerPath = "")
         {
-            var directory = new DirectoryInfo(AppContext.BaseDirectory);
-            while (directory != null)
+            var startingPaths = new[]
             {
-                if (File.Exists(Path.Join(directory.FullName, "listenarr.slnx")))
-                {
-                    return Path.Join(
-                        directory.FullName,
-                        "tests",
-                        "Data",
-                        "Infrastructure",
-                        "Torrents",
-                        filename);
-                }
+                Environment.GetEnvironmentVariable("LISTENARR_REPOSITORY_ROOT"),
+                Path.GetDirectoryName(callerPath),
+                Directory.GetCurrentDirectory(),
+                AppContext.BaseDirectory
+            };
 
-                directory = directory.Parent;
+            foreach (var startingPath in startingPaths
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                var directory = new DirectoryInfo(startingPath!);
+                while (directory != null)
+                {
+                    if (File.Exists(Path.Join(directory.FullName, "listenarr.slnx")))
+                    {
+                        return directory.FullName;
+                    }
+
+                    directory = directory.Parent;
+                }
             }
 
-            throw new DirectoryNotFoundException($"Unable to locate repository root from {AppContext.BaseDirectory}");
+            throw new DirectoryNotFoundException(
+                $"Unable to locate repository root from caller '{callerPath}', "
+                + $"current directory '{Directory.GetCurrentDirectory()}', or '{AppContext.BaseDirectory}'.");
+        }
+
+        public static string GetTorrentDataPath(string filename)
+        {
+            return Path.Join(
+                FindRepositoryRoot(),
+                "tests",
+                "Data",
+                "Infrastructure",
+                "Torrents",
+                filename);
         }
     }
 }

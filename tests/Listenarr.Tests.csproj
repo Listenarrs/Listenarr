@@ -23,6 +23,17 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<Reference Include="Microsoft.CodeAnalysis">
+			<HintPath>$(MSBuildSDKsPath)/../Roslyn/bincore/Microsoft.CodeAnalysis.dll</HintPath>
+			<Private>true</Private>
+		</Reference>
+		<Reference Include="Microsoft.CodeAnalysis.CSharp">
+			<HintPath>$(MSBuildSDKsPath)/../Roslyn/bincore/Microsoft.CodeAnalysis.CSharp.dll</HintPath>
+			<Private>true</Private>
+		</Reference>
+	</ItemGroup>
+
+	<ItemGroup>
 		<ProjectReference Include="..\listenarr.api\Listenarr.Api.csproj" />
 		<ProjectReference Include="..\listenarr.infrastructure\Listenarr.Infrastructure.csproj" />
 	</ItemGroup>

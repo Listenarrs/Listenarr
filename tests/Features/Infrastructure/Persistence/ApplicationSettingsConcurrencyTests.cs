@@ -11,6 +11,7 @@
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Listenarr.Application.Common.Exceptions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 
 namespace Listenarr.Tests.Features.Infrastructure.Persistence;
 
@@ -28,7 +29,6 @@ public sealed class ApplicationSettingsConcurrencyTests : IAsyncLifetime
             .Options;
         await using var db = new ListenArrDbContext(_options);
         await db.Database.EnsureCreatedAsync();
-        await new EfApplicationSettingsRepository(db).SaveAsync(new ApplicationSettings());
     }
 
     public Task DisposeAsync()
@@ -42,8 +42,115 @@ public sealed class ApplicationSettingsConcurrencyTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ConcurrentInitialSave_ReturnsSingletonSettingsForBothCallers()
+    {
+        await using var db1 = new ListenArrDbContext(_options);
+        await using var db2 = new ListenArrDbContext(_options);
+        var repository1 = new EfApplicationSettingsRepository(db1);
+        var repository2 = new EfApplicationSettingsRepository(db2);
+
+        var results = await Task.WhenAll(
+            repository1.InitializeIfMissingAsync(new ApplicationSettings()),
+            repository2.InitializeIfMissingAsync(new ApplicationSettings()));
+
+        Assert.All(results, settings => Assert.Equal(1, settings.Id));
+        await using var verificationDb = new ListenArrDbContext(_options);
+        Assert.Equal(1, await verificationDb.ApplicationSettings.CountAsync());
+    }
+
+    [Fact]
+    public async Task InitialSave_RacedByExternalInitialization_ThrowsConflictInsteadOfReportingSuccess()
+    {
+        var interceptor = new InsertCompetingSettingsInterceptor(_options);
+        var racingOptions = new DbContextOptionsBuilder<ListenArrDbContext>()
+            .UseSqlite($"Data Source={_databasePath};Pooling=False")
+            .AddInterceptors(interceptor)
+            .Options;
+        await using var db = new ListenArrDbContext(racingOptions);
+        var repository = new EfApplicationSettingsRepository(db);
+
+        var exception = await Assert.ThrowsAsync<ApplicationConflictException>(() =>
+            repository.SaveAsync(new ApplicationSettings
+            {
+                OutputPath = "submitted"
+            }));
+
+        Assert.Equal("settings_concurrency_conflict", exception.Code);
+        await using var verificationDb = new ListenArrDbContext(_options);
+        var persisted = await verificationDb.ApplicationSettings
+            .AsNoTracking()
+            .SingleAsync();
+        Assert.Equal("winner", persisted.OutputPath);
+        Assert.Equal(1, persisted.Version);
+    }
+
+    [Fact]
+    public async Task ExistingSettingsUpdate_WithoutVersion_ThrowsStableConflict()
+    {
+        await using (var seedDb = new ListenArrDbContext(_options))
+        {
+            await new EfApplicationSettingsRepository(seedDb).SaveAsync(new ApplicationSettings
+            {
+                OutputPath = "original"
+            });
+        }
+
+        await using var updateDb = new ListenArrDbContext(_options);
+        var repository = new EfApplicationSettingsRepository(updateDb);
+
+        var exception = await Assert.ThrowsAsync<ApplicationConflictException>(() =>
+            repository.SaveAsync(new ApplicationSettings
+            {
+                OutputPath = "versionless-overwrite"
+            }));
+
+        Assert.Equal("settings_concurrency_conflict", exception.Code);
+        await using var verificationDb = new ListenArrDbContext(_options);
+        var persisted = await verificationDb.ApplicationSettings
+            .AsNoTracking()
+            .SingleAsync();
+        Assert.Equal("original", persisted.OutputPath);
+        Assert.Equal(1, persisted.Version);
+    }
+
+    private sealed class InsertCompetingSettingsInterceptor(
+        DbContextOptions<ListenArrDbContext> competingOptions) : SaveChangesInterceptor
+    {
+        private int _invoked;
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Exchange(ref _invoked, 1) != 0
+                || eventData.Context?.ChangeTracker
+                    .Entries<ApplicationSettings>()
+                    .All(entry => entry.State != EntityState.Added) != false)
+            {
+                return result;
+            }
+
+            await using var competingDb = new ListenArrDbContext(competingOptions);
+            competingDb.ApplicationSettings.Add(new ApplicationSettings
+            {
+                Id = 1,
+                Version = 1,
+                OutputPath = "winner"
+            });
+            await competingDb.SaveChangesAsync(cancellationToken);
+            return result;
+        }
+    }
+
+    [Fact]
     public async Task StaleSettingsUpdate_ThrowsStableConflict()
     {
+        await using (var seedDb = new ListenArrDbContext(_options))
+        {
+            await new EfApplicationSettingsRepository(seedDb).SaveAsync(new ApplicationSettings());
+        }
+
         await using var db1 = new ListenArrDbContext(_options);
         await using var db2 = new ListenArrDbContext(_options);
         var repository1 = new EfApplicationSettingsRepository(db1);

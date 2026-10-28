@@ -18,7 +18,7 @@
 <template>
   <Modal :visible="visible" size="lg" @close="closeModal">
     <template #header>
-      <ModalHeader :title="'Add to Library'" @close="closeModal" />
+      <ModalHeader :title="'Add to Library'" :show-close="!isAdding" @close="closeModal" />
     </template>
 
     <template #default>
@@ -46,6 +46,45 @@
 
             <!-- Book Details -->
             <div class="book-details">
+              <div
+                v-if="metadataLookupFailed"
+                class="metadata-not-found"
+                role="alert"
+                data-testid="metadata-not-found"
+              >
+                <PhWarning :size="16" />
+                <div>
+                  <p>
+                    <strong
+                      >No Audible record for this ASIN in the
+                      {{ regionLabel(metadataLookupRegion) }} catalogue.</strong
+                    >
+                    The book can't be added without it: look it up in another region, or cancel.
+                  </p>
+                  <div class="metadata-not-found-actions">
+                    <label for="metadata-retry-region">Look it up in</label>
+                    <select
+                      id="metadata-retry-region"
+                      v-model="retryRegion"
+                      class="form-select"
+                      data-testid="metadata-retry-region"
+                    >
+                      <option v-for="o in retryRegionOptions" :key="o.value" :value="o.value">
+                        {{ o.label }}
+                      </option>
+                    </select>
+                    <button
+                      type="button"
+                      class="btn btn-secondary btn-sm"
+                      data-testid="metadata-retry"
+                      :disabled="metadataLoading || !retryRegion"
+                      @click="retryMetadataLookup"
+                    >
+                      Search again
+                    </button>
+                  </div>
+                </div>
+              </div>
               <div v-if="!showMetadataEditor" class="detail-section detail-header">
                 <div>
                   <h3>{{ currentMetadata.title }}</h3>
@@ -315,6 +354,23 @@
                   <div class="detail-item">
                     <span class="label">ASIN</span>
                     <input v-model="editableMetadata.asin" type="text" class="form-input" />
+                    <div v-if="asinValidationError" class="path-validation-error">
+                      <PhWarning :size="16" />
+                      <span>{{ asinValidationError }}</span>
+                    </div>
+                  </div>
+                  <div class="detail-item">
+                    <span class="label">Region</span>
+                    <select
+                      v-model="editableMetadata.region"
+                      class="form-input"
+                      data-testid="metadata-region"
+                    >
+                      <option v-if="!editableMetadata.region" :value="undefined">Not set</option>
+                      <option v-for="o in metadataRegionOptions" :key="o.value" :value="o.value">
+                        {{ o.label }}
+                      </option>
+                    </select>
                   </div>
                   <div class="detail-item">
                     <span class="label">ISBN</span>
@@ -377,21 +433,9 @@
                 <div class="destination-display">
                   <div class="destination-row">
                     <div class="root-select">
-                      <RootFolderSelect
-                        v-model:rootId="selectedRootId"
-                        v-model:customPath="customRootPath"
-                        hideLabel
-                      />
+                      <RootFolderSelect v-model:rootId="selectedRootId" hideLabel />
                     </div>
                     <input
-                      v-if="selectedRootId === 0"
-                      type="text"
-                      v-model="customRootPath"
-                      class="form-input custom-path-input"
-                      placeholder="e.g. C:\\Audiobooks or /mnt/audiobooks"
-                    />
-                    <input
-                      v-else
                       type="text"
                       v-model="options.relativePath"
                       class="form-input relative-input"
@@ -399,13 +443,21 @@
                       @input="onRelativePathInput"
                     />
                   </div>
-                  <small class="form-help" v-if="selectedRootId === 0">
-                    Enter an absolute path where files will be stored
+                  <small class="form-help">
+                    Select a configured root and edit the path relative to it on the right.
                   </small>
-                  <small class="form-help" v-else>
-                    Select a named root (or custom path) and edit the path relative to it on the
-                    right.
-                  </small>
+                  <div
+                    v-if="estimatedFullPath"
+                    class="destination-preview"
+                    data-testid="effective-destination"
+                  >
+                    <span>Effective destination:</span>
+                    <code>{{ estimatedFullPath }}</code>
+                  </div>
+                  <div v-if="destinationPathValidationError" class="path-validation-error">
+                    <PhWarning :size="16" />
+                    <span>{{ destinationPathValidationError }}</span>
+                  </div>
                   <!-- Path length warning -->
                   <div v-if="destinationPathWarning" class="path-length-warning">
                     <PhWarning :size="16" />
@@ -434,11 +486,21 @@
     </template>
 
     <template #footer>
-      <button class="btn btn-secondary" @click="closeModal">
+      <button class="btn btn-secondary" :disabled="isAdding" @click="closeModal">
         <PhX />
         Cancel
       </button>
-      <button class="btn btn-primary" @click="addToLibrary" :disabled="isAdding || metadataLoading">
+      <button
+        class="btn btn-primary"
+        @click="addToLibrary"
+        :disabled="
+          isAdding ||
+          metadataLoading ||
+          Boolean(destinationPathValidationError) ||
+          Boolean(asinValidationError) ||
+          metadataLookupFailed
+        "
+      >
         <PhSpinner v-if="isAdding" class="ph-spin" />
         <PhPlus v-else />
         {{ isAdding ? 'Adding...' : 'Add to Library' }}
@@ -456,6 +518,7 @@ import type {
   AudiobookSeriesMembership,
 } from '@/types'
 import { apiService } from '@/services/api'
+import { getApiValidationError } from '@/services/apiErrors'
 import { useConfigurationStore } from '@/stores/configuration'
 import { useToast } from '@/services/toastService'
 import { logger } from '@/utils/logger'
@@ -464,6 +527,7 @@ import RootFolderSelect from '@/components/form/RootFolderSelect.vue'
 import Checkbox from '@/components/form/Checkbox.vue'
 import FormRow from '@/components/settings/FormRow.vue'
 import { useRootFoldersStore } from '@/stores/rootFolders'
+import { buildAudibleProductUrl } from '@/utils/marketDomains'
 import {
   PhX,
   PhSpinner,
@@ -473,10 +537,21 @@ import {
   PhPencilSimple,
   PhEye,
 } from '@phosphor-icons/vue'
-import { toForward, normalizeForCompare } from '@/utils/path'
+import {
+  detectPathKind,
+  isRootedPath,
+  joinPaths,
+  stripRootPrefix,
+  validateLibraryDestinationPath,
+} from '@/utils/path'
 import { formatDate } from '@/utils/searchResultFormatting'
 import { stripHtmlAndNormalize } from '@/utils/textUtils'
 import { usePathLengthCheck } from '@/composables/usePathLengthCheck'
+import {
+  normalizeSearchRegion,
+  orderedSearchRegionOptions,
+  searchRegionOptions,
+} from '@/utils/languageMapping'
 
 interface Props {
   visible: boolean
@@ -508,6 +583,17 @@ const options = ref({
 
 const editableMetadata = ref<AudibleBookMetadata | null>(null)
 const relativePathManuallyEdited = ref(false)
+type DestinationPreviewState = 'idle' | 'pending' | 'valid' | 'failed'
+const destinationPreviewState = ref<DestinationPreviewState>('idle')
+let seedGeneration = 0
+let previewGeneration = 0
+let addGeneration = 0
+let manualEditGeneration = 0
+let metadataEditGeneration = 0
+let suppressMetadataEditTracking = false
+let seedPreviewOwner = 0
+const seedPreviewPending = ref(false)
+let pendingSeedRootSelection: number | null | undefined
 const showMetadataEditor = ref(false)
 
 function trimToUndefined(value: string | null | undefined): string | undefined {
@@ -623,8 +709,22 @@ function cloneMetadata(source: AudibleBookMetadata): AudibleBookMetadata {
     abridged: Boolean(source.abridged),
     source: trimToUndefined(source.source),
     sourceLink: trimToUndefined(source.sourceLink),
+    region: trimToUndefined(source.region),
     openLibraryId: trimToUndefined(source.openLibraryId),
     metadataSource: trimToUndefined(source.metadataSource),
+  }
+}
+
+// The book's region as loaded (not as edited), so the region list keeps its order while editing
+const bookRegion = ref<string | undefined>()
+
+function replaceEditableMetadata(metadata: AudibleBookMetadata) {
+  suppressMetadataEditTracking = true
+  try {
+    editableMetadata.value = cloneMetadata(metadata)
+    bookRegion.value = trimToUndefined(metadata.region)
+  } finally {
+    suppressMetadataEditTracking = false
   }
 }
 
@@ -672,6 +772,7 @@ function buildMetadataPayload(): AudibleBookMetadata {
     imageUrl: trimToUndefined(source?.imageUrl),
     explicit: Boolean(source?.explicit),
     abridged: Boolean(source?.abridged),
+    region: trimToUndefined(source?.region),
     openLibraryId: trimToUndefined(source?.openLibraryId),
   }
 }
@@ -723,12 +824,12 @@ const audibleSourceUrl = computed(() => {
   const source = (metadataSource.value || currentMetadata.value?.source || '').toLowerCase()
   const asin = currentMetadata.value?.asin
   if (!source.includes('audible') || !asin) return null
-  return `https://www.audible.com/pd/${encodeURIComponent(asin)}`
+  return buildAudibleProductUrl(asin, currentMetadata.value?.region)
 })
 
 const audibleProductUrl = computed(() => {
   const asin = currentMetadata.value?.asin
-  return asin ? `https://www.audible.com/pd/${asin}` : '#'
+  return asin ? buildAudibleProductUrl(asin, currentMetadata.value?.region) : '#'
 })
 
 const openLibraryUrl = computed(() => {
@@ -771,7 +872,6 @@ const displaySeriesMemberships = computed(() =>
 
 const rootStore = useRootFoldersStore()
 const selectedRootId = ref<number | null>(null)
-const customRootPath = ref<string | null>(null)
 
 const rootPath = ref<string>('')
 const previewFull = ref<string>('')
@@ -780,23 +880,48 @@ const previewRelative = ref<string>('')
 // Path length check — reactively compute the full destination path
 const estimatedFullPath = computed(() => {
   let root = ''
-  if (selectedRootId.value === 0) {
-    root = (customRootPath.value || '').trim()
-  } else if (selectedRootId.value && selectedRootId.value > 0) {
+  if (selectedRootId.value && selectedRootId.value > 0) {
     const found = rootStore.folders.find((f) => f.id === selectedRootId.value)
     root = found?.path || ''
   } else {
     const defaultRoot = rootStore.folders.find((f) => f.isDefault)
     root = defaultRoot?.path || configStore.applicationSettings?.outputPath || ''
   }
-  if (selectedRootId.value === 0) return root
-  const rel = (options.value.relativePath || '').trim()
+  const relativePath = options.value.relativePath || ''
+  const rel = relativePath.trim().length > 0 ? relativePath : ''
   if (!root) return rel
   if (!rel) return root
-  const sep = root.includes('\\') ? '\\' : '/'
-  return root.endsWith(sep) ? root + rel : root + sep + rel
+  return joinPaths(root, rel, detectPathKind(root))
 })
+const serverDestinationValidationError = ref<string | null>(null)
 const { pathLengthWarning: destinationPathWarning } = usePathLengthCheck(estimatedFullPath)
+const destinationPathValidationError = computed(() => {
+  if (serverDestinationValidationError.value) return serverDestinationValidationError.value
+
+  const relativePath = options.value.relativePath || ''
+  if (!relativePathManuallyEdited.value) {
+    if (seedPreviewPending.value || destinationPreviewState.value === 'pending') {
+      return 'Updating the destination preview for the current book and root folder.'
+    }
+    if (destinationPreviewState.value === 'failed') {
+      return 'The destination preview could not be refreshed. Edit the relative path or try again.'
+    }
+  }
+
+  const candidateKind = detectPathKind(relativePath)
+  if (relativePath && isRootedPath(relativePath, candidateKind)) {
+    return 'Enter a path relative to the selected configured root folder.'
+  }
+
+  return validateLibraryDestinationPath(estimatedFullPath.value, {
+    pathKind: detectPathKind(estimatedFullPath.value),
+    allowFileSystemRoot: false,
+  })
+})
+
+watch(estimatedFullPath, () => {
+  serverDestinationValidationError.value = null
+})
 
 // Hold an enriched metadata object (populate if metadata sources available)
 const enriched = ref<AudibleBookMetadata | null>(null)
@@ -806,6 +931,43 @@ const imageLoading = ref(false)
 const imageRetryCount = ref(0)
 const metadataLoading = ref(false)
 const metadataSource = ref<string | null>(null)
+// Set when the Audible catalogue has no usable record for the ASIN in the region that was asked
+// (request error such as a 404, or an empty product stub that has an ASIN but no title). There is
+// no automatic switch to another catalogue: the user picks the region to try.
+const metadataLookupFailed = ref(false)
+const metadataLookupRegion = ref('')
+const retryRegion = ref('')
+
+// The region that was tried first, then the configured one and US, then the others alphabetically
+const retryRegionOptions = computed(() =>
+  orderedSearchRegionOptions([
+    metadataLookupRegion.value,
+    normalizeSearchRegion(configStore.applicationSettings?.defaultSearchRegion),
+    'us',
+  ]),
+)
+
+// The Audible catalogue the ASIN belongs to, saved with it and used by rescans: editable with the
+// ASIN. The book's region first, then the configured one and US, as in Find Match
+const metadataRegionOptions = computed(() =>
+  orderedSearchRegionOptions([
+    bookRegion.value,
+    normalizeSearchRegion(configStore.applicationSettings?.defaultSearchRegion),
+    'us',
+  ]),
+)
+
+function regionLabel(region: string): string {
+  return searchRegionOptions.find((o) => o.value === region)?.label ?? region
+}
+
+// An ASIN can be corrected by hand (Audible sometimes republishes a book under a new one), but a
+// malformed one could never be looked up again, so it blocks the add; no ASIN is still allowed
+const asinValidationError = computed(() => {
+  const asin = trimToUndefined(editableMetadata.value?.asin)
+  if (!asin || /^[A-Z0-9]{10}$/i.test(asin)) return null
+  return 'An ASIN has 10 letters or digits.'
+})
 
 const imageSrc = computed(() => {
   // prefer resolvedImageUrl passed from parent
@@ -844,6 +1006,7 @@ interface Audible {
   imageUrl?: string
   lengthMinutes?: number
   language?: string
+  region?: string
   genres?: AudibleGenre[]
   series?: AudibleSeries[]
   bookFormat?: string
@@ -860,6 +1023,7 @@ interface AudibleMetadataResponse {
 const mapAudibleToAudible = (
   audible: Partial<Audible> | undefined,
   source?: string,
+  fallbackBook: AudibleBookMetadata = props.book,
 ): AudibleBookMetadata => {
   let publishYear: string | undefined
   let publishedDate: string | undefined
@@ -881,50 +1045,50 @@ const mapAudibleToAudible = (
       isPrimary: index === 0,
       sortOrder: index,
     })),
-    props.book?.series,
-    props.book?.seriesNumber,
+    fallbackBook?.series,
+    fallbackBook?.seriesNumber,
   )
   const primaryMembership = primarySeriesMembership(
     seriesMemberships,
-    props.book?.series,
-    props.book?.seriesNumber,
+    fallbackBook?.series,
+    fallbackBook?.seriesNumber,
   )
 
   return {
-    asin: audible?.asin || props.book?.asin || '',
-    title: audible?.title || props.book?.title || 'Unknown Title',
+    asin: audible?.asin || fallbackBook?.asin || '',
+    title: audible?.title || fallbackBook?.title || 'Unknown Title',
     subtitle: audible?.subtitle,
-    authors: authors.length ? authors : props.book?.authors || [],
-    narrators: narrators.length ? narrators : props.book?.narrators || [],
-    publisher: audible?.publisher || props.book?.publisher,
-    publishYear: publishYear || props.book?.publishYear,
-    publishedDate: publishedDate || props.book?.publishedDate,
-    description: audible?.description || props.book?.description,
-    imageUrl: audible?.imageUrl || props.book?.imageUrl,
+    authors: authors.length ? authors : fallbackBook?.authors || [],
+    narrators: narrators.length ? narrators : fallbackBook?.narrators || [],
+    publisher: audible?.publisher || fallbackBook?.publisher,
+    publishYear: publishYear || fallbackBook?.publishYear,
+    publishedDate: publishedDate || fallbackBook?.publishedDate,
+    description: audible?.description || fallbackBook?.description,
+    imageUrl: audible?.imageUrl || fallbackBook?.imageUrl,
     runtime:
-      typeof audible?.lengthMinutes === 'number' ? audible.lengthMinutes : props.book?.runtime,
-    language: audible?.language || props.book?.language,
-    edition: props.book?.edition,
-    version: audible?.version || props.book?.version,
-    genres: genres.length ? genres : props.book?.genres || [],
-    series: primaryMembership?.seriesName || props.book?.series,
+      typeof audible?.lengthMinutes === 'number' ? audible.lengthMinutes : fallbackBook?.runtime,
+    language: audible?.language || fallbackBook?.language,
+    edition: fallbackBook?.edition,
+    version: audible?.version || fallbackBook?.version,
+    genres: genres.length ? genres : fallbackBook?.genres || [],
+    region: audible?.region || fallbackBook?.region,
+    series: primaryMembership?.seriesName || fallbackBook?.series,
     seriesNumber:
       primaryMembership?.seriesNumber ||
-      (props.book?.seriesNumber && props.book.seriesNumber !== 'null'
-        ? props.book.seriesNumber
+      (fallbackBook?.seriesNumber && fallbackBook.seriesNumber !== 'null'
+        ? fallbackBook.seriesNumber
         : undefined),
     seriesMemberships,
     abridged:
       typeof audible?.bookFormat === 'string'
         ? audible.bookFormat.toLowerCase().includes('abridged')
-        : Boolean(props.book?.abridged),
-    isbn: audible?.isbn || props.book?.isbn,
-    source: source || props.book?.source,
+        : Boolean(fallbackBook?.abridged),
+    isbn: audible?.isbn || fallbackBook?.isbn,
+    source: source || fallbackBook?.source,
   }
 }
 
 function resolvePreviewRoot(): string | undefined {
-  if (selectedRootId.value === 0) return undefined
   if (selectedRootId.value && selectedRootId.value > 0) {
     const found = rootStore.folders.find((folder) => folder.id === selectedRootId.value)
     return found?.path || undefined
@@ -933,85 +1097,231 @@ function resolvePreviewRoot(): string | undefined {
   return defaultRoot?.path || configStore.applicationSettings?.outputPath || undefined
 }
 
-async function refreshPreviewFromMetadata(force = false) {
-  if (!props.visible || selectedRootId.value === 0) return
-  if (!force && relativePathManuallyEdited.value) return
+function isCurrentSeed(generation: number): boolean {
+  return generation === seedGeneration && props.visible
+}
 
+async function refreshPreviewFromMetadata(force = false, ownerGeneration = seedGeneration) {
+  if (!isCurrentSeed(ownerGeneration)) return
+  if (!force && (relativePathManuallyEdited.value || seedPreviewOwner !== 0)) return
+
+  const requestGeneration = ++previewGeneration
+  destinationPreviewState.value = 'pending'
   const metadataForPreview = buildMetadataPayload()
   const destinationRoot = resolvePreviewRoot()
-  const response = await apiService.previewLibraryPath(metadataForPreview, destinationRoot)
-  previewFull.value = response?.fullPath || ''
-  previewRelative.value = response?.relativePath || ''
-  options.value.relativePath = deriveRelative(
-    previewRelative.value,
-    previewFull.value,
-    destinationRoot || '',
-  )
+
+  try {
+    const response = await apiService.previewLibraryPath(metadataForPreview, destinationRoot)
+    if (
+      requestGeneration !== previewGeneration ||
+      !isCurrentSeed(ownerGeneration) ||
+      relativePathManuallyEdited.value
+    ) {
+      return
+    }
+
+    previewFull.value = response?.fullPath || ''
+    previewRelative.value = response?.relativePath || ''
+    options.value.relativePath = deriveRelative(
+      previewRelative.value,
+      previewFull.value,
+      destinationRoot || '',
+    )
+    destinationPreviewState.value = 'valid'
+  } catch (error) {
+    if (
+      requestGeneration === previewGeneration &&
+      isCurrentSeed(ownerGeneration) &&
+      !relativePathManuallyEdited.value
+    ) {
+      previewFull.value = ''
+      previewRelative.value = ''
+      destinationPreviewState.value = 'failed'
+      logger.debug('Destination preview refresh failed in AddLibraryModal:', error)
+    }
+  }
+}
+
+type MetadataLookup = { found: boolean; enriched: AudibleBookMetadata | null; source?: string }
+
+// Fetch the Audible record for an ASIN in one region. found=false means that catalogue has nothing
+// usable for it; a response without any record keeps the previous behaviour (use the provided book).
+async function lookupMetadata(
+  asin: string,
+  region: string,
+  fallbackBook: AudibleBookMetadata,
+): Promise<MetadataLookup> {
+  let resp: unknown
+  try {
+    resp = await apiService.getAudibleMetadata<AudibleMetadataResponse | Partial<Audible>>(
+      asin,
+      region,
+    )
+  } catch (metaErr) {
+    logger.debug('Metadata fetch failed in AddLibraryModal:', metaErr)
+    return { found: false, enriched: null }
+  }
+  const payload = (resp && typeof resp === 'object' ? resp : {}) as
+    | AudibleMetadataResponse
+    | Partial<Audible>
+  const source =
+    'source' in payload && typeof payload.source === 'string' ? payload.source : undefined
+  const metadata =
+    'metadata' in payload && payload.metadata && typeof payload.metadata === 'object'
+      ? payload.metadata
+      : (payload as Partial<Audible>)
+  if (!metadata || typeof metadata !== 'object') return { found: true, enriched: null, source }
+  // Audible answers an ASIN it doesn't sell in that market with an empty stub: ASIN, no title
+  if (metadata.asin && !metadata.title) return { found: false, enriched: null }
+  // The record's region, else the region this request found it in: never the book's own region,
+  // which may be the catalogue that just failed
+  const enrichedMeta = {
+    ...mapAudibleToAudible(metadata, source, fallbackBook),
+    region: metadata.region || region,
+  }
+  // Sanitize seriesNumber to filter out the string "null"
+  if (enrichedMeta.seriesNumber === 'null') {
+    enrichedMeta.seriesNumber = undefined
+  }
+  return { found: true, enriched: enrichedMeta, source }
+}
+
+// Like seedPreview, a late answer never replaces what the user changed while it was pending: the
+// metadata they edited stays (the record's region is still taken, as the ASIN belongs to that
+// catalogue), and so does a destination they typed. ("Search again" is disabled while one runs.)
+const retryMetadataLookup = async () => {
+  const asin = props.book?.asin
+  if (!asin || !retryRegion.value) return
+  const generation = seedGeneration
+  const metadataEditGenerationAtStart = metadataEditGeneration
+  const manualEditGenerationAtStart = manualEditGeneration
+  const region = retryRegion.value
+  metadataLoading.value = true
+  const result = await lookupMetadata(asin, region, cloneMetadata(props.book))
+  if (!isCurrentSeed(generation)) return
+  metadataLoading.value = false
+  metadataLookupRegion.value = region
+  if (!result.found || !result.enriched) {
+    metadataLookupFailed.value = true
+    return
+  }
+  metadataLookupFailed.value = false
+  enriched.value = result.enriched
+  metadataSource.value = result.source || null
+  if (metadataEditGeneration === metadataEditGenerationAtStart) {
+    replaceEditableMetadata(enriched.value)
+  } else {
+    applyFoundRegion(result.enriched.region)
+  }
+  if (manualEditGeneration !== manualEditGenerationAtStart) return
+  await refreshPreviewFromMetadata(true, generation)
+}
+
+// The region the record was found in, set on the edited metadata without counting as a user edit
+function applyFoundRegion(region: string | undefined) {
+  if (!region || !editableMetadata.value) return
+  suppressMetadataEditTracking = true
+  try {
+    editableMetadata.value = { ...editableMetadata.value, region }
+    bookRegion.value = region
+  } finally {
+    suppressMetadataEditTracking = false
+  }
 }
 
 // helper to load profiles/settings and seed preview
 const seedPreview = async () => {
-  await configStore.loadQualityProfiles()
-  qualityProfiles.value = configStore.qualityProfiles
-
-  // Load application settings to get default root
-  await configStore.loadApplicationSettings()
-  // Load named root folders if available
-  await rootStore.load()
-  if (rootStore.folders.length > 0) {
-    const def = rootStore.folders.find((f) => f.isDefault) || rootStore.folders[0]
-    selectedRootId.value = def?.id ?? null
-    // override rootPath for preview
-    rootPath.value = def?.path || configStore.applicationSettings?.outputPath || ''
-  } else {
-    // Fallback to legacy outputPath if no root folders
-    rootPath.value = configStore.applicationSettings?.outputPath || ''
-  }
-
+  const generation = ++seedGeneration
+  ++addGeneration
+  isAdding.value = false
+  const manualEditGenerationAtStart = manualEditGeneration
+  const metadataEditGenerationAtStart = metadataEditGeneration
+  seedPreviewOwner = generation
+  seedPreviewPending.value = true
+  ++previewGeneration
+  relativePathManuallyEdited.value = false
+  destinationPreviewState.value = 'pending'
+  serverDestinationValidationError.value = null
+  metadataLoading.value = false
+  const bookSnapshot = cloneMetadata(props.book)
   enriched.value = null
   metadataSource.value = null
+  metadataLookupFailed.value = false
+  metadataLookupRegion.value = ''
+  retryRegion.value = ''
+  replaceEditableMetadata(bookSnapshot)
   showMetadataEditor.value = false
 
-  // Attempt to fetch enriched metadata for the ASIN (if present) so preview/add use metadata sources
   try {
-    if (props.book?.asin) {
-      metadataLoading.value = true
-      try {
-        const resp = await apiService.getAudibleMetadata<
-          AudibleMetadataResponse | Partial<Audible>
-        >(props.book.asin)
-        const payload = (resp && typeof resp === 'object' ? resp : {}) as
-          | AudibleMetadataResponse
-          | Partial<Audible>
-        const source =
-          'source' in payload && typeof payload.source === 'string' ? payload.source : undefined
-        const metadata =
-          'metadata' in payload && payload.metadata && typeof payload.metadata === 'object'
-            ? payload.metadata
-            : (payload as Partial<Audible>)
+    await configStore.loadQualityProfiles()
+    if (!isCurrentSeed(generation)) return
+    qualityProfiles.value = configStore.qualityProfiles
 
-        if (metadata && typeof metadata === 'object') {
-          const enrichedMeta = mapAudibleToAudible(metadata, source)
-          // Sanitize seriesNumber to filter out the string "null"
-          if (enrichedMeta.seriesNumber === 'null') {
-            enrichedMeta.seriesNumber = undefined
-          }
-          enriched.value = enrichedMeta
-          metadataSource.value = source || null
+    // Load application settings to get default root
+    await configStore.loadApplicationSettings()
+    if (!isCurrentSeed(generation)) return
+    // Load named root folders if available
+    await rootStore.load()
+    if (!isCurrentSeed(generation)) return
+    if (rootStore.folders.length > 0) {
+      const def = rootStore.folders.find((f) => f.isDefault) || rootStore.folders[0]
+      pendingSeedRootSelection = def?.id ?? null
+      selectedRootId.value = pendingSeedRootSelection
+      // override rootPath for preview
+      rootPath.value = def?.path || configStore.applicationSettings?.outputPath || ''
+    } else {
+      // Fallback to legacy outputPath if no root folders
+      pendingSeedRootSelection = null
+      selectedRootId.value = null
+      rootPath.value = configStore.applicationSettings?.outputPath || ''
+    }
+
+    // Attempt to fetch enriched metadata for the ASIN (if present) so preview/add use metadata sources
+    if (bookSnapshot.asin) {
+      metadataLoading.value = true
+      // The result's own region first, then the configured one (the API would default to 'us')
+      const region =
+        bookSnapshot.region ||
+        normalizeSearchRegion(configStore.applicationSettings?.defaultSearchRegion)
+      try {
+        const result = await lookupMetadata(bookSnapshot.asin, region, bookSnapshot)
+        if (!isCurrentSeed(generation)) return
+        if (!result.found) {
+          // Don't silently add a book without its Audible record: say so and let the user choose
+          metadataLookupFailed.value = true
+          metadataLookupRegion.value = region
+          retryRegion.value = region
+        } else if (result.enriched) {
+          enriched.value = result.enriched
+          metadataSource.value = result.source || null
         }
-      } catch (metaErr) {
-        // ignore metadata fetch errors - we'll fall back to provided book
-        logger.debug('Metadata fetch failed in AddLibraryModal:', metaErr)
       } finally {
-        metadataLoading.value = false
+        if (isCurrentSeed(generation)) {
+          metadataLoading.value = false
+        }
       }
     }
 
-    editableMetadata.value = cloneMetadata((enriched.value || props.book) as AudibleBookMetadata)
+    if (!isCurrentSeed(generation)) return
+    if (metadataEditGeneration === metadataEditGenerationAtStart) {
+      replaceEditableMetadata(enriched.value || bookSnapshot)
+    }
+    if (manualEditGeneration !== manualEditGenerationAtStart) {
+      destinationPreviewState.value = 'valid'
+      return
+    }
     relativePathManuallyEdited.value = false
-    await refreshPreviewFromMetadata(true)
-  } catch (e) {
-    console.error('Failed to preview path:', e)
+    await refreshPreviewFromMetadata(true, generation)
+  } catch (error) {
+    if (isCurrentSeed(generation)) {
+      destinationPreviewState.value = 'failed'
+      logger.debug('Failed to seed AddLibraryModal destination preview:', error)
+    }
+  } finally {
+    if (seedPreviewOwner === generation) {
+      seedPreviewOwner = 0
+      seedPreviewPending.value = false
+    }
   }
 }
 
@@ -1048,30 +1358,21 @@ function deriveRelative(
   root: string | undefined | null,
 ): string {
   const rootVal = root || ''
-  // Prefer explicit server-provided relative
-  if (serverRelative && String(serverRelative).trim().length > 0) return serverRelative
+  // Prefer a server-provided value only when it actually satisfies the relative-path
+  // contract. If an older or degraded server returns an absolute path here, derive the
+  // relative value from fullPath/root instead of feeding invalid state back into the form.
+  if (serverRelative && String(serverRelative).trim().length > 0) {
+    const candidate = String(serverRelative)
+    const candidateKind = detectPathKind(candidate)
+    if (!isRootedPath(candidate, candidateKind)) return candidate
+  }
 
   // If no root configured, fall back to showing the full path
   if (!rootVal) return serverFull || ''
   if (!serverFull) return ''
 
-  // Normalize separators to forward slash for comparison
-  const normRoot = toForward(rootVal)
-  const normFull = toForward(serverFull)
-
-  // Ensure trailing slash on root for slicing
-  const rootWithSlash = normRoot.endsWith('/') ? normRoot : normRoot + '/'
-
-  if (normalizeForCompare(normFull) === normalizeForCompare(normRoot)) return ''
-  if (normalizeForCompare(normFull).startsWith(normalizeForCompare(rootWithSlash))) {
-    const rel = normFull.slice(rootWithSlash.length).replace(/^\/+/, '')
-    // Preserve user's original separator preference from configured root
-    const useBackslash = rootVal.includes('\\')
-    return useBackslash ? rel.replace(/\//g, '\\') : rel
-  }
-
-  // Not under root: show full path so user can edit it
-  return serverFull
+  const derived = stripRootPrefix(rootVal, serverFull)
+  return derived ?? serverFull
 }
 
 // Re-seed preview if the passed book changes after mount (parent may update props)
@@ -1090,8 +1391,29 @@ watch(
   (value) => {
     if (value) {
       void seedPreview()
+      return
+    }
+
+    ++seedGeneration
+    ++previewGeneration
+    ++addGeneration
+    isAdding.value = false
+    seedPreviewOwner = 0
+    seedPreviewPending.value = false
+    pendingSeedRootSelection = undefined
+    metadataLoading.value = false
+    destinationPreviewState.value = 'idle'
+  },
+)
+
+watch(
+  editableMetadata,
+  () => {
+    if (!suppressMetadataEditTracking) {
+      ++metadataEditGeneration
     }
   },
+  { deep: true, flush: 'sync' },
 )
 
 watch(
@@ -1117,13 +1439,23 @@ watch(
 
 watch(
   () => selectedRootId.value,
-  () => {
+  (rootId) => {
+    if (pendingSeedRootSelection !== undefined && rootId === pendingSeedRootSelection) {
+      pendingSeedRootSelection = undefined
+      return
+    }
+    pendingSeedRootSelection = undefined
+    relativePathManuallyEdited.value = false
     void refreshPreviewFromMetadata(true)
   },
 )
 
 function onRelativePathInput() {
   relativePathManuallyEdited.value = true
+  ++manualEditGeneration
+  ++previewGeneration
+  destinationPreviewState.value = 'valid'
+  serverDestinationValidationError.value = null
 }
 
 function toggleMetadataEditor() {
@@ -1132,8 +1464,25 @@ function toggleMetadataEditor() {
 
 const modalRef = ref<HTMLElement | null>(null)
 
-const closeModal = () => {
+const finishModalSession = () => {
+  ++seedGeneration
+  ++previewGeneration
+  ++addGeneration
+  isAdding.value = false
+  seedPreviewOwner = 0
+  seedPreviewPending.value = false
+  pendingSeedRootSelection = undefined
+  metadataLoading.value = false
+  destinationPreviewState.value = 'idle'
   emit('close')
+}
+
+const closeModal = () => {
+  // Once the add request has been submitted, closing the modal cannot reliably cancel
+  // a server-side commit. Keep the session visible until the request resolves so the
+  // user cannot unknowingly submit the same identifier-less book a second time.
+  if (isAdding.value) return
+  finishModalSession()
 }
 
 // Focus management for accessibility: trap focus inside modal and restore on close
@@ -1204,58 +1553,85 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  ++seedGeneration
+  ++previewGeneration
+  ++addGeneration
   document.removeEventListener('keydown', onKeyDown, { capture: true })
 })
 
+const getAlreadyExistingAudiobook = (error: unknown): Audiobook | null => {
+  if (!(error instanceof Error)) return null
+  const candidate = error as Error & { status?: number; body?: string }
+  if (candidate.status !== 409 || !candidate.body) return null
+
+  try {
+    const payload = JSON.parse(candidate.body) as { audiobook?: unknown }
+    if (!payload.audiobook || typeof payload.audiobook !== 'object') return null
+    const audiobook = payload.audiobook as Partial<Audiobook>
+    return typeof audiobook.id === 'number' ? (payload.audiobook as Audiobook) : null
+  } catch {
+    return null
+  }
+}
+
 const addToLibrary = async () => {
   if (!props.book) return
+  if (metadataLookupFailed.value) return
+  if (asinValidationError.value) {
+    toast.error('Invalid ASIN', asinValidationError.value)
+    return
+  }
+  if (destinationPathValidationError.value) {
+    toast.error('Invalid destination', destinationPathValidationError.value)
+    return
+  }
 
+  const ownerGeneration = seedGeneration
+  const requestGeneration = ++addGeneration
+  let submittedTitle = props.book.title || 'Audiobook'
   isAdding.value = true
-  // Combine rootPath + relativePath into full destination path
-  let destination: string | undefined = undefined
   try {
-    const rel = (options.value.relativePath || '').trim()
-    // Resolve selected root (custom, named, or default)
-    let root = null
-    if (selectedRootId.value === 0) root = customRootPath.value || ''
-    else if (selectedRootId.value && selectedRootId.value > 0) {
-      const found = rootStore.folders.find((f) => f.id === selectedRootId.value)
-      root = found?.path || ''
-    } else {
-      // Use default root folder, fallback to legacy outputPath for compatibility
-      const defaultRoot = rootStore.folders.find((f) => f.isDefault)
-      root = defaultRoot?.path || configStore.applicationSettings?.outputPath || ''
-    }
-
-    if (selectedRootId.value === 0) {
-      // Custom path: use exactly what the user entered (no pattern/relative path)
-      const cleaned = (root || '').trim()
-      destination = cleaned.length ? cleaned : undefined
-    } else if (root && rel) {
-      const sep = root.includes('\\') ? '\\' : '/'
-      const cleanedRel = rel.replace(/\\|\//g, sep)
-      destination = root.endsWith(sep) ? root + cleanedRel : root + sep + cleanedRel
-    } else if (root && !rel) {
-      destination = root
-    }
-
+    const estimatedDestination = estimatedFullPath.value
+    const destination = estimatedDestination.trim().length > 0 ? estimatedDestination : undefined
     const metadataToSend = buildMetadataPayload()
+    submittedTitle = metadataToSend.title || submittedTitle
     const result = await apiService.addToLibrary(metadataToSend, {
       monitored: options.value.monitored,
       qualityProfileId: options.value.qualityProfileId || undefined,
       autoSearch: options.value.autoSearch,
-      destinationPath: destination || undefined,
+      destinationPath: destination,
     })
+    if (requestGeneration !== addGeneration || !isCurrentSeed(ownerGeneration)) return
+
     toast.success('Added', `"${metadataToSend.title}" has been added to your library!`)
     emit('added', result.audiobook)
-    closeModal()
+    finishModalSession()
   } catch (err: unknown) {
+    if (requestGeneration !== addGeneration || !isCurrentSeed(ownerGeneration)) return
+
+    const existingAudiobook = getAlreadyExistingAudiobook(err)
+    if (existingAudiobook) {
+      toast.success('Already added', `"${submittedTitle}" is already in your library.`)
+      emit('added', existingAudiobook)
+      finishModalSession()
+      return
+    }
+
     console.error('Failed to add audiobook:', err)
+    const validationError = getApiValidationError(err, 'destinationPath')
+    if (validationError) {
+      serverDestinationValidationError.value = validationError.message
+      toast.error('Invalid destination', validationError.message)
+      return
+    }
+
     const errorMessage =
       err instanceof Error ? err.message : 'Failed to add audiobook. Please try again.'
     toast.error('Add failed', errorMessage)
   } finally {
-    isAdding.value = false
+    if (requestGeneration === addGeneration) {
+      isAdding.value = false
+    }
   }
 }
 
@@ -1656,21 +2032,63 @@ const capitalizeFirst = (str: string): string => {
   }
 }
 
-.path-length-warning {
+.metadata-not-found {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  background-color: rgba(255, 152, 0, 0.08);
+  border: 1px solid rgba(255, 152, 0, 0.35);
+  color: #ffb74d;
+}
+
+.metadata-not-found p {
+  margin: 0 0 0.5rem;
+}
+
+.metadata-not-found-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.metadata-not-found svg {
+  flex-shrink: 0;
+  margin-top: 0.2rem;
+}
+
+.path-length-warning,
+.path-validation-error {
   display: flex;
   align-items: flex-start;
   gap: 0.5rem;
   margin-top: 0.5rem;
   padding: 0.625rem 0.75rem;
-  background-color: rgba(255, 152, 0, 0.08);
-  border: 1px solid rgba(255, 152, 0, 0.35);
   border-radius: 6px;
-  color: #ffb74d;
   font-size: 0.8rem;
   line-height: 1.5;
 }
 
-.path-length-warning svg {
+.path-length-warning {
+  background-color: rgba(255, 152, 0, 0.08);
+  border: 1px solid rgba(255, 152, 0, 0.35);
+  color: #ffb74d;
+}
+
+.path-validation-error {
+  background-color: rgba(244, 67, 54, 0.08);
+  border: 1px solid rgba(244, 67, 54, 0.35);
+  color: #ef9a9a;
+}
+
+.path-length-warning svg,
+.path-validation-error svg {
   flex-shrink: 0;
   margin-top: 0.125rem;
 }

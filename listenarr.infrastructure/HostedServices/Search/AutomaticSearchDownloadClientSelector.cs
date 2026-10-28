@@ -30,10 +30,10 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             using var scope = serviceScopeFactory.CreateScope();
             var configurationService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
 
-            if (searchResult.DownloadType?.Equals("DDL", StringComparison.OrdinalIgnoreCase) == true)
+            if (searchResult.DownloadType?.Equals(DirectDownloadMetadataKeys.ClientId, StringComparison.OrdinalIgnoreCase) == true)
             {
                 logger.LogInformation("DDL download detected, using internal DDL client");
-                return "DDL";
+                return DirectDownloadMetadataKeys.ClientId;
             }
 
             var clients = await configurationService.GetDownloadClientConfigurationsAsync();

@@ -15,6 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using Listenarr.Domain.Common;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Common
@@ -50,10 +51,21 @@ namespace Listenarr.Application.Common
                     return;
                 }
 
+                if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                        appSettings.OutputPath,
+                        out var outputPath,
+                        out var reason))
+                {
+                    _logger.LogWarning(
+                        "Skipped legacy output path migration because the persisted path is unavailable on this host: {Reason}",
+                        reason);
+                    return;
+                }
+
                 var root = new RootFolder
                 {
                     Name = "Default",
-                    Path = appSettings.OutputPath!,
+                    Path = outputPath,
                     IsDefault = true
                 };
 

@@ -37,10 +37,11 @@
         </div>
         <button
           class="btn btn-primary"
-          @click="searchMissing"
-          :disabled="categorizedWanted.missing.length === 0"
+          @click="openConfirmSearchAll"
+          :disabled="actionableMissingWanted.length === 0 || isSearchingAll"
         >
-          <PhRobot />
+          <PhSpinner v-if="isSearchingAll" class="ph-spin" />
+          <PhRobot v-else />
           Search All
         </button>
         <button class="btn btn-secondary" @click="openManualImport">
@@ -48,6 +49,40 @@
           Manual Import
         </button>
       </div>
+    </div>
+
+    <!-- Quality profile recovery: automatic search skips books without a valid profile -->
+    <div
+      v-if="!loading && wantedNeedingProfile.length > 0"
+      class="profile-warning"
+      data-testid="profile-warning"
+    >
+      <PhWarning :size="20" />
+      <div class="profile-warning-text">
+        <strong>
+          {{ wantedNeedingProfile.length }} wanted
+          {{ wantedNeedingProfile.length === 1 ? 'audiobook has' : 'audiobooks have' }} no quality
+          profile.
+        </strong>
+        Automatic search skips a book until it has one, so these will never be searched or
+        downloaded automatically.
+        <template v-if="configurationStore.qualityProfiles.length === 0">
+          No quality profiles exist yet — create one in
+          <RouterLink to="/settings#quality-profiles" class="profile-warning-link"
+            >Settings → Quality Profiles</RouterLink
+          >
+          and come back to assign it.
+        </template>
+      </div>
+      <button
+        v-if="configurationStore.qualityProfiles.length > 0"
+        class="btn btn-secondary"
+        data-testid="assign-profile-open"
+        @click="openAssignProfile"
+      >
+        <PhStar />
+        Assign profile…
+      </button>
     </div>
 
     <!-- Loading State -->
@@ -121,8 +156,15 @@
               <span v-else class="muted">-</span>
             </div>
             <div class="col-quality">
-              <span class="quality-tag">
-                {{ getQualityProfileForAudiobook(item)?.name ?? item.quality ?? 'Unknown' }}
+              <span v-if="getQualityProfileForAudiobook(item)" class="quality-tag">
+                {{ getQualityProfileForAudiobook(item)!.name }}
+              </span>
+              <span
+                v-else
+                class="quality-tag quality-tag-missing"
+                title="Automatic search skips this book until a quality profile is assigned"
+              >
+                No profile
               </span>
             </div>
             <div class="col-status">
@@ -139,7 +181,7 @@
                 <button
                   class="btn-icon"
                   @click="searchAudiobook(item)"
-                  :disabled="searching[item.id]"
+                  :disabled="searching[item.id] || hasActiveDownload(item) || isSearchingAll"
                   title="Automatic Search"
                 >
                   <PhRobot />
@@ -177,6 +219,26 @@
       </template>
     </EmptyState>
 
+    <!-- Confirm Search All Modal -->
+    <ConfirmModal
+      :visible="showConfirmSearchAll"
+      title="Search Missing Audiobooks"
+      :message="confirmSearchAllMessage"
+      confirmLabel="Search All"
+      :confirming="isSearchingAll"
+      @confirm="searchMissing"
+      @cancel="closeConfirmSearchAll"
+    />
+
+    <!-- Assign Quality Profile Modal -->
+    <AssignQualityProfileModal
+      :visible="showAssignProfileModal"
+      :audiobooks="wantedNeedingProfile"
+      :profiles="configurationStore.qualityProfiles"
+      :after-assign="handleProfilesAssigned"
+      @cancel="closeAssignProfile"
+    />
+
     <!-- Manual Search Modal -->
     <ManualSearchModal
       :is-open="showManualSearchModal"
@@ -203,6 +265,11 @@ import { errorTracking } from '@/services/errorTracking'
 import { handleImageError } from '@/utils/imageFallback'
 import ManualSearchModal from '@/components/domain/search/ManualSearchModal.vue'
 import ManualImportModal from '@/components/feedback/ManualImportModal.vue'
+import AssignQualityProfileModal, {
+  type AssignQualityProfileResult,
+} from '@/components/domain/audiobook/AssignQualityProfileModal.vue'
+import { useToast } from '@/services/toastService'
+import { ConfirmModal } from '@/components/feedback'
 import { EmptyState, LoadingState } from '@/components/base'
 import type { Audiobook, SearchResult, Download } from '@/types'
 import { safeText } from '@/utils/textUtils'
@@ -215,6 +282,8 @@ import {
   PhX,
   PhCheckCircle,
   PhDownloadSimple,
+  PhStar,
+  PhWarning,
 } from '@phosphor-icons/vue'
 import { logger } from '@/utils/logger'
 import { useDownloadsStore } from '@/stores/downloads'
@@ -225,6 +294,7 @@ const downloadsStore = useDownloadsStore()
 const { getProtectedImageSrc } = useProtectedImages()
 const libraryStore = useLibraryStore()
 const configurationStore = useConfigurationStore()
+const toast = useToast()
 
 // Filter
 const filterText = ref('')
@@ -291,6 +361,34 @@ const searchResults = ref<Record<number, string>>({})
 const showManualSearchModal = ref(false)
 const selectedAudiobook = ref<Audiobook | null>(null)
 const showManualImportModal = ref(false)
+const showConfirmSearchAll = ref(false)
+const showAssignProfileModal = ref(false)
+const isSearchingAll = ref(false)
+const isCancelled = ref(false)
+let activeDelayTimer: ReturnType<typeof setTimeout> | null = null
+let delayResolve: (() => void) | null = null
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    delayResolve = resolve
+    activeDelayTimer = setTimeout(() => {
+      activeDelayTimer = null
+      delayResolve = null
+      resolve()
+    }, ms)
+  })
+
+const abortDelay = () => {
+  if (activeDelayTimer !== null) {
+    clearTimeout(activeDelayTimer)
+    activeDelayTimer = null
+  }
+  if (delayResolve !== null) {
+    const res = delayResolve
+    delayResolve = null
+    res()
+  }
+}
 
 const syncWantedLayout = async () => {
   await nextTick()
@@ -312,11 +410,15 @@ onMounted(async () => {
     await libraryStore.fetchLibrary()
   }
   await configurationStore.loadQualityProfiles()
+  // Issue #936: Hydrate downloads store on mount so active downloads are excluded on fresh loads
+  await downloadsStore.loadDownloads()
 
   await syncWantedLayout()
 })
 
 onBeforeUnmount(() => {
+  isCancelled.value = true
+  abortDelay()
   if (typeof window !== 'undefined') {
     window.removeEventListener('resize', handleViewportResize)
   }
@@ -337,15 +439,36 @@ const wantedAudiobooks = computed(() => {
   })
 })
 
-// Categorize wanted audiobooks by their current search state
-const categorizedWanted = computed(() => {
-  const all = wantedAudiobooks.value
-  const missingItems = all.filter((a) => !searching.value[a.id] && !searchResults.value[a.id])
+// Wanted audiobooks the automatic search will skip: no profile assigned, or one that
+// no longer exists. Not scoped to the text filter — the recovery flow repairs all of them.
+// Books whose profile was just assigned but whose refreshed row has not confirmed it yet. They
+// are kept out of the picker so a retry — or a reopen after a failed refresh — cannot overwrite
+// the profile they already received. The store's fetchLibrary() swallows API failures, so a
+// book only leaves this set once a reloaded row carries a valid profile.
+const profileAssignedPendingRefresh = ref(new Set<number>())
 
-  return {
-    all,
-    missing: missingItems,
+const wantedNeedingProfile = computed(() =>
+  wantedAudiobooks.value.filter(
+    (audiobook) =>
+      !profileAssignedPendingRefresh.value.has(audiobook.id) &&
+      getQualityProfileForAudiobook(audiobook) === null,
+  ),
+)
+
+// Actionable wanted audiobooks: scoped to visible filter, excluding active downloads and in-flight searches (Issue #936)
+const actionableMissingWanted = computed(() => {
+  return filteredWanted.value.filter(
+    (item) =>
+      !hasActiveDownload(item) && !searching.value[item.id] && !searchResults.value[item.id],
+  )
+})
+
+const confirmSearchAllMessage = computed(() => {
+  const count = actionableMissingWanted.value.length
+  if (count === 1) {
+    return 'Are you sure you want to search for 1 missing audiobook? This will send search requests to all indexers and download the best matches.'
   }
+  return `Are you sure you want to search for all ${count} missing audiobooks? This will send search requests to all indexers and download the best matches.`
 })
 
 const filteredWanted = computed(() => {
@@ -438,13 +561,96 @@ function getStatusText(item: Audiobook): string {
   return 'Missing'
 }
 
-const searchMissing = async () => {
-  logger.debug('Automatic search for all missing audiobooks')
+function openConfirmSearchAll() {
+  if (isSearchingAll.value || actionableMissingWanted.value.length === 0) return
+  showConfirmSearchAll.value = true
+}
 
-  for (const audiobook of categorizedWanted.value.missing) {
-    await searchAudiobook(audiobook)
-    await new Promise((resolve) => setTimeout(resolve, 1000))
+function closeConfirmSearchAll() {
+  showConfirmSearchAll.value = false
+}
+
+const searchMissing = async () => {
+  if (isSearchingAll.value || actionableMissingWanted.value.length === 0) return
+
+  showConfirmSearchAll.value = false
+  isSearchingAll.value = true
+  isCancelled.value = false
+  logger.debug('Automatic search for actionable missing audiobooks initiated')
+
+  try {
+    const targetBooks = [...actionableMissingWanted.value]
+    for (let i = 0; i < targetBooks.length; i++) {
+      if (isCancelled.value) break
+
+      const audiobook = targetBooks[i]
+      if (hasActiveDownload(audiobook) || searching.value[audiobook.id]) continue
+
+      await searchAudiobook(audiobook)
+
+      if (i < targetBooks.length - 1 && !isCancelled.value) {
+        await sleep(1000)
+      }
+    }
+  } finally {
+    isSearchingAll.value = false
+    abortDelay()
   }
+}
+function openAssignProfile() {
+  if (wantedNeedingProfile.value.length === 0) return
+  showAssignProfileModal.value = true
+}
+
+function closeAssignProfile() {
+  showAssignProfileModal.value = false
+}
+
+async function handleProfilesAssigned(result: AssignQualityProfileResult) {
+  // The server has already accepted these assignments: reflect them on the local rows right
+  // away so the books leave the picker whether or not the reload below succeeds.
+  for (const id of result.assignedIds) {
+    profileAssignedPendingRefresh.value.add(id)
+    const row = libraryStore.audiobooks.find((audiobook) => audiobook.id === id)
+    if (row && result.profile.id != null) row.qualityProfileId = result.profile.id
+  }
+
+  // fetchLibrary() never throws — a failed reload leaves the previous rows in place and sets
+  // libraryStore.error — so only a successful reload can confirm the assignments.
+  await libraryStore.fetchLibrary()
+  if (libraryStore.error === null) {
+    for (const id of [...profileAssignedPendingRefresh.value]) {
+      const row = libraryStore.audiobooks.find((audiobook) => audiobook.id === id)
+      if (row && getQualityProfileForAudiobook(row) !== null) {
+        profileAssignedPendingRefresh.value.delete(id)
+      }
+    }
+  }
+  if (result.assignedIds.some((id) => profileAssignedPendingRefresh.value.has(id))) {
+    toast.warning(
+      'Library refresh failed',
+      'The books that were assigned stay hidden from this picker until the list reloads.',
+    )
+  }
+
+  if (result.failures.length === 0) {
+    toast.success(
+      'Quality profile assigned',
+      `Assigned "${result.profile.name}" to ${result.assigned} wanted ${
+        result.assigned === 1 ? 'audiobook' : 'audiobooks'
+      }.`,
+    )
+    closeAssignProfile()
+    return
+  }
+
+  // Keep the modal open so the failed books stay visible.
+  toast.warning(
+    'Assignment incomplete',
+    `Assigned "${result.profile.name}" to ${result.assigned} of ${
+      result.assigned + result.failures.length
+    }; ${result.failures.length} could not be updated.`,
+  )
 }
 
 function openManualSearch(item: Audiobook) {
@@ -571,6 +777,43 @@ const markAsSkipped = async (item: Audiobook) => {
   display: flex;
   gap: 0.75rem;
   align-items: center;
+}
+
+/* Quality profile recovery banner */
+.profile-warning {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+  padding: 0.75rem 1rem;
+  background: rgba(250, 176, 5, 0.12);
+  border: 1px solid rgba(250, 176, 5, 0.4);
+  border-radius: 6px;
+  color: #ffd43b;
+}
+
+.profile-warning > svg {
+  flex-shrink: 0;
+}
+
+.profile-warning-text {
+  flex: 1;
+  color: #e9ecef;
+  font-size: 0.9rem;
+}
+
+.profile-warning-text strong {
+  color: #ffd43b;
+}
+
+.profile-warning-link {
+  color: #ffd43b;
+  text-decoration: underline;
+}
+
+.quality-tag-missing {
+  background: rgba(250, 82, 82, 0.15);
+  color: #ffa8a8;
 }
 
 /* Filter input */

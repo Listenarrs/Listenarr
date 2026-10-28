@@ -55,11 +55,14 @@ public class AsinSearchHandler
     public async Task<List<SearchResult>> SearchByAsinAsync(
         string asin,
         List<ApiConfiguration> metadataSources,
+        string? region = null,
+        string? language = null,
         CancellationToken ct = default)
     {
         _logger.LogInformation("Processing direct ASIN query: {Asin}", asin);
         await _searchProgressReporter.BroadcastAsync($"Extracting ASIN: {asin}", null);
 
+        var safeRegion = AudiobookIdentifierNormalizer.NormalizeRegion(region) ?? "us";
 
         // Initialize metadata variables
         AudibleBookMetadata? metadata = null;
@@ -71,7 +74,7 @@ public class AsinSearchHandler
 
         try
         {
-            var audibleData = await _audibleService.GetBookMetadataAsync(asin, "us", true);
+            var audibleData = await _audibleService.GetBookMetadataAsync(asin, safeRegion, true, language);
             if (audibleData != null)
             {
                 metadata = _metadataConverters.ConvertAudibleToMetadata(audibleData, asin, "Audible");
@@ -102,7 +105,7 @@ public class AsinSearchHandler
                     {
                         _logger.LogInformation("Attempting Audnexus for ASIN {Asin}", asin);
                         await _searchProgressReporter.BroadcastAsync($"Searching Audnexus for {asin}", null);
-                        var audnexusData = await _audnexusService.GetBookMetadataAsync(asin, "us", true, false);
+                        var audnexusData = await _audnexusService.GetBookMetadataAsync(asin, safeRegion, true, false);
                         if (audnexusData != null)
                         {
                             metadata = _metadataConverters.ConvertAudnexusToMetadata(audnexusData, asin, "Audible");
@@ -124,6 +127,7 @@ public class AsinSearchHandler
         if (metadata != null)
         {
             await _searchProgressReporter.BroadcastAsync($"Found audiobook: {metadata.Title}", null);
+            metadata.Region ??= safeRegion;
             var result = await _metadataConverters.ConvertMetadataToSearchResultAsync(metadata, asin, null, null, null);
             _logger.LogInformation("Converted metadata to SearchResult: Title={Title}, Series={Series}, SeriesNumber={SeriesNumber}",
                 result.Title, result.Series, result.SeriesNumber);
@@ -134,18 +138,18 @@ public class AsinSearchHandler
             if (metadataSourceName == "Amazon")
             {
                 result.Source = "Amazon";
-                result.SourceLink = $"https://www.amazon.com/dp/{asin}";
+                result.SourceLink = result.ProductUrl ?? MarketDomainResolver.BuildAmazonProductUrl(asin, metadata.Region ?? safeRegion);
             }
             else if (metadataSourceName == "Audible")
             {
                 result.Source = "Audible";
-                result.SourceLink = $"https://www.audible.com/pd/{asin}";
+                result.SourceLink = result.ProductUrl ?? MarketDomainResolver.BuildAudibleProductUrl(asin, metadata.Region ?? safeRegion);
             }
             else
             {
                 // Metadata API source - default to Audible for product link
                 result.Source = "Audible";
-                result.SourceLink = $"https://www.audible.com/pd/{asin}";
+                result.SourceLink = result.ProductUrl ?? MarketDomainResolver.BuildAudibleProductUrl(asin, metadata.Region ?? safeRegion);
             }
 
             // Validate result before returning
@@ -169,5 +173,5 @@ public class AsinSearchHandler
         // If we reach here, ASIN query failed - return empty list
         return new List<SearchResult>();
     }
-}
 
+}

@@ -21,6 +21,9 @@ namespace Listenarr.Application.Audiobooks.Files
 {
     public interface IAudiobookFilesystemDeleteService
     {
-        Task<AudiobookFilesystemDeleteResult> DeleteAsync(Audiobook audiobook, bool deleteFolder);
+        Task<AudiobookFilesystemDeleteResult> DeleteAsync(
+            Audiobook audiobook,
+            bool deleteFolder,
+            CancellationToken cancellationToken = default);
     }
 }

@@ -1,0 +1,400 @@
+using Listenarr.Domain.Common;
+using System.Text.Json;
+using Microsoft.Extensions.Logging;
+
+namespace Listenarr.Infrastructure.Library.Scanning;
+
+internal static partial class ScanFileDiscovery
+{
+    internal const string PinnedPathOnlyIdentity = "scan:pinned-path-only";
+
+    internal static EnumerationResult CollectCandidates(
+        IFileSystem fileSystem,
+        string scanRoot,
+        Guid jobId,
+        ILogger logger,
+        FileSystemPathSemantics semantics,
+        PinnedDirectoryCreation.PinnedDirectoryAnchor? pinnedScanRoot,
+        bool requireDurableGenerationProof = true)
+    {
+        var candidates = new HashSet<string>(semantics.Comparer);
+        var enumeratedDirectories = new HashSet<string>(semantics.Comparer);
+        var directoryObjectIdentities = new Dictionary<string, string>(
+            semantics.Comparer);
+        var fileObjectIdentities = new Dictionary<string, string>(
+            semantics.Comparer);
+        var fileLengths = new Dictionary<string, long>(semantics.Comparer);
+        var issues = new List<ScanDiscoveryIssue>();
+        var directories = new Stack<DirectoryEnumerationSnapshot>();
+        using var root = pinnedScanRoot?.Duplicate()
+            ?? PinnedDirectoryCreation.OpenPinnedBoundary(scanRoot);
+        directories.Push(new DirectoryEnumerationSnapshot(
+            root.FullPath,
+            CaptureDirectoryIdentity(root, requireDurableGenerationProof)));
+
+        while (directories.Count > 0)
+        {
+            var pending = directories.Pop();
+            PinnedDirectoryCreation.PinnedDirectoryAnchor openedDirectory;
+            try
+            {
+                openedDirectory = OpenDiscoveredDirectory(root, pending.Path, semantics);
+            }
+            catch (Exception exception) when (
+                IsFilesystemException(exception) || exception is InvalidOperationException)
+            {
+                RecordEnumerationFailure(issues, logger, jobId, pending.Path, exception);
+                continue;
+            }
+            using var directory = openedDirectory;
+            var localCandidates = new Dictionary<string, string>(
+                semantics.Comparer);
+            var localFileLengths = new Dictionary<string, long>(
+                semantics.Comparer);
+            var localChildren = new List<DirectoryEnumerationSnapshot>();
+            try
+            {
+                if (!DirectoryIdentityMatches(directory, pending.ObjectIdentity))
+                {
+                    RecordDirectoryGenerationChange(
+                        issues,
+                        logger,
+                        jobId,
+                        directory.FullPath);
+                    continue;
+                }
+                var namespaceChangeToken = requireDurableGenerationProof
+                    ? directory.GetNamespaceChangeToken()
+                    : null;
+
+                foreach (var visibleFile in fileSystem
+                    .EnumerateFiles(directory.FullPath)
+                    .ToList())
+                {
+                    try
+                    {
+                        if (fileSystem.IsReparsePoint(visibleFile))
+                        {
+                            issues.Add(new ScanDiscoveryIssue(
+                                ScanDiscoveryIssueKind.LinkSkipped,
+                                visibleFile,
+                                "Linked files are not scanned."));
+                            continue;
+                        }
+
+                        if (!FileUtils.IsAudioFile(visibleFile))
+                        {
+                            continue;
+                        }
+
+                        var fileName = Path.GetFileName(visibleFile);
+                        using var pinnedFile = directory.OpenExistingFile(
+                            fileName,
+                            requireDeleteAccess: false);
+                        if (!pinnedFile.VisiblePathMatches())
+                        {
+                            RecordDirectoryGenerationChange(
+                                issues,
+                                logger,
+                                jobId,
+                                visibleFile);
+                            continue;
+                        }
+                        if (!pinnedFile.IsRegularFile())
+                        {
+                            issues.Add(new ScanDiscoveryIssue(
+                                ScanDiscoveryIssueKind.LinkSkipped,
+                                visibleFile,
+                                "Non-regular files are not scanned."));
+                            continue;
+                        }
+
+                        var canonicalFile =
+                            FileSystemPathIdentity.Canonicalize(
+                                pinnedFile.FullPath,
+                                semantics.Syntax);
+                        var length = pinnedFile.GetLength();
+                        if (!pinnedFile.VisiblePathMatches())
+                        {
+                            RecordDirectoryGenerationChange(
+                                issues,
+                                logger,
+                                jobId,
+                                visibleFile);
+                            continue;
+                        }
+
+                        var identity = CaptureIdentity(
+                            pinnedFile.GetObjectIdentity,
+                            requireDurableGenerationProof);
+                        localFileLengths[canonicalFile] = length;
+                        localCandidates[canonicalFile] = identity;
+                    }
+                    catch (Exception exception) when (
+                        IsFilesystemException(exception)
+                        || exception is InvalidOperationException)
+                    {
+                        RecordEnumerationFailure(
+                            issues,
+                            logger,
+                            jobId,
+                            visibleFile,
+                            exception);
+                    }
+                }
+
+                foreach (var visibleChild in fileSystem
+                    .EnumerateDirectories(directory.FullPath)
+                    .ToList())
+                {
+                    try
+                    {
+                        if (fileSystem.IsReparsePoint(visibleChild))
+                        {
+                            logger.LogWarning(
+                                "Skipped linked directory while scanning job {JobId}: {Dir}",
+                                jobId,
+                                LogRedaction.SanitizeFilePath(visibleChild));
+                            issues.Add(new ScanDiscoveryIssue(
+                                ScanDiscoveryIssueKind.LinkSkipped,
+                                visibleChild,
+                                "Linked directories are not traversed."));
+                            continue;
+                        }
+
+                        var childName = Path.GetFileName(
+                            Path.TrimEndingDirectorySeparator(visibleChild));
+                        if (IsOwnedCompatibilityQuarantine(visibleChild, childName))
+                        {
+                            logger.LogDebug(
+                                "Skipped Listenarr compatibility quarantine while scanning job {JobId}: {Dir}",
+                                jobId,
+                                LogRedaction.SanitizeFilePath(visibleChild));
+                            continue;
+                        }
+                        using var childAnchor = directory.OpenExistingChild(childName);
+                        localChildren.Add(new DirectoryEnumerationSnapshot(
+                            childAnchor.FullPath,
+                            CaptureDirectoryIdentity(
+                                childAnchor,
+                                requireDurableGenerationProof)));
+                    }
+                    catch (Exception exception) when (
+                        IsFilesystemException(exception)
+                        || exception is InvalidOperationException)
+                    {
+                        RecordEnumerationFailure(
+                            issues,
+                            logger,
+                            jobId,
+                            visibleChild,
+                            exception);
+                    }
+                }
+
+                if (!DirectoryIdentityMatches(directory, pending.ObjectIdentity)
+                    || (namespaceChangeToken != null
+                        && !string.Equals(
+                            directory.GetNamespaceChangeToken(),
+                            namespaceChangeToken,
+                            StringComparison.Ordinal)))
+                {
+                    RecordDirectoryGenerationChange(
+                        issues,
+                        logger,
+                        jobId,
+                        directory.FullPath);
+                    continue;
+                }
+
+                foreach (var candidate in localCandidates)
+                {
+                    candidates.Add(candidate.Key);
+                    fileObjectIdentities[candidate.Key] = candidate.Value;
+                    fileLengths[candidate.Key] = localFileLengths[candidate.Key];
+                }
+
+                var canonicalDirectory =
+                    FileSystemPathIdentity.Canonicalize(
+                        directory.FullPath,
+                        semantics.Syntax);
+                enumeratedDirectories.Add(canonicalDirectory);
+                directoryObjectIdentities[canonicalDirectory] =
+                    pending.ObjectIdentity;
+                foreach (var child in localChildren)
+                {
+                    directories.Push(child);
+                }
+            }
+            catch (Exception exception) when (
+                IsFilesystemException(exception)
+                || exception is InvalidOperationException)
+            {
+                RecordEnumerationFailure(
+                    issues,
+                    logger,
+                    jobId,
+                    directory.FullPath,
+                    exception);
+            }
+        }
+
+        return new EnumerationResult(
+            candidates.OrderBy(path => path, semantics.Comparer).ToList(),
+            enumeratedDirectories.OrderBy(path => path, semantics.Comparer).ToList(),
+            directoryObjectIdentities,
+            fileObjectIdentities,
+            fileLengths,
+            issues);
+    }
+
+    private static string CaptureDirectoryIdentity(
+        PinnedDirectoryCreation.PinnedDirectoryAnchor directory,
+        bool requireDurableGenerationProof) =>
+        CaptureIdentity(directory.GetDirectoryObjectIdentity, requireDurableGenerationProof);
+
+    private static string CaptureIdentity(Func<string> capture, bool requireDurableGenerationProof)
+    {
+        try
+        {
+            return capture();
+        }
+        catch (Exception exception) when (!requireDurableGenerationProof
+            && (IsFilesystemException(exception) || exception is InvalidOperationException))
+        {
+            // Scan observations are optional and never authorize later deletion.
+            // Close the handle after inspection; identity-limited storage is checked
+            // again when the file is opened for metadata or registration.
+            return PinnedPathOnlyIdentity;
+        }
+    }
+
+    private static PinnedDirectoryCreation.PinnedDirectoryAnchor OpenDiscoveredDirectory(
+        PinnedDirectoryCreation.PinnedDirectoryAnchor root,
+        string path,
+        FileSystemPathSemantics semantics)
+    {
+        if (!root.VisiblePathMatches()
+            || !FileSystemPathIdentity.IsSameOrInside(path, root.FullPath, semantics))
+        {
+            throw new InvalidOperationException("The scan directory escaped or changed its root.");
+        }
+
+        var current = root.Duplicate();
+        try
+        {
+            var relative = Path.GetRelativePath(root.FullPath, path);
+            foreach (var segment in relative.Split(
+                [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                StringSplitOptions.RemoveEmptyEntries).Where(segment => segment != "."))
+            {
+                if (segment == "..")
+                    throw new InvalidOperationException("The scan directory escaped its root.");
+                var next = current.OpenExistingChild(segment);
+                current.Dispose();
+                current = next;
+            }
+            return current;
+        }
+        catch
+        {
+            current.Dispose();
+            throw;
+        }
+    }
+
+    private static bool DirectoryIdentityMatches(
+        PinnedDirectoryCreation.PinnedDirectoryAnchor directory,
+        string expectedIdentity) =>
+        directory.VisiblePathMatches()
+        && (string.Equals(
+                expectedIdentity,
+                PinnedPathOnlyIdentity,
+                StringComparison.Ordinal)
+            || directory.MatchesDirectoryObjectIdentity(expectedIdentity));
+
+    private static bool IsFilesystemException(Exception exception) =>
+        exception is IOException
+            or UnauthorizedAccessException
+            or System.Security.SecurityException
+            or ArgumentException
+            or NotSupportedException
+            or PathTooLongException
+            or System.ComponentModel.Win32Exception;
+
+    private static bool IsOwnedCompatibilityQuarantine(
+        string directoryPath,
+        string childName)
+    {
+        const string prefix = ".listenarr-quarantine-";
+        if (!childName.StartsWith(prefix, StringComparison.Ordinal)
+            || !Guid.TryParseExact(childName[prefix.Length..], "N", out var batchId))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var marker = JsonDocument.Parse(
+                File.ReadAllText(Path.Join(directoryPath, ".listenarr-owner-v2")));
+            return marker.RootElement.TryGetProperty("ProtocolVersion", out var protocol)
+                && protocol.GetInt32() == CompatibilityFilePublicationProtocol.Current
+                && marker.RootElement.TryGetProperty("BatchId", out var storedBatch)
+                && storedBatch.ValueKind == JsonValueKind.String
+                && Guid.TryParse(storedBatch.GetString(), out var parsedBatch)
+                && parsedBatch == batchId;
+        }
+        catch (Exception exception) when (exception is
+            IOException or UnauthorizedAccessException or JsonException
+                or InvalidOperationException or FormatException)
+        {
+            return false;
+        }
+    }
+
+    private static void RecordEnumerationFailure(
+        ICollection<ScanDiscoveryIssue> issues,
+        ILogger logger,
+        Guid jobId,
+        string path,
+        Exception exception)
+    {
+        logger.LogWarning(
+            exception,
+            "Failed to enumerate path for scan job {JobId}: {Path}",
+            jobId,
+            LogRedaction.SanitizeFilePath(path));
+        issues.Add(new ScanDiscoveryIssue(
+            ScanDiscoveryIssueKind.EnumerationFailure,
+            path,
+            "The path could not be enumerated safely."));
+    }
+
+    private static void RecordDirectoryGenerationChange(
+        ICollection<ScanDiscoveryIssue> issues,
+        ILogger logger,
+        Guid jobId,
+        string path)
+    {
+        logger.LogWarning(
+            "Directory or file generation changed while scanning job {JobId}: {Path}",
+            jobId,
+            LogRedaction.SanitizeFilePath(path));
+        issues.Add(new ScanDiscoveryIssue(
+            ScanDiscoveryIssueKind.DirectoryGenerationChanged,
+            path,
+            "A directory or file generation changed while it was being enumerated."));
+    }
+
+    private sealed record DirectoryEnumerationSnapshot(
+        string Path,
+        string ObjectIdentity);
+
+    internal sealed record EnumerationResult(
+        IReadOnlyList<string> Candidates,
+        IReadOnlyList<string> EnumeratedDirectories,
+        IReadOnlyDictionary<string, string> DirectoryObjectIdentities,
+        IReadOnlyDictionary<string, string> FileObjectIdentities,
+        IReadOnlyDictionary<string, long> FileLengths,
+        IReadOnlyList<ScanDiscoveryIssue> Issues);
+}

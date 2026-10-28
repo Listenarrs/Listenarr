@@ -10,108 +10,57 @@ namespace Listenarr.Infrastructure.Library.Moving;
 internal static class MovedAudiobookPathRewriter
 {
     public static async Task RewriteAsync(
-        Audiobook audiobook,
+        int audiobookId,
         string source,
         string target,
+        FileSystemPathSemantics sourceSemantics,
+        FileSystemPathSemantics targetSemantics,
         IAudiobookRepository audiobookRepository,
-        ILogger logger)
+        ILogger logger,
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string> targetPhysicalObjectIdentities,
+        FileSystemCaseSensitivityMode targetCaseSensitivityMode = FileSystemCaseSensitivityMode.Auto)
     {
-        await RewriteImagePathAsync(audiobook, source, target, audiobookRepository, logger);
-        await RewriteLegacyFilePathAsync(audiobook, source, target, audiobookRepository, logger);
-    }
+        ArgumentNullException.ThrowIfNull(audiobookRepository);
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(targetPhysicalObjectIdentities);
 
-    private static async Task RewriteImagePathAsync(
-        Audiobook audiobook,
-        string source,
-        string target,
-        IAudiobookRepository audiobookRepository,
-        ILogger logger)
-    {
+        bool rewritten;
         try
         {
-            var imageUrl = audiobook.ImageUrl;
-            if (string.IsNullOrWhiteSpace(imageUrl))
-            {
-                return;
-            }
-
-            var looksLikeFileSystemPath = Path.IsPathRooted(imageUrl)
-                || imageUrl.StartsWith(source, StringComparison.OrdinalIgnoreCase)
-                || imageUrl.StartsWith(
-                    source.Replace(Path.DirectorySeparatorChar, '/'),
-                    StringComparison.OrdinalIgnoreCase);
-            if (!looksLikeFileSystemPath)
-            {
-                return;
-            }
-
-            var fullImagePath = Path.IsPathRooted(imageUrl)
-                ? Path.GetFullPath(imageUrl)
-                : Path.GetFullPath(Path.Join(source, imageUrl));
-            if (!FileUtils.IsPathSameOrInside(fullImagePath, source))
-            {
-                return;
-            }
-
-            var relativePath = Path.GetRelativePath(source, fullImagePath);
-            if (FileUtils.TryResolveRelativePathWithinBase(target, relativePath, out var newImagePath)
-                && File.Exists(newImagePath))
-            {
-                audiobook.ImageUrl = newImagePath;
-                await audiobookRepository.UpdateAsync(audiobook);
-                logger.LogInformation(
-                    "Updated ImageUrl for audiobook {AudiobookId} to new path after move",
-                    audiobook.Id);
-            }
+            rewritten = await audiobookRepository.RewriteMovedPathReferencesAsync(
+                audiobookId,
+                source,
+                target,
+                sourceSemantics,
+                targetSemantics,
+                targetPhysicalObjectIdentities,
+                DateTime.UtcNow,
+                cancellationToken,
+                targetCaseSensitivityMode);
         }
-        catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
+        catch (AudiobookPathRewriteException exception)
         {
-            logger.LogDebug(
+            throw new MoveNeedsAttentionException(exception.Message);
+        }
+        catch (UniqueConstraintViolationException exception)
+        {
+            logger.LogWarning(
                 exception,
-                "Non-fatal: failed to update ImageUrl after move for audiobook {AudiobookId}",
-                audiobook.Id);
+                "Moved audiobook {AudiobookId} could not publish file ownership identities",
+                audiobookId);
+            throw new MoveNeedsAttentionException(
+                "The moved audiobook file identity conflicts with an existing ownership record.");
         }
-    }
 
-    private static async Task RewriteLegacyFilePathAsync(
-        Audiobook audiobook,
-        string source,
-        string target,
-        IAudiobookRepository audiobookRepository,
-        ILogger logger)
-    {
-        try
+        if (!rewritten)
         {
-            if (string.IsNullOrWhiteSpace(audiobook.FilePath))
-            {
-                return;
-            }
-
-            var fullFilePath = Path.IsPathRooted(audiobook.FilePath)
-                ? Path.GetFullPath(audiobook.FilePath)
-                : Path.GetFullPath(Path.Join(source, audiobook.FilePath));
-            if (!FileUtils.IsPathSameOrInside(fullFilePath, source))
-            {
-                return;
-            }
-
-            var relativePath = Path.GetRelativePath(source, fullFilePath);
-            if (FileUtils.TryResolveRelativePathWithinBase(target, relativePath, out var newFilePath)
-                && File.Exists(newFilePath))
-            {
-                audiobook.FilePath = newFilePath;
-                await audiobookRepository.UpdateAsync(audiobook);
-                logger.LogInformation(
-                    "Updated FilePath for audiobook {AudiobookId} to new path after move",
-                    audiobook.Id);
-            }
+            throw new MoveNeedsAttentionException(
+                "The audiobook disappeared before its moved path references could be persisted.");
         }
-        catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
-        {
-            logger.LogDebug(
-                exception,
-                "Non-fatal: failed to update FilePath after move for audiobook {AudiobookId}",
-                audiobook.Id);
-        }
+
+        logger.LogInformation(
+            "Rewrote stored path references for audiobook {AudiobookId} after physical move",
+            audiobookId);
     }
 }

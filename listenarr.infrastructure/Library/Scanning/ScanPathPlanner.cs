@@ -21,90 +21,54 @@ namespace Listenarr.Infrastructure.Library.Scanning
 {
     internal static class ScanPathPlanner
     {
-        public static string CalculateBasePath(List<string> filePaths)
+        public static string CalculateBasePath(
+            IReadOnlyCollection<string> filePaths,
+            FileSystemPathSemantics semantics,
+            string? provenBookBoundary = null,
+            string? authorizedScanRoot = null)
         {
-            if (!filePaths.Any())
+            if (filePaths.Count == 0)
+            {
                 return string.Empty;
+            }
+
+            if (!string.IsNullOrWhiteSpace(provenBookBoundary))
+            {
+                var canonicalBoundary = FileSystemPathIdentity.Canonicalize(
+                    provenBookBoundary,
+                    semantics.Syntax);
+                var boundaryIsAuthorized = string.IsNullOrWhiteSpace(authorizedScanRoot)
+                    || FileSystemPathIdentity.IsSameOrInside(
+                        canonicalBoundary,
+                        authorizedScanRoot,
+                        semantics);
+                if (boundaryIsAuthorized
+                    && filePaths.All(path => FileSystemPathIdentity.IsSameOrInside(
+                        path,
+                        canonicalBoundary,
+                        semantics)))
+                {
+                    return canonicalBoundary;
+                }
+            }
 
             var directories = filePaths
-                .Select(p => FileUtils.NormalizeStoredPath(Path.GetDirectoryName(p) ?? p))
-                .Where(p => !string.IsNullOrWhiteSpace(p))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Select(path => FileSystemPathIdentity.Canonicalize(
+                    Path.GetDirectoryName(path) ?? path,
+                    semantics.Syntax))
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Distinct(semantics.Comparer)
                 .ToList();
-
-            if (directories.Count == 1)
+            if (directories.Count == 0)
             {
-                return directories[0];
-            }
-
-            var commonPath = GetCommonPath(directories);
-            var currentPath = commonPath;
-            while (!string.IsNullOrEmpty(currentPath))
-            {
-                try
-                {
-                    var parent = Directory.GetParent(currentPath)?.FullName;
-                    if (string.IsNullOrEmpty(parent))
-                        break;
-
-                    var subDirs = Directory.GetDirectories(parent).Length;
-                    var files = Directory.GetFiles(parent).Length;
-                    if (subDirs + files > 1)
-                    {
-                        return currentPath;
-                    }
-
-                    currentPath = parent;
-                }
-                catch (Exception caughtEx) when (caughtEx is not OperationCanceledException && caughtEx is not OutOfMemoryException && caughtEx is not StackOverflowException)
-                {
-                    break;
-                }
-            }
-
-            return commonPath;
-        }
-
-        private static string GetCommonPath(List<string> paths)
-        {
-            if (!paths.Any())
                 return string.Empty;
-
-            var firstPath = FileUtils.NormalizeStoredPath(paths[0]);
-            var commonPath = firstPath;
-
-            foreach (var path in paths.Skip(1).Select(rawPath => FileUtils.NormalizeStoredPath(rawPath)))
-            {
-                var minLength = Math.Min(commonPath.Length, path.Length);
-                var commonLength = 0;
-
-                for (int i = 0; i < minLength; i++)
-                {
-                    if (commonPath[i] == path[i])
-                        commonLength++;
-                    else
-                        break;
-                }
-
-                if (commonLength < commonPath.Length)
-                {
-                    var lastSep = commonPath.LastIndexOf(Path.DirectorySeparatorChar, commonLength - 1);
-                    commonLength = lastSep >= 0 ? lastSep + 1 : 0;
-                }
-
-                commonPath = commonPath.Substring(0, commonLength);
-
-                if (string.IsNullOrEmpty(commonPath))
-                    break;
             }
 
-            if (!string.IsNullOrEmpty(commonPath) && !Directory.Exists(commonPath))
-            {
-                var parent = Directory.GetParent(commonPath)?.FullName;
-                return parent ?? commonPath;
-            }
-
-            return commonPath;
+            return directories.Count == 1
+                ? directories[0]
+                : FileUtils.GetCommonPathForDirectories(directories, semantics)
+                    ?? directories[0];
         }
+
     }
 }

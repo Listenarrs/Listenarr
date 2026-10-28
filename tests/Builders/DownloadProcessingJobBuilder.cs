@@ -72,6 +72,13 @@ namespace Listenarr.Tests.Builders
             return this;
         }
 
+        public DownloadProcessingJobBuilder WithFailed(DateTime at)
+        {
+            _job.Status = ProcessingJobStatus.Failed;
+            _job.CompletedAt = at;
+            return this;
+        }
+
         public DownloadProcessingJob Build()
         {
             _job.DownloadId = _download.Id;

@@ -27,6 +27,7 @@ public static class ListenarrWorkflowRegistration
     public static IServiceCollection AddListenarrDomainWorkflows(this IServiceCollection services)
     {
         services.AddScoped<IRootFolderService, RootFolderService>();
+        services.AddScoped<IAudiobookDestinationRewriteService, AudiobookDestinationRewriteService>();
         services.AddScoped<ILegacyOutputPathMigrator, LegacyOutputPathMigrator>();
         services.AddMemoryCache();
 

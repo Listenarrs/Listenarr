@@ -45,7 +45,38 @@ public sealed class DirectDownloadWorkflowTests
         Assert.Empty(id);
     }
 
-    private static PreparedDirectDownloadSubmission CreateSubmission() => new(
+    [Fact]
+    public async Task CreateTrackedDownloadAsync_ArtifactBatch_PersistsPlanAndExtractionRequirement()
+    {
+        // Given
+        Download? persistedDownload = null;
+        var repository = new Mock<IDownloadRepository>();
+        repository
+            .Setup(repo => repo.AddAsync(It.IsAny<Download>()))
+            .Callback<Download>(download => persistedDownload = download)
+            .ReturnsAsync((Download download) => download);
+        var workflow = new DirectDownloadWorkflow(
+            repository.Object,
+            NullLogger<DirectDownloadWorkflow>.Instance);
+        var submission = CreateSubmission([
+            new PreparedDirectDownloadArtifact(
+                new Uri("https://archive.org/download/book/book.zip"),
+                "book.zip",
+                100,
+                DirectDownloadArtifactPackaging.Archive)
+        ]);
+
+        // When
+        await workflow.CreateTrackedDownloadAsync(submission, audiobookId: 42);
+
+        // Then
+        Assert.NotNull(persistedDownload);
+        Assert.Contains("book.zip", persistedDownload.GetMetadataString(DirectDownloadMetadataKeys.ArtifactPlan));
+        Assert.Equal("True", persistedDownload.GetMetadataString(DirectDownloadMetadataKeys.RequiresArchiveExtraction));
+    }
+
+    private static PreparedDirectDownloadSubmission CreateSubmission(
+        IReadOnlyList<PreparedDirectDownloadArtifact>? artifacts = null) => new(
         "Book",
         "Author",
         "Album",
@@ -54,5 +85,10 @@ public sealed class DirectDownloadWorkflowTests
         "en",
         100,
         "https://example.com/book.m4b",
-        new Uri("https://example.com/book.m4b"));
+        artifacts ?? [new PreparedDirectDownloadArtifact(
+            new Uri("https://example.com/book.m4b"),
+            "book.m4b",
+            100,
+            DirectDownloadArtifactPackaging.File)],
+        "InternetArchive");
 }

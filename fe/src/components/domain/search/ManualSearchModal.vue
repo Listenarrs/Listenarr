@@ -165,8 +165,8 @@
                   <td class="col-title">
                     <div class="title-cell">
                       <a
-                        v-if="result.id"
-                        :href="result.id"
+                        v-if="getResultLink(result)"
+                        :href="getResultLink(result)"
                         class="title-text"
                         target="_blank"
                         rel="noopener noreferrer"
@@ -371,13 +371,31 @@ const anyHasLanguage = computed(() =>
   displayResults.value.some((r) => !!normalizeLanguage(r.language)),
 )
 
+const languageDisplayNames: Record<string, string> = {
+  en: 'English',
+  eng: 'English',
+  de: 'German',
+  deu: 'German',
+  ger: 'German',
+  fr: 'French',
+  fre: 'French',
+  fra: 'French',
+  nl: 'Dutch',
+  dut: 'Dutch',
+  nld: 'Dutch',
+  es: 'Spanish',
+  spa: 'Spanish',
+}
+
 // Normalize language values from DTOs/indexers: treat explicit 'unknown' strings as absent
 const normalizeLanguage = (value?: string | null): string | undefined => {
   if (!value) return undefined
   const v = value.toString().trim()
   if (v.length === 0) return undefined
-  if (v.toLowerCase() === 'unknown') return undefined
-  return v
+  const normalized = v.toLowerCase()
+  if (normalized === 'unknown') return undefined
+
+  return languageDisplayNames[normalized] ?? v
 }
 const anyHasQuality = computed(() => displayResults.value.some((r) => !!r.quality || !!r.format))
 
@@ -512,7 +530,13 @@ async function search() {
           (indexerResultsRaw[0] as Record<string, unknown>).guid !== undefined
         ) {
           normalized = (indexerResultsRaw as Record<string, unknown>[]).map((dto) => ({
-            id: String(dto.guid ?? dto.infoUrl ?? dto.fileName ?? Math.random()),
+            id: String(
+              dto.guid ??
+                dto.infoUrl ??
+                dto.downloadUrl ??
+                dto.fileName ??
+                `${indexer.id}:${dto.title ?? ''}:${dto.size ?? ''}`,
+            ),
             title: String(dto.title ?? ''),
             size: typeof dto.size === 'string' ? Number(dto.size) || 0 : Number(dto.size ?? 0),
             seeders:
@@ -619,8 +643,8 @@ async function search() {
             return sortDirection.value === 'Ascending' ? a.size - b.size : b.size - a.size
           case 'PublishedDate':
             return sortDirection.value === 'Ascending'
-              ? new Date(a.publishedDate).getTime() - new Date(b.publishedDate).getTime()
-              : new Date(b.publishedDate).getTime() - new Date(a.publishedDate).getTime()
+              ? getSortableDateValue(a.publishedDate) - getSortableDateValue(b.publishedDate)
+              : getSortableDateValue(b.publishedDate) - getSortableDateValue(a.publishedDate)
           case 'Title':
             return sortDirection.value === 'Ascending'
               ? a.title.localeCompare(b.title)
@@ -782,12 +806,28 @@ function getSourceType(result: SearchResult): string {
   return 'nzb'
 }
 
-function formatAge(date: Date | string): string {
+function getResultLink(result: SearchResult): string | undefined {
+  const candidates = [result.resultUrl, result.sourceLink, result.productUrl, result.id]
+  return candidates
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .find((value) => /^https?:\/\//i.test(value))
+}
+
+function getSortableDateValue(date?: Date | string): number {
+  if (!date) return 0
+  const timestamp = new Date(date).getTime()
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function formatAge(date?: Date | string): string {
+  const publishedTime = getSortableDateValue(date)
+  if (publishedTime <= 0) return '-'
+
   const now = new Date()
-  const published = new Date(date)
-  const diffMs = now.getTime() - published.getTime()
+  const diffMs = now.getTime() - publishedTime
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
 
+  if (diffDays < 0) return '-'
   if (diffDays === 0) return 'Today'
   if (diffDays === 1) return '1 day'
   if (diffDays < 30) return `${diffDays} days`

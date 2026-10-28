@@ -22,6 +22,12 @@ namespace Listenarr.Tests.Features.Api.Services
 {
     public class DownloadNaming_AudiobookMetadataTests : BaseTests
     {
+        public override async Task InitializeAsync()
+        {
+            await base.InitializeAsync();
+            await AddAuthorizedRootAsync(FileService.GetTempPath());
+        }
+
         [Fact]
         public async Task ProcessCompletedDownload_UsesAudiobookMetadata_ForNaming()
         {

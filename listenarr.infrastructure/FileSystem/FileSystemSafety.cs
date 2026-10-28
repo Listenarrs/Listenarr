@@ -11,7 +11,7 @@ using Listenarr.Domain.Common;
 
 namespace Listenarr.Infrastructure.FileSystem;
 
-internal static class FileSystemSafety
+internal static partial class FileSystemSafety
 {
     public static async Task<bool> FilesHaveSameContentAsync(
         string firstPath,
@@ -79,13 +79,30 @@ internal static class FileSystemSafety
                 return false;
             }
 
-            normalizedPath = Path.GetFullPath(targetPath);
+            if (!FileSystemPathIdentity.TryCanonicalizeStoredAbsolutePathForHost(
+                    targetPath,
+                    out normalizedPath,
+                    out var targetReason))
+            {
+                reason = targetReason;
+                return false;
+            }
+
             var normalizedTarget = normalizedPath;
-            var normalizedRoots = allowedRoots
-                .Where(root => !string.IsNullOrWhiteSpace(root))
-                .Select(root => Path.GetFullPath(root!))
-                .Distinct(PathComparer)
-                .ToList();
+            // Mutation authorization must not assume all Windows directories are
+            // case-insensitive. Without pinned proof that two differently-cased
+            // spellings identify the same boundary, fail closed on lexical aliases.
+            var normalizedRoots = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var root in allowedRoots.Where(root => !string.IsNullOrWhiteSpace(root)))
+            {
+                if (FileSystemPathIdentity.TryCanonicalizeStoredAbsolutePathForHost(
+                        root!,
+                        out var normalizedRoot,
+                        out _))
+                {
+                    normalizedRoots.Add(normalizedRoot);
+                }
+            }
 
             if (normalizedRoots.Count == 0)
             {
@@ -93,18 +110,92 @@ internal static class FileSystemSafety
                 return false;
             }
 
-            if (!normalizedRoots.Any(root => FileUtils.IsPathSameOrInside(normalizedTarget, root)))
+            var candidateRoots = normalizedRoots
+                .Where(root => IsSameOrInsideMutationBoundary(normalizedTarget, root))
+                .OrderByDescending(root => root.Length)
+                .ToList();
+            if (candidateRoots.Count == 0)
             {
                 reason = "Target path is outside all allowed mutation roots.";
                 return false;
             }
 
-            return IsResolvedMutationTargetInsideRoots(normalizedTarget, normalizedRoots, out reason);
+            foreach (var root in candidateRoots)
+            {
+                if (TryValidateResolvedComponents(normalizedTarget, root, out reason))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
         catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
         {
             normalizedPath = string.Empty;
             reason = "Target path could not be normalized.";
+            return false;
+        }
+    }
+
+    public static bool TryEnumerateTreeWithoutLinks(
+        string rootPath,
+        out IReadOnlyList<string> files,
+        out IReadOnlyList<string> directories,
+        out string reason)
+    {
+        var discoveredFiles = new List<string>();
+        var discoveredDirectories = new List<string>();
+        files = discoveredFiles;
+        directories = discoveredDirectories;
+        reason = string.Empty;
+
+        try
+        {
+            var root = Path.GetFullPath(rootPath);
+            if (!Directory.Exists(root))
+            {
+                reason = "The directory does not exist.";
+                return false;
+            }
+
+            if ((File.GetAttributes(root) & FileAttributes.ReparsePoint) != 0)
+            {
+                reason = "The directory is a symbolic link or reparse point.";
+                return false;
+            }
+
+            var pending = new Stack<string>();
+            pending.Push(root);
+            while (pending.Count > 0)
+            {
+                var current = pending.Pop();
+                foreach (var entry in Directory.EnumerateFileSystemEntries(current))
+                {
+                    var attributes = File.GetAttributes(entry);
+                    if ((attributes & FileAttributes.ReparsePoint) != 0)
+                    {
+                        reason = $"Linked filesystem entry blocked safe traversal: {Path.GetFileName(entry)}";
+                        return false;
+                    }
+
+                    if ((attributes & FileAttributes.Directory) != 0)
+                    {
+                        discoveredDirectories.Add(entry);
+                        pending.Push(entry);
+                    }
+                    else
+                    {
+                        discoveredFiles.Add(entry);
+                    }
+                }
+            }
+
+            return true;
+        }
+        catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
+        {
+            reason = $"Filesystem tree could not be enumerated safely: {exception.GetType().Name}.";
             return false;
         }
     }
@@ -118,13 +209,7 @@ internal static class FileSystemSafety
                 return;
             }
 
-            foreach (var directory in Directory.GetDirectories(rootPath, "*", SearchOption.AllDirectories)
-                .OrderByDescending(path => path.Length))
-            {
-                TryDeleteDirectoryIfEmpty(directory);
-            }
-
-            TryDeleteDirectoryIfEmpty(rootPath);
+            DeleteEmptyDirectoriesPinned(rootPath);
         }
         catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
         {
@@ -133,23 +218,16 @@ internal static class FileSystemSafety
         }
     }
 
-    private static bool IsResolvedMutationTargetInsideRoots(
+    private static bool TryValidateResolvedComponents(
         string normalizedTargetPath,
-        IReadOnlyCollection<string> normalizedRoots,
+        string normalizedRootPath,
         out string reason)
     {
         reason = string.Empty;
-        var resolvedRoots = normalizedRoots
-            .Select(root => TryResolveAllowedMutationRoot(root, out var resolvedRoot)
-                ? resolvedRoot
-                : string.Empty)
-            .Where(root => !string.IsNullOrWhiteSpace(root))
-            .Distinct(PathComparer)
-            .ToList();
-
-        if (resolvedRoots.Count == 0)
+        if (!TryGetNearestExistingPath(normalizedRootPath, out var existingRootPath)
+            || !TryResolveExistingFinalPath(existingRootPath, out var resolvedRootPath))
         {
-            reason = "Allowed mutation roots could not be resolved safely.";
+            reason = "Allowed mutation root could not be resolved safely.";
             return false;
         }
 
@@ -159,30 +237,49 @@ internal static class FileSystemSafety
             return false;
         }
 
-        if (!TryResolveExistingFinalPath(existingTargetPath, out var resolvedExistingTargetPath))
+        if (!IsSameOrInsideMutationBoundary(existingTargetPath, existingRootPath))
         {
-            reason = "Target path could not be resolved safely.";
-            return false;
+            if (IsSameOrInsideMutationBoundary(existingRootPath, existingTargetPath))
+            {
+                existingTargetPath = existingRootPath;
+            }
+            else
+            {
+                reason = "Target path could not be related to its allowed mutation root.";
+                return false;
+            }
         }
 
-        if (resolvedRoots.Any(root => FileUtils.IsPathSameOrInside(resolvedExistingTargetPath, root)))
-        {
-            return true;
-        }
-
-        reason = "Target path resolves outside all allowed mutation roots.";
-        return false;
-    }
-
-    private static bool TryResolveAllowedMutationRoot(string rootPath, out string resolvedPath)
-    {
-        if (TryResolveExistingFinalPath(rootPath, out resolvedPath))
+        var relativePath = Path.GetRelativePath(existingRootPath, existingTargetPath);
+        if (relativePath == ".")
         {
             return true;
         }
 
-        return TryGetNearestExistingPath(rootPath, out var existingRootAncestor)
-            && TryResolveExistingFinalPath(existingRootAncestor, out resolvedPath);
+        var currentLexicalPath = existingRootPath;
+        var currentResolvedPath = resolvedRootPath;
+        foreach (var segment in relativePath.Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries))
+        {
+            currentLexicalPath = Path.Join(currentLexicalPath, segment);
+            var attributes = File.GetAttributes(currentLexicalPath);
+            var info = (attributes & FileAttributes.Directory) != 0
+                ? (FileSystemInfo)new DirectoryInfo(currentLexicalPath)
+                : new FileInfo(currentLexicalPath);
+            var resolvedTarget = (attributes & FileAttributes.ReparsePoint) != 0
+                ? info.ResolveLinkTarget(returnFinalTarget: true)
+                : null;
+            currentResolvedPath = Path.GetFullPath(
+                resolvedTarget?.FullName ?? Path.Join(currentResolvedPath, segment));
+            if (!IsSameOrInsideMutationBoundary(currentResolvedPath, resolvedRootPath))
+            {
+                reason = "Target path resolves outside an allowed mutation root through a linked path component.";
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool TryGetNearestExistingPath(string path, out string existingPath)
@@ -242,24 +339,77 @@ internal static class FileSystemSafety
         }
     }
 
-    private static void TryDeleteDirectoryIfEmpty(string path)
+    internal static bool IsSameOrInsideMutationBoundary(
+        string candidatePath,
+        string rootPath,
+        FileSystemPathSyntax? syntax = null)
     {
+        var effectiveSyntax = syntax
+            ?? (OperatingSystem.IsWindows()
+                ? FileSystemPathSyntax.Windows
+                : FileSystemPathSyntax.Unix);
+        var sensitiveSemantics = new FileSystemPathSemantics(
+            effectiveSyntax,
+            FileSystemCaseSensitivity.Sensitive);
+        if (FileSystemPathIdentity.IsSameOrInside(
+                candidatePath,
+                rootPath,
+                sensitiveSemantics))
+        {
+            return true;
+        }
+
+        // A Windows namespace can be case-insensitive or case-sensitive per
+        // directory. Accept a differently-cased spelling only when the candidate
+        // prefix that corresponds to the allowed root can be pinned and proven to
+        // identify the same physical directory. This preserves normal Windows case
+        // aliases without authorizing a case-distinct sibling on a sensitive parent.
+        if (effectiveSyntax != FileSystemPathSyntax.Windows
+            || !OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+
+        var insensitiveSemantics = new FileSystemPathSemantics(
+            FileSystemPathSyntax.Windows,
+            FileSystemCaseSensitivity.Insensitive);
+        if (!FileSystemPathIdentity.IsSameOrInside(
+                candidatePath,
+                rootPath,
+                insensitiveSemantics))
+        {
+            return false;
+        }
+
         try
         {
-            if (Directory.Exists(path) && !Directory.EnumerateFileSystemEntries(path).Any())
+            var canonicalRoot = FileSystemPathIdentity.Canonicalize(
+                rootPath,
+                FileSystemPathSyntax.Windows);
+            var canonicalCandidate = FileSystemPathIdentity.Canonicalize(
+                candidatePath,
+                FileSystemPathSyntax.Windows);
+            if (canonicalCandidate.Length < canonicalRoot.Length)
             {
-                Directory.Delete(path, recursive: false);
+                return false;
             }
+
+            var candidateRootAlias = canonicalCandidate[..canonicalRoot.Length];
+            using var expectedRoot = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                canonicalRoot,
+                createMissing: false);
+            using var candidateRoot = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                candidateRootAlias,
+                createMissing: false);
+            return string.Equals(
+                expectedRoot.GetDirectoryObjectIdentity(),
+                candidateRoot.GetDirectoryObjectIdentity(),
+                StringComparison.Ordinal);
         }
-        catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
+        catch (Exception exception) when (exception is not (
+            OperationCanceledException or OutOfMemoryException or StackOverflowException))
         {
-            System.Diagnostics.Debug.WriteLine(
-                $"Suppressed empty-directory delete failure for '{path}': {exception.Message}");
+            return false;
         }
     }
-
-    private static StringComparer PathComparer =>
-        OperatingSystem.IsWindows()
-            ? StringComparer.OrdinalIgnoreCase
-            : StringComparer.Ordinal;
 }

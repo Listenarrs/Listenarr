@@ -45,10 +45,11 @@ public class AudnexusStrategy : IMetadataStrategy
         return source.BaseUrl.Contains("audnex.us", StringComparison.OrdinalIgnoreCase);
     }
 
-    public async Task<AudibleBookMetadata?> FetchMetadataAsync(string asin, ApiConfiguration source, string? originalSource)
+    public async Task<AudibleBookMetadata?> FetchMetadataAsync(string asin, ApiConfiguration source, string? originalSource, string? region = null)
     {
         _logger.LogDebug("Calling Audnexus service for ASIN {Asin}", asin);
-        var audnexusData = await _audnexusService.GetBookMetadataAsync(asin, "us", true, false);
+        var safeRegion = AudiobookIdentifierNormalizer.NormalizeRegion(region) ?? "us";
+        var audnexusData = await _audnexusService.GetBookMetadataAsync(asin, safeRegion, true, false);
 
         if (audnexusData != null)
         {

@@ -141,10 +141,9 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
                 .WithFolderNamingPattern("{Author}/{Series}/{Title}")
                 .Build());
 
-            await _rootFolderRepository.AddAsync(new RootFolderBuilder()
-                .WithIsDefault()
-                .WithPath(rootPath)
-                .Build());
+            var root = await AddAuthorizedRootAsync(rootPath);
+            root.IsDefault = true;
+            await _rootFolderRepository.UpdateAsync(root);
 
             _seriesCatalogService
                 .Setup(service => service.GetCatalogAsync(
@@ -176,7 +175,9 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
             });
 
             // Then
-            Assert.True(result.SyncResult.Succeeded);
+            Assert.True(
+                result.SyncResult.Succeeded,
+                result.SyncResult.ErrorMessage);
             Assert.Equal(1, result.SyncResult.AddedCount);
 
             var storedAudiobook = Assert.Single(await _audiobookRepository.GetAllAsync());

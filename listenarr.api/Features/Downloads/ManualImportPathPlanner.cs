@@ -13,6 +13,10 @@ using Listenarr.Domain.Common;
 
 namespace Listenarr.Api.Features.Downloads;
 
+public sealed record ManualImportPathPlan(
+    string DestinationPath,
+    string AudiobookBasePath);
+
 public sealed class ManualImportPathPlanner
 {
     private readonly IFileNamingService _fileNamingService;
@@ -27,12 +31,14 @@ public sealed class ManualImportPathPlanner
         return FileUtils.GetCommonDirectory(destinationPaths);
     }
 
-    public async Task<string> GeneratePathAsync(
+    public async Task<ManualImportPathPlan> GeneratePathAsync(
         Audiobook audiobook,
         AudioMetadata metadata,
         ManualImportItemDto item,
+        string destinationBasePath,
         List<RootFolder> rootFolders,
         ApplicationSettings settings,
+        FileSystemPathSemantics destinationSemantics,
         bool isMultiFile = false)
     {
         await Task.CompletedTask;
@@ -41,11 +47,11 @@ public sealed class ManualImportPathPlanner
         var folderPattern = settings.FolderNamingPattern;
         var filePattern = isMultiFile ? settings.MultiFileNamingPattern : settings.FileNamingPattern;
 
-        var basePath = string.IsNullOrWhiteSpace(audiobook.BasePath)
+        var basePath = string.IsNullOrWhiteSpace(destinationBasePath)
             ? string.Empty
-            : FileUtils.NormalizeStoredPath(audiobook.BasePath);
+            : FileUtils.NormalizeStoredPath(destinationBasePath);
         var configuredOutput = settings.OutputPath ?? string.Empty;
-        var isCustomBasePath = IsCustomBasePath(basePath, configuredOutput, rootFolders);
+        var isCustomBasePath = IsCustomBasePath(basePath, configuredOutput, rootFolders, destinationSemantics);
 
         var extension = Path.GetExtension(sourceFilePath).ToLowerInvariant();
         if (string.IsNullOrEmpty(extension))
@@ -56,6 +62,7 @@ public sealed class ManualImportPathPlanner
         var variables = BuildNamingVariables(audiobook, metadata, item, folderPattern, filePattern, isMultiFile, out var stableSuffixNumber);
 
         string relativePath;
+        string? plannedFolderRelative = null;
         var patternHasNumberTokens = !string.IsNullOrWhiteSpace(filePattern)
             && (filePattern.IndexOf("DiskNumber", StringComparison.OrdinalIgnoreCase) >= 0
                 || filePattern.IndexOf("ChapterNumber", StringComparison.OrdinalIgnoreCase) >= 0);
@@ -79,6 +86,7 @@ public sealed class ManualImportPathPlanner
         {
             var effectiveFilePattern = string.IsNullOrWhiteSpace(filePattern) ? "{Title}" : filePattern;
             var folderRelative = _fileNamingService.ApplyNamingPattern(folderPattern, variables, treatAsFilename: false);
+            plannedFolderRelative = folderRelative;
             var patternAllowsSubfolders = PatternAllowsSubfolders(effectiveFilePattern);
             var fileRelative = _fileNamingService.ApplyNamingPattern(effectiveFilePattern, variables, treatAsFilename: !patternAllowsSubfolders);
 
@@ -103,38 +111,46 @@ public sealed class ManualImportPathPlanner
             relativePath += extension;
         }
 
-        return string.IsNullOrWhiteSpace(basePath)
+        var destinationPath = string.IsNullOrWhiteSpace(basePath)
             ? relativePath
             : CombineWithOptionalBase(basePath, relativePath);
+        var audiobookBasePath = ResolveAudiobookBasePath(
+            basePath,
+            relativePath,
+            plannedFolderRelative,
+            string.IsNullOrWhiteSpace(folderPattern),
+            isCustomBasePath);
+        return new ManualImportPathPlan(destinationPath, audiobookBasePath);
+    }
+
+    private static string ResolveAudiobookBasePath(
+        string basePath,
+        string relativePath,
+        string? plannedFolderRelative,
+        bool usesLegacyPattern,
+        bool isCustomBasePath)
+    {
+        if (isCustomBasePath || string.IsNullOrWhiteSpace(basePath))
+        {
+            return basePath;
+        }
+
+        var relativeDirectory = usesLegacyPattern
+            ? Path.GetDirectoryName(relativePath)
+            : plannedFolderRelative;
+        return string.IsNullOrWhiteSpace(relativeDirectory)
+            ? basePath
+            : CombineWithOptionalBase(basePath, relativeDirectory);
     }
 
     public static string CombineWithOptionalBase(string? basePath, string candidatePath)
     {
-        var normalizedPath = candidatePath.Trim();
-
-        if (string.IsNullOrEmpty(normalizedPath))
-        {
-            return normalizedPath;
-        }
-
-        if (Path.IsPathRooted(normalizedPath) || string.IsNullOrWhiteSpace(basePath))
-        {
-            return normalizedPath;
-        }
-
-        var relativePath = normalizedPath.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        if (Path.IsPathRooted(relativePath))
-        {
-            return relativePath;
-        }
-
-        var normalizedBasePath = basePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        return string.IsNullOrEmpty(normalizedBasePath)
-            ? relativePath
-            : normalizedBasePath + Path.DirectorySeparatorChar + relativePath;
+        return FileUtils.CombineWithOptionalBase(basePath, candidatePath);
     }
 
-    public static List<ManualImportItemDto> BuildOrderedItems(IEnumerable<ManualImportItemDto> items)
+    public static List<ManualImportItemDto> BuildOrderedItems(
+        IEnumerable<ManualImportItemDto> items,
+        StringComparer sourcePathComparer)
     {
         var ordered = new List<ManualImportItemDto>();
 
@@ -145,10 +161,12 @@ public sealed class ManualImportPathPlanner
                 continue;
             }
 
-            var plans = MultiFileImportPlanner.BuildPlans(validItems.Select(i => (i.FullPath!, string.IsNullOrWhiteSpace(i.RelativePath) ? null : i.RelativePath)));
-            var itemLookup = validItems.ToDictionary(i => i.FullPath!, StringComparer.OrdinalIgnoreCase);
-            var diskNumbersForNaming = MultiFileImportPlanner.BuildStableNamingNumbers(plans, p => p.DiskNumberHint);
-            var chapterNumbersForNaming = MultiFileImportPlanner.BuildStableNamingNumbers(plans, p => p.ChapterNumberHint);
+            var plans = MultiFileImportPlanner.BuildPlans(
+                validItems.Select(i => (i.FullPath!, string.IsNullOrWhiteSpace(i.RelativePath) ? null : i.RelativePath)),
+                sourcePathComparer);
+            var itemLookup = validItems.ToDictionary(i => i.FullPath!, sourcePathComparer);
+            var diskNumbersForNaming = MultiFileImportPlanner.BuildStableNamingNumbers(plans, p => p.DiskNumberHint, sourcePathComparer);
+            var chapterNumbersForNaming = MultiFileImportPlanner.BuildStableNamingNumbers(plans, p => p.ChapterNumberHint, sourcePathComparer);
 
             ordered.AddRange(plans
                 .Select(plan =>
@@ -175,7 +193,11 @@ public sealed class ManualImportPathPlanner
         return ordered;
     }
 
-    private static bool IsCustomBasePath(string basePath, string configuredOutput, List<RootFolder> rootFolders)
+    private static bool IsCustomBasePath(
+        string basePath,
+        string configuredOutput,
+        List<RootFolder> rootFolders,
+        FileSystemPathSemantics destinationSemantics)
     {
         try
         {
@@ -184,19 +206,37 @@ public sealed class ManualImportPathPlanner
                 return false;
             }
 
-            var baseFull = FileUtils.NormalizeStoredPath(basePath);
-            var configuredFull = string.IsNullOrWhiteSpace(configuredOutput) ? string.Empty : Path.GetFullPath(configuredOutput);
-            var isCustomBasePath = !string.Equals(baseFull, configuredFull, StringComparison.OrdinalIgnoreCase);
+            if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    basePath,
+                    out var baseFull,
+                    out _))
+            {
+                return true;
+            }
+
+            var configuredFull = string.Empty;
+            var hasConfiguredOutput = !string.IsNullOrWhiteSpace(configuredOutput)
+                && FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                    configuredOutput,
+                    out configuredFull,
+                    out _);
+            var isCustomBasePath = !hasConfiguredOutput
+                || !FileSystemPathIdentity.AreEquivalent(
+                    baseFull,
+                    configuredFull,
+                    destinationSemantics);
 
             if (isCustomBasePath)
             {
-                var isRootFolder = rootFolders.Any(r =>
-                {
-                    try { return string.Equals(FileUtils.NormalizeStoredPath(r.Path), baseFull, StringComparison.OrdinalIgnoreCase); }
-                    catch (ArgumentException) { return false; }
-                    catch (NotSupportedException) { return false; }
-                    catch (PathTooLongException) { return false; }
-                });
+                var isRootFolder = rootFolders.Any(root =>
+                    FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                        root.Path,
+                        out var rootPath,
+                        out _)
+                    && FileSystemPathIdentity.AreEquivalent(
+                        rootPath,
+                        baseFull,
+                        destinationSemantics));
                 if (isRootFolder) isCustomBasePath = false;
             }
 
@@ -204,8 +244,8 @@ public sealed class ManualImportPathPlanner
         }
         catch (Exception caughtEx) when (caughtEx is not OperationCanceledException && caughtEx is not OutOfMemoryException && caughtEx is not StackOverflowException)
         {
-            return !string.IsNullOrWhiteSpace(basePath) && !string.IsNullOrWhiteSpace(configuredOutput)
-                && !string.Equals(basePath, configuredOutput, StringComparison.OrdinalIgnoreCase);
+            // When identity comparison cannot be completed, avoid falling back to host rules.
+            return !string.IsNullOrWhiteSpace(basePath);
         }
     }
 

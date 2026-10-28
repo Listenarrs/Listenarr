@@ -22,14 +22,18 @@ namespace Listenarr.Tests.Features.Application.Configuration.Core
         [Fact]
         public async Task SaveAsync_PreservesAuthenticationRequired()
         {
-            // arrange - ensure no existing config on disk
-            var baseDir = AppContext.BaseDirectory;
+            // arrange - isolate startup configuration from the shared test-runner
+            // application directory, which can concurrently host runtime lock files.
+            var baseDir = Path.Join(
+                Path.GetTempPath(),
+                "listenarr-startup-config-tests",
+                Guid.NewGuid().ToString("N"));
             var cfgDir = Path.Join(baseDir, "config");
 
             using var loggerFactory = new LoggerFactory();
             var logger = loggerFactory.CreateLogger<StartupConfigService>();
             var pathServiceMock = new Moq.Mock<IApplicationPathService>();
-            pathServiceMock.Setup(e => e.ContentRootPath).Returns(AppContext.BaseDirectory);
+            pathServiceMock.Setup(e => e.ContentRootPath).Returns(baseDir);
 
             try
             {
@@ -84,8 +88,8 @@ namespace Listenarr.Tests.Features.Application.Configuration.Core
             }
             finally
             {
-                if (Directory.Exists(cfgDir))
-                    Directory.Delete(cfgDir, recursive: true);
+                if (Directory.Exists(baseDir))
+                    Directory.Delete(baseDir, recursive: true);
             }
         }
     }

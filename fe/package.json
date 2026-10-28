@@ -1,10 +1,10 @@
 {
   "name": "listenarr-fe",
-  "version": "1.1.0",
+  "version": "1.5.6",
   "private": true,
   "type": "module",
   "engines": {
-    "node": "^24.15.0"
+    "node": "^26.12.1"
   },
   "scripts": {
     "version:sync": "node ../scripts/sync-fe-version-from-csproj.mjs",
@@ -20,6 +20,7 @@
     "build": "run-p type-check \"build-only {@}\" --",
     "preview": "vite preview",
     "test": "vitest",
+    "test:build-config": "node --test scripts/check-vite-production-build.mjs",
     "test:unit": "vitest run --reporter=dot --silent",
     "prepare": "cypress install",
     "postinstall": "patch-package && npm run version:sync",
@@ -45,18 +46,18 @@
     "@vueuse/core": "^14.3.0",
     "minimist": "^1.2.8",
     "pinia": "^3.0.4",
-    "qs": "^6.15.2",
-    "vue": "^3.5.35",
+    "qs": "^6.16.0",
+    "vue": "^3.5.44",
     "vue-router": "^5.1.0",
     "web-vitals": "^5.3.0"
   },
   "devDependencies": {
-    "@tsconfig/node24": "^24.0.4",
+    "@tsconfig/node26": "^26.0.1",
     "@types/jsdom": "^28.0.3",
-    "@types/node": "^24.13.1",
+    "@types/node": "^26.6.5",
     "@vitejs/plugin-vue": "^6.0.7",
-    "@vitest/eslint-plugin": "^1.6.19",
-    "@vue/compiler-sfc": "^3.5.35",
+    "@vitest/eslint-plugin": "^1.6.20",
+    "@vue/compiler-sfc": "^3.5.44",
     "@vue/eslint-config-prettier": "^10.2.0",
     "@vue/eslint-config-typescript": "^14.8.0",
     "@vue/test-utils": "^2.4.11",
@@ -74,9 +75,9 @@
     "rollup-plugin-visualizer": "^7.0.1",
     "start-server-and-test": "^3.0.11",
     "typescript": "^6.0.3",
-    "vite": "^8.0.16",
-    "vitest": "^4.1.8",
-    "vue-tsc": "^3.3.4"
+    "vite": "^8.1.6",
+    "vitest": "^4.1.12",
+    "vue-tsc": "^3.3.5"
   },
   "overrides": {
     "ajv": "^8.18.0",

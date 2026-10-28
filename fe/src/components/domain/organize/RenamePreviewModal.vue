@@ -151,7 +151,7 @@
               />
               <span class="result-title">{{ titleFor(result.audiobookId) }}</span>
               <span class="result-detail">
-                {{ result.success ? 'Organized successfully' : result.error || 'Organize failed' }}
+                {{ resultDetail(result) }}
               </span>
             </div>
           </div>
@@ -172,7 +172,17 @@
             v-if="!finished"
             type="button"
             class="btn btn-primary"
-            :disabled="loading || executing || selectedCount === 0"
+            :disabled="
+              loading ||
+              executing ||
+              selectedCount === 0 ||
+              !filesystemReadinessStore.filesystemReady
+            "
+            :title="
+              !filesystemReadinessStore.filesystemReady
+                ? 'Available after library filesystem initialization completes'
+                : undefined
+            "
             @click="confirm"
           >
             <PhSpinner v-if="executing" class="ph-spin" :size="16" />
@@ -203,6 +213,7 @@ import {
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '@/components/feedback'
 import RenamePathDiff from './RenamePathDiff.vue'
 import { apiService } from '@/services/api'
+import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import type { RenameOperation, RenamePreview, RenameResult } from '@/types'
 
 const props = withDefaults(
@@ -221,6 +232,7 @@ const emit = defineEmits<{
   done: []
 }>()
 
+const filesystemReadinessStore = useFilesystemReadinessStore()
 const loading = ref(false)
 const loaded = ref(false)
 const executing = ref(false)
@@ -271,6 +283,8 @@ async function confirm() {
     .filter((preview) => selected.value.has(preview.audiobookId))
     .map((preview) => ({
       audiobookId: preview.audiobookId,
+      currentFolderPath: preview.currentFolderPath,
+      currentFolderSemantics: preview.currentFolderSemantics,
       newFolderPath: preview.folderChanged ? preview.newFolderPath : undefined,
       fileRenames: preview.fileRenames
         .filter((entry) => entry.changed)
@@ -313,6 +327,14 @@ function toggleSelected(id: number) {
     next.add(id)
   }
   selected.value = next
+}
+
+function resultDetail(result: RenameResult) {
+  if (!result.success) return result.error || 'Organize failed'
+  const retainedCount = result.renamedFiles.filter((file) => file.sourceRetained).length
+  return retainedCount > 0
+    ? `Organized successfully; original sources retained for ${retainedCount} file${retainedCount === 1 ? '' : 's'}.`
+    : 'Organized successfully'
 }
 
 function titleFor(audiobookId: number) {

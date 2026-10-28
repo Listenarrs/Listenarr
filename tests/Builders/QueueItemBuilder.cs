@@ -6,7 +6,14 @@ namespace Listenarr.Tests.Builders
 
         public QueueItemBuilder()
         {
+            _item.Id = "1";
             _item.Progress = 0;
+        }
+
+        public QueueItemBuilder WithId(string value)
+        {
+            _item.Id = value;
+            return this;
         }
 
         public QueueItemBuilder WithRemotePath(string value)
@@ -27,6 +34,18 @@ namespace Listenarr.Tests.Builders
         public QueueItemBuilder WithContentPath(string value)
         {
             _item.ContentPath = value;
+            return this;
+        }
+
+        public QueueItemBuilder WithProgress(double value)
+        {
+            _item.Progress = value;
+            return this;
+        }
+
+        public QueueItemBuilder WithStatus(string value)
+        {
+            _item.Status = value;
             return this;
         }
 

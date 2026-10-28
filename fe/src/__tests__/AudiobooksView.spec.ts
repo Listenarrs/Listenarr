@@ -23,6 +23,16 @@ import AudiobooksView from '@/views/library/AudiobooksView.vue'
 import { useLibraryStore } from '@/stores/library'
 // apiService stubbed in vi.mock below if needed
 
+const { mockGetAudiobookDeleteCapabilities } = vi.hoisted(() => ({
+  mockGetAudiobookDeleteCapabilities: vi.fn(async () => ({
+    canRemoveFromLibrary: true,
+    canDeleteTrackedFiles: true,
+    canDeleteFolder: true,
+    reason: null,
+    fallbackAction: 'RemoveFromLibraryOnly' as const,
+  })),
+}))
+
 vi.mock('@/services/api', () => ({
   apiService: {
     getQualityProfiles: vi.fn(async () => []),
@@ -30,6 +40,7 @@ vi.mock('@/services/api', () => ({
     getBootstrapConfig: vi.fn(async () => ({})),
     getStartupConfig: vi.fn(async () => ({})),
     getApplicationSettings: vi.fn(async () => ({})),
+    getAudiobookDeleteCapabilities: mockGetAudiobookDeleteCapabilities,
   },
 }))
 
@@ -39,6 +50,10 @@ type AudiobooksVm = {
   showItemDetails?: boolean
   groupBy?: string
   visibleRange?: { start: number; end: number }
+  confirmDelete?: (audiobook: import('@/types').Audiobook) => Promise<void>
+  deleteTarget?: import('@/types').Audiobook | null
+  deleteCapabilities?: import('@/types').AudiobookDeleteCapabilities | null
+  showDeleteDialog?: boolean
 }
 
 const getVm = (wrapper: ReturnType<typeof mount>) => wrapper.vm as unknown as AudiobooksVm
@@ -47,6 +62,14 @@ describe('AudiobooksView', () => {
   beforeEach(() => {
     const pinia = createPinia()
     setActivePinia(pinia)
+    mockGetAudiobookDeleteCapabilities.mockReset()
+    mockGetAudiobookDeleteCapabilities.mockResolvedValue({
+      canRemoveFromLibrary: true,
+      canDeleteTrackedFiles: true,
+      canDeleteFolder: true,
+      reason: null,
+      fallbackAction: 'RemoveFromLibraryOnly',
+    })
   })
 
   it('shows extra details in grid view when showItemDetails is enabled', async () => {
@@ -117,6 +140,82 @@ describe('AudiobooksView', () => {
     expect(wrapper.text()).toContain('Test Narrator')
     expect(wrapper.text()).toContain('Test Publisher')
     expect(wrapper.text()).toContain('2020')
+  })
+
+  it('ignores stale delete capabilities when a newer audiobook becomes the target', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: { template: '<div />' } },
+        { path: '/audiobooks', name: 'audiobooks', component: AudiobooksView },
+      ],
+    })
+    await router.push('/audiobooks')
+    await router.isReady().catch(() => {})
+
+    const books = [
+      { id: 1, title: 'First', authors: ['Author'], files: [] },
+      { id: 2, title: 'Second', authors: ['Author'], files: [] },
+    ] as unknown as import('@/types').Audiobook[]
+    const store = useLibraryStore()
+    store.audiobooks = books
+    store.fetchLibrary = vi.fn(async () => undefined)
+
+    let resolveFirst!: (value: import('@/types').AudiobookDeleteCapabilities) => void
+    let resolveSecond!: (value: import('@/types').AudiobookDeleteCapabilities) => void
+    mockGetAudiobookDeleteCapabilities
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecond = resolve
+          }),
+      )
+
+    const wrapper = mount(AudiobooksView, {
+      global: {
+        plugins: [pinia, router],
+        stubs: [
+          'BulkEditModal',
+          'EditAudiobookModal',
+          'CustomFilterModal',
+          'FiltersDropdown',
+          'CustomSelect',
+        ],
+      },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const vm = getVm(wrapper)
+
+    const firstRequest = vm.confirmDelete?.(books[0]!)
+    const secondRequest = vm.confirmDelete?.(books[1]!)
+    resolveSecond({
+      canRemoveFromLibrary: true,
+      canDeleteTrackedFiles: false,
+      canDeleteFolder: false,
+      reason: 'Second target is protected.',
+      fallbackAction: 'RemoveFromLibraryOnly',
+    })
+    await secondRequest
+    resolveFirst({
+      canRemoveFromLibrary: true,
+      canDeleteTrackedFiles: true,
+      canDeleteFolder: true,
+      reason: 'Stale first target.',
+      fallbackAction: 'RemoveFromLibraryOnly',
+    })
+    await firstRequest
+
+    expect(vm.deleteTarget?.id).toBe(2)
+    expect(vm.deleteCapabilities?.reason).toBe('Second target is protected.')
+    expect(vm.showDeleteDialog).toBe(true)
   })
 })
 

@@ -139,11 +139,14 @@ namespace Listenarr.Tests.Builders
             return this;
         }
 
-        public DownloadBuilder WithClientDownloadId(string value)
+        public DownloadBuilder WithExternalId(string value)
         {
             _download.SetExternalId(value);
             return this;
         }
+
+        public DownloadBuilder WithClientDownloadId(string value)
+            => WithExternalId(value);
 
         public Download Build()
         {

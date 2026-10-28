@@ -21,7 +21,12 @@ public enum DownloadSourceLocatorKind
     ReleaseId
 }
 
-public sealed record DownloadSourceLocator(DownloadSourceLocatorKind Kind, string Value);
+public sealed record DownloadSourceLocator(
+    DownloadSourceLocatorKind Kind,
+    string Value,
+    string? FileName = null,
+    long ExpectedSize = 0,
+    DirectDownloadArtifactPackaging Packaging = DirectDownloadArtifactPackaging.File);
 
 public sealed record DownloadSourceDescriptor(
     int? IndexerId,
@@ -109,7 +114,8 @@ public sealed record PreparedDirectDownloadSubmission(
     string? Language,
     long Size,
     string OriginalLocator,
-    Uri DownloadUri)
+    IReadOnlyList<PreparedDirectDownloadArtifact> Artifacts,
+    string SourcePolicyKey)
     : PreparedDownloadSubmission(
         DownloadProtocol.DirectDownload,
         Title,
@@ -120,6 +126,25 @@ public sealed record PreparedDirectDownloadSubmission(
         Language,
         Size,
         OriginalLocator);
+
+public sealed record PreparedDirectDownloadArtifact(
+    Uri DownloadUri,
+    string FileName,
+    long ExpectedSize,
+    DirectDownloadArtifactPackaging Packaging);
+
+public sealed record PersistedDirectDownloadArtifact(
+    string Url,
+    string FileName,
+    long ExpectedSize,
+    DirectDownloadArtifactPackaging Packaging);
+
+public sealed record PersistedDirectDownloadArtifactPlan(
+    int Version,
+    IReadOnlyList<PersistedDirectDownloadArtifact> Artifacts)
+{
+    public const int CurrentVersion = 1;
+}
 
 public sealed record DownloadClientSubmissionResult(
     string ExternalId,

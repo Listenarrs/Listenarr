@@ -16,119 +16,212 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Application.Common.Exceptions;
 using Listenarr.Domain.Common;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Features.Library
 {
-    public sealed class LibraryUpdateWorkflow
+    public sealed partial class LibraryUpdateWorkflow
     {
-        private readonly IAudiobookRepository _repo;
         private readonly IServiceScopeFactory _scopeFactory;
+        private readonly IAudiobookDestinationRewriteService _destinationRewriteService;
+        private readonly IAudiobookOperationCoordinator _audiobookOperationCoordinator;
+        private readonly IFileSystemSemanticsResolver _fileSystemSemanticsResolver;
         private readonly ILogger<LibraryUpdateWorkflow> _logger;
 
         public LibraryUpdateWorkflow(
-            IAudiobookRepository repo,
             IServiceScopeFactory scopeFactory,
+            IAudiobookDestinationRewriteService destinationRewriteService,
+            IAudiobookOperationCoordinator audiobookOperationCoordinator,
+            IFileSystemSemanticsResolver fileSystemSemanticsResolver,
             ILogger<LibraryUpdateWorkflow> logger)
         {
-            _repo = repo;
             _scopeFactory = scopeFactory;
+            _destinationRewriteService = destinationRewriteService;
+            _audiobookOperationCoordinator = audiobookOperationCoordinator ?? throw new ArgumentNullException(nameof(audiobookOperationCoordinator));
+            _fileSystemSemanticsResolver = fileSystemSemanticsResolver ?? throw new ArgumentNullException(nameof(fileSystemSemanticsResolver));
             _logger = logger;
         }
 
-        public async Task<IActionResult> UpdateAsync(int id, Audiobook updatedAudiobook)
+        public async Task<IActionResult> UpdateAsync(
+            int id,
+            AudiobookUpdateRequest request,
+            CancellationToken cancellationToken = default)
         {
-            var existingAudiobook = await _repo.GetByIdAsync(id);
+            cancellationToken.ThrowIfCancellationRequested();
+            var existingAudiobook = await GetAudiobookPreflightSnapshotAsync(
+                id,
+                cancellationToken);
             if (existingAudiobook == null)
             {
                 return new NotFoundObjectResult(new { message = "Audiobook not found" });
             }
 
-            var legacyIdentifierFieldsTouched = false;
+            var basePathRewritten = false;
+            var suppressStaleImageUrl = false;
+            var metadataUpdateRequested = HasMetadataUpdates(request);
 
-            if (updatedAudiobook.Title != null) existingAudiobook.Title = updatedAudiobook.Title;
-            if (updatedAudiobook.Subtitle != null) existingAudiobook.Subtitle = updatedAudiobook.Subtitle;
-            if (updatedAudiobook.Authors != null) existingAudiobook.Authors = updatedAudiobook.Authors;
-            if (updatedAudiobook.ImageUrl != null) existingAudiobook.ImageUrl = updatedAudiobook.ImageUrl;
-            if (updatedAudiobook.PublishYear != null) existingAudiobook.PublishYear = updatedAudiobook.PublishYear;
-            if (updatedAudiobook.PublishedDate != null) existingAudiobook.PublishedDate = updatedAudiobook.PublishedDate;
-            if (updatedAudiobook.Description != null) existingAudiobook.Description = updatedAudiobook.Description;
-            if (updatedAudiobook.Genres != null) existingAudiobook.Genres = updatedAudiobook.Genres;
-            if (updatedAudiobook.Tags != null) existingAudiobook.Tags = updatedAudiobook.Tags;
-            if (updatedAudiobook.Narrators != null) existingAudiobook.Narrators = updatedAudiobook.Narrators;
-            if (updatedAudiobook.Isbn != null)
+            if (request.BasePath != null)
             {
-                existingAudiobook.Isbn = updatedAudiobook.Isbn;
-                legacyIdentifierFieldsTouched = true;
+                if (!string.Equals(
+                        request.BasePath,
+                        existingAudiobook.BasePath,
+                        StringComparison.Ordinal))
+                {
+                    suppressStaleImageUrl = await IsPathInsideBasePathAsync(
+                        request.ImageUrl,
+                        existingAudiobook.BasePath,
+                        cancellationToken);
+                    _logger.LogWarning(
+                        "Deprecated PUT /library/{AudiobookId} BasePath update received. Route destination changes through the move endpoint with moveFiles=false.",
+                        id);
+
+                    try
+                    {
+                        await _destinationRewriteService.RewriteDestinationAsync(
+                            id,
+                            request.BasePath,
+                            existingAudiobook.BasePath,
+                            cancellationToken);
+                        basePathRewritten = true;
+                    }
+                    catch (ListenarrApplicationException ex)
+                    {
+                        return ToApplicationExceptionResult(ex);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                    {
+                        _logger.LogError(ex, "Failed to compatibility-route BasePath update for audiobook {AudiobookId}", id);
+                        return new ObjectResult(new
+                        {
+                            message = "Failed to update BasePath",
+                            code = "destination_update_failed"
+                        })
+                        {
+                            StatusCode = StatusCodes.Status500InternalServerError
+                        };
+                    }
+
+                }
             }
 
-            if (updatedAudiobook.Asin != null)
-            {
-                existingAudiobook.Asin = updatedAudiobook.Asin;
-                legacyIdentifierFieldsTouched = true;
-            }
-
-            if (updatedAudiobook.OpenLibraryId != null)
-            {
-                existingAudiobook.OpenLibraryId = updatedAudiobook.OpenLibraryId;
-                legacyIdentifierFieldsTouched = true;
-            }
-
-            if (updatedAudiobook.Publisher != null) existingAudiobook.Publisher = updatedAudiobook.Publisher;
-            if (updatedAudiobook.Language != null) existingAudiobook.Language = updatedAudiobook.Language;
-            if (updatedAudiobook.Runtime != null) existingAudiobook.Runtime = updatedAudiobook.Runtime;
-            if (updatedAudiobook.Edition != null) existingAudiobook.Edition = updatedAudiobook.Edition;
-            if (updatedAudiobook.Version != null) existingAudiobook.Version = updatedAudiobook.Version;
-
-            ApplySeriesMembershipUpdates(existingAudiobook, updatedAudiobook);
-
-            existingAudiobook.Explicit = updatedAudiobook.Explicit;
-            existingAudiobook.Abridged = updatedAudiobook.Abridged;
-            existingAudiobook.Monitored = updatedAudiobook.Monitored;
-
-            if (updatedAudiobook.FilePath != null) existingAudiobook.FilePath = updatedAudiobook.FilePath;
-            if (updatedAudiobook.FileSize.HasValue) existingAudiobook.FileSize = updatedAudiobook.FileSize;
-            if (updatedAudiobook.Quality != null) existingAudiobook.Quality = updatedAudiobook.Quality;
-
-            await ApplyQualityProfileAsync(existingAudiobook, updatedAudiobook);
-
-            if (updatedAudiobook.BasePath != null)
-            {
-                existingAudiobook.BasePath = FileUtils.NormalizeStoredPath(updatedAudiobook.BasePath);
-                _logger.LogInformation("Updated BasePath for audiobook '{Title}' to: {BasePath}", LogRedaction.SanitizeText(existingAudiobook.Title), LogRedaction.SanitizeFilePath(updatedAudiobook.BasePath));
-            }
-
-            if (legacyIdentifierFieldsTouched)
-            {
-                AudiobookIdentifierMapper.SyncImportedIdentifiersFromLegacyFields(existingAudiobook);
-            }
-
-            await _repo.UpdateAsync(existingAudiobook);
-
-            _logger.LogInformation("Updated audiobook '{Title}' (ID: {Id})", LogRedaction.SanitizeText(existingAudiobook.Title), id);
-
-            return new OkObjectResult(new { message = "Audiobook updated successfully", audiobook = existingAudiobook });
+            var completionToken = basePathRewritten
+                ? CancellationToken.None
+                : cancellationToken;
+            return await _audiobookOperationCoordinator.ExecuteExclusiveAsync(
+                id,
+                token => ApplyMetadataUpdatesAsync(
+                    id,
+                    request,
+                    basePathRewritten,
+                    suppressStaleImageUrl,
+                    metadataUpdateRequested,
+                    token),
+                completionToken);
         }
 
-        private static void ApplySeriesMembershipUpdates(Audiobook existingAudiobook, Audiobook updatedAudiobook)
+        private async Task<Audiobook?> GetAudiobookPreflightSnapshotAsync(
+            int id,
+            CancellationToken cancellationToken)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var repository = scope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
+            return await repository.GetForUpdateSnapshotAsync(id, cancellationToken);
+        }
+
+        private async Task<bool> IsPathInsideBasePathAsync(
+            string? candidatePath,
+            string? basePath,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(candidatePath)
+                || string.IsNullOrWhiteSpace(basePath))
+            {
+                return false;
+            }
+
+            try
+            {
+                var resolution = await _fileSystemSemanticsResolver.ResolveAsync(
+                    basePath,
+                    FileSystemCaseSensitivityMode.Auto,
+                    cancellationToken);
+                return resolution.State == PathIdentityState.Valid
+                    && FileSystemPathIdentity.IsSameOrInside(
+                        candidatePath,
+                        basePath,
+                        resolution.Semantics);
+            }
+            catch (Exception exception) when (exception is
+                IOException or UnauthorizedAccessException or ArgumentException or
+                InvalidOperationException or NotSupportedException or PathTooLongException or
+                System.Security.SecurityException)
+            {
+                return false;
+            }
+        }
+
+        private static bool HasMetadataUpdates(AudiobookUpdateRequest request) =>
+            request.Title != null
+            || request.Subtitle != null
+            || request.Authors != null
+            || request.ImageUrl != null
+            || request.PublishYear != null
+            || request.PublishedDate != null
+            || request.Series != null
+            || request.SeriesNumber != null
+            || request.SeriesMemberships != null
+            || request.Description != null
+            || request.Genres != null
+            || request.Tags != null
+            || request.Narrators != null
+            || request.Isbn != null
+            || request.Asin != null
+            || request.OpenLibraryId != null
+            || request.Publisher != null
+            || request.Language != null
+            || request.Runtime.HasValue
+            || request.Edition != null
+            || request.Version != null
+            || request.Explicit.HasValue
+            || request.Abridged.HasValue
+            || request.Monitored.HasValue
+            || request.FilePath != null
+            || request.FileSize.HasValue
+            || request.Quality != null
+            || request.QualityProfileId.HasValue;
+
+        private static IActionResult ToApplicationExceptionResult(ListenarrApplicationException exception) =>
+            exception switch
+            {
+                ApplicationNotFoundException => new NotFoundObjectResult(new { message = exception.SafeDetail, code = exception.Code }),
+                ApplicationConflictException => new ConflictObjectResult(new { message = exception.SafeDetail, code = exception.Code }),
+                ApplicationValidationException => new BadRequestObjectResult(new { message = exception.SafeDetail, code = exception.Code }),
+                _ => new ObjectResult(new { message = exception.SafeDetail, code = exception.Code })
+                {
+                    StatusCode = StatusCodes.Status500InternalServerError
+                }
+            };
+
+        private static void ApplySeriesMembershipUpdates(Audiobook existingAudiobook, AudiobookUpdateRequest request)
         {
             var seriesMembershipsTouched =
-                updatedAudiobook.SeriesMemberships != null ||
-                updatedAudiobook.Series != null ||
-                updatedAudiobook.SeriesNumber != null;
+                request.SeriesMemberships != null ||
+                request.Series != null ||
+                request.SeriesNumber != null;
 
             if (!seriesMembershipsTouched)
             {
                 return;
             }
 
-            var mergedSeries = updatedAudiobook.Series ?? existingAudiobook.Series;
-            var mergedSeriesNumber = updatedAudiobook.SeriesNumber ?? existingAudiobook.SeriesNumber;
+            var mergedSeries = request.Series ?? existingAudiobook.Series;
+            var mergedSeriesNumber = request.SeriesNumber ?? existingAudiobook.SeriesNumber;
             var existingPrimaryMembership = AudiobookSeriesMembershipHelper.GetPrimaryMembership(existingAudiobook.SeriesMemberships);
 
             var normalizedMemberships = AudiobookSeriesMembershipHelper.Normalize(
-                updatedAudiobook.SeriesMemberships,
+                request.SeriesMemberships,
                 mergedSeries,
                 mergedSeriesNumber,
                 existingPrimaryMembership?.SeriesAsin);
@@ -150,18 +243,23 @@ namespace Listenarr.Api.Features.Library
             AudiobookSeriesMembershipHelper.ApplyPrimarySeriesFields(existingAudiobook);
         }
 
-        private async Task ApplyQualityProfileAsync(Audiobook existingAudiobook, Audiobook updatedAudiobook)
+        private async Task ApplyQualityProfileAsync(
+            Audiobook existingAudiobook,
+            AudiobookUpdateRequest request,
+            CancellationToken cancellationToken)
         {
-            if (!updatedAudiobook.QualityProfileId.HasValue)
+            if (!request.QualityProfileId.HasValue)
             {
                 return;
             }
 
-            if (updatedAudiobook.QualityProfileId.Value == -1)
+            if (request.QualityProfileId.Value == -1)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 using var scope = _scopeFactory.CreateScope();
                 var qualityProfileService = scope.ServiceProvider.GetRequiredService<IQualityProfileService>();
                 var defaultProfile = await qualityProfileService.GetDefaultAsync();
+                cancellationToken.ThrowIfCancellationRequested();
                 if (defaultProfile != null)
                 {
                     existingAudiobook.QualityProfileId = defaultProfile.Id;
@@ -177,9 +275,9 @@ namespace Listenarr.Api.Features.Library
                 return;
             }
 
-            existingAudiobook.QualityProfileId = updatedAudiobook.QualityProfileId.Value;
+            existingAudiobook.QualityProfileId = request.QualityProfileId.Value;
             _logger.LogInformation("Updated quality profile for audiobook '{Title}' to ID {ProfileId}",
-                existingAudiobook.Title, updatedAudiobook.QualityProfileId.Value);
+                existingAudiobook.Title, request.QualityProfileId.Value);
         }
     }
 }

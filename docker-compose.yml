@@ -10,7 +10,7 @@ services:
       - PGID=1000
       - UMASK=022
       # OPTIONAL: set logging level at runtime (overrides config file). Valid values: Verbose, Debug, Information, Warning, Error, Fatal
-      # e.g. to enable debug logs in Docker: LISTENARR_LOG_LEVEL=Debug
+      # e.g. to enable debug or trace logs in Docker: LISTENARR_LOG_LEVEL=Debug or LISTENARR_LOG_LEVEL=Trace
       - LISTENARR_LOG_LEVEL=Information
       - LISTENARR_PUBLIC_URL=https://your-domain.com ## OPTIONAL: Used by Discord Bot
     volumes:

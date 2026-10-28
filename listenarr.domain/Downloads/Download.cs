@@ -39,6 +39,8 @@ namespace Listenarr.Domain.Downloads
     public class Download
     {
         public static string METADATA_EXTERNAL_ID_KEY = "ClientDownloadId";
+        public const string SourceRetainedMetadataKey = "SourceRetained";
+        public const string ImportSourceRetentionRequiredMetadataKey = "ImportSourceRetentionRequired";
         public static int MaxImportAttempts = 3;
 
         public string Id { get; set; } = Guid.NewGuid().ToString();
@@ -63,6 +65,11 @@ namespace Listenarr.Domain.Downloads
             get;
             set;
         } = DownloadStatus.Queued;
+
+        /// <summary>
+        /// Progress of the download.
+        /// From 0 to 100 by convention
+        /// </summary>
         public decimal Progress
         {
             get;
@@ -80,7 +87,7 @@ namespace Listenarr.Domain.Downloads
         public DateTime? CompletedAt { get; set; }
         public string? ErrorMessage { get; set; }
         public string DownloadClientId { get; set; } = string.Empty;
-        public Dictionary<string, object> Metadata { get; set; } = new();
+        public Dictionary<string, object> Metadata { get; set; } = [];
 
         /// <summary>
         /// Tracks why a download is ImportBlocked (error code for categorization)
@@ -111,6 +118,11 @@ namespace Listenarr.Domain.Downloads
         /// Links to DownloadHistory.Id for audit trail
         /// </summary>
         public int? HistoryId { get; set; }
+
+        public void SetMetadata(string key, object value)
+        {
+            Metadata[key] = value;
+        }
 
         public string? GetMetadataString(string key)
         {
@@ -337,6 +349,10 @@ namespace Listenarr.Domain.Downloads
         public DateTime? SnapshotRefreshedAt { get; set; }
         public bool CanPause { get; set; } = true;
         public bool CanRemove { get; set; } = true;
+
+        /// <summary>Fresh client permission to retire source files; null means unknown.</summary>
+        [JsonIgnore]
+        public bool? CanMoveFiles { get; set; }
         public int? Seeders { get; set; }
         public int? Leechers { get; set; }
         public double? Ratio { get; set; }
@@ -376,6 +392,13 @@ namespace Listenarr.Domain.Downloads
         /// Used for stability window validation before import.
         /// </summary>
         public DateTime? CompletionTime { get; set; }
+
+        /// <summary>
+        /// Raw client failure reason used for retry policy decisions. This is hidden from
+        /// API consumers because ErrorMessage owns the user-facing text.
+        /// </summary>
+        [JsonIgnore]
+        public string? ClientFailureReason { get; set; }
 
         /// <summary>
         /// Creates a shallow copy of this QueueItem.

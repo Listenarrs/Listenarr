@@ -62,6 +62,24 @@ export const searchRegionOptions = [
   { value: 'jp', label: 'Japan (JP)' },
 ] as const
 
+type SearchRegionOption = (typeof searchRegionOptions)[number]
+
+// Region choices ordered by usefulness: the given regions first (in that order, without
+// duplicates), then every other region alphabetically by label.
+export function orderedSearchRegionOptions(
+  first: Array<string | null | undefined>,
+): SearchRegionOption[] {
+  const head: SearchRegionOption[] = []
+  for (const region of first) {
+    const option = searchRegionOptions.find((o) => o.value === region)
+    if (option && !head.includes(option)) head.push(option)
+  }
+  const rest = searchRegionOptions
+    .filter((o) => !head.includes(o))
+    .sort((a, b) => a.label.localeCompare(b.label))
+  return [...head, ...rest]
+}
+
 export const preferredSearchLanguageOptions = [
   { value: 'all', label: 'All' },
   { value: 'arabic', label: 'Arabic' },
@@ -246,6 +264,12 @@ export function getRegionFromLanguage(language: string): string {
  */
 export function getLanguageFromRegion(region: string): string {
   return regionToLanguage[region.toLowerCase()] || 'english'
+}
+
+export function getPrimaryPreferredSearchLanguageForRegion(
+  region: string | undefined | null,
+): string {
+  return normalizePreferredSearchLanguage(getLanguageFromRegion(normalizeSearchRegion(region)))
 }
 
 export function normalizeSearchRegion(region: string | undefined | null): string {

@@ -2,10 +2,8 @@
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2026 Listenarr Contributors
  */
-using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using Microsoft.Extensions.Caching.Memory;
 namespace Listenarr.Api.Features.Library
 {
@@ -23,7 +21,16 @@ namespace Listenarr.Api.Features.Library
                 if (seen.Add(normalized)) ordered.Add(normalized);
             }
 
+            // A region recorded on the ASIN is the catalogue the book was matched in (or that the user
+            // chose): only that one is tried, so a rescan never moves the book to another catalogue on
+            // its own. Without a region (older data, or an ASIN found through an ISBN), the US and UK
+            // catalogues are tried as before.
             AddOrdered(preferredRegion);
+            if (ordered.Count > 0)
+            {
+                return ordered;
+            }
+
             AddOrdered("us");
             AddOrdered("uk");
 
@@ -33,56 +40,6 @@ namespace Listenarr.Api.Features.Library
             }
 
             return ordered;
-        }
-
-        private static bool TryExtractMetadataLookupResult(
-            object? rawResult,
-            out AudibleBookResponse? metadata,
-            out string? source)
-        {
-            metadata = null;
-            source = null;
-            if (rawResult == null) return false;
-
-            if (rawResult is AudibleBookResponse direct)
-            {
-                metadata = direct;
-                return true;
-            }
-
-            var type = rawResult.GetType();
-            var metadataProp = type.GetProperty("metadata", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-            if (metadataProp != null)
-            {
-                var metadataValue = metadataProp.GetValue(rawResult);
-                if (metadataValue is AudibleBookResponse audible)
-                {
-                    metadata = audible;
-                }
-                else if (metadataValue is JsonElement metadataElement && metadataElement.ValueKind == JsonValueKind.Object)
-                {
-                    try
-                    {
-                        metadata = metadataElement.Deserialize<AudibleBookResponse>();
-                    }
-                    catch (JsonException)
-                    {
-                        metadata = null;
-                    }
-                    catch (NotSupportedException)
-                    {
-                        metadata = null;
-                    }
-                }
-            }
-
-            var sourceProp = type.GetProperty("source", BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-            if (sourceProp != null)
-            {
-                source = sourceProp.GetValue(rawResult)?.ToString();
-            }
-
-            return metadata != null;
         }
 
         private static bool ApplyMetadataRescanPatch(Audiobook audiobook, AudibleBookMetadata metadata)

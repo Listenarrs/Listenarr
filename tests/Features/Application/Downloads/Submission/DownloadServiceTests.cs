@@ -131,6 +131,45 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
         }
 
         [Fact]
+        public async Task SendToDownloadClientAsync_WhenClientReturnsBlankExternalId_RemovesProvisionalDownloadAndDoesNotRecordGrab()
+        {
+            var gatewayMock = new Mock<IDownloadClientGateway>(MockBehavior.Strict);
+            gatewayMock
+                .Setup(g => g.AddAsync(
+                    It.Is<DownloadClientConfiguration>(client => client.Id == "qb-1"),
+                    It.IsAny<PreparedDownloadSubmission>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new DownloadClientSubmissionResult(string.Empty));
+
+            var historyMock = new Mock<IDownloadHistoryService>(MockBehavior.Strict);
+            var notificationMock = new Mock<INotificationService>(MockBehavior.Strict);
+            _services.AddSingleton(gatewayMock.Object);
+            _services.AddSingleton(historyMock.Object);
+            _services.AddSingleton(notificationMock.Object);
+
+            Init();
+            await InitData();
+            var initialDownloadCount = (await _downloadRepository.GetAllAsync()).Count;
+            var downloadService = _provider.GetRequiredService<DownloadService>();
+            var searchResult = new SearchResult
+            {
+                Title = "Artemis",
+                Artist = "Andy Weir",
+                DownloadType = "Torrent",
+                MagnetLink = "magnet:?xt=urn:btih:ABCDEF1234567890ABCDEF1234567890ABCDEF12",
+                Size = 123456789
+            };
+
+            await Assert.ThrowsAsync<DownloadClientSubmissionException>(
+                () => downloadService.SendToDownloadClientAsync(searchResult, _client.Id));
+
+            Assert.Equal(initialDownloadCount, (await _downloadRepository.GetAllAsync()).Count);
+            gatewayMock.VerifyAll();
+            historyMock.VerifyNoOtherCalls();
+            notificationMock.VerifyNoOtherCalls();
+        }
+
+        [Fact]
         public async Task SendToDownloadClientAsync_DerivesTorrent_WhenRequestSpoofsDdl()
         {
             var gatewayMock = new Mock<IDownloadClientGateway>();
@@ -237,6 +276,100 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
             downloadRepository.Verify(r => r.GetByIdAsync(missingDownload.Id), Times.Once);
             downloadRepository.Verify(r => r.UpdateAsync(It.IsAny<Download>()), Times.Never);
             notificationService.VerifyNoOtherCalls();
+        }
+        [Fact]
+        public async Task SearchAndDownloadAsync_WhenActiveDownloadExists_ReturnsFailureAndSkipsIndexerSearch()
+        {
+            var searchServiceMock = new Mock<ISearchService>(MockBehavior.Strict);
+            _services.AddSingleton(searchServiceMock.Object);
+
+            Init();
+            await InitData();
+
+            var qualityProfile = await _qualityProfileRepository.AddAsync(new QualityProfileBuilder().WithName("Structured").WithStructuredDefaults().Build());
+            _audiobook.QualityProfileId = qualityProfile.Id;
+            _audiobook.QualityProfile = null;
+            await _audiobookRepository.UpdateAsync(_audiobook);
+
+            var downloadService = _provider.GetRequiredService<DownloadService>();
+
+            var result = await downloadService.SearchAndDownloadAsync(_audiobook.Id);
+
+            Assert.False(result.Success);
+            searchServiceMock.Verify(
+                s => s.SearchAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<List<string>?>(),
+                    It.IsAny<SearchSortBy>(),
+                    It.IsAny<SearchSortDirection>(),
+                    It.IsAny<bool>()),
+                Times.Never);
+        }
+
+        [Fact]
+        public async Task SearchAndDownloadAsync_WhenSendToDownloadClientReturnsEmpty_ReturnsFailureAndDoesNotLogHistory()
+        {
+            var searchServiceMock = new Mock<ISearchService>();
+            searchServiceMock
+                .Setup(s => s.SearchAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<List<string>?>(),
+                    It.IsAny<SearchSortBy>(),
+                    It.IsAny<SearchSortDirection>(),
+                    It.IsAny<bool>()))
+                .ReturnsAsync(() =>
+                {
+                    // Simulate duplicate download initiated concurrently during indexer search
+                    _download.Status = DownloadStatus.Downloading;
+                    _downloadRepository.UpdateAsync(_download).GetAwaiter().GetResult();
+                    return new List<SearchResult>
+                    {
+                        new SearchResult
+                        {
+                            Title = "Artemis",
+                            Artist = "Andy Weir",
+                            DownloadType = "Torrent",
+                            MagnetLink = "magnet:?xt=urn:btih:ABCDEF1234567890ABCDEF1234567890ABCDEF12",
+                            Size = 123456789
+                        }
+                    };
+                });
+
+            var historyMock = new Mock<IDownloadHistoryService>(MockBehavior.Strict);
+
+            _services.AddSingleton(searchServiceMock.Object);
+            _services.AddSingleton(historyMock.Object);
+
+            Init();
+            await InitData();
+
+            // Clear active download state before search so pre-search check passes
+            _download.Status = DownloadStatus.Completed;
+            await _downloadRepository.UpdateAsync(_download);
+
+            var qualityProfile = await _qualityProfileRepository.AddAsync(new QualityProfileBuilder().WithName("Structured").WithStructuredDefaults().Build());
+            _audiobook.QualityProfileId = qualityProfile.Id;
+            _audiobook.QualityProfile = null;
+            await _audiobookRepository.UpdateAsync(_audiobook);
+
+            var downloadService = _provider.GetRequiredService<DownloadService>();
+
+            var result = await downloadService.SearchAndDownloadAsync(_audiobook.Id);
+
+            searchServiceMock.Verify(
+                s => s.SearchAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<List<string>?>(),
+                    It.IsAny<SearchSortBy>(),
+                    It.IsAny<SearchSortDirection>(),
+                    It.IsAny<bool>()),
+                Times.Once);
+            Assert.False(result.Success);
+            Assert.True(string.IsNullOrEmpty(result.DownloadId));
+            historyMock.VerifyNoOtherCalls();
         }
     }
 }

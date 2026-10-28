@@ -23,7 +23,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Features.Library
 {
-    public sealed class LibraryAddWorkflow
+    public sealed partial class LibraryAddWorkflow
     {
         private readonly IAudiobookRepository _repo;
         private readonly IImageCacheService _imageCacheService;
@@ -31,6 +31,8 @@ namespace Listenarr.Api.Features.Library
         private readonly IHistoryRepository _historyRepository;
         private readonly INotificationService? _notificationService;
         private readonly ILibraryAddService? _libraryAddService;
+        private readonly ILibraryDestinationMutationGuard _destinationMutationGuard;
+        private readonly IFilesystemMutationCoordinator _mutationCoordinator;
         private readonly ILogger<LibraryAddWorkflow> _logger;
 
         public LibraryAddWorkflow(
@@ -38,6 +40,8 @@ namespace Listenarr.Api.Features.Library
             IImageCacheService imageCacheService,
             IServiceScopeFactory scopeFactory,
             IHistoryRepository historyRepository,
+            ILibraryDestinationMutationGuard destinationMutationGuard,
+            IFilesystemMutationCoordinator mutationCoordinator,
             ILogger<LibraryAddWorkflow> logger,
             INotificationService? notificationService = null,
             ILibraryAddService? libraryAddService = null)
@@ -46,35 +50,72 @@ namespace Listenarr.Api.Features.Library
             _imageCacheService = imageCacheService;
             _scopeFactory = scopeFactory;
             _historyRepository = historyRepository;
+            _destinationMutationGuard = destinationMutationGuard
+                ?? throw new ArgumentNullException(nameof(destinationMutationGuard));
+            _mutationCoordinator = mutationCoordinator ?? throw new ArgumentNullException(nameof(mutationCoordinator));
             _logger = logger;
             _notificationService = notificationService;
             _libraryAddService = libraryAddService;
         }
 
-        public async Task<IActionResult> AddAsync(LibraryController.AddToLibraryRequest request)
+        public Task<IActionResult> AddAsync(
+            LibraryController.AddToLibraryRequest request,
+            CancellationToken cancellationToken = default)
         {
-            if (_libraryAddService != null)
+            // A book is only added with no ASIN or a well-formed one: an ASIN typed by hand that isn't
+            // one can never be looked up again, so Rescan metadata could never repair the book
+            var asin = request.Metadata?.Asin;
+            if (!string.IsNullOrWhiteSpace(asin) && !ImageIdentifierHelper.LooksLikeAsin(asin))
             {
-                var result = await _libraryAddService.AddToLibraryAsync(new LibraryAddOperationRequest
-                {
-                    Metadata = request.Metadata,
-                    Monitored = request.Monitored,
-                    QualityProfileId = request.QualityProfileId,
-                    AutoSearch = request.AutoSearch,
-                    DestinationPath = request.DestinationPath,
-                    SearchResult = request.SearchResult,
-                    HistorySource = "AddNew",
-                    HistoryMessage = $"Audiobook '{request.Metadata.Title}' added to library from Add New page"
-                });
-
-                if (result.AlreadyExists)
-                {
-                    return new ConflictObjectResult(new { message = result.Message, audiobook = result.Audiobook });
-                }
-
-                return new OkObjectResult(new { message = result.Message, audiobook = result.Audiobook });
+                return Task.FromResult<IActionResult>(DestinationValidationResult(
+                    "asin_invalid",
+                    "An ASIN has 10 letters or digits.",
+                    field: "metadata.asin"));
             }
 
+            return _libraryAddService != null
+                ? AddWithServiceAsync(request, cancellationToken)
+                : _mutationCoordinator.ExecuteExclusiveAsync(
+                    _ => AddCoreAsync(request),
+                    cancellationToken);
+        }
+
+        private async Task<IActionResult> AddWithServiceAsync(
+            LibraryController.AddToLibraryRequest request,
+            CancellationToken cancellationToken)
+        {
+            var result = await _libraryAddService!.AddToLibraryAsync(new LibraryAddOperationRequest
+            {
+                Metadata = request.Metadata,
+                Monitored = request.Monitored,
+                QualityProfileId = request.QualityProfileId,
+                AutoSearch = request.AutoSearch,
+                DestinationPath = request.DestinationPath,
+                SearchResult = request.SearchResult,
+                HistorySource = "AddNew",
+                HistoryMessage = $"Audiobook '{request.Metadata.Title}' added to library from Add New page"
+            }, cancellationToken);
+
+            if (result.ValidationFailed)
+            {
+                return DestinationValidationResult(
+                    result.ValidationCode ?? "destination_path_invalid",
+                    result.ValidationMessage ?? result.Message,
+                    result.ResolvedDestination,
+                    result.ValidationField ?? "destinationPath");
+            }
+
+            if (result.AlreadyExists)
+            {
+                return new ConflictObjectResult(new { message = result.Message, audiobook = result.Audiobook });
+            }
+
+            StartAutoSearchAfterAdd(result.Audiobook, request.AutoSearch);
+            return new OkObjectResult(new { message = result.Message, audiobook = result.Audiobook });
+        }
+
+        private async Task<IActionResult> AddCoreAsync(LibraryController.AddToLibraryRequest request)
+        {
             var metadata = request.Metadata;
 
             _logger.LogInformation("AddToLibrary received metadata: Title={Title}, Asin={Asin}, PublishYear={PublishYear}, Authors={Authors}, Series={Series}",
@@ -103,20 +144,9 @@ namespace Listenarr.Api.Features.Library
                 }
             }
 
-            string? imageUrl;
-            try
-            {
-                imageUrl = await ResolveLibraryImageUrlAsync(request, firstIsbn);
-            }
-            catch (LibraryAddConflictException ex)
-            {
-                return new ConflictObjectResult(new { message = "Audiobook already exists in library", audiobook = ex.Audiobook });
-            }
-
             var audiobook = metadata.ToAudiobook();
 
             audiobook.Monitored = request.Monitored;
-            audiobook.ImageUrl = imageUrl;
 
             AudiobookSeriesMembershipHelper.ApplyToAudiobook(
                 audiobook,
@@ -133,9 +163,82 @@ namespace Listenarr.Api.Features.Library
 
             if (!string.IsNullOrWhiteSpace(request.DestinationPath))
             {
-                audiobook.BasePath = FileUtils.NormalizeStoredPath(request.DestinationPath);
-                _logger.LogInformation("Using custom destination path for audiobook '{Title}': {BasePath}",
+                // Preserve valid Unix path-segment whitespace, but reject values that only become
+                // absolute after trimming accidental leading whitespace.
+                if (FileUtils.HasLeadingWhitespaceBeforeRootedPath(request.DestinationPath))
+                {
+                    return DestinationValidationResult(
+                        "destination_path_invalid",
+                        "DestinationPath is invalid: leading whitespace before an absolute path is not allowed.",
+                        request.DestinationPath);
+                }
+
+                if (!FileUtils.TryNormalizeUserProvidedDirectoryPathForCurrentOs(
+                    request.DestinationPath,
+                    out var normalizedDestinationPath,
+                    out var validationReason,
+                    rejectParentTraversal: true))
+                {
+                    return DestinationValidationResult(
+                        "destination_path_invalid",
+                        $"DestinationPath is invalid: {validationReason}",
+                        request.DestinationPath);
+                }
+
+                using var destinationScope = _scopeFactory.CreateScope();
+                var rootFolderService = destinationScope.ServiceProvider
+                    .GetRequiredService<IRootFolderService>();
+                var fileSystem = destinationScope.ServiceProvider.GetRequiredService<IFileSystem>();
+                var rootFolders = await rootFolderService.GetAllAsync();
+                ApplicationSettings? settings = null;
+                if (rootFolders.Count == 0)
+                {
+                    var configurationService = destinationScope.ServiceProvider
+                        .GetRequiredService<IConfigurationService>();
+                    settings = await configurationService.GetApplicationSettingsAsync();
+                }
+                var allowedDestinationRoots = FileUtils.GetValidMutationRootsForCurrentOs(
+                    rootFolders.Count > 0
+                        ? rootFolders.Select(root => root.Path)
+                        : [settings!.OutputPath]);
+                if (allowedDestinationRoots.Count == 0
+                    || !fileSystem.TryValidateMutationTarget(
+                        normalizedDestinationPath,
+                        allowedDestinationRoots,
+                        out normalizedDestinationPath,
+                        out _))
+                {
+                    return DestinationValidationResult(
+                        "destination_path_outside_roots",
+                        "DestinationPath must be inside a configured root folder or output path",
+                        normalizedDestinationPath);
+                }
+
+                audiobook.BasePath = normalizedDestinationPath;
+                _logger.LogInformation("Using requested destination path for audiobook '{Title}': {BasePath}",
                     audiobook.Title, audiobook.BasePath);
+            }
+
+            if (!string.IsNullOrWhiteSpace(audiobook.BasePath))
+            {
+                var destinationBlockingReason = await _destinationMutationGuard.GetBlockingReasonAsync(
+                    audiobook.BasePath);
+                if (destinationBlockingReason != null)
+                {
+                    return DestinationValidationResult(
+                        "destination_path_blocked",
+                        destinationBlockingReason,
+                        audiobook.BasePath);
+                }
+            }
+
+            try
+            {
+                audiobook.ImageUrl = await ResolveLibraryImageUrlAsync(request, firstIsbn);
+            }
+            catch (LibraryAddConflictException ex)
+            {
+                return new ConflictObjectResult(new { message = "Audiobook already exists in library", audiobook = ex.Audiobook });
             }
 
             await _repo.AddAsync(audiobook);
@@ -146,8 +249,22 @@ namespace Listenarr.Api.Features.Library
             _logger.LogInformation("Added audiobook '{Title}' (ASIN: {Asin}) to library with Monitored={Monitored}, QualityProfileId={QualityProfileId}, AutoSearch={AutoSearch}",
                 audiobook.Title, audiobook.Asin, request.Monitored, audiobook.QualityProfileId, request.AutoSearch);
 
+            StartAutoSearchAfterAdd(audiobook, request.AutoSearch);
             return new OkObjectResult(new { message = "Audiobook added to library successfully", audiobook });
         }
+
+        private static BadRequestObjectResult DestinationValidationResult(
+            string code,
+            string message,
+            string? resolvedDestination = null,
+            string field = "destinationPath") =>
+            new(new
+            {
+                code,
+                field,
+                message,
+                resolvedDestination
+            });
 
         private void TryExtractPublishYear(LibraryController.AddToLibraryRequest request)
         {
@@ -336,44 +453,6 @@ namespace Listenarr.Api.Features.Library
             {
                 _logger.LogWarning(ex, "Error resolving author ASINs for audiobook '{Title}'", LogRedaction.SanitizeText(audiobook.Title));
             }
-        }
-
-        private async Task SendAddedNotificationAsync(Audiobook audiobook)
-        {
-            if (_notificationService == null)
-            {
-                return;
-            }
-
-            using var scope = _scopeFactory.CreateScope();
-            var configService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
-            var settings = await configService.GetApplicationSettingsAsync();
-            var data = new
-            {
-                id = audiobook.Id,
-                title = audiobook.Title ?? "Unknown Title",
-                authors = audiobook.Authors,
-                narrators = audiobook.Narrators,
-                description = audiobook.Description,
-                asin = audiobook.Asin,
-                publisher = audiobook.Publisher,
-                year = audiobook.PublishYear,
-                imageUrl = audiobook.ImageUrl
-            };
-            await _notificationService.SendNotificationAsync("book-added", data, settings.WebhookUrl, settings.EnabledNotificationTriggers);
-        }
-
-        private async Task AddHistoryAsync(Audiobook audiobook)
-        {
-            await _historyRepository.AddAsync(new History
-            {
-                AudiobookId = audiobook.Id,
-                AudiobookTitle = audiobook.Title ?? "Unknown Title",
-                EventType = "Added",
-                Message = $"Audiobook '{audiobook.Title}' added to library from Add New page",
-                Source = "AddNew",
-                Timestamp = DateTime.UtcNow
-            });
         }
 
         private static string ComputeShortHash(string? input)

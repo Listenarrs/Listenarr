@@ -39,6 +39,16 @@
       </button>
     </div>
 
+    <div
+      v-if="showFilesystemInitializationBanner"
+      class="filesystem-initialization-banner"
+      :class="{ failed: filesystemReadinessStore.filesystemFailed }"
+      role="status"
+      aria-live="polite"
+    >
+      <span>{{ filesystemInitializationMessage }}</span>
+    </div>
+
     <!-- Top Navigation Bar -->
     <header
       v-if="!hideLayout"
@@ -139,17 +149,13 @@
           </button>
           <div v-if="notificationsOpen" class="notification-dropdown" role="menu">
             <div class="dropdown-header">
-              <strong>Recent Activity</strong>
+              <strong>Notifications</strong>
               <button class="clear-btn" @click.stop="clearNotifications" title="Clear">
                 Clear
               </button>
             </div>
             <ul class="notification-list">
-              <li
-                v-for="item in recentNotifications.filter((n) => !n.dismissed)"
-                :key="item.id"
-                class="notification-item"
-              >
+              <li v-for="item in visibleNotifications" :key="item.id" class="notification-item">
                 <div class="notif-icon">
                   <component
                     v-if="notificationIconComponent(item.icon)"
@@ -160,10 +166,23 @@
                 <div class="notif-content">
                   <div class="notif-title">{{ item.title }}</div>
                   <div class="notif-message">{{ item.message }}</div>
-                  <div class="notif-time">{{ formatTime(item.timestamp) }}</div>
+                  <ProgressBar
+                    v-if="item.progress != null"
+                    :value="item.progress"
+                    variant="activity"
+                    height="small"
+                    :show-percentage="item.showProgressPercentage !== false"
+                    :show-size="false"
+                    :animating="item.active === true && item.indeterminate !== true"
+                    :indeterminate="item.indeterminate === true"
+                  />
+                  <div v-if="item.timestamp" class="notif-time">
+                    {{ formatTime(item.timestamp) }}
+                  </div>
                 </div>
                 <div class="notif-actions">
                   <button
+                    v-if="!item.active"
                     class="dismiss-btn"
                     @click.stop="dismissNotification(item.id)"
                     title="Dismiss"
@@ -172,16 +191,13 @@
                   </button>
                 </div>
               </li>
-              <li
-                v-if="recentNotifications.filter((n) => !n.dismissed).length === 0"
-                class="notification-empty"
-              >
+              <li v-if="visibleNotifications.length === 0" class="notification-empty">
                 No recent activity
               </li>
             </ul>
             <div class="dropdown-footer">
               <RouterLink to="/activity" class="view-all-link" @click="notificationsOpen = false"
-                >View all activity</RouterLink
+                >View activity</RouterLink
               >
             </div>
           </div>
@@ -558,11 +574,15 @@ import { useConfirmService } from '@/composables/confirmService'
 import { useNotification } from '@/composables/useNotification'
 import { useDownloadsStore } from '@/stores/downloads'
 import { useLibraryStore } from '@/stores/library'
+import { useMoveJobsStore } from '@/stores/moveJobs'
+import { useLibraryDeleteOperationsStore } from '@/stores/libraryDeleteOperations'
+import { useScanNotificationsStore } from '@/stores/scanNotifications'
+import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import { useAuthStore } from '@/stores/auth'
 import { apiService } from '@/services/api'
 import { getStartupConfigCached } from '@/services/startupConfigCache'
 import { handleImageError } from '@/utils/imageFallback'
-import { Pill } from '@/components/base'
+import { Pill, ProgressBar } from '@/components/base'
 import { getPlaceholderUrl } from '@/utils/placeholder'
 import { useProtectedImages } from '@/composables/useProtectedImages'
 import { logSessionState, clearAllAuthData } from '@/utils/sessionDebug'
@@ -586,6 +606,10 @@ const { notification, close: closeNotification } = useNotification()
 const { getProtectedImageSrc } = useProtectedImages()
 const downloadsStore = useDownloadsStore()
 const libraryStore = useLibraryStore()
+const moveJobsStore = useMoveJobsStore()
+const deleteOperationsStore = useLibraryDeleteOperationsStore()
+const scanNotificationsStore = useScanNotificationsStore()
+const filesystemReadinessStore = useFilesystemReadinessStore()
 const auth = useAuthStore()
 const authEnabled = ref(false)
 const startupConfigLoaded = ref(false)
@@ -793,7 +817,6 @@ const closeMobileMenu = () => {
 }
 
 // Reactive state for badges and counters
-const notificationCount = computed(() => recentNotifications.filter((n) => !n.dismissed).length)
 const queueItems = ref<QueueItem[]>([])
 const wantedCount = computed(
   () => libraryStore.audiobooks.filter((book) => book.wanted === true).length,
@@ -872,12 +895,135 @@ type HistoryNotification = {
   title: string
   message: string
   icon?: string
-  timestamp: string
+  timestamp?: string
   dismissed?: boolean
+  progress?: number
+  phase?: string
+  active?: boolean
+  showProgressPercentage?: boolean
+  indeterminate?: boolean
 }
 
 const recentNotifications = reactive<HistoryNotification[]>([])
 const recentDownloadTitles = ref<Set<string>>(new Set()) // Track recent download titles to avoid spam
+
+const activeMoveNotifications = computed<HistoryNotification[]>(() =>
+  moveJobsStore.trackedJobs.map((job) => {
+    const audiobookTitle = job.audiobookId
+      ? libraryStore.audiobooks.find((book) => book.id === job.audiobookId)?.title
+      : undefined
+    const target = job.target ? ` to ${job.target}` : ''
+    return {
+      id: `move-${job.jobId}`,
+      title: audiobookTitle ? `Moving ${audiobookTitle}` : 'Moving audiobook',
+      message: `${job.phase || 'Preparing move'}${target}`,
+      icon: 'ph ph-folder-open',
+      progress: job.progress,
+      phase: job.phase,
+      active: true,
+    }
+  }),
+)
+
+const scanNotifications = computed<HistoryNotification[]>(() =>
+  scanNotificationsStore.jobs
+    .filter((job) => job.visible && !job.dismissed)
+    .sort((left, right) => right.timestamp.localeCompare(left.timestamp))
+    .map((job) => {
+      const normalizedStatus = job.status.toLowerCase()
+      const active = normalizedStatus === 'queued' || normalizedStatus === 'processing'
+      const audiobookTitle = job.audiobookId
+        ? libraryStore.audiobooks.find((book) => book.id === job.audiobookId)?.title
+        : undefined
+      const subject = audiobookTitle || 'audiobook folder'
+      const title =
+        normalizedStatus === 'queued'
+          ? `Scan queued: ${subject}`
+          : normalizedStatus === 'processing'
+            ? `Scanning ${subject}`
+            : normalizedStatus === 'completed'
+              ? `Scan complete: ${subject}`
+              : normalizedStatus === 'superseded'
+                ? `Scan stopped: ${subject}`
+                : `Scan failed: ${subject}`
+      const message =
+        normalizedStatus === 'queued'
+          ? 'Waiting to scan folder'
+          : normalizedStatus === 'processing'
+            ? 'Scanning folder'
+            : normalizedStatus === 'completed'
+              ? job.found != null
+                ? `${job.found} file${job.found === 1 ? '' : 's'} found${job.created != null ? ` · ${job.created} added` : ''}`
+                : 'Folder scan completed'
+              : job.error || 'The folder scan did not complete'
+
+      return {
+        id: `scan-${job.jobId}`,
+        title,
+        message,
+        icon: 'ph ph-folder-open',
+        timestamp: job.timestamp,
+        progress: active ? 0 : undefined,
+        active,
+        showProgressPercentage: false,
+        indeterminate: active,
+      }
+    }),
+)
+
+const deleteNotifications = computed<HistoryNotification[]>(() =>
+  deleteOperationsStore.operations
+    .filter((operation) => !operation.dismissed)
+    .map((operation) => {
+      const active = operation.status === 'deleting'
+      const isBulk = operation.kind === 'bulk'
+      const title = active
+        ? isBulk
+          ? operation.title
+          : `Deleting ${operation.title}`
+        : operation.status === 'completed'
+          ? isBulk
+            ? `Deleted ${operation.deleted} audiobook${operation.deleted === 1 ? '' : 's'}`
+            : `Deleted ${operation.title}`
+          : isBulk
+            ? `Delete incomplete: ${operation.deleted}/${operation.total} audiobooks`
+            : `Delete failed: ${operation.title}`
+      const message = isBulk
+        ? active
+          ? operation.currentTitle
+            ? `${operation.processed}/${operation.total} · ${operation.currentTitle}`
+            : `${operation.processed}/${operation.total}`
+          : operation.status === 'completed'
+            ? `${operation.deleted}/${operation.total} deleted`
+            : `${operation.deleted}/${operation.total} deleted · ${operation.failed} failed${operation.error ? ` · ${operation.error}` : ''}`
+        : active
+          ? 'Removing audiobook from library'
+          : operation.status === 'completed'
+            ? 'Removed from library'
+            : operation.error || 'Could not remove audiobook from library'
+
+      return {
+        id: operation.id,
+        title,
+        message,
+        icon: 'ph ph-file-remove',
+        timestamp: operation.startedAt,
+        progress: active ? operation.progress : undefined,
+        active,
+        showProgressPercentage: isBulk,
+        indeterminate: active && !isBulk,
+      }
+    }),
+)
+
+const visibleNotifications = computed(() => [
+  ...activeMoveNotifications.value,
+  ...scanNotifications.value,
+  ...deleteNotifications.value,
+  ...recentNotifications.filter((notification) => !notification.dismissed),
+])
+
+const notificationCount = computed(() => visibleNotifications.value.length)
 
 function pushNotification(n: HistoryNotification) {
   // Ensure new notifications are not dismissed
@@ -890,9 +1036,15 @@ function pushNotification(n: HistoryNotification) {
 function clearNotifications() {
   recentNotifications.length = 0
   recentDownloadTitles.value.clear()
+  deleteOperationsStore.clearFinished()
+  scanNotificationsStore.clearFinished()
 }
 
 function dismissNotification(id: string) {
+  deleteOperationsStore.dismiss(id)
+  if (id.startsWith('scan-')) {
+    scanNotificationsStore.dismiss(id.slice('scan-'.length))
+  }
   const notification = recentNotifications.find((n) => n.id === id)
   if (notification) {
     notification.dismissed = true
@@ -930,7 +1082,99 @@ function notificationIconComponent(icon?: string) {
 
 let unsubscribeQueue: (() => void) | null = null
 let unsubscribeFilesRemoved: (() => void) | null = null
+let unsubscribeScanJobs: (() => void) | null = null
 let unsubscribeSignalRConnected: (() => void) | null = null
+let scanStatusReconcileTimer: ReturnType<typeof setInterval> | null = null
+let scanStatusReconcileInFlight = false
+
+const hasActiveVisibleScan = () =>
+  auth.user.authenticated &&
+  scanNotificationsStore.jobs.some((job) => {
+    const status = job.status.toLowerCase()
+    return job.visible && !job.dismissed && (status === 'queued' || status === 'processing')
+  })
+
+const stopScanStatusReconciliation = () => {
+  if (scanStatusReconcileTimer != null) {
+    window.clearInterval(scanStatusReconcileTimer)
+    scanStatusReconcileTimer = null
+  }
+}
+
+const reconcileActiveScanStatuses = async () => {
+  if (scanStatusReconcileInFlight) return
+
+  const activeJobs = scanNotificationsStore.jobs.filter((job) => {
+    const status = job.status.toLowerCase()
+    return job.visible && !job.dismissed && (status === 'queued' || status === 'processing')
+  })
+  if (activeJobs.length === 0) {
+    stopScanStatusReconciliation()
+    return
+  }
+
+  scanStatusReconcileInFlight = true
+  try {
+    await Promise.all(
+      activeJobs.map(async (job) => {
+        try {
+          const status = await apiService.getScanJobStatus(job.jobId)
+          scanNotificationsStore.applyUpdate({
+            jobId: job.jobId,
+            audiobookId: status.audiobookId,
+            status: status.status,
+            error: status.error,
+          })
+        } catch (error) {
+          const status =
+            error && typeof error === 'object' && 'status' in error
+              ? Number((error as { status?: unknown }).status)
+              : undefined
+          if (status === 404) {
+            scanNotificationsStore.applyUpdate({
+              jobId: job.jobId,
+              audiobookId: job.audiobookId,
+              status: 'Failed',
+              error:
+                'Scan status is no longer available. Refresh the audiobook to verify the current files.',
+            })
+            return
+          }
+
+          logger.debug('Unable to reconcile scan job status', { jobId: job.jobId, error })
+        }
+      }),
+    )
+  } finally {
+    scanStatusReconcileInFlight = false
+    if (!hasActiveVisibleScan()) {
+      stopScanStatusReconciliation()
+    }
+  }
+}
+
+const syncScanStatusReconciliation = () => {
+  if (!hasActiveVisibleScan()) {
+    stopScanStatusReconciliation()
+    return
+  }
+
+  if (scanStatusReconcileTimer == null) {
+    void reconcileActiveScanStatuses()
+    scanStatusReconcileTimer = window.setInterval(() => {
+      void reconcileActiveScanStatuses()
+    }, 1500)
+  }
+}
+
+watch(
+  () =>
+    scanNotificationsStore.jobs
+      .map((job) => `${job.jobId}:${job.status}:${job.visible}:${job.dismissed === true}`)
+      .join('|'),
+  syncScanStatusReconciliation,
+  { flush: 'post' },
+)
 
 const syncLibrarySnapshot = async () => {
   try {
@@ -1106,6 +1350,7 @@ watch(
   () => auth.user.authenticated,
   () => {
     void refreshAuthPresentationFromStartupConfig(true)
+    syncScanStatusReconciliation()
   },
 )
 
@@ -1113,6 +1358,7 @@ watch(
 
 // Initialize: Subscribe to SignalR for real-time updates (NO POLLING!)
 onMounted(async () => {
+  filesystemReadinessStore.start()
   logger.debug('Initializing real-time updates via SignalR...')
 
   // Session debugging utilities
@@ -1156,12 +1402,17 @@ onMounted(async () => {
 
   // If authenticated, load protected resources and enable real-time updates
   if (auth.user.authenticated) {
+    // Keep durable move jobs globally visible so the notification dropdown can
+    // show progress even when the Activity page is not mounted.
+    moveJobsStore.start()
+
     // Hydrate the app once, then keep it current from SignalR updates.
     await Promise.all([downloadsStore.loadDownloads(), syncLibrarySnapshot()])
 
     unsubscribeSignalRConnected = signalRService.onConnected(() => {
       if (auth.user.authenticated) {
         void syncLibrarySnapshot()
+        void moveJobsStore.loadActiveJobs()
       }
     })
 
@@ -1170,6 +1421,10 @@ onMounted(async () => {
       const queueSnapshot = normalizeQueueSnapshot(queue)
       logger.debug('Received queue update via SignalR:', queueSnapshot.items.length, 'items')
       queueItems.value = queueSnapshot.items
+    })
+
+    unsubscribeScanJobs = signalRService.onScanJobUpdate((job) => {
+      scanNotificationsStore.applyUpdate(job)
     })
 
     // Prepare toast helper for this mounted scope
@@ -1340,9 +1595,15 @@ onUnmounted(() => {
   if (unsubscribeFilesRemoved) {
     unsubscribeFilesRemoved()
   }
+  if (unsubscribeScanJobs) {
+    unsubscribeScanJobs()
+  }
+  stopScanStatusReconciliation()
   if (unsubscribeSignalRConnected) {
     unsubscribeSignalRConnected()
   }
+  moveJobsStore.stop()
+  filesystemReadinessStore.stop()
   // Event listeners are automatically cleaned up by VueUse
 })
 
@@ -1389,14 +1650,35 @@ const dismissSecurityWarning = () => {
   securityWarningDismissed.value = true
 }
 
+const showFilesystemInitializationBanner = computed(
+  () =>
+    !hideLayout.value &&
+    (filesystemReadinessStore.filesystemInitializing || filesystemReadinessStore.filesystemFailed),
+)
+
+const filesystemInitializationMessage = computed(() => {
+  if (filesystemReadinessStore.filesystemFailed) {
+    return (
+      filesystemReadinessStore.readiness?.filesystemErrorMessage ||
+      'Library filesystem initialization failed. Browsing remains available, but file operations are disabled.'
+    )
+  }
+
+  return 'Library filesystem is initializing. Browsing is available, but file operations are temporarily disabled.'
+})
+
 const appShellCssVars = computed(() => {
   const topNavHeightPx = 60
-  const bannerHeightPx = showSecurityWarningBanner.value ? 44 : 0
+  const securityBannerHeightPx = showSecurityWarningBanner.value ? 44 : 0
+  const filesystemBannerHeightPx = showFilesystemInitializationBanner.value ? 38 : 0
+  const bannerHeightPx = securityBannerHeightPx + filesystemBannerHeightPx
   const topOffsetPx = hideLayout.value ? 0 : topNavHeightPx + bannerHeightPx
 
   return {
     '--top-nav-height': `${topNavHeightPx}px`,
-    '--security-banner-height': `${bannerHeightPx}px`,
+    '--security-banner-height': `${securityBannerHeightPx}px`,
+    '--filesystem-banner-height': `${filesystemBannerHeightPx}px`,
+    '--app-banner-height': `${bannerHeightPx}px`,
     '--app-top-offset': `${topOffsetPx}px`,
   } as Record<string, string>
 })
@@ -1422,6 +1704,8 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
 #app {
   --top-nav-height: 60px;
   --security-banner-height: 0px;
+  --filesystem-banner-height: 0px;
+  --app-banner-height: 0px;
   --app-top-offset: var(--top-nav-height);
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   margin: 0;
@@ -1444,14 +1728,14 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
   justify-content: space-between;
   align-items: center;
   position: fixed;
-  top: var(--security-banner-height);
+  top: var(--app-banner-height);
   left: 0;
   right: 0;
   z-index: 1000;
 }
 
 .top-nav.auth-warning-visible {
-  top: var(--security-banner-height);
+  top: var(--app-banner-height);
 }
 
 .security-warning-banner {
@@ -1503,6 +1787,29 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
 .security-warning-dismiss:focus-visible {
   outline: 2px solid rgba(255, 216, 168, 0.5);
   outline-offset: 1px;
+}
+
+.filesystem-initialization-banner {
+  position: fixed;
+  top: var(--security-banner-height);
+  left: 0;
+  right: 0;
+  z-index: 1001;
+  height: var(--filesystem-banner-height);
+  display: flex;
+  align-items: center;
+  padding: 0 1rem;
+  background: #263548;
+  border-bottom: 1px solid rgba(144, 202, 249, 0.28);
+  color: #d7ebff;
+  font-size: 0.875rem;
+  line-height: 1.3;
+}
+
+.filesystem-initialization-banner.failed {
+  background: #4a2116;
+  border-bottom-color: rgba(255, 183, 77, 0.28);
+  color: #ffd8a8;
 }
 
 .nav-brand {

@@ -178,10 +178,22 @@ onMounted(() => {
 - Use index files for clean imports
 
 #### Testing
-- Write unit tests for business logic
-- Mock external dependencies
-- Use descriptive test names
-- Test both success and error scenarios
+- Write unit tests for all business logic; test both success and error scenarios.
+- Mock external dependencies (API clients, file system, download clients).
+- Test classes are named `{TestedClassName}Tests` and mirror the source project path under `tests/`.
+- Every test class inherits `BaseTests`.
+- Annotate with `[Trait("Name", "...Tests")]` and `[Trait("Category", "...")]`.
+- Call `Init()` (optionally with DI overrides) before adding test data:
+  ```csharp
+  Init(services => services.WithSingleton(myMock.Object));
+  Init(services => services.Without<IServiceToRemove>());
+  ```
+- Use builder classes under `tests/Builders/` to create populated test entities. Prefer fluent `.With...()` methods followed by `.Build()` over multi-property inline object initializers.
+- If a coherent domain/model fixture needs repeated setup and no builder exists, add a focused builder.
+- Only add repository data *after* calling `Init()`.
+- Structure tests as Given / When / Then.
+- API mock helpers inherit `BaseMock`; use `GetCallCount()`, `GetLastRequest()`, `GetLastContent()`.
+- See `tests/README.md` for full conventions.
 
 #### Documentation
 - Add XML comments to public methods and classes
@@ -266,13 +278,33 @@ onMounted(() => {
 - Frontend: Restart `npm run dev` if Vite HMR fails
 - File locks may prevent hot reload; full restart resolves this
 
-### Development Workflow
+#### Architecture / Layering
+- `listenarr.api` **must not** reference `listenarr.infrastructure` (except `listenarr.api/Program.cs`).
+- `listenarr.application` **must not** reference `listenarr.infrastructure`.
+- Data flows inward only: `infrastructure` → `application` → `api`. Violations are caught by the pre-commit hook.
 
-1. **Branching**: Use feature branches for new work
-2. **Commits**: Make small, focused commits with clear messages
-3. **Testing**: Run tests before committing
-4. **Code Review**: Submit PRs for review
-5. **Deployment**: Use automated deployment scripts
+#### Async Code
+- **Never use `async void`** in production code. Always use `async Task`. `async void` causes unobservable exceptions and is rejected by the pre-commit hook.
+
+#### Dependency Injection
+- Use `AddListenarrInfrastructure` to register DbContext/IDbContextFactory (replaces `AddListenarrPersistence` / separate `AddDbContext` calls).
+- Inject `IDbContextFactory<ListenArrDbContext>` in hosted/background services; create and dispose contexts per operation.
+
+### Pre-Commit and Pre-Push Enforcement
+
+**Pre-commit** (`node scripts/lint-staged.mjs` + layering check + `async void` check):
+- C# staged files: `dotnet-format` (no alignment padding allowed).
+- Vue/TS staged files: Prettier check (`cd fe && npm run format:prettier:check`).
+- Layering rules (see above) checked across all source projects.
+- `async void` grep rejects any occurrences in production projects.
+
+Quick fix: `dotnet format && cd fe && npm run format:prettier && cd ..`
+
+**Pre-push** (runs on `git push`):
+1. Version sync — `node scripts/sync-fe-version-from-csproj.mjs`
+2. Full solution format — `dotnet format listenarr.slnx --no-restore --verify-no-changes`
+3. Vue TypeScript check — `cd fe && vue-tsc --build tsconfig.app.json`
+4. Frontend unit tests — `cd fe && vitest run`
 
 ### Common Patterns
 

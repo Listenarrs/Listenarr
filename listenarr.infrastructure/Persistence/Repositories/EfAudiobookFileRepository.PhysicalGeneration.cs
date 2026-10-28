@@ -1,0 +1,336 @@
+using Microsoft.EntityFrameworkCore;
+
+namespace Listenarr.Infrastructure.Persistence.Repositories;
+
+public partial class EfAudiobookFileRepository
+{
+    public async Task<bool> RestorePhysicalGenerationAsync(
+        int fileId,
+        int audiobookId,
+        string? expectedPath,
+        string? expectedPhysicalObjectIdentity,
+        AudiobookFilePhysicalGenerationSnapshot predecessor,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(predecessor);
+        var query = _db.AudiobookFiles.Where(candidate =>
+            candidate.Id == fileId
+            && candidate.AudiobookId == audiobookId
+            && candidate.Path == expectedPath
+            && candidate.PhysicalObjectIdentity == expectedPhysicalObjectIdentity);
+        if (_db.Database.IsRelational())
+        {
+            var completionToken = RequestCancellationBoundary.EnterNonCancelablePhase(ct);
+            var updated = await query.ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(candidate => candidate.Size, predecessor.Size)
+                    .SetProperty(candidate => candidate.DurationSeconds, predecessor.DurationSeconds)
+                    .SetProperty(candidate => candidate.Format, predecessor.Format)
+                    .SetProperty(candidate => candidate.Container, predecessor.Container)
+                    .SetProperty(candidate => candidate.Codec, predecessor.Codec)
+                    .SetProperty(candidate => candidate.Bitrate, predecessor.Bitrate)
+                    .SetProperty(candidate => candidate.SampleRate, predecessor.SampleRate)
+                    .SetProperty(candidate => candidate.Channels, predecessor.Channels)
+                    .SetProperty(candidate => candidate.Source, predecessor.Source)
+                    .SetProperty(candidate => candidate.PhysicalObjectIdentity, predecessor.PhysicalObjectIdentity)
+                    .SetProperty(candidate => candidate.PhysicalIdentityVersion, predecessor.PhysicalIdentityVersion)
+                    .SetProperty(candidate => candidate.PhysicalIdentityObservedAtUtc, predecessor.PhysicalIdentityObservedAtUtc),
+                completionToken);
+            if (updated != 1)
+            {
+                return false;
+            }
+            SynchronizeTrackedPhysicalGeneration(fileId, predecessor);
+            return true;
+        }
+
+        var existing = await query.SingleOrDefaultAsync(ct);
+        if (existing == null)
+        {
+            return false;
+        }
+        ApplyPhysicalGenerationSnapshot(existing, predecessor);
+        var nonRelationalCompletionToken = RequestCancellationBoundary.EnterNonCancelablePhase(ct);
+        await _db.SaveChangesAsync(nonRelationalCompletionToken);
+        return true;
+    }
+    public async Task<bool> ReplacePhysicalGenerationAsync(
+        int fileId,
+        int audiobookId,
+        string? expectedPath,
+        string? expectedPhysicalObjectIdentity,
+        AudiobookFile replacement,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(replacement);
+
+        var query = _db.AudiobookFiles.Where(candidate =>
+            candidate.Id == fileId
+            && candidate.AudiobookId == audiobookId
+            && candidate.Path == expectedPath
+            && candidate.PhysicalObjectIdentity == expectedPhysicalObjectIdentity);
+        if (_db.Database.IsRelational())
+        {
+            var completionToken =
+                RequestCancellationBoundary.EnterNonCancelablePhase(ct);
+            var updated = await query.ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(candidate => candidate.Size, replacement.Size)
+                    .SetProperty(
+                        candidate => candidate.DurationSeconds,
+                        replacement.DurationSeconds)
+                    .SetProperty(candidate => candidate.Format, replacement.Format)
+                    .SetProperty(candidate => candidate.Container, replacement.Container)
+                    .SetProperty(candidate => candidate.Codec, replacement.Codec)
+                    .SetProperty(candidate => candidate.Bitrate, replacement.Bitrate)
+                    .SetProperty(candidate => candidate.SampleRate, replacement.SampleRate)
+                    .SetProperty(candidate => candidate.Channels, replacement.Channels)
+                    .SetProperty(candidate => candidate.Source, replacement.Source)
+                    .SetProperty(
+                        candidate => candidate.PhysicalObjectIdentity,
+                        replacement.PhysicalObjectIdentity)
+                    .SetProperty(
+                        candidate => candidate.PhysicalIdentityVersion,
+                        replacement.PhysicalIdentityVersion)
+                    .SetProperty(
+                        candidate => candidate.PhysicalIdentityObservedAtUtc,
+                        replacement.PhysicalIdentityObservedAtUtc),
+                completionToken);
+            if (updated != 1)
+            {
+                return false;
+            }
+
+            SynchronizeTrackedPhysicalGeneration(fileId, replacement);
+            return true;
+        }
+
+        var existing = await query.SingleOrDefaultAsync(ct);
+        if (existing == null)
+        {
+            return false;
+        }
+
+        ApplyPhysicalGeneration(existing, replacement);
+        var nonRelationalCompletionToken =
+            RequestCancellationBoundary.EnterNonCancelablePhase(ct);
+        await _db.SaveChangesAsync(nonRelationalCompletionToken);
+        return true;
+    }
+
+    public async Task<bool> DeletePhysicalGenerationAsync(
+        int fileId,
+        int audiobookId,
+        string? expectedPath,
+        string? expectedPhysicalObjectIdentity,
+        CancellationToken ct = default)
+    {
+        var query = _db.AudiobookFiles.Where(candidate =>
+            candidate.Id == fileId
+            && candidate.AudiobookId == audiobookId
+            && candidate.Path == expectedPath
+            && candidate.PhysicalObjectIdentity
+                == expectedPhysicalObjectIdentity);
+        if (_db.Database.IsRelational())
+        {
+            var completionToken =
+                RequestCancellationBoundary.EnterNonCancelablePhase(ct);
+            var deleted = await query.ExecuteDeleteAsync(completionToken);
+            if (deleted != 1)
+            {
+                return false;
+            }
+
+            var tracked = _db.ChangeTracker.Entries<AudiobookFile>()
+                .FirstOrDefault(entry => entry.Entity.Id == fileId);
+            if (tracked != null)
+            {
+                tracked.State = EntityState.Detached;
+            }
+
+            return true;
+        }
+
+        var existing = await query.SingleOrDefaultAsync(ct);
+        if (existing == null)
+        {
+            return false;
+        }
+
+        _db.AudiobookFiles.Remove(existing);
+        var nonRelationalCompletionToken =
+            RequestCancellationBoundary.EnterNonCancelablePhase(ct);
+        await _db.SaveChangesAsync(nonRelationalCompletionToken);
+        return true;
+    }
+
+
+    public async Task<bool> DeletePathStateAsync(
+        int fileId,
+        int audiobookId,
+        AudiobookFilePathState expectedPathState,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(expectedPathState);
+        var query = _db.AudiobookFiles.Where(candidate =>
+            candidate.Id == fileId
+            && candidate.AudiobookId == audiobookId
+            && candidate.Path == expectedPathState.StoredPath
+            && candidate.CanonicalPath == expectedPathState.CanonicalPath
+            && candidate.PathSyntax == expectedPathState.Syntax
+            && candidate.PathCaseSensitivity == expectedPathState.CaseSensitivity
+            && candidate.PathCaseSensitivityMode == expectedPathState.RequestedMode
+            && candidate.PathIdentityBoundary == expectedPathState.BoundaryPath
+            && candidate.PathIdentityLookupKey == expectedPathState.LookupKey
+            && candidate.PathOwnershipKey == expectedPathState.OwnershipKey
+            && candidate.PathIdentityVersion == expectedPathState.Version
+            && candidate.PathIdentityState == expectedPathState.State
+            && candidate.PathIdentityReason == expectedPathState.Reason);
+
+        var completionToken = RequestCancellationBoundary.EnterNonCancelablePhase(ct);
+        if (_db.Database.IsRelational())
+        {
+            var deleted = await query.ExecuteDeleteAsync(completionToken);
+            if (deleted != 1)
+            {
+                return false;
+            }
+
+            var tracked = _db.ChangeTracker.Entries<AudiobookFile>()
+                .FirstOrDefault(entry => entry.Entity.Id == fileId);
+            if (tracked != null)
+            {
+                tracked.State = EntityState.Detached;
+            }
+
+            return true;
+        }
+
+        var existing = await query.SingleOrDefaultAsync(ct);
+        if (existing == null)
+        {
+            return false;
+        }
+
+        _db.AudiobookFiles.Remove(existing);
+        await _db.SaveChangesAsync(completionToken);
+        return true;
+    }
+
+    private void SynchronizeTrackedPhysicalGeneration(
+        int fileId,
+        AudiobookFile replacement)
+    {
+        var trackedEntry = _db.ChangeTracker.Entries<AudiobookFile>()
+            .FirstOrDefault(entry => entry.Entity.Id == fileId);
+        if (trackedEntry == null)
+        {
+            return;
+        }
+
+        Synchronize(nameof(AudiobookFile.Size), replacement.Size);
+        Synchronize(
+            nameof(AudiobookFile.DurationSeconds),
+            replacement.DurationSeconds);
+        Synchronize(nameof(AudiobookFile.Format), replacement.Format);
+        Synchronize(nameof(AudiobookFile.Container), replacement.Container);
+        Synchronize(nameof(AudiobookFile.Codec), replacement.Codec);
+        Synchronize(nameof(AudiobookFile.Bitrate), replacement.Bitrate);
+        Synchronize(nameof(AudiobookFile.SampleRate), replacement.SampleRate);
+        Synchronize(nameof(AudiobookFile.Channels), replacement.Channels);
+        Synchronize(nameof(AudiobookFile.Source), replacement.Source);
+        Synchronize(
+            nameof(AudiobookFile.PhysicalObjectIdentity),
+            replacement.PhysicalObjectIdentity);
+        Synchronize(
+            nameof(AudiobookFile.PhysicalIdentityVersion),
+            replacement.PhysicalIdentityVersion);
+        Synchronize(
+            nameof(AudiobookFile.PhysicalIdentityObservedAtUtc),
+            replacement.PhysicalIdentityObservedAtUtc);
+
+        void Synchronize(string propertyName, object? value)
+        {
+            var property = trackedEntry.Property(propertyName);
+            property.CurrentValue = value;
+            property.OriginalValue = value;
+            property.IsModified = false;
+        }
+    }
+
+    private void SynchronizeTrackedPhysicalGeneration(
+        int fileId,
+        AudiobookFilePhysicalGenerationSnapshot snapshot)
+    {
+        var trackedEntry = _db.ChangeTracker.Entries<AudiobookFile>()
+            .FirstOrDefault(entry => entry.Entity.Id == fileId);
+        if (trackedEntry == null)
+        {
+            return;
+        }
+
+        Synchronize(nameof(AudiobookFile.Size), snapshot.Size);
+        Synchronize(nameof(AudiobookFile.DurationSeconds), snapshot.DurationSeconds);
+        Synchronize(nameof(AudiobookFile.Format), snapshot.Format);
+        Synchronize(nameof(AudiobookFile.Container), snapshot.Container);
+        Synchronize(nameof(AudiobookFile.Codec), snapshot.Codec);
+        Synchronize(nameof(AudiobookFile.Bitrate), snapshot.Bitrate);
+        Synchronize(nameof(AudiobookFile.SampleRate), snapshot.SampleRate);
+        Synchronize(nameof(AudiobookFile.Channels), snapshot.Channels);
+        Synchronize(nameof(AudiobookFile.Source), snapshot.Source);
+        Synchronize(nameof(AudiobookFile.PhysicalObjectIdentity), snapshot.PhysicalObjectIdentity);
+        Synchronize(nameof(AudiobookFile.PhysicalIdentityVersion), snapshot.PhysicalIdentityVersion);
+        Synchronize(nameof(AudiobookFile.PhysicalIdentityObservedAtUtc), snapshot.PhysicalIdentityObservedAtUtc);
+
+        void Synchronize(string propertyName, object? value)
+        {
+            var property = trackedEntry.Property(propertyName);
+            property.CurrentValue = value;
+            property.OriginalValue = value;
+            property.IsModified = false;
+        }
+    }
+
+    private void ApplyPhysicalGenerationSnapshot(
+        AudiobookFile target,
+        AudiobookFilePhysicalGenerationSnapshot snapshot)
+    {
+        target.Size = snapshot.Size;
+        target.DurationSeconds = snapshot.DurationSeconds;
+        target.Format = snapshot.Format;
+        target.Container = snapshot.Container;
+        target.Codec = snapshot.Codec;
+        target.Bitrate = snapshot.Bitrate;
+        target.SampleRate = snapshot.SampleRate;
+        target.Channels = snapshot.Channels;
+        target.Source = snapshot.Source;
+        var entry = _db.Entry(target);
+        entry.Property(nameof(AudiobookFile.PhysicalObjectIdentity)).CurrentValue = snapshot.PhysicalObjectIdentity;
+        entry.Property(nameof(AudiobookFile.PhysicalIdentityVersion)).CurrentValue = snapshot.PhysicalIdentityVersion;
+        entry.Property(nameof(AudiobookFile.PhysicalIdentityObservedAtUtc)).CurrentValue = snapshot.PhysicalIdentityObservedAtUtc;
+    }
+    private static void ApplyPhysicalGeneration(
+        AudiobookFile target,
+        AudiobookFile source)
+    {
+        target.Size = source.Size;
+        target.DurationSeconds = source.DurationSeconds;
+        target.Format = source.Format;
+        target.Container = source.Container;
+        target.Codec = source.Codec;
+        target.Bitrate = source.Bitrate;
+        target.SampleRate = source.SampleRate;
+        target.Channels = source.Channels;
+        target.Source = source.Source;
+        if (string.IsNullOrWhiteSpace(source.PhysicalObjectIdentity)
+            || !source.PhysicalIdentityObservedAtUtc.HasValue)
+        {
+            target.ClearPhysicalObjectIdentity();
+            return;
+        }
+
+        target.ApplyPhysicalObjectIdentity(
+            source.PhysicalObjectIdentity,
+            source.PhysicalIdentityObservedAtUtc.Value);
+    }
+}

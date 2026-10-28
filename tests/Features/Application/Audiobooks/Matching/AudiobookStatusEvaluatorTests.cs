@@ -108,6 +108,62 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Matching
             Assert.Equal(AudiobookStatusEvaluator.QualityMatch, status);
         }
 
+        [Fact]
+        public void ComputeStatus_ReturnsQualityMatch_ForPathOnlyFile_WhenProbeMetadataMissing()
+        {
+            // Regression: when metadata processing is disabled / ffprobe is unavailable, the file
+            // summary carries only a Path. The status evaluator must forward that Path to the
+            // QualityMatcher (as AudiobookQualityCutoffEvaluator does) so a "book.flac" maps to the
+            // FLAC lossless rung. Previously Path was dropped, so this resolved as quality-mismatch
+            // and disagreed with the automatic-search cutoff.
+            // PreferredFormats = ["flac"] exercises the candidate filter too: a metadata-less file
+            // must match the preferred format via its path extension, not be dropped before the matcher.
+            var profile = new QualityProfile
+            {
+                Name = "Lossless Profile",
+                CutoffQuality = "lossless",
+                PreferredFormats = new List<string> { "flac" },
+                Qualities = new List<QualityDefinition>
+                {
+                    new() { Quality = "lossless", Priority = 0 }
+                }
+            };
+            var files = new List<AudiobookFormatSummary>
+            {
+                new() { Path = "/audiobooks/Author/Title/book.flac" }
+            };
+
+            var status = AudiobookStatusEvaluator.ComputeStatus(false, true, null, profile, files);
+
+            Assert.Equal(AudiobookStatusEvaluator.QualityMatch, status);
+        }
+
+        [Fact]
+        public void ComputeStatus_ReturnsQualityMatch_ForPathOnlyLossyFile_WhenPreferredFormatMatchesExtension()
+        {
+            // Generality beyond FLAC: the path-extension fallback is format-agnostic. A metadata-less
+            // book.m4b with PreferredFormats = ["m4b"] must pass the candidate filter via its extension
+            // (AAC group) and resolve through the matcher, not be dropped as quality-mismatch.
+            var profile = new QualityProfile
+            {
+                Name = "AAC Profile",
+                CutoffQuality = "AAC 256kbps",
+                PreferredFormats = new List<string> { "m4b" },
+                Qualities = new List<QualityDefinition>
+                {
+                    new() { Quality = "AAC 256kbps", Codec = "AAC", Bitrate = 256, Priority = 0 }
+                }
+            };
+            var files = new List<AudiobookFormatSummary>
+            {
+                new() { Path = "/audiobooks/Author/Title/book.m4b" }
+            };
+
+            var status = AudiobookStatusEvaluator.ComputeStatus(false, true, null, profile, files);
+
+            Assert.Equal(AudiobookStatusEvaluator.QualityMatch, status);
+        }
+
         private static QualityProfile CreateProfile(string cutoffQuality, List<string> preferredFormats)
         {
             return new QualityProfile

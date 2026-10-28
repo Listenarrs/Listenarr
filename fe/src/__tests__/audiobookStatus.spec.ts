@@ -17,91 +17,50 @@
  */
 import { describe, expect, it } from 'vitest'
 import { computeAudiobookStatus } from '@/utils/audiobookStatus'
-import type { Audiobook, QualityProfile } from '@/types'
+import type { Audiobook } from '@/types'
 
 describe('computeAudiobookStatus', () => {
-  it('uses the server-provided slim status when files are not present', () => {
-    const audiobook = {
-      id: 1,
-      title: 'Slim Book',
-      status: 'quality-match',
-      wanted: false,
-    } as Audiobook
-
-    expect(computeAudiobookStatus(audiobook, new Set(), [])).toBe('quality-match')
+  it('trusts the server-computed quality-match status', () => {
+    const audiobook = { id: 1, title: 'Matched', status: 'quality-match' } as Audiobook
+    expect(computeAudiobookStatus(audiobook, new Set())).toBe('quality-match')
   })
 
-  it('lets active downloads override the cached list status', () => {
-    const audiobook = {
-      id: 2,
-      title: 'Downloading Book',
-      status: 'quality-match',
-      wanted: false,
-    } as Audiobook
-
-    expect(computeAudiobookStatus(audiobook, new Set([2]), [])).toBe('downloading')
+  it('trusts the server-computed quality-mismatch status', () => {
+    const audiobook = { id: 2, title: 'Below Cutoff', status: 'quality-mismatch' } as Audiobook
+    expect(computeAudiobookStatus(audiobook, new Set())).toBe('quality-mismatch')
   })
 
-  it('recomputes from files when a richer audiobook payload is available', () => {
-    const audiobook = {
-      id: 3,
-      title: 'Detailed Book',
-      qualityProfileId: 10,
-      files: [{ id: 100, format: 'm4b', bitrate: 320000 }],
-    } as Audiobook
-
-    const profiles: QualityProfile[] = [
-      {
-        id: 10,
-        name: 'High Quality',
-        cutoffQuality: '320kbps',
-        preferredFormats: ['m4b'],
-        qualities: [{ quality: '320kbps', allowed: true, priority: 0 }],
-      },
-    ]
-
-    expect(computeAudiobookStatus(audiobook, new Set(), profiles)).toBe('quality-match')
+  it('trusts the server-computed no-file status', () => {
+    const audiobook = { id: 3, title: 'Missing', status: 'no-file' } as Audiobook
+    expect(computeAudiobookStatus(audiobook, new Set())).toBe('no-file')
   })
 
-  it('handles bitrate values stored in bits per second', () => {
-    const audiobook = {
-      id: 4,
-      title: 'Bitrate Book',
-      qualityProfileId: 10,
-      files: [{ id: 101, format: 'm4b', bitrate: 256000 }],
-    } as Audiobook
-
-    const profiles: QualityProfile[] = [
-      {
-        id: 10,
-        name: 'High Quality',
-        cutoffQuality: '256kbps',
-        preferredFormats: ['m4b'],
-        qualities: [{ quality: '256kbps', allowed: true, priority: 0 }],
-      },
-    ]
-
-    expect(computeAudiobookStatus(audiobook, new Set(), profiles)).toBe('quality-match')
+  it('lets an active download override the cached server status', () => {
+    const audiobook = { id: 4, title: 'Downloading', status: 'quality-match' } as Audiobook
+    expect(computeAudiobookStatus(audiobook, new Set([4]))).toBe('downloading')
   })
 
-  it('treats WavPack files as lossless', () => {
+  it('does not recompute from files/profiles — the server is the source of truth', () => {
+    // Files look like a healthy 320kbps M4B, but the server says it is below cutoff
+    // (e.g. its profile cutoff is higher). The frontend must defer to the server.
     const audiobook = {
       id: 5,
-      title: 'Lossless Book',
+      title: 'Defer To Server',
+      status: 'quality-mismatch',
       qualityProfileId: 10,
-      files: [{ id: 102, format: 'wv', container: 'wv' }],
+      files: [{ id: 100, format: 'm4b', codec: 'aac', bitrate: 320000 }],
     } as Audiobook
 
-    const profiles: QualityProfile[] = [
-      {
-        id: 10,
-        name: 'Lossless',
-        cutoffQuality: 'lossless',
-        preferredFormats: ['wv'],
-        qualities: [{ quality: 'lossless', allowed: true, priority: 0 }],
-      },
-    ]
+    expect(computeAudiobookStatus(audiobook, new Set())).toBe('quality-mismatch')
+  })
 
-    expect(computeAudiobookStatus(audiobook, new Set(), profiles)).toBe('quality-match')
+  it('falls back to no-file when the server sent no recognizable status', () => {
+    const audiobook = { id: 6, title: 'No Status' } as Audiobook
+    expect(computeAudiobookStatus(audiobook, new Set())).toBe('no-file')
+  })
+
+  it('falls back to no-file when the status is an unrelated download-state string', () => {
+    const audiobook = { id: 7, title: 'Stray Status', status: 'completed' } as unknown as Audiobook
+    expect(computeAudiobookStatus(audiobook, new Set())).toBe('no-file')
   })
 })

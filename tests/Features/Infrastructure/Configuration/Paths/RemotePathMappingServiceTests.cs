@@ -52,6 +52,34 @@ namespace Listenarr.Tests.Features.Infrastructure.Configuration.Paths
             randomClient = await CreateDownloadClientConfiguration();
         }
 
+        [Fact]
+        public async Task CreateAsync_AmbiguousForwardSlashDoubleRoot_RejectsUnusableMapping()
+        {
+            var mapping = new RemotePathMappingBuilder()
+                .WithDownloadClientConfiguration(client)
+                .WithRemotePath("//server/share/downloads")
+                .WithLocalPath(FileUtils.GetAbsolutePath("remote-ambiguous-create"))
+                .Build();
+
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+                remotePathMappingService.CreateAsync(mapping));
+        }
+
+        [Fact]
+        public async Task UpdateAsync_AmbiguousForwardSlashDoubleRoot_RejectsUnusableMapping()
+        {
+            var existing = await remotePathMappingService.CreateAsync(
+                new RemotePathMappingBuilder()
+                    .WithDownloadClientConfiguration(client)
+                    .WithRemotePath("/downloads")
+                    .WithLocalPath(FileUtils.GetAbsolutePath("remote-ambiguous-update"))
+                    .Build());
+            existing.RemotePath = "//server/share/downloads";
+
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+                remotePathMappingService.UpdateAsync(existing));
+        }
+
         [Theory]
         [ClassData(typeof(PathTestData))]
         [Trait("Method", "TranslatePathAsync")]
@@ -67,6 +95,34 @@ namespace Listenarr.Tests.Features.Infrastructure.Configuration.Paths
 
             Assert.Equal(expected, await remotePathMappingService.TranslatePathAsync(client, given));
             Assert.Equal(given, await remotePathMappingService.TranslatePathAsync(randomClient, given));
+        }
+
+        [Fact]
+        [Trait("Method", "TranslatePathAsync")]
+        public async Task TranslatePathAsync_UnavailableMoreSpecificMapping_DoesNotFallThroughToBroaderMapping()
+        {
+            var broadLocalPath = FileUtils.GetAbsolutePath("remote-broad-imports");
+            await _remotePathMappingRepository.SaveAsync(new RemotePathMappingBuilder()
+                .WithDownloadClientConfiguration(client)
+                .WithRemotePath("/downloads")
+                .WithLocalPath(broadLocalPath)
+                .Build());
+            await _remotePathMappingRepository.SaveAsync(new RemotePathMappingBuilder()
+                .WithDownloadClientConfiguration(client)
+                .WithRemotePath("/downloads/books")
+                .WithLocalPath("relative-unavailable-local-root")
+                .Build());
+            const string reportedPath = "/downloads/books/Author/book.m4b";
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                remotePathMappingService.TranslatePathAsync(
+                    client,
+                    reportedPath));
+
+            Assert.Contains(
+                "matching remote path mapping",
+                exception.Message,
+                StringComparison.OrdinalIgnoreCase);
         }
 
         [Fact]
@@ -105,5 +161,91 @@ namespace Listenarr.Tests.Features.Infrastructure.Configuration.Paths
             Assert.Equal(FileUtils.EnsureTrailingSeparator(FileUtils.NormalizeStoredPath(localPath)), await remotePathMappingService.TranslatePathAsync(client, remotePath));
             Assert.Equal(Path.Join(localPath, "book.m4b"), await remotePathMappingService.TranslatePathAsync(client, childPath));
         }
+
+        [Fact]
+        public async Task TranslatePathAsync_BackslashUncRoot_PreservesWindowsRemoteSyntax()
+        {
+            var localPath = FileUtils.GetAbsolutePath("remote-unc-imports");
+            await _remotePathMappingRepository.SaveAsync(new RemotePathMappingBuilder()
+                .WithDownloadClientConfiguration(client)
+                .WithRemotePath(@"\\server\share\downloads")
+                .WithLocalPath(localPath)
+                .Build());
+
+            var translated = await remotePathMappingService.TranslatePathAsync(
+                client,
+                @"\\server\share\downloads\Author\book.m4b");
+
+            Assert.Equal(Path.Join(localPath, "Author", "book.m4b"), translated);
+        }
+
+        [Fact]
+        public async Task TranslatePathAsync_ForwardSlashDoubleRoot_IsAmbiguousAndNotMapped()
+        {
+            var localPath = FileUtils.GetAbsolutePath("remote-ambiguous-imports");
+            const string ambiguousRoot = "//server/share/downloads";
+            const string reportedPath = "//server/share/downloads/Author/book.m4b";
+            await _remotePathMappingRepository.SaveAsync(new RemotePathMappingBuilder()
+                .WithDownloadClientConfiguration(client)
+                .WithRemotePath(ambiguousRoot)
+                .WithLocalPath(localPath)
+                .Build());
+
+            var translated = await remotePathMappingService.TranslatePathAsync(
+                client,
+                reportedPath);
+
+            Assert.Equal(reportedPath, translated);
+        }
+
+        [WindowsFact]
+        public async Task TranslatePathAsync_ForeignPersistedLocalRoot_FailsClosed()
+        {
+            var nativeLocalRoot = FileUtils.GetAbsolutePath("foreign-local-root");
+            var foreignLocalRoot = TempFileService
+                .GetWindowsRootRelativeForeignAlias(nativeLocalRoot);
+
+            await _remotePathMappingRepository.SaveAsync(new RemotePathMappingBuilder()
+                .WithDownloadClientConfiguration(client)
+                .WithRemotePath("/downloads")
+                .WithLocalPath(foreignLocalRoot)
+                .Build());
+
+            var reportedPath = "/downloads/Author/book.m4b";
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                remotePathMappingService.TranslatePathAsync(
+                    client,
+                    reportedPath));
+
+            Assert.Contains(
+                "matching remote path mapping",
+                exception.Message,
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Theory]
+        [InlineData("C:/downloads", "C:\\downloads\\Author\\book.m4b")]
+        [InlineData("/downloads", "/downloads/Author/book.m4b")]
+        public async Task TranslatePathAsync_UsesRemoteSyntaxIndependentOfHost(
+            string remoteRoot,
+            string reportedPath)
+        {
+            var localPath = FileUtils.GetAbsolutePath("remote-syntax-imports");
+            await _remotePathMappingRepository.SaveAsync(new RemotePathMappingBuilder()
+                .WithDownloadClientConfiguration(client)
+                .WithRemotePath(remoteRoot)
+                .WithLocalPath(localPath)
+                .Build());
+
+            var translated = await remotePathMappingService.TranslatePathAsync(client, reportedPath);
+
+            Assert.Equal(Path.Join(localPath, "Author", "book.m4b"), translated);
+        }
+
+        // The concurrency regression for GetByClientIdAsync lives in
+        // EfRemotePathMappingRepositoryConcurrencyTests, which uses a SQLite-backed
+        // command interceptor to guarantee the reads genuinely overlap. The InMemory
+        // provider used here completes reads synchronously as Task.WhenAll enumerates
+        // them, so a burst scheduled on it cannot prove the per-operation context fix.
     }
 }

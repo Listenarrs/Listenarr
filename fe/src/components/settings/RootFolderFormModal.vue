@@ -35,6 +35,32 @@
           />
         </FormRow>
 
+        <FormRow label="Filesystem behavior">
+          <div class="filesystem-behavior-summary">
+            <div>
+              <strong>{{ filesystemBehaviorTitle }}</strong>
+              <small class="semantics-help">{{ filesystemBehaviorDetail }}</small>
+            </div>
+          </div>
+
+          <details class="advanced-semantics">
+            <summary>Advanced options</summary>
+            <label for="root-case-sensitivity" class="advanced-semantics-label">
+              Case sensitivity
+            </label>
+            <select
+              id="root-case-sensitivity"
+              v-model="form.caseSensitivityMode"
+              class="form-input"
+              :disabled="rootFilesystemMutationLocked"
+            >
+              <option value="Auto">Automatic when supported</option>
+              <option value="Sensitive">Case-sensitive</option>
+              <option value="Insensitive">Case-insensitive</option>
+            </select>
+          </details>
+        </FormRow>
+
         <FormRow label="Path" labelFor="root-path">
           <div class="path-input-row">
             <input
@@ -42,17 +68,24 @@
               v-model="form.path"
               class="form-input"
               placeholder="Select or enter a path..."
+              :disabled="rootFilesystemMutationLocked"
             />
             <button
               type="button"
               class="icon-btn btn-secondary btn-inline-browse"
               @click="openBrowser"
+              :disabled="rootFilesystemMutationLocked"
               title="Browse for folder"
               aria-label="Browse for folder"
             >
               <PhFolder :size="16" />
             </button>
           </div>
+
+          <small v-if="rootFilesystemMutationLocked" class="semantics-help">
+            Path and filesystem semantics changes are available after library filesystem
+            initialization completes.
+          </small>
 
           <!-- Folder browser modal (opens in a centered modal) -->
           <FolderBrowserModal
@@ -82,7 +115,14 @@
 
   <MoveAudiobookModal
     :visible="showConfirm"
+    title="Change Library Folder"
     :pendingRootPath="form.path"
+    :currentRootPath="root?.path ?? null"
+    :rootFolderName="form.name"
+    :rootFolderChange="true"
+    :rootFolderRepair="rootStorageRepairRequired() && !rootPathChanged()"
+    :showMoveOption="rootPathChanged()"
+    :allowMoveFiles="rootPathChanged() && root?.storageState === 'Healthy'"
     v-model:moveFiles="modalMoveFiles"
     v-model:deleteEmpty="modalDeleteEmpty"
     @cancel="showConfirm = false"
@@ -91,7 +131,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import FolderBrowserModal from '@/components/feedback/FolderBrowserModal.vue'
 import { Modal, ModalHeader, ModalFooter } from '@/components/feedback'
 import MoveAudiobookModal from '@/components/feedback/MoveAudiobookModal.vue'
@@ -102,7 +142,11 @@ import CheckboxCard from '@/components/settings/CheckboxCard.vue'
 import { PhFolder } from '@phosphor-icons/vue'
 import { useRootFoldersStore } from '@/stores/rootFolders'
 import { useToast } from '@/services/toastService'
+import { getApiValidationError } from '@/services/apiErrors'
+import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import type { RootFolder } from '@/types'
+import { detectPathKind, validateLibraryDestinationPath, type PathKind } from '@/utils/path'
+import { persistedRootPathKind, rootFolderPathChanged } from '@/utils/rootFolderPath'
 
 const { root } = defineProps<{ root?: RootFolder }>()
 const emit = defineEmits<{
@@ -111,13 +155,39 @@ const emit = defineEmits<{
 }>()
 
 const store = useRootFoldersStore()
+const filesystemReadinessStore = useFilesystemReadinessStore()
 const toast = useToast()
+const rootFilesystemMutationLocked = computed(
+  () =>
+    Boolean(root?.id) &&
+    (root?.canChangePath === false || filesystemReadinessStore.filesystemReady === false),
+)
 
-const form = ref({ name: root?.name || '', path: root?.path || '', isDefault: !!root?.isDefault })
+const form = ref({
+  name: root?.name || '',
+  path: root?.path || '',
+  isDefault: !!root?.isDefault,
+  caseSensitivityMode: root?.caseSensitivityMode ?? ('Auto' as const),
+})
 
 const showConfirm = ref(false)
 const modalMoveFiles = ref(true)
 const modalDeleteEmpty = ref(true)
+
+const filesystemBehaviorTitle = computed(() => {
+  if (form.value.caseSensitivityMode === 'Sensitive') return 'Case-sensitive'
+  if (form.value.caseSensitivityMode === 'Insensitive') return 'Case-insensitive'
+  return 'Automatic when supported'
+})
+const filesystemBehaviorDetail = computed(() => {
+  if (form.value.caseSensitivityMode !== 'Auto') {
+    return 'File operations will use this explicitly configured behavior.'
+  }
+  if (root?.resolvedCaseSensitivity && root.resolvedCaseSensitivity !== 'Unknown') {
+    return `Detected ${root.resolvedCaseSensitivity === 'Sensitive' ? 'case-sensitive' : 'case-insensitive'} behavior automatically.`
+  }
+  return 'Listenarr will detect case behavior automatically when the storage provides reliable evidence.'
+})
 
 // Local state for showing the inline folder browser
 const showBrowser = ref(false)
@@ -132,62 +202,119 @@ function close() {
   emit('close')
 }
 
+function rootPathKind(): PathKind {
+  const sourceKind = root ? persistedRootPathKind(root) : 'unknown'
+  const detected = detectPathKind(form.value.path, sourceKind)
+  return detected === 'unknown' ? sourceKind : detected
+}
+
+function rootPathChanged(): boolean {
+  return root ? rootFolderPathChanged(root, form.value.path) : false
+}
+
+function rootStorageRepairRequired(): boolean {
+  return (
+    root?.storageReason === 'FilesystemSemanticsChanged' ||
+    root?.storageReason === 'FilesystemSemanticsUnavailable'
+  )
+}
+
+function rootFolderSaveError(error: unknown): string {
+  return (
+    getApiValidationError(error)?.message ||
+    (error instanceof Error ? error.message : 'Failed to save root folder')
+  )
+}
+
 async function save() {
   if (!form.value.name || !form.value.path) {
     toast.error('Validation Error', 'Name and Path are required')
     return
   }
+
+  const pathValidationError = validateLibraryDestinationPath(form.value.path, {
+    pathKind: rootPathKind(),
+    requireAbsolute: true,
+  })
+  if (pathValidationError) {
+    toast.error('Validation Error', pathValidationError)
+    return
+  }
+
   try {
     let newRoot
     if (root?.id) {
       // If path changed, show confirmation to choose whether to move files
-      if (form.value.path !== root.path) {
+      if (rootPathChanged() || rootStorageRepairRequired()) {
+        modalMoveFiles.value = rootPathChanged() && root.storageState === 'Healthy'
+        modalDeleteEmpty.value = modalMoveFiles.value
         showConfirm.value = true
         return
       }
-      newRoot = await store.update(root.id, {
-        id: root.id,
-        name: form.value.name,
-        path: form.value.path,
-        isDefault: form.value.isDefault,
-      })
-      toast.success('Success', 'Root folder updated')
+      newRoot = await store.update(
+        root.id,
+        {
+          id: root.id,
+          name: form.value.name,
+          path: form.value.path,
+          isDefault: form.value.isDefault,
+          caseSensitivityMode: form.value.caseSensitivityMode,
+        },
+        { expectedCurrentPath: root.path },
+      )
+      if (newRoot.activeRelocation?.status === 'NeedsAttention') {
+        toast.warning(
+          'Root folder changed',
+          'The root folder was updated, but one or more audiobooks still need path repair.',
+        )
+      } else {
+        toast.success('Success', 'Root folder updated')
+      }
     } else {
       newRoot = await store.create({
         name: form.value.name,
         path: form.value.path,
         isDefault: form.value.isDefault,
+        caseSensitivityMode: form.value.caseSensitivityMode,
       })
       toast.success('Success', 'Root folder created')
     }
     emit('saved', newRoot)
   } catch (e: unknown) {
-    const error = e as Error
-    toast.error('Error', error?.message || 'Failed to save root folder')
+    toast.error('Error', rootFolderSaveError(e))
   }
 }
 
 async function confirmChange(moveFiles: boolean) {
   showConfirm.value = false
   try {
-    await store.update(
+    const updated = await store.update(
       root!.id,
       {
         id: root!.id,
         name: form.value.name,
         path: form.value.path,
         isDefault: form.value.isDefault,
+        caseSensitivityMode: form.value.caseSensitivityMode,
       },
-      { moveFiles: moveFiles, deleteEmptySource: modalDeleteEmpty.value },
+      {
+        expectedCurrentPath: root!.path,
+        pathChangeConfirmed: true,
+        moveFiles,
+        deleteEmptySource: modalDeleteEmpty.value,
+      },
     )
-    toast.success(
-      'Success',
-      moveFiles ? 'Root renamed and move jobs queued' : 'Root renamed (files unchanged)',
-    )
-    emit('saved', root!)
+    if (!moveFiles && updated.activeRelocation?.status === 'NeedsAttention') {
+      toast.warning(
+        'Root folder changed',
+        'The root folder was updated, but one or more audiobooks still need path repair.',
+      )
+    } else {
+      toast.success('Success', moveFiles ? 'Root relocation started' : 'Root folder changed')
+    }
+    emit('saved', updated)
   } catch (e: unknown) {
-    const error = e as Error
-    toast.error('Error', error?.message || 'Failed to save root folder')
+    toast.error('Error', rootFolderSaveError(e))
   }
 }
 </script>
@@ -470,6 +597,45 @@ async function confirmChange(moveFiles: boolean) {
 .checkbox-row label input[type='checkbox']:focus {
   outline: 2px solid rgba(var(--brand-rgb), 0.3);
   outline-offset: 2px;
+}
+
+.filesystem-behavior-summary {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.875rem;
+  border: 1px solid var(--border-color, #444);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.filesystem-behavior-summary strong,
+.filesystem-behavior-summary .semantics-help {
+  display: block;
+}
+
+.filesystem-behavior-summary .semantics-help {
+  margin-top: 0.25rem;
+  line-height: 1.45;
+}
+
+.detected-semantics-action {
+  justify-self: start;
+}
+
+.advanced-semantics {
+  margin-top: 0.75rem;
+}
+
+.advanced-semantics summary {
+  cursor: pointer;
+  color: var(--text-secondary, #aaa);
+}
+
+.advanced-semantics-label {
+  display: block;
+  margin: 0.75rem 0 0.35rem;
+  color: var(--text-secondary, #bbb);
+  font-size: 0.875rem;
 }
 
 /* Form input styling to match login and other forms */

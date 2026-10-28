@@ -15,7 +15,13 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-import type { Download, QueueSnapshot, QueueUpdatePayload, Audiobook } from '@/types'
+import type {
+  Download,
+  QueueSnapshot,
+  QueueUpdatePayload,
+  Audiobook,
+  RootFolderPathChangeResult,
+} from '@/types'
 import { sessionTokenManager } from '@/utils/sessionToken'
 import { setConnected, setLastError, setReconnectAttempts } from './signalrEvents'
 import { logger } from '@/utils/logger'
@@ -142,7 +148,7 @@ type DownloadListCallback = (downloads: Download[]) => void
 type QueueUpdateCallback = (queueSnapshot: QueueSnapshot) => void
 type ScanJobCallback = (job: {
   jobId: string
-  audiobookId: number
+  audiobookId?: number | null
   status: string
   found?: number
   created?: number
@@ -197,8 +203,11 @@ class SignalRService {
       status: string
       target?: string
       error?: string
+      sourceRetained?: boolean
     }) => void
   > = new Set()
+  private rootFolderRelocationCallbacks: Set<(update: RootFolderPathChangeResult) => void> =
+    new Set()
   private filesRemovedCallbacks: Set<
     (payload: { audiobookId: number; removed: Array<{ id: number; path: string }> }) => void
   > = new Set()
@@ -417,7 +426,7 @@ class SignalRService {
         if (args && args[0]) {
           const job = args[0] as unknown as {
             jobId: string
-            audiobookId: number
+            audiobookId?: number | null
             status: string
             found?: number
             created?: number
@@ -432,10 +441,19 @@ class SignalRService {
             jobId: string
             audiobookId?: number
             status: string
+            progress?: number
+            phase?: string
             target?: string
             error?: string
+            sourceRetained?: boolean
           }
           this.moveJobCallbacks.forEach((cb) => cb(job))
+        }
+        break
+      case 'RootFolderRelocationUpdate':
+        if (args && args[0]) {
+          const update = args[0] as RootFolderPathChangeResult
+          this.rootFolderRelocationCallbacks.forEach((cb) => cb(update))
         }
         break
       case 'FilesRemoved':
@@ -735,13 +753,23 @@ class SignalRService {
       jobId: string
       audiobookId?: number
       status: string
+      progress?: number
+      phase?: string
       target?: string
       error?: string
+      sourceRetained?: boolean
     }) => void,
   ): () => void {
     this.moveJobCallbacks.add(callback)
     return () => {
       this.moveJobCallbacks.delete(callback)
+    }
+  }
+
+  onRootFolderRelocationUpdate(callback: (update: RootFolderPathChangeResult) => void): () => void {
+    this.rootFolderRelocationCallbacks.add(callback)
+    return () => {
+      this.rootFolderRelocationCallbacks.delete(callback)
     }
   }
 

@@ -17,6 +17,7 @@
  */
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Listenarr.Domain.Common;
 
 namespace Listenarr.Infrastructure.Metadata.Parsing
 {
@@ -31,6 +32,7 @@ namespace Listenarr.Infrastructure.Metadata.Parsing
         public string? Narrator { get; set; }
         public string? CoverPath { get; set; }
         public string? Asin { get; set; }
+        internal string? BookFolderPath { get; set; }
     }
 
     /// <summary>
@@ -53,20 +55,40 @@ namespace Listenarr.Infrastructure.Metadata.Parsing
         private static readonly string[] AudioExtensions = { ".m4b", ".mp3", ".flac", ".ogg", ".opus", ".m4a", ".aac", ".wav" };
         private static readonly string[] CoverExtensions = { ".jpg", ".jpeg", ".png", ".webp" };
 
-        public static PathParsedMetadata Parse(string filePath, string rootFolderPath)
+        public static PathParsedMetadata Parse(
+            string filePath,
+            string rootFolderPath,
+            FileSystemPathSemantics semantics) =>
+            ParseCore(filePath, rootFolderPath, semantics, includeFilesystemMetadata: true);
+
+        internal static PathParsedMetadata ParsePathOnly(
+            string filePath,
+            string rootFolderPath,
+            FileSystemPathSemantics semantics) =>
+            ParseCore(filePath, rootFolderPath, semantics, includeFilesystemMetadata: false);
+
+        private static PathParsedMetadata ParseCore(
+            string filePath,
+            string rootFolderPath,
+            FileSystemPathSemantics semantics,
+            bool includeFilesystemMetadata)
         {
             var result = new PathParsedMetadata();
 
             var normalizedFile = Path.GetFullPath(filePath);
-            var normalizedRoot = Path.GetFullPath(rootFolderPath)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            var normalizedRootWithSep = normalizedRoot + Path.DirectorySeparatorChar;
+            var normalizedRoot = Path.GetFullPath(rootFolderPath);
 
-            if (!normalizedFile.StartsWith(normalizedRootWithSep, StringComparison.OrdinalIgnoreCase))
+            if (!FileSystemPathIdentity.TryGetRelativePathWithinBase(
+                normalizedRoot,
+                normalizedFile,
+                semantics,
+                out var relative))
                 return result;
 
-            var relative = normalizedFile[(normalizedRoot.Length)..].TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            var parts = relative.Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
+            var separators = semantics.Syntax == FileSystemPathSyntax.Windows
+                ? new[] { '\\', '/' }
+                : new[] { '/' };
+            var parts = relative.Split(separators, StringSplitOptions.RemoveEmptyEntries);
 
             // parts[^1] is the filename; everything before is folder levels
             if (parts.Length < 2) return result;
@@ -104,9 +126,16 @@ namespace Listenarr.Infrastructure.Metadata.Parsing
                     result.Series = folderParts[1];
             }
 
-            // Build absolute path to the book folder for sidecar reading
+            // Keep the matched book directory available to hardened callers that
+            // need to read sidecars through pinned handles rather than public paths.
             var bookFolderPath = Path.Join(normalizedRoot,
                 Path.Join(folderParts[..(bookFolderIndex + 1)]));
+            result.BookFolderPath = bookFolderPath;
+
+            if (!includeFilesystemMetadata)
+            {
+                return result;
+            }
 
             TryReadSidecar(bookFolderPath, "desc.txt", content =>
                 result.Description = content.Length > 2000 ? content[..2000] : content);
@@ -135,6 +164,7 @@ namespace Listenarr.Infrastructure.Metadata.Parsing
         public static async Task<PathParsedMetadata> ReadEmbeddedTagsAsync(
             string filePath, string ffprobePath, CancellationToken ct = default)
         {
+            ct.ThrowIfCancellationRequested();
             var result = new PathParsedMetadata();
             try
             {
@@ -160,6 +190,10 @@ namespace Listenarr.Infrastructure.Metadata.Parsing
 
                 var doc = JsonSerializer.Deserialize<JsonElement>(stdout);
                 result = ParseEmbeddedTagsFromFfprobeJson(doc);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex) when (ex is not OutOfMemoryException && ex is not StackOverflowException) { /* silently skip - ffprobe unavailable or file unreadable */ }
             return result;
@@ -268,4 +302,3 @@ namespace Listenarr.Infrastructure.Metadata.Parsing
         }
     }
 }
-

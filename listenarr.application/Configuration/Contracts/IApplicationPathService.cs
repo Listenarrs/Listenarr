@@ -33,6 +33,13 @@ namespace Listenarr.Application.Configuration.Contracts
         /// <summary>Gets the absolute path to the logs directory (<c>ConfigRootPath/logs</c>).</summary>
         string LogsRootPath { get; }
 
+        /// <summary>
+        /// Gets the absolute path to the file-move coordination directory
+        /// (<c>ConfigRootPath/runtime/file-move-locks</c>). Processes that share a
+        /// Listenarr configuration root share this coordination namespace.
+        /// </summary>
+        string FileMoveLockRootPath { get; }
+
         /// <summary>Gets the absolute path to the bundled FFmpeg directory (<c>ConfigRootPath/ffmpeg</c>).</summary>
         string FfmpegRootPath { get; }
 

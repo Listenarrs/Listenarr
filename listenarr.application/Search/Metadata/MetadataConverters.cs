@@ -58,6 +58,7 @@ public class MetadataConverters
         {
             Asin = audibleData.Asin ?? asin,
             Source = source, // Use the original search source (Amazon or Audible)
+            Region = audibleData.Region,
             Title = audibleData.Title,
             Subtitle = audibleData.Subtitle,
             Authors = audibleData.Authors?.Where(a => !string.IsNullOrEmpty(a.Name)).Select(a => a.Name!).ToList(),
@@ -122,6 +123,7 @@ public class MetadataConverters
         {
             Asin = audnexusData.Asin ?? asin,
             Source = source, // Use the original search source (Amazon or Audible)
+            Region = audnexusData.Region,
             Title = audnexusData.Title,
             Subtitle = audnexusData.Subtitle,
             Authors = audnexusData.Authors?.Where(a => !string.IsNullOrEmpty(a.Name)).Select(a => a.Name!).ToList(),
@@ -280,8 +282,8 @@ public class MetadataConverters
         if (!string.IsNullOrEmpty(asin))
         {
             productUrl = metadata.Source == "Amazon"
-                ? $"https://www.amazon.com/dp/{asin}"
-                : $"https://www.audible.com/pd/{asin}";
+                ? MarketDomainResolver.BuildAmazonProductUrl(asin, metadata.Region)
+                : MarketDomainResolver.BuildAudibleProductUrl(asin, metadata.Region);
         }
 
         // If metadata provided a non-http product link, prefer synthesized productUrl and
@@ -427,8 +429,8 @@ public class MetadataConverters
         if (!string.IsNullOrEmpty(asin))
         {
             productUrl = metadata.Source == "Amazon"
-                ? $"https://www.amazon.com/dp/{asin}"
-                : $"https://www.audible.com/pd/{asin}";
+                ? MarketDomainResolver.BuildAmazonProductUrl(asin, metadata.Region)
+                : MarketDomainResolver.BuildAudibleProductUrl(asin, metadata.Region);
         }
 
         var categoryText = string.Join(", ", metadata.Genres ?? new List<string> { "Audiobook" });
@@ -482,4 +484,5 @@ public class MetadataConverters
 
         return result;
     }
+
 }

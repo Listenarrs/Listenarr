@@ -31,6 +31,12 @@ namespace Listenarr.Tests.Mocks
             metadataRegexMapping[regex] = metadata;
         }
 
+        public Task<AudioMetadata?> ExtractFileMetadataAsync(
+            MetadataFileSource fileSource)
+        {
+            return ExtractFileMetadataAsync(fileSource.PublicPath);
+        }
+
         public async Task<AudioMetadata?> ExtractFileMetadataAsync(string filePath)
         {
             if (string.IsNullOrWhiteSpace(filePath))

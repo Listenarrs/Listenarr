@@ -23,6 +23,7 @@ namespace Listenarr.Infrastructure.ActivityHistory.Persistence
             builder.Property(h => h.DownloadId).HasMaxLength(150);
             builder.Property(h => h.DownloadClientId).HasMaxLength(100);
             builder.Property(h => h.CorrelationId).IsRequired().HasMaxLength(64);
+            builder.Property(h => h.IdempotencyKey).HasMaxLength(200);
             builder.Property(h => h.Error).HasMaxLength(4000);
             builder.Property(h => h.Outcome).HasConversion<int>();
         }

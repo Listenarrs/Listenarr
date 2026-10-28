@@ -8,6 +8,7 @@
  * (at your option) any later version.
  */
 
+using Listenarr.Tests.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -45,6 +46,7 @@ public sealed class SystemReadinessServiceTests : IAsyncLifetime
     {
         var service = new SystemReadinessService(
             _factory,
+            TestLibraryFilesystemReadiness.Ready(),
             NullLogger<SystemReadinessService>.Instance);
 
         var result = await service.CheckAsync();
@@ -56,6 +58,47 @@ public sealed class SystemReadinessServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CheckAsync_FilesystemStillInitializing_ApplicationRemainsReady()
+    {
+        var filesystemReadiness = new TestLibraryFilesystemReadiness();
+        filesystemReadiness.SetRunning("AudiobookFileIdentities");
+        var service = new SystemReadinessService(
+            _factory,
+            filesystemReadiness,
+            NullLogger<SystemReadinessService>.Instance);
+
+        var result = await service.CheckAsync();
+
+        Assert.True(result.IsReady);
+        Assert.True(result.DatabaseConnected);
+        Assert.True(result.MigrationsCurrent);
+        Assert.False(result.FilesystemReady);
+        Assert.Equal("Running", result.FilesystemStatus);
+        Assert.Equal("AudiobookFileIdentities", result.FilesystemPhase);
+    }
+
+    [Fact]
+    public async Task CheckAsync_FilesystemInitializationFailed_ApplicationRemainsReady()
+    {
+        var filesystemReadiness = new TestLibraryFilesystemReadiness();
+        filesystemReadiness.SetFailed("Injected reconciliation failure");
+        var service = new SystemReadinessService(
+            _factory,
+            filesystemReadiness,
+            NullLogger<SystemReadinessService>.Instance);
+
+        var result = await service.CheckAsync();
+
+        Assert.True(result.IsReady);
+        Assert.True(result.DatabaseConnected);
+        Assert.True(result.MigrationsCurrent);
+        Assert.False(result.FilesystemReady);
+        Assert.Equal("Failed", result.FilesystemStatus);
+        Assert.Equal("filesystem_initialization_failed", result.FilesystemErrorCode);
+        Assert.Equal("Injected reconciliation failure", result.FilesystemErrorMessage);
+    }
+
+    [Fact]
     public async Task CheckAsync_FactoryFailure_ReturnsNotReadyWithoutLeakingException()
     {
         var factory = new Mock<IDbContextFactory<ListenArrDbContext>>();
@@ -63,6 +106,7 @@ public sealed class SystemReadinessServiceTests : IAsyncLifetime
             .ThrowsAsync(new IOException("secret database path"));
         var service = new SystemReadinessService(
             factory.Object,
+            TestLibraryFilesystemReadiness.Ready(),
             NullLogger<SystemReadinessService>.Instance);
 
         var result = await service.CheckAsync();

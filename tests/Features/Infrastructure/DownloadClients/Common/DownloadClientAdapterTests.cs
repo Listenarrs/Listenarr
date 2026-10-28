@@ -94,24 +94,6 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Common
             { NzbgetApiMock.MULTI_FILE_NZBGET, FileUtils.GetAbsolutePath("nzbget", "completed", "Book Folder") }
         };
 
-        [Theory]
-        [Trait("Third-Party", "Transmission")]
-        [Trait("Method", "GetImportItemAsync")]
-        [MemberData(nameof(TransmissionGetImportItemAsyncCases))]
-        public async Task Transmission_GetImportItemAsync_ResolvesPath(int downloadId, string expectedPath)
-        {
-            var item = new DownloadClientItem
-            {
-                DownloadId = downloadId.ToString(),
-                OutputPath = string.Empty
-            };
-
-            var adapter = MockUtils.CreateTransmissionAdapter(_provider);
-            var resolved = await adapter.GetImportItemAsync(_transmissionClient, item);
-
-            Assert.Equal(expectedPath, resolved.OutputPath);
-        }
-
         [Fact]
         [Trait("Third-Party", "Transmission")]
         [Trait("Method", "GetImportItemAsync")]
@@ -136,6 +118,32 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Common
                 {
                     FileUtils.GetAbsolutePath("downloads", "Book Folder", "chapter1.m4b"),
                     FileUtils.GetAbsolutePath("downloads", "Book Folder", "book.txt")
+                },
+                resolved.SourceFiles);
+        }
+        [Fact]
+        [Trait("Third-Party", "Transmission")]
+        [Trait("Method", "GetImportItemAsync")]
+        public async Task Transmission_LegacyGetImportItemAsync_PreservesWhitespaceBearingFolderPaths()
+        {
+            var item = new QueueItem
+            {
+                Id = TransmissionApiMock.WHITESPACE_FOLDER_TORRENT.ToString(),
+                ContentPath = string.Empty
+            };
+
+            var download = new DownloadBuilder().Build();
+            await _downloadRepository.AddAsync(download);
+
+            var adapter = MockUtils.CreateTransmissionAdapter(_provider);
+            var resolved = await adapter.GetImportItemAsync(_transmissionClient, download, item);
+
+            Assert.Equal(FileUtils.GetAbsolutePath("downloads", " Book Folder "), resolved.ContentPath);
+            Assert.Equal(
+                new[]
+                {
+                    FileUtils.GetAbsolutePath("downloads", " Book Folder ", "chapter1.m4b"),
+                    FileUtils.GetAbsolutePath("downloads", " Book Folder ", "book.txt")
                 },
                 resolved.SourceFiles);
         }
@@ -204,6 +212,46 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Common
         [Fact]
         [Trait("Third-Party", "Nzbget")]
         [Trait("Method", "GetImportItemAsync")]
+        public async Task Nzbget_GetImportItemAsync_DownloadClientItemWithStaleOutputPath_ResolvesFromHistory()
+        {
+            var apiMock = _provider.GetRequiredService<NzbgetApiMock>();
+            apiMock.ResetXmlRpcCapture();
+            var completedPath = FileUtils.GetAbsolutePath("nzbget", "completed", "Resolved Client Item");
+            var historyResponse = NzbgetApiMock.CreateHistoryResponse(
+                """
+                <value><struct>
+                  <member><name>ID</name><value><string>case-id</string></value></member>
+                  <member><name>FinalDir</name><value><string>{{COMPLETED_PATH}}</string></value></member>
+                  <member><name>DestDir</name><value><string>{{IGNORED_PATH}}</string></value></member>
+                </struct></value>
+                """
+                .Replace("{{COMPLETED_PATH}}", completedPath)
+                .Replace("{{IGNORED_PATH}}", FileUtils.GetAbsolutePath("nzbget", "ignored", "Intermediate Client Item")));
+            apiMock.QueueXmlRpcResponse("history", historyResponse);
+            var missingPath = Path.Combine(
+                Path.GetTempPath(),
+                $"listenarr-nzbget-output-missing-{Guid.NewGuid():N}");
+            var original = new DownloadClientItem
+            {
+                DownloadId = "CASE-ID",
+                OutputPath = missingPath,
+                Title = "Stale"
+            };
+            var adapter = MockUtils.CreateNzbgetAdapter(_provider);
+
+            var resolved = await adapter.GetImportItemAsync(_nzbgetClient, original);
+
+            Assert.False(File.Exists(missingPath));
+            Assert.False(Directory.Exists(missingPath));
+            Assert.NotSame(original, resolved);
+            Assert.Equal(completedPath, resolved.OutputPath);
+            Assert.Equal(missingPath, original.OutputPath);
+            AssertHistoryFalseCall(Assert.Single(apiMock.XmlRpcCalls));
+        }
+
+        [Fact]
+        [Trait("Third-Party", "Nzbget")]
+        [Trait("Method", "GetImportItemAsync")]
         public async Task Nzbget_GetImportItemAsync_QueueItemHistoryCompatibility_PreservesMethodParametersAndResponse()
         {
             var apiMock = _provider.GetRequiredService<NzbgetApiMock>();
@@ -261,6 +309,101 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Common
             Assert.Equal(string.Empty, unmatched.ContentPath);
             Assert.All(apiMock.XmlRpcCalls, AssertHistoryFalseCall);
             Assert.Equal(3, apiMock.XmlRpcCalls.Count);
+        }
+
+        [Fact]
+        [Trait("Third-Party", "Nzbget")]
+        [Trait("Method", "GetImportItemAsync")]
+        public async Task Nzbget_GetImportItemAsync_QueueItemWithMissingContentPath_ResolvesFromHistory()
+        {
+            var apiMock = _provider.GetRequiredService<NzbgetApiMock>();
+            apiMock.ResetXmlRpcCapture();
+            var completedPath = FileUtils.GetAbsolutePath("nzbget", "completed", "Resolved Book");
+            var ignoredPath = FileUtils.GetAbsolutePath("nzbget", "ignored", "Intermediate Book");
+            var historyResponse = NzbgetApiMock.CreateHistoryResponse(
+                """
+                <value><struct>
+                  <member><name>NZBID</name><value><string>501</string></value></member>
+                  <member><name>FinalDir</name><value><string>{{COMPLETED_PATH}}</string></value></member>
+                  <member><name>DestDir</name><value><string>{{IGNORED_PATH}}</string></value></member>
+                </struct></value>
+                """
+                .Replace("{{COMPLETED_PATH}}", completedPath)
+                .Replace("{{IGNORED_PATH}}", ignoredPath));
+            apiMock.QueueXmlRpcResponse("history", historyResponse);
+            var missingPath = Path.Combine(
+                Path.GetTempPath(),
+                $"listenarr-nzbget-missing-{Guid.NewGuid():N}");
+            var adapter = MockUtils.CreateNzbgetAdapter(_provider);
+            var download = new DownloadBuilder().Build();
+            var original = new QueueItem
+            {
+                Id = "501",
+                ContentPath = missingPath,
+                Title = "Stale"
+            };
+
+            var resolved = await adapter.GetImportItemAsync(_nzbgetClient, download, original);
+
+            Assert.False(File.Exists(missingPath));
+            Assert.False(Directory.Exists(missingPath));
+            Assert.NotSame(original, resolved);
+            Assert.Equal(completedPath, resolved.ContentPath);
+            Assert.Equal(missingPath, original.ContentPath);
+            AssertHistoryFalseCall(Assert.Single(apiMock.XmlRpcCalls));
+        }
+
+        [Theory]
+        [Trait("Third-Party", "Nzbget")]
+        [Trait("Method", "GetImportItemAsync")]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task Nzbget_GetImportItemAsync_QueueItemWithExistingContentPath_DoesNotQueryHistory(bool existingDirectory)
+        {
+            var apiMock = _provider.GetRequiredService<NzbgetApiMock>();
+            apiMock.ResetXmlRpcCapture();
+            var existingPath = Path.Combine(
+                Path.GetTempPath(),
+                $"listenarr-nzbget-existing-{Guid.NewGuid():N}");
+
+            if (existingDirectory)
+            {
+                Directory.CreateDirectory(existingPath);
+            }
+            else
+            {
+                File.WriteAllText(existingPath, "existing NZBGet content");
+            }
+
+            try
+            {
+                var adapter = MockUtils.CreateNzbgetAdapter(_provider);
+                var download = new DownloadBuilder().Build();
+                var original = new QueueItem
+                {
+                    Id = "501",
+                    ContentPath = existingPath,
+                    Title = "Existing"
+                };
+
+                var resolved = await adapter.GetImportItemAsync(_nzbgetClient, download, original);
+
+                Assert.NotSame(original, resolved);
+                Assert.Equal(existingPath, resolved.ContentPath);
+                Assert.Empty(apiMock.XmlRpcCalls);
+            }
+            finally
+            {
+                if (File.Exists(existingPath))
+                {
+                    File.Delete(existingPath);
+                }
+
+                if (Directory.Exists(existingPath))
+                {
+                    Directory.Delete(existingPath, recursive: true);
+                }
+            }
         }
 
         private static void AssertHistoryFalseCall(NzbgetApiMock.XmlRpcCall call)

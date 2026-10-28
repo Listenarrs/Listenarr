@@ -26,40 +26,34 @@ namespace Listenarr.Infrastructure.Persistence
     /// so that collection properties are stored as JSON arrays (not primitive roots).
     /// This is safe to run repeatedly and will not modify already-correct rows.
     /// </summary>
-    public class StartupDbNormalizer : IHostedService
+    internal sealed class StartupDbNormalizer(
+        IServiceProvider provider,
+        LibraryFilesystemReadiness filesystemReadiness,
+        ILogger<StartupDbNormalizer> logger) : BackgroundService
     {
-        private readonly IServiceProvider _provider;
-        private readonly ILogger<StartupDbNormalizer> _logger;
-
-        public StartupDbNormalizer(IServiceProvider provider, ILogger<StartupDbNormalizer> logger)
+        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            _provider = provider ?? throw new ArgumentNullException(nameof(provider));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        }
-
-        public async Task StartAsync(CancellationToken cancellationToken)
-        {
+            await Task.Yield();
             try
             {
-                using var scope = _provider.CreateScope();
+                await filesystemReadiness.WaitUntilSettledAsync(stoppingToken);
+                using var scope = provider.CreateScope();
                 var audiobookRepository = scope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
-                await audiobookRepository.NormalizeJsonColumnsAsync(cancellationToken);
-                _logger.LogInformation("StartupDbNormalizer: normalization pass complete.");
+                await audiobookRepository.NormalizeJsonColumnsAsync(stoppingToken);
+                logger.LogInformation("StartupDbNormalizer: normalization pass complete.");
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
-                Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                Debug.WriteLine("StartupDbNormalizer canceled during host shutdown.");
             }
             catch (OperationCanceledException ex)
             {
-                _logger.LogWarning(ex, "StartupDbNormalizer: operation canceled/timed out; skipping normalization pass");
+                logger.LogWarning(ex, "StartupDbNormalizer: operation canceled/timed out; skipping normalization pass");
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
-                _logger.LogError(ex, "StartupDbNormalizer: unexpected error while running normalization");
+                logger.LogError(ex, "StartupDbNormalizer: unexpected error while running normalization");
             }
         }
-
-        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }

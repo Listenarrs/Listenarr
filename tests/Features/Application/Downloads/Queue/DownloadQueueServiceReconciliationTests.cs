@@ -52,14 +52,12 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
                 clientGateway,
                 metrics,
                 NullLogger<DownloadClientQueuePoller>.Instance);
-
             var service = new DownloadQueueService(
                 resolvedMemoryCache,
                 configurationService,
                 downloadRepository,
                 candidateLoader,
                 clientQueuePoller,
-                metrics,
                 NullLogger<DownloadQueueService>.Instance);
 
             service._clientQueueTimeout = (TimeSpan)(clientQueueTimeout == null ? service._clientQueueTimeout : clientQueueTimeout);
@@ -101,6 +99,42 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
                     .SelectMany(d => GetKnownClientItemIds(d.Metadata))
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList());
+
+            // Emulate the real conditional write: fill only missing identifiers against current
+            // state, never overwrite a different recorded one, and return the resulting metadata.
+            downloadRepoMock
+                .Setup(r => r.FillMissingClientIdentifiersAsync(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string id, string clientItemId, bool isTorrent, CancellationToken _) =>
+                {
+                    var d = downloads.FirstOrDefault(x => x.Id == id);
+                    if (d == null)
+                    {
+                        return null;
+                    }
+
+                    d.Metadata ??= new Dictionary<string, object>();
+                    var existingId = d.Metadata.TryGetValue("ClientDownloadId", out var cid) ? cid?.ToString() : null;
+                    var existingHash = d.Metadata.TryGetValue("TorrentHash", out var th) ? th?.ToString() : null;
+                    var idConflict = !string.IsNullOrWhiteSpace(existingId)
+                        && !string.Equals(existingId, clientItemId, StringComparison.OrdinalIgnoreCase);
+                    var hashConflict = isTorrent && !string.IsNullOrWhiteSpace(existingHash)
+                        && !string.Equals(existingHash, clientItemId, StringComparison.OrdinalIgnoreCase);
+                    if (!idConflict && !hashConflict)
+                    {
+                        if (string.IsNullOrWhiteSpace(existingId))
+                        {
+                            d.Metadata["ClientDownloadId"] = clientItemId;
+                        }
+
+                        if (isTorrent && string.IsNullOrWhiteSpace(existingHash))
+                        {
+                            d.Metadata["TorrentHash"] = clientItemId;
+                        }
+                    }
+
+                    return (IReadOnlyDictionary<string, object>)d.Metadata;
+                });
         }
 
         private static IEnumerable<string> GetKnownClientItemIds(Dictionary<string, object>? metadata)
@@ -245,7 +279,7 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
 
         [Fact]
         [Trait("Scenario", "MissingSnapshotRetainsTrackedDownload")]
-        public async Task GetQueueAsync_MissingQueueSnapshot_RetainsTrackedRecord_WithoutOrphanMetric()
+        public async Task GetQueueAsync_MissingQueueSnapshot_RetainsTrackedRecord_WithoutOrphanRemoval()
         {
             var client = new DownloadClientConfiguration
             {
@@ -293,7 +327,223 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
             var result = await service.GetQueueAsync();
 
             Assert.Empty(result);
-            metricsMock.Verify(m => m.Increment("download.purge.skipped.tracked_orphan_retained", It.IsAny<int>()), Times.Never);
+            downloadRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Download>()), Times.Never);
+            downloadRepoMock.Verify(r => r.RemoveAsync(It.IsAny<string>()), Times.Never);
+            metricsMock.Verify(m => m.Increment("download.orphan.removed", It.IsAny<int>()), Times.Never);
+        }
+
+        [Fact]
+        [Trait("Scenario", "LiveNonEmptySnapshotDoesNotRemoveOrphan")]
+        public async Task GetQueueAsync_LiveNonEmptySnapshot_DoesNotRemoveEligibleOrphan()
+        {
+            var client = new DownloadClientConfiguration
+            {
+                Id = "qb-1",
+                Name = "local qbit",
+                Type = "qbittorrent",
+                IsEnabled = true
+            };
+
+            var configMock = new Mock<IConfigurationService>();
+            configMock.Setup(c => c.GetDownloadClientConfigurationsAsync())
+                .ReturnsAsync(new List<DownloadClientConfiguration> { client });
+            configMock.Setup(c => c.GetApplicationSettingsAsync())
+                .ReturnsAsync(new ApplicationSettings { ShowCompletedExternalDownloads = false });
+
+            var orphan = new Download
+            {
+                Id = "download-missing",
+                DownloadClientId = "qb-1",
+                Title = "Missing Download",
+                Status = DownloadStatus.Queued,
+                StartedAt = DateTime.UtcNow.AddMinutes(-10),
+                Metadata = new Dictionary<string, object>
+                {
+                    ["ClientDownloadId"] = "missing"
+                }
+            };
+
+            var present = new Download
+            {
+                Id = "download-present",
+                DownloadClientId = "qb-1",
+                Title = "Present Download",
+                Status = DownloadStatus.Paused,
+                StartedAt = DateTime.UtcNow.AddMinutes(-10),
+                Metadata = new Dictionary<string, object>
+                {
+                    ["ClientDownloadId"] = "present"
+                }
+            };
+
+            var downloadRepoMock = new Mock<IDownloadRepository>();
+            SetupQueueRepository(downloadRepoMock, new List<Download> { orphan, present });
+            downloadRepoMock.Setup(r => r.RemoveAsync(It.IsAny<string>())).Returns(Task.CompletedTask);
+            downloadRepoMock
+                .Setup(r => r.UpdateMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<object?>()))
+                .Returns(Task.CompletedTask);
+
+            var processingJobRepoMock = new Mock<IDownloadProcessingJobRepository>();
+            processingJobRepoMock.Setup(r => r.GetPendingDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+            processingJobRepoMock.Setup(r => r.GetAllJobDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+
+            var gatewayMock = new Mock<IDownloadClientGateway>();
+            gatewayMock.Setup(g => g.GetQueueAsync(client, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<QueueItem>
+                {
+                    new QueueItem
+                    {
+                        Id = "present",
+                        Title = "Present Download",
+                        Status = "paused",
+                        AddedAt = DateTime.UtcNow
+                    }
+                });
+
+            var metricsMock = new Mock<IAppMetricsService>();
+
+            var service = CreateService(
+                configMock.Object,
+                downloadRepoMock.Object,
+                processingJobRepoMock.Object,
+                gatewayMock.Object,
+                metricsMock.Object);
+
+            var result = await service.GetQueueAsync();
+
+            Assert.Single(result);
+            Assert.Equal("download-present", result[0].Id);
+            Assert.Equal(DownloadStatus.Queued, orphan.Status);
+            Assert.Null(orphan.ErrorMessage);
+            Assert.False(orphan.Metadata.ContainsKey("ClientFailureReason"));
+            Assert.Equal(DownloadStatus.Paused, present.Status);
+            downloadRepoMock.Verify(r => r.RemoveAsync(It.IsAny<string>()), Times.Never);
+            downloadRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Download>()), Times.Never);
+            metricsMock.Verify(m => m.Increment("download.orphan.removed", It.IsAny<int>()), Times.Never);
+        }
+
+        [Fact]
+        [Trait("Scenario", "ClientUnavailableDoesNotFailOrphan")]
+        public async Task GetQueueAsync_ClientUnavailable_DoesNotFailTrackedDownload()
+        {
+            var client = new DownloadClientConfiguration
+            {
+                Id = "qb-1",
+                Name = "local qbit",
+                Type = "qbittorrent",
+                IsEnabled = true
+            };
+
+            var configMock = new Mock<IConfigurationService>();
+            configMock.Setup(c => c.GetDownloadClientConfigurationsAsync())
+                .ReturnsAsync(new List<DownloadClientConfiguration> { client });
+            configMock.Setup(c => c.GetApplicationSettingsAsync())
+                .ReturnsAsync(new ApplicationSettings { ShowCompletedExternalDownloads = false });
+
+            var tracked = new Download
+            {
+                Id = "download-missing",
+                DownloadClientId = "qb-1",
+                Title = "Missing Download",
+                Status = DownloadStatus.Queued,
+                StartedAt = DateTime.UtcNow.AddMinutes(-10),
+                Metadata = new Dictionary<string, object>
+                {
+                    ["ClientDownloadId"] = "missing"
+                }
+            };
+
+            var downloadRepoMock = new Mock<IDownloadRepository>();
+            SetupQueueRepository(downloadRepoMock, new List<Download> { tracked });
+            downloadRepoMock.Setup(r => r.RemoveAsync(It.IsAny<string>())).Returns(Task.CompletedTask);
+
+            var processingJobRepoMock = new Mock<IDownloadProcessingJobRepository>();
+            processingJobRepoMock.Setup(r => r.GetPendingDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+            processingJobRepoMock.Setup(r => r.GetAllJobDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+
+            var gatewayMock = new Mock<IDownloadClientGateway>();
+            gatewayMock.Setup(g => g.GetQueueAsync(client, It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new InvalidOperationException("client unavailable"));
+
+            var metricsMock = new Mock<IAppMetricsService>();
+
+            var service = CreateService(
+                configMock.Object,
+                downloadRepoMock.Object,
+                processingJobRepoMock.Object,
+                gatewayMock.Object,
+                metricsMock.Object);
+
+            var result = await service.GetQueueAsync();
+
+            Assert.Empty(result);
+            Assert.Equal(DownloadStatus.Queued, tracked.Status);
+            Assert.Null(tracked.ErrorMessage);
+            downloadRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Download>()), Times.Never);
+            downloadRepoMock.Verify(r => r.RemoveAsync(It.IsAny<string>()), Times.Never);
+            metricsMock.Verify(m => m.Increment("download.orphan.removed", It.IsAny<int>()), Times.Never);
+        }
+
+        [Fact]
+        [Trait("Scenario", "LiveEmptySnapshotDoesNotFailOrphan")]
+        public async Task GetQueueAsync_LiveEmptySnapshot_DoesNotFailTrackedDownloads()
+        {
+            var client = new DownloadClientConfiguration
+            {
+                Id = "qb-1",
+                Name = "local qbit",
+                Type = "qbittorrent",
+                IsEnabled = true
+            };
+
+            var configMock = new Mock<IConfigurationService>();
+            configMock.Setup(c => c.GetDownloadClientConfigurationsAsync())
+                .ReturnsAsync(new List<DownloadClientConfiguration> { client });
+            configMock.Setup(c => c.GetApplicationSettingsAsync())
+                .ReturnsAsync(new ApplicationSettings { ShowCompletedExternalDownloads = false });
+
+            var tracked = new Download
+            {
+                Id = "download-missing",
+                DownloadClientId = "qb-1",
+                Title = "Missing Download",
+                Status = DownloadStatus.Downloading,
+                StartedAt = DateTime.UtcNow.AddMinutes(-10),
+                Metadata = new Dictionary<string, object>
+                {
+                    ["ClientDownloadId"] = "missing"
+                }
+            };
+
+            var downloadRepoMock = new Mock<IDownloadRepository>();
+            SetupQueueRepository(downloadRepoMock, new List<Download> { tracked });
+            downloadRepoMock.Setup(r => r.RemoveAsync(It.IsAny<string>())).Returns(Task.CompletedTask);
+
+            var processingJobRepoMock = new Mock<IDownloadProcessingJobRepository>();
+            processingJobRepoMock.Setup(r => r.GetPendingDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+            processingJobRepoMock.Setup(r => r.GetAllJobDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+
+            var gatewayMock = new Mock<IDownloadClientGateway>();
+            gatewayMock.Setup(g => g.GetQueueAsync(client, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<QueueItem>());
+
+            var metricsMock = new Mock<IAppMetricsService>();
+
+            var service = CreateService(
+                configMock.Object,
+                downloadRepoMock.Object,
+                processingJobRepoMock.Object,
+                gatewayMock.Object,
+                metricsMock.Object);
+
+            var result = await service.GetQueueAsync();
+
+            Assert.Empty(result);
+            Assert.Equal(DownloadStatus.Downloading, tracked.Status);
+            Assert.Null(tracked.ErrorMessage);
+            downloadRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Download>()), Times.Never);
+            downloadRepoMock.Verify(r => r.RemoveAsync(It.IsAny<string>()), Times.Never);
+            metricsMock.Verify(m => m.Increment("download.orphan.removed", It.IsAny<int>()), Times.Never);
         }
 
         [Fact]
@@ -630,7 +880,8 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
             Assert.Equal("tracked-1", result[0].Id);
             Assert.Equal("completed", result[0].Status, ignoreCase: true, ignoreLineEndingDifferences: false, ignoreWhiteSpaceDifferences: false, ignoreAllWhiteSpace: false);
             downloadRepoMock.Verify(
-                r => r.UpdateMetadataAsync("tracked-1", "ClientDownloadId", "061850ead3eb6f1c5c6d8420211b4bbf2d4ee3e2"),
+                r => r.FillMissingClientIdentifiersAsync(
+                    "tracked-1", "061850ead3eb6f1c5c6d8420211b4bbf2d4ee3e2", true, It.IsAny<CancellationToken>()),
                 Times.Once);
         }
 
@@ -663,13 +914,8 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
                 StartedAt = DateTime.UtcNow.AddMinutes(-20)
             };
 
-            var persistedMetadata = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
             var downloadRepoMock = new Mock<IDownloadRepository>();
             SetupQueueRepository(downloadRepoMock, new List<Download> { trackedDownload });
-            downloadRepoMock
-                .Setup(r => r.UpdateMetadataAsync("tracked-artemis", It.IsAny<string>(), It.IsAny<object?>()))
-                .Callback<string, string, object?>((_, key, value) => persistedMetadata[key] = value)
-                .Returns(Task.CompletedTask);
 
             var processingJobRepoMock = new Mock<IDownloadProcessingJobRepository>();
             processingJobRepoMock.Setup(r => r.GetPendingDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
@@ -708,10 +954,944 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
             Assert.Equal("Artemis", result[0].Title);
             Assert.Equal("HASH-ARTEMIS", trackedDownload.Metadata?["ClientDownloadId"]?.ToString());
             Assert.Equal("HASH-ARTEMIS", trackedDownload.Metadata?["TorrentHash"]?.ToString());
-            Assert.Equal("HASH-ARTEMIS", persistedMetadata["ClientDownloadId"]?.ToString());
-            Assert.Equal("HASH-ARTEMIS", persistedMetadata["TorrentHash"]?.ToString());
-            downloadRepoMock.Verify(r => r.UpdateMetadataAsync("tracked-artemis", "ClientDownloadId", "HASH-ARTEMIS"), Times.Once);
-            downloadRepoMock.Verify(r => r.UpdateMetadataAsync("tracked-artemis", "TorrentHash", "HASH-ARTEMIS"), Times.Once);
+            downloadRepoMock.Verify(
+                r => r.FillMissingClientIdentifiersAsync(
+                    "tracked-artemis", "HASH-ARTEMIS", true, It.IsAny<CancellationToken>()),
+                Times.Once);
+        }
+
+        [Fact]
+        [Trait("Scenario", "DoesNotRebindRecordedHashToTitleMatchedTorrent")]
+        public async Task GetQueueAsync_TitleMatchedPreExistingTorrent_DoesNotOverwriteRecordedHash()
+        {
+            // Regression for #1055: the download already carries the hash captured when it was
+            // grabbed. A different, pre-existing torrent for the same book also title-matches it;
+            // reconciliation must NOT rebind the recorded hash, or a later removal would delete
+            // that unrelated torrent (and its files).
+            var client = new DownloadClientConfiguration
+            {
+                Id = "qb-1",
+                Name = "local qbit",
+                Type = "qbittorrent",
+                IsEnabled = true
+            };
+
+            var configMock = new Mock<IConfigurationService>();
+            configMock.Setup(c => c.GetDownloadClientConfigurationsAsync())
+                .ReturnsAsync(new List<DownloadClientConfiguration> { client });
+            configMock.Setup(c => c.GetApplicationSettingsAsync())
+                .ReturnsAsync(new ApplicationSettings { ShowCompletedExternalDownloads = false });
+
+            const string grabbedHash = "c86d5412aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+            const string preexistingHash = "82e3f9adf097143fc8129f31338b3aad1d7412fd";
+            var trackedDownload = new Download
+            {
+                Id = "tracked-xo",
+                DownloadClientId = "qb-1",
+                Title = "Jeffery Deaver - XO",
+                Artist = "Jeffery Deaver",
+                Status = DownloadStatus.Downloading,
+                StartedAt = DateTime.UtcNow.AddMinutes(-5),
+                Metadata = new Dictionary<string, object>
+                {
+                    ["ClientDownloadId"] = grabbedHash,
+                    ["TorrentHash"] = grabbedHash
+                }
+            };
+
+            var downloadRepoMock = new Mock<IDownloadRepository>();
+            SetupQueueRepository(downloadRepoMock, new List<Download> { trackedDownload });
+            downloadRepoMock
+                .Setup(r => r.UpdateMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<object?>()))
+                .Returns(Task.CompletedTask);
+
+            var processingJobRepoMock = new Mock<IDownloadProcessingJobRepository>();
+            processingJobRepoMock.Setup(r => r.GetPendingDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+            processingJobRepoMock.Setup(r => r.GetAllJobDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+
+            var gatewayMock = new Mock<IDownloadClientGateway>();
+            gatewayMock.Setup(g => g.GetQueueAsync(client, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<QueueItem>
+                {
+                    // The pre-existing torrent for the same book, title-matching the download.
+                    new QueueItem
+                    {
+                        Id = preexistingHash,
+                        Title = "Jeffery Deaver - XO",
+                        Status = "stalledDL",
+                        DownloadClient = "local qbit",
+                        DownloadClientId = "qb-1",
+                        DownloadClientType = "qbittorrent",
+                        AddedAt = DateTime.UtcNow.AddMonths(-1)
+                    }
+                });
+
+            var metricsMock = new Mock<IAppMetricsService>();
+
+            var service = CreateService(
+                configMock.Object,
+                downloadRepoMock.Object,
+                processingJobRepoMock.Object,
+                gatewayMock.Object,
+                metricsMock.Object);
+
+            await service.GetQueueAsync();
+
+            // The recorded (grabbed) hash is preserved; the pre-existing torrent's hash is never
+            // written, so removal will target the correct torrent.
+            Assert.Equal(grabbedHash, trackedDownload.Metadata?["TorrentHash"]?.ToString());
+            Assert.Equal(grabbedHash, trackedDownload.Metadata?["ClientDownloadId"]?.ToString());
+            downloadRepoMock.Verify(
+                r => r.UpdateMetadataAsync("tracked-xo", "TorrentHash", preexistingHash),
+                Times.Never);
+            downloadRepoMock.Verify(
+                r => r.UpdateMetadataAsync("tracked-xo", "ClientDownloadId", preexistingHash),
+                Times.Never);
+        }
+
+        [Fact]
+        [Trait("Scenario", "HideUntrackedExternalActivity")]
+        public async Task GetQueueAsync_UnmatchedActiveTransmissionItem_IsHiddenFromActivity()
+        {
+            var client = new DownloadClientConfiguration
+            {
+                Id = "tr-1",
+                Name = "Transmission",
+                Type = "transmission",
+                IsEnabled = true
+            };
+
+            var configMock = new Mock<IConfigurationService>();
+            configMock.Setup(c => c.GetDownloadClientConfigurationsAsync())
+                .ReturnsAsync(new List<DownloadClientConfiguration> { client });
+            configMock.Setup(c => c.GetApplicationSettingsAsync())
+                .ReturnsAsync(new ApplicationSettings { ShowCompletedExternalDownloads = false });
+
+            var downloadRepoMock = new Mock<IDownloadRepository>();
+            SetupQueueRepository(downloadRepoMock, new List<Download>());
+
+            var processingJobRepoMock = new Mock<IDownloadProcessingJobRepository>();
+            processingJobRepoMock.Setup(r => r.GetPendingDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+            processingJobRepoMock.Setup(r => r.GetAllJobDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+
+            var gatewayMock = new Mock<IDownloadClientGateway>();
+            gatewayMock.Setup(g => g.GetQueueAsync(client, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<QueueItem>
+                {
+                    new QueueItem
+                    {
+                        Id = "unrelated-transmission-hash",
+                        Title = "Ubuntu ISO",
+                        Status = "downloading",
+                        DownloadClient = "Transmission",
+                        DownloadClientId = "tr-1",
+                        DownloadClientType = "transmission",
+                        AddedAt = DateTime.UtcNow
+                    }
+                });
+
+            var metricsMock = new Mock<IAppMetricsService>();
+
+            var service = CreateService(
+                configMock.Object,
+                downloadRepoMock.Object,
+                processingJobRepoMock.Object,
+                gatewayMock.Object,
+                metricsMock.Object);
+
+            var result = await service.GetQueueAsync();
+
+            Assert.Empty(result);
+        }
+
+        [Fact]
+        [Trait("Scenario", "HideUntrackedExternalActivity")]
+        public async Task GetQueueAsync_UnmatchedActiveExternalItem_IsHidden_WhenCompletedExternalEnabled()
+        {
+            var client = new DownloadClientConfiguration
+            {
+                Id = "qb-1",
+                Name = "qbit",
+                Type = "qbittorrent",
+                IsEnabled = true
+            };
+
+            var configMock = new Mock<IConfigurationService>();
+            configMock.Setup(c => c.GetDownloadClientConfigurationsAsync())
+                .ReturnsAsync(new List<DownloadClientConfiguration> { client });
+            configMock.Setup(c => c.GetApplicationSettingsAsync())
+                .ReturnsAsync(new ApplicationSettings { ShowCompletedExternalDownloads = true });
+
+            var downloadRepoMock = new Mock<IDownloadRepository>();
+            SetupQueueRepository(downloadRepoMock, new List<Download>());
+
+            var processingJobRepoMock = new Mock<IDownloadProcessingJobRepository>();
+            processingJobRepoMock.Setup(r => r.GetPendingDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+            processingJobRepoMock.Setup(r => r.GetAllJobDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+
+            var gatewayMock = new Mock<IDownloadClientGateway>();
+            gatewayMock.Setup(g => g.GetQueueAsync(client, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<QueueItem>
+                {
+                    new QueueItem
+                    {
+                        Id = "external-active-hash",
+                        Title = "External Active Item",
+                        Status = "downloading",
+                        DownloadClient = "qbit",
+                        DownloadClientId = "qb-1",
+                        DownloadClientType = "qbittorrent",
+                        AddedAt = DateTime.UtcNow
+                    }
+                });
+
+            var metricsMock = new Mock<IAppMetricsService>();
+
+            var service = CreateService(
+                configMock.Object,
+                downloadRepoMock.Object,
+                processingJobRepoMock.Object,
+                gatewayMock.Object,
+                metricsMock.Object);
+
+            var result = await service.GetQueueAsync();
+
+            Assert.Empty(result);
+        }
+
+        [Fact]
+        [Trait("Scenario", "HideUntrackedExternalActivity")]
+        public async Task GetQueueAsync_MatchedTransmissionItem_IsShown()
+        {
+            var client = new DownloadClientConfiguration
+            {
+                Id = "tr-1",
+                Name = "Transmission",
+                Type = "transmission",
+                IsEnabled = true
+            };
+
+            var configMock = new Mock<IConfigurationService>();
+            configMock.Setup(c => c.GetDownloadClientConfigurationsAsync())
+                .ReturnsAsync(new List<DownloadClientConfiguration> { client });
+            configMock.Setup(c => c.GetApplicationSettingsAsync())
+                .ReturnsAsync(new ApplicationSettings { ShowCompletedExternalDownloads = false });
+
+            var trackedDownload = new Download
+            {
+                Id = "tracked-transmission",
+                DownloadClientId = "tr-1",
+                Title = "Tracked Transmission Book",
+                Status = DownloadStatus.Downloading,
+                StartedAt = DateTime.UtcNow.AddMinutes(-20),
+                Metadata = new Dictionary<string, object>
+                {
+                    ["TorrentHash"] = "HASH1"
+                }
+            };
+
+            var downloadRepoMock = new Mock<IDownloadRepository>();
+            SetupQueueRepository(downloadRepoMock, new List<Download> { trackedDownload });
+            downloadRepoMock
+                .Setup(r => r.UpdateMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<object?>()))
+                .Returns(Task.CompletedTask);
+
+            var processingJobRepoMock = new Mock<IDownloadProcessingJobRepository>();
+            processingJobRepoMock.Setup(r => r.GetPendingDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+            processingJobRepoMock.Setup(r => r.GetAllJobDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+
+            var gatewayMock = new Mock<IDownloadClientGateway>();
+            gatewayMock.Setup(g => g.GetQueueAsync(client, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<QueueItem>
+                {
+                    new QueueItem
+                    {
+                        Id = "HASH1",
+                        Title = "Tracked Transmission Book",
+                        Status = "downloading",
+                        DownloadClient = "Transmission",
+                        DownloadClientId = "tr-1",
+                        DownloadClientType = "transmission",
+                        AddedAt = DateTime.UtcNow
+                    }
+                });
+
+            var metricsMock = new Mock<IAppMetricsService>();
+
+            var service = CreateService(
+                configMock.Object,
+                downloadRepoMock.Object,
+                processingJobRepoMock.Object,
+                gatewayMock.Object,
+                metricsMock.Object);
+
+            var result = await service.GetQueueAsync();
+
+            Assert.Single(result);
+            Assert.Equal("tracked-transmission", result[0].Id);
+            Assert.Equal("Tracked Transmission Book", result[0].Title);
+        }
+
+        [Fact]
+        [Trait("Scenario", "HideUntrackedExternalActivity")]
+        public async Task GetQueueAsync_UnlinkedButMatchingTransmissionItem_IsShownAndPersistsClientId()
+        {
+            var client = new DownloadClientConfiguration
+            {
+                Id = "tr-1",
+                Name = "Transmission",
+                Type = "transmission",
+                IsEnabled = true
+            };
+
+            var configMock = new Mock<IConfigurationService>();
+            configMock.Setup(c => c.GetDownloadClientConfigurationsAsync())
+                .ReturnsAsync(new List<DownloadClientConfiguration> { client });
+            configMock.Setup(c => c.GetApplicationSettingsAsync())
+                .ReturnsAsync(new ApplicationSettings { ShowCompletedExternalDownloads = false });
+
+            var trackedDownload = new Download
+            {
+                Id = "tracked-artemis-transmission",
+                DownloadClientId = "tr-1",
+                Title = "Artemis",
+                Artist = "Andy Weir",
+                Status = DownloadStatus.Downloading,
+                StartedAt = DateTime.UtcNow.AddMinutes(-20)
+            };
+
+            var downloadRepoMock = new Mock<IDownloadRepository>();
+            SetupQueueRepository(downloadRepoMock, new List<Download> { trackedDownload });
+
+            var processingJobRepoMock = new Mock<IDownloadProcessingJobRepository>();
+            processingJobRepoMock.Setup(r => r.GetPendingDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+            processingJobRepoMock.Setup(r => r.GetAllJobDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+
+            var gatewayMock = new Mock<IDownloadClientGateway>();
+            gatewayMock.Setup(g => g.GetQueueAsync(client, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<QueueItem>
+                {
+                    new QueueItem
+                    {
+                        Id = "HASH-ARTEMIS-TRANSMISSION",
+                        Title = "Andy Weir - Artemis",
+                        Status = "downloading",
+                        DownloadClient = "Transmission",
+                        DownloadClientId = "tr-1",
+                        DownloadClientType = "transmission",
+                        AddedAt = DateTime.UtcNow
+                    }
+                });
+
+            var metricsMock = new Mock<IAppMetricsService>();
+
+            var service = CreateService(
+                configMock.Object,
+                downloadRepoMock.Object,
+                processingJobRepoMock.Object,
+                gatewayMock.Object,
+                metricsMock.Object);
+
+            var result = await service.GetQueueAsync();
+
+            Assert.Single(result);
+            Assert.Equal("tracked-artemis-transmission", result[0].Id);
+            Assert.Equal("Artemis", result[0].Title);
+            Assert.Equal("HASH-ARTEMIS-TRANSMISSION", trackedDownload.Metadata?["ClientDownloadId"]?.ToString());
+            Assert.Equal("HASH-ARTEMIS-TRANSMISSION", trackedDownload.Metadata?["TorrentHash"]?.ToString());
+            downloadRepoMock.Verify(
+                r => r.FillMissingClientIdentifiersAsync(
+                    "tracked-artemis-transmission", "HASH-ARTEMIS-TRANSMISSION", true, It.IsAny<CancellationToken>()),
+                Times.Once);
+        }
+
+        [Theory]
+        [Trait("Scenario", "HideUntrackedExternalActivity")]
+        [InlineData(false, 0)]
+        [InlineData(true, 1)]
+        public async Task GetQueueAsync_UnmatchedCompletedExternalItem_RespectsCompletedExternalSetting(
+            bool showCompletedExternal,
+            int expectedCount)
+        {
+            var client = new DownloadClientConfiguration
+            {
+                Id = "tr-1",
+                Name = "Transmission",
+                Type = "transmission",
+                IsEnabled = true
+            };
+
+            var configMock = new Mock<IConfigurationService>();
+            configMock.Setup(c => c.GetDownloadClientConfigurationsAsync())
+                .ReturnsAsync(new List<DownloadClientConfiguration> { client });
+            configMock.Setup(c => c.GetApplicationSettingsAsync())
+                .ReturnsAsync(new ApplicationSettings { ShowCompletedExternalDownloads = showCompletedExternal });
+
+            var downloadRepoMock = new Mock<IDownloadRepository>();
+            SetupQueueRepository(downloadRepoMock, new List<Download>());
+
+            var processingJobRepoMock = new Mock<IDownloadProcessingJobRepository>();
+            processingJobRepoMock.Setup(r => r.GetPendingDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+            processingJobRepoMock.Setup(r => r.GetAllJobDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+
+            var gatewayMock = new Mock<IDownloadClientGateway>();
+            gatewayMock.Setup(g => g.GetQueueAsync(client, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<QueueItem>
+                {
+                    new QueueItem
+                    {
+                        Id = "external-completed-hash",
+                        Title = "External Completed Item",
+                        Status = "completed",
+                        DownloadClient = "Transmission",
+                        DownloadClientId = "tr-1",
+                        DownloadClientType = "transmission",
+                        AddedAt = DateTime.UtcNow
+                    }
+                });
+
+            var metricsMock = new Mock<IAppMetricsService>();
+
+            var service = CreateService(
+                configMock.Object,
+                downloadRepoMock.Object,
+                processingJobRepoMock.Object,
+                gatewayMock.Object,
+                metricsMock.Object);
+
+            var result = await service.GetQueueAsync();
+
+            Assert.Equal(expectedCount, result.Count);
+            if (showCompletedExternal)
+            {
+                Assert.Single(result);
+                Assert.Equal("completed", result[0].Status);
+                Assert.False(result[0].CanPause);
+                Assert.True(result[0].CanRemove);
+                Assert.Equal("tr-1", result[0].DownloadClientId);
+                Assert.NotNull(result[0].CompletionTime);
+            }
+        }
+
+        [Fact]
+        [Trait("Scenario", "HideUntrackedExternalActivity")]
+        public async Task GetQueueAsync_MatchedItemMetadataPersistenceError_StillShowsMatchedDownload()
+        {
+            var client = new DownloadClientConfiguration
+            {
+                Id = "tr-1",
+                Name = "Transmission",
+                Type = "transmission",
+                IsEnabled = true
+            };
+
+            var configMock = new Mock<IConfigurationService>();
+            configMock.Setup(c => c.GetDownloadClientConfigurationsAsync())
+                .ReturnsAsync(new List<DownloadClientConfiguration> { client });
+            configMock.Setup(c => c.GetApplicationSettingsAsync())
+                .ReturnsAsync(new ApplicationSettings { ShowCompletedExternalDownloads = false });
+
+            var trackedDownload = new Download
+            {
+                Id = "tracked-persistence-error",
+                DownloadClientId = "tr-1",
+                Title = "Artemis",
+                Artist = "Andy Weir",
+                Status = DownloadStatus.Downloading,
+                StartedAt = DateTime.UtcNow.AddMinutes(-20)
+            };
+
+            var downloadRepoMock = new Mock<IDownloadRepository>();
+            SetupQueueRepository(downloadRepoMock, new List<Download> { trackedDownload });
+            downloadRepoMock
+                .Setup(r => r.FillMissingClientIdentifiersAsync(
+                    "tracked-persistence-error", "HASH-PERSISTENCE-ERROR", It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new InvalidOperationException("metadata persistence failed"));
+
+            var processingJobRepoMock = new Mock<IDownloadProcessingJobRepository>();
+            processingJobRepoMock.Setup(r => r.GetPendingDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+            processingJobRepoMock.Setup(r => r.GetAllJobDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+
+            var gatewayMock = new Mock<IDownloadClientGateway>();
+            gatewayMock.Setup(g => g.GetQueueAsync(client, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<QueueItem>
+                {
+                    new QueueItem
+                    {
+                        Id = "HASH-PERSISTENCE-ERROR",
+                        Title = "Andy Weir - Artemis",
+                        Status = "downloading",
+                        DownloadClient = "Transmission",
+                        DownloadClientId = "tr-1",
+                        DownloadClientType = "transmission",
+                        AddedAt = DateTime.UtcNow
+                    }
+                });
+
+            var metricsMock = new Mock<IAppMetricsService>();
+
+            var service = CreateService(
+                configMock.Object,
+                downloadRepoMock.Object,
+                processingJobRepoMock.Object,
+                gatewayMock.Object,
+                metricsMock.Object);
+
+            var result = await service.GetQueueAsync();
+
+            Assert.Single(result);
+            Assert.Equal("tracked-persistence-error", result[0].Id);
+        }
+
+        [Fact]
+        [Trait("Scenario", "HideUntrackedExternalActivity")]
+        public async Task GetQueueAsync_AmbiguousTitleOnlyExternalItem_IsHiddenFromActivity()
+        {
+            var client = new DownloadClientConfiguration
+            {
+                Id = "tr-1",
+                Name = "Transmission",
+                Type = "transmission",
+                IsEnabled = true
+            };
+
+            var configMock = new Mock<IConfigurationService>();
+            configMock.Setup(c => c.GetDownloadClientConfigurationsAsync())
+                .ReturnsAsync(new List<DownloadClientConfiguration> { client });
+            configMock.Setup(c => c.GetApplicationSettingsAsync())
+                .ReturnsAsync(new ApplicationSettings { ShowCompletedExternalDownloads = false });
+
+            var firstCandidate = new Download
+            {
+                Id = "tracked-long-road-1",
+                DownloadClientId = "tr-1",
+                Title = "The Long Road Home",
+                Status = DownloadStatus.Downloading,
+                StartedAt = DateTime.UtcNow.AddMinutes(-20)
+            };
+            var secondCandidate = new Download
+            {
+                Id = "tracked-long-road-2",
+                DownloadClientId = "tr-1",
+                Title = "The Long Road Home",
+                Status = DownloadStatus.Downloading,
+                StartedAt = DateTime.UtcNow.AddMinutes(-10)
+            };
+
+            var downloadRepoMock = new Mock<IDownloadRepository>();
+            SetupQueueRepository(downloadRepoMock, new List<Download> { firstCandidate, secondCandidate });
+
+            var processingJobRepoMock = new Mock<IDownloadProcessingJobRepository>();
+            processingJobRepoMock.Setup(r => r.GetPendingDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+            processingJobRepoMock.Setup(r => r.GetAllJobDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+
+            var gatewayMock = new Mock<IDownloadClientGateway>();
+            gatewayMock.Setup(g => g.GetQueueAsync(client, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<QueueItem>
+                {
+                    new QueueItem
+                    {
+                        Id = "external-long-road-hash",
+                        Title = "The Long Road Home Complete",
+                        Status = "downloading",
+                        DownloadClient = "Transmission",
+                        DownloadClientId = "tr-1",
+                        DownloadClientType = "transmission",
+                        AddedAt = DateTime.UtcNow
+                    }
+                });
+
+            var metricsMock = new Mock<IAppMetricsService>();
+
+            var service = CreateService(
+                configMock.Object,
+                downloadRepoMock.Object,
+                processingJobRepoMock.Object,
+                gatewayMock.Object,
+                metricsMock.Object);
+
+            var result = await service.GetQueueAsync();
+
+            Assert.Empty(result);
+            downloadRepoMock.Verify(r => r.UpdateMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<object?>()), Times.Never);
+        }
+
+        [Theory]
+        [InlineData(DownloadStatus.Completed)]
+        [InlineData(DownloadStatus.Processing)]
+        [InlineData(DownloadStatus.ImportPending)]
+        [InlineData(DownloadStatus.Moved)]
+        [InlineData(DownloadStatus.Failed)]
+        public async Task GetQueueAsync_LiveNonEmptySnapshot_DoesNotRemoveNonActiveStatuses(DownloadStatus status)
+        {
+            var client = new DownloadClientConfiguration
+            {
+                Id = "qb-1",
+                Name = "local qbit",
+                Type = "qbittorrent",
+                IsEnabled = true
+            };
+
+            var configMock = new Mock<IConfigurationService>();
+            configMock.Setup(c => c.GetDownloadClientConfigurationsAsync())
+                .ReturnsAsync(new List<DownloadClientConfiguration> { client });
+            configMock.Setup(c => c.GetApplicationSettingsAsync())
+                .ReturnsAsync(new ApplicationSettings { ShowCompletedExternalDownloads = false });
+
+            var tracked = new Download
+            {
+                Id = $"download-{status}",
+                DownloadClientId = "qb-1",
+                Title = $"Status {status}",
+                Status = status,
+                StartedAt = DateTime.UtcNow.AddMinutes(-20),
+                Metadata = new Dictionary<string, object>
+                {
+                    ["ClientDownloadId"] = $"missing-{status}"
+                }
+            };
+
+            var downloadRepoMock = new Mock<IDownloadRepository>();
+            SetupQueueRepository(downloadRepoMock, new List<Download> { tracked });
+            downloadRepoMock.Setup(r => r.RemoveAsync(It.IsAny<string>())).Returns(Task.CompletedTask);
+
+            var processingJobRepoMock = new Mock<IDownloadProcessingJobRepository>();
+            processingJobRepoMock.Setup(r => r.GetPendingDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+            processingJobRepoMock.Setup(r => r.GetAllJobDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+
+            var gatewayMock = new Mock<IDownloadClientGateway>();
+            gatewayMock.Setup(g => g.GetQueueAsync(client, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<QueueItem>
+                {
+                    new QueueItem
+                    {
+                        Id = "other-live-item",
+                        Title = "Other Live Item",
+                        Status = "downloading",
+                        AddedAt = DateTime.UtcNow
+                    }
+                });
+
+            var metricsMock = new Mock<IAppMetricsService>();
+
+            var service = CreateService(
+                configMock.Object,
+                downloadRepoMock.Object,
+                processingJobRepoMock.Object,
+                gatewayMock.Object,
+                metricsMock.Object);
+
+            await service.GetQueueAsync();
+
+            downloadRepoMock.Verify(r => r.RemoveAsync(It.IsAny<string>()), Times.Never);
+            downloadRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Download>()), Times.Never);
+            metricsMock.Verify(m => m.Increment("download.orphan.removed", It.IsAny<int>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task GetQueueAsync_LiveNonEmptySnapshot_DoesNotRemoveRecentOrExternalIdlessDownloads()
+        {
+            var client = new DownloadClientConfiguration
+            {
+                Id = "qb-1",
+                Name = "local qbit",
+                Type = "qbittorrent",
+                IsEnabled = true
+            };
+
+            var configMock = new Mock<IConfigurationService>();
+            configMock.Setup(c => c.GetDownloadClientConfigurationsAsync())
+                .ReturnsAsync(new List<DownloadClientConfiguration> { client });
+            configMock.Setup(c => c.GetApplicationSettingsAsync())
+                .ReturnsAsync(new ApplicationSettings { ShowCompletedExternalDownloads = false });
+
+            var recent = new Download
+            {
+                Id = "recent-download",
+                DownloadClientId = "qb-1",
+                Title = "Recent Download",
+                Status = DownloadStatus.Downloading,
+                StartedAt = DateTime.UtcNow.AddMinutes(-1),
+                Metadata = new Dictionary<string, object>
+                {
+                    ["ClientDownloadId"] = "recent-missing"
+                }
+            };
+
+            var withoutExternalId = new Download
+            {
+                Id = "without-external-id",
+                DownloadClientId = "qb-1",
+                Title = "No External Id",
+                Status = DownloadStatus.Queued,
+                StartedAt = DateTime.UtcNow.AddMinutes(-20)
+            };
+
+            var downloadRepoMock = new Mock<IDownloadRepository>();
+            SetupQueueRepository(downloadRepoMock, new List<Download> { recent, withoutExternalId });
+            downloadRepoMock.Setup(r => r.RemoveAsync(It.IsAny<string>())).Returns(Task.CompletedTask);
+
+            var processingJobRepoMock = new Mock<IDownloadProcessingJobRepository>();
+            processingJobRepoMock.Setup(r => r.GetPendingDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+            processingJobRepoMock.Setup(r => r.GetAllJobDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+
+            var gatewayMock = new Mock<IDownloadClientGateway>();
+            gatewayMock.Setup(g => g.GetQueueAsync(client, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<QueueItem>
+                {
+                    new QueueItem
+                    {
+                        Id = "other-live-item",
+                        Title = "Other Live Item",
+                        Status = "downloading",
+                        AddedAt = DateTime.UtcNow
+                    }
+                });
+
+            var metricsMock = new Mock<IAppMetricsService>();
+
+            var service = CreateService(
+                configMock.Object,
+                downloadRepoMock.Object,
+                processingJobRepoMock.Object,
+                gatewayMock.Object,
+                metricsMock.Object);
+
+            await service.GetQueueAsync();
+
+            downloadRepoMock.Verify(r => r.RemoveAsync(It.IsAny<string>()), Times.Never);
+            metricsMock.Verify(m => m.Increment("download.orphan.removed", It.IsAny<int>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task GetQueueAsync_LiveNonEmptySnapshot_DoesNotRemoveMatchedRawIdOrTorrentHash()
+        {
+            var client = new DownloadClientConfiguration
+            {
+                Id = "qb-1",
+                Name = "local qbit",
+                Type = "qbittorrent",
+                IsEnabled = true
+            };
+
+            var configMock = new Mock<IConfigurationService>();
+            configMock.Setup(c => c.GetDownloadClientConfigurationsAsync())
+                .ReturnsAsync(new List<DownloadClientConfiguration> { client });
+            configMock.Setup(c => c.GetApplicationSettingsAsync())
+                .ReturnsAsync(new ApplicationSettings { ShowCompletedExternalDownloads = false });
+
+            var rawIdMatch = new Download
+            {
+                Id = "raw-id-match",
+                DownloadClientId = "qb-1",
+                Title = "Raw Id Match",
+                Status = DownloadStatus.Downloading,
+                StartedAt = DateTime.UtcNow.AddMinutes(-20),
+                Metadata = new Dictionary<string, object>
+                {
+                    ["ClientDownloadId"] = "client-id-1"
+                }
+            };
+
+            var torrentHashMatch = new Download
+            {
+                Id = "torrent-hash-match",
+                DownloadClientId = "qb-1",
+                Title = "Torrent Hash Match",
+                Status = DownloadStatus.Downloading,
+                StartedAt = DateTime.UtcNow.AddMinutes(-20),
+                Metadata = new Dictionary<string, object>
+                {
+                    ["TorrentHash"] = "torrent-hash-1"
+                }
+            };
+
+            var downloadRepoMock = new Mock<IDownloadRepository>();
+            SetupQueueRepository(downloadRepoMock, new List<Download> { rawIdMatch, torrentHashMatch });
+            downloadRepoMock.Setup(r => r.RemoveAsync(It.IsAny<string>())).Returns(Task.CompletedTask);
+            downloadRepoMock
+                .Setup(r => r.UpdateMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<object?>()))
+                .Returns(Task.CompletedTask);
+
+            var processingJobRepoMock = new Mock<IDownloadProcessingJobRepository>();
+            processingJobRepoMock.Setup(r => r.GetPendingDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+            processingJobRepoMock.Setup(r => r.GetAllJobDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
+
+            var gatewayMock = new Mock<IDownloadClientGateway>();
+            gatewayMock.Setup(g => g.GetQueueAsync(client, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<QueueItem>
+                {
+                    new QueueItem
+                    {
+                        Id = "client-id-1",
+                        Title = "Raw Id Match",
+                        Status = "downloading",
+                        AddedAt = DateTime.UtcNow
+                    },
+                    new QueueItem
+                    {
+                        Id = "torrent-hash-1",
+                        Title = "Torrent Hash Match",
+                        Status = "downloading",
+                        AddedAt = DateTime.UtcNow
+                    }
+                });
+
+            var metricsMock = new Mock<IAppMetricsService>();
+
+            var service = CreateService(
+                configMock.Object,
+                downloadRepoMock.Object,
+                processingJobRepoMock.Object,
+                gatewayMock.Object,
+                metricsMock.Object);
+
+            var result = await service.GetQueueAsync();
+
+            Assert.Equal(2, result.Count);
+            downloadRepoMock.Verify(r => r.RemoveAsync(It.IsAny<string>()), Times.Never);
+            metricsMock.Verify(m => m.Increment("download.orphan.removed", It.IsAny<int>()), Times.Never);
+        }
+
+        [Fact]
+        [Trait("Scenario", "DirectDownloadVisibleFromDatabase")]
+        public async Task GetQueueAsync_IncludesDirectDownloadReservations_FromDatabase()
+        {
+            var ddl = new Download
+            {
+                Id = "ddl-1",
+                AudiobookId = 77,
+                Title = "Alice in Wonderland (Drama)",
+                Artist = "Lewis Carroll",
+                OriginalUrl = "https://archive.org/download/alice/alice.m4b",
+                DownloadClientId = "DDL",
+                Status = DownloadStatus.Queued,
+                Progress = 0,
+                TotalSize = 12345,
+                DownloadedSize = 0,
+                StartedAt = DateTime.UtcNow,
+                Metadata = new Dictionary<string, object>
+                {
+                    ["Quality"] = "M4B",
+                    ["Language"] = "English",
+                    ["DownloadType"] = "DDL"
+                }
+            };
+
+            var downloadRepoMock = new Mock<IDownloadRepository>();
+            SetupQueueRepository(downloadRepoMock, new List<Download> { ddl });
+
+            var configMock = new Mock<IConfigurationService>();
+            configMock.Setup(c => c.GetDownloadClientConfigurationsAsync())
+                .ReturnsAsync(new List<DownloadClientConfiguration>());
+            configMock.Setup(c => c.GetApplicationSettingsAsync())
+                .ReturnsAsync(new ApplicationSettings());
+
+            var processingJobRepoMock = new Mock<IDownloadProcessingJobRepository>();
+            var gatewayMock = new Mock<IDownloadClientGateway>();
+            var metricsMock = new Mock<IAppMetricsService>();
+
+            var service = CreateService(
+                configMock.Object,
+                downloadRepoMock.Object,
+                processingJobRepoMock.Object,
+                gatewayMock.Object,
+                metricsMock.Object);
+
+            var result = await service.GetQueueAsync();
+
+            var item = Assert.Single(result);
+            Assert.Equal("ddl-1", item.Id);
+            Assert.Equal("queued", item.Status);
+            Assert.Equal("Direct Download", item.DownloadClient);
+            Assert.Equal("DDL", item.DownloadClientId);
+            Assert.Equal("ddl", item.DownloadClientType);
+            Assert.Equal(77, item.AudiobookId);
+            Assert.Equal(ddl.OriginalUrl, item.RemotePath);
+        }
+
+        [Fact]
+        [Trait("Scenario", "DirectDownloadVisibleFromDatabase")]
+        public async Task GetQueueAsync_MapsDirectDownloadProgressAndImportStatuses_FromDatabase()
+        {
+            var downloading = new Download
+            {
+                Id = "ddl-downloading",
+                Title = "DDL Downloading",
+                Artist = "Author",
+                OriginalUrl = "https://archive.org/download/book/book.m4b",
+                DownloadClientId = "DDL",
+                Status = DownloadStatus.Downloading,
+                Progress = 42.5M,
+                TotalSize = 1000,
+                DownloadedSize = 425,
+                StartedAt = DateTime.UtcNow.AddMinutes(-3),
+                Metadata = new Dictionary<string, object>
+                {
+                    ["Quality"] = "M4B",
+                    ["Language"] = "English",
+                    ["DownloadType"] = "DDL"
+                }
+            };
+            var importPending = new Download
+            {
+                Id = "ddl-importpending",
+                Title = "DDL Import Pending",
+                OriginalUrl = "https://archive.org/download/book/import.m4b",
+                DownloadClientId = "DDL",
+                Status = DownloadStatus.ImportPending,
+                Progress = 100,
+                TotalSize = 1000,
+                DownloadedSize = 1000,
+                StartedAt = DateTime.UtcNow.AddMinutes(-2),
+                Metadata = new Dictionary<string, object> { ["DownloadType"] = "DDL" }
+            };
+            var importBlocked = new Download
+            {
+                Id = "ddl-importblocked",
+                Title = "DDL Import Blocked",
+                OriginalUrl = "https://archive.org/download/book/blocked.m4b",
+                DownloadClientId = "DDL",
+                Status = DownloadStatus.ImportBlocked,
+                Progress = 100,
+                TotalSize = 1000,
+                DownloadedSize = 1000,
+                StartedAt = DateTime.UtcNow.AddMinutes(-1),
+                ErrorMessage = "Import failed",
+                Metadata = new Dictionary<string, object> { ["DownloadType"] = "DDL" }
+            };
+
+            var downloadRepoMock = new Mock<IDownloadRepository>();
+            SetupQueueRepository(downloadRepoMock, new List<Download> { downloading, importPending, importBlocked });
+
+            var configMock = new Mock<IConfigurationService>();
+            configMock.Setup(c => c.GetDownloadClientConfigurationsAsync())
+                .ReturnsAsync(new List<DownloadClientConfiguration>());
+            configMock.Setup(c => c.GetApplicationSettingsAsync())
+                .ReturnsAsync(new ApplicationSettings());
+
+            var processingJobRepoMock = new Mock<IDownloadProcessingJobRepository>();
+            var gatewayMock = new Mock<IDownloadClientGateway>();
+            var metricsMock = new Mock<IAppMetricsService>();
+
+            var service = CreateService(
+                configMock.Object,
+                downloadRepoMock.Object,
+                processingJobRepoMock.Object,
+                gatewayMock.Object,
+                metricsMock.Object);
+
+            var result = await service.GetQueueAsync();
+            var items = result.ToDictionary(item => item.Id, StringComparer.OrdinalIgnoreCase);
+
+            Assert.Equal(3, result.Count);
+            Assert.Equal("downloading", items["ddl-downloading"].Status);
+            Assert.Equal(42.5, items["ddl-downloading"].Progress);
+            Assert.Equal(425, items["ddl-downloading"].Downloaded);
+            Assert.Equal(1000, items["ddl-downloading"].Size);
+            Assert.Equal("importpending", items["ddl-importpending"].Status);
+            Assert.Equal("importblocked", items["ddl-importblocked"].Status);
+            Assert.Equal("Import failed", items["ddl-importblocked"].ErrorMessage);
         }
 
         private static bool IsQueueDisplayCandidate(Download d)

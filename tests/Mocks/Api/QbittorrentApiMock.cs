@@ -10,6 +10,8 @@ namespace Listenarr.Tests.Mocks.Api
         public bool Authenticated { get; set; } = false;
         public NameValueCollection? LastDeleteForm { get; private set; }
         public NameValueCollection? LastCategoryForm { get; private set; }
+        public HttpStatusCode InfoStatusCode { get; set; } = HttpStatusCode.OK;
+        public string? InfoResponseOverride { get; set; }
 
         public QbittorrentApiMock()
         {
@@ -17,6 +19,7 @@ namespace Listenarr.Tests.Mocks.Api
             AddRoute("api/v2/torrents/add", DoAdd, HttpMethod.Post);
             AddRoute("api/v2/app/version", GetVersion, HttpMethod.Get);
             AddRoute("api/v2/torrents/info", GetInfo, HttpMethod.Get);
+            AddRoute("api/v2/torrents/files", GetFiles, HttpMethod.Get);
             AddRoute("api/v2/torrents/delete", DoDelete, HttpMethod.Post);
             AddRoute("api/v2/torrents/setCategory", SetCategory, HttpMethod.Post);
         }
@@ -58,14 +61,34 @@ namespace Listenarr.Tests.Mocks.Api
                 return new HttpResponseMessage(HttpStatusCode.Forbidden);
             }
 
-            return MockUtils.GetCannedResponse("""
+            if (InfoStatusCode != HttpStatusCode.OK)
+            {
+                return new HttpResponseMessage(InfoStatusCode);
+            }
+
+            return MockUtils.GetCannedResponse(InfoResponseOverride ?? """
             [
                 {
                     "hash": "NEWHASH",
-                    "name": "Book"
+                    "name": "Book",
+                    "progress": 0.5,
+                    "size": 1000,
+                    "downloaded": 500,
+                    "state": "downloading",
+                    "save_path": "/downloads/book"
                 }
             ]
             """);
+        }
+
+        private async Task<HttpResponseMessage> GetFiles(HttpRequestMessage request, CancellationToken ct)
+        {
+            if (!Authenticated)
+            {
+                return new HttpResponseMessage(HttpStatusCode.Forbidden);
+            }
+
+            return MockUtils.GetCannedResponse("[]");
         }
 
         private async Task<HttpResponseMessage> GetVersion(HttpRequestMessage request, CancellationToken ct)

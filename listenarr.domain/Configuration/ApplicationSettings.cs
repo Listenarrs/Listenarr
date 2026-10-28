@@ -7,15 +7,7 @@ namespace Listenarr.Domain.Configuration
     {
         public int Version { get; set; }
         public int Id { get; set; } = 1; // Singleton pattern - only one settings record
-        public string OutputPath
-        {
-            get
-            {
-                // TODO: Should be put on the set operation with appropriate DB migration to normalize existing data
-                return FileUtils.NormalizeStoredPath(field);
-            }
-            set;
-        } = string.Empty;
+        public string OutputPath { get; set; } = string.Empty;
 
         // Folder naming pattern (base directory structure)
         // Available variables:
@@ -245,5 +237,25 @@ namespace Listenarr.Domain.Configuration
         /// Preferred default language filter for Add New searches.
         /// </summary>
         public string DefaultSearchLanguage { get; set; } = "english";
+
+        /// <summary>
+        /// How often the automatic-search worker sweeps for eligible books, in hours.
+        /// This is only the cadence of the check; which books it picks up is decided by
+        /// <see cref="AutomaticSearchCooldownHours"/>. Read each cycle, clamped to [1, 168].
+        /// </summary>
+        public int AutomaticSearchIntervalHours { get; set; } = 1;
+
+        /// <summary>
+        /// How long a book stays ineligible for automatic search after it was last searched,
+        /// in hours. One shared cooldown for every book. Clamped to [1, 720].
+        /// </summary>
+        public int AutomaticSearchCooldownHours { get; set; } = 24;
+
+        /// <summary>
+        /// Pause between consecutive book searches inside one sweep, in seconds, so a large
+        /// wanted list does not hammer the indexers. 0 disables it. Manual "Search now" is
+        /// unaffected. Clamped to [0, 300].
+        /// </summary>
+        public int AutomaticSearchBookDelaySeconds { get; set; } = 5;
     }
 }

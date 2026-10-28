@@ -164,8 +164,15 @@ vi.mock('@/services/api', () => {
     executeRename: vi.fn(async () => []),
     getQualityProfiles: vi.fn(async () => []),
     getApiConfigurations: vi.fn(async () => []),
-    // add getRootFolders to apiService so tests that spy on apiService.getRootFolders work
+    // Root-folder mutation methods used by store/component integration tests.
     getRootFolders: vi.fn(async () => []),
+    updateRootFolder: vi.fn(async (_id: number, payload: unknown) => payload),
+    changeRootFolderPath: vi.fn(async () => ({})),
+    confirmRootFolder: vi.fn(async () => ({})),
+    getRootFolderMetadataRepairDetails: vi.fn(async () => ({})),
+    removeRootFolderMetadataRepairFile: vi.fn(async () => ({})),
+    abandonUnpublishedRootFolderRelocation: vi.fn(async () => ({})),
+    retryRootFolderRelocation: vi.fn(async () => ({})),
 
     // add checkVolume to apiService so components that call `apiService.checkVolume` in
     // unit tests have a sensible default value that matches the real API signature.
@@ -186,6 +193,10 @@ vi.mock('@/services/api', () => {
           typeof sourcePath === 'string' ? sourcePath.split(/[\\/]/)[1] || '' : undefined,
         destVolume: typeof destPath === 'string' ? destPath.split(/[\\/]/)[1] || '' : undefined,
         message: same ? 'Same volume' : 'Different volumes',
+        verifiedSourceDeletionEnabled: false,
+        sourceIsManagedRoot: false,
+        sourceCleanupMessage:
+          'Source files will be retained because safe source cleanup is unavailable.',
       }
     }),
   }
@@ -233,6 +244,14 @@ vi.mock('@/services/signalr', () => ({
       return () => {}
     },
     onQueueUpdate: (cb?: (...args: unknown[]) => void) => {
+      void cb
+      return () => {}
+    },
+    onConnected: (cb?: (...args: unknown[]) => void) => {
+      void cb
+      return () => {}
+    },
+    onRootFolderRelocationUpdate: (cb?: (...args: unknown[]) => void) => {
       void cb
       return () => {}
     },
@@ -294,40 +313,48 @@ try {
   }
 } catch {}
 
-// Provide a simple localStorage polyfill for tests that rely on it
-// Ensure a working localStorage implementation exists for tests. Some test
-// runners may set a placeholder object; normalize it so .setItem/.getItem exist.
-if (
-  typeof (globalThis as unknown as { localStorage?: { setItem?: unknown } }).localStorage ===
-    'undefined' ||
-  typeof (globalThis as unknown as { localStorage?: { setItem?: unknown } }).localStorage
-    ?.setItem !== 'function'
-) {
-  ;(
-    globalThis as unknown as {
-      localStorage?: {
-        _store?: Record<string, string>
-        getItem?: (k: string) => string | null
-        setItem?: (k: string, v: string) => void
-        removeItem?: (k: string) => void
-        clear?: () => void
-      }
-    }
-  ).localStorage = {
-    _store: {} as Record<string, string>,
-    getItem(key: string) {
-      return this._store[key] ?? null
-    },
-    setItem(key: string, value: string) {
-      this._store[key] = value + ''
-    },
-    removeItem(key: string) {
-      delete this._store[key]
-    },
-    clear() {
-      this._store = {}
-    },
-  }
+// Ensure a working localStorage implementation exists for tests. Node 24 exposes
+// a native global localStorage getter that warns unless --localstorage-file is
+// configured, so install test storage without reading the getter.
+type TestStorage = {
+  _store?: Record<string, string>
+  getItem?: (k: string) => string | null
+  setItem?: (k: string, v: string) => void
+  removeItem?: (k: string) => void
+  clear?: () => void
+}
+
+const createMemoryStorage = (): TestStorage => ({
+  _store: {},
+  getItem(key: string) {
+    return this._store?.[key] ?? null
+  },
+  setItem(key: string, value: string) {
+    this._store = this._store ?? {}
+    this._store[key] = value + ''
+  },
+  removeItem(key: string) {
+    delete this._store?.[key]
+  },
+  clear() {
+    this._store = {}
+  },
+})
+
+const testLocalStorage = createMemoryStorage()
+
+Object.defineProperty(globalThis, 'localStorage', {
+  configurable: true,
+  value: testLocalStorage,
+  writable: true,
+})
+
+if (typeof window !== 'undefined') {
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: testLocalStorage,
+    writable: true,
+  })
 }
 
 // Defensive: JSDOM / Vitest may encounter `file://` asset URLs (e.g. transformed

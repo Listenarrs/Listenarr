@@ -7,12 +7,14 @@
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  */
+using Listenarr.Domain.Common;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Features.Library;
 
 public sealed class LibraryPreviewPathWorkflow(
     IConfigurationService configurationService,
+    IRootFolderService rootFolderService,
     IFileNamingService fileNamingService,
     ILogger<LibraryPreviewPathWorkflow> logger)
 {
@@ -21,9 +23,13 @@ public sealed class LibraryPreviewPathWorkflow(
         try
         {
             var settings = await configurationService.GetApplicationSettingsAsync();
-            var root = !string.IsNullOrEmpty(request.DestinationRoot)
+            var explicitRoot = !string.IsNullOrEmpty(request.DestinationRoot);
+            var defaultRoot = explicitRoot
+                ? null
+                : await rootFolderService.GetDefaultAsync();
+            var root = explicitRoot
                 ? request.DestinationRoot
-                : settings.OutputPath;
+                : defaultRoot?.Path ?? settings.OutputPath;
             var audiobook = request.Metadata.ToAudiobook();
 
             AudiobookSeriesMembershipHelper.ApplyToAudiobook(
@@ -35,18 +41,17 @@ public sealed class LibraryPreviewPathWorkflow(
             var namingPattern = !string.IsNullOrWhiteSpace(settings.FolderNamingPattern)
                 ? settings.FolderNamingPattern
                 : settings.FileNamingPattern;
-            var fullPath = LibraryPathPlanner.ComputeAudiobookBaseDirectoryFromPattern(
+            // Preview owns the naming calculation, so preserve the generated relative
+            // directory directly instead of re-deriving it from the full path through
+            // live filesystem semantics. Read-only preview must not depend on CIFS/NFS/
+            // FUSE case-sensitivity probes merely to recover a string it just produced.
+            var relativePath = LibraryPathPlanner.ComputeAudiobookRelativeDirectoryFromPattern(
                 audiobook,
-                root ?? string.Empty,
                 namingPattern,
                 fileNamingService);
-            var relativePath = fullPath;
-            if (!string.IsNullOrEmpty(root) &&
-                fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
-            {
-                relativePath = fullPath[root.Length..]
-                    .TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            }
+            var fullPath = FileUtils.CombineWithOptionalBase(
+                root ?? string.Empty,
+                relativePath);
 
             return new OkObjectResult(new { fullPath, relativePath, root });
         }

@@ -61,6 +61,9 @@ public interface IRemotePathMappingService
     /// </summary>
     /// <param name="client">The download client reporting the path</param>
     /// <param name="remotePath">The path as reported by the download client</param>
-    /// <returns>The translated local path, or the original path if no mapping matches</returns>
+    /// <returns>The translated local path, or the original path if no mapping matches.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// A matching mapping exists but its local side is unavailable or unsafe on this host.
+    /// </exception>
     Task<string> TranslatePathAsync(DownloadClientConfiguration client, string remotePath);
 }

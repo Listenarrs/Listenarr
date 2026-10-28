@@ -53,6 +53,8 @@ type ManualSearchResult = {
   source?: string
   nzbUrl?: string
   sourceLink?: string
+  productUrl?: string
+  publishedDate?: string
   size?: number
   quality?: string
   format?: string
@@ -72,7 +74,6 @@ type QualityScore = {
 type QualityScoresMap =
   | Map<string, QualityScore>
   | { value?: Map<string, QualityScore>; set?: (k: string, v: QualityScore) => void }
-  | Map<string, QualityScore>
 
 describe('ManualSearchModal.vue', () => {
   const stubs = {
@@ -131,12 +132,69 @@ describe('ManualSearchModal.vue', () => {
 
     await nextTick()
 
-    // Debug: show rendered HTML to investigate missing anchor
-
-    console.log(wrapper.html())
     const anchor = wrapper.find('a.title-text')
     expect(anchor.exists()).toBe(true)
     expect(anchor.attributes('href')).toBe('https://indexer/info/123')
+  })
+
+  it('uses canonical result URL for DDL title links and hides invalid age', async () => {
+    const wrapper = mount(ManualSearchModal, {
+      props: { isOpen: true, audiobook: null },
+      global: { stubs },
+    })
+    const vm = wrapper.vm as unknown as {
+      results: ManualSearchResult[]
+      qualityScores?: QualityScoresMap
+    }
+
+    setResultsOnVm(vm, [
+      {
+        id: '7a5b7a7d-3300-4dc2-97a8-1c1f5ac1e2b7',
+        title: "Alice's Adventures in Wonderland",
+        downloadType: 'DDL',
+        resultUrl: 'https://archive.org/details/alices_adventures_1003',
+        source: 'ia (Internet Archive)',
+        publishedDate: '',
+        size: 73_000_000,
+      },
+    ])
+
+    await nextTick()
+
+    const anchor = wrapper.find('a.title-text')
+    expect(anchor.exists()).toBe(true)
+    expect(anchor.attributes('href')).toBe('https://archive.org/details/alices_adventures_1003')
+    expect(wrapper.find('tbody .col-age').text()).toBe('-')
+    expect(wrapper.text()).not.toContain('NaN years')
+  })
+
+  it('normalizes ISO language codes before rendering badges', async () => {
+    const wrapper = mount(ManualSearchModal, {
+      props: { isOpen: true, audiobook: null },
+      global: { stubs },
+    })
+    const vm = wrapper.vm as unknown as {
+      results: ManualSearchResult[]
+      qualityScores?: QualityScoresMap
+    }
+
+    setResultsOnVm(vm, [
+      {
+        id: 'lang-deu',
+        title: 'German Language Test',
+        language: 'deu',
+        downloadType: 'DDL',
+        resultUrl: 'https://archive.org/details/german-test',
+        source: 'ia',
+        size: 0,
+      },
+    ])
+
+    await nextTick()
+
+    const langBadge = wrapper.find('.language-badge')
+    expect(langBadge.exists()).toBe(true)
+    expect(langBadge.text()).toBe('German')
   })
 
   it('does not show language badge when language is Unknown', async () => {

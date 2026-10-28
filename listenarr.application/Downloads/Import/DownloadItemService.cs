@@ -22,11 +22,19 @@ namespace Listenarr.Application.Downloads.Import
     public class DownloadItemService(
         IConfigurationService configurationService,
         ILogger<IDownloadItemService> logger,
-        IDownloadClientGateway downloadClientGateway) : IDownloadItemService
+        IDownloadClientGateway downloadClientGateway,
+        IDirectDownloadImportSourceResolver directDownloadImportSourceResolver) : IDownloadItemService
     {
 
         public async Task<QueueItem> GetImportItemAsync(Download download, CancellationToken ct = default)
         {
+            if (string.Equals(download.DownloadClientId, DirectDownloadMetadataKeys.ClientId, StringComparison.OrdinalIgnoreCase))
+            {
+                // DDLs are fetched by Listenarr itself and have no external client
+                // row to resolve. Infrastructure owns local filesystem discovery.
+                return directDownloadImportSourceResolver.Resolve(download);
+            }
+
             // Get the download client configuration
             var client = await configurationService.GetDownloadClientConfigurationAsync(download.DownloadClientId);
             if (client == null)
@@ -58,5 +66,6 @@ namespace Listenarr.Application.Downloads.Import
                 queueItem,
                 ct);
         }
+
     }
 }

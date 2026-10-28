@@ -2,18 +2,17 @@ namespace Listenarr.Tests.Builders
 {
     public class RootFolderBuilder
     {
-        private static int IdCounter = 0;
         private RootFolder _rootFolder = new();
 
         public RootFolderBuilder()
         {
-            _rootFolder.Id = ++IdCounter;
+            _rootFolder.Id = TestEntityIdGenerator.Next();
             _rootFolder.CreatedAt = DateTime.UtcNow;
         }
 
         public RootFolderBuilder WithId(int value)
         {
-            _rootFolder.Id = value;
+            _rootFolder.Id = TestEntityIdGenerator.Explicit(value);
             return this;
         }
 
@@ -38,6 +37,12 @@ namespace Listenarr.Tests.Builders
         public RootFolderBuilder WithoutIsDefault()
         {
             _rootFolder.IsDefault = false;
+            return this;
+        }
+
+        public RootFolderBuilder WithCaseSensitivityMode(FileSystemCaseSensitivityMode value)
+        {
+            _rootFolder.CaseSensitivityMode = value;
             return this;
         }
 

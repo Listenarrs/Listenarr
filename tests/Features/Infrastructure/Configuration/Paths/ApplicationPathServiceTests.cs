@@ -26,6 +26,30 @@ namespace Listenarr.Tests.Features.Infrastructure.Configuration.Paths
     {
         [Fact]
         [Trait("Method", "Constructor")]
+        [Trait("Scenario", "ExposesFileMoveLockRootUnderConfigRuntime")]
+        public void Constructor_ExposesFileMoveLockRootUnderConfigRuntime()
+        {
+            var contentRootPath = Path.Join(
+                Path.GetTempPath(),
+                "listenarr-path-service-tests",
+                Guid.NewGuid().ToString("N"));
+            var service = new ApplicationPathService(contentRootPath);
+
+            Assert.Equal(
+                Path.GetFullPath(Path.Join(
+                    contentRootPath,
+                    "config",
+                    "runtime",
+                    "file-move-locks")),
+                service.FileMoveLockRootPath);
+            Assert.StartsWith(
+                service.ConfigRootPath,
+                service.FileMoveLockRootPath,
+                StringComparison.Ordinal);
+        }
+
+        [Fact]
+        [Trait("Method", "Constructor")]
         [Trait("Scenario", "ExposesDiscordBotRootPathUnderToolsRoot")]
         public void Constructor_ExposesDiscordBotRootPathUnderToolsRoot()
         {

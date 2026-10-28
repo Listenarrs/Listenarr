@@ -31,6 +31,12 @@ namespace Listenarr.Application.Common.Contracts
         Task ProcessJobAsync(DownloadProcessingJob job, CancellationToken cancellationToken);
     }
 
+    public interface IDirectDownloadProcessor
+    {
+        Task RunCycleAsync(CancellationToken cancellationToken);
+        Task ProcessDownloadAsync(Download download, CancellationToken cancellationToken);
+    }
+
     public interface IMovedDownloadCleanupProcessor
     {
         Task RunCycleAsync(CancellationToken cancellationToken);
@@ -41,9 +47,31 @@ namespace Listenarr.Application.Common.Contracts
         Task ProcessJobAsync(ScanJob job, CancellationToken cancellationToken);
     }
 
+    public sealed record MovePostCommitContext(
+        Guid JobId,
+        int AudiobookId,
+        string? AudiobookTitle,
+        string Source,
+        string Target,
+        Guid HandoffId,
+        int MoveHistoryId,
+        bool MoveHistoryCreated,
+        bool SourceRetained = false);
+
     public interface IMoveJobProcessor
     {
         Task ProcessJobAsync(MoveJob job, CancellationToken cancellationToken);
+    }
+
+    public interface IMoveJobProcessorPhases
+    {
+        Task<MovePostCommitContext?> ProcessDurableJobAsync(
+            MoveJob job,
+            CancellationToken cancellationToken);
+
+        Task RunPostCompletionEffectsAsync(
+            MovePostCommitContext context,
+            CancellationToken cancellationToken);
     }
 
     public interface IAutomaticSearchProcessor

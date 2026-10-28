@@ -14,8 +14,30 @@ public sealed class LocalFileSystem : IFileSystem
 
     public long GetFileLength(string path) => new FileInfo(path).Length;
 
-    public bool IsReparsePoint(string path) =>
-        File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint);
+    public bool IsReparsePoint(string path)
+    {
+        try
+        {
+            var attributes = File.GetAttributes(path);
+            if (attributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                return true;
+            }
+
+            FileSystemInfo entry = attributes.HasFlag(FileAttributes.Directory)
+                ? new DirectoryInfo(path)
+                : new FileInfo(path);
+            return entry.LinkTarget != null;
+        }
+        catch (FileNotFoundException)
+        {
+            return false;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return false;
+        }
+    }
 
     public string ReadAllText(string path) => File.ReadAllText(path);
 

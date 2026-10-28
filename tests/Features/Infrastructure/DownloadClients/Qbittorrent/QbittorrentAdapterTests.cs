@@ -15,7 +15,10 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using System.Net;
 using System.Text.Json;
+using System.Web;
+using Listenarr.Domain.Downloads.Exceptions;
 using Listenarr.Tests.Common;
 
 using Listenarr.Tests.Builders;
@@ -26,6 +29,30 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
 {
     public class QbittorrentAdapterTests : BaseTests
     {
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task GetItemsAsync_UnknownSeedPolicyCannotAuthorizeMovement(bool knownPolicy)
+        {
+            using var http = new HttpClient(new DelegatingHandlerMock((request, _) =>
+            {
+                var path = request.RequestUri!.AbsolutePath;
+                var response = path.EndsWith("/preferences")
+                    ? knownPolicy ? """{"max_ratio_enabled":true,"max_ratio":2,"max_seeding_time_enabled":false,"max_seeding_time":30}""" : "{}"
+                    : path.EndsWith("/login") ? "Ok."
+                    : """[{"hash":"EXACT","name":"Book","state":"stoppedUP","progress":1,"ratio":3,"ratio_limit":-2,"seeding_time_limit":-2}]""";
+                return Task.FromResult(MockUtils.GetCannedResponse(response));
+            }));
+            var factory = new Mock<IHttpClientFactory>();
+            factory.Setup(value => value.CreateClient(It.IsAny<string>())).Returns(http);
+            var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<QbittorrentAdapter>.Instance;
+            var workflow = new QbittorrentItemFetchWorkflow(factory.Object, new QbittorrentAuthSession(logger), logger, "qbittorrent");
+            var client = new DownloadClientConfiguration { Host = "localhost", Port = 8080, RemoveCompletedDownloads = "remove_and_delete" };
+            var item = Assert.Single(await workflow.GetItemsAsync(client));
+            Assert.Equal(knownPolicy, item.CanMoveFiles);
+            Assert.Equal(knownPolicy, item.CanBeRemoved);
+        }
+
         private DownloadClientConfiguration _client = null!;
 
         public override async Task InitializeAsync()
@@ -421,6 +448,78 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
         }
 
         [Fact]
+        public async Task GetQueueAsync_WithIds_AddsHashesQuery()
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = """
+            [
+                {
+                    "hash": "abcdef",
+                    "name": "Book",
+                    "progress": 0.5,
+                    "size": 1000,
+                    "downloaded": 500,
+                    "state": "downloading",
+                    "save_path": "/downloads/book"
+                }
+            ]
+            """;
+            apiMock.ResetRequestHistory();
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            var items = await adapter.GetQueueAsync(_client, ["ABCDEF", "123456"]);
+
+            Assert.NotEmpty(items);
+            var infoRequest = Assert.Single(apiMock.RequestHistory,
+                request => request.RequestUri.AbsolutePath.EndsWith("/api/v2/torrents/info", StringComparison.Ordinal));
+            var query = HttpUtility.ParseQueryString(infoRequest.RequestUri.Query);
+            Assert.Equal("abcdef|123456", query["hashes"]);
+        }
+
+        [Fact]
+        public async Task GetQueueAsync_WithoutIds_DoesNotAddHashesQuery()
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.ResetRequestHistory();
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            var items = await adapter.GetQueueAsync(_client);
+
+            Assert.NotEmpty(items);
+            var infoRequest = Assert.Single(apiMock.RequestHistory,
+                request => request.RequestUri.AbsolutePath.EndsWith("/api/v2/torrents/info", StringComparison.Ordinal));
+            var query = HttpUtility.ParseQueryString(infoRequest.RequestUri.Query);
+            Assert.Null(query["hashes"]);
+        }
+
+        [Fact]
+        public async Task GetQueueAsync_WithIds_ThrowsPollingException_OnQueueRequestFailure()
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoStatusCode = HttpStatusCode.InternalServerError;
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            await Assert.ThrowsAsync<DownloadClientAdapterPollingException>(
+                () => adapter.GetQueueAsync(_client, ["ABCDEF"]));
+        }
+
+        [Fact]
+        public async Task GetQueueAsync_WithoutIds_ReturnsEmpty_OnQueueRequestFailure()
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoStatusCode = HttpStatusCode.InternalServerError;
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            var items = await adapter.GetQueueAsync(_client);
+
+            Assert.Empty(items);
+        }
+
+        [Fact]
         public async Task MarkItemAsImportedAsync_SetsConfiguredPostImportCategory()
         {
             _client.Settings = new Dictionary<string, object>
@@ -465,10 +564,22 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
         [InlineData("uploading")]
         [InlineData("stalledUP")]
         [InlineData("stoppedUP")]
+        [InlineData("pausedUP")] // qBittorrent < 5.0 / rdt-client (#1047)
         public void CompletedTorrentStates_MapToCompleted(string state)
         {
             Assert.Equal(DownloadItemStatus.Completed, QbittorrentResponseMapper.MapDownloadItemStatus(state, 100));
             Assert.Equal("completed", QbittorrentResponseMapper.MapQueueStatus(state, 100));
+        }
+
+        [Theory]
+        [InlineData("pausedDL")]
+        [InlineData("pausedUP")]
+        public void LegacyPausedStates_MapToPaused_WhenIncomplete(string state)
+        {
+            // Before #1047 these pre-5.0 states fell through to Warning/unknown, so an rdt-client
+            // or old-qBittorrent download never progressed to completion or import.
+            Assert.Equal(DownloadItemStatus.Paused, QbittorrentResponseMapper.MapDownloadItemStatus(state, 50));
+            Assert.Equal("paused", QbittorrentResponseMapper.MapQueueStatus(state, 50));
         }
     }
 }

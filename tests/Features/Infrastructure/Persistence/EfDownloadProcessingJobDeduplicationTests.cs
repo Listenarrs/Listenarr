@@ -10,7 +10,6 @@
 
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Listenarr.Tests.Features.Infrastructure.Persistence;
 
@@ -44,9 +43,7 @@ public sealed class EfDownloadProcessingJobDeduplicationTests : IAsyncLifetime
     [Fact]
     public async Task ActiveJobKey_IsUniqueUntilJobBecomesTerminal()
     {
-        var repository = new EfDownloadProcessingJobRepository(
-            _factory,
-            NullLogger<EfDownloadProcessingJobRepository>.Instance);
+        var repository = new EfDownloadProcessingJobRepository(_factory);
         var first = CreateJob("download-42");
         var duplicate = CreateJob("DOWNLOAD-42");
 
@@ -61,6 +58,23 @@ public sealed class EfDownloadProcessingJobDeduplicationTests : IAsyncLifetime
         Assert.Equal(
             duplicate.Id,
             (await repository.GetActiveByDownloadIdAsync("DOWNLOAD-42"))?.Id);
+    }
+
+    [Fact]
+    public async Task DeleteCompletedBeforeAsync_WhenStatusesEmpty_DoesNothing()
+    {
+        var repository = new EfDownloadProcessingJobRepository(_factory);
+        var oldCompleted = CreateJob("download-cleanup").MarkAsCompleted();
+        oldCompleted.CompletedAt = DateTime.UtcNow.AddDays(-30);
+
+        await repository.AddAsync(oldCompleted);
+
+        var removed = await repository.DeleteCompletedBeforeAsync(
+            Array.Empty<ProcessingJobStatus>(),
+            DateTime.UtcNow);
+
+        Assert.Equal(0, removed);
+        Assert.NotNull(await repository.GetByIdAsync(oldCompleted.Id));
     }
 
     private static DownloadProcessingJob CreateJob(string downloadId) => new()

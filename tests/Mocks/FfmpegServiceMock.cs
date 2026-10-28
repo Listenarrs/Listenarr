@@ -33,9 +33,15 @@ namespace Listenarr.Tests.Mocks
             return "LICENSED Listenarr mock corp. V0";
         }
 
-        public async Task<AudioMetadata> RunFfprobeAsync(string filePath)
+        public Task<AudioMetadata> RunFfprobeAsync(string filePath)
         {
-            if (filePath.Contains("withmetadata"))
+            return RunFfprobeAsync(new MetadataFileSource(filePath, filePath));
+        }
+
+        public async Task<AudioMetadata> RunFfprobeAsync(
+            MetadataFileSource fileSource)
+        {
+            if (fileSource.PublicPath.Contains("withmetadata"))
             {
                 return new AudioMetadataBuilder()
                     .WithTitle("Super Tag")

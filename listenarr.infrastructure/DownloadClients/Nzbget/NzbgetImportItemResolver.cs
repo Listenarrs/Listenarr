@@ -29,9 +29,18 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
         {
             var result = item.Clone();
 
-            if (!string.IsNullOrEmpty(result.OutputPath))
+            if (!string.IsNullOrWhiteSpace(result.OutputPath) &&
+                (File.Exists(result.OutputPath) || Directory.Exists(result.OutputPath)))
             {
                 return result;
+            }
+
+            if (!string.IsNullOrWhiteSpace(result.OutputPath))
+            {
+                logger.LogDebug(
+                    "NZBGet output path {OutputPath} for {Id} does not exist; resolving from history",
+                    result.OutputPath,
+                    item.DownloadId);
             }
 
             var members = await FindHistoryEntryAsync(
@@ -45,19 +54,21 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
                 return result;
             }
 
+            var finalDir = members.GetValueOrDefault("FinalDir", string.Empty);
             var destDir = members.GetValueOrDefault("DestDir", string.Empty);
-            if (string.IsNullOrEmpty(destDir))
+            var outputPath = !string.IsNullOrWhiteSpace(finalDir) ? finalDir : destDir;
+            if (string.IsNullOrWhiteSpace(outputPath))
             {
-                logger.LogWarning("No DestDir found for NZBGet download {Id}", item.DownloadId);
+                logger.LogWarning("No FinalDir or DestDir found for NZBGet download {Id}", item.DownloadId);
                 return result;
             }
 
-            result.OutputPath = destDir;
+            result.OutputPath = outputPath;
 
             logger.LogDebug(
                 "Resolved NZBGet content path for {Id}: {ContentPath}",
                 item.DownloadId,
-                destDir);
+                outputPath);
 
             return result;
         }
@@ -68,9 +79,18 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
         {
             var result = queueItem.Clone();
 
-            if (!string.IsNullOrEmpty(result.ContentPath))
+            if (!string.IsNullOrWhiteSpace(result.ContentPath) &&
+                (File.Exists(result.ContentPath) || Directory.Exists(result.ContentPath)))
             {
                 return result;
+            }
+
+            if (!string.IsNullOrWhiteSpace(result.ContentPath))
+            {
+                logger.LogDebug(
+                    "NZBGet content path {ContentPath} for {NzbId} does not exist; resolving from history",
+                    result.ContentPath,
+                    queueItem.Id);
             }
 
             var members = await FindHistoryEntryAsync(
@@ -86,9 +106,9 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
 
             var finalDir = members.GetValueOrDefault("FinalDir", string.Empty);
             var destDir = members.GetValueOrDefault("DestDir", string.Empty);
-            var contentPath = !string.IsNullOrEmpty(finalDir) ? finalDir : destDir;
+            var contentPath = !string.IsNullOrWhiteSpace(finalDir) ? finalDir : destDir;
 
-            if (string.IsNullOrEmpty(contentPath))
+            if (string.IsNullOrWhiteSpace(contentPath))
             {
                 logger.LogWarning("No FinalDir or DestDir found for NZB {NzbId}", queueItem.Id);
                 return result;

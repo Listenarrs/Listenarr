@@ -16,19 +16,18 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Persistence.Repositories
 {
     public class EfDownloadProcessingJobRepository : IDownloadProcessingJobRepository
     {
-        private readonly IDbContextFactory<ListenArrDbContext> _dbFactory;
-        private readonly ILogger<EfDownloadProcessingJobRepository> _logger;
+        private const int CleanupBatchSize = 500;
 
-        public EfDownloadProcessingJobRepository(IDbContextFactory<ListenArrDbContext> dbFactory, ILogger<EfDownloadProcessingJobRepository> logger)
+        private readonly IDbContextFactory<ListenArrDbContext> _dbFactory;
+
+        public EfDownloadProcessingJobRepository(IDbContextFactory<ListenArrDbContext> dbFactory)
         {
             _dbFactory = dbFactory ?? throw new ArgumentNullException(nameof(dbFactory));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
         public async Task<List<string>> GetPendingDownloadIdsAsync(IEnumerable<string> completedDownloadIds)
@@ -162,20 +161,41 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             return result;
         }
 
-        public async Task CleanupOldJobsAsync(int retentionDays)
+        public async Task<int> DeleteCompletedBeforeAsync(
+            IReadOnlyCollection<ProcessingJobStatus> statuses,
+            DateTime cutoffUtc,
+            CancellationToken cancellationToken = default)
         {
-            var cutoffDate = DateTime.UtcNow.AddDays(-retentionDays);
-            await using var ctx = await _dbFactory.CreateDbContextAsync();
-            var oldJobs = await ctx.DownloadProcessingJobs
-                .Where(j => (j.Status == ProcessingJobStatus.Completed || j.Status == ProcessingJobStatus.Failed) &&
-                           j.CompletedAt.HasValue && j.CompletedAt < cutoffDate)
-                .ToListAsync();
-
-            if (oldJobs.Any())
+            if (statuses.Count == 0)
             {
+                return 0;
+            }
+
+            await using var ctx = await _dbFactory.CreateDbContextAsync(cancellationToken);
+            var removed = 0;
+
+            while (true)
+            {
+                var oldJobs = await ctx.DownloadProcessingJobs
+                    .Where(j =>
+                        statuses.Contains(j.Status) &&
+                        j.CompletedAt.HasValue &&
+                        j.CompletedAt < cutoffUtc)
+                    .OrderBy(j => j.CompletedAt)
+                    .ThenBy(j => j.Id)
+                    .Take(CleanupBatchSize)
+                    .ToListAsync(cancellationToken);
+
+                if (oldJobs.Count == 0)
+                {
+                    return removed;
+                }
+
                 ctx.DownloadProcessingJobs.RemoveRange(oldJobs);
-                await ctx.SaveChangesAsync();
-                _logger.LogInformation("Cleaned up {Count} old processing jobs older than {Days} days", oldJobs.Count, retentionDays);
+                await ctx.SaveChangesAsync(cancellationToken);
+
+                removed += oldJobs.Count;
+                ctx.ChangeTracker.Clear();
             }
         }
 

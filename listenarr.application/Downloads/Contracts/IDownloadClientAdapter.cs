@@ -21,18 +21,33 @@ namespace Listenarr.Application.Downloads.Contracts
     /// <summary>
     /// Encapsulates all download-client specific operations. Implement an adapter per client to keep
     /// protocol details isolated from the orchestration layer.
-    /// Follows IDownloadClient pattern for consistency.
+    /// Regarding QueueItem:
+    /// - Progress is display telemetry in the range 0 to 100 by convention. Completion
+    ///   must come from an explicit terminal client state or reliable byte telemetry
+    ///   showing no data remains.
+    /// - SourceFiles is the source of truth for downloaded files, if it cannot be determined,
+    ///   ContentPath should be used instead (as a path either being a directory or a single file),
+    ///   gateway will transform that as a SourceFiles list
+    /// - Only remote path should be returned, gateway handles the local path mapping
+    /// - The adapter must define an external ID used to link listenarr downloads 1-to-1 with
+    ///   download client entries/items
     /// </summary>
     public interface IDownloadClientAdapter
     {
-        string ClientId { get; }
         string ClientType { get; }
+
         DownloadProtocol Protocol { get; }
+
+        List<DownloadProtocol> Protocols => [Protocol];
 
         Task<(bool Success, string Message)> TestConnectionAsync(DownloadClientConfiguration client, CancellationToken ct = default);
 
         /// <summary>
-        /// Returns an identifier for the download
+        /// Submit a client-backed download and return the external client item ID.
+        /// A successful adapter submission without an external ID is invalid because
+        /// active client downloads must be monitorable and reconcilable against the
+        /// client queue/history. Direct downloads do not use this adapter contract;
+        /// they are internally tracked with DownloadClientId == "DDL".
         /// </summary>
         /// <param name="client"></param>
         /// <param name="submission"></param>
@@ -46,33 +61,23 @@ namespace Listenarr.Application.Downloads.Contracts
         Task<bool> RemoveAsync(DownloadClientConfiguration client, string id, bool deleteFiles = false, CancellationToken ct = default);
 
         /// <summary>
-        /// Give a list of ongoing download as queue items, each of them should respect the same constraint as for GetImportItemAsync
+        /// Fetch the full live queue snapshot from the given client.
         /// </summary>
+        /// <param name="client">Download client configuration</param>
+        /// <param name="ct"></param>
+        /// <returns>List of live queue items reported by the client</returns>
         Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, CancellationToken ct = default);
 
         /// <summary>
-        /// Returns normalized DownloadClientItem list
-        /// This is the preferred method going forward
-        /// </summary>
-        Task<List<DownloadClientItem>> GetItemsAsync(DownloadClientConfiguration client, CancellationToken ct = default);
-
-        Task<List<(string Id, string Name)>> GetRecentHistoryAsync(DownloadClientConfiguration client, int limit = 100, CancellationToken ct = default);
-
-        /// <summary>
-        /// Resolves the actual import item for a completed download.
-        /// Called just before import to ensure the most accurate path and metadata.
-        /// Some clients (like qBittorrent) require additional queries to determine final paths.
+        /// Given a list of IDs, fetch updates from the given client
         /// </summary>
         /// <param name="client">Download client configuration</param>
-        /// <param name="item">The download client item to resolve</param>
-        /// <param name="previousAttempt">Previous import attempt for retry scenarios (can be null)</param>
-        /// <param name="ct">Cancellation token</param>
-        /// <returns>Updated item with resolved OutputPath, or original if unable to determine</returns>
-        Task<DownloadClientItem> GetImportItemAsync(
-            DownloadClientConfiguration client,
-            DownloadClientItem item,
-            DownloadClientItem? previousAttempt = null,
-            CancellationToken ct = default);
+        /// <param name="ids">List of IDs to get updates from</param>
+        /// <param name="ct"></param>
+        /// <returns>List of updated values for the given IDs</returns>
+        Task<List<QueueItem>> GetQueueAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default);
+
+        Task<List<DownloadClientItem>> GetItemsAsync(DownloadClientConfiguration client, CancellationToken ct = default);
 
         /// <summary>
         /// Retrieves the information about a given download as a queue item
@@ -98,15 +103,5 @@ namespace Listenarr.Application.Downloads.Contracts
         /// <returns>True if the operation succeeded or was a no-op</returns>
         Task<bool> MarkItemAsImportedAsync(DownloadClientConfiguration client, string id, CancellationToken ct = default)
             => Task.FromResult(true); // Default no-op
-
-        /// <summary>
-        /// Given a list of downloads, fetch updates from the given client
-        /// This only returns updated values, it does not persists them!
-        /// </summary>
-        /// <param name="client">Download client configuration</param>
-        /// <param name="downloads">List of downloads to be updated</param>
-        /// <param name="cancellationToken"></param>
-        /// <returns></returns>
-        Task<List<Download>> FetchDownloadsAsync(DownloadClientConfiguration client, List<Download> downloads, CancellationToken cancellationToken = default);
     }
 }

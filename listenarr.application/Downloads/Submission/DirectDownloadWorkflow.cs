@@ -10,6 +10,7 @@
 
 using Listenarr.Application.Common;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
 
 namespace Listenarr.Application.Downloads.Submission
 {
@@ -21,8 +22,22 @@ namespace Listenarr.Application.Downloads.Submission
             PreparedDirectDownloadSubmission submission,
             int? audiobookId)
         {
+            if (submission.Artifacts.Count == 0)
+            {
+                throw new DownloadClientSubmissionException(
+                    "The direct-download submission does not contain any artifacts.");
+            }
+
             try
             {
+                var primaryArtifact = submission.Artifacts[0];
+                var artifactPlan = submission.Artifacts
+                    .Select(artifact => new PersistedDirectDownloadArtifact(
+                        artifact.DownloadUri.ToString(),
+                        artifact.FileName,
+                        artifact.ExpectedSize,
+                        artifact.Packaging))
+                    .ToList();
                 var id = Guid.NewGuid().ToString();
                 var download = new Download
                 {
@@ -32,20 +47,30 @@ namespace Listenarr.Application.Downloads.Submission
                     Artist = submission.Artist,
                     Album = submission.Album,
                     Language = submission.Language,
-                    OriginalUrl = submission.DownloadUri.ToString(),
+                    OriginalUrl = primaryArtifact.DownloadUri.ToString(),
                     Progress = 0,
                     TotalSize = submission.Size,
                     DownloadedSize = 0,
                     DownloadPath = string.Empty,
                     FinalPath = string.Empty,
                     StartedAt = DateTime.UtcNow,
-                    DownloadClientId = "DDL",
+                    DownloadClientId = DirectDownloadMetadataKeys.ClientId,
                     Metadata = new Dictionary<string, object>
                     {
                         ["Source"] = submission.Source,
                         ["Quality"] = submission.Quality ?? string.Empty,
                         ["Language"] = submission.Language ?? string.Empty,
-                        ["DownloadType"] = "DDL"
+                        [DirectDownloadMetadataKeys.DownloadType] = DirectDownloadMetadataKeys.ClientId,
+                        // The worker revalidates this policy before every HTTP request so
+                        // future DDL sources stay additive without making Listenarr fetch arbitrary URLs.
+                        [DirectDownloadMetadataKeys.SourcePolicyKey] = submission.SourcePolicyKey,
+                        [DirectDownloadMetadataKeys.OriginalHost] = primaryArtifact.DownloadUri.Host,
+                        [DirectDownloadMetadataKeys.ArtifactPlan] = JsonSerializer.Serialize(
+                            new PersistedDirectDownloadArtifactPlan(
+                                PersistedDirectDownloadArtifactPlan.CurrentVersion,
+                                artifactPlan)),
+                        [DirectDownloadMetadataKeys.RequiresArchiveExtraction] = artifactPlan.Any(
+                            artifact => artifact.Packaging == DirectDownloadArtifactPackaging.Archive)
                     }
                 };
 

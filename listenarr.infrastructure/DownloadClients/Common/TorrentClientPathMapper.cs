@@ -27,22 +27,27 @@ namespace Listenarr.Infrastructure.DownloadClients.Common
             string savePath,
             List<Dictionary<string, JsonElement>> files)
         {
-            if (string.IsNullOrWhiteSpace(savePath) || files == null || files.Count == 0)
+            if (string.IsNullOrEmpty(savePath) || files == null || files.Count == 0)
             {
                 return new List<string>();
             }
 
+            // External client paths are filesystem identifiers, not user text. Do not trim
+            // whitespace from path segments; only strip separators when intentionally
+            // converting a rooted-looking child path into a relative child path.
             return files
+                .Where(IsQbittorrentFileDownloaded)
                 .Select(file => file.TryGetValue("name", out var nameEl) ? nameEl.GetString() ?? string.Empty : string.Empty)
-                .Where(name => !string.IsNullOrWhiteSpace(name))
-                .Select(name => CombineWithOptionalBase(savePath, name.Replace('/', Path.DirectorySeparatorChar)))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Where(name => !string.IsNullOrEmpty(name))
+                .Select(name => CombineClientReportedPath(savePath, name))
+                .Where(path => !string.IsNullOrEmpty(path))
+                .Distinct(StringComparer.Ordinal)
                 .ToList();
         }
 
         public static List<string> BuildTransmissionSourceFiles(string? downloadDir, JsonElement filesElement)
         {
-            if (string.IsNullOrWhiteSpace(downloadDir) || filesElement.ValueKind != JsonValueKind.Array)
+            if (string.IsNullOrEmpty(downloadDir) || filesElement.ValueKind != JsonValueKind.Array)
             {
                 return new List<string>();
             }
@@ -56,12 +61,16 @@ namespace Listenarr.Infrastructure.DownloadClients.Common
                 }
 
                 var relativePath = nameProp.GetString();
-                if (string.IsNullOrWhiteSpace(relativePath))
+                if (string.IsNullOrEmpty(relativePath))
                 {
                     continue;
                 }
 
-                sourceFiles.Add(FileUtils.CombineWithOptionalBase(downloadDir, relativePath));
+                var sourceFile = CombineClientReportedPath(downloadDir, relativePath);
+                if (!string.IsNullOrEmpty(sourceFile))
+                {
+                    sourceFiles.Add(sourceFile);
+                }
             }
 
             return sourceFiles;
@@ -71,14 +80,16 @@ namespace Listenarr.Infrastructure.DownloadClients.Common
             string savePath,
             List<Dictionary<string, JsonElement>> files)
         {
-            if (string.IsNullOrWhiteSpace(savePath) || files == null || files.Count == 0)
+            if (string.IsNullOrEmpty(savePath) || files == null || files.Count == 0)
             {
                 return string.Empty;
             }
 
             var fileNames = files
+                .Where(IsQbittorrentFileDownloaded)
                 .Select(f => f.TryGetValue("name", out var nameEl) ? nameEl.GetString() ?? string.Empty : string.Empty)
-                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Where(name => !string.IsNullOrEmpty(name))
+                .Where(name => !FileUtils.ContainsParentDirectorySegment(name, '/', '\\'))
                 .ToList();
 
             if (fileNames.Count == 0)
@@ -93,8 +104,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Common
             if (fileNames.Count == 1)
             {
                 return hasNestedPath
-                    ? CombineWithOptionalBase(savePath, firstParts[0])
-                    : CombineWithOptionalBase(savePath, firstFile);
+                    ? CombineClientReportedPath(savePath, firstParts[0])
+                    : CombineClientReportedPath(savePath, firstFile);
             }
 
             if (!hasNestedPath)
@@ -110,34 +121,80 @@ namespace Listenarr.Infrastructure.DownloadClients.Common
             });
 
             return allShareTopLevel
-                ? CombineWithOptionalBase(savePath, topLevel)
+                ? CombineClientReportedPath(savePath, topLevel)
                 : savePath;
         }
 
-        private static string CombineWithOptionalBase(string? basePath, string candidatePath)
+        // qBittorrent lists every file in the torrent, including ones the user excluded —
+        // priority 0 ("Do not download"), set manually or by the "Excluded file names" setting.
+        // Those are never written to disk, so counting them as source files makes the on-disk
+        // file count never match and the import stalls out (#1005). Treat only priority-0 as
+        // skipped; an absent or non-zero priority is a file qBittorrent was asked to download.
+        private static bool IsQbittorrentFileDownloaded(Dictionary<string, JsonElement> file)
         {
-            var normalizedPath = candidatePath.Trim();
-
-            if (string.IsNullOrEmpty(normalizedPath))
+            if (!file.TryGetValue("priority", out var priorityElement))
             {
-                return normalizedPath;
+                return true;
             }
 
-            if (Path.IsPathRooted(normalizedPath) || string.IsNullOrWhiteSpace(basePath))
+            return priorityElement.ValueKind switch
             {
-                return normalizedPath;
+                JsonValueKind.Number => !(priorityElement.TryGetInt32(out var priority) && priority == 0),
+                JsonValueKind.String => !(int.TryParse(priorityElement.GetString(), out var priority) && priority == 0),
+                _ => true
+            };
+        }
+
+        private static string CombineClientReportedPath(string? basePath, string candidatePath)
+        {
+            if (string.IsNullOrEmpty(candidatePath) || string.IsNullOrEmpty(basePath))
+            {
+                return candidatePath;
             }
 
-            var relativePath = normalizedPath.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            if (Path.IsPathRooted(relativePath))
+            var semantics = GetClientPathSemantics(basePath);
+            var separators = semantics.Syntax == FileSystemPathSyntax.Windows
+                ? new[] { '\\', '/' }
+                : new[] { '/' };
+            var relativePath = candidatePath.TrimStart(separators);
+            if (HasDriveRootedPrefix(relativePath))
             {
-                return relativePath;
+                relativePath = relativePath[2..]
+                    .TrimStart(separators);
             }
 
-            var normalizedBasePath = basePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            return string.IsNullOrEmpty(normalizedBasePath)
-                ? relativePath
-                : normalizedBasePath + Path.DirectorySeparatorChar + relativePath;
+            if (relativePath.Split(separators).Any(segment => segment is "." or ".."))
+            {
+                return string.Empty;
+            }
+
+            return FileSystemPathIdentity.TryResolveRelativePathWithinBase(
+                basePath,
+                relativePath,
+                semantics,
+                out var combinedPath)
+                    ? combinedPath
+                    : string.Empty;
+        }
+
+        private static FileSystemPathSemantics GetClientPathSemantics(string path)
+        {
+            var windowsSyntax = HasDriveRootedPrefix(path)
+                || path.StartsWith("\\\\", StringComparison.Ordinal)
+                || path.StartsWith("//", StringComparison.Ordinal);
+            return new FileSystemPathSemantics(
+                windowsSyntax ? FileSystemPathSyntax.Windows : FileSystemPathSyntax.Unix,
+                windowsSyntax
+                    ? FileSystemCaseSensitivity.Insensitive
+                    : FileSystemCaseSensitivity.Sensitive);
+        }
+
+        private static bool HasDriveRootedPrefix(string path)
+        {
+            return path.Length >= 2
+                && char.IsLetter(path[0])
+                && path[1] == ':'
+                && (path.Length == 2 || path[2] is '/' or '\\');
         }
     }
 }

@@ -43,4 +43,18 @@ describe('ProgressBar', () => {
     expect(text).toContain('8.0 GB')
     expect(text).not.toContain('TB')
   })
+
+  it('renders indeterminate activity without percentage text', () => {
+    const wrapper = mount(ProgressBar, {
+      props: {
+        value: 0,
+        variant: 'activity',
+        indeterminate: true,
+        showPercentage: true,
+      },
+    })
+
+    expect(wrapper.find('.progress-fill').classes()).toContain('indeterminate')
+    expect(wrapper.find('.percentage').exists()).toBe(false)
+  })
 })

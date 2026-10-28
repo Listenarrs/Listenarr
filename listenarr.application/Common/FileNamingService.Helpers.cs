@@ -6,6 +6,7 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
+using Listenarr.Domain.Common;
 using Microsoft.Extensions.Logging;
 namespace Listenarr.Application.Common
 {
@@ -290,28 +291,9 @@ namespace Listenarr.Application.Common
 
         private static string CombineWithOptionalBase(string? basePath, string candidatePath)
         {
-            var normalizedPath = candidatePath.Trim();
-
-            if (string.IsNullOrEmpty(normalizedPath))
-            {
-                return normalizedPath;
-            }
-
-            if (Path.IsPathRooted(normalizedPath) || string.IsNullOrWhiteSpace(basePath))
-            {
-                return normalizedPath;
-            }
-
-            var relativePath = normalizedPath.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            if (Path.IsPathRooted(relativePath))
-            {
-                return relativePath;
-            }
-
-            var normalizedBasePath = basePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            return string.IsNullOrEmpty(normalizedBasePath)
-                ? relativePath
-                : normalizedBasePath + Path.DirectorySeparatorChar + relativePath;
+            // Keep all naming-path composition on the shared helper so filesystem roots
+            // and Unix/Docker whitespace semantics stay consistent with import/move flows.
+            return FileUtils.CombineWithOptionalBase(basePath, candidatePath);
         }
     }
 }

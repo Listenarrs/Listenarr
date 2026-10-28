@@ -22,11 +22,12 @@ namespace Listenarr.Api.Features.Search
         ISearchService searchService,
         AudibleService audibleService,
         IAudiobookMetadataService metadataService,
-        Microsoft.Extensions.Logging.ILogger<SearchByTitleWorkflow> logger)
+        Microsoft.Extensions.Logging.ILogger<SearchByTitleWorkflow> logger,
+        IConfigurationService? configurationService = null)
     {
         public async Task<SearchByTitleWorkflowResult> ExecuteAsync(
             string query,
-            string region,
+            string? region,
             int limit,
             CancellationToken cancellationToken)
         {
@@ -37,11 +38,13 @@ namespace Listenarr.Api.Features.Search
                     return SearchByTitleWorkflowResult.BadRequest("Query parameter is required");
                 }
 
+                var resolvedRegion = await ResolveSearchRegionAsync(region);
+
                 logger.LogInformation("Searching by title: {Query}", query);
 
                 if (IsAsin(query.Trim()))
                 {
-                    var directResult = await TryLookupAsinAsync(query.Trim(), region);
+                    var directResult = await TryLookupAsinAsync(query.Trim(), resolvedRegion);
                     if (directResult != null)
                     {
                         return SearchByTitleWorkflowResult.Ok(directResult);
@@ -50,7 +53,7 @@ namespace Listenarr.Api.Features.Search
 
                 var searchResults = await searchService.IntelligentSearchAsync(
                     query,
-                    region: region,
+                    region: resolvedRegion,
                     language: null,
                     ct: cancellationToken);
 
@@ -60,7 +63,7 @@ namespace Listenarr.Api.Features.Search
                     return SearchByTitleWorkflowResult.Ok(new List<object>());
                 }
 
-                var results = BuildDiscordTitleResults(searchResults.Take(limit));
+                var results = BuildDiscordTitleResults(searchResults.Take(limit), resolvedRegion);
 
                 logger.LogInformation("Successfully fetched {Count} enriched results for title search: {Query}", results.Count, query);
                 return SearchByTitleWorkflowResult.Ok(results);
@@ -85,7 +88,7 @@ namespace Listenarr.Api.Features.Search
                     {
                         metadata = audible,
                         source = "Audible",
-                        sourceUrl = "https://www.audible.com"
+                        sourceUrl = GetAudibleBaseUrl(region)
                     };
                     return new List<object> { metadataObj };
                 }
@@ -113,7 +116,7 @@ namespace Listenarr.Api.Features.Search
             return null;
         }
 
-        private List<object> BuildDiscordTitleResults(IEnumerable<MetadataSearchResult> searchResults)
+        private List<object> BuildDiscordTitleResults(IEnumerable<MetadataSearchResult> searchResults, string region)
         {
             var results = new List<object>();
 
@@ -141,7 +144,7 @@ namespace Listenarr.Api.Features.Search
                     {
                         metadata,
                         source = searchResult.MetadataSource ?? searchResult.Source ?? "Amazon/Audible",
-                        sourceUrl = "https://www.amazon.com"
+                        sourceUrl = GetMetadataSourceBaseUrl(searchResult.MetadataSource ?? searchResult.Source, region)
                     });
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
@@ -159,6 +162,52 @@ namespace Listenarr.Api.Features.Search
             if (s.Length != 10) return false;
             if (!(s.StartsWith("B0") || char.IsDigit(s[0]))) return false;
             return s.All(char.IsLetterOrDigit);
+        }
+
+        private async Task<string> ResolveSearchRegionAsync(string? requestedRegion)
+        {
+            if (!string.IsNullOrWhiteSpace(requestedRegion))
+            {
+                return requestedRegion.Trim();
+            }
+
+            if (configurationService != null)
+            {
+                try
+                {
+                    var settings = await configurationService.GetApplicationSettingsAsync().ConfigureAwait(false);
+                    if (!string.IsNullOrWhiteSpace(settings?.DefaultSearchRegion))
+                    {
+                        return settings.DefaultSearchRegion.Trim();
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                {
+                    logger.LogWarning(ex, "Failed to resolve configured default search region; falling back to us");
+                }
+            }
+
+            return "us";
+        }
+
+        private static string GetAudibleBaseUrl(string region)
+        {
+            return $"https://{MarketDomainResolver.GetAudibleDomain(region)}";
+        }
+
+        private static string GetAmazonBaseUrl(string region)
+        {
+            return $"https://{MarketDomainResolver.GetAmazonDomain(region)}";
+        }
+
+        private static string GetMetadataSourceBaseUrl(string? source, string region)
+        {
+            var isAmazon = source?.Contains("amazon", StringComparison.OrdinalIgnoreCase) == true;
+            var isAudible = source?.Contains("audible", StringComparison.OrdinalIgnoreCase) == true;
+
+            return isAmazon && !isAudible
+                ? GetAmazonBaseUrl(region)
+                : GetAudibleBaseUrl(region);
         }
     }
 

@@ -15,6 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using Listenarr.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Listenarr.Tests.Features.Api.Services
@@ -55,6 +56,28 @@ namespace Listenarr.Tests.Features.Api.Services
             await migrator.MigrateAsync();
 
             mockRootService.Verify(r => r.CreateAsync(It.IsAny<RootFolder>()), Times.Never);
+        }
+
+        [WindowsFact]
+        public async Task Migrate_DoesNotCreate_WhenPersistedUnixRootWouldAliasCurrentWindowsDrive()
+        {
+            var mockConfig = new Mock<IConfigurationService>();
+            mockConfig.Setup(c => c.GetApplicationSettingsAsync())
+                .ReturnsAsync(new ApplicationSettings { OutputPath = "/" });
+
+            var mockRootService = new Mock<IRootFolderService>();
+            mockRootService.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<RootFolder>());
+
+            var migrator = new LegacyOutputPathMigrator(
+                mockConfig.Object,
+                mockRootService.Object,
+                new NullLogger<LegacyOutputPathMigrator>());
+
+            await migrator.MigrateAsync();
+
+            mockRootService.Verify(
+                r => r.CreateAsync(It.IsAny<RootFolder>()),
+                Times.Never);
         }
 
         [Fact]

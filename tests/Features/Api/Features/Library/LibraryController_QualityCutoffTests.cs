@@ -59,5 +59,52 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             // Then
             Assert.True(result);
         }
+
+        [Fact]
+        [Trait("Method", "IsQualityCutoffMetAsync")]
+        [Trait("Scenario", "DisabledQualityRung_ReturnsFalse")]
+        public async Task IsQualityCutoffMetAsync_DisabledMatchingQualityRung_ReturnsFalse()
+        {
+            // Given
+            var profile = new QualityProfile
+            {
+                Name = "Disabled AAC cutoff",
+                CutoffQuality = "AAC 256kbps",
+                Qualities = new List<QualityDefinition>
+                {
+                    new()
+                    {
+                        Quality = "AAC 256kbps",
+                        Codec = "AAC",
+                        Bitrate = 256,
+                        Priority = 0,
+                        Allowed = false
+                    }
+                }
+            };
+
+            var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Disabled AAC")
+                .WithQualityProfile(profile)
+                .Build());
+
+            await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
+                .WithAudiobook(audiobook)
+                .WithPath(@"C:\books\disabled-aac\book.m4b")
+                .WithFormat("m4b")
+                .WithCoded("aac")
+                .WithBitrate(256_000)
+                .WithSize(123_456)
+                .Build());
+
+            // When
+            var result = await AudiobookQualityCutoffEvaluator.IsQualityCutoffMetAsync(
+                audiobook,
+                _downloadRepository,
+                _audiobookFileRepository);
+
+            // Then
+            Assert.False(result);
+        }
     }
 }

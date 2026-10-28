@@ -89,5 +89,5 @@ describe('import checks', () => {
 
     const mod = await import('@/views/ActivityView.vue')
     expect(mod).toBeTruthy()
-  }, 20000)
+  })
 })

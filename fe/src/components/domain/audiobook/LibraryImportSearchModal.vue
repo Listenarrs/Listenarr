@@ -35,6 +35,20 @@
             />
           </div>
           <div class="search-input-row">
+            <label class="region-label" for="find-match-region">Region</label>
+            <select
+              id="find-match-region"
+              v-model="region"
+              class="form-input region-select"
+              data-testid="find-match-region"
+              @change="runSearch"
+            >
+              <option v-for="o in regionOptions" :key="o.value" :value="o.value">
+                {{ o.label }}
+              </option>
+            </select>
+          </div>
+          <div class="search-input-row">
             <input
               v-model="authorQuery"
               class="form-input search-input"
@@ -72,12 +86,16 @@
                 >
                 <span v-if="result.asin" class="result-asin"> · {{ result.asin }}</span>
               </span>
+              <span v-if="extractNarrators(result)" class="result-narrator">
+                Narrated by {{ extractNarrators(result) }}
+              </span>
             </div>
           </div>
         </div>
 
         <div v-else-if="hasSearched && !isSearching" class="no-results">
-          No results for "{{ searchQuery }}"{{ authorQuery ? ` by "${authorQuery}"` : '' }}
+          No results for "{{ searchQuery }}"{{ authorQuery ? ` by "${authorQuery}"` : '' }} in
+          {{ regionLabel(region) }}
         </div>
 
         <div v-else-if="!hasSearched && !isSearching" class="hint-text">
@@ -89,18 +107,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { PhSpinner } from '@phosphor-icons/vue'
 import { Modal, ModalHeader, ModalBody } from '@/components/feedback'
-import { apiService } from '@/services/api'
 import { useProtectedImages } from '@/composables/useProtectedImages'
-import type { LibraryImportItem } from '@/stores/libraryImport'
+import { useLibraryImportStore, type LibraryImportItem } from '@/stores/libraryImport'
+import { orderedSearchRegionOptions, searchRegionOptions } from '@/utils/languageMapping'
 import {
   buildLibraryImportInitialAuthor,
   buildLibraryImportInitialQuery,
 } from '@/utils/libraryImportSearch'
 import { getPlaceholderUrl } from '@/utils/placeholder'
 import type { SearchResult } from '@/types'
+import { extractNarrators } from '@/utils/searchResultHelpers'
 
 const props = defineProps<{ item: LibraryImportItem }>()
 const emit = defineEmits<{
@@ -121,10 +140,31 @@ const authorQuery = ref(buildLibraryImportInitialAuthor(props.item))
 const searchResults = ref<SearchResult[]>([])
 const isSearching = ref(false)
 const hasSearched = ref(false)
+const store = useLibraryImportStore()
+// The configured region by default; the user can pick another one, which the selected match keeps
+const configuredRegion = ref('')
+const region = ref(props.item.selectedMatch?.region ?? '')
+const regionOptions = computed(() =>
+  orderedSearchRegionOptions([props.item.selectedMatch?.region, configuredRegion.value, 'us']),
+)
+
+function regionLabel(value: string): string {
+  return searchRegionOptions.find((o) => o.value === value)?.label ?? value
+}
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
+// The search in flight: a newer one (typing, Enter, region change) aborts it, and only its own
+// response may update the list, so a slow answer for another query or region never shows up
+let searchController: AbortController | null = null
+
+onBeforeUnmount(() => {
+  if (debounceTimer) clearTimeout(debounceTimer)
+  searchController?.abort()
+})
 
 onMounted(async () => {
+  configuredRegion.value = await store.configuredRegion()
+  if (!region.value) region.value = configuredRegion.value
   await nextTick()
   inputEl.value?.focus()
   inputEl.value?.select()
@@ -139,17 +179,38 @@ function onInput() {
 async function runSearch() {
   const q = searchQuery.value.trim()
   if (!q) return
+  if (debounceTimer) {
+    clearTimeout(debounceTimer)
+    debounceTimer = null
+  }
+  searchController?.abort()
+  const controller = new AbortController()
+  searchController = controller
   isSearching.value = true
   hasSearched.value = false
+  // Results of the previous query or region can't be picked while this one runs
+  searchResults.value = []
+  // Importing waits for it (each search counts once, however it ends)
+  store.findMatchSearchStarted()
   try {
     const isAsin = /^[A-Z0-9]{10}$/i.test(q)
     const params = isAsin
       ? { asin: q, cap: 5 }
       : { title: q, author: authorQuery.value.trim() || undefined, cap: 5 }
-    searchResults.value = await apiService.advancedSearch(params)
+    const results = await store.searchInRegion(params, region.value || undefined, controller.signal)
+    if (controller !== searchController) return
+    searchResults.value = results
     hasSearched.value = true
+  } catch (error) {
+    // A cancelled search (a newer one, or the modal closing) fails on purpose: nothing to report.
+    // The API wraps the AbortError into a generic error, so the signal tells it apart.
+    if (controller === searchController && !controller.signal.aborted) throw error
   } finally {
-    isSearching.value = false
+    store.findMatchSearchEnded()
+    if (controller === searchController) {
+      searchController = null
+      isSearching.value = false
+    }
   }
 }
 
@@ -168,8 +229,32 @@ function select(result: SearchResult) {
 
 .search-fields {
   display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Title, region and author on one line; they wrap only when the modal is too narrow */
+.search-fields > .search-input-row:first-child {
+  flex: 1 1 9rem;
+}
+
+.search-fields > .search-input-row:nth-child(2) {
+  flex: 0 0 auto;
+}
+
+.search-fields > .search-input-row:last-child {
+  flex: 1 1 9rem;
+}
+
+.region-label {
+  font-size: 0.8rem;
+  color: #888;
+}
+
+.region-select {
+  flex: 0 0 auto;
+  width: auto;
 }
 
 .search-input-row {
@@ -246,6 +331,15 @@ function select(result: SearchResult) {
 .result-asin {
   font-family: monospace;
   font-size: 0.7rem;
+}
+
+.result-narrator {
+  display: block;
+  font-size: 0.75rem;
+  color: #888;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .no-results,

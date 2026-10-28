@@ -68,14 +68,22 @@ public sealed class SearchResponseMapper
         }).Cast<object>().ToList() ?? new List<object>();
     }
 
-    public void SanitizeResultForPublicApi(SearchResult r)
+    public void SanitizeResultForPublicApi(SearchResult r, string region = "us")
     {
         try
         {
             if (r == null) return;
             if (string.IsNullOrWhiteSpace(r.ProductUrl) && !string.IsNullOrWhiteSpace(r.Asin))
             {
-                r.ProductUrl = $"https://www.amazon.com/dp/{r.Asin}";
+                r.ProductUrl = MarketDomainResolver.BuildAmazonProductUrl(r.Asin, region);
+            }
+
+            var sourceText = $"{r.Source} {r.MetadataSource}";
+            if (!string.IsNullOrWhiteSpace(r.Asin) &&
+                sourceText.Contains("Audible", StringComparison.OrdinalIgnoreCase))
+            {
+                r.ProductUrl = NormalizeAudibleProductUrl(r.ProductUrl, r.Asin, region);
+                r.SourceLink = NormalizeAudibleProductUrl(r.SourceLink, r.Asin, region);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
@@ -198,7 +206,9 @@ public sealed class SearchResponseMapper
             releaseDate = book.ReleaseDate,
             @explicit = false,
             hasPdf = false,
-            link = !string.IsNullOrWhiteSpace(book.Asin) ? $"https://www.audible.com/pd/{book.Asin}" : (string?)null,
+            link = !string.IsNullOrWhiteSpace(book.Asin)
+                ? MarketDomainResolver.BuildAudibleProductUrl(book.Asin, region)
+                : (string?)null,
             sku = book.Sku,
             isListenable = !string.IsNullOrWhiteSpace(book.Asin),
             isAvailable = true,
@@ -266,7 +276,7 @@ public sealed class SearchResponseMapper
             releaseDate = md?.PublishedDate,
             @explicit = false,
             hasPdf = false,
-            link = md?.ProductUrl,
+            link = NormalizeAudibleProductUrl(md?.ProductUrl, md?.Asin, region),
             sku = (string?)null,
             skuGroup = (string?)null,
             isListenable = !string.IsNullOrWhiteSpace(md?.Asin),
@@ -400,9 +410,7 @@ public sealed class SearchResponseMapper
             releaseDate = aud.ReleaseDate ?? aud.PublishDate ?? md?.PublishedDate,
             @explicit = aud.Explicit ?? false,
             hasPdf = false,
-            link = !string.IsNullOrWhiteSpace(md?.ProductUrl)
-                ? md.ProductUrl
-                : !string.IsNullOrWhiteSpace(aud.Asin) ? $"https://www.audible.com/pd/{aud.Asin}" : null,
+            link = NormalizeAudibleProductUrl(md?.ProductUrl, aud.Asin ?? md?.Asin, aud.Region ?? region),
             sku = aud.Sku,
             skuGroup = (string?)null,
             isListenable = !string.IsNullOrWhiteSpace(aud.Asin ?? md?.Asin),
@@ -417,5 +425,55 @@ public sealed class SearchResponseMapper
             seriesList = series.Select(s => $"{s.name}{(s.position != null ? $" #{s.position}" : "")}").ToList(),
             updatedAt = DateTime.UtcNow.ToString("o")
         };
+    }
+
+    private static string? NormalizeAudibleProductUrl(string? url, string? asin, string? region)
+    {
+        if (!string.IsNullOrWhiteSpace(asin))
+        {
+            return MarketDomainResolver.BuildAudibleProductUrl(asin, region);
+        }
+
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return null;
+        }
+
+        if (!IsAudibleUrl(url))
+        {
+            return url;
+        }
+
+        return RegionalizeAudibleUrl(url, region);
+    }
+
+    private static bool IsAudibleUrl(string? url)
+    {
+        return !string.IsNullOrWhiteSpace(url) &&
+            Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
+            IsAudibleHost(uri.Host);
+    }
+
+    private static bool IsAudibleHost(string host)
+    {
+        var normalized = host.Trim().ToLowerInvariant();
+        return normalized.StartsWith("audible.", StringComparison.Ordinal) ||
+               normalized.StartsWith("www.audible.", StringComparison.Ordinal) ||
+               normalized.StartsWith("api.audible.", StringComparison.Ordinal);
+    }
+
+    private static string RegionalizeAudibleUrl(string url, string? region)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return url;
+        }
+
+        var builder = new UriBuilder(uri)
+        {
+            Host = MarketDomainResolver.GetAudibleDomain(region)
+        };
+
+        return builder.Uri.ToString();
     }
 }

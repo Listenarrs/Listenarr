@@ -17,6 +17,8 @@
  */
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace Listenarr.Infrastructure.Downloads.Processing
@@ -24,16 +26,19 @@ namespace Listenarr.Infrastructure.Downloads.Processing
     /// <summary>
     /// Process the download processing jobs queued
     /// </summary>
-    public class DownloadProcessingJobProcessor(
+    public partial class DownloadProcessingJobProcessor(
         IServiceScopeFactory scopeFactory,
         ILogger<DownloadProcessingJobProcessor> logger,
         IAppMetricsService metrics,
-        IScanQueueService scanQueueService) : BackgroundService, IDownloadImportProcessor
+        IScanQueueService scanQueueService,
+        ILibraryFilesystemReadiness filesystemReadiness) : BackgroundService, IDownloadImportProcessor
     {
         private readonly TimeSpan _processingInterval = TimeSpan.FromSeconds(10); // Check every 10 seconds
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
+            logger.LogInformation("Download Processing Background Service waiting for library filesystem initialization");
+            await filesystemReadiness.WaitUntilReadyAsync(stoppingToken);
             logger.LogInformation("Download Processing Background Service started");
 
             // On startup, reset any jobs stuck in Processing status (from previous crash/restart)
@@ -90,6 +95,8 @@ namespace Listenarr.Infrastructure.Downloads.Processing
 
         public async Task ProcessQueueAsync(CancellationToken cancellationToken)
         {
+            await filesystemReadiness.WaitUntilReadyAsync(cancellationToken);
+
             using var scope = scopeFactory.CreateScope();
             var downloadProcessingJobService = scope.ServiceProvider.GetRequiredService<IDownloadProcessingJobService>();
             var downloadRepository = scope.ServiceProvider.GetRequiredService<IDownloadRepository>();
@@ -123,12 +130,14 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                 var download = await downloadRepository.GetByIdAsync(job.DownloadId);
                 if (download == null)
                 {
-                    logger.LogError($"Download {job.DownloadId} disapeared after job {job.Id} failed");
+                    logger.LogError($"Download {job.DownloadId} disappeared after job {job.Id} failed");
                     return;
                 }
 
                 await downloadService.UpdateAsync(
-                    download.Blocked($"Unable to import the download", "See the log of job {job.Id} for more informations"));
+                    download.Blocked(
+                        "Unable to import the download",
+                        $"See the log of job {job.Id} for more information"));
             }
         }
 
@@ -187,11 +196,16 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                 throw new DownloadProcessingException($"Inconsistency: Download {download.Id}'s audiobook {download.AudiobookId} cannot be retrieved");
             }
 
-            var configurationService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
-            var client = await configurationService.GetDownloadClientConfigurationAsync(download.DownloadClientId);
-            if (client == null)
+            var isDirectDownload = string.Equals(download.DownloadClientId, DirectDownloadMetadataKeys.ClientId, StringComparison.OrdinalIgnoreCase);
+            DownloadClientConfiguration? client = null;
+            if (!isDirectDownload)
             {
-                throw new DownloadProcessingException($"Inconsistency: Download {download.Id}'s client {download.DownloadClientId} cannot be retrieved");
+                var configurationService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+                client = await configurationService.GetDownloadClientConfigurationAsync(download.DownloadClientId);
+                if (client == null)
+                {
+                    throw new DownloadProcessingException($"Inconsistency: Download {download.Id}'s client {download.DownloadClientId} cannot be retrieved");
+                }
             }
 
             var downloadService = scope.ServiceProvider.GetRequiredService<IDownloadService>();
@@ -213,11 +227,12 @@ namespace Listenarr.Infrastructure.Downloads.Processing
 
             if (!job.HasCheckpoint("FilesImported"))
             {
-                if (string.IsNullOrEmpty(download.DownloadPath) || (!File.Exists(download.DownloadPath) && !Directory.Exists(download.DownloadPath)))
+                if (isDirectDownload &&
+                    (string.IsNullOrEmpty(download.DownloadPath) || (!File.Exists(download.DownloadPath) && !Directory.Exists(download.DownloadPath))))
                 {
                     metrics.Increment("processing.source_missing");
                     await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
-                        correlationId, $"Source path not found at processing time: {job.SourcePath}", cancellationToken);
+                        correlationId, $"Direct-download source path not found at processing time: {download.DownloadPath}", cancellationToken);
                     return;
                 }
 
@@ -226,15 +241,20 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                 try
                 {
                     var downloadItemService = scope.ServiceProvider.GetRequiredService<IDownloadItemService>();
+                    // External client DownloadPath may be stale or missing. Client-specific
+                    // import resolvers own recovery from queue/history before the processor
+                    // decides the source is unavailable.
                     queueItem = await downloadItemService.GetImportItemAsync(download, cancellationToken);
                     if (queueItem?.SourceFiles == null)
                     {
                         await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
-                            correlationId, "Unable to fetch the download from the download client", cancellationToken);
+                            correlationId, isDirectDownload
+                                ? "Unable to resolve the local direct-download file"
+                                : "Unable to fetch the download from the download client", cancellationToken);
                         return;
                     }
 
-                    job.AddLogEntry($"Download client reported {queueItem.SourceFiles.Count} file(s) downloaded");
+                    job.AddLogEntry($"Resolved {queueItem.SourceFiles.Count} file(s) for import");
                     files = [.. queueItem.SourceFiles.Where(File.Exists)];
                     job.AddLogEntry($"{files.Count} file(s) remaining after checking which ones are effectively on disk");
                 }
@@ -259,7 +279,31 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                 try
                 {
                     var downloadImportService = scope.ServiceProvider.GetRequiredService<IDownloadImportService>();
-                    results = await downloadImportService.ImportDownloadFilesAsync(audiobook, files, cancellationToken);
+                    var retainSource = !isDirectDownload && queueItem.CanMoveFiles != true
+                        || bool.TryParse(download.GetMetadataString(Download.ImportSourceRetentionRequiredMetadataKey), out var persistedRetention) && persistedRetention
+                        || job.TryGetJobDataString(Download.ImportSourceRetentionRequiredMetadataKey, out var retainedJobValue)
+                            && bool.TryParse(retainedJobValue, out var retainedJob) && retainedJob;
+                    if (retainSource)
+                    {
+                        // Persist before publication so retry/restart cannot upgrade a
+                        // retained operation into destructive Move when client state changes.
+                        download.SetMetadata(Download.ImportSourceRetentionRequiredMetadataKey, true);
+                        job.JobData[Download.ImportSourceRetentionRequiredMetadataKey] = true;
+                        await downloadProcessingJobService.UpdateJobAsync(job);
+                        await downloadService.UpdateAsync(download);
+                    }
+                    var importOptions = new DownloadImportOptions(
+                        ForceArchiveExtraction: isDirectDownload && string.Equals(
+                            download.GetMetadataString(DirectDownloadMetadataKeys.RequiresArchiveExtraction),
+                            bool.TrueString,
+                            StringComparison.OrdinalIgnoreCase),
+                        CompatibilityBatchId: ResolveCompatibilityBatchId(job.Id),
+                        ForceCopyAndRetainSource: retainSource);
+                    results = await downloadImportService.ImportDownloadFilesAsync(
+                        audiobook,
+                        files,
+                        cancellationToken,
+                        importOptions);
                 }
                 catch (InvalidOperationException exception)
                 {
@@ -273,10 +317,12 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                     if (!string.IsNullOrEmpty(result.Message)) job.AddLogEntry(result.Message);
                 }
 
-                if (results.Any(result => !result.Success))
+                var failedResults = results.Where(result => !result.Success).ToList();
+                if (failedResults.Count > 0)
                 {
                     await FailImportAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
-                        correlationId, "Unable to import at least one file for the job (see the log entries)", cancellationToken);
+                        correlationId, "Unable to import at least one file for the job (see the log entries)",
+                        cancellationToken, failedResults);
                     return;
                 }
 
@@ -320,6 +366,10 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                         {
                             JobId = job.Id,
                             result.Action,
+                            result.RequestedAction,
+                            result.EffectiveAction,
+                            result.SourceDisposition,
+                            result.WarningCode,
                             result.SourcePath,
                             result.FinalPath,
                             result.WasRegisteredToAudiobook
@@ -327,22 +377,35 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                     }, cancellationToken);
                 }
 
+                job.JobData[Download.SourceRetainedMetadataKey] = results.Any(result =>
+                    !string.IsNullOrWhiteSpace(result.SourcePath)
+                        && result.SourceDisposition != ImportSourceDisposition.Retired);
                 job.SetCheckpoint("FilesImported", results.Count);
                 await downloadProcessingJobService.UpdateJobAsync(job);
             }
 
             if (!job.HasCheckpoint("ClientMarkedImported"))
             {
-                var downloadClientGateway = scope.ServiceProvider.GetRequiredService<IDownloadClientGateway>();
-                if (!await downloadClientGateway.MarkItemAsImportedAsync(client, download, cancellationToken))
+                if (isDirectDownload)
                 {
-                    await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
-                        correlationId, $"Unable to mark the item imported in client {client.Id}", cancellationToken);
-                    return;
+                    // There is no external client history to mark for DDLs. The
+                    // local staged file is already under Listenarr's ownership.
+                    job.SetCheckpoint("ClientMarkedImported");
+                    await downloadProcessingJobService.UpdateJobAsync(job);
                 }
+                else
+                {
+                    var downloadClientGateway = scope.ServiceProvider.GetRequiredService<IDownloadClientGateway>();
+                    if (!await downloadClientGateway.MarkItemAsImportedAsync(client!, download, cancellationToken))
+                    {
+                        await ScheduleRetryAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
+                            correlationId, $"Unable to mark the item imported in client {client!.Id}", cancellationToken);
+                        return;
+                    }
 
-                job.SetCheckpoint("ClientMarkedImported");
-                await downloadProcessingJobService.UpdateJobAsync(job);
+                    job.SetCheckpoint("ClientMarkedImported");
+                    await downloadProcessingJobService.UpdateJobAsync(job);
+                }
             }
 
             if (!job.HasCheckpoint("ScanEnqueued"))
@@ -377,6 +440,12 @@ namespace Listenarr.Infrastructure.Downloads.Processing
             }
 
             var finalizationService = scope.ServiceProvider.GetRequiredService<IImportFinalizationService>();
+            bool? sourceRetained = job.TryGetJobDataString(
+                    Download.SourceRetainedMetadataKey,
+                    out var sourceRetainedValue)
+                && bool.TryParse(sourceRetainedValue, out var parsedSourceRetained)
+                    ? parsedSourceRetained
+                    : null;
             try
             {
                 await finalizationService.FinalizeAsync(
@@ -384,8 +453,9 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                     download.Id,
                     audiobook.Id,
                     audiobook.Title ?? download.Title,
-                    client.Id,
+                    client?.Id ?? download.DownloadClientId,
                     correlationId,
+                    sourceRetained,
                     new Dictionary<string, object>
                     {
                         ["JobId"] = job.Id,
@@ -400,66 +470,16 @@ namespace Listenarr.Infrastructure.Downloads.Processing
             }
         }
 
-        private static async Task ScheduleRetryAsync(
-            DownloadProcessingJob job,
-            IDownloadProcessingJobService jobService,
-            IHistoryRepository historyRepository,
-            Download download,
-            Audiobook audiobook,
-            string correlationId,
-            string reason,
-            CancellationToken ct)
+        private static Guid ResolveCompatibilityBatchId(string jobId)
         {
-            job.ScheduleRetry(reason);
-            await jobService.UpdateJobAsync(job);
-            var exhausted = job.Status == ProcessingJobStatus.Failed;
-            await RecordHistoryAsync(historyRepository, download, audiobook,
-                exhausted ? HistoryEvents.ImportFailed : HistoryEvents.ImportRetry,
-                exhausted ? HistoryOutcome.Failed : HistoryOutcome.Retrying, correlationId, reason,
-                new Dictionary<string, object> { ["JobId"] = job.Id, ["RetryCount"] = job.RetryCount }, ct);
-        }
-
-        private static async Task FailImportAsync(
-            DownloadProcessingJob job,
-            IDownloadProcessingJobService jobService,
-            IHistoryRepository historyRepository,
-            Download download,
-            Audiobook audiobook,
-            string correlationId,
-            string reason,
-            CancellationToken ct)
-        {
-            await jobService.UpdateJobAsync(job.MarkAsFailed(reason));
-            await RecordHistoryAsync(historyRepository, download, audiobook, HistoryEvents.ImportFailed,
-                HistoryOutcome.Failed, correlationId, reason,
-                new Dictionary<string, object> { ["JobId"] = job.Id, ["RetryCount"] = job.RetryCount }, ct);
-        }
-
-        private static Task RecordHistoryAsync(
-            IHistoryRepository historyRepository,
-            Download download,
-            Audiobook audiobook,
-            string eventType,
-            HistoryOutcome outcome,
-            string correlationId,
-            string message,
-            Dictionary<string, object> details,
-            CancellationToken ct) =>
-            historyRepository.AddAsync(new History
+            if (Guid.TryParse(jobId, out var parsed))
             {
-                AudiobookId = audiobook.Id,
-                AudiobookTitle = audiobook.Title,
-                SourceTitle = download.Title,
-                DownloadId = download.Id.ToUpperInvariant(),
-                DownloadClientId = download.DownloadClientId,
-                EventType = eventType,
-                Outcome = outcome,
-                Source = "DownloadImport",
-                Message = message,
-                Error = outcome == HistoryOutcome.Failed ? message : null,
-                Timestamp = DateTime.UtcNow,
-                CorrelationId = correlationId,
-                Data = JsonSerializer.Serialize(details)
-            }, ct);
+                return parsed;
+            }
+
+            var hash = SHA256.HashData(
+                Encoding.UTF8.GetBytes("download-import:" + jobId));
+            return new Guid(hash.AsSpan(0, 16));
+        }
     }
 }

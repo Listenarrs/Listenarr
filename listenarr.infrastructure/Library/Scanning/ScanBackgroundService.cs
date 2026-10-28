@@ -23,25 +23,54 @@ namespace Listenarr.Infrastructure.Library.Scanning
     public class ScanBackgroundService(
         IScanQueueService queue,
         IScanJobProcessor processor,
+        MoveScanHandoffRecoveryService moveHandoffRecoveryService,
+        IWorkerCycleRunner cycleRunner,
+        ILibraryFilesystemReadiness filesystemReadiness,
         ILogger<ScanBackgroundService> logger) : BackgroundService
     {
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
+            logger.LogInformation("ScanBackgroundService waiting for library filesystem initialization");
+            await filesystemReadiness.WaitUntilReadyAsync(stoppingToken);
             logger.LogInformation("ScanBackgroundService started");
 
-            if (queue is not ScanQueueService scanQueue)
-            {
-                logger.LogWarning("ScanBackgroundService cannot read jobs because the configured queue is {QueueType}", queue.GetType().Name);
-                return;
-            }
-
             logger.LogInformation("ScanBackgroundService awaiting jobs from queue");
+            using var recoveryCancellation = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            var recoveryTask = cycleRunner.RunPeriodicAsync(
+                "move.scan.handoff.recovery",
+                initialDelay: null,
+                intervalProvider: static () => TimeSpan.FromSeconds(30),
+                runCycle: moveHandoffRecoveryService.RecoverAsync,
+                recoveryCancellation.Token);
             try
             {
-                await foreach (var job in scanQueue.Reader.ReadAllAsync(stoppingToken))
+                await foreach (var job in queue.Reader.ReadAllAsync(stoppingToken))
                 {
                     logger.LogDebug("Dequeued scan job {JobId} from channel", job.Id);
-                    await processor.ProcessJobAsync(job, stoppingToken);
+                    try
+                    {
+                        await processor.ProcessJobAsync(job, stoppingToken);
+                    }
+                    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (OperationCanceledException exception)
+                    {
+                        TryMarkJobFailed(job, exception);
+                        logger.LogWarning(
+                            exception,
+                            "Scan job {JobId} was canceled unexpectedly; continuing with later jobs",
+                            job.Id);
+                    }
+                    catch (Exception exception) when (WorkerExceptionClassifier.IsNonFatal(exception))
+                    {
+                        TryMarkJobFailed(job, exception);
+                        logger.LogError(
+                            exception,
+                            "Unhandled error processing scan job {JobId}; continuing with later jobs",
+                            job.Id);
+                    }
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -50,12 +79,53 @@ namespace Listenarr.Infrastructure.Library.Scanning
             }
             catch (OperationCanceledException ex)
             {
-                logger.LogWarning(ex, "ScanBackgroundService job stream canceled/timed out unexpectedly; continuing");
+                logger.LogWarning(ex, "ScanBackgroundService job stream canceled unexpectedly");
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            catch (Exception ex) when (WorkerExceptionClassifier.IsNonFatal(ex))
             {
-                logger.LogError(ex, "Unhandled error in ScanBackgroundService loop");
+                logger.LogError(ex, "Unhandled error reading the ScanBackgroundService job stream");
+            }
+            finally
+            {
+                await recoveryCancellation.CancelAsync();
+                try
+                {
+                    await recoveryTask;
+                }
+                catch (OperationCanceledException) when (recoveryCancellation.IsCancellationRequested)
+                {
+                    logger.LogDebug("Move scan handoff recovery stopped");
+                }
             }
         }
+
+        private void TryMarkJobFailed(ScanJob job, Exception processingException)
+        {
+            try
+            {
+                if (queue.TryGetJob(job.Id, out var current)
+                    && current != null
+                    && (string.Equals(current.Status, "Completed", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(current.Status, "Failed", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(current.Status, "Superseded", StringComparison.OrdinalIgnoreCase)))
+                {
+                    logger.LogDebug(
+                        "Preserved authoritative terminal status {Status} for scan job {JobId} after a later processor exception",
+                        current.Status,
+                        job.Id);
+                    return;
+                }
+
+                queue.UpdateJobStatus(job.Id, "Failed", processingException.Message);
+            }
+            catch (Exception statusException) when (WorkerExceptionClassifier.IsNonFatal(statusException))
+            {
+                logger.LogWarning(
+                    statusException,
+                    "Failed to update scan job {JobId} after its processor failed; continuing with later jobs",
+                    job.Id);
+            }
+        }
+
     }
 }

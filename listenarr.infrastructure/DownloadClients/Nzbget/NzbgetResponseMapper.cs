@@ -18,7 +18,6 @@
 
 using System.Globalization;
 using System.Xml.Linq;
-using Listenarr.Domain.Common;
 
 namespace Listenarr.Infrastructure.DownloadClients.Nzbget;
 
@@ -41,9 +40,18 @@ internal static class NzbgetResponseMapper
         var remainingMb = ParseDouble(members.GetValueOrDefault("RemainingSizeMB", "0"));
         var downloadRate = ParseDouble(members.GetValueOrDefault("DownloadRate", "0"));
         var destDir = members.GetValueOrDefault("DestDir", string.Empty);
+        var normalizedStatus = (statusRaw ?? "QUEUED").ToUpperInvariant();
+        var isTerminalLikeActiveStatus = IsTerminalLikeActiveStatus(normalizedStatus);
 
         var sizeBytes = Convert.ToInt64(Math.Max(0, sizeMb) * 1024 * 1024);
         var remainingBytes = Convert.ToInt64(Math.Max(0, remainingMb) * 1024 * 1024);
+        if (isTerminalLikeActiveStatus && sizeBytes > 0 && remainingBytes == 0)
+        {
+            // Active terminal-looking rows are not import-ready by themselves.
+            // Keep one byte remaining so normalized active telemetry cannot look
+            // indistinguishable from completed history before FinalDir/DestDir exists.
+            remainingBytes = 1;
+        }
 
         TimeSpan? remainingTime = null;
         if (downloadRate > 0 && remainingMb > 0)
@@ -53,26 +61,25 @@ internal static class NzbgetResponseMapper
             remainingTime = TimeSpan.FromSeconds(etaSeconds);
         }
 
-        var normalizedStatus = (statusRaw ?? "QUEUED").ToUpperInvariant();
         var status = normalizedStatus switch
         {
             "QUEUED" => DownloadItemStatus.Queued,
-            "DOWNLOADING" => DownloadItemStatus.Downloading,
             "PAUSED" => DownloadItemStatus.Paused,
+            "DOWNLOADING" => DownloadItemStatus.Downloading,
             "FETCHING" => DownloadItemStatus.Downloading,
             "SCANNING" => DownloadItemStatus.Downloading,
             "PP_QUEUED" => DownloadItemStatus.Downloading,
             "PP_PROCESSING" => DownloadItemStatus.Downloading,
-            _ when normalizedStatus.StartsWith("SUCCESS", StringComparison.Ordinal) => DownloadItemStatus.Completed,
-            _ when normalizedStatus.StartsWith("FAILURE", StringComparison.Ordinal) || normalizedStatus.StartsWith("FAILED", StringComparison.Ordinal) => DownloadItemStatus.Failed,
+            _ when IsTerminalLikeActiveStatus(normalizedStatus) => DownloadItemStatus.Downloading,
             _ => DownloadItemStatus.Queued
         };
 
-        var contentPath = !string.IsNullOrEmpty(destDir) && !string.IsNullOrEmpty(title)
-            ? FileUtils.CombineWithOptionalBase(destDir, title)
-            : (destDir ?? string.Empty);
+        var progress = CalculateActiveProgress(sizeMb, remainingMb, isTerminalLikeActiveStatus);
 
-        var progress = sizeMb > 0 ? Math.Clamp((sizeMb - remainingMb) / sizeMb * 100, 0, 100) : 0;
+        // Active NZBGet groups are progress telemetry only. They can briefly
+        // report terminal-looking statuses before history exposes the final
+        // result and path. Do not let active telemetry drive completed/failed
+        // transitions or import paths; completed history owns FinalDir/DestDir.
 
         return new DownloadClientItem
         {
@@ -83,7 +90,7 @@ internal static class NzbgetResponseMapper
             TotalSize = sizeBytes,
             RemainingSize = remainingBytes,
             RemainingTime = remainingTime,
-            OutputPath = contentPath ?? string.Empty,
+            OutputPath = string.Empty,
             Message = statusRaw ?? "QUEUED",
             Progress = progress,
             DownloadSpeed = downloadRate,
@@ -116,9 +123,18 @@ internal static class NzbgetResponseMapper
         var downloadedMb = sizeMb - remainingMb;
         var downloadRate = ParseDouble(members.GetValueOrDefault("DownloadRate", "0"));
         var destDir = members.GetValueOrDefault("DestDir", string.Empty);
+        var normalizedStatus = (statusRaw ?? "QUEUED").ToUpperInvariant();
+        var isTerminalLikeActiveStatus = IsTerminalLikeActiveStatus(normalizedStatus);
 
         var sizeBytes = Convert.ToInt64(Math.Max(0, sizeMb) * 1024 * 1024);
         var downloadedBytes = Convert.ToInt64(Math.Max(0, downloadedMb) * 1024 * 1024);
+        if (isTerminalLikeActiveStatus && sizeBytes > 0 && downloadedBytes >= sizeBytes)
+        {
+            // Active terminal-looking rows do not carry the final import path.
+            // Avoid making generic monitor conversion complete the download from
+            // bytes alone before the history row supplies FinalDir/DestDir.
+            downloadedBytes = sizeBytes - 1;
+        }
 
         int? etaSeconds = null;
         if (downloadRate > 0 && remainingMb > 0)
@@ -127,32 +143,31 @@ internal static class NzbgetResponseMapper
             etaSeconds = (int)Math.Max(0, remainingBytes / downloadRate);
         }
 
-        var normalizedStatus = (statusRaw ?? "QUEUED").ToUpperInvariant();
         string status = normalizedStatus switch
         {
             "QUEUED" => "queued",
-            "DOWNLOADING" => "downloading",
             "PAUSED" => "paused",
+            "DOWNLOADING" => "downloading",
             "FETCHING" => "downloading",
             "SCANNING" => "downloading",
             "PP_QUEUED" => "downloading",
             "PP_PROCESSING" => "downloading",
-            _ when normalizedStatus.StartsWith("SUCCESS", StringComparison.Ordinal) => "completed",
-            _ when normalizedStatus.StartsWith("FAILURE", StringComparison.Ordinal) || normalizedStatus.StartsWith("FAILED", StringComparison.Ordinal) => "failed",
+            _ when IsTerminalLikeActiveStatus(normalizedStatus) => "downloading",
             _ => "queued"
         };
 
-        var contentPath = !string.IsNullOrEmpty(destDir) && !string.IsNullOrEmpty(title)
-            ? FileUtils.CombineWithOptionalBase(destDir, title)
-            : destDir;
+        var remotePath = string.IsNullOrWhiteSpace(destDir) ? null : destDir;
 
+        // Active NZBGet groups do not reliably expose the final import path or
+        // final state. Keep DestDir as queue telemetry, but leave import paths
+        // empty until completed history provides FinalDir or DestDir.
         return new QueueItem
         {
             Id = id,
             Title = title ?? string.Empty,
             Quality = category ?? string.Empty,
             Status = status,
-            Progress = sizeMb > 0 ? Math.Clamp(downloadedMb / sizeMb * 100, 0, 100) : 0,
+            Progress = CalculateActiveProgress(sizeMb, remainingMb, isTerminalLikeActiveStatus),
             Size = sizeBytes,
             Downloaded = downloadedBytes,
             DownloadSpeed = downloadRate,
@@ -163,9 +178,10 @@ internal static class NzbgetResponseMapper
             AddedAt = DateTime.UtcNow,
             CanPause = status is "downloading" or "queued",
             CanRemove = true,
-            RemotePath = destDir,
-            LocalPath = destDir,
-            ContentPath = contentPath
+            RemotePath = remotePath,
+            LocalPath = remotePath,
+            ContentPath = null,
+            SourceFiles = []
         };
     }
 
@@ -185,9 +201,12 @@ internal static class NzbgetResponseMapper
                     0,
                     100)
                 : 0;
-        var completedPath = isCompleted
+        var completedPath = isCompleted && !string.IsNullOrWhiteSpace(entry.CompletedPath)
             ? entry.CompletedPath
-            : string.Empty;
+            : null;
+        var diagnosticPath = isCompleted
+            ? null
+            : GetDiagnosticPath(entry);
 
         return new QueueItem
         {
@@ -204,13 +223,34 @@ internal static class NzbgetResponseMapper
             DownloadClientId = client.Id ?? string.Empty,
             DownloadClientType = "nzbget",
             AddedAt = DateTime.UtcNow,
-            ErrorMessage = isCompleted ? null : entry.RawStatus,
+            ErrorMessage = isCompleted ? null : NzbgetFailureMessageMapper.Map(entry),
+            ClientFailureReason = isCompleted ? null : entry.RawStatus,
             CanPause = false,
             CanRemove = true,
-            RemotePath = completedPath,
-            LocalPath = completedPath,
-            ContentPath = completedPath
+            RemotePath = isCompleted ? completedPath : diagnosticPath,
+            LocalPath = isCompleted ? completedPath : diagnosticPath,
+            ContentPath = completedPath,
+            SourceFiles = isCompleted ? null : []
         };
+    }
+
+    public static long? MapStatusDownloadRate(XElement valueElement)
+    {
+        var structElement = valueElement.Element("struct");
+        if (structElement == null)
+        {
+            return null;
+        }
+
+        var members = ReadMembers(structElement);
+        var splitRate = ParseLoHiLong(members, "DownloadRateLo", "DownloadRateHi");
+        if (splitRate.HasValue && splitRate.Value > 0)
+        {
+            return splitRate.Value;
+        }
+
+        var legacyRate = ParseLong(members.GetValueOrDefault("DownloadRate"));
+        return legacyRate > 0 ? legacyRate : null;
     }
 
     public static DownloadClientItem MapHistoryToDownloadClientItem(
@@ -232,6 +272,9 @@ internal static class NzbgetResponseMapper
                     0,
                     100)
                 : 0;
+        var outputPath = isCompleted && !string.IsNullOrWhiteSpace(entry.CompletedPath)
+            ? entry.CompletedPath
+            : string.Empty;
 
         return new DownloadClientItem
         {
@@ -244,7 +287,7 @@ internal static class NzbgetResponseMapper
             TotalSize = entry.TotalSizeBytes,
             RemainingSize = remainingBytes,
             RemainingTime = null,
-            OutputPath = isCompleted ? entry.CompletedPath : string.Empty,
+            OutputPath = outputPath,
             Message = entry.RawStatus,
             Progress = progress,
             DownloadSpeed = 0,
@@ -276,5 +319,62 @@ internal static class NzbgetResponseMapper
     private static double ParseDouble(string? value)
     {
         return double.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed) ? parsed : 0d;
+    }
+
+    private static long ParseLong(string? value)
+    {
+        return long.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed) ? parsed : 0L;
+    }
+
+    private static double CalculateActiveProgress(
+        double sizeMb,
+        double remainingMb,
+        bool isTerminalLikeActiveStatus)
+    {
+        if (sizeMb <= 0)
+        {
+            return 0;
+        }
+
+        var progress = Math.Clamp((sizeMb - remainingMb) / sizeMb * 100, 0, 100);
+        return isTerminalLikeActiveStatus && progress >= 100
+            ? 99.9
+            : progress;
+    }
+
+    private static bool IsTerminalLikeActiveStatus(string normalizedStatus)
+    {
+        return normalizedStatus.StartsWith("SUCCESS", StringComparison.Ordinal) ||
+            normalizedStatus.StartsWith("FAILURE", StringComparison.Ordinal) ||
+            normalizedStatus.StartsWith("FAILED", StringComparison.Ordinal);
+    }
+
+    private static string? GetDiagnosticPath(NzbgetHistoryEntry entry)
+    {
+        if (!string.IsNullOrWhiteSpace(entry.FinalDir))
+        {
+            return entry.FinalDir;
+        }
+
+        return !string.IsNullOrWhiteSpace(entry.DestDir)
+            ? entry.DestDir
+            : null;
+    }
+
+    private static long? ParseLoHiLong(
+        IReadOnlyDictionary<string, string?> members,
+        string lowName,
+        string highName)
+    {
+        if (!members.TryGetValue(lowName, out var lowValue) ||
+            !members.TryGetValue(highName, out var highValue) ||
+            !long.TryParse(lowValue, NumberStyles.Any, CultureInfo.InvariantCulture, out var low) ||
+            !long.TryParse(highValue, NumberStyles.Any, CultureInfo.InvariantCulture, out var high))
+        {
+            return null;
+        }
+
+        var combined = ((ulong)(uint)high << 32) | (uint)low;
+        return combined > long.MaxValue ? long.MaxValue : (long)combined;
     }
 }

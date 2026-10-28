@@ -25,6 +25,7 @@ public sealed class ListenarrExceptionHandlerTests
     [InlineData("missing", 404)]
     [InlineData("conflict", 409)]
     [InlineData("forbidden", 403)]
+    [InlineData("unavailable", 503)]
     [InlineData("external", 502)]
     public async Task TypedExceptions_MapToStableProblemDetails(string kind, int expectedStatus)
     {
@@ -50,6 +51,7 @@ public sealed class ListenarrExceptionHandlerTests
             "missing" => new ApplicationNotFoundException("missing_item", "Item was not found."),
             "conflict" => new ApplicationConflictException("duplicate_item", "Item already exists."),
             "forbidden" => new ApplicationForbiddenException("operation_forbidden", "Operation is forbidden."),
+            "unavailable" => new ApplicationUnavailableException("filesystem_initializing", "Filesystem initialization is still in progress."),
             _ => new ExternalServiceException("provider_unavailable", "Provider is unavailable.")
         };
 

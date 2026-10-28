@@ -117,8 +117,7 @@ namespace Listenarr.Tests.Common
             return new SabnzbdAdapter(
                 provider.GetRequiredService<IHttpClientFactory>(),
                 Mock.Of<INzbUrlResolver>(),
-                new Mock<ILogger<SabnzbdAdapter>>().Object,
-                new Mock<IAppMetricsService>().Object);
+                new Mock<ILogger<SabnzbdAdapter>>().Object);
         }
 
         public static NzbgetAdapter CreateNzbgetAdapter(ServiceProvider provider)

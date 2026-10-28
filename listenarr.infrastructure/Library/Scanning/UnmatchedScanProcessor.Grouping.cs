@@ -4,7 +4,6 @@
  */
 using System.Text.RegularExpressions;
 using Listenarr.Domain.Common;
-using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Library.Scanning
 {
@@ -13,11 +12,12 @@ namespace Listenarr.Infrastructure.Library.Scanning
         internal static List<List<string>> BuildGroupedFilesForFolder(
             IEnumerable<string> files,
             string folderPath,
+            FileSystemPathSemantics semantics,
             IReadOnlyDictionary<string, PathParsedMetadata>? embeddedTagsByFile = null)
         {
             var allFiles = files
                 .Where(f => !string.IsNullOrWhiteSpace(f))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Distinct(semantics.Comparer)
                 .ToList();
 
             if (allFiles.Count <= 1)
@@ -27,7 +27,11 @@ namespace Listenarr.Infrastructure.Library.Scanning
 
             if (embeddedTagsByFile != null)
             {
-                var metadataAwareGroups = BuildMetadataAwareGroups(allFiles, folderPath, embeddedTagsByFile);
+                var metadataAwareGroups = BuildMetadataAwareGroups(
+                    allFiles,
+                    folderPath,
+                    semantics,
+                    embeddedTagsByFile);
                 if (metadataAwareGroups.Count > 0)
                 {
                     return metadataAwareGroups;
@@ -40,6 +44,7 @@ namespace Listenarr.Infrastructure.Library.Scanning
         private static List<List<string>> BuildMetadataAwareGroups(
             IReadOnlyCollection<string> files,
             string folderPath,
+            FileSystemPathSemantics semantics,
             IReadOnlyDictionary<string, PathParsedMetadata> embeddedTagsByFile)
         {
             var folderKey = NormalizeGroupKey(Path.GetFileName(folderPath));
@@ -73,7 +78,7 @@ namespace Listenarr.Infrastructure.Library.Scanning
 
             var attachedFiles = new HashSet<string>(
                 metadataGroups.SelectMany(group => group).Select(candidate => candidate.FilePath),
-                StringComparer.OrdinalIgnoreCase);
+                semantics.Comparer);
 
             foreach (var candidate in candidates.Where(candidate => !attachedFiles.Contains(candidate.FilePath)))
             {
@@ -97,7 +102,7 @@ namespace Listenarr.Infrastructure.Library.Scanning
                 .ToList();
 
             var grouped = metadataGroups
-                .Select(group => group.Select(candidate => candidate.FilePath).Distinct(StringComparer.OrdinalIgnoreCase).ToList())
+                .Select(group => group.Select(candidate => candidate.FilePath).Distinct(semantics.Comparer).ToList())
                 .ToList();
 
             if (leftovers.Count > 0)
@@ -173,15 +178,210 @@ namespace Listenarr.Infrastructure.Library.Scanning
         private static async Task<IReadOnlyDictionary<string, PathParsedMetadata>> ReadEmbeddedTagsForFilesAsync(
             IEnumerable<string> files,
             string ffprobePath,
+            FileSystemPathSemantics semantics,
+            IReadOnlyDictionary<string, string> fileObjectIdentities,
             CancellationToken ct)
         {
-            var result = new Dictionary<string, PathParsedMetadata>(StringComparer.OrdinalIgnoreCase);
+            var result = new Dictionary<string, PathParsedMetadata>(semantics.Comparer);
             foreach (var file in files)
             {
-                result[file] = await PathMetadataParser.ReadEmbeddedTagsAsync(file, ffprobePath, ct);
+                var canonicalFile = FileSystemPathIdentity.Canonicalize(
+                    file,
+                    semantics.Syntax);
+                fileObjectIdentities.TryGetValue(
+                    canonicalFile,
+                    out var expectedPhysicalObjectIdentity);
+                if (string.Equals(
+                        expectedPhysicalObjectIdentity,
+                        ScanFileDiscovery.PinnedPathOnlyIdentity,
+                        StringComparison.Ordinal))
+                {
+                    expectedPhysicalObjectIdentity = null;
+                }
+
+                using var lease =
+                    PinnedAudiobookFileRegistrationLease.OpenForMetadataRead(
+                        file,
+                        expectedPhysicalObjectIdentity);
+                result[file] = await PathMetadataParser.ReadEmbeddedTagsAsync(
+                    lease.MetadataPath,
+                    ffprobePath,
+                    ct);
+                if (!lease.MatchesCurrentPublication())
+                {
+                    throw new InvalidOperationException(
+                        "The unmatched metadata candidate changed during embedded-tag extraction.");
+                }
             }
 
             return result;
+        }
+
+        internal static async Task ApplyPinnedFolderMetadataAsync(
+            PathParsedMetadata target,
+            string bookFolder,
+            ScanFileDiscovery.EnumerationResult enumeration,
+            FileSystemPathSemantics semantics,
+            CancellationToken ct)
+        {
+            ArgumentNullException.ThrowIfNull(target);
+            if (string.IsNullOrWhiteSpace(bookFolder))
+            {
+                return;
+            }
+
+            var canonicalFolder = FileSystemPathIdentity.Canonicalize(
+                bookFolder,
+                semantics.Syntax);
+            enumeration.DirectoryObjectIdentities.TryGetValue(
+                canonicalFolder,
+                out var expectedDirectoryIdentity);
+            if (string.Equals(
+                    expectedDirectoryIdentity,
+                    ScanFileDiscovery.PinnedPathOnlyIdentity,
+                    StringComparison.Ordinal))
+            {
+                expectedDirectoryIdentity = null;
+            }
+
+            using var folder = PinnedDirectoryCreation.OpenPinnedHierarchyNoFollow(
+                bookFolder,
+                createMissing: false);
+            if (!string.IsNullOrWhiteSpace(expectedDirectoryIdentity)
+                && !folder.MatchesDirectoryObjectIdentity(
+                    expectedDirectoryIdentity))
+            {
+                throw new InvalidOperationException(
+                    "The unmatched metadata folder changed after filesystem enumeration.");
+            }
+            var expectedNamespaceChangeToken =
+                TryCapturePinnedFolderChangeToken(folder);
+            EnsurePinnedFolderMatches(
+                folder,
+                expectedDirectoryIdentity,
+                expectedNamespaceChangeToken);
+
+            var description = await TryReadPinnedTextFileAsync(
+                folder,
+                "desc.txt",
+                maxCharacters: 2000,
+                ct);
+            EnsurePinnedFolderMatches(
+                folder,
+                expectedDirectoryIdentity,
+                expectedNamespaceChangeToken);
+            if (!string.IsNullOrWhiteSpace(description))
+            {
+                target.Description = description.Trim();
+            }
+
+            var narrator = await TryReadPinnedTextFileAsync(
+                folder,
+                "reader.txt",
+                maxCharacters: 512,
+                ct);
+            EnsurePinnedFolderMatches(
+                folder,
+                expectedDirectoryIdentity,
+                expectedNamespaceChangeToken);
+            if (!string.IsNullOrWhiteSpace(narrator))
+            {
+                target.Narrator = narrator.Trim();
+            }
+
+            string[] visibleFiles;
+            try
+            {
+                visibleFiles = Directory.EnumerateFiles(folder.FullPath)
+                    .Select(Path.GetFileName)
+                    .Where(name => !string.IsNullOrWhiteSpace(name))
+                    .Cast<string>()
+                    .ToArray();
+            }
+            catch (Exception exception) when (exception is
+                IOException or UnauthorizedAccessException
+                    or System.ComponentModel.Win32Exception)
+            {
+                throw new InvalidOperationException(
+                    "The unmatched metadata folder became unavailable while locating its cover image.",
+                    exception);
+            }
+            EnsurePinnedFolderMatches(
+                folder,
+                expectedDirectoryIdentity,
+                expectedNamespaceChangeToken);
+
+            foreach (var fileName in visibleFiles)
+            {
+                if (!Path.GetFileNameWithoutExtension(fileName)
+                        .Contains("cover", StringComparison.OrdinalIgnoreCase)
+                    || !new[] { ".jpg", ".jpeg", ".png", ".webp" }
+                        .Contains(
+                            Path.GetExtension(fileName),
+                            StringComparer.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                using var cover = folder.TryOpenExistingFile(
+                    fileName,
+                    requireDeleteAccess: false);
+                if (cover == null || !cover.IsRegularFile() || !cover.VisiblePathMatches())
+                {
+                    continue;
+                }
+
+                EnsurePinnedFolderMatches(
+                    folder,
+                    expectedDirectoryIdentity,
+                    expectedNamespaceChangeToken);
+                target.CoverPath = cover.FullPath;
+                break;
+            }
+        }
+
+        private static async Task<string?> TryReadPinnedTextFileAsync(
+            PinnedDirectoryCreation.PinnedDirectoryAnchor folder,
+            string fileName,
+            int maxCharacters,
+            CancellationToken ct)
+        {
+            using var file = folder.TryOpenExistingFile(
+                fileName,
+                requireDeleteAccess: false);
+            if (file == null || !file.IsRegularFile() || !file.VisiblePathMatches())
+            {
+                return null;
+            }
+
+            await using var stream = file.OpenReadStream(
+                bufferSize: 4096,
+                asynchronous: false);
+            using var reader = new StreamReader(
+                stream,
+                detectEncodingFromByteOrderMarks: true,
+                leaveOpen: true);
+            var buffer = new char[maxCharacters + 1];
+            var totalRead = 0;
+            while (totalRead < buffer.Length)
+            {
+                var read = await reader.ReadAsync(
+                    buffer.AsMemory(totalRead, buffer.Length - totalRead),
+                    ct);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                totalRead += read;
+            }
+            if (!file.VisiblePathMatches() || !folder.VisiblePathMatches())
+            {
+                throw new InvalidOperationException(
+                    "The unmatched metadata sidecar changed while it was being read.");
+            }
+
+            return new string(buffer, 0, Math.Min(totalRead, maxCharacters));
         }
 
         private static void ApplyEmbeddedTags(PathParsedMetadata target, PathParsedMetadata tags)
@@ -194,60 +394,6 @@ namespace Listenarr.Infrastructure.Library.Scanning
             if (!string.IsNullOrEmpty(tags.Year)) target.Year = tags.Year;
             if (!string.IsNullOrEmpty(tags.Description)) target.Description = tags.Description;
             if (!string.IsNullOrEmpty(tags.Asin)) target.Asin = tags.Asin;
-        }
-
-        private List<string> CollectAudioFiles(string rootFolderPath)
-        {
-            var candidates = new List<string>();
-            var normalizedRoot = Path.GetFullPath(rootFolderPath);
-            var dirs = new Stack<string>();
-            dirs.Push(normalizedRoot);
-
-            while (dirs.Count > 0)
-            {
-                var dir = dirs.Pop();
-                try
-                {
-                    var normalizedDir = Path.GetFullPath(dir);
-                    foreach (var file in Directory.EnumerateFiles(normalizedDir))
-                    {
-                        try
-                        {
-                            if (AudioExtensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase))
-                                candidates.Add(file);
-                        }
-                        catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                        {
-                            _logger.LogDebug(ex, "Skipped file {File} during unmatched scan", file);
-                        }
-                    }
-                    foreach (var sub in Directory.EnumerateDirectories(normalizedDir))
-                    {
-                        // Skip reparse points (symlinks, junctions) because they can point outside the root.
-                        if (new DirectoryInfo(sub).Attributes.HasFlag(FileAttributes.ReparsePoint))
-                        {
-                            _logger.LogDebug("Skipping reparse point {Dir}", sub);
-                            continue;
-                        }
-                        var resolvedSub = Path.GetFullPath(sub);
-                        var rootWithSep = normalizedRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-                        if (!resolvedSub.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase))
-                        {
-                            _logger.LogWarning("Skipping {Dir}: resolves outside configured root {Root}", sub, normalizedRoot);
-                            continue;
-                        }
-                        dirs.Push(resolvedSub);
-                    }
-                }
-                catch (IOException ioEx) { _logger.LogWarning(ioEx, "IO error scanning {Dir}", dir); }
-                catch (UnauthorizedAccessException uaEx) { _logger.LogWarning(uaEx, "Access denied scanning {Dir}", dir); }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    _logger.LogWarning(ex, "Unexpected error scanning {Dir}", dir);
-                }
-            }
-
-            return candidates;
         }
 
         /// <summary>
@@ -314,7 +460,7 @@ namespace Listenarr.Infrastructure.Library.Scanning
         private static string NormalizeGroupKey(string value) =>
             Regex.Replace(value ?? string.Empty, @"\s+", " ").Trim().ToLowerInvariant();
 
-        private static string NormalizePath(string path) =>
-            Path.GetFullPath(path).Replace('\\', '/').TrimEnd('/');
+        private static string NormalizePath(string path, FileSystemPathSyntax syntax) =>
+            FileSystemPathIdentity.Canonicalize(Path.GetFullPath(path), syntax);
     }
 }

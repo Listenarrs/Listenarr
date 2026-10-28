@@ -31,7 +31,10 @@ namespace Listenarr.Tests.Features.Api.Services
                 Path.Join(folder, "Chapter 02.mp3")
             };
 
-            var groups = UnmatchedScanBackgroundService.BuildGroupedFilesForFolder(files, folder);
+            var groups = UnmatchedScanBackgroundService.BuildGroupedFilesForFolder(
+                files,
+                folder,
+                FileSystemPathSemantics.CurrentHostDefault);
 
             var group = Assert.Single(groups);
             Assert.Equal(3, group.Count);
@@ -50,7 +53,10 @@ namespace Listenarr.Tests.Features.Api.Services
                 Path.Join(folder, "Lord of Light.mp3")
             };
 
-            var groups = UnmatchedScanBackgroundService.BuildGroupedFilesForFolder(files, folder);
+            var groups = UnmatchedScanBackgroundService.BuildGroupedFilesForFolder(
+                files,
+                folder,
+                FileSystemPathSemantics.CurrentHostDefault);
 
             Assert.Equal(2, groups.Count);
             Assert.Contains(groups, group => group.Single() == Path.Join(folder, "Jack of Shadows.mp3"));
@@ -78,7 +84,11 @@ namespace Listenarr.Tests.Features.Api.Services
                 [alchemised] = new() { Title = "Alchemised (Spanish Edition)", Author = "SenLinYu" }
             };
 
-            var groups = UnmatchedScanBackgroundService.BuildGroupedFilesForFolder(files, folder, embeddedTags);
+            var groups = UnmatchedScanBackgroundService.BuildGroupedFilesForFolder(
+                files,
+                folder,
+                FileSystemPathSemantics.CurrentHostDefault,
+                embeddedTags);
 
             Assert.Equal(2, groups.Count);
             Assert.Contains(groups, group => group.Count == 2 && group.Contains(foreword) && group.Contains(chapter1));
@@ -99,7 +109,11 @@ namespace Listenarr.Tests.Features.Api.Services
                 [fileB] = new() { Title = "Shared Title", Author = "SenLinYu" }
             };
 
-            var groups = UnmatchedScanBackgroundService.BuildGroupedFilesForFolder(files, folder, embeddedTags);
+            var groups = UnmatchedScanBackgroundService.BuildGroupedFilesForFolder(
+                files,
+                folder,
+                FileSystemPathSemantics.CurrentHostDefault,
+                embeddedTags);
 
             Assert.Equal(2, groups.Count);
             Assert.Contains(groups, group => group.Single() == fileA);

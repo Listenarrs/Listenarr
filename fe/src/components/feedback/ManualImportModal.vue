@@ -58,7 +58,12 @@
           <button
             class="btn btn-info"
             @click="startAutomaticImport"
-            :disabled="!isPathValid || loading"
+            :disabled="!isPathValid || loading || !filesystemReadinessStore.filesystemReady"
+            :title="
+              !filesystemReadinessStore.filesystemReady
+                ? 'Available after library filesystem initialization completes'
+                : undefined
+            "
           >
             <PhRocket />
             Automatic Import
@@ -162,7 +167,12 @@
             <button
               class="btn btn-info"
               @click="startAutomaticImport"
-              :disabled="!isPathValid || loading"
+              :disabled="!isPathValid || loading || !filesystemReadinessStore.filesystemReady"
+              :title="
+                !filesystemReadinessStore.filesystemReady
+                  ? 'Available after library filesystem initialization completes'
+                  : undefined
+              "
             >
               <PhRocket />
               Automatic Import
@@ -182,7 +192,12 @@
             v-else-if="showPreview"
             class="btn btn-primary"
             @click="importSelected"
-            :disabled="selectedCount === 0 || loading"
+            :disabled="selectedCount === 0 || loading || !filesystemReadinessStore.filesystemReady"
+            :title="
+              !filesystemReadinessStore.filesystemReady
+                ? 'Available after library filesystem initialization completes'
+                : undefined
+            "
           >
             Import
           </button>
@@ -336,6 +351,7 @@ import {
 import { apiService } from '@/services/api'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
+import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 
 const props = withDefaults(defineProps<{ isOpen?: boolean; initialPath?: string }>(), {
   isOpen: false,
@@ -463,6 +479,7 @@ const selectRecent = (path: string) => {
 const libraryStore = useLibraryStore()
 const library = computed(() => libraryStore.audiobooks)
 const configurationStore = useConfigurationStore()
+const filesystemReadinessStore = useFilesystemReadinessStore()
 const qualityProfiles = computed(() => configurationStore.qualityProfiles)
 const showMatch = ref(false)
 const matchTarget = ref<PreviewItem | null>(null)

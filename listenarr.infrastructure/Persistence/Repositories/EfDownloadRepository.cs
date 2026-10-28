@@ -50,19 +50,105 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
         {
             ApplyActiveDeduplicationKey(download);
             await using var ctx = await _dbFactory.CreateDbContextAsync();
+            await using var transaction = ctx.Database.IsRelational()
+                ? await ctx.Database.BeginTransactionAsync() : null;
+            var current = await ctx.Downloads.AsNoTracking().SingleOrDefaultAsync(d => d.Id == download.Id);
+            if (current != null && bool.TryParse(current.GetMetadataString(
+                    Download.ImportSourceRetentionRequiredMetadataKey), out var retainSource) && retainSource)
+            {
+                // Pollers may hold older snapshots while import starts. Retention is
+                // monotonic for this download and must survive their subsequent saves.
+                download.SetMetadata(Download.ImportSourceRetentionRequiredMetadataKey, true);
+            }
             ctx.Downloads.Update(download);
             await ctx.SaveChangesAsync();
+            if (transaction != null) await transaction.CommitAsync();
         }
 
         public async Task UpdateMetadataAsync(string id, string key, object? value)
         {
             await using var ctx = await _dbFactory.CreateDbContextAsync();
+            await using var transaction = ctx.Database.IsRelational()
+                ? await ctx.Database.BeginTransactionAsync() : null;
             var d = await ctx.Downloads.FindAsync(id);
             if (d == null) return;
+            if (key == Download.ImportSourceRetentionRequiredMetadataKey
+                && bool.TryParse(d.GetMetadataString(key), out var retained) && retained)
+            {
+                return;
+            }
             if (d.Metadata == null) d.Metadata = new Dictionary<string, object>();
             d.Metadata[key] = value ?? string.Empty;
             ctx.Downloads.Update(d);
             await ctx.SaveChangesAsync();
+            if (transaction != null) await transaction.CommitAsync();
+        }
+
+        public async Task<IReadOnlyDictionary<string, object>?> FillMissingClientIdentifiersAsync(
+            string id,
+            string clientItemId,
+            bool isTorrentClient,
+            CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(clientItemId))
+            {
+                return null;
+            }
+
+            await using var ctx = await _dbFactory.CreateDbContextAsync(ct);
+            await using var transaction = ctx.Database.IsRelational()
+                ? await ctx.Database.BeginTransactionAsync(ct) : null;
+
+            // Read current database state inside the transaction rather than trusting a snapshot
+            // captured before the download client was queried: a grab may have recorded the real
+            // identifier in the meantime.
+            var d = await ctx.Downloads.FindAsync([id], ct);
+            if (d == null)
+            {
+                return null;
+            }
+
+            d.Metadata ??= new Dictionary<string, object>();
+            var hasClientDownloadId = TryGetMetadataString(d.Metadata, "ClientDownloadId", out var existingClientDownloadId);
+            var hasTorrentHash = TryGetMetadataString(d.Metadata, "TorrentHash", out var existingTorrentHash);
+
+            // A stored identifier that differs from this queue item means the download already
+            // knows its real client item (often recorded by the grab, possibly concurrently). Leave
+            // both alone so a later removal can't act on an unrelated same-title item (#1055).
+            var clientDownloadIdConflicts = hasClientDownloadId
+                && !string.Equals(existingClientDownloadId, clientItemId, StringComparison.OrdinalIgnoreCase);
+            var torrentHashConflicts = isTorrentClient && hasTorrentHash
+                && !string.Equals(existingTorrentHash, clientItemId, StringComparison.OrdinalIgnoreCase);
+            if (clientDownloadIdConflicts || torrentHashConflicts)
+            {
+                return d.Metadata;
+            }
+
+            var changed = false;
+            if (!hasClientDownloadId)
+            {
+                d.Metadata["ClientDownloadId"] = clientItemId;
+                changed = true;
+            }
+
+            if (isTorrentClient && !hasTorrentHash)
+            {
+                d.Metadata["TorrentHash"] = clientItemId;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                ctx.Downloads.Update(d);
+                await ctx.SaveChangesAsync(ct);
+            }
+
+            if (transaction != null)
+            {
+                await transaction.CommitAsync(ct);
+            }
+
+            return d.Metadata;
         }
 
         public async Task RemoveAsync(string id)
@@ -85,11 +171,11 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             await using var ctx = await _dbFactory.CreateDbContextAsync();
             var ddl = await ctx.Downloads
                 .AsNoTracking()
-                .Where(d => d.DownloadClientId == "DDL" && d.Status != DownloadStatus.Moved)
+                .Where(d => d.DownloadClientId == DirectDownloadMetadataKeys.ClientId && d.Status != DownloadStatus.Moved)
                 .ToListAsync();
             var nonDdl = await ctx.Downloads
                 .AsNoTracking()
-                .Where(d => d.DownloadClientId != "DDL")
+                .Where(d => d.DownloadClientId != DirectDownloadMetadataKeys.ClientId)
                 .Where(d => d.Status != DownloadStatus.Moved && d.Status != DownloadStatus.Failed)
                 .Where(d => d.Status != DownloadStatus.Completed || string.IsNullOrEmpty(d.FinalPath))
                 .ToListAsync();
@@ -101,7 +187,7 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             await using var ctx = await _dbFactory.CreateDbContextAsync();
             return await ctx.Downloads
                 .AsNoTracking()
-                .Where(d => d.DownloadClientId != "DDL" && d.Status != DownloadStatus.Failed)
+                .Where(d => d.DownloadClientId != DirectDownloadMetadataKeys.ClientId && d.Status != DownloadStatus.Failed)
                 .ToListAsync();
         }
 

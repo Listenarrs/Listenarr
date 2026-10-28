@@ -6,18 +6,20 @@
  * it under the terms of the GNU Affero General Public License as published
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-import { mount } from '@vue/test-utils'
-import { vi, describe, it, expect } from 'vitest'
-import { nextTick } from 'vue'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { mount, type VueWrapper } from '@vue/test-utils'
+import { createPinia } from 'pinia'
+
+const toastMocks = vi.hoisted(() => ({
+  error: vi.fn(),
+  info: vi.fn(),
+  success: vi.fn(),
+}))
+
+vi.mock('@/services/toastService', () => ({
+  useToast: () => toastMocks,
+}))
 
 vi.mock('@/services/api', () => ({
   apiService: {
@@ -25,13 +27,20 @@ vi.mock('@/services/api', () => ({
     getQualityProfiles: vi.fn().mockResolvedValue([]),
     getApplicationSettings: vi.fn().mockResolvedValue({ outputPath: 'C:\\root' }),
     getAudiobookIdentifiers: vi.fn().mockResolvedValue({ identifiers: [] }),
-    getRootFolders: vi
-      .fn()
-      .mockResolvedValue([{ id: 1, name: 'Default', path: 'C:\\root', isDefault: true }]),
+    getRootFolders: vi.fn(),
   },
 }))
 
+import { apiService } from '@/services/api'
 import EditAudiobookModal from '@/components/domain/audiobook/EditAudiobookModal.vue'
+
+const defaultRoot = {
+  id: 1,
+  name: 'Default',
+  path: 'C:\\root',
+  isDefault: true,
+  resolvedCaseSensitivity: 'Insensitive' as const,
+}
 
 const audiobook = {
   id: 1,
@@ -42,197 +51,200 @@ const audiobook = {
   tags: [],
 }
 
-describe('EditAudiobookModal relative path calculation', () => {
-  it('shows full path in readonly input by default', async () => {
-    const wrapper = mount(EditAudiobookModal, {
-      props: {
-        isOpen: true,
-        audiobook,
-      },
-      attachTo: document.body,
-      global: {
-        plugins: [(await import('pinia')).createPinia()],
-      },
-    })
+type EditDestinationVm = {
+  selectedRootId: number | null
+  unmanagedExistingDestination: boolean
+  editingDestination: boolean
+  formData: { relativePath: string | null }
+  combinedBasePath: () => string | null
+  startEditingDestination: () => void
+  finishEditingDestination: () => void
+}
 
-    // allow async init
-    await new Promise((r) => setTimeout(r, 10))
-
-    // Primary assertion: combined path should match expected (normalize slashes)
-    expect(((wrapper.vm as unknown).combinedBasePath() || '').replace(/\\/g, '/')).toBe(
-      'C:/root/Some Author/Some Title',
-    )
-
-    // If the readonly input exists in this environment, also assert its value
-    const readonlyInput = wrapper.find('.readonly-input')
-    const readonlyValue = (
-      readonlyInput.exists()
-        ? (readonlyInput.element as HTMLInputElement).value || ''
-        : 'C:\\root\\Some Author\\Some Title'
-    ).replace(/\\/g, '/')
-    expect(readonlyValue).toBe('C:/root/Some Author/Some Title')
+async function mountModal(
+  candidate = audiobook,
+): Promise<{ wrapper: VueWrapper; vm: EditDestinationVm }> {
+  const wrapper = mount(EditAudiobookModal, {
+    props: {
+      isOpen: true,
+      audiobook: candidate,
+    },
+    attachTo: document.body,
+    global: {
+      plugins: [createPinia()],
+    },
   })
 
-  it('derives relative path from stored basePath when root configured', async () => {
-    const wrapper = mount(EditAudiobookModal, {
-      props: {
-        isOpen: true,
-        audiobook,
-      },
-      attachTo: document.body,
-      global: {
-        plugins: [(await import('pinia')).createPinia()],
-      },
-    })
+  await new Promise((resolve) => setTimeout(resolve, 25))
+  return {
+    wrapper,
+    vm: wrapper.vm as unknown as EditDestinationVm,
+  }
+}
 
-    // allow async init
-    await new Promise((r) => setTimeout(r, 10))
-
-    // Expect the internal relativePath to be derived from stored basePath
-    expect((wrapper.vm as unknown).formData.relativePath).toBe('Some Author\\Some Title')
+describe('EditAudiobookModal configured-root destination editing', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(apiService.getRootFolders).mockResolvedValue([defaultRoot])
   })
 
-  it('treats an exact root-folder basePath as that configured root instead of custom path', async () => {
-    const wrapper = mount(EditAudiobookModal, {
-      props: {
-        isOpen: true,
-        audiobook: {
-          ...audiobook,
-          basePath: 'C:\\root',
-        },
-      },
-      attachTo: document.body,
-      global: {
-        plugins: [(await import('pinia')).createPinia()],
-      },
-    })
+  it('shows the full stored path while deriving a configured-root relative path', async () => {
+    const { wrapper, vm } = await mountModal()
 
-    await new Promise((r) => setTimeout(r, 10))
-
-    expect((wrapper.vm as unknown).selectedRootId).toBe(1)
-    expect((wrapper.vm as unknown).customRootPath).toBeUndefined()
-    expect((wrapper.vm as unknown).formData.relativePath).toBe('')
+    expect((vm.combinedBasePath() || '').replace(/\\/g, '/')).toBe('C:/root/Some Author/Some Title')
+    expect(vm.formData.relativePath).toBe('Some Author\\Some Title')
+    expect(
+      (wrapper.get('.readonly-input').element as HTMLInputElement).value.replace(/\\/g, '/'),
+    ).toBe('C:/root/Some Author/Some Title')
   })
 
-  it('normalizes absolute path to relative when Done is clicked', async () => {
-    const wrapper = mount(EditAudiobookModal, {
-      props: {
-        isOpen: true,
-        audiobook,
-      },
-      attachTo: document.body,
-      global: {
-        plugins: [(await import('pinia')).createPinia()],
-      },
+  it('treats an exact configured root as the selected root with an empty relative path', async () => {
+    const { vm } = await mountModal({
+      ...audiobook,
+      basePath: 'C:\\root',
     })
 
-    // allow async init
-    await new Promise((r) => setTimeout(r, 10))
-
-    // Set absolute value and call finishEditingDestination directly
-    ;(wrapper.vm as unknown).formData.relativePath = 'C:\\root\\New Author\\New Title'
-    await (wrapper.vm as unknown).finishEditingDestination()
-
-    // After normalization the internal relativePath should be the short relative
-    expect((wrapper.vm as unknown).formData.relativePath).toBe('New Author\\New Title')
+    expect(vm.selectedRootId).toBe(1)
+    expect(vm.formData.relativePath).toBe('')
   })
 
-  it('preserves a user-typed relative path after Done and reopen', async () => {
-    const wrapper = mount(EditAudiobookModal, {
-      props: {
-        isOpen: true,
-        audiobook,
+  it('selects the most specific configured root for nested roots', async () => {
+    vi.mocked(apiService.getRootFolders).mockResolvedValueOnce([
+      defaultRoot,
+      {
+        id: 2,
+        name: 'Nested sensitive root',
+        path: 'C:\\root\\Sensitive',
+        isDefault: false,
+        resolvedCaseSensitivity: 'Sensitive',
       },
-      attachTo: document.body,
-      global: {
-        plugins: [(await import('pinia')).createPinia()],
-      },
+    ])
+
+    const { vm } = await mountModal({
+      ...audiobook,
+      basePath: 'C:\\root\\Sensitive\\Book',
     })
 
-    // allow async init
-    await new Promise((r) => setTimeout(r, 10))
-
-    // Type a relative path and call Done directly
-    ;(wrapper.vm as unknown).formData.relativePath = 'My Author\\My Title'
-    await (wrapper.vm as unknown).finishEditingDestination()
-
-    // The internal relativePath should remain what the user typed
-    expect((wrapper.vm as unknown).formData.relativePath).toBe('My Author\\My Title')
+    expect(vm.selectedRootId).toBe(2)
+    expect(vm.formData.relativePath).toBe('Book')
   })
 
-  it('prefills absolute path when switching to Custom path', async () => {
-    const wrapper = mount(EditAudiobookModal, {
-      props: {
-        isOpen: true,
-        audiobook,
-      },
-      attachTo: document.body,
-      global: {
-        plugins: [(await import('pinia')).createPinia()],
-      },
-    })
+  it('rejects an absolute destination even when it is inside the selected root', async () => {
+    const { vm } = await mountModal()
 
-    // allow async init
-    await new Promise((r) => setTimeout(r, 10))
+    vm.startEditingDestination()
+    vm.formData.relativePath = 'C:\\root\\New Author\\New Title'
+    vm.finishEditingDestination()
 
-    // Simulate switching to Custom path by setting selectedRootId
-    ;(wrapper.vm as unknown).selectedRootId = 0
-    await nextTick()
-
-    // customRootPath should be prefilled to the full base path (normalize slashes)
-    expect(((wrapper.vm as unknown).customRootPath || '').replace(/\\/g, '/')).toBe(
-      'C:/root/Some Author/Some Title',
+    expect(vm.formData.relativePath).toBe('C:\\root\\New Author\\New Title')
+    expect(vm.editingDestination).toBe(true)
+    expect(toastMocks.error).toHaveBeenCalledWith(
+      'Invalid destination',
+      'Enter a path relative to the selected configured root folder.',
     )
   })
 
-  it('does not duplicate relative part when saving a Custom path', async () => {
-    const wrapper = mount(EditAudiobookModal, {
-      props: {
-        isOpen: true,
-        audiobook,
-      },
-      attachTo: document.body,
-      global: {
-        plugins: [(await import('pinia')).createPinia()],
-      },
-    })
+  it('rejects a Windows root-relative destination', async () => {
+    const { vm } = await mountModal()
 
-    // allow async init
-    await new Promise((r) => setTimeout(r, 10))
+    vm.startEditingDestination()
+    vm.formData.relativePath = '\\Redirected Title'
+    vm.finishEditingDestination()
 
-    // Simulate selecting Custom path directly
-    ;(wrapper.vm as unknown).selectedRootId = 0
-    ;(wrapper.vm as unknown).customRootPath = (wrapper.vm as unknown).combinedBasePath()
-    await nextTick()
-
-    // combinedBasePath should equal the custom path exactly (no duplication)
-    const cb = (wrapper.vm as unknown).combinedBasePath()
-    const cr = (wrapper.vm as unknown).customRootPath
-    expect((cb || '').replace(/\\/g, '/')).toBe((cr || '').replace(/\\/g, '/'))
+    expect(vm.formData.relativePath).toBe('\\Redirected Title')
+    expect(vm.editingDestination).toBe(true)
+    expect(toastMocks.error).toHaveBeenCalledWith(
+      'Invalid destination',
+      'Enter a path relative to the selected configured root folder.',
+    )
   })
 
-  it('selects custom path via folder browser and saves exact custom path (no duplication)', async () => {
-    const wrapper = mount(EditAudiobookModal, {
-      props: {
-        isOpen: true,
-        audiobook,
-      },
-      attachTo: document.body,
-      global: {
-        plugins: [(await import('pinia')).createPinia()],
-      },
+  it('does not expose an arbitrary custom-path destination mode', async () => {
+    const { wrapper } = await mountModal()
+
+    await wrapper.get('button[aria-label="Edit destination"]').trigger('click')
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.text()).not.toContain('Custom path')
+    expect(wrapper.find('.custom-input').exists()).toBe(false)
+    expect(wrapper.find('button[aria-label="Browse for folder"]').exists()).toBe(false)
+  })
+
+  it('keeps a legacy out-of-root path visible until a configured-root relative path is chosen', async () => {
+    const legacyPath = 'D:\\legacy\\Author\\Title'
+    const { wrapper, vm } = await mountModal({
+      ...audiobook,
+      basePath: legacyPath,
     })
 
-    // allow async init
-    await new Promise((r) => setTimeout(r, 10))
+    expect(vm.unmanagedExistingDestination).toBe(true)
+    expect((wrapper.get('.readonly-input').element as HTMLInputElement).value).toBe(legacyPath)
 
-    // Simulate folder browser selection by setting custom root directly
-    ;(wrapper.vm as unknown).selectedRootId = 0
-    ;(wrapper.vm as unknown).customRootPath = 'C:\\temp\\Isaac Asimov\\Foundation'
-    await nextTick()
+    vm.startEditingDestination()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain(
+      'Enter a path relative to the selected configured root folder.',
+    )
 
-    // combinedBasePath should equal the selected custom root exactly
-    const cb = (wrapper.vm as unknown).combinedBasePath()
-    expect(cb.replace(/\\/g, '/')).toBe('C:/temp/Isaac Asimov/Foundation')
+    vm.formData.relativePath = 'Author\\Title'
+    vm.finishEditingDestination()
+
+    expect(vm.unmanagedExistingDestination).toBe(false)
+    expect((vm.combinedBasePath() || '').replace(/\\/g, '/')).toBe('C:/root/Author/Title')
+    expect(vm.editingDestination).toBe(false)
+  })
+
+  it('uses Unix separators when the configured Unix root contains a literal backslash', async () => {
+    vi.mocked(apiService.getRootFolders).mockResolvedValueOnce([
+      {
+        id: 9,
+        name: 'Unix root with backslash',
+        path: '/library/Books\\Archive',
+        pathSyntax: 'Unix',
+        isDefault: true,
+        resolvedCaseSensitivity: 'Sensitive',
+      },
+    ])
+    vi.mocked(apiService.getApplicationSettings).mockResolvedValueOnce({
+      outputPath: '/library/Books\\Archive',
+    })
+
+    const { vm } = await mountModal({
+      ...audiobook,
+      basePath: '/library/Books\\Archive/Author/Title',
+    })
+
+    vm.startEditingDestination()
+    vm.formData.relativePath = 'Other/Book'
+    vm.finishEditingDestination()
+
+    expect(vm.combinedBasePath()).toBe('/library/Books\\Archive/Other/Book')
+    expect(vm.editingDestination).toBe(false)
+  })
+
+  it('treats a leading backslash as relative under an explicit Unix root', async () => {
+    vi.mocked(apiService.getRootFolders).mockResolvedValueOnce([
+      {
+        id: 8,
+        name: 'Unix root',
+        path: '/library',
+        pathSyntax: 'Unix',
+        isDefault: true,
+        resolvedCaseSensitivity: 'Sensitive',
+      },
+    ])
+    vi.mocked(apiService.getApplicationSettings).mockResolvedValueOnce({ outputPath: '/library' })
+
+    const { vm } = await mountModal({
+      ...audiobook,
+      basePath: '/library/Author/Title',
+    })
+
+    vm.startEditingDestination()
+    vm.formData.relativePath = '\\Chapter'
+    vm.finishEditingDestination()
+
+    expect(vm.formData.relativePath).toBe('\\Chapter')
+    expect(vm.editingDestination).toBe(false)
   })
 })

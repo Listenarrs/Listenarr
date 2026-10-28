@@ -21,6 +21,10 @@ dotnet_diagnostic.IDE0005.severity = warning
 # IDE0130: Namespace does not match the directory.
 dotnet_diagnostic.IDE0130.severity = warning
 
+[listenarr.infrastructure/Persistence/Migrations/*.cs]
+generated_code = true
+dotnet_diagnostic.IDE0005.severity = none
+
 [*.{csproj,props,targets,slnx,xml,config,resx}]
 indent_style = space
 indent_size = 2

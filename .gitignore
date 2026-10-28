@@ -129,6 +129,7 @@ coverage/
 /cypress/screenshots/
 test-results/
 playwright-report/
+.playwright-cli/
 .codeql-db*/
 
 # Vite
@@ -168,6 +169,9 @@ playwright-report/
 .env.production.local
 
 # Sensitive configuration files
+.licenses/
+**/sixlabors.lic
+!/licenses/sixlabors.lic
 appsettings.Development.json
 appsettings.Local.json
 appsettings.Production.json
@@ -274,6 +278,7 @@ listenarr.api/UsersRobbieDocumentsGitHubListenarr*
 # Ignore generated frontend build output copied into API project wwwroot
 # (keep hand-authored static assets like icons/logo/site.webmanifest)
 listenarr.api/wwwroot/assets/
+listenarr.api/wwwroot/fonts/
 listenarr.api/wwwroot/index.html
 listenarr.api/wwwroot/*.map
 listenarr.api/wwwroot/assets/**

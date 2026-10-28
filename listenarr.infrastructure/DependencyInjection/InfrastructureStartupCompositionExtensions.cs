@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Domain.Common;
 using Listenarr.Infrastructure.Persistence;
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Listenarr.Infrastructure.Configuration;
@@ -61,12 +62,30 @@ public static class InfrastructureStartupCompositionExtensions
             using var migrateScope = serviceProvider.CreateScope();
             var factory = migrateScope.ServiceProvider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
             using var ctx = factory.CreateDbContext();
+            var repairedLegacyData =
+                ListenarrDatabaseMigrationPreflight.RepairLegacyData(ctx);
+            if (repairedLegacyData.DefaultRootsNormalized > 0)
+            {
+                Log.Logger.Warning(
+                    "[Startup] Normalized {Count} duplicate default root folder row(s) before applying the single-default constraint",
+                    repairedLegacyData.DefaultRootsNormalized);
+            }
+
             ctx.Database.Migrate();
+            var repairedPostMigrationData =
+                ListenarrDatabaseMigrationPreflight.RepairPostMigrationData(ctx);
+            if (repairedPostMigrationData.MoveJobsRepaired > 0)
+            {
+                Log.Logger.Warning(
+                    "[Startup] Normalized {Count} legacy move job row(s) after applying durable move migrations",
+                    repairedPostMigrationData.MoveJobsRepaired);
+            }
             Log.Logger.Information("[Startup] EF Core migrations applied successfully");
         }
         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
         {
-            Log.Logger.Error(ex, "[Startup] Failed to apply EF Core migrations at startup. You can run 'dotnet ef database update' manually to apply migrations.");
+            Log.Logger.Error(ex, "[Startup] Failed to apply EF Core migrations at startup. Listenarr cannot start safely with an unknown database schema.");
+            throw;
         }
     }
 
@@ -86,6 +105,8 @@ public static class InfrastructureStartupCompositionExtensions
         }
 
         services.AddSingleton<IUnmatchedScanQueueService, UnmatchedScanQueueService>();
+        services.AddHostedService<LibraryFilesystemStartupReconciliationService>();
+
         if (!disableHostedServices)
         {
             services.AddListenarrHostedServices(configuration);
@@ -118,7 +139,7 @@ public static class InfrastructureStartupCompositionExtensions
         {
             var repoDbPath = Path.GetFullPath(Path.Join(environment.ContentRootPath, "config", "database", "listenarr.db"));
             var resolvedSqlitePath = Path.GetFullPath(sqliteDbPath);
-            if (string.Equals(resolvedSqlitePath, repoDbPath, StringComparison.OrdinalIgnoreCase))
+            if (FileUtils.AreFilesystemPathsEquivalentForCurrentOs(resolvedSqlitePath, repoDbPath))
             {
                 sqliteDbPath = Path.Join(Path.GetTempPath(), "listenarr-tests", "program-main", $"listenarr-{Guid.NewGuid():N}.db");
                 Log.Logger.Warning("[Startup] Test environment attempted to use repo sqlite path; forcing isolated test DB path: {SqliteDbPath}", sqliteDbPath);

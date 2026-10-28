@@ -95,7 +95,8 @@ namespace Listenarr.Application.Search.Audible
                     Series = book.Series,
                     Publisher = book.Publisher,
                     Narrators = book.Narrators,
-                    ReleaseDate = book.ReleaseDate
+                    ReleaseDate = book.ReleaseDate,
+                    Region = region
                 };
                 var metadata = _metadataConverters.ConvertAudibleToMetadata(bookResponse, book.Asin!, "Audible");
                 var searchResult = await _metadataConverters.ConvertMetadataToSearchResultAsync(metadata, book.Asin!);
@@ -150,9 +151,7 @@ namespace Listenarr.Application.Search.Audible
 
             if (!string.IsNullOrEmpty(title))
             {
-                authorFiltered = authorFiltered.Where(b =>
-                    (!string.IsNullOrWhiteSpace(b.Title) && b.Title.IndexOf(title, StringComparison.OrdinalIgnoreCase) >= 0) ||
-                    (!string.IsNullOrWhiteSpace(b.Subtitle) && b.Subtitle.IndexOf(title, StringComparison.OrdinalIgnoreCase) >= 0));
+                authorFiltered = authorFiltered.Where(b => AudibleTitleMatcher.Matches(b, title));
             }
 
             var detailedMetaByAsin = new Dictionary<string, AudibleBookResponse>(StringComparer.OrdinalIgnoreCase);
@@ -170,6 +169,7 @@ namespace Listenarr.Application.Search.Audible
             var converted = await AudibleSearchResultMapper.ConvertToSearchResultsAsync(
                 authorFiltered,
                 _metadataConverters,
+                region,
                 detailedMetaByAsin,
                 _logger,
                 continueOnConversionError: true);

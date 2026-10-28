@@ -36,7 +36,17 @@ namespace Listenarr.Application.Downloads.Contracts.Repositories
         Task<DownloadProcessingJob?> GetByIdAsync(string jobId);
         Task<List<DownloadProcessingJob>> GetByDownloadIdAsync(string downloadId);
         Task<QueueStats> GetStatsAsync();
-        Task CleanupOldJobsAsync(int retentionDays);
+
+        /// <summary>
+        /// Deletes processing jobs in the supplied terminal statuses whose completion timestamp is
+        /// older than <paramref name="cutoffUtc" />, returning the number of removed rows.
+        /// Retention policy stays in the application service; the repository only performs the
+        /// persistence operation so future contributors do not accidentally delete active jobs here.
+        /// </summary>
+        Task<int> DeleteCompletedBeforeAsync(
+            IReadOnlyCollection<ProcessingJobStatus> statuses,
+            DateTime cutoffUtc,
+            CancellationToken cancellationToken = default);
         Task<List<DownloadProcessingJob>> GetRecentAsync(int count);
         Task<List<DownloadProcessingJob>> GetStuckProcessingJobsAsync(CancellationToken cancellationToken = default);
     }

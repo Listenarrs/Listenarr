@@ -2,14 +2,12 @@ namespace Listenarr.Tests.Builders
 {
     public class AudiobookFileBuilder
     {
-        private static int IdCounter = 0;
-
         private readonly AudiobookFile _audiobookFile = new();
         private Audiobook _audiobook = new AudiobookBuilder().Build();
 
         public AudiobookFileBuilder()
         {
-            _audiobookFile.Id = ++IdCounter;
+            _audiobookFile.Id = TestEntityIdGenerator.Next();
         }
 
         public AudiobookFileBuilder WithAudiobook(Audiobook value)

@@ -61,6 +61,7 @@ vi.mock('@/services/api', () => ({
 describe('SettingsView', () => {
   type SetupState = { showPassword?: { value: boolean } | boolean }
   type Settings = {
+    version?: number
     adminPassword?: string
     useUsProxy?: boolean
     usProxyHost?: string
@@ -150,7 +151,12 @@ describe('SettingsView', () => {
   // Note: legacy "Prefer US domain" setting was removed from the UI;
   // related tests removed to reflect current application state.
 
-  it('applies child updates (via events) to settings and includes them when saving', async () => {
+  it('preserves the loaded concurrency version and saves child updates exactly once', async () => {
+    ;(apiService.getApplicationSettings as Mock).mockResolvedValue({
+      version: 7,
+      folderNamingPattern: '{Author}/{Series}/{Title}',
+      fileNamingPattern: '{Title}',
+    })
     const router = createRouter({
       history: createMemoryHistory(),
       routes: [{ path: '/', name: 'home', component: { template: '<div />' } }],
@@ -173,13 +179,9 @@ describe('SettingsView', () => {
     await generalTab!.trigger('click')
 
     const vm = wrapper.vm as unknown as { settings?: Settings }
-    vm.settings = {
-      folderNamingPattern: '{Author}/{Series}/{Title}',
-      fileNamingPattern: '{Title}',
-    } as unknown as Settings
-
-    await wrapper.vm.$nextTick()
-    await new Promise((r) => setTimeout(r, 0))
+    await vi.waitFor(() => {
+      expect(vm.settings?.version).toBe(7)
+    })
 
     // Find the File Naming Pattern input inside the child and change it
     const fileNamingInput = wrapper.find('input[placeholder="{Title}"]')
@@ -190,7 +192,10 @@ describe('SettingsView', () => {
     // Spy on the configuration store save method
     const { useConfigurationStore } = await import('@/stores/configuration')
     const cfgStore = useConfigurationStore()
-    cfgStore.saveApplicationSettings = vi.fn().mockResolvedValue(undefined)
+    cfgStore.saveApplicationSettings = vi.fn().mockImplementation(async (payload) => ({
+      ...payload,
+      version: 8,
+    }))
 
     // Save settings and assert that the updated value from the child is included
     const saveBtn = wrapper
@@ -199,9 +204,70 @@ describe('SettingsView', () => {
     expect(saveBtn).toBeTruthy()
     await saveBtn!.trigger('click')
 
-    expect(cfgStore.saveApplicationSettings).toHaveBeenCalled()
+    expect(cfgStore.saveApplicationSettings).toHaveBeenCalledTimes(1)
     const calledWith = (cfgStore.saveApplicationSettings as Mock).mock.calls[0][0]
     expect(calledWith.fileNamingPattern).toBe('{Title}-{DiskNumber}')
+    expect(calledWith.version).toBe(7)
+    await vi.waitFor(() => {
+      expect(vm.settings?.version).toBe(8)
+    })
+  })
+
+  it('reloads the authoritative version after a failed settings save', async () => {
+    ;(apiService.getApplicationSettings as Mock).mockResolvedValue({
+      version: 7,
+      folderNamingPattern: '{Author}/{Series}/{Title}',
+      fileNamingPattern: '{Title}',
+    })
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/', name: 'home', component: { template: '<div />' } }],
+    })
+    await router.push('/')
+    await router.isReady().catch(() => {})
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(SettingsView, {
+      global: { plugins: [pinia, router], stubs: ['FolderBrowser'] },
+    })
+
+    const generalTab = wrapper
+      .findAll('button.tab-button')
+      .find((b) => b.text().includes('General Settings'))
+    expect(generalTab).toBeTruthy()
+    await generalTab!.trigger('click')
+
+    const vm = wrapper.vm as unknown as { settings?: Settings }
+    await vi.waitFor(() => {
+      expect(vm.settings?.version).toBe(7)
+    })
+
+    const { useConfigurationStore } = await import('@/stores/configuration')
+    const cfgStore = useConfigurationStore()
+    cfgStore.saveApplicationSettings = vi
+      .fn()
+      .mockRejectedValue(new Error('admin provisioning failed'))
+    cfgStore.loadApplicationSettings = vi.fn(async () => {
+      const reloaded = {
+        version: 8,
+        folderNamingPattern: '{Author}/{Series}/{Title}',
+        fileNamingPattern: '{Title}',
+      } as never
+      cfgStore.applicationSettings = reloaded
+      return reloaded
+    })
+
+    const saveBtn = wrapper
+      .findAll('button.btn.btn-primary')
+      .find((b) => b.text().includes('Save Settings'))
+    expect(saveBtn).toBeTruthy()
+    await saveBtn!.trigger('click')
+
+    await vi.waitFor(() => {
+      expect(cfgStore.loadApplicationSettings).toHaveBeenCalledTimes(1)
+      expect(vm.settings?.version).toBe(8)
+    })
   })
 
   it('toggles download client enabled state', async () => {

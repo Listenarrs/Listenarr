@@ -41,7 +41,10 @@ namespace Listenarr.Application.Metadata.Core
             _logger = logger;
         }
 
-        public async Task<object?> GetMetadataAsync(string asin, string region = "us", bool cache = true)
+        public async Task<AudiobookMetadataEnvelope?> GetMetadataAsync(
+            string asin,
+            string region = "us",
+            bool cache = true)
         {
             if (string.IsNullOrWhiteSpace(asin))
             {
@@ -69,7 +72,7 @@ namespace Listenarr.Application.Metadata.Core
                     _logger.LogInformation("Attempting to fetch metadata from {SourceName} (Priority: {Priority}) for ASIN: {Asin}",
                         source.Name, source.Priority, asin);
 
-                    object? result = null;
+                    AudibleBookResponse? result = null;
 
                     if (IsAudibleMetadataSource(source))
                     {
@@ -118,12 +121,10 @@ namespace Listenarr.Application.Metadata.Core
                     if (result != null)
                     {
                         _logger.LogInformation("Successfully fetched metadata from {SourceName} for ASIN: {Asin}", source.Name, asin);
-                        return new
-                        {
-                            metadata = result,
-                            source = source.Name,
-                            sourceUrl = source.BaseUrl
-                        };
+                        return new AudiobookMetadataEnvelope(
+                            result,
+                            source.Name,
+                            source.BaseUrl);
                     }
                 }
                 catch (Exception sourceEx) when (sourceEx is not OperationCanceledException && sourceEx is not OutOfMemoryException && sourceEx is not StackOverflowException)
@@ -160,4 +161,3 @@ namespace Listenarr.Application.Metadata.Core
         }
     }
 }
-

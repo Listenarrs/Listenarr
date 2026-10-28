@@ -80,7 +80,12 @@ namespace Listenarr.Application.Search.Core
                 if (searchType == "ASIN" && !string.IsNullOrEmpty(asinVal))
                 {
                     var asinMetadataSources = await GetEnabledMetadataSourcesAsync();
-                    var asinSearchResults = await _asinSearchHandler.SearchByAsinAsync(asinVal, asinMetadataSources);
+                    var asinSearchResults = await _asinSearchHandler.SearchByAsinAsync(
+                        asinVal,
+                        asinMetadataSources,
+                        region,
+                        language,
+                        ct);
                     return asinSearchResults.Select(r => SearchResultConverters.ToMetadata(r)).ToList();
                 }
 
@@ -144,6 +149,7 @@ namespace Listenarr.Application.Search.Core
                     asinToOpenLibrary,
                     metadataSources,
                     query,
+                    region,
                     ct);
 
                 var enrichedList = enrichmentResult.EnrichedResults;

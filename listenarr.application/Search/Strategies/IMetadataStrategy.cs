@@ -39,6 +39,7 @@ public interface IMetadataStrategy
     /// <param name="asin">The ASIN to fetch metadata for</param>
     /// <param name="source">The metadata source configuration</param>
     /// <param name="originalSource">Original source where the ASIN was found (Amazon/Audible)</param>
+    /// <param name="region">Requested marketplace region for region-specific providers</param>
     /// <returns>Metadata if successful, null otherwise</returns>
-    Task<AudibleBookMetadata?> FetchMetadataAsync(string asin, ApiConfiguration source, string? originalSource);
+    Task<AudibleBookMetadata?> FetchMetadataAsync(string asin, ApiConfiguration source, string? originalSource, string? region = null);
 }

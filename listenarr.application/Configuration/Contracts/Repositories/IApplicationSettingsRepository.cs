@@ -21,6 +21,9 @@ namespace Listenarr.Application.Configuration.Contracts.Repositories
     public interface IApplicationSettingsRepository
     {
         Task<ApplicationSettings?> GetAsync(CancellationToken ct = default);
+        Task<ApplicationSettings> InitializeIfMissingAsync(
+            ApplicationSettings defaults,
+            CancellationToken ct = default);
         Task<ApplicationSettings> SaveAsync(ApplicationSettings settings, CancellationToken ct = default);
     }
 }

@@ -28,7 +28,14 @@ internal static class PersistenceRegistrationExtensions
         }
 
         services.AddScoped<IUnitOfWork, EfUnitOfWork>();
+        services.AddSingleton<LibraryFilesystemReadiness>();
+        services.AddSingleton<ILibraryFilesystemReadiness>(provider =>
+            provider.GetRequiredService<LibraryFilesystemReadiness>());
+        services.AddSingleton<ILibraryFilesystemMutationGate>(provider =>
+            provider.GetRequiredService<LibraryFilesystemReadiness>());
         services.AddSingleton<IMoveQueuePersistence, EfMoveQueuePersistence>();
+        services.AddSingleton<IMoveExecutionStore, EfMoveExecutionStore>();
+        services.AddSingleton<IMoveScanHandoffStore, EfMoveScanHandoffStore>();
         services.AddScoped<IHistoryRepository, EfHistoryRepository>();
         return services;
     }

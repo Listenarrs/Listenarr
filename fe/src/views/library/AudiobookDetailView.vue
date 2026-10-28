@@ -389,20 +389,37 @@
         <div class="files-header">
           <h3>Files</h3>
           <div class="files-actions">
-            <!-- Scan job status (updated via SignalR) -->
-            <div v-if="scanJobId" class="scan-job-status">
+            <div v-if="displayedScanJobId" class="scan-job-status">
               <div class="job-row">
                 <PhClock />
                 <strong>Scan job:</strong>
-                <span class="job-id">{{ scanJobId }}</span>
+                <span class="job-id">{{ displayedScanJobId }}</span>
               </div>
               <div class="job-status">
-                <span v-if="scanQueued" class="status queued">Queued / Processing</span>
-                <span v-else class="status completed">No active scan</span>
+                <span :class="['status', scanQueued ? 'queued' : 'completed']">
+                  {{ displayedScanStatus }}
+                </span>
               </div>
             </div>
           </div>
         </div>
+        <section v-if="weakStorageMissingFiles.items.length" class="weak-storage-missing-files">
+          <div>
+            <strong>Missing tracked files need confirmation</strong>
+            <p>
+              This storage cannot prove durable file generations. Review these paths before removing
+              their library records.
+            </p>
+            <ul>
+              <li v-for="candidate in weakStorageMissingFiles.items" :key="candidate.id">
+                <code>{{ candidate.path }}</code>
+              </li>
+            </ul>
+          </div>
+          <button class="btn btn-danger" type="button" @click="confirmMissingFileRecords">
+            Remove missing records
+          </button>
+        </section>
         <div v-if="audiobook.files && audiobook.files.length" class="file-list">
           <div
             v-for="f in audiobook.files"
@@ -568,6 +585,10 @@
                 type="checkbox"
                 class="checkbox-input"
                 aria-label="Remove all files in the audiobook folder from disk"
+                :disabled="
+                  !filesystemReadinessStore.filesystemReady ||
+                  deleteCapabilities?.canDeleteTrackedFiles === false
+                "
               />
               <div class="checkbox-content">
                 <span class="checkbox-title"
@@ -588,6 +609,10 @@
                 type="checkbox"
                 class="checkbox-input"
                 aria-label="Remove audiobook folder from disk"
+                :disabled="
+                  !filesystemReadinessStore.filesystemReady ||
+                  deleteCapabilities?.canDeleteFolder === false
+                "
               />
               <div class="checkbox-content">
                 <span class="checkbox-title">Also remove the audiobook folder</span>
@@ -598,6 +623,12 @@
               </div>
             </label>
           </div>
+          <p v-if="deleteCapabilities?.reason" class="warning-text">
+            {{ deleteCapabilities.reason }}
+            <span v-if="deleteCapabilities.canRemoveFromLibrary">
+              The audiobook can still be removed from the library.
+            </span>
+          </p>
         </div>
       </template>
     </DeleteConfirmationModal>
@@ -652,23 +683,28 @@ import { useRoute, useRouter } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
 import { useConfigurationStore } from '@/stores/configuration'
 import { useRootFoldersStore } from '@/stores/rootFolders'
+import { useScanNotificationsStore } from '@/stores/scanNotifications'
+import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import { apiService, ensureImageCached } from '@/services/api'
 import { isApiImagesUrl } from '@/services/apiBase'
 import { handleImageError } from '@/utils/imageFallback'
 import { getPlaceholderUrl } from '@/utils/placeholder'
-import { joinPaths, isAbsolutePath } from '@/utils/path'
+import { detectPathKind, joinPaths, isAbsolutePath } from '@/utils/path'
 import { signalRService } from '@/services/signalr'
 import type {
   Audiobook,
   AudiobookExternalIdentifier,
   AudiobookSeriesMembership,
+  AudiobookDeleteCapabilities,
   History,
   SearchResult,
+  WeakStorageMissingFilesResponse,
 } from '@/types'
 import { safeText, stripHtmlAndNormalize } from '@/utils/textUtils'
 import { logger } from '@/utils/logger'
 import { errorTracking } from '@/services/errorTracking'
 import { useProtectedImages } from '@/composables/useProtectedImages'
+import { buildAudibleProductUrl } from '@/utils/marketDomains'
 import EditAudiobookModal from '@/components/domain/audiobook/EditAudiobookModal.vue'
 import ManualSearchModal from '@/components/domain/search/ManualSearchModal.vue'
 import RenamePreviewModal from '@/components/domain/organize/RenamePreviewModal.vue'
@@ -716,6 +752,8 @@ const router = useRouter()
 const libraryStore = useLibraryStore()
 const configStore = useConfigurationStore()
 const rootFoldersStore = useRootFoldersStore()
+const scanNotificationsStore = useScanNotificationsStore()
+const filesystemReadinessStore = useFilesystemReadinessStore()
 const { getProtectedImageSrc } = useProtectedImages()
 
 type DetailTab = 'details' | 'files' | 'history'
@@ -729,11 +767,36 @@ const showManualSearchModal = ref(false)
 const deleting = ref(false)
 const deleteFilesOnDisk = ref(false)
 const deleteFolderOnDisk = ref(false)
+const deleteCapabilities = ref<AudiobookDeleteCapabilities | null>(null)
 const showFullDescription = ref(false)
 const scanning = ref(false)
 const rescanningMetadata = ref(false)
-const scanQueued = ref(false)
-const scanJobId = ref<string | null>(null)
+const weakStorageMissingFiles = ref<WeakStorageMissingFilesResponse>({ items: [] })
+let weakStorageMissingFilesRequestId = 0
+let scanDetailRefreshRequestId = 0
+let detailViewUnmounted = false
+const trackedScanJob = computed(() => {
+  const currentBookId = audiobook.value?.id
+  if (!currentBookId) return undefined
+
+  return scanNotificationsStore.jobs
+    .filter((job) => job.visible && job.audiobookId === currentBookId)
+    .sort((left, right) => right.timestamp.localeCompare(left.timestamp))[0]
+})
+const displayedScanJobId = computed(() => trackedScanJob.value?.jobId)
+const scanQueued = computed(() => {
+  const status = trackedScanJob.value?.status.toLowerCase()
+  return status === 'queued' || status === 'processing'
+})
+const displayedScanStatus = computed(() => {
+  const status = trackedScanJob.value?.status.toLowerCase()
+  if (status === 'queued') return 'Queued'
+  if (status === 'processing') return 'Processing'
+  if (status === 'completed') return 'Completed'
+  if (status === 'failed') return 'Failed'
+  if (status === 'superseded') return 'Stopped'
+  return 'No active scan'
+})
 const showEditModal = ref(false)
 const showOrganizeModal = ref(false)
 const showMoreActions = ref(false)
@@ -776,11 +839,17 @@ const topActions = computed<DetailTopAction[]>(() => [
   {
     key: 'scan',
     label: scanning.value ? 'Scanning...' : scanQueued.value ? 'Scan queued' : 'Scan Folder',
-    title: scanning.value ? 'Scanning...' : scanQueued.value ? 'Scan queued' : 'Scan Folder',
+    title: !filesystemReadinessStore.filesystemReady
+      ? 'Available after library filesystem initialization completes'
+      : scanning.value
+        ? 'Scanning...'
+        : scanQueued.value
+          ? 'Scan queued'
+          : 'Scan Folder',
     ariaLabel: 'Scan Folder',
     icon: scanning.value ? PhSpinner : scanQueued.value ? PhClock : PhFolderOpen,
     iconClass: scanning.value ? 'ph-spin' : undefined,
-    disabled: scanning.value || scanQueued.value,
+    disabled: scanning.value || scanQueued.value || !filesystemReadinessStore.filesystemReady,
     desktopGroup: 'primary',
     onClick: () => {
       void scanFiles()
@@ -899,13 +968,20 @@ const assignedProfileName = computed(() => {
   return p ? p.name : null
 })
 
-const primaryAsin = computed(() => {
+const primaryAsinIdentifier = computed(() => {
   const ids = audiobook.value?.identifiers || []
   const explicitPrimary = ids.find((id) => id.type === 'Asin' && id.isPrimary && id.value?.trim())
-  if (explicitPrimary) return explicitPrimary.value.trim()
+  if (explicitPrimary) return explicitPrimary
 
   const firstAsin = ids.find((id) => id.type === 'Asin' && id.value?.trim())
-  if (firstAsin) return firstAsin.value.trim()
+  if (firstAsin) return firstAsin
+
+  return null
+})
+
+const primaryAsin = computed(() => {
+  const identifier = primaryAsinIdentifier.value
+  if (identifier?.value?.trim()) return identifier.value.trim()
 
   const legacy = (audiobook.value?.asin || '').trim()
   return legacy || null
@@ -914,7 +990,7 @@ const primaryAsin = computed(() => {
 const audibleSourceUrl = computed(() => {
   const asin = primaryAsin.value
   if (!asin) return null
-  return `https://www.audible.com/pd/${encodeURIComponent(asin)}`
+  return buildAudibleProductUrl(asin, primaryAsinIdentifier.value?.region ?? undefined)
 })
 
 const displayIdentifiers = computed<DetailIdentifierItem[]>(() => {
@@ -929,6 +1005,7 @@ const displayIdentifiers = computed<DetailIdentifierItem[]>(() => {
     type: AudiobookExternalIdentifier['type'],
     rawValue: unknown,
     isPrimary = false,
+    rawRegion?: string | null,
   ) => {
     const value = typeof rawValue === 'string' ? rawValue.trim() : ''
     if (!value) return
@@ -944,13 +1021,18 @@ const displayIdentifiers = computed<DetailIdentifierItem[]>(() => {
       type,
       typeLabel: formatIdentifierType(type),
       value,
-      href: getIdentifierHref(type, value),
+      href: getIdentifierHref(type, value, rawRegion),
       isPrimary,
     })
   }
 
   for (const identifier of book.identifiers || []) {
-    addIdentifier(identifier.type, identifier.value, Boolean(identifier.isPrimary))
+    addIdentifier(
+      identifier.type,
+      identifier.value,
+      Boolean(identifier.isPrimary),
+      identifier.region,
+    )
   }
 
   if (book.asin) {
@@ -1109,9 +1191,10 @@ function normalizeIdentifierKey(type: AudiobookExternalIdentifier['type'], value
 function getIdentifierHref(
   type: AudiobookExternalIdentifier['type'],
   value: string,
+  region?: string | null,
 ): string | null {
   if (type === 'Asin') {
-    return `https://www.audible.com/pd/${encodeURIComponent(value)}`
+    return buildAudibleProductUrl(value, region ?? undefined)
   }
 
   if (type === 'OpenLibraryId') {
@@ -1166,27 +1249,21 @@ watch(activeTab, async (newTab) => {
 // }
 
 let audiobookUpdateUnsub: (() => void) | null = null
+let scanJobUpdateUnsub: (() => void) | null = null
 
 onMounted(async () => {
   syncActiveTabFromRoute()
   document.addEventListener('click', handleClickOutside)
 
   await loadAudiobook()
+  await loadWeakStorageMissingFiles()
 
-  // subscribe to scan job updates
-  signalRService.onScanJobUpdate((job) => {
+  // Keep the shared scan notification store current when this detail view is mounted.
+  // App.vue also subscribes globally; duplicate updates are monotonic/idempotent in the store.
+  scanJobUpdateUnsub = signalRService.onScanJobUpdate((job) => {
     if (!audiobook.value) return
     if (String(job.audiobookId) !== String(audiobook.value.id)) return
-    // update local job state
-    scanJobId.value = job.jobId
-    scanQueued.value = job.status === 'Queued' || job.status === 'Processing'
-    // if completed or failed, clear queued flag when appropriate
-    if (job.status === 'Completed' || job.status === 'Failed') {
-      // small delay to allow AudiobookUpdate to arrive and merge files
-      setTimeout(() => {
-        scanQueued.value = false
-      }, 500)
-    }
+    scanNotificationsStore.applyUpdate(job)
   })
 
   // subscribe to AudiobookUpdate messages and merge detail when this audiobook is updated (e.g., after a move)
@@ -1234,9 +1311,14 @@ function handleClickOutside() {
 }
 
 onUnmounted(() => {
+  detailViewUnmounted = true
+  scanDetailRefreshRequestId++
   document.removeEventListener('click', handleClickOutside)
   try {
     if (audiobookUpdateUnsub) audiobookUpdateUnsub()
+  } catch {}
+  try {
+    if (scanJobUpdateUnsub) scanJobUpdateUnsub()
   } catch {}
 })
 
@@ -1246,6 +1328,70 @@ watch(
     syncActiveTabFromRoute()
   },
 )
+
+let lastHandledTerminalScanJobId: string | null = null
+watch(
+  () => route.params.id,
+  () => {
+    scanDetailRefreshRequestId++
+  },
+)
+watch(
+  () =>
+    [
+      trackedScanJob.value?.jobId,
+      trackedScanJob.value?.status,
+      trackedScanJob.value?.error,
+    ] as const,
+  async ([jobId, status, scanError]) => {
+    if (!jobId || !status) return
+    const normalizedStatus = status.toLowerCase()
+    if (normalizedStatus !== 'completed' && normalizedStatus !== 'failed') return
+    if (lastHandledTerminalScanJobId === jobId) return
+    lastHandledTerminalScanJobId = jobId
+
+    if (normalizedStatus === 'completed') {
+      await refreshAudiobookAfterScan(jobId)
+      return
+    }
+
+    const toast = useToast()
+    toast.error('Scan failed', scanError || 'The audiobook scan did not complete successfully.')
+  },
+  { flush: 'post' },
+)
+
+async function refreshAudiobookAfterScan(jobId: string) {
+  const id = audiobook.value?.id ?? parseInt(route.params.id as string)
+  const routeId = String(route.params.id)
+  const requestId = ++scanDetailRefreshRequestId
+  const isCurrent = () =>
+    !detailViewUnmounted &&
+    requestId === scanDetailRefreshRequestId &&
+    audiobook.value?.id === id &&
+    parseInt(routeId, 10) === id &&
+    String(route.params.id) === routeId &&
+    trackedScanJob.value?.jobId === jobId
+  try {
+    let refreshed: Audiobook | null = null
+    if (typeof apiService.getAudiobook === 'function') {
+      refreshed = await apiService.getAudiobook(id)
+    } else {
+      await libraryStore.fetchLibrary()
+      refreshed = libraryStore.audiobooks.find((candidate) => candidate.id === id) ?? null
+    }
+
+    if (!isCurrent()) return
+    if (refreshed) {
+      audiobook.value = refreshed
+      await afterLoad(isCurrent)
+    }
+  } catch (err) {
+    logger.debug('Unable to refresh audiobook after scan completion', err)
+  }
+
+  if (isCurrent()) await loadWeakStorageMissingFiles()
+}
 
 async function loadAudiobook() {
   loading.value = true
@@ -1291,9 +1437,11 @@ async function loadAudiobook() {
 }
 
 // After loading audiobook, also fetch quality profiles so we can display the assigned profile
-async function afterLoad() {
-  await loadQualityProfilesForDetail()
-  await loadIdentifiersForDetail()
+async function afterLoad(isCurrent: () => boolean = () => true) {
+  await loadQualityProfilesForDetail(isCurrent)
+  if (!isCurrent()) return
+  await loadIdentifiersForDetail(isCurrent)
+  if (!isCurrent()) return
   try {
     const img = audiobook.value?.imageUrl
     if (img) {
@@ -1306,21 +1454,22 @@ async function afterLoad() {
   } catch {}
 }
 
-async function loadQualityProfilesForDetail() {
+async function loadQualityProfilesForDetail(isCurrent: () => boolean = () => true) {
   try {
-    qualityProfiles.value = await apiService.getQualityProfiles()
+    const profiles = await apiService.getQualityProfiles()
+    if (isCurrent()) qualityProfiles.value = profiles
   } catch (err) {
     logger.warn('Failed to load quality profiles for detail view:', err)
   }
 }
 
-async function loadIdentifiersForDetail() {
+async function loadIdentifiersForDetail(isCurrent: () => boolean = () => true) {
   const id = audiobook.value?.id
   if (!id || typeof apiService.getAudiobookIdentifiers !== 'function') return
 
   try {
     const response = await apiService.getAudiobookIdentifiers(id)
-    if (!audiobook.value || audiobook.value.id !== id) return
+    if (!isCurrent() || !audiobook.value || audiobook.value.id !== id) return
     audiobook.value = {
       ...audiobook.value,
       identifiers: Array.isArray(response?.identifiers) ? response.identifiers : [],
@@ -1441,8 +1590,6 @@ function handleDownloaded(result: SearchResult) {
 async function scanFiles() {
   if (!audiobook.value) return
   scanning.value = true
-  scanQueued.value = false
-  scanJobId.value = null
   try {
     const res = (await apiService.scanAudiobook(audiobook.value.id)) as {
       message: string
@@ -1455,8 +1602,7 @@ async function scanFiles() {
     logger.debug('Scan result:', res)
     // If backend enqueued the job it will return 202 Accepted with { jobId }
     if (res?.jobId) {
-      scanQueued.value = true
-      scanJobId.value = res.jobId
+      scanNotificationsStore.registerManualScan(res.jobId, audiobook.value.id)
       // keep scanning spinner off - queued state shows separately
     }
 
@@ -1481,6 +1627,57 @@ async function scanFiles() {
   }
 }
 
+async function loadWeakStorageMissingFiles() {
+  const audiobookId = audiobook.value?.id
+  if (!audiobookId) return
+  const requestId = ++weakStorageMissingFilesRequestId
+  try {
+    const response = await apiService.getWeakStorageMissingFiles(audiobookId)
+    if (requestId !== weakStorageMissingFilesRequestId || audiobook.value?.id !== audiobookId)
+      return
+    weakStorageMissingFiles.value = response
+  } catch {
+    if (requestId !== weakStorageMissingFilesRequestId || audiobook.value?.id !== audiobookId)
+      return
+    weakStorageMissingFiles.value = { items: [] }
+  }
+}
+
+async function confirmMissingFileRecords() {
+  if (
+    !audiobook.value ||
+    !weakStorageMissingFiles.value.scanToken ||
+    weakStorageMissingFiles.value.items.length === 0
+  ) {
+    return
+  }
+  if (
+    !window.confirm(
+      'Remove the selected missing file records? Listenarr will check every path and database row again before making changes.',
+    )
+  ) {
+    return
+  }
+
+  try {
+    const result = await apiService.confirmWeakStorageMissingFiles(
+      audiobook.value.id,
+      weakStorageMissingFiles.value.scanToken,
+      weakStorageMissingFiles.value.items.map((candidate) => candidate.id),
+    )
+    const toast = useToast()
+    toast.success('Missing records reviewed', `${result.removedCount} record(s) removed`)
+    await loadAudiobook()
+    await loadWeakStorageMissingFiles()
+  } catch (error) {
+    const toast = useToast()
+    toast.error(
+      'Missing records changed',
+      error instanceof Error ? error.message : 'Scan the audiobook again and retry.',
+    )
+  }
+}
+
 // Watch library store for updates (SignalR pushes) and refresh audiobook object reactively
 watch(
   () => libraryStore.audiobooks,
@@ -1490,11 +1687,6 @@ watch(
     if (updated) {
       // Merge fields to preserve reactivity where possible
       audiobook.value = { ...audiobook.value, ...updated }
-      // If files were added, clear queued indicators
-      if (scanQueued.value && updated.files && updated.files.length > 0) {
-        scanQueued.value = false
-        scanJobId.value = null
-      }
     }
   },
   { deep: true },
@@ -1521,13 +1713,20 @@ function toggleMonitored() {
   }
 }
 
-function confirmDelete() {
+async function confirmDelete() {
   resetDeleteOptions()
+  if (!audiobook.value) return
+  try {
+    deleteCapabilities.value = await apiService.getAudiobookDeleteCapabilities(audiobook.value.id)
+  } catch {
+    deleteCapabilities.value = unavailableDeleteCapabilities()
+  }
   showDeleteDialog.value = true
 }
 
 function cancelDelete() {
   resetDeleteOptions()
+  deleteCapabilities.value = null
   showDeleteDialog.value = false
 }
 
@@ -1553,7 +1752,7 @@ async function executeDelete() {
       }
       // Navigate back to library after successful deletion
       router.push('/audiobooks')
-    } else {
+    } else if (success === false) {
       const toast = useToast()
       toast.error('Delete failed', libraryStore.error || 'Failed to delete audiobook')
     }
@@ -1566,6 +1765,7 @@ async function executeDelete() {
   } finally {
     deleting.value = false
     resetDeleteOptions()
+    deleteCapabilities.value = null
     showDeleteDialog.value = false
   }
 }
@@ -1573,6 +1773,16 @@ async function executeDelete() {
 function resetDeleteOptions() {
   deleteFilesOnDisk.value = false
   deleteFolderOnDisk.value = false
+}
+
+function unavailableDeleteCapabilities(): AudiobookDeleteCapabilities {
+  return {
+    canRemoveFromLibrary: true,
+    canDeleteTrackedFiles: false,
+    canDeleteFolder: false,
+    reason: 'Filesystem delete capability could not be checked.',
+    fallbackAction: 'RemoveFromLibraryOnly',
+  }
 }
 
 watch(deleteFolderOnDisk, (checked) => {
@@ -1735,10 +1945,12 @@ function toggleFileAccordion(fileId: number): void {
 function getFullPath(relativePath?: string): string {
   if (!relativePath) return 'Unknown'
 
-  const isAbsolute = isAbsolutePath(relativePath)
+  const basePath = audiobook.value?.basePath
+  const pathKind = detectPathKind(basePath)
+  const isAbsolute = isAbsolutePath(relativePath, pathKind)
   if (isAbsolute) return relativePath
-  if (!audiobook.value?.basePath) return relativePath
-  return joinPaths(audiobook.value.basePath, relativePath)
+  if (!basePath) return relativePath
+  return joinPaths(basePath, relativePath, pathKind)
 }
 
 function formatDate(dateString?: string): string {
@@ -2698,6 +2910,28 @@ a.identifier-link:hover {
 .history-header h3 {
   margin: 0;
   color: #fff;
+}
+
+.weak-storage-missing-files {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, var(--warning-500) 45%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning-500) 8%, transparent);
+}
+
+.weak-storage-missing-files p,
+.weak-storage-missing-files ul {
+  margin: 0.4rem 0 0;
+  color: var(--text-secondary);
+}
+
+.weak-storage-missing-files code {
+  overflow-wrap: anywhere;
 }
 
 .action-btn {

@@ -22,10 +22,25 @@ public partial class LibraryController
         public List<int> Ids { get; set; } = [];
     }
 
+    public enum BulkPathChangeMode
+    {
+        None,
+        MetadataOnly,
+        Physical
+    }
+
+    public class BulkPathChangeRequest
+    {
+        public BulkPathChangeMode Mode { get; set; }
+        public string? DestinationRootOrPath { get; set; }
+        public bool DeleteEmptySource { get; set; } = true;
+    }
+
     public class BulkUpdateRequest
     {
         public List<int> Ids { get; set; } = [];
         public Dictionary<string, object> Updates { get; set; } = [];
+        public BulkPathChangeRequest? PathChange { get; set; }
     }
 
     public class AddToLibraryRequest
@@ -47,6 +62,10 @@ public partial class LibraryController
     public class MoveRequest
     {
         public string? DestinationPath { get; set; }
+        /// <summary>
+        /// Optional optimistic-concurrency value containing the source path observed by the caller.
+        /// It must match the audiobook's current BasePath and is never used as a filesystem source override.
+        /// </summary>
         public string? SourcePath { get; set; }
         public bool? MoveFiles { get; set; }
         public bool? DeleteEmptySource { get; set; }

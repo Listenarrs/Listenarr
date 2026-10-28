@@ -35,6 +35,7 @@ namespace Listenarr.Api.Features.Search
         private readonly StructuredSearchWorkflow _structuredSearchWorkflow;
         private readonly SearchByTitleWorkflow _searchByTitleWorkflow;
         private readonly IDownloadReferenceService? _downloadReferenceService;
+        private readonly IConfigurationService? _configurationService;
 
         public SearchController(
             ISearchService searchService,
@@ -46,7 +47,8 @@ namespace Listenarr.Api.Features.Search
             SearchResponseMapper? responseMapper = null,
             StructuredSearchWorkflow? structuredSearchWorkflow = null,
             SearchByTitleWorkflow? searchByTitleWorkflow = null,
-            IDownloadReferenceService? downloadReferenceService = null)
+            IDownloadReferenceService? downloadReferenceService = null,
+            IConfigurationService? configurationService = null)
         {
             _searchService = searchService;
             _logger = logger;
@@ -58,6 +60,7 @@ namespace Listenarr.Api.Features.Search
                 metadataService,
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<SearchResponseMapper>.Instance,
                 imageCacheService);
+            _configurationService = configurationService;
             _structuredSearchWorkflow = structuredSearchWorkflow ?? new StructuredSearchWorkflow(
                 searchService,
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<StructuredSearchWorkflow>.Instance,
@@ -65,12 +68,14 @@ namespace Listenarr.Api.Features.Search
                 metadataService,
                 imageCacheService,
                 metadataConvertersInstance,
-                _responseMapper);
+                _responseMapper,
+                configurationService);
             _searchByTitleWorkflow = searchByTitleWorkflow ?? new SearchByTitleWorkflow(
                 searchService,
                 audibleService,
                 metadataService,
-                Microsoft.Extensions.Logging.Abstractions.NullLogger<SearchByTitleWorkflow>.Instance);
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<SearchByTitleWorkflow>.Instance,
+                configurationService);
             _downloadReferenceService = downloadReferenceService;
         }
 
@@ -183,27 +188,15 @@ namespace Listenarr.Api.Features.Search
         {
             try
             {
-                // Debug: log raw incoming query to help integration-test diagnostics
-                try { _logger.LogDebug("[DEBUG] IntelligentSearch called with query='{Query}'", LogRedaction.SanitizeText(query ?? "<null>")); }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    System.Diagnostics.Debug.WriteLine($"SearchController IntelligentSearch debug logging failed: {ex.Message}");
-                }
-
-                // Also emit a warning-level log so test output captures the value
-                try { _logger.LogWarning("[DBG] IntelligentSearch called with query='{Query}'", LogRedaction.SanitizeText(query ?? "<null>")); }
-                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-                {
-                    System.Diagnostics.Debug.WriteLine($"SearchController IntelligentSearch warning logging failed: {ex.Message}");
-                }
-
                 if (string.IsNullOrEmpty(query))
                 {
                     return BadRequest("Query parameter is required");
                 }
 
                 _logger.LogInformation("IntelligentSearch called for query: {Query}", LogRedaction.SanitizeText(query));
-                var region = Request.Query.TryGetValue("region", out var regionValue) ? regionValue.ToString() ?? "us" : "us";
+                var region = Request.Query.TryGetValue("region", out var regionValue)
+                    ? regionValue.ToString() ?? "us"
+                    : await ResolveSearchRegionAsync(null);
                 var language = Request.Query.TryGetValue("language", out var languageValue) ? languageValue.ToString() : null;
                 var results = await _searchService.IntelligentSearchAsync(query, candidateLimit, returnLimit, containmentMode, requireAuthorAndPublisher, fuzzyThreshold, region, language, HttpContext.RequestAborted);
                 await _responseMapper.NormalizeMetadataResultImagesAsync(results, HttpContext, "metadata result");
@@ -215,6 +208,32 @@ namespace Listenarr.Api.Features.Search
                 _logger.LogError(ex, "Error performing intelligent search for query: {Query}", LogRedaction.SanitizeText(query));
                 return StatusCode(500, "Internal server error");
             }
+        }
+
+        private async Task<string> ResolveSearchRegionAsync(string? requestedRegion)
+        {
+            if (!string.IsNullOrWhiteSpace(requestedRegion))
+            {
+                return requestedRegion.Trim();
+            }
+
+            if (_configurationService != null)
+            {
+                try
+                {
+                    var settings = await _configurationService.GetApplicationSettingsAsync().ConfigureAwait(false);
+                    if (!string.IsNullOrWhiteSpace(settings?.DefaultSearchRegion))
+                    {
+                        return settings.DefaultSearchRegion.Trim();
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                {
+                    _logger.LogWarning(ex, "Failed to resolve configured default search region; falling back to us");
+                }
+            }
+
+            return "us";
         }
 
         /// <summary>
@@ -327,33 +346,6 @@ namespace Listenarr.Api.Features.Search
             }
         }
 
-        // [HttpGet("indexers")]
-        // public async Task<ActionResult<List<SearchResult>>> SearchIndexers(
-        //     [FromQuery] string query,
-        //     [FromQuery] string? category = null)
-        // {
-        //     try
-        //     {
-        //         if (string.IsNullOrEmpty(query))
-        //         {
-        //             return BadRequest("Query parameter is required");
-        //         }
-
-        //         var results = await _searchService.SearchIndexersAsync(query, category);
-        // Optional tuning parameters exposed to callers
-        //var candidateLimit = int.TryParse(Request.Query["candidateLimit"], out var cl) ? Math.Clamp(cl, 5, 200) : 50;
-        //var returnLimit = int.TryParse(Request.Query["returnLimit"], out var rl) ? Math.Clamp(rl, 1, 100) : 10;
-        //var containmentMode = Request.Query.ContainsKey("containmentMode") ? Request.Query["containmentMode"].ToString() ?? "Relaxed" : "Relaxed";
-        //var requireAuthorAndPublisher = bool.TryParse(Request.Query["requireAuthorAndPublisher"], out var rap) ? rap : false;
-        //var fuzzyThreshold = double.TryParse(Request.Query["fuzzyThreshold"], out var ft) ? Math.Clamp(ft, 0.0, 1.0) : 0.7;
-        //         return Ok(results);
-        //     }
-        //     catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException) //     {
-        //         _logger.LogError(ex, "Error searching indexers for query: {Query}", query);
-        //         return StatusCode(500, "Internal server error");
-        //     }
-        // }
-
         /// <summary>
         /// Search the Audible catalog for audiobooks.
         /// </summary>
@@ -395,7 +387,7 @@ namespace Listenarr.Api.Features.Search
         [ProducesResponseType(StatusCodes.Status500InternalServerError)]
         public async Task<ActionResult<List<object>>> SearchByTitle(
             [FromQuery] string query,
-            [FromQuery] string region = "us",
+            [FromQuery] string? region = null,
             [FromQuery] int limit = 10)
         {
             var result = await _searchByTitleWorkflow.ExecuteAsync(query, region, limit, HttpContext.RequestAborted);
@@ -407,7 +399,6 @@ namespace Listenarr.Api.Features.Search
             };
         }
 
-        // existing code continuation
         /// <summary>
         /// Search a specific API by ID
         /// Note: This route uses a parameter and must come after all specific routes to avoid conflicts

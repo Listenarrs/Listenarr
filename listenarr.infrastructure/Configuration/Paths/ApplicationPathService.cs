@@ -35,6 +35,8 @@ namespace Listenarr.Infrastructure.Configuration.Paths
         /// <inheritdoc/>
         public string LogsRootPath { get; }
         /// <inheritdoc/>
+        public string FileMoveLockRootPath { get; }
+        /// <inheritdoc/>
         public string FfmpegRootPath { get; }
         /// <inheritdoc/>
         public string ToolsRootPath { get; }
@@ -59,6 +61,7 @@ namespace Listenarr.Infrastructure.Configuration.Paths
             ContentRootPath = Path.GetFullPath(contentRoot);
             ConfigRootPath = ResolveFromContentRoot("config");
             LogsRootPath = ResolveFromConfig("logs");
+            FileMoveLockRootPath = ResolveFromConfig("runtime", "file-move-locks");
             FfmpegRootPath = ResolveFromConfig("ffmpeg");
             ToolsRootPath = ResolveFromContentRoot("tools");
             DiscordBotRootPath = Path.GetFullPath(FileUtils.CombineRelativePath(ToolsRootPath, "discord-bot"));

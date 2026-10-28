@@ -12,6 +12,7 @@ using Listenarr.Infrastructure.Configuration;
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Polly;
 using Polly.Extensions.Http;
@@ -28,6 +29,7 @@ internal static class DownloadRegistrationExtensions
             .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromHours(2))
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
             {
+                AllowAutoRedirect = false,
                 AutomaticDecompression = DecompressionMethods.All
             })
             .AddPolicyHandler(HttpPolicyExtensions
@@ -52,6 +54,8 @@ internal static class DownloadRegistrationExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
+        services.TryAddSingleton(TimeProvider.System);
+
         services.AddSingleton<IDownloadPushService, DownloadPushService>();
         services.AddScoped<IDownloadService, DownloadService>();
         services.AddScoped<DownloadTypeResolver>();
@@ -62,11 +66,18 @@ internal static class DownloadRegistrationExtensions
         services.AddScoped<DownloadRemovalWorkflow>();
         services.AddScoped<DownloadQueueCandidateLoader>();
         services.AddScoped<DownloadClientQueuePoller>();
+        services.AddScoped<DownloadOrphanCleanupService>();
         services.AddScoped<IDownloadQueueService, DownloadQueueService>();
         services.AddScoped<ImportDestinationPlanner>();
         services.AddScoped<ArchiveImportExtractor>();
         services.AddScoped<IDownloadImportService, DownloadImportService>();
-        services.AddScoped<IFileMover, FileMover>();
+        services.AddScoped<FileMover>();
+        services.AddScoped<IFileMover>(provider =>
+            provider.GetRequiredService<FileMover>());
+        services.AddScoped<IFilePublicationSourceCapability>(provider =>
+            provider.GetRequiredService<FileMover>());
+        services.AddScoped<IFilePublicationCapabilityResolver,
+            FilePublicationCapabilityResolver>();
         services.AddScoped<IArchiveExtractor, ArchiveExtractor>();
         services.AddOptions<FileMoverOptions>()
             .Bind(configuration.GetSection("FileMover"))
@@ -75,6 +86,7 @@ internal static class DownloadRegistrationExtensions
         services.AddScoped<IDownloadClientGateway, DownloadClientGateway>();
         services.AddScoped<IRemotePathMappingService, RemotePathMappingService>();
         services.AddScoped<IDownloadProcessingJobService, DownloadProcessingJobService>();
+        services.AddScoped<IDirectDownloadImportSourceResolver, DirectDownloadImportSourceResolver>();
         return services;
     }
 
@@ -91,10 +103,11 @@ internal static class DownloadRegistrationExtensions
         services.AddScoped<ITorrentMetadataService, TorrentMetadataService>();
         services.AddScoped<INzbFileDownloader, NzbFileDownloader>();
         services.AddScoped<MyAnonamouseTorrentPreparationService>();
+        services.AddSingleton<IDirectDownloadSourcePolicy, InternetArchiveDirectDownloadSourcePolicy>();
         services.AddScoped<IDownloadSourceResolver, MyAnonamouseSourceResolver>();
         services.AddScoped<IDownloadSourceResolver, GenericTorrentSourceResolver>();
         services.AddScoped<IDownloadSourceResolver, GenericUsenetSourceResolver>();
-        services.AddScoped<IDownloadSourceResolver, DirectDownloadSourceResolver>();
+        services.AddScoped<IDownloadSourceResolver, DirectDownloadSubmissionResolver>();
         return services;
     }
 }

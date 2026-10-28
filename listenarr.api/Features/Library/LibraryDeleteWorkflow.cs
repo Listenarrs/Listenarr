@@ -17,73 +17,339 @@
  */
 
 using System.Text.RegularExpressions;
+using Listenarr.Application.Common;
+using Listenarr.Application.Common.Exceptions;
 using Listenarr.Domain.Common;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Features.Library
 {
-    public sealed class LibraryDeleteWorkflow
+    public sealed partial class LibraryDeleteWorkflow
     {
-        private readonly IAudiobookRepository _repo;
+        private readonly IAudiobookDeletionCommitService _deletionCommitService;
+        private readonly IAudiobookRepository _audiobookRepository;
+        private readonly IAudiobookDeletionIntentStore _deletionIntentStore;
         private readonly IImageCacheService _imageCacheService;
         private readonly IAudiobookFilesystemDeleteService _audiobookFilesystemDeleteService;
         private readonly string _contentRootPath;
         private readonly IFileSystem _fileSystem;
+        private readonly IFilesystemMutationCoordinator _filesystemMutationCoordinator;
+        private readonly IAudiobookOperationCoordinator _audiobookOperationCoordinator;
+        private readonly IMoveQueueService _moveQueueService;
+        private readonly ILibraryFilesystemMutationGate _filesystemMutationGate;
+        private readonly IRootFolderService _rootFolderService;
+        private readonly IRootFolderStorageHealthResolver _storageHealthResolver;
         private readonly ILogger<LibraryDeleteWorkflow> _logger;
 
         public LibraryDeleteWorkflow(
-            IAudiobookRepository repo,
+            IAudiobookDeletionCommitService deletionCommitService,
+            IAudiobookRepository audiobookRepository,
+            IAudiobookDeletionIntentStore deletionIntentStore,
             IImageCacheService imageCacheService,
             IAudiobookFilesystemDeleteService audiobookFilesystemDeleteService,
             IApplicationPathService applicationPathService,
             IFileSystem fileSystem,
+            IFilesystemMutationCoordinator filesystemMutationCoordinator,
+            IAudiobookOperationCoordinator audiobookOperationCoordinator,
+            IMoveQueueService moveQueueService,
+            ILibraryFilesystemMutationGate filesystemMutationGate,
+            IRootFolderService rootFolderService,
+            IRootFolderStorageHealthResolver storageHealthResolver,
+            IAudiobookFileIdentityReconciler fileIdentityReconciler,
             ILogger<LibraryDeleteWorkflow> logger)
         {
-            _repo = repo;
+            _deletionCommitService = deletionCommitService ?? throw new ArgumentNullException(nameof(deletionCommitService));
+            _audiobookRepository = audiobookRepository ?? throw new ArgumentNullException(nameof(audiobookRepository));
+            _deletionIntentStore = deletionIntentStore ?? throw new ArgumentNullException(nameof(deletionIntentStore));
             _imageCacheService = imageCacheService;
             _audiobookFilesystemDeleteService = audiobookFilesystemDeleteService;
             _contentRootPath = applicationPathService.ContentRootPath;
             _fileSystem = fileSystem;
+            _filesystemMutationCoordinator = filesystemMutationCoordinator ?? throw new ArgumentNullException(nameof(filesystemMutationCoordinator));
+            _audiobookOperationCoordinator = audiobookOperationCoordinator ?? throw new ArgumentNullException(nameof(audiobookOperationCoordinator));
+            _moveQueueService = moveQueueService ?? throw new ArgumentNullException(nameof(moveQueueService));
+            _filesystemMutationGate = filesystemMutationGate
+                ?? throw new ArgumentNullException(nameof(filesystemMutationGate));
+            _rootFolderService = rootFolderService
+                ?? throw new ArgumentNullException(nameof(rootFolderService));
+            _storageHealthResolver = storageHealthResolver
+                ?? throw new ArgumentNullException(nameof(storageHealthResolver));
+            _ = fileIdentityReconciler
+                ?? throw new ArgumentNullException(nameof(fileIdentityReconciler));
             _logger = logger;
         }
 
-        public async Task<IActionResult> DeleteAsync(int id, bool deleteFiles, bool deleteFolder)
-        {
-            var audiobook = await _repo.GetByIdAsync(id);
-            if (audiobook == null)
-            {
-                return new NotFoundObjectResult(new { message = "Audiobook not found" });
-            }
-
-            deleteFiles = deleteFiles || deleteFolder;
-
-            AudiobookFilesystemDeleteResult? filesystemResult = null;
-            if (deleteFiles)
-            {
-                filesystemResult = await _audiobookFilesystemDeleteService.DeleteAsync(audiobook, deleteFolder);
-            }
-
-            await DeleteCachedImageAsync(audiobook);
-
-            var deleted = await _repo.DeleteByIdAsync(id);
-            if (deleted)
-            {
-                var message = filesystemResult?.BuildDeleteMessage() ?? "Audiobook deleted successfully.";
-                return new OkObjectResult(new
-                {
-                    message,
+        public Task<IActionResult> DeleteAsync(
+            int id,
+            bool deleteFiles,
+            bool deleteFolder,
+            CancellationToken cancellationToken = default) =>
+            _filesystemMutationCoordinator.ExecuteExclusiveAsync(
+                globalToken => _audiobookOperationCoordinator.ExecuteExclusiveAsync(
                     id,
-                    deletedFiles = filesystemResult?.DeletedFiles ?? 0,
-                    deletedFolder = filesystemResult?.DeletedFolder,
-                    deletedParentFolder = filesystemResult?.DeletedParentFolder,
-                    warnings = filesystemResult?.Warnings ?? new List<string>()
+                    audiobookToken => DeleteCoreAsync(
+                        id,
+                        deleteFiles,
+                        deleteFolder,
+                        audiobookToken),
+                    globalToken),
+                cancellationToken);
+
+        private async Task<IActionResult> DeleteCoreAsync(
+            int id,
+            bool deleteFiles,
+            bool deleteFolder,
+            CancellationToken cancellationToken)
+        {
+            var deleteFilesystem = deleteFiles || deleteFolder;
+            if (deleteFilesystem)
+            {
+                _filesystemMutationGate.EnsureReady();
+            }
+
+            try
+            {
+                await _moveQueueService.EnsureFilesystemMutationAllowedAsync(
+                    id,
+                    cancellationToken,
+                    allowActiveDeletionIntent: true);
+            }
+            catch (ApplicationConflictException exception)
+            {
+                return new ConflictObjectResult(new
+                {
+                    message = exception.SafeDetail,
+                    code = exception.Code
                 });
             }
 
-            return new ObjectResult(new { message = "Failed to delete audiobook" })
+            Audiobook audiobook;
+            AudiobookFilesystemDeleteResult? filesystemResult = null;
+            if (deleteFilesystem)
             {
-                StatusCode = StatusCodes.Status500InternalServerError
-            };
+                var snapshot = await _audiobookRepository.GetByIdSnapshotAsync(
+                    id,
+                    cancellationToken);
+                if (snapshot == null)
+                {
+                    return new NotFoundObjectResult(new { message = "Audiobook not found" });
+                }
+
+                var activeIntent = await GetActiveDeletionIntentAsync(
+                    id,
+                    cancellationToken);
+                if (activeIntent?.State == AudiobookDeletionIntentState.NeedsAttention)
+                {
+                    return new ConflictObjectResult(new
+                    {
+                        message = activeIntent.Error
+                            ?? "An earlier filesystem deletion requires operator repair before it can continue.",
+                        code = "delete_repair_required"
+                    });
+                }
+
+                var filesystemCleanupAlreadyCompleted =
+                    activeIntent?.State == AudiobookDeletionIntentState.FilesystemCleanupCompleted;
+
+                if (!filesystemCleanupAlreadyCompleted)
+                {
+                    var storageBlock = await GetManagedStorageMutationBlockAsync(
+                        snapshot,
+                        cancellationToken);
+                    if (storageBlock != null)
+                    {
+                        return new ConflictObjectResult(new
+                        {
+                            message = storageBlock.Message
+                                ?? "The audiobook storage does not currently allow filesystem mutations.",
+                            code = "filesystem_mutation_unavailable"
+                        });
+                    }
+
+                }
+
+                // Cancellation is authoritative until the durable deletion intent is
+                // about to be committed. From this point onward, either this request
+                // or startup reconciliation must drive the intent to a terminal state.
+                var mutationToken = RequestCancellationBoundary.EnterNonCancelablePhase(
+                    cancellationToken);
+                var intent = await _deletionIntentStore.GetOrCreateAsync(
+                    id,
+                    deleteFolder,
+                    mutationToken);
+                if (intent.State == AudiobookDeletionIntentState.Planned)
+                {
+                    try
+                    {
+                        filesystemResult = await _audiobookFilesystemDeleteService.DeleteAsync(
+                            snapshot,
+                            deleteFolder,
+                            mutationToken);
+                        if (!filesystemResult.TrackedFileCleanupComplete)
+                        {
+                            await _deletionIntentStore.RecordErrorAsync(
+                                intent.Id,
+                                "One or more tracked audiobook file generations remain unresolved after filesystem cleanup.",
+                                CancellationToken.None);
+                            return new ObjectResult(new
+                            {
+                                message = "One or more tracked audiobook files could not be deleted safely. The library row was preserved and the deletion can be retried.",
+                                code = "delete_recovery_pending",
+                                warnings = filesystemResult.Warnings
+                            })
+                            {
+                                StatusCode = StatusCodes.Status500InternalServerError
+                            };
+                        }
+                        await _deletionIntentStore.MarkFilesystemCleanupCompletedAsync(
+                            intent.Id,
+                            CancellationToken.None);
+                    }
+                    catch (Exception exception) when (exception is not (
+                        OutOfMemoryException or StackOverflowException))
+                    {
+                        await _deletionIntentStore.RecordErrorAsync(
+                            intent.Id,
+                            "Filesystem cleanup failed during durable audiobook deletion.",
+                            CancellationToken.None);
+                        _logger.LogError(
+                            exception,
+                            "Durable filesystem cleanup failed for audiobook {AudiobookId}; the library row was preserved",
+                            id);
+                        return new ObjectResult(new
+                        {
+                            message = "Filesystem cleanup could not be completed safely. The deletion remains pending and can be retried.",
+                            code = "delete_recovery_pending"
+                        })
+                        {
+                            StatusCode = StatusCodes.Status500InternalServerError
+                        };
+                    }
+                }
+                else if (intent.State != AudiobookDeletionIntentState.FilesystemCleanupCompleted)
+                {
+                    throw new InvalidOperationException(
+                        "The active audiobook deletion intent is not in a retryable state.");
+                }
+
+                var commit = await _deletionCommitService.DeleteAsync(
+                    id,
+                    includeFiles: false,
+                    CancellationToken.None);
+                if (commit.Outcome == AudiobookDeletionCommitOutcome.Failed)
+                {
+                    _logger.LogError(
+                        "Filesystem cleanup completed for audiobook {AudiobookId}, but the database delete did not commit; startup recovery will retry it",
+                        id);
+                    return new ObjectResult(new
+                    {
+                        message = "Filesystem cleanup completed, but the library deletion has not committed yet and will be recovered on restart.",
+                        code = "delete_recovery_pending"
+                    })
+                    {
+                        StatusCode = StatusCodes.Status500InternalServerError
+                    };
+                }
+
+                await _deletionIntentStore.MarkCompletedAsync(
+                    intent.Id,
+                    CancellationToken.None);
+                audiobook = snapshot;
+            }
+            else
+            {
+                var commit = await _deletionCommitService.DeleteAsync(
+                    id,
+                    includeFiles: false,
+                    cancellationToken);
+                if (commit.Outcome == AudiobookDeletionCommitOutcome.NotFound)
+                {
+                    return new NotFoundObjectResult(new { message = "Audiobook not found" });
+                }
+
+                if (commit.Outcome != AudiobookDeletionCommitOutcome.Deleted
+                    || commit.Audiobook == null)
+                {
+                    return new ObjectResult(new { message = "Failed to delete audiobook" })
+                    {
+                        StatusCode = StatusCodes.Status500InternalServerError
+                    };
+                }
+
+                audiobook = commit.Audiobook;
+            }
+
+            await DeleteCachedImageAsync(audiobook);
+            var message = filesystemResult?.BuildDeleteMessage() ?? "Audiobook deleted successfully.";
+            return new OkObjectResult(new
+            {
+                message,
+                id,
+                deletedFiles = filesystemResult?.DeletedFiles ?? 0,
+                deletedFolder = filesystemResult?.DeletedFolder,
+                deletedParentFolder = filesystemResult?.DeletedParentFolder,
+                warnings = filesystemResult?.Warnings ?? new List<string>()
+            });
+        }
+
+        private async Task<AudiobookDeletionIntent?> GetActiveDeletionIntentAsync(
+            int audiobookId,
+            CancellationToken cancellationToken)
+        {
+            var active = await _deletionIntentStore.GetActiveAsync(cancellationToken);
+            return active.SingleOrDefault(intent => intent.AudiobookId == audiobookId);
+        }
+
+        private async Task<RootFolderStorageObservation?> GetManagedStorageMutationBlockAsync(
+            Audiobook audiobook,
+            CancellationToken cancellationToken)
+        {
+            var path = !string.IsNullOrWhiteSpace(audiobook.BasePath)
+                ? audiobook.BasePath
+                : !string.IsNullOrWhiteSpace(audiobook.FilePath)
+                    ? audiobook.FilePath
+                    : audiobook.Files?
+                        .Select(file => file.Path)
+                        .FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate));
+            if (string.IsNullOrWhiteSpace(path)
+                || !FileSystemPathIdentity.TryDetectAbsoluteSyntaxForHost(path, out var pathSyntax))
+            {
+                return null;
+            }
+
+            RootFolder? bestRoot = null;
+            var bestLength = -1;
+            foreach (var root in await _rootFolderService.GetAllAsync())
+            {
+                if (!FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(
+                        root.Path,
+                        out var canonicalRoot,
+                        out _)
+                    || !FileSystemPathIdentity.StoredBoundaryMayContainPath(
+                        canonicalRoot,
+                        path,
+                        pathSyntax,
+                        root.CaseSensitivityMode))
+                {
+                    continue;
+                }
+
+                if (canonicalRoot.Length > bestLength)
+                {
+                    bestRoot = root;
+                    bestLength = canonicalRoot.Length;
+                }
+            }
+
+            if (bestRoot == null)
+            {
+                return null;
+            }
+
+            var observation = await _storageHealthResolver.ResolveAsync(
+                bestRoot,
+                cancellationToken);
+            return observation.CanMutateFilesystem ? null : observation;
         }
 
         private async Task DeleteCachedImageAsync(Audiobook audiobook)
@@ -99,7 +365,8 @@ namespace Listenarr.Api.Features.Library
                     await DeleteCachedImageFromUrlAsync(audiobook);
                 }
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            catch (Exception ex) when (ex is not (
+                OutOfMemoryException or StackOverflowException))
             {
                 _logger.LogWarning(ex, "Failed to delete cached image for audiobook id {Id}", audiobook.Id);
             }

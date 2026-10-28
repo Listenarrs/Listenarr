@@ -19,19 +19,20 @@ internal static class WorkerRegistrationExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        services.AddSingleton(TimeProvider.System);
         services.AddSingleton<IWorkerCycleRunner, WorkerCycleRunner>();
 
         services.AddSingleton<IScanQueueService, ScanQueueService>();
+        services.AddSingleton<MoveScanHandoffRecoveryService>();
         AddProcessor<ScanJobProcessor, IScanJobProcessor>(services);
         services.AddHostedService<ScanBackgroundService>();
 
-        services.AddSingleton<IMoveQueueService, MoveQueueService>();
+        services.AddSingleton<AudiobookContentMoveService>();
         AddProcessor<MoveJobProcessor, IMoveJobProcessor>(services);
         services.AddHostedService<MoveBackgroundService>();
 
         AddHostedProcessor<ImageCacheCleanupProcessor, IImageCacheCleanupProcessor, ImageCacheCleanupService>(services);
         AddHostedProcessor<DownloadMonitorProcessor, IDownloadMonitorProcessor, DownloadMonitorService>(services);
+        AddHostedProcessor<DirectDownloadProcessor, IDirectDownloadProcessor, DirectDownloadService>(services);
         AddHostedProcessor<MovedDownloadCleanupProcessor, IMovedDownloadCleanupProcessor, MovedDownloadCleanupService>(services);
 
         AddProcessor<QueueMonitorProcessor, IQueueMonitorProcessor>(services);
@@ -42,12 +43,18 @@ internal static class WorkerRegistrationExtensions
         AddHostedProcessor<SeriesMonitoringProcessor, ISeriesMonitoringProcessor, SeriesMonitoringBackgroundService>(services);
         AddHostedProcessor<FfmpegInstallProcessor, IFfmpegInstallProcessor, FfmpegInstallBackgroundService>(services);
         AddHostedProcessor<MetadataRescanProcessor, IMetadataRescanProcessor, MetadataRescanService>(services);
-
         services.AddSingleton<DownloadProcessingJobProcessor>();
         services.AddSingleton<IDownloadImportProcessor>(provider =>
             provider.GetRequiredService<DownloadProcessingJobProcessor>());
         services.AddHostedService(provider =>
             provider.GetRequiredService<DownloadProcessingJobProcessor>());
+
+        // Retention cleanup gets its own worker so importing files and pruning old
+        // terminal processing-job rows remain separate durable responsibilities.
+        AddHostedProcessor<
+            DownloadProcessingJobCleanupProcessor,
+            IDownloadProcessingJobCleanupProcessor,
+            DownloadProcessingJobCleanupService>(services);
 
         AddHostedProcessor<UnmatchedScanProcessor, IUnmatchedScanProcessor, UnmatchedScanBackgroundService>(services);
         return services;

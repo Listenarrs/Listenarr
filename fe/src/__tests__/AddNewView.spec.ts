@@ -23,6 +23,8 @@ import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import AddNewView from '@/views/content/AddNewView.vue'
 import { useLibraryStore } from '@/stores/library'
+import { useConfigurationStore } from '@/stores/configuration'
+import type { SearchResult } from '@/types'
 
 // apiService and signalR are mocked centrally in test-setup.ts
 
@@ -33,9 +35,17 @@ describe('AddNewView pagination', () => {
       routes: [{ path: '/', component: { template: '<div />' } }],
     })
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks()
     window.localStorage.clear()
+    window.sessionStorage.clear()
+    const apiModule = await import('@/services/api')
+    const apiService = apiModule.apiService as unknown as {
+      getApplicationSettings?: Mock
+      searchAudibleByTitleAndAuthor?: Mock
+    }
+    apiService.getApplicationSettings?.mockResolvedValue({})
+    apiService.searchAudibleByTitleAndAuthor?.mockResolvedValue({ totalResults: 0, results: [] })
     const pinia = createPinia()
     setActivePinia(pinia)
   })
@@ -113,6 +123,7 @@ describe('AddNewView pagination', () => {
       results: [
         {
           asin: 'B000123',
+          region: 'de',
           title: 'Dune',
           subtitle: 'A Heroic Saga',
           authors: [{ name: 'Frank Herbert' }],
@@ -152,7 +163,7 @@ describe('AddNewView pagination', () => {
     expect(tr.searchResult.series).toBe('Dune Series')
     expect(tr.publisher && tr.publisher[0]).toBe('Chilton')
     expect(tr.first_publish_year).toBe(1965)
-    expect(tr.searchResult.productUrl).toBe('https://www.audible.com/pd/B000123')
+    expect(tr.searchResult.productUrl).toBe('https://www.audible.de/pd/B000123')
 
     // Rendered subtitle should appear in the title-result card
     await wrapper.vm.$nextTick()
@@ -210,6 +221,9 @@ describe('AddNewView pagination', () => {
     const simpleOptions = simpleSelect.findAll('option').map((o) => o.text())
     expect(simpleOptions).toContain('All')
     expect(simpleOptions).toContain('English')
+    const simpleRegion = wrapper.find('select#region-select')
+    expect(simpleRegion.exists()).toBe(true)
+    expect((simpleRegion.element as HTMLSelectElement).value).toBe('us')
 
     // Advanced search select should be labeled Language and contain German
     await wrapper.vm.$nextTick()
@@ -222,9 +236,12 @@ describe('AddNewView pagination', () => {
     const advOptions = advSelect.findAll('option').map((o) => o.text())
     expect(advOptions).toContain('German')
     expect(wrapper.find('label[for="adv-language"]').text()).toBe('Language')
+    const advRegion = wrapper.find('select#adv-region')
+    expect(advRegion.exists()).toBe(true)
+    expect((advRegion.element as HTMLSelectElement).value).toBe('us')
   })
 
-  it('applies configured default region and language from application settings', async () => {
+  it('shows the configured region and preserves the configured default language', async () => {
     const apiModule = await import('@/services/api')
     const apiService = apiModule.apiService as unknown as { getApplicationSettings?: Mock }
     apiService.getApplicationSettings?.mockResolvedValue({
@@ -244,9 +261,485 @@ describe('AddNewView pagination', () => {
 
     expect(vm.searchLanguage).toBe('de')
     expect(vm.preferredSearchLanguage).toBe('polish')
+    expect((wrapper.find('select#region-select').element as HTMLSelectElement).value).toBe('de')
   })
 
-  it('omits language filtering when default language is set to all', async () => {
+  it('shows the parameters of a search of this session with its results, and restores them only on demand', async () => {
+    const apiModule = await import('@/services/api')
+    const apiService = apiModule.apiService as unknown as { getApplicationSettings?: Mock }
+    apiService.getApplicationSettings?.mockResolvedValue({
+      defaultSearchRegion: 'de',
+      defaultSearchLanguage: 'german',
+    })
+    window.sessionStorage.setItem(
+      'listenarr.addNewResults',
+      JSON.stringify({ titleResults: [{ key: 'B000999', title: 'Dune Simple' }] }),
+    )
+    window.sessionStorage.setItem('listenarr.addNewSearchType', 'title')
+    window.sessionStorage.setItem('listenarr.addNewTitleResultsCount', '1')
+    window.sessionStorage.setItem(
+      'listenarr.addNewSearchContext',
+      JSON.stringify({ query: 'Dune', region: 'fr', language: 'french' }),
+    )
+
+    const router = createTestRouter()
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      searchQuery?: string
+      searchLanguage?: string
+      preferredSearchLanguage?: string
+      titleResults?: unknown[]
+    }
+    expect(vm.titleResults?.length).toBe(1)
+    // The results say what they were found with; the form is left alone (the defaults here)
+    expect(wrapper.get('[data-testid="search-results-for"]').text()).toBe(
+      'for “Dune” · France (FR) · French',
+    )
+    expect(vm.searchQuery).toBe('')
+    expect(vm.searchLanguage).toBe('de')
+    expect(vm.preferredSearchLanguage).toBe('german')
+
+    await wrapper.get('[data-testid="restore-search-inputs"]').trigger('click')
+    expect(vm.searchQuery).toBe('Dune')
+    expect(vm.searchLanguage).toBe('fr')
+    expect(vm.preferredSearchLanguage).toBe('french')
+    expect((wrapper.find('select#region-select').element as HTMLSelectElement).value).toBe('fr')
+  })
+
+  it('does not show results an earlier version left in localStorage, and drops them', async () => {
+    window.localStorage.setItem(
+      'listenarr.addNewResults',
+      JSON.stringify({ titleResults: [{ key: 'B000999', title: 'Old Search' }] }),
+    )
+    window.localStorage.setItem('listenarr.addNewTitleResultsCount', '16')
+
+    const router = createTestRouter()
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as { titleResults?: unknown[] }
+    expect(vm.titleResults?.length).toBe(0)
+    expect(wrapper.text()).not.toContain('Found 16 Books')
+    expect(window.localStorage.getItem('listenarr.addNewResults')).toBeNull()
+    expect(window.localStorage.getItem('listenarr.addNewTitleResultsCount')).toBeNull()
+  })
+
+  it('keeps the query, region and language of a search for this session only', async () => {
+    const apiModule = await import('@/services/api')
+    const apiService = apiModule.apiService as unknown as { getApplicationSettings?: Mock }
+    apiService.getApplicationSettings?.mockResolvedValue({ defaultSearchRegion: 'fr' })
+    vi.spyOn(apiModule.apiService, 'advancedSearch').mockResolvedValue([])
+
+    const router = createTestRouter()
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      searchQuery?: string
+      performSearch?: () => Promise<void>
+    }
+
+    vm.searchQuery = 'Dune'
+    await vm.performSearch?.()
+    await flushPromises()
+
+    expect(
+      JSON.parse(window.sessionStorage.getItem('listenarr.addNewSearchContext') ?? '{}'),
+    ).toEqual({
+      query: 'Dune',
+      region: 'fr',
+      language: 'french',
+    })
+    expect(window.localStorage.getItem('listenarr.addNewSearchContext')).toBeNull()
+  })
+
+  // A successful Dune search of this session, as the page saved it
+  const seedDuneSearch = () => {
+    window.sessionStorage.setItem(
+      'listenarr.addNewResults',
+      JSON.stringify({ titleResults: [{ key: 'B000999', title: 'Dune Simple' }] }),
+    )
+    window.sessionStorage.setItem('listenarr.addNewSearchType', 'title')
+    window.sessionStorage.setItem('listenarr.addNewTitleResultsCount', '1')
+    window.sessionStorage.setItem(
+      'listenarr.addNewSearchContext',
+      JSON.stringify({ query: 'Dune', region: 'us', language: 'english' }),
+    )
+  }
+
+  it.each([
+    ['the search box', false, 'Foundation'],
+    ['the advanced form', true, ''],
+  ])(
+    'clears the previous results when a search from %s fails, and keeps nothing of it',
+    async (_label, advanced, typedQuery) => {
+      seedDuneSearch()
+      const apiModule = await import('@/services/api')
+      vi.spyOn(apiModule.apiService, 'advancedSearch').mockRejectedValue(new Error('Network error'))
+      const router = createTestRouter()
+      const first = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+      await flushPromises()
+      const vm = first.vm as unknown as {
+        searchQuery?: string
+        titleResults?: unknown[]
+        showAdvancedSearch?: boolean
+        advancedSearchParams?: Record<string, unknown>
+        performSearch?: () => Promise<unknown>
+        performAdvancedSearch?: () => Promise<void>
+      }
+      expect(vm.titleResults?.length).toBe(1)
+
+      if (advanced) {
+        vm.showAdvancedSearch = true
+        vm.advancedSearchParams = { title: 'Foundation' }
+        await vm.performAdvancedSearch?.()
+      } else {
+        vm.searchQuery = 'Foundation'
+        await vm.performSearch?.().catch(() => undefined)
+      }
+      await flushPromises()
+
+      // The failed search shows nothing, not the Dune books under the new query
+      expect(vm.titleResults?.length).toBe(0)
+      expect(window.sessionStorage.getItem('listenarr.addNewSearchContext')).toBeNull()
+      first.unmount()
+
+      const back = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+      await flushPromises()
+      const backVm = back.vm as unknown as { searchQuery?: string; titleResults?: unknown[] }
+      // Nothing of the failed search comes back; what the user typed stays theirs
+      expect(backVm.titleResults?.length).toBe(0)
+      expect(backVm.searchQuery).toBe(typedQuery)
+    },
+  )
+
+  it('empties the previous results as soon as a new search starts', async () => {
+    seedDuneSearch()
+    const apiModule = await import('@/services/api')
+    vi.spyOn(apiModule.apiService, 'advancedSearch').mockImplementation(() => new Promise(() => {}))
+    const router = createTestRouter()
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      searchQuery?: string
+      titleResults?: unknown[]
+      performSearch?: () => Promise<unknown>
+    }
+    expect(vm.titleResults?.length).toBe(1)
+
+    vm.searchQuery = 'Foundation'
+    void vm.performSearch?.()
+    await flushPromises()
+
+    expect(vm.titleResults?.length).toBe(0)
+    expect(JSON.parse(window.sessionStorage.getItem('listenarr.addNewResults') ?? '{}')).toEqual(
+      expect.objectContaining({ titleResults: [] }),
+    )
+  })
+
+  // Navigation within the app keeps the same Pinia: the search store outlives the page
+  describe('a search that keeps running while the page is away', () => {
+    type Deferred = { query: string; resolve: (r: SearchResult[]) => void }
+    const book = (title: string, asin: string) =>
+      ({
+        asin,
+        title,
+        authors: [{ name: 'Someone' }],
+        language: 'english',
+      }) as unknown as SearchResult
+
+    async function setup() {
+      const apiModule = await import('@/services/api')
+      const pending: Deferred[] = []
+      vi.spyOn(apiModule.apiService, 'advancedSearch').mockImplementation(
+        (params: { title?: string }) =>
+          new Promise<SearchResult[]>((resolve) =>
+            pending.push({ query: params.title ?? '', resolve }),
+          ),
+      )
+      const pinia = createPinia()
+      const router = createTestRouter()
+      const visit = async () => {
+        const wrapper = mount(AddNewView, { global: { plugins: [pinia, router] } })
+        await flushPromises()
+        return {
+          wrapper,
+          vm: wrapper.vm as unknown as {
+            searchQuery?: string
+            isSearching?: boolean
+            titleResults?: Array<{ title?: string }>
+            performSearch?: () => Promise<unknown>
+          },
+        }
+      }
+      const answer = async (query: string, results: SearchResult[]) => {
+        pending.find((p) => p.query === query)!.resolve(results)
+        await flushPromises()
+      }
+      const savedQuery = () =>
+        JSON.parse(window.sessionStorage.getItem('listenarr.addNewSearchContext') ?? 'null')?.query
+      return { visit, answer, savedQuery }
+    }
+
+    it('shows the running search when coming back, then its results', async () => {
+      const { visit, answer, savedQuery } = await setup()
+      const first = await visit()
+      first.vm.searchQuery = 'Dune'
+      void first.vm.performSearch?.()
+      await flushPromises()
+      first.wrapper.unmount()
+
+      const back = await visit()
+      expect(back.vm.isSearching).toBe(true)
+      expect(back.vm.searchQuery).toBe('Dune')
+      // What is being searched is said while it runs, whatever the form now holds
+      expect(back.wrapper.get('[data-testid="running-search-for"]').text()).toContain('for “Dune”')
+
+      await answer('Dune', [book('Dune', 'B000000001')])
+      expect(back.vm.isSearching).toBe(false)
+      expect(back.vm.titleResults?.map((r) => r.title)).toEqual(['Dune'])
+      expect(savedQuery()).toBe('Dune')
+    })
+
+    it('ignores an older search that answers after the search that replaced it', async () => {
+      const { visit, answer, savedQuery } = await setup()
+      const first = await visit()
+      first.vm.searchQuery = 'Dune'
+      void first.vm.performSearch?.()
+      await flushPromises()
+      first.wrapper.unmount()
+
+      // Back on the page, a new search replaces the one still running
+      const back = await visit()
+      back.vm.searchQuery = 'Foundation'
+      void back.vm.performSearch?.()
+      await flushPromises()
+      await answer('Foundation', [book('Foundation', 'B000000002')])
+      expect(back.vm.titleResults?.map((r) => r.title)).toEqual(['Foundation'])
+
+      await answer('Dune', [book('Dune', 'B000000001')])
+      expect(back.vm.titleResults?.map((r) => r.title)).toEqual(['Foundation'])
+      expect(savedQuery()).toBe('Foundation')
+      back.wrapper.unmount()
+
+      const again = await visit()
+      expect(again.vm.searchQuery).toBe('Foundation')
+      expect(again.vm.titleResults?.map((r) => r.title)).toEqual(['Foundation'])
+    })
+
+    it('keeps what is typed during a search: the search still ends, and the text stays', async () => {
+      const { visit, answer, savedQuery } = await setup()
+      const page = await visit()
+      page.vm.searchQuery = 'Dune'
+      void page.vm.performSearch?.()
+      await flushPromises()
+
+      // Typing the next search, not submitted: it neither stops Dune nor is replaced by it
+      await page.wrapper.get('#unified-search-input').setValue('Foundation')
+      expect(page.vm.isSearching).toBe(true)
+      await answer('Dune', [book('Dune', 'B000000001')])
+
+      expect(page.vm.titleResults?.map((r) => r.title)).toEqual(['Dune'])
+      expect(page.vm.searchQuery).toBe('Foundation')
+      // The saved context is still the search the results come from
+      expect(savedQuery()).toBe('Dune')
+    })
+
+    it('keeps the results type of the search when an ASIN is typed during it', async () => {
+      const { visit, answer } = await setup()
+      const page = await visit()
+      page.vm.searchQuery = 'Dune'
+      void page.vm.performSearch?.()
+      await flushPromises()
+
+      await page.wrapper.get('#unified-search-input').setValue('B0BK9W82PQ')
+      await answer('Dune', [book('Dune', 'B000000001')])
+
+      const vm = page.wrapper.vm as unknown as { searchType?: string; inputType?: string }
+      expect(vm.searchType).toBe('title')
+      expect(vm.inputType).toBe('asin')
+      expect(page.vm.titleResults?.map((r) => r.title)).toEqual(['Dune'])
+    })
+
+    it('ignores the answer of a cancelled search', async () => {
+      const { visit, answer, savedQuery } = await setup()
+      const page = await visit()
+      page.vm.searchQuery = 'Dune'
+      void page.vm.performSearch?.()
+      await flushPromises()
+      ;(page.wrapper.vm as unknown as { cancelSearch: () => void }).cancelSearch()
+      expect(page.vm.isSearching).toBe(false)
+
+      await answer('Dune', [book('Dune', 'B000000001')])
+      expect(page.vm.titleResults?.length).toBe(0)
+      expect(savedQuery()).toBeUndefined()
+    })
+  })
+
+  it("keeps what was typed after a search when coming back, next to that search's results", async () => {
+    window.sessionStorage.setItem(
+      'listenarr.addNewResults',
+      JSON.stringify({ titleResults: [{ key: 'B000999', title: 'Dune Simple' }] }),
+    )
+    window.sessionStorage.setItem('listenarr.addNewSearchType', 'title')
+    window.sessionStorage.setItem('listenarr.addNewTitleResultsCount', '1')
+    window.sessionStorage.setItem(
+      'listenarr.addNewSearchContext',
+      JSON.stringify({ query: 'Dune', region: 'fr', language: 'french' }),
+    )
+    const router = createTestRouter()
+    const first = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+
+    // Typed but not submitted, then the user goes to another page
+    await first.find('input#unified-search-input').setValue('Foundation')
+    await flushPromises()
+    first.unmount()
+
+    const back = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    const vm = back.vm as unknown as { searchQuery?: string; titleResults?: unknown[] }
+    expect(vm.titleResults?.length).toBe(1)
+    expect(vm.searchQuery).toBe('Foundation')
+    expect(back.get('[data-testid="search-results-for"]').text()).toContain('for “Dune”')
+  })
+
+  it('restores an advanced search into the advanced form', async () => {
+    window.sessionStorage.setItem(
+      'listenarr.addNewResults',
+      JSON.stringify({ titleResults: [{ key: 'B000999', title: 'Dune Simple' }] }),
+    )
+    window.sessionStorage.setItem('listenarr.addNewSearchType', 'title')
+    window.sessionStorage.setItem('listenarr.addNewTitleResultsCount', '1')
+    window.sessionStorage.setItem(
+      'listenarr.addNewSearchContext',
+      JSON.stringify({
+        advanced: { title: 'Dune', author: 'Frank Herbert' },
+        region: 'us',
+        language: 'english',
+      }),
+    )
+    const router = createTestRouter()
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="search-results-for"]').text()).toBe(
+      'for Title: Dune, Author: Frank Herbert · United States (US) · English',
+    )
+
+    await wrapper.get('[data-testid="restore-search-inputs"]').trigger('click')
+    const vm = wrapper.vm as unknown as {
+      showAdvancedSearch?: boolean
+      advancedSearchParams?: Record<string, unknown>
+    }
+    expect(vm.showAdvancedSearch).toBe(true)
+    expect(vm.advancedSearchParams).toEqual(
+      expect.objectContaining({ title: 'Dune', author: 'Frank Herbert' }),
+    )
+  })
+
+  it('keeps the region and language the user chose when coming back, not the defaults', async () => {
+    const router = createTestRouter()
+    const first = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    await first.get('select#region-select').setValue('fr')
+    first.unmount()
+
+    const back = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    const vm = back.vm as unknown as { searchLanguage?: string; preferredSearchLanguage?: string }
+    expect(vm.searchLanguage).toBe('fr')
+    expect(vm.preferredSearchLanguage).toBe('french')
+  })
+
+  it('uses the new defaults after a visit without a search', async () => {
+    const apiModule = await import('@/services/api')
+    const apiService = apiModule.apiService as unknown as { getApplicationSettings?: Mock }
+    apiService.getApplicationSettings?.mockResolvedValue({
+      defaultSearchRegion: 'de',
+      defaultSearchLanguage: 'german',
+    })
+    const router = createTestRouter()
+    const first = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    first.unmount()
+    expect(window.sessionStorage.getItem('listenarr.addNewSearchContext')).toBeNull()
+
+    // The defaults change in Settings before coming back
+    apiService.getApplicationSettings?.mockResolvedValue({
+      defaultSearchRegion: 'fr',
+      defaultSearchLanguage: 'french',
+    })
+    const back = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    const vm = back.vm as unknown as { searchLanguage?: string; preferredSearchLanguage?: string }
+    expect(vm.searchLanguage).toBe('fr')
+    expect(vm.preferredSearchLanguage).toBe('french')
+  })
+
+  it('defaults language to the region primary language when no language is configured', async () => {
+    const apiModule = await import('@/services/api')
+    const apiService = apiModule.apiService as unknown as { getApplicationSettings?: Mock }
+    apiService.getApplicationSettings?.mockResolvedValue({
+      defaultSearchRegion: 'de',
+    })
+
+    const router = createTestRouter()
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      searchLanguage?: string
+      preferredSearchLanguage?: string
+    }
+
+    expect(vm.searchLanguage).toBe('de')
+    expect(vm.preferredSearchLanguage).toBe('german')
+  })
+
+  it('allows ad-hoc region changes without overwriting saved settings and updates language', async () => {
+    const apiModule = await import('@/services/api')
+    const apiService = apiModule.apiService as unknown as { getApplicationSettings?: Mock }
+    apiService.getApplicationSettings?.mockResolvedValue({
+      defaultSearchRegion: 'de',
+      defaultSearchLanguage: 'german',
+    })
+    const advancedSearchSpy = vi.spyOn(apiModule.apiService, 'advancedSearch').mockResolvedValue([])
+
+    const router = createTestRouter()
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+
+    const configStore = useConfigurationStore()
+    const vm = wrapper.vm as unknown as {
+      searchLanguage?: string
+      preferredSearchLanguage?: string
+      searchQuery?: string
+      performSearch?: () => Promise<void>
+    }
+
+    await wrapper.find('select.language-select').setValue('english')
+    await wrapper.vm.$nextTick()
+    expect(vm.preferredSearchLanguage).toBe('english')
+
+    await wrapper.find('select#region-select').setValue('fr')
+    await wrapper.vm.$nextTick()
+
+    expect(vm.searchLanguage).toBe('fr')
+    expect(vm.preferredSearchLanguage).toBe('french')
+    expect(configStore.applicationSettings?.defaultSearchRegion).toBe('de')
+
+    vm.searchQuery = 'Dune'
+    await vm.performSearch?.()
+    await flushPromises()
+
+    const lastCall = advancedSearchSpy.mock.calls.at(-1)?.[0] as Record<string, unknown> | undefined
+    expect(lastCall?.region).toBe('fr')
+    expect(lastCall?.language).toBe('french')
+    advancedSearchSpy.mockRestore()
+  })
+
+  it('preserves a saved all-language preference for the configured region', async () => {
     const apiModule = await import('@/services/api')
     const apiService = apiModule.apiService as unknown as { getApplicationSettings?: Mock }
     apiService.getApplicationSettings?.mockResolvedValue({
@@ -274,11 +767,11 @@ describe('AddNewView pagination', () => {
     expect(advancedSearchSpy).toHaveBeenCalled()
     const lastCall = advancedSearchSpy.mock.calls.at(-1)?.[0] as Record<string, unknown> | undefined
     expect(lastCall?.region).toBe('de')
-    expect(lastCall).not.toHaveProperty('language')
+    expect(lastCall?.language).toBeUndefined()
     advancedSearchSpy.mockRestore()
   })
 
-  it('filters mixed-language audible results using the selected language while keeping the default region', async () => {
+  it('filters mixed-language audible results using the saved language while keeping the default region', async () => {
     const apiModule = await import('@/services/api')
     const apiService = apiModule.apiService as unknown as { getApplicationSettings?: Mock }
     apiService.getApplicationSettings?.mockResolvedValue({
@@ -382,8 +875,11 @@ describe('AddNewView pagination', () => {
       await vi.advanceTimersByTimeAsync(1100)
       await flushPromises()
 
-      const vm = wrapper.vm as unknown as { searchType?: string }
-      expect(vm.searchType).toBe('title')
+      // The hint follows the text typed; the type of the results on screen doesn't change
+      const vm = wrapper.vm as unknown as { inputType?: string; searchType?: string | null }
+      expect(vm.inputType).toBe('title')
+      expect(wrapper.get('#unified-search-hint').text()).toContain('Searching by title')
+      expect(vm.searchType).toBeNull()
       expect(advancedSearchSpy).not.toHaveBeenCalled()
     } finally {
       vi.useRealTimers()
@@ -529,6 +1025,47 @@ describe('AddNewView pagination', () => {
     scrollSpy.mockRestore()
   })
 
+  it('clears the previous results when a new search returns nothing', async () => {
+    const apiModule = await import('@/services/api')
+    const apiService = apiModule.apiService as unknown as { searchAudibleByTitleAndAuthor?: Mock }
+    apiService.searchAudibleByTitleAndAuthor?.mockResolvedValueOnce({
+      totalResults: 1,
+      results: [
+        {
+          asin: 'B000999',
+          title: 'Dune Simple',
+          authors: [{ name: 'Frank Herbert' }],
+          language: 'english',
+        },
+      ],
+    })
+
+    const router = createTestRouter()
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    const vm = wrapper.vm as unknown as {
+      searchQuery?: string
+      performSearch?: () => Promise<void>
+      titleResults?: unknown[]
+    }
+
+    vm.searchQuery = 'Dune Simple'
+    await vm.performSearch()
+    await flushPromises()
+    expect(vm.titleResults.length).toBe(1)
+    expect(wrapper.text()).toContain('Found 1 Book')
+
+    apiService.searchAudibleByTitleAndAuthor?.mockResolvedValueOnce({
+      totalResults: 0,
+      results: [],
+    })
+    vm.searchQuery = 'testwkledjhfg'
+    await vm.performSearch()
+    await flushPromises()
+
+    expect(vm.titleResults.length).toBe(0)
+    expect(wrapper.text()).not.toContain('Found 1 Book')
+  })
+
   it('maps runtime from runtimeLengthMin (minutes) and keeps as minutes', async () => {
     const apiModule = await import('@/services/api')
     const apiService = apiModule.apiService as unknown as { searchAudibleByTitleAndAuthor?: Mock }
@@ -651,6 +1188,7 @@ describe('AddNewView pagination', () => {
     vm.searchType = 'asin'
     ;(vm as unknown).audibleResult = {
       asin: 'BAUD1',
+      region: 'de',
       title: 'Title',
       authors: [{ name: 'Author Name' }],
       narrators: [{ name: 'Narrator Name' }],
@@ -667,14 +1205,146 @@ describe('AddNewView pagination', () => {
     // Metadata badge should link to the Audible product page
     const metaLink = wrapper.find('.result-meta .metadata-source-link')
     expect(metaLink.exists()).toBe(true)
-    expect(metaLink.attributes('href')).toBe('https://www.audible.com/pd/BAUD1')
+    expect(metaLink.attributes('href')).toBe('https://www.audible.de/pd/BAUD1')
     expect(metaLink.text()).toContain('Audible')
 
     // Source link should prefer Audible product URL and show 'Audible'
     const sourceLink = wrapper.find('.result-meta .source-link')
     expect(sourceLink.exists()).toBe(true)
-    expect(sourceLink.attributes('href')).toBe('https://www.audible.com/pd/BAUD1')
+    expect(sourceLink.attributes('href')).toBe('https://www.audible.de/pd/BAUD1')
     expect(sourceLink.text()).toContain('Audible')
+    expect(wrapper.findAll('.result-meta a')).toHaveLength(1)
+    expect(sourceLink.classes()).toContain('metadata-source-link')
+    expect(sourceLink.findAll('svg')).toHaveLength(2)
+  })
+
+  it('shows Amazon metadata badge links for the selected result region', async () => {
+    const router = createTestRouter()
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    const vm = wrapper.vm as unknown as { searchType?: string; titleResults?: unknown[] }
+
+    vm.searchType = 'title'
+    vm.titleResults = [
+      {
+        key: 'BAMZ1',
+        title: 'Amazon Result',
+        author_name: ['Author Name'],
+        metadataSource: 'Amazon',
+        searchResult: {
+          asin: 'BAMZ1',
+          region: 'de',
+          artist: 'Author Name',
+          metadataSource: 'Amazon',
+        },
+      },
+    ]
+
+    await wrapper.vm.$nextTick()
+
+    const metaLink = wrapper.find('.title-results .metadata-source-link')
+    expect(metaLink.exists()).toBe(true)
+    expect(metaLink.attributes('href')).toBe('https://www.amazon.de/dp/BAMZ1')
+    expect(metaLink.text()).toContain('Metadata: Amazon')
+  })
+
+  it('shows metadata and source links for simple Audible-backed card results', async () => {
+    const router = createTestRouter()
+    const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+    const vm = wrapper.vm as unknown as {
+      handleSimpleSearchResults?: (results: SearchResult[]) => Promise<void>
+    }
+
+    await vm.handleSimpleSearchResults?.([
+      {
+        id: 'simple-audible-url',
+        title: 'Simple Audible Result',
+        artist: 'Author Name',
+        album: '',
+        category: '',
+        source: '',
+        sourceLink: '',
+        publishedDate: '',
+        format: '',
+        size: 0,
+        magnetLink: '',
+        torrentUrl: '',
+        nzbUrl: '',
+        downloadType: 'Torrent',
+        language: 'english',
+        publisher: 'Pottermore Publishing',
+        releaseDate: '2016-11-20',
+        link: 'https://www.audible.de/pd/B01M02FJ7A',
+      },
+    ])
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    const metaLink = wrapper.find('.title-results .metadata-source-link')
+    expect(metaLink.exists()).toBe(true)
+    expect(metaLink.attributes('data-source')).toBe('audible')
+    expect(metaLink.attributes('href')).toBe('https://www.audible.de/pd/B01M02FJ7A')
+    expect(metaLink.text()).toContain('Audible')
+
+    const sourceLink = wrapper.find('.title-results .source-link')
+    expect(sourceLink.exists()).toBe(true)
+    expect(sourceLink.attributes('href')).toBe('https://www.audible.de/pd/B01M02FJ7A')
+    expect(sourceLink.text()).toContain('Audible')
+    expect(wrapper.findAll('.title-results .result-meta a')).toHaveLength(1)
+    expect(sourceLink.classes()).toContain('metadata-source-link')
+    expect(sourceLink.findAll('svg')).toHaveLength(2)
+
+    const badgeText = wrapper
+      .findAll('.title-results .metadata-badges .metadata-badge')
+      .map((badge) => badge.text())
+    expect(badgeText).toContain('Pottermore Publishing')
+    expect(badgeText).toContain('2016')
+  })
+
+  it('shows metadata and source links for advanced Audible-backed results', async () => {
+    const apiModule = await import('@/services/api')
+    const advancedSearchSpy = vi.spyOn(apiModule.apiService, 'advancedSearch').mockResolvedValue([
+      {
+        asin: 'B01M02FJ7A',
+        region: 'de',
+        title: 'Advanced Audible Result',
+        author: 'Author Name',
+        language: 'english',
+        link: 'https://www.audible.de/pd/B01M02FJ7A',
+      },
+    ])
+
+    try {
+      const router = createTestRouter()
+      const wrapper = mount(AddNewView, { global: { plugins: [createPinia(), router] } })
+      const vm = wrapper.vm as unknown as {
+        showAdvancedSearch?: boolean
+        advancedSearchParams?: Record<string, unknown>
+        performAdvancedSearch?: () => Promise<void>
+      }
+
+      vm.showAdvancedSearch = true
+      vm.advancedSearchParams = { title: 'Advanced Audible Result' }
+
+      await vm.performAdvancedSearch?.()
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+
+      const metaLink = wrapper.find('.title-results .metadata-source-link')
+      expect(metaLink.exists()).toBe(true)
+      expect(metaLink.attributes('data-source')).toBe('audible')
+      expect(metaLink.attributes('href')).toBe('https://www.audible.de/pd/B01M02FJ7A')
+      expect(metaLink.text()).toContain('Audible')
+
+      const sourceLink = wrapper.find('.title-results .source-link')
+      expect(sourceLink.exists()).toBe(true)
+      expect(sourceLink.attributes('href')).toBe('https://www.audible.de/pd/B01M02FJ7A')
+      expect(sourceLink.text()).toContain('Audible')
+      expect(wrapper.findAll('.title-results .result-meta a')).toHaveLength(1)
+      expect(sourceLink.classes()).toContain('metadata-source-link')
+      expect(sourceLink.findAll('svg')).toHaveLength(2)
+    } finally {
+      advancedSearchSpy.mockRestore()
+    }
   })
 
   it('does not label non-Audible URLs containing audible.com as Audible', async () => {

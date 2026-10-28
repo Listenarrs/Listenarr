@@ -138,8 +138,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Common
             var adapter = new SabnzbdAdapter(
                 new TestHttpClientFactory(httpClient),
                 Mock.Of<INzbUrlResolver>(),
-                NullLogger<SabnzbdAdapter>.Instance,
-                Mock.Of<IAppMetricsService>());
+                NullLogger<SabnzbdAdapter>.Instance);
 
             var client = new DownloadClientConfiguration
             {
@@ -154,14 +153,14 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Common
                 }
             };
 
+            // Category filtering scopes untracked discovery (the no-tracked-ids display
+            // path). A tracked nzo_id bypasses it so a grabbed job SABnzbd reassigned to
+            // Default is never hidden; here no ids are tracked, so the foreign-category
+            // "Movie One" slot is excluded and only the audiobooks slot survives.
             var queue = await adapter.GetQueueAsync(client, CancellationToken.None);
-            var items = await adapter.GetItemsAsync(client, CancellationToken.None);
 
             Assert.Single(queue);
             Assert.Equal("Book One", queue[0].Title);
-
-            Assert.Single(items);
-            Assert.Equal("Book One", items[0].Title);
         }
 
         [Fact]
@@ -234,15 +233,12 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Common
                 }
             };
 
-            var queue = await adapter.GetQueueAsync(client, CancellationToken.None);
-            var items = await adapter.GetItemsAsync(client, CancellationToken.None);
+            var queue = await adapter.GetQueueAsync(client, ["101", "202"], CancellationToken.None);
 
             Assert.Single(queue);
             Assert.Equal("Book One", queue[0].Title);
 
-            Assert.Single(items);
-            Assert.Equal("Book One", items[0].Title);
-            Assert.Equal(["listgroups", "history", "listgroups", "history"], methodNames);
+            Assert.Equal(["listgroups", "history"], methodNames);
             Assert.DoesNotContain(
                 logger.Levels,
                 level => level >= LogLevel.Warning);

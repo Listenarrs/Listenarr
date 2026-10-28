@@ -88,15 +88,14 @@
             </label>
 
             <div v-if="formData.rootChangeEnabled" class="mt-md">
-              <RootFolderSelect
-                v-model:rootId="formData.rootId"
-                v-model:customPath="formData.rootCustomPath"
-                data-cy="bulk-root-select"
-              />
+              <RootFolderSelect v-model:rootId="formData.rootId" data-cy="bulk-root-select" />
 
               <p class="help-text">
-                Select a named root or provide a custom path. If you choose "Use default" and no
-                named default exists, the application default output path will be used.
+                Select a configured root. If you choose "Use default" and no named default exists,
+                the application default output path will be used.
+              </p>
+              <p v-if="resolvedRootPath" class="help-text" data-testid="effective-destination-root">
+                Destination root: <code>{{ resolvedRootPath }}</code>
               </p>
             </div>
           </div>
@@ -107,18 +106,27 @@
         <div v-if="showResults" class="results-section">
           <h4>Bulk Update Results</h4>
           <p>
-            {{ results.filter((r) => r.success).length }} succeeded,
-            {{ results.filter((r) => !r.success).length }} failed
+            {{ successfulResults.length }} succeeded, {{ partialResults.length }} partially
+            succeeded, {{ failedResults.length }} failed
           </p>
 
           <div class="results-list">
             <div v-for="res in results" :key="res.id" class="result-item">
               <div class="result-header">
                 <strong>Audiobook ID {{ res.id }}</strong>
-                <span class="status" :class="{ success: res.success, error: !res.success }">{{
-                  res.success ? 'Success' : 'Failed'
-                }}</span>
+                <span
+                  class="status"
+                  :class="{
+                    success: res.success,
+                    partial: isPartialResult(res),
+                    error: !res.success && !isPartialResult(res),
+                  }"
+                  >{{ resultStatusLabel(res) }}</span
+                >
               </div>
+              <p v-if="isPartialResult(res)" class="partial-message">
+                {{ partialResultMessage(res) }}
+              </p>
               <ul v-if="res.errors && res.errors.length > 0" class="error-list">
                 <li v-for="(err, idx) in res.errors" :key="idx">{{ err }}</li>
               </ul>
@@ -163,6 +171,8 @@ import Checkbox from '@/components/form/Checkbox.vue'
 import { Modal, ModalBody, ModalHeader } from '@/components/feedback'
 import MoveAudiobookModal from '@/components/feedback/MoveAudiobookModal.vue'
 import { apiService } from '@/services/api'
+import { useMoveJobsStore } from '@/stores/moveJobs'
+import { executeBulkEdit, type BulkEditItemResult } from '@/utils/bulkEditOrchestration'
 import { buildApiPath } from '@/services/apiBase'
 import { useToast } from '@/services/toastService'
 import type { QualityProfile } from '@/types'
@@ -180,8 +190,7 @@ interface FormData {
   qualityProfileId: number | null
   // root change controls
   rootChangeEnabled: boolean
-  rootId: number | null | 0
-  rootCustomPath: string | null
+  rootId: number | null
 }
 
 const props = defineProps<Props>()
@@ -191,13 +200,13 @@ const emit = defineEmits<{
 }>()
 
 const qualityProfiles = ref<QualityProfile[]>([])
-const rootFolders = ref<string[]>([])
 const rootStore = useRootFoldersStore()
+const moveJobsStore = useMoveJobsStore()
 const saving = ref(false)
 
 // Root change helper values
 const defaultOutputPath = ref<string | null>(null)
-const results = ref<Array<{ id: number; success: boolean; errors: string[] }>>([])
+const results = ref<BulkEditItemResult[]>([])
 const showResults = ref(false)
 const bulkUpdateEndpoint = buildApiPath('/library/bulk-update')
 
@@ -215,20 +224,30 @@ const formData = ref<FormData>({
   qualityProfileId: null,
   rootChangeEnabled: false,
   rootId: null,
-  rootCustomPath: null,
+})
+
+const resolvedRootPath = computed(() => {
+  if (!formData.value.rootChangeEnabled) return null
+  if (formData.value.rootId && formData.value.rootId > 0) {
+    return rootStore.folders.find((folder) => folder.id === formData.value.rootId)?.path ?? null
+  }
+  return defaultOutputPath.value
 })
 
 const hasChanges = computed(() => {
   return (
     formData.value.monitored !== null ||
     formData.value.qualityProfileId !== null ||
-    (formData.value.rootChangeEnabled === true &&
-      (formData.value.rootId !== null ||
-        (formData.value.rootCustomPath && formData.value.rootCustomPath.length > 0)))
+    formData.value.rootChangeEnabled === true
   )
 })
 
 const toast = useToast()
+const successfulResults = computed(() => results.value.filter((result) => result.success))
+const partialResults = computed(() => results.value.filter(isPartialResult))
+const failedResults = computed(() =>
+  results.value.filter((result) => !result.success && !isPartialResult(result)),
+)
 
 watch(
   () => props.isOpen,
@@ -248,16 +267,12 @@ async function loadData() {
     // Load root folders from configuration
     await rootStore.load()
     if (rootStore.folders.length > 0) {
-      rootFolders.value = rootStore.folders.map((f) => f.path)
       // Capture default output path for fallback when user picks "Use default"
       const def = rootStore.folders.find((f) => f.isDefault)
       defaultOutputPath.value = def?.path ?? null
     } else {
       const appSettings = await apiService.getApplicationSettings()
-      if (appSettings.outputPath) {
-        rootFolders.value = [appSettings.outputPath]
-        defaultOutputPath.value = appSettings.outputPath
-      }
+      defaultOutputPath.value = appSettings.outputPath || null
     }
   } catch (error) {
     console.error('Failed to load bulk edit data:', error)
@@ -270,7 +285,6 @@ function resetForm() {
     qualityProfileId: null,
     rootChangeEnabled: false,
     rootId: null,
-    rootCustomPath: null,
   }
 }
 
@@ -331,178 +345,79 @@ async function handleSave() {
 
   saving.value = true
   try {
-    // Build update payload with only changed fields
     const updates: Record<string, boolean | number | string> = {}
-
     if (formData.value.monitored !== null) {
       updates.monitored = formData.value.monitored
     }
-
     if (formData.value.qualityProfileId !== null) {
       updates.qualityProfileId = formData.value.qualityProfileId
     }
 
-    // Handle root folder change with move confirmation
     let userWantsMove = false
     let userWantsDeleteEmpty = false
     let newRootPath: string | null = null
-
-    // Store original basePaths before updating if we're changing root folders
-    const originalBasePaths = new Map<number, string>()
-
     if (formData.value.rootChangeEnabled === true) {
-      // Resolve chosen root path: named root, custom path or default
-      if (formData.value.rootId === 0) {
-        newRootPath = formData.value.rootCustomPath || null
-      } else if (formData.value.rootId && formData.value.rootId > 0) {
-        const found = rootStore.folders.find((f) => f.id === formData.value.rootId)
-        newRootPath = found?.path ?? null
-      } else if (formData.value.rootId === null) {
-        // Use default path (if available)
-        newRootPath = defaultOutputPath.value
+      newRootPath = resolvedRootPath.value
+      if (!newRootPath) {
+        throw new Error('Select a valid destination root before saving.')
       }
 
-      if (newRootPath !== null) {
-        // Fetch all audiobooks BEFORE updating to capture their original basePaths
-        const ids = Array.from(props.selectedIds)
-        for (const id of ids) {
-          try {
-            const audiobook = await apiService.getAudiobook(id)
-            if (audiobook?.basePath) {
-              originalBasePaths.set(id, audiobook.basePath)
-            }
-          } catch (err) {
-            console.error(`Failed to fetch audiobook ${id} before update:`, err)
-          }
-        }
-
-        // Ask user if they want to move files
-        const choice = await askMoveConfirmation(newRootPath)
-        if (!choice || !choice.proceed) {
-          saving.value = false
-          return // User cancelled
-        }
-        userWantsMove = Boolean(choice.moveFiles)
-        userWantsDeleteEmpty = Boolean(choice.deleteEmptySource)
-        updates.rootFolder = newRootPath
-      }
+      const choice = await askMoveConfirmation(newRootPath)
+      if (!choice?.proceed) return
+      userWantsMove = Boolean(choice.moveFiles)
+      userWantsDeleteEmpty = Boolean(choice.deleteEmptySource)
+      updates.rootFolder = newRootPath
     }
 
-    // Add move options if root folder is being changed
-    if (formData.value.rootChangeEnabled && newRootPath) {
-      ;(updates as { moveFiles?: boolean; deleteEmptySource?: boolean }).moveFiles = userWantsMove
-      ;(updates as { moveFiles?: boolean; deleteEmptySource?: boolean }).deleteEmptySource =
-        userWantsDeleteEmpty
-    }
-
-    // Convert Set to Array for API call
     const ids = Array.from(props.selectedIds)
+    logger.debug('[BulkEditModal] Preparing bulk update', {
+      endpoint: bulkUpdateEndpoint,
+      ids,
+      updates,
+      physicalMove: userWantsMove,
+      timestamp: new Date().toISOString(),
+    })
 
-    // Debug logging: payload and environment
-    // This will help diagnose NS_ERROR_CONNECTION_REFUSED in browser
-    try {
-      logger.debug('[BulkEditModal] Preparing bulk update', {
-        endpoint: bulkUpdateEndpoint,
-        origin: window?.location?.origin,
+    const outcome = await executeBulkEdit(
+      {
         ids,
         updates,
-        navigatorOnline: typeof navigator !== 'undefined' ? navigator.onLine : undefined,
-        timestamp: new Date().toISOString(),
-      })
-    } catch {
-      // ignore logging errors in non-browser envs
-    }
+        destinationRoot: newRootPath,
+        moveFiles: userWantsMove,
+        deleteEmptySource: userWantsDeleteEmpty,
+      },
+      {
+        bulkUpdateAudiobooks: (audiobookIds, metadataUpdates, pathChange) =>
+          apiService.bulkUpdateAudiobooks(audiobookIds, metadataUpdates, pathChange),
+        trackQueuedJob: (job) => moveJobsStore.trackQueuedJob(job),
+      },
+    )
 
-    // Call bulk update API
-    const resp = await apiService.bulkUpdateAudiobooks(ids, updates)
-
-    // Save per-id results for display
-    results.value = resp.results || []
+    results.value = outcome.results
     showResults.value = true
-
-    // If user wants to move files, enqueue move jobs for each audiobook
-    if (userWantsMove && newRootPath) {
-      console.log('[BulkEditModal] Starting move job enqueue process', {
-        userWantsMove,
-        newRootPath,
-        totalIds: ids.length,
-        originalBasePathsSize: originalBasePaths.size,
-      })
-
-      let moveCount = 0
-      for (const id of ids) {
-        // Only enqueue move for audiobooks that were successfully updated
-        const result = results.value.find((r) => r.id === id)
-        console.log(`[BulkEditModal] Processing audiobook ${id}`, {
-          hasResult: !!result,
-          success: result?.success,
-        })
-
-        if (result && result.success) {
-          try {
-            // Get the ORIGINAL basePath (before update) and the NEW basePath (after update)
-            const originalBasePath = originalBasePaths.get(id)
-            const audiobook = await apiService.getAudiobook(id)
-            const newBasePath = audiobook?.basePath
-
-            console.log(`[BulkEditModal] Audiobook ${id} paths:`, {
-              originalBasePath,
-              newBasePath,
-              pathsAreDifferent: originalBasePath !== newBasePath,
-            })
-
-            if (originalBasePath && newBasePath && originalBasePath !== newBasePath) {
-              console.log(`[BulkEditModal] Enqueueing move for audiobook ${id}`, {
-                destination: newBasePath,
-                source: originalBasePath,
-                deleteEmpty: userWantsDeleteEmpty,
-              })
-
-              const moveResult = await apiService.moveAudiobook(id, newBasePath, {
-                sourcePath: originalBasePath,
-                moveFiles: true,
-                deleteEmptySource: userWantsDeleteEmpty,
-              })
-
-              console.log(`[BulkEditModal] Move enqueued for audiobook ${id}:`, moveResult)
-              moveCount++
-            } else {
-              console.warn(
-                `[BulkEditModal] Skipping move for audiobook ${id} - invalid paths or paths are the same`,
-              )
-            }
-          } catch (moveErr) {
-            console.error(`Failed to enqueue move for audiobook ${id}:`, moveErr)
-            // Don't fail the entire operation, just log the error
-          }
-        }
-      }
-
-      console.log(`[BulkEditModal] Finished move enqueue process. Queued ${moveCount} moves.`)
-
-      if (moveCount > 0) {
-        toast.info(
-          'Move jobs queued',
-          `Queued ${moveCount} move job(s). Files will be moved in the background.`,
-        )
-      } else {
-        console.warn('[BulkEditModal] No move jobs were queued!')
-      }
-    } else {
-      console.log('[BulkEditModal] Skipping move job enqueue', { userWantsMove, newRootPath })
+    const successCount = successfulResults.value.length
+    const partialCount = partialResults.value.length
+    const failureCount = failedResults.value.length
+    if (partialCount > 0 || failureCount > 0) {
+      toast.error(
+        'Bulk update incomplete',
+        `${successCount} succeeded, ${partialCount} partially succeeded, and ${failureCount} failed. Review the per-audiobook results.`,
+      )
+      return
     }
 
-    // Count successes
-    const successCount = results.value.filter((r) => r.success).length
-    toast.success('Bulk update', `Updated ${successCount} of ${results.value.length} audiobook(s)`)
+    if (userWantsMove) {
+      toast.info(
+        'Move jobs queued',
+        `Queued ${successCount} move job(s). Files will be moved in the background.`,
+      )
+    } else {
+      toast.success('Bulk update', `Updated ${successCount} audiobook(s)`)
+    }
 
-    // Notify parent that changes were saved
     emit('saved')
-
-    // Close the modal after successful operation
     close()
   } catch (error) {
-    // Enhanced error logging so browser console shows more details
     try {
       const err = error as Error & { url?: string }
       console.error('[BulkEditModal] Failed to save bulk edits:', {
@@ -512,18 +427,16 @@ async function handleSave() {
         url: err?.url || bulkUpdateEndpoint,
       })
     } catch {
-      // fallback
       console.error('Failed to save bulk edits (minimal):', error)
     }
 
-    // Try to extract a readable message from the API error
     let message = 'Failed to save changes. Please try again.'
     try {
       const err = error as Error & { body?: string }
       if (err.body) {
         try {
           const parsed = JSON.parse(err.body)
-          if (parsed && parsed.message) message = parsed.message
+          if (parsed?.message) message = parsed.message
         } catch {
           message = err.body
         }
@@ -531,11 +444,31 @@ async function handleSave() {
         message = err.message
       }
     } catch {
-      // fallback
+      // Keep the generic message when an error cannot be inspected.
     }
     toast.error('Bulk update failed', message)
   } finally {
     saving.value = false
+  }
+}
+
+function isPartialResult(result: BulkEditItemResult): boolean {
+  return !result.success && result.metadataUpdated === true
+}
+
+function resultStatusLabel(result: BulkEditItemResult): 'Success' | 'Partial' | 'Failed' {
+  if (result.success) return 'Success'
+  return isPartialResult(result) ? 'Partial' : 'Failed'
+}
+
+function partialResultMessage(result: BulkEditItemResult): string {
+  switch (result.pathChangeOutcome) {
+    case 'failed':
+      return 'Metadata saved; the requested path change failed.'
+    case 'not-enqueued':
+      return 'Metadata saved; the requested move was not queued.'
+    default:
+      return 'Metadata saved; the requested path change did not complete.'
   }
 }
 
@@ -650,6 +583,15 @@ function close() {
 
 .status.error {
   color: #f44336;
+}
+
+.status.partial,
+.partial-message {
+  color: #ffb74d;
+}
+
+.partial-message {
+  margin: 0.5rem 0 0;
 }
 
 .error-list {

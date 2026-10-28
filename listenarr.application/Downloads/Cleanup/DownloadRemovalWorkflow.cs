@@ -99,7 +99,7 @@ namespace Listenarr.Application.Downloads.Cleanup
                         // Try to find the download in the database and check if it's DDL or has a valid client
                         if (downloadRecord != null)
                         {
-                            if (downloadRecord.DownloadClientId == "DDL")
+                            if (string.Equals(downloadRecord.DownloadClientId, DirectDownloadMetadataKeys.ClientId, StringComparison.OrdinalIgnoreCase))
                             {
                                 // DDL downloads don't have an external client to remove from
                                 removedFromClient = true;

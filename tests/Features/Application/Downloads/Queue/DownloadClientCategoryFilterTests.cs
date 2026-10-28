@@ -137,87 +137,11 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
                 }
             };
 
-            var queue = await adapter.GetQueueAsync(client, CancellationToken.None);
+            var queue = await adapter.GetQueueAsync(client, ["HASH1", "HASH2"], CancellationToken.None);
 
             Assert.Single(queue);
             Assert.Equal("Book One", queue[0].Title);
             Assert.Equal("audiobooks", queue[0].Quality);
-        }
-
-        [Fact]
-        [Trait("Scenario", "TransmissionItemCategoryFilter")]
-        public async Task Transmission_GetItems_FiltersByConfiguredCategory()
-        {
-            const string body = """
-            {
-              "result":"success",
-              "arguments":{
-                "torrents":[
-                  {
-                    "id":1,
-                    "hashString":"HASH1",
-                    "name":"Book One",
-                    "percentDone":0.5,
-                    "status":4,
-                    "totalSize":1000,
-                    "leftUntilDone":500,
-                    "rateDownload":25,
-                    "eta":60,
-                    "downloadDir":"/downloads",
-                    "addedDate":1700000000,
-                    "uploadRatio":0.1,
-                    "labels":["audiobooks"]
-                  },
-                  {
-                    "id":2,
-                    "hashString":"HASH2",
-                    "name":"Movie One",
-                    "percentDone":0.6,
-                    "status":4,
-                    "totalSize":1000,
-                    "leftUntilDone":400,
-                    "rateDownload":20,
-                    "eta":50,
-                    "downloadDir":"/downloads",
-                    "addedDate":1700000000,
-                    "uploadRatio":0.1,
-                    "labels":["movies"]
-                  }
-                ]
-              }
-            }
-            """;
-            using var response = new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(body, Encoding.UTF8, "application/json")
-            };
-            var handler = new DelegatingHandlerMock((_, _) =>
-            {
-                return Task.FromResult(response);
-            });
-
-            using var httpClient = new HttpClient(handler);
-            var httpFactory = new Mock<IHttpClientFactory>();
-            httpFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(httpClient);
-
-            var adapter = new TransmissionAdapter(httpFactory.Object, Mock.Of<ITorrentFileDownloader>(), NullLogger<TransmissionAdapter>.Instance);
-            var client = new DownloadClientConfiguration
-            {
-                Id = "tr-1",
-                Name = "Transmission",
-                Type = "transmission",
-                Host = "localhost",
-                Port = 9091,
-                Settings = new Dictionary<string, object>
-                {
-                    ["category"] = "audiobooks"
-                }
-            };
-
-            var items = await adapter.GetItemsAsync(client, CancellationToken.None);
-
-            Assert.Single(items);
-            Assert.Equal("Book One", items[0].Title);
         }
 
         [Fact]

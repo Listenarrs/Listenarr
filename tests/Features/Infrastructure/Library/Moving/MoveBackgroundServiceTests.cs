@@ -1,97 +1,303 @@
-/*
- * Listenarr - Audiobook Management System
- * Copyright (C) 2024-2026 Listenarr Contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as published
- * by the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with this program. If not, see <https://www.gnu.org/licenses/>.
- */
+using System.Threading.Channels;
 using Listenarr.Tests.Common;
+using Microsoft.Extensions.Logging.Abstractions;
 
-namespace Listenarr.Tests.Features.Infrastructure.Library.Moving
+namespace Listenarr.Tests.Features.Infrastructure.Library.Moving;
+
+[Trait("Area", "Library")]
+[Trait("Name", "MoveBackgroundServiceTests")]
+[Trait("Category", "Infrastructure")]
+public sealed class MoveBackgroundServiceTests : BaseTests
 {
-    public class MoveBackgroundServiceTests : BaseTests
+    [Fact]
+    public async Task FilesystemNotReady_DoesNotRecoverClaimOrProcessJobsUntilGateOpens()
     {
-        [Fact(Timeout = 20000)]
-        public async Task MoveBackgroundService_PerformsMoveAndUpdatesDb()
-        {
-            // Create source with files
-            var src = FileService.GetTempDirectory("listenarr_test_src");
-            var nested = Path.Join(src, "Nested");
-            Directory.CreateDirectory(nested);
-
-            await FileService.GetFileAsync(src, "file1.txt", "one");
-            await FileService.GetFileAsync(nested, "file2.txt", "two");
-            // Additionally create a cover image inside the audiobook folder and set ImageUrl to it
-            await FileService.GetFileAsync(src, "cover.jpg", "coverdata");
-
-            // Audiobook record uses src and points to the local cover
-            var ab = await _audiobookRepository.AddAsync(new Audiobook { Title = "MoveTest", BasePath = src, ImageUrl = Path.GetFullPath(Path.Join(src, "cover.jpg")) });
-
-            // Snapshot source timestamps before move
-            var srcFile1 = Path.Join(src, "file1.txt");
-            var srcFile2 = Path.Join(src, "Nested", "file2.txt");
-            var srcFile1WriteUtc = File.GetLastWriteTimeUtc(srcFile1);
-            var srcFile2WriteUtc = File.GetLastWriteTimeUtc(srcFile2);
-
-            var moveQueue = _provider.GetRequiredService<IMoveQueueService>();
-            var bg = _provider.GetRequiredService<MoveBackgroundService>();
-
-            // Destination
-            var dst = FileService.GetTempDirectory("listenarr_test_dst");
-
-            // Start the background service
-            await bg.StartAsync(CancellationToken.None);
-
-            // Enqueue move
-            var jobId = await moveQueue.EnqueueMoveAsync(ab.Id, dst, src);
-
-            // Poll for job completion (timeout ~15s)
-            var succeeded = false;
-            for (int i = 0; i < 60; i++)
+        var jobs = Channel.CreateUnbounded<MoveJob>();
+        var job = new MoveJob { Id = Guid.NewGuid(), AudiobookId = 42 };
+        await jobs.Writer.WriteAsync(job);
+        var readiness = new TestLibraryFilesystemReadiness();
+        readiness.SetRunning("AudiobookFileIdentities");
+        var recovered = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var processed = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var queue = new Mock<IMoveQueueService>(MockBehavior.Strict);
+        queue.SetupGet(service => service.Reader).Returns(jobs.Reader);
+        queue.Setup(service => service.RecoverActiveJobsAsync(It.IsAny<CancellationToken>()))
+            .Returns(() =>
             {
-                var job = await moveQueue.GetJobAsync(jobId);
-                if (job != null && string.Equals(job.Status, "Completed", StringComparison.OrdinalIgnoreCase))
+                recovered.TrySetResult();
+                return Task.CompletedTask;
+            });
+        queue.Setup(service => service.TryClaimJobAsync(
+                job.Id,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        var processor = new Mock<IMoveJobProcessor>(MockBehavior.Strict);
+        processor.Setup(service => service.ProcessJobAsync(job, It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                processed.TrySetResult();
+                return Task.CompletedTask;
+            });
+        var worker = new MoveBackgroundService(
+            queue.Object,
+            processor.Object,
+            readiness,
+            NullLogger<MoveBackgroundService>.Instance,
+            heartbeatInterval: TimeSpan.FromHours(1));
+
+        await worker.StartAsync(CancellationToken.None);
+
+        Assert.False(recovered.Task.IsCompleted);
+        queue.Verify(service => service.TryClaimJobAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        processor.Verify(service => service.ProcessJobAsync(
+            It.IsAny<MoveJob>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+
+        readiness.SetReady();
+        await recovered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await processed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await worker.StopAsync(CancellationToken.None);
+
+        queue.Verify(service => service.TryClaimJobAsync(
+            job.Id,
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+        processor.Verify(service => service.ProcessJobAsync(
+            job,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task LeaseLoss_DoesNotRewriteJobAsFailed()
+    {
+        var jobs = Channel.CreateUnbounded<MoveJob>();
+        var job = new MoveJob { Id = Guid.NewGuid(), AudiobookId = 42 };
+        await jobs.Writer.WriteAsync(job);
+        var queue = new Mock<IMoveQueueService>();
+        queue.SetupGet(service => service.Reader).Returns(jobs.Reader);
+        queue.Setup(service => service.RecoverActiveJobsAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        queue.Setup(service => service.TryClaimJobAsync(
+                job.Id,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        var processorInvoked = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var processor = new Mock<IMoveJobProcessor>();
+        processor.Setup(service => service.ProcessJobAsync(job, It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                processorInvoked.TrySetResult();
+                return Task.FromException(new MoveLeaseLostException(job.Id, 1));
+            });
+        var worker = new MoveBackgroundService(
+            queue.Object,
+            processor.Object,
+            TestLibraryFilesystemReadiness.Ready(),
+            NullLogger<MoveBackgroundService>.Instance,
+            heartbeatInterval: TimeSpan.FromHours(1));
+
+        await worker.StartAsync(CancellationToken.None);
+        await processorInvoked.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await worker.StopAsync(CancellationToken.None);
+
+        queue.Verify(service => service.UpdateJobStatusAsync(
+            job.Id,
+            It.IsAny<string>(),
+            It.IsAny<int>(),
+            MoveJobStatus.Failed,
+            It.IsAny<string?>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task HeartbeatException_CancelsInFlightProcessing()
+    {
+        var jobs = Channel.CreateUnbounded<MoveJob>();
+        var job = new MoveJob { Id = Guid.NewGuid(), AudiobookId = 42 };
+        await jobs.Writer.WriteAsync(job);
+        var processingCanceled = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var queue = new Mock<IMoveQueueService>();
+        queue.SetupGet(service => service.Reader).Returns(jobs.Reader);
+        queue.Setup(service => service.RecoverActiveJobsAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        queue.Setup(service => service.TryClaimJobAsync(
+                job.Id,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        queue.Setup(service => service.HeartbeatJobAsync(
+                job.Id,
+                It.IsAny<string>(),
+                1,
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new PersistenceException(
+                "heartbeat failed",
+                new InvalidOperationException("database unavailable")));
+        var processor = new Mock<IMoveJobProcessor>();
+        processor.Setup(service => service.ProcessJobAsync(job, It.IsAny<CancellationToken>()))
+            .Returns(async (MoveJob _, CancellationToken cancellationToken) =>
+            {
+                try
                 {
-                    succeeded = true; break;
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
                 }
-                await Task.Delay(250, CancellationToken.None);
-            }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    processingCanceled.TrySetResult();
+                    throw;
+                }
+            });
+        var worker = new MoveBackgroundService(
+            queue.Object,
+            processor.Object,
+            TestLibraryFilesystemReadiness.Ready(),
+            NullLogger<MoveBackgroundService>.Instance,
+            heartbeatInterval: TimeSpan.FromMilliseconds(10));
 
-            // Stop background service
-            await bg.StopAsync(CancellationToken.None);
+        await worker.StartAsync(CancellationToken.None);
+        await processingCanceled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await worker.StopAsync(CancellationToken.None);
 
-            Assert.True(succeeded, "Move job did not complete in time");
+        queue.Verify(service => service.UpdateJobStatusAsync(
+            job.Id,
+            It.IsAny<string>(),
+            It.IsAny<int>(),
+            MoveJobStatus.Failed,
+            It.IsAny<string?>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
 
-            // Verify destination has files and source removed
-            Assert.True(Directory.Exists(dst));
-            Assert.True(File.Exists(Path.Join(dst, "file1.txt")));
-            Assert.True(File.Exists(Path.Join(dst, "Nested", "file2.txt")));
-            Assert.False(Directory.Exists(src));
+    [Fact]
+    public async Task OwnershipDeadline_CancelsInFlightProcessing()
+    {
+        var jobs = Channel.CreateUnbounded<MoveJob>();
+        var job = new MoveJob { Id = Guid.NewGuid(), AudiobookId = 42 };
+        await jobs.Writer.WriteAsync(job);
+        var processingCanceled = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var queue = new Mock<IMoveQueueService>();
+        queue.SetupGet(service => service.Reader).Returns(jobs.Reader);
+        queue.Setup(service => service.RecoverActiveJobsAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        queue.Setup(service => service.TryClaimJobAsync(
+                job.Id,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        queue.Setup(service => service.HeartbeatJobAsync(
+                job.Id,
+                It.IsAny<string>(),
+                1,
+                It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan);
+                return MoveHeartbeatOutcome.Renewed;
+            });
+        var processor = new Mock<IMoveJobProcessor>();
+        processor.Setup(service => service.ProcessJobAsync(job, It.IsAny<CancellationToken>()))
+            .Returns(async (MoveJob _, CancellationToken cancellationToken) =>
+            {
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    processingCanceled.TrySetResult();
+                    throw;
+                }
+            });
+        var worker = new MoveBackgroundService(
+            queue.Object,
+            processor.Object,
+            TestLibraryFilesystemReadiness.Ready(),
+            NullLogger<MoveBackgroundService>.Instance,
+            heartbeatInterval: TimeSpan.FromMilliseconds(10),
+            ownershipDuration: TimeSpan.FromMilliseconds(50));
 
-            // Verify timestamps preserved (took snapshots before move)
-            var dstFile1 = Path.Join(dst, "file1.txt");
-            var dstFile2 = Path.Join(dst, "Nested", "file2.txt");
+        await worker.StartAsync(CancellationToken.None);
+        await processingCanceled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await worker.StopAsync(CancellationToken.None);
 
-            Assert.Equal(srcFile1WriteUtc, File.GetLastWriteTimeUtc(dstFile1));
-            Assert.Equal(srcFile2WriteUtc, File.GetLastWriteTimeUtc(dstFile2));
+        queue.Verify(service => service.UpdateJobStatusAsync(
+            job.Id,
+            It.IsAny<string>(),
+            It.IsAny<int>(),
+            MoveJobStatus.Failed,
+            It.IsAny<string?>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
 
-            using var scope = _provider.CreateScope();
-            _audiobookRepository = scope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
-            var ab2 = await _audiobookRepository.GetByIdAsync(ab.Id);
+    [Fact]
+    public async Task HeartbeatLeaseLoss_CancelsInFlightProcessing()
+    {
+        var jobs = Channel.CreateUnbounded<MoveJob>();
+        var job = new MoveJob { Id = Guid.NewGuid(), AudiobookId = 42 };
+        await jobs.Writer.WriteAsync(job);
+        var processingCanceled = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var queue = new Mock<IMoveQueueService>();
+        queue.SetupGet(service => service.Reader).Returns(jobs.Reader);
+        queue.Setup(service => service.RecoverActiveJobsAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        queue.Setup(service => service.TryClaimJobAsync(
+                job.Id,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        queue.Setup(service => service.HeartbeatJobAsync(
+                job.Id,
+                It.IsAny<string>(),
+                1,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(MoveHeartbeatOutcome.Lost);
+        var processor = new Mock<IMoveJobProcessor>();
+        processor.Setup(service => service.ProcessJobAsync(job, It.IsAny<CancellationToken>()))
+            .Returns(async (MoveJob _, CancellationToken cancellationToken) =>
+            {
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    processingCanceled.TrySetResult();
+                    throw;
+                }
+            });
+        var worker = new MoveBackgroundService(
+            queue.Object,
+            processor.Object,
+            TestLibraryFilesystemReadiness.Ready(),
+            NullLogger<MoveBackgroundService>.Instance,
+            heartbeatInterval: TimeSpan.FromMilliseconds(10));
 
-            // Verify ImageUrl was updated to new location when the cover file exists
-            var expectedCover = Path.GetFullPath(Path.Join(dst, "cover.jpg"));
-            Assert.Equal(expectedCover, ab2.ImageUrl);
-        }
+        await worker.StartAsync(CancellationToken.None);
+        await processingCanceled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.Equal(1, job.LeaseGeneration);
+        queue.Verify(service => service.HeartbeatJobAsync(
+            job.Id,
+            It.IsAny<string>(),
+            1,
+            It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        queue.Verify(service => service.UpdateJobStatusAsync(
+            job.Id,
+            It.IsAny<string>(),
+            It.IsAny<int>(),
+            MoveJobStatus.Failed,
+            It.IsAny<string?>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 }

@@ -26,18 +26,34 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Files
         {
             // Minimal metadata service mock so File metadata lookup doesn't throw
             var metadataMock = new Mock<IMetadataService>();
+            var metadata = new AudioMetadata
+            {
+                Title = "Test Book",
+                Duration = TimeSpan.FromSeconds(1),
+                Format = "m4b",
+                BitRate = 64000,
+                SampleRate = 44100,
+                Channels = 2
+            };
             metadataMock.Setup(m => m.ExtractFileMetadataAsync(It.IsAny<string>()))
-                .ReturnsAsync(new AudioMetadata { Title = "Test Book", Duration = TimeSpan.FromSeconds(1), Format = "m4b", BitRate = 64000, SampleRate = 44100, Channels = 2 });
+                .ReturnsAsync(metadata);
+            metadataMock.Setup(m => m.ExtractFileMetadataAsync(
+                    It.IsAny<MetadataFileSource>()))
+                .ReturnsAsync(metadata);
             _services.AddSingleton(metadataMock.Object);
             Init();
 
-            var audiobook = new Audiobook { Title = "Test Book", Monitored = true };
+            // Use temp file and establish the authoritative audiobook folder first.
+            var tempFile = await FileService.GetTempFileAsync($"afs-test-{Guid.NewGuid()}.m4b");
+            var audiobook = new Audiobook
+            {
+                Title = "Test Book",
+                Monitored = true,
+                BasePath = Path.GetDirectoryName(tempFile)
+            };
             await _audiobookRepository.AddAsync(audiobook);
 
             var audiobookFileService = _provider.GetRequiredService<IAudiobookFileService>();
-
-            // Use temp file
-            var tempFile = await FileService.GetTempFileAsync($"afs-test-{Guid.NewGuid()}.m4b");
 
             // Act
             var created = await audiobookFileService.EnsureAudiobookFileAsync(audiobook, tempFile, "test");

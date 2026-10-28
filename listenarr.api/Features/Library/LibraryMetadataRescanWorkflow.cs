@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Application.Common.Exceptions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
 
@@ -29,27 +30,33 @@ namespace Listenarr.Api.Features.Library
         private const int MetadataRescanMaxAsinLookupAttempts = 8;
         private const int MetadataRescanMaxIsbnConversionAttempts = 5;
 
-        private readonly IAudiobookRepository _repo;
         private readonly IAudiobookMetadataService _metadataService;
         private readonly MetadataConverters _metadataConverters;
         private readonly IImageCacheService _imageCacheService;
+        private readonly IServiceScopeFactory _scopeFactory;
+        private readonly IAudiobookOperationCoordinator _audiobookOperationCoordinator;
+        private readonly IMoveQueueService _moveQueueService;
         private readonly ILogger<LibraryMetadataRescanWorkflow> _logger;
         private readonly IMemoryCache? _memoryCache;
         private readonly IAsinLookupService? _asinLookupService;
 
         public LibraryMetadataRescanWorkflow(
-            IAudiobookRepository repo,
             IAudiobookMetadataService metadataService,
             MetadataConverters metadataConverters,
             IImageCacheService imageCacheService,
+            IServiceScopeFactory scopeFactory,
+            IAudiobookOperationCoordinator audiobookOperationCoordinator,
+            IMoveQueueService moveQueueService,
             ILogger<LibraryMetadataRescanWorkflow> logger,
             IMemoryCache? memoryCache = null,
             IAsinLookupService? asinLookupService = null)
         {
-            _repo = repo;
             _metadataService = metadataService;
             _metadataConverters = metadataConverters;
             _imageCacheService = imageCacheService;
+            _scopeFactory = scopeFactory;
+            _audiobookOperationCoordinator = audiobookOperationCoordinator ?? throw new ArgumentNullException(nameof(audiobookOperationCoordinator));
+            _moveQueueService = moveQueueService ?? throw new ArgumentNullException(nameof(moveQueueService));
             _logger = logger;
             _memoryCache = memoryCache;
             _asinLookupService = asinLookupService;
@@ -57,7 +64,13 @@ namespace Listenarr.Api.Features.Library
 
         public async Task<IActionResult> RescanAsync(int id, HttpContext httpContext)
         {
-            var audiobook = await _repo.GetByIdAsync(id);
+            var cancellationToken = httpContext.RequestAborted;
+            cancellationToken.ThrowIfCancellationRequested();
+
+            using var preflightScope = _scopeFactory.CreateScope();
+            var preflightRepository = preflightScope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
+            var audiobook = await preflightRepository.GetByIdAsync(id);
+            cancellationToken.ThrowIfCancellationRequested();
 
             if (audiobook == null)
             {
@@ -86,6 +99,7 @@ namespace Listenarr.Api.Features.Library
                 };
             }
 
+            var expectedMetadataState = CreateMetadataStateFingerprint(audiobook);
             var effectiveIdentifiers = AudiobookIdentifierMapper.GetEffectiveIdentifiers(audiobook);
             var asinIdentifiers = effectiveIdentifiers
                 .Where(i => i.Type == AudiobookExternalIdentifierType.Asin)
@@ -149,10 +163,11 @@ namespace Listenarr.Api.Features.Library
 
                     asinLookupAttempts++;
 
-                    object? rawResult;
+                    AudiobookMetadataEnvelope? metadataEnvelope;
                     try
                     {
-                        rawResult = await _metadataService.GetMetadataAsync(normalizedAsin, regionValue, cache: false);
+                        metadataEnvelope = await _metadataService.GetMetadataAsync(normalizedAsin, regionValue, cache: false);
+                        cancellationToken.ThrowIfCancellationRequested();
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                     {
@@ -166,15 +181,16 @@ namespace Listenarr.Api.Features.Library
                         continue;
                     }
 
-                    if (!TryExtractMetadataLookupResult(rawResult, out var extractedMetadata, out var extractedSource) ||
-                        extractedMetadata == null)
+                    if (metadataEnvelope == null)
                     {
                         continue;
                     }
 
-                    providerMetadata = extractedMetadata;
-                    providerSource = extractedSource;
-                    resolvedAsin = string.IsNullOrWhiteSpace(extractedMetadata.Asin) ? normalizedAsin : extractedMetadata.Asin;
+                    providerMetadata = metadataEnvelope.Metadata;
+                    providerSource = metadataEnvelope.Source;
+                    resolvedAsin = string.IsNullOrWhiteSpace(metadataEnvelope.Metadata.Asin)
+                        ? normalizedAsin
+                        : metadataEnvelope.Metadata.Asin;
                     resolvedRegion = regionValue;
                     return true;
                 }
@@ -230,6 +246,7 @@ namespace Listenarr.Api.Features.Library
 
                         isbnConversionAttempts++;
                         var (success, asinFromIsbn, _) = await _asinLookupService.GetAsinFromIsbnAsync(isbnValue);
+                        cancellationToken.ThrowIfCancellationRequested();
                         if (!success || string.IsNullOrWhiteSpace(asinFromIsbn))
                         {
                             continue;
@@ -275,30 +292,57 @@ namespace Listenarr.Api.Features.Library
                 });
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             var convertedMetadata = _metadataConverters.ConvertAudibleToMetadata(
                 providerMetadata,
                 resolvedAsin,
                 string.IsNullOrWhiteSpace(providerSource) ? "Audible" : providerSource!);
 
-            var legacyIdentifierFieldsTouched = ApplyMetadataRescanPatch(audiobook, convertedMetadata);
-
-            if (!string.IsNullOrWhiteSpace(convertedMetadata.ImageUrl))
+            MetadataRescanApplyResult applyResult;
+            try
             {
-                audiobook.ImageUrl = await MoveMetadataImageToLibraryStorageAsync(audiobook, convertedMetadata.ImageUrl)
-                    ?? convertedMetadata.ImageUrl;
+                applyResult = await _audiobookOperationCoordinator.ExecuteExclusiveAsync(
+                    id,
+                    async token =>
+                    {
+                        await _moveQueueService.EnsureFilesystemMutationAllowedAsync(id, token);
+                        token.ThrowIfCancellationRequested();
+                        return await ApplyMetadataRescanResultAsync(
+                            id,
+                            convertedMetadata,
+                            resolvedRegion,
+                            expectedMetadataState,
+                            token);
+                    },
+                    cancellationToken);
+            }
+            catch (ApplicationConflictException exception)
+            {
+                return new ConflictObjectResult(new
+                {
+                    message = exception.SafeDetail,
+                    code = exception.Code
+                });
+            }
+            if (applyResult.Status == MetadataRescanApplyStatus.NotFound)
+            {
+                return new NotFoundObjectResult(new { message = "Audiobook not found" });
             }
 
-            if (legacyIdentifierFieldsTouched)
+            if (applyResult.Status == MetadataRescanApplyStatus.Conflict)
             {
-                AudiobookIdentifierMapper.SyncImportedIdentifiersFromLegacyFields(audiobook);
+                return new ConflictObjectResult(new
+                {
+                    message = "The audiobook metadata changed during the rescan. Refresh and try again.",
+                    code = "audiobook_metadata_changed"
+                });
             }
 
-            await _repo.UpdateAsync(audiobook);
-
+            var updatedAudiobook = applyResult.Audiobook!;
             _logger.LogInformation(
                 "Metadata rescan updated audiobook {AudiobookId} ({Title}) using {Source} ASIN {Asin} region {Region}",
-                audiobook.Id,
-                audiobook.Title,
+                updatedAudiobook.Id,
+                updatedAudiobook.Title,
                 providerSource ?? "unknown",
                 resolvedAsin,
                 resolvedRegion ?? "us");
@@ -306,7 +350,7 @@ namespace Listenarr.Api.Features.Library
             return new OkObjectResult(new
             {
                 message = "Metadata rescanned successfully",
-                audiobookId = audiobook.Id,
+                audiobookId = updatedAudiobook.Id,
                 source = providerSource,
                 asin = resolvedAsin,
                 region = resolvedRegion

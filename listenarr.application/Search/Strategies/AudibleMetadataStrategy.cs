@@ -51,10 +51,11 @@ namespace Listenarr.Application.Search.Strategies
                 baseUrl.Contains("api.audible", StringComparison.OrdinalIgnoreCase);
         }
 
-        public async Task<AudibleBookMetadata?> FetchMetadataAsync(string asin, ApiConfiguration source, string? originalSource)
+        public async Task<AudibleBookMetadata?> FetchMetadataAsync(string asin, ApiConfiguration source, string? originalSource, string? region = null)
         {
             _logger.LogDebug("Calling Audible metadata service for ASIN {Asin}", asin);
-            var audibleData = await _audibleService.GetBookMetadataAsync(asin, "us", true);
+            var safeRegion = AudiobookIdentifierNormalizer.NormalizeRegion(region) ?? "us";
+            var audibleData = await _audibleService.GetBookMetadataAsync(asin, safeRegion, true);
 
             if (audibleData != null)
             {
@@ -75,7 +76,7 @@ namespace Listenarr.Application.Search.Strategies
                 _logger.LogInformation(
                     "Audible metadata returned null for ASIN {Asin} (cache=true); retrying without cache",
                     asin);
-                var audibleRetry = await _audibleService.GetBookMetadataAsync(asin, "us", false);
+                var audibleRetry = await _audibleService.GetBookMetadataAsync(asin, safeRegion, false);
                 if (audibleRetry != null)
                 {
                     _logger.LogInformation(

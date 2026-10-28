@@ -1,12 +1,15 @@
-
 namespace Listenarr.Tests.Builders
 {
     public class AudibleSearchResultBuilder
     {
         private readonly AudibleSearchResult _result = new()
         {
+            Asin = "B0TESTASIN",
+            Title = "Test Audiobook",
             Authors = [],
-            Series = []
+            Series = [],
+            Language = "english",
+            BookFormat = "unabridged"
         };
 
         public AudibleSearchResultBuilder WithAsin(string value)
@@ -28,7 +31,7 @@ namespace Listenarr.Tests.Builders
             return this;
         }
 
-        public AudibleSearchResultBuilder WithLanguage(string value)
+        public AudibleSearchResultBuilder WithLanguage(string? value)
         {
             _result.Language = value;
             return this;

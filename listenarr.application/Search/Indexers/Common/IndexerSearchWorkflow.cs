@@ -63,8 +63,8 @@ public class IndexerSearchWorkflow
 
         if (!indexers.Any())
         {
-            _logger.LogWarning("No indexers configured, returning mock results for query: {Query}", query);
-            return GenerateMockIndexerResults(query);
+            _logger.LogWarning("No indexers configured or enabled; search returned no results for query: {Query}", query);
+            return results;
         }
 
         var searchTasks = indexers.Select(async indexer =>
@@ -78,7 +78,16 @@ public class IndexerSearchWorkflow
                 _logger.LogInformation("Found {Count} results from indexer {Name}", indexerResults.Count, indexer.Name);
                 return indexerResults;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            catch (OperationCanceledException ex)
+            {
+                // No workflow-level cancellation token flows into this search, so an
+                // OperationCanceledException here is an HttpClient per-request timeout
+                // (TaskCanceledException derives from OperationCanceledException). Contain it
+                // to this indexer so a single slow indexer can't abort every other one's results.
+                _logger.LogWarning(ex, "Timed out searching indexer {Name} for query: {Query}", indexer.Name, query);
+                return new List<IndexerSearchResult>();
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 _logger.LogError(ex, "Error searching indexer {Name} for query: {Query}", indexer.Name, query);
                 return new List<IndexerSearchResult>();
@@ -206,6 +215,16 @@ public class IndexerSearchWorkflow
         try
         {
             query = IndexerQuerySanitizer.Sanitize(query);
+            if (string.IsNullOrWhiteSpace(query))
+            {
+                // A query that sanitizes to nothing (dash-only or punctuation-only input) must
+                // never be dispatched: some indexers treat an empty query as "browse everything"
+                // and would return unrelated releases that could then be grabbed. Fail closed.
+                _logger.LogWarning(
+                    "Skipping indexer {Name} ({Implementation}): the search query was empty after sanitization",
+                    indexer.Name, indexer.Implementation);
+                return new List<IndexerSearchResult>();
+            }
             _logger.LogInformation("Searching indexer {Name} ({Implementation}) for: {Query}", indexer.Name, indexer.Implementation, query);
 
             var fallbackName = GetFallbackIndexerName(indexer);
@@ -253,62 +272,5 @@ public class IndexerSearchWorkflow
         {
             return "Indexer";
         }
-    }
-
-    private List<IndexerSearchResult> GenerateMockIndexerResults(string query)
-    {
-        return GenerateMockIndexerResults(query, "Mock Indexer", "Torrent");
-    }
-
-    private List<IndexerSearchResult> GenerateMockIndexerResults(string query, string indexerName, string indexerType)
-    {
-        var random = new Random();
-        var results = new List<IndexerSearchResult>();
-        var isUsenet = indexerType.Equals("Usenet", StringComparison.OrdinalIgnoreCase);
-
-        _logger.LogInformation("Generating {Count} mock {Type} results for indexer {IndexerName}", 5, indexerType, indexerName);
-
-        for (int i = 0; i < 5; i++)
-        {
-            var result = new IndexerSearchResult
-            {
-                Id = Guid.NewGuid().ToString(),
-                Title = $"{query} - Quality {i + 1}",
-                Artist = "Various Authors",
-                Album = $"{query} Series",
-                Category = "Audiobook",
-                Size = random.Next(200_000_000, 1_500_000_000),
-                Seeders = isUsenet ? 0 : random.Next(5, 100),
-                Leechers = isUsenet ? 0 : random.Next(0, 20),
-                Source = indexerName,
-                PublishedDate = DateTime.UtcNow.AddDays(-random.Next(1, 365)).ToString("o"),
-                Quality = i switch
-                {
-                    0 => "MP3 64kbps",
-                    1 => "MP3 128kbps",
-                    2 => "MP3 192kbps",
-                    3 => "M4B 128kbps",
-                    _ => "FLAC"
-                },
-                Format = i >= 3 ? "M4B" : "MP3",
-                Language = "English"
-            };
-
-            if (isUsenet)
-            {
-                result.NzbUrl = $"https://{indexerName.ToLowerInvariant()}.example.com/api/nzb/{Guid.NewGuid():N}";
-                result.MagnetLink = string.Empty;
-                result.TorrentUrl = string.Empty;
-            }
-            else
-            {
-                result.MagnetLink = $"magnet:?xt=urn:btih:{Guid.NewGuid():N}";
-                result.NzbUrl = string.Empty;
-            }
-
-            results.Add(result);
-        }
-
-        return results;
     }
 }

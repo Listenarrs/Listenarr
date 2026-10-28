@@ -8,17 +8,17 @@
     "start": "node index.js"
   },
   "engines": {
-    "node": ">=24"
+    "node": "^26.12.1"
   },
   "dependencies": {
     "@microsoft/signalr": "^10.0.0",
     "discord.js": "^14.26.4",
     "fetch-cookie": "^3.2.0",
     "node-fetch": "^3.3.2",
-    "sanitize-html": "^2.17.4",
+    "sanitize-html": "^2.18.0",
     "tough-cookie": "^6.0.1"
   },
   "overrides": {
-    "undici": "^6.24.1"
+    "undici": "^6.29.1"
   }
 }

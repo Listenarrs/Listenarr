@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { useConfigurationStore } from '@/stores/configuration'
@@ -38,6 +38,54 @@ describe('NotificationsTab', () => {
 
     expect(wrapper.find('.loading-state').exists()).toBe(true)
     expect(wrapper.find('.section-header .small-inline-spinner').exists()).toBe(true)
+  })
+
+  it('uses the latest committed settings version across consecutive webhook saves', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const cfg = useConfigurationStore()
+    cfg.isLoading = false
+    const initialSettings = { version: 3, webhookUrl: '', webhooks: [] }
+    cfg.applicationSettings = initialSettings as never
+    const submittedVersions: number[] = []
+    cfg.saveApplicationSettings = vi.fn(async (payload) => {
+      submittedVersions.push(payload.version)
+      const saved = { ...payload, version: payload.version + 1 }
+      cfg.applicationSettings = saved
+      return saved
+    })
+
+    const NotificationsTab = (await import('@/views/settings/NotificationsTab.vue')).default
+    const wrapper = mount(NotificationsTab, {
+      props: { settings: initialSettings as never },
+      global: { plugins: [pinia] },
+    })
+    const vm = wrapper.vm as unknown as { openWebhookForm: () => void }
+
+    async function addWebhook(name: string, url: string, expectedSaveCount: number) {
+      vm.openWebhookForm()
+      await wrapper.vm.$nextTick()
+      await wrapper.find('#webhook-name').setValue(name)
+      await wrapper.find('#webhook-type').setValue('NTFY')
+      await wrapper.vm.$nextTick()
+      await wrapper.find('#webhook-url').setValue(url)
+      const trigger = wrapper.find('.webhook-triggers input[type="checkbox"]')
+      expect(trigger.exists()).toBe(true)
+      await trigger.setValue(true)
+      await wrapper.find('.webhook-modal form').trigger('submit')
+      await vi.waitFor(() => {
+        expect(submittedVersions).toHaveLength(expectedSaveCount)
+      })
+    }
+
+    await addWebhook('First webhook', 'https://ntfy.example/first', 1)
+    await addWebhook('Second webhook', 'https://ntfy.example/second', 2)
+
+    expect(submittedVersions).toEqual([3, 4])
+    const updates = wrapper.emitted('update:settings') ?? []
+    expect(updates).toHaveLength(2)
+    expect((updates[1]?.[0] as { version: number }).version).toBe(5)
   })
 
   describe('webhook URL validation', () => {

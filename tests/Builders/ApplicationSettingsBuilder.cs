@@ -18,6 +18,12 @@ namespace Listenarr.Tests.Builders
             return this;
         }
 
+        public ApplicationSettingsBuilder WithHardlinkFileOnCompleted()
+        {
+            _applicationSettings.CompletedFileAction = FileAction.HardlinkCopy;
+            return this;
+        }
+
         public ApplicationSettingsBuilder WithoutFileAction()
         {
             _applicationSettings.CompletedFileAction = FileAction.None;
@@ -87,6 +93,12 @@ namespace Listenarr.Tests.Builders
         public ApplicationSettingsBuilder WithFolderNamingPattern(string value)
         {
             _applicationSettings.FolderNamingPattern = value;
+            return this;
+        }
+
+        public ApplicationSettingsBuilder WithDefaultSearchRegion(string value)
+        {
+            _applicationSettings.DefaultSearchRegion = value;
             return this;
         }
 

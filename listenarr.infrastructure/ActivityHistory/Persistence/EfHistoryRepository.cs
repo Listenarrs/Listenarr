@@ -80,6 +80,36 @@ namespace Listenarr.Infrastructure.ActivityHistory.Persistence
                 .ToListAsync(ct);
         }
 
+        public async Task<History?> GetSucceededImportedByDownloadIdAsync(string downloadId, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(downloadId)) return null;
+
+            var normalizedId = downloadId.ToUpperInvariant();
+            return await _db.History
+                .AsNoTracking()
+                .Where(h =>
+                    h.DownloadId != null &&
+                    h.DownloadId.ToUpper() == normalizedId &&
+                    h.EventType == HistoryEvents.Imported &&
+                    h.Outcome == HistoryOutcome.Succeeded)
+                .OrderByDescending(h => h.Timestamp)
+                .ThenByDescending(h => h.Id)
+                .FirstOrDefaultAsync(ct);
+        }
+
+        public async Task<DateTime?> GetOldestTimestampByDownloadIdAsync(string downloadId, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(downloadId)) return null;
+
+            var normalizedId = downloadId.ToUpperInvariant();
+            return await _db.History
+                .AsNoTracking()
+                .Where(h => h.DownloadId != null && h.DownloadId.ToUpper() == normalizedId)
+                .OrderBy(h => h.Timestamp)
+                .Select(h => (DateTime?)h.Timestamp)
+                .FirstOrDefaultAsync(ct);
+        }
+
         public async Task<List<History>> GetPagedAsync(int limit, int offset, CancellationToken ct = default)
         {
             return await _db.History
@@ -144,10 +174,43 @@ namespace Listenarr.Infrastructure.ActivityHistory.Persistence
             return entry;
         }
 
+        public async Task UpdateAsync(History entry, CancellationToken ct = default)
+        {
+            _db.History.Update(entry);
+            await _db.SaveChangesAsync(ct);
+        }
+
+        public async Task MarkNotificationSentAsync(int id, CancellationToken ct = default)
+        {
+            if (_db.Database.IsRelational())
+            {
+                await _db.History
+                    .Where(history => history.Id == id)
+                    .ExecuteUpdateAsync(
+                        updates => updates.SetProperty(
+                            history => history.NotificationSent,
+                            true),
+                        ct);
+                return;
+            }
+
+            var history = await _db.History.SingleOrDefaultAsync(
+                candidate => candidate.Id == id,
+                ct);
+            if (history == null)
+            {
+                return;
+            }
+
+            history.NotificationSent = true;
+            await _db.SaveChangesAsync(ct);
+        }
+
         public async Task<bool> DeleteAsync(int id, CancellationToken ct = default)
         {
             var entry = await _db.History.FindAsync(new object[] { id }, ct);
             if (entry == null) return false;
+
             _db.History.Remove(entry);
             await _db.SaveChangesAsync(ct);
             return true;
@@ -155,16 +218,20 @@ namespace Listenarr.Infrastructure.ActivityHistory.Persistence
 
         public async Task DeleteAllAsync(CancellationToken ct = default)
         {
-            _db.History.RemoveRange(_db.History);
+            var deletable = await _db.History.ToListAsync(ct);
+            _db.History.RemoveRange(deletable);
             await _db.SaveChangesAsync(ct);
         }
 
         public async Task<int> DeleteOlderThanAsync(DateTime cutoff, CancellationToken ct = default)
         {
-            var old = await _db.History.Where(h => h.Timestamp < cutoff).ToListAsync(ct);
+            var old = await _db.History
+                .Where(history => history.Timestamp < cutoff)
+                .ToListAsync(ct);
             _db.History.RemoveRange(old);
             await _db.SaveChangesAsync(ct);
             return old.Count;
         }
+
     }
 }

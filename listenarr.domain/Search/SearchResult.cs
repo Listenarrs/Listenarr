@@ -20,6 +20,18 @@ using System.Text.Json.Serialization;
 
 namespace Listenarr.Domain.Search
 {
+    public enum DirectDownloadArtifactPackaging
+    {
+        File,
+        Archive
+    }
+
+    public sealed record DirectDownloadArtifactDescriptor(
+        string Url,
+        string FileName,
+        long ExpectedSize,
+        DirectDownloadArtifactPackaging Packaging);
+
     /// <summary>
     /// Base class for all search results with common properties
     /// </summary>
@@ -72,6 +84,8 @@ namespace Listenarr.Domain.Search
         public string? Language { get; set; }
         public string? Publisher { get; set; }
         public string? Narrator { get; set; }
+        [JsonIgnore]
+        public IReadOnlyList<DirectDownloadArtifactDescriptor> DirectDownloadArtifacts { get; set; } = [];
     }
 
     /// <summary>
@@ -159,6 +173,8 @@ namespace Listenarr.Domain.Search
         // Tracks which metadata API was used to enrich this result (e.g., "Audible", "Audnexus", "Audible (Scraped)")
         public string? MetadataSource { get; set; }
         public string? Subtitles { get; set; }
+        [JsonIgnore]
+        public IReadOnlyList<DirectDownloadArtifactDescriptor> DirectDownloadArtifacts { get; set; } = [];
     }
 
     public class SearchAndDownloadResult
@@ -318,7 +334,8 @@ namespace Listenarr.Domain.Search
                 Files = result.Files,
                 // Copy indexer metadata for MAM server-side downloads
                 IndexerId = result.IndexerId,
-                IndexerImplementation = result.IndexerImplementation
+                IndexerImplementation = result.IndexerImplementation,
+                DirectDownloadArtifacts = result.DirectDownloadArtifacts
             };
         }
 
@@ -348,7 +365,8 @@ namespace Listenarr.Domain.Search
                 DownloadReference = result.DownloadReference,
                 Grabs = result.Grabs,
                 Files = result.Files,
-                TorrentFileName = result.TorrentFileName
+                TorrentFileName = result.TorrentFileName,
+                DirectDownloadArtifacts = result.DirectDownloadArtifacts
             };
         }
 

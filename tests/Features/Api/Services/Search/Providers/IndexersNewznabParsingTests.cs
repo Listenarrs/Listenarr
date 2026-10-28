@@ -358,8 +358,13 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
             });
 
             using var httpClient = new HttpClient(handler);
+            var configurationService = new Mock<IConfigurationService>();
+            configurationService
+                .Setup(service => service.GetApplicationSettingsAsync())
+                .ReturnsAsync(new ApplicationSettings { ExtractArchives = false });
             var provider = new InternetArchiveSearchProvider(
                 httpClient,
+                configurationService.Object,
                 NullLogger<InternetArchiveSearchProvider>.Instance);
 
             var results = await provider.SearchAsync(indexer, "Artemis");

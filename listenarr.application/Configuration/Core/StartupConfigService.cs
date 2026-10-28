@@ -102,7 +102,7 @@ namespace Listenarr.Application.Configuration.Core
                 // If the content root equals the current AppContext base directory
                 // (common in unit tests) prefer the local content-root config and
                 // skip ancestor probing to keep tests isolated and deterministic.
-                if (string.Equals(contentRoot, AppContext.BaseDirectory, StringComparison.OrdinalIgnoreCase))
+                if (FileUtils.AreFilesystemPathsEquivalentForCurrentOs(contentRoot, AppContext.BaseDirectory))
                 {
                     _configPath = Path.Join(contentRoot, "config", "config.json");
                 }

@@ -16,11 +16,24 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Domain.Common;
+
 namespace Listenarr.Application.Audiobooks.Contracts.Repositories
 {
+    public sealed record AudiobookPathReferenceSnapshot(
+        int AudiobookId,
+        string? BasePath,
+        string? FilePath);
+
     public interface IAudiobookRepository
     {
         Task<List<Audiobook>> GetAllAsync();
+        Task<AudiobookPathReferenceSnapshot?> GetPathReferenceSnapshotAsync(
+            int audiobookId,
+            CancellationToken ct = default);
+        Task<List<AudiobookPathReferenceSnapshot>> GetOtherPathReferenceSnapshotsAsync(
+            int audiobookId,
+            CancellationToken ct = default);
         Task<List<Audiobook>> GetLibraryAsync();
         Task<Dictionary<int, List<AudiobookSeriesMembership>>> GetAllSeriesMembershipsGroupedByAudiobookIdAsync(CancellationToken ct = default);
         Task<List<Audiobook>> GetByIdsWithFilesAsync(IEnumerable<int> ids, CancellationToken ct = default);
@@ -29,6 +42,20 @@ namespace Listenarr.Application.Audiobooks.Contracts.Repositories
         Task<Audiobook?> GetByAsinAsync(string asin);
         Task<Audiobook?> GetByIsbnAsync(string isbn);
         Task<Audiobook?> GetByIdAsync(int id);
+        Task<Audiobook?> GetByIdSnapshotAsync(int id, CancellationToken ct = default);
+        Task<Audiobook?> GetForUpdateSnapshotAsync(int id, CancellationToken ct = default);
+        Task<Audiobook?> GetForScanAsync(int id, CancellationToken ct = default);
+        Task<Audiobook?> GetForScanSnapshotAsync(int id, CancellationToken ct = default);
+        Task<bool> TryUpdateBasePathAsync(
+            int audiobookId,
+            string expectedBasePath,
+            string newBasePath,
+            CancellationToken ct = default);
+        Task<bool> TryUpdateImageUrlAsync(
+            int audiobookId,
+            string? expectedImageUrl,
+            string? newImageUrl,
+            CancellationToken ct = default) => Task.FromResult(false);
         Task<string?> GetAuthorAsinByNameAsync(string name);
         Task<AuthorCacheEntry?> GetCachedAuthorByNameAsync(string name, string region);
         Task<AuthorCacheEntry?> GetCachedAuthorByAsinAsync(string asin, string region);
@@ -38,9 +65,25 @@ namespace Listenarr.Application.Audiobooks.Contracts.Repositories
         Task<SeriesCacheEntry> UpsertCachedSeriesAsync(SeriesCacheEntry seriesCacheEntry);
         Task<Audiobook> AddAsync(Audiobook audiobook);
         Task<bool> UpdateAsync(Audiobook audiobook);
-        Task<bool> DeleteAsync(Audiobook audiobook);
+        Task<bool> RewritePathReferencesAsync(
+            int audiobookId,
+            string? sourceBasePath,
+            string targetBasePath,
+            FileSystemPathSemantics sourceSemantics,
+            FileSystemPathSemantics targetSemantics,
+            CancellationToken ct = default,
+            FileSystemCaseSensitivityMode targetCaseSensitivityMode = FileSystemCaseSensitivityMode.Auto);
+        Task<bool> RewriteMovedPathReferencesAsync(
+            int audiobookId,
+            string? sourceBasePath,
+            string targetBasePath,
+            FileSystemPathSemantics sourceSemantics,
+            FileSystemPathSemantics targetSemantics,
+            IReadOnlyDictionary<string, string> targetPhysicalObjectIdentities,
+            DateTime targetPhysicalIdentityObservedAtUtc,
+            CancellationToken ct = default,
+            FileSystemCaseSensitivityMode targetCaseSensitivityMode = FileSystemCaseSensitivityMode.Auto);
         Task<bool> DeleteByIdAsync(int id);
-        Task<int> DeleteBulkAsync(List<int> ids);
         Task SaveChangesAsync(CancellationToken ct = default);
         Task<bool> UpdateWithIdentifierReplaceAsync(Audiobook audiobook, List<AudiobookExternalIdentifier> newIdentifiers, CancellationToken ct = default);
     }

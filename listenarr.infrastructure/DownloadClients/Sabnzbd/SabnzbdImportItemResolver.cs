@@ -33,7 +33,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
         {
             var result = item.Clone();
 
-            if (!string.IsNullOrEmpty(result.OutputPath))
+            if (!string.IsNullOrWhiteSpace(result.OutputPath))
             {
                 var localPath = result.OutputPath;
                 if (SabnzbdImportPathResolver.IsExistingLocalPath(localPath))
@@ -43,8 +43,10 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                 }
             }
 
+            // SABnzbd's active queue path can be absent or stale. The completed history
+            // record's storage field is the authoritative import location once available.
             var storage = await ResolveHistoryStorageAsync(client, item.DownloadId, ct);
-            if (!string.IsNullOrEmpty(storage))
+            if (!string.IsNullOrWhiteSpace(storage))
             {
                 result.OutputPath = storage;
                 logger.LogDebug(
@@ -63,7 +65,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
         {
             var result = queueItem.Clone();
 
-            if (!string.IsNullOrEmpty(result.ContentPath))
+            if (!string.IsNullOrWhiteSpace(result.ContentPath))
             {
                 var localPath = result.ContentPath;
                 if (SabnzbdImportPathResolver.IsExistingLocalPath(localPath))
@@ -73,8 +75,10 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                 }
             }
 
+            // Prefer SABnzbd history storage over a guessed or missing queue ContentPath.
+            // This keeps active queue telemetry separate from import path resolution.
             var storage = await ResolveHistoryStorageAsync(client, queueItem.Id, ct);
-            if (!string.IsNullOrEmpty(storage))
+            if (!string.IsNullOrWhiteSpace(storage))
             {
                 result.ContentPath = storage;
                 logger.LogDebug($"Resolved SABnzbd content path for {queueItem.Id}: {result.ContentPath}");
@@ -132,7 +136,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                     if (!string.Equals(slotNzoId, nzoId, StringComparison.OrdinalIgnoreCase)) continue;
 
                     var storage = SabnzbdImportPathResolver.GetStoragePath(slot);
-                    if (string.IsNullOrEmpty(storage))
+                    if (string.IsNullOrWhiteSpace(storage))
                     {
                         logger.LogWarning("No storage path found for SABnzbd download {NzoId}", nzoId);
                         return null;

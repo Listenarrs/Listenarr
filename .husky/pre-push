@@ -6,6 +6,9 @@ if ! command -v node >/dev/null 2>&1 && [ -d "/c/Program Files/nodejs" ]; then
   export PATH="/c/Program Files/nodejs:$PATH"
 fi
 
+echo "Checking repository path safety..."
+node scripts/validate-repository-paths.mjs
+
 echo "Syncing version..."
 node scripts/sync-fe-version-from-csproj.mjs
 
