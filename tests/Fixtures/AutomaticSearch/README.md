@@ -42,3 +42,50 @@ dotnet test tests/Listenarr.Tests.csproj -c Release -p:SkipFrontendBuild=true --
 No schema migration, title allowlist, new catalogue request, or change to explicit
 manual download authorization is required. The existing `SearchResult.Score`
 remains the quality score; identity and reasons are separate diagnostics.
+
+The V2 release interpreter keeps source offsets and assigns surrounding text to
+author, series, series position, narrator, technical metadata, or group roles.
+Scene punctuation is interpreted in a separate comparison view. Complete title
+and author evidence is still required. Known series positions must agree with
+the library, and unlabeled scene narrators require a matching library narrator.
+Unknown annotations and groups defer; they are not arbitrary ignorable text.
+Narrator and series membership changes invalidate the assessment fingerprint.
+Parsing has input, reference-count, operation, and cancellation limits.
+
+`historical-releases.json` is the anonymized 498-case corpus supplied for PR #591:
+https://gist.github.com/kevinheneveld/f158b2ee8a7e7a4def79321a8c7b8c94
+Revision: `1d87d89a6b77057d25dea7d2791e5b61b3f60ff8`.
+SHA-256: `3896480cf1f002768268dceeef7983e76b7a528bad2be816d2fce5f714a86dfa`.
+The original outcome labels include manual grabs and non-identity failures; they
+are not ground truth. `historical-adjudications.json` explicitly records 453
+reviewed policy expectations, including the author's three wrong-book
+controls and the correct Fires of December release whose unpacking failed.
+These expectations do not establish the contents of downloaded audio.
+
+The follow-up review classifies all 403 cases deferred by the first V2 candidate
+and expands the original 53-case adjudication sidecar. Deferred
+does not mean wrong audio: many cases lack credited authors, complete reference
+aliases, series facts, or narrator facts. Anchored whitespace-separated credits
+are supported only for complete known names, and technical/edition words cannot
+be promoted to author credits. An explicit complete subtitle such as
+`The Expanse, Book 3.5` supplies a named series/position reference; vague subtitles
+and release-derived guesses do not. Conflicting structured references defer.
+The raw corpus is unchanged. Supplementary Unicode letters remain word characters
+at title boundaries. Novel new title/author combinations are exercised separately;
+the synthetic challenge exposed a boundary defect and is now a regression set,
+not an untouched external holdout.
+
+V3 preserves the explicit title/subtitle relationship and binds complete fields
+across declared presentation joins. Credit cues are parsed in the comparison view
+with name ranges mapped back to source text. Known subtitle text cannot also be
+reused as an author credit, including across normalized views. Case 88's earlier
+manual expectation was corrected through policy review; the initial green test
+did not establish that deferral was necessary. No other historical expectation
+was changed for this fix, and no import outcome supplies an identity label.
+
+`historical-partitions.json` groups normalized work titles into development and
+holdout partitions. Baseline and technical-layout observations were already
+available before this partition was recorded; this is a regression split, not
+an untouched external evaluation. Historical replay uses only the supplied
+metadata. Separate synthetic tests exercise additional library series/narrator
+metadata and ensure missing or conflicting facts continue to defer.

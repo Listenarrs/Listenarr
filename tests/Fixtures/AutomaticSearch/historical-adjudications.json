@@ -1,0 +1,2724 @@
+{
+  "corpusSha256": "3896480cf1f002768268dceeef7983e76b7a528bad2be816d2fce5f714a86dfa",
+  "note": "Identity assessment only. No audio content, automatic/manual origin, or quality eligibility inferred from outcome. Pending cases are omitted, not treated as negatives. Deferred-case classifications are policy expectations, not claims about downloaded audio. Anchored whitespace credits exclude edition/technical words.",
+  "cases": [
+    {
+      "index": 0,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: missing_author_evidence. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 1,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 2,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 3,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 4,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 5,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 6,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 7,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and author; an explicit complete library subtitle supplies the matching named series and position."
+    },
+    {
+      "index": 8,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and author; an explicit complete library subtitle supplies the matching named series and position."
+    },
+    {
+      "index": 9,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 10,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 11,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 12,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 13,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 14,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of the original release, complete reference title/author and applicable role layout; not inferred from outcome.",
+      "rationale": "Complete textual work/author evidence with a supported terminal group, dotted scene presentation, coauthor list, explicit author label or explicit narrator clause. No extra work or unresolved name is present."
+    },
+    {
+      "index": 15,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of the original release, complete reference title/author and applicable role layout; not inferred from outcome.",
+      "rationale": "Complete textual work/author evidence with a supported terminal group, dotted scene presentation, coauthor list, explicit author label or explicit narrator clause. No extra work or unresolved name is present."
+    },
+    {
+      "index": 16,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 17,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 18,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 19,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 20,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: missing_author_evidence. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 21,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: missing_author_evidence. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 22,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: missing_author_evidence. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 23,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: missing_author_evidence. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 24,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: missing_author_evidence. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 25,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 26,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 28,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 29,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 30,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 31,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 32,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 33,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 34,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 35,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 36,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 37,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 38,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 39,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 40,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 41,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 42,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 43,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 44,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 45,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of the original release, complete reference title/author and applicable role layout; not inferred from outcome.",
+      "rationale": "Complete textual work/author evidence with a supported terminal group, dotted scene presentation, coauthor list, explicit author label or explicit narrator clause. No extra work or unresolved name is present."
+    },
+    {
+      "index": 46,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 47,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and author; an explicit complete library subtitle supplies the matching named series and position."
+    },
+    {
+      "index": 48,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 49,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and author; an explicit complete library subtitle supplies the matching named series and position."
+    },
+    {
+      "index": 50,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 51,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 52,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 53,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 54,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 55,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 56,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 57,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 58,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 59,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 60,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 61,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 62,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 63,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 64,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 65,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 66,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 67,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 68,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 69,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 70,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 71,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 72,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 73,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 74,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 75,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 76,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 77,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 78,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 79,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 80,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 81,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 83,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 84,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unverified_name_or_credit. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 85,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 86,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 87,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 88,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete known primary title, explicitly stored subtitle, and explicit complete author credit in a scene layout. Presentation joins and dotted by cues must not turn those reference-backed fields into unknown text. Corrected through policy audit, not import outcome."
+    },
+    {
+      "index": 89,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 90,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 91,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 92,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unverified_name_or_credit. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 93,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 94,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 95,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 96,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 97,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 98,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 99,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of the original release, complete reference title/author and applicable role layout; not inferred from outcome.",
+      "rationale": "Complete textual work/author evidence with a supported terminal group, dotted scene presentation, coauthor list, explicit author label or explicit narrator clause. No extra work or unresolved name is present."
+    },
+    {
+      "index": 100,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: missing_author_evidence. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 101,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 102,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 103,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 104,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 105,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and author; an explicit complete library subtitle supplies the matching named series and position."
+    },
+    {
+      "index": 106,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and author; an explicit complete library subtitle supplies the matching named series and position."
+    },
+    {
+      "index": 107,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of the original release, complete reference title/author and applicable role layout; not inferred from outcome.",
+      "rationale": "Complete textual work/author evidence with a supported terminal group, dotted scene presentation, coauthor list, explicit author label or explicit narrator clause. No extra work or unresolved name is present."
+    },
+    {
+      "index": 108,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 109,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 114,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 115,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 116,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 117,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: missing_author_evidence. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 118,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 119,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 120,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 121,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unverified_name_or_credit. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 122,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 123,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 124,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 125,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of the original release, complete reference title/author and applicable role layout; not inferred from outcome.",
+      "rationale": "Complete textual work/author evidence with a supported terminal group, dotted scene presentation, coauthor list, explicit author label or explicit narrator clause. No extra work or unresolved name is present."
+    },
+    {
+      "index": 126,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 127,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unverified_name_or_credit. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 128,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 129,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 130,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 131,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 132,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 133,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 135,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 136,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 137,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 138,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 139,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 140,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 141,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 142,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 143,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 144,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 145,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 146,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 147,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 148,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 149,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 150,
+      "expectedConfirmed": true,
+      "source": "PR author clarification accompanying the corpus.",
+      "rationale": "Author explicitly identified this as the correct book; import failure was unpacking."
+    },
+    {
+      "index": 151,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 152,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 153,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 154,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 155,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 156,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: missing_author_evidence. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 157,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 158,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 159,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 160,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 161,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 162,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 163,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 164,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 165,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 166,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 167,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 168,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 169,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 170,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 171,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 172,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 173,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 174,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 175,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 176,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 177,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unverified_name_or_credit. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 178,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 179,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: missing_author_evidence. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 180,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 181,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 182,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 184,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 185,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 186,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 187,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 189,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 190,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 191,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 192,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 193,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 194,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 195,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 196,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 197,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 198,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 199,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 200,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 201,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 202,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 203,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 204,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 205,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 206,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 207,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 209,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 210,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 211,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 213,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 214,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 215,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 216,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unverified_name_or_credit. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 217,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 218,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of the original release, complete reference title/author and applicable role layout; not inferred from outcome.",
+      "rationale": "Complete textual work/author evidence with a supported terminal group, dotted scene presentation, coauthor list, explicit author label or explicit narrator clause. No extra work or unresolved name is present."
+    },
+    {
+      "index": 219,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and author; an explicit complete library subtitle supplies the matching named series and position."
+    },
+    {
+      "index": 220,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 221,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 222,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 223,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 224,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 225,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 226,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 227,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 228,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 229,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 230,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 231,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 232,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 233,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 234,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: missing_author_evidence. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 235,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 236,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of the original release, complete reference title/author and applicable role layout; not inferred from outcome.",
+      "rationale": "Complete textual work/author evidence with a supported terminal group, dotted scene presentation, coauthor list, explicit author label or explicit narrator clause. No extra work or unresolved name is present."
+    },
+    {
+      "index": 237,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 238,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 241,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 242,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 243,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 244,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 245,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 246,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: missing_author_evidence. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 247,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 249,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 250,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 255,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 257,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 258,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 259,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 260,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: missing_author_evidence. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 261,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 262,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: missing_author_evidence. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 263,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 264,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 265,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 266,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and author; an explicit complete library subtitle supplies the matching named series and position."
+    },
+    {
+      "index": 267,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 268,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 269,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 270,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: missing_author_evidence. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 271,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 272,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 273,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 274,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: missing_author_evidence. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 275,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 276,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 277,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 278,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 279,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 280,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 281,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 282,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 283,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 284,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 285,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 286,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 287,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 288,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: missing_author_evidence. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 289,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 290,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 292,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 293,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 294,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 295,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of the original release, complete reference title/author and applicable role layout; not inferred from outcome.",
+      "rationale": "Complete textual work/author evidence with a supported terminal group, dotted scene presentation, coauthor list, explicit author label or explicit narrator clause. No extra work or unresolved name is present."
+    },
+    {
+      "index": 296,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 297,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 298,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 299,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of the original release, complete reference title/author and applicable role layout; not inferred from outcome.",
+      "rationale": "Complete textual work/author evidence with a supported terminal group, dotted scene presentation, coauthor list, explicit author label or explicit narrator clause. No extra work or unresolved name is present."
+    },
+    {
+      "index": 300,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 301,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 302,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "The existing presentation comparison already preserves all words while treating Ha-Ha as Ha Ha. This is a complete whitespace-delimited title/author case, not a new title alias. Corrected a classification oversight after the assertion failed; not an untouched holdout."
+    },
+    {
+      "index": 303,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 304,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 305,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 306,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 307,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 308,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 309,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 310,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 311,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 312,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 313,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 314,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 315,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 316,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 317,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 318,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 320,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 321,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 322,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 326,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 327,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 329,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 330,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 331,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 332,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 333,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 334,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 339,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 341,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 342,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 343,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 344,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 345,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 346,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 347,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 348,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 349,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of the original release, complete reference title/author and applicable role layout; not inferred from outcome.",
+      "rationale": "Complete textual work/author evidence with a supported terminal group, dotted scene presentation, coauthor list, explicit author label or explicit narrator clause. No extra work or unresolved name is present."
+    },
+    {
+      "index": 350,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 351,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of the original release, complete reference title/author and applicable role layout; not inferred from outcome.",
+      "rationale": "Complete textual work/author evidence with a supported terminal group, dotted scene presentation, coauthor list, explicit author label or explicit narrator clause. No extra work or unresolved name is present."
+    },
+    {
+      "index": 352,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 353,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 354,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 355,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 357,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 358,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 359,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 360,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 361,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 362,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 363,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 364,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 365,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 366,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 367,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 368,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 369,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 370,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 372,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of the original release, complete reference title/author and applicable role layout; not inferred from outcome.",
+      "rationale": "Complete textual work/author evidence with a supported terminal group, dotted scene presentation, coauthor list, explicit author label or explicit narrator clause. No extra work or unresolved name is present."
+    },
+    {
+      "index": 373,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 374,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 376,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 377,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 378,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 379,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 380,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 381,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 382,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 383,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 384,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 385,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 386,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 387,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 389,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 390,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 391,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 392,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 393,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 394,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 395,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 396,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of the original release, complete reference title/author and applicable role layout; not inferred from outcome.",
+      "rationale": "Complete textual work/author evidence with a supported terminal group, dotted scene presentation, coauthor list, explicit author label or explicit narrator clause. No extra work or unresolved name is present."
+    },
+    {
+      "index": 397,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 398,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 399,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 401,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and author; an explicit complete library subtitle supplies the matching named series and position."
+    },
+    {
+      "index": 402,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and author; an explicit complete library subtitle supplies the matching named series and position."
+    },
+    {
+      "index": 403,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 405,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and author; an explicit complete library subtitle supplies the matching named series and position."
+    },
+    {
+      "index": 406,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 407,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 408,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 409,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 410,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: missing_author_evidence. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 411,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 412,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 413,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 416,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 417,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 418,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 419,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 420,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 421,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 422,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 423,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of the original release, complete reference title/author and applicable role layout; not inferred from outcome.",
+      "rationale": "Complete textual work/author evidence with a supported terminal group, dotted scene presentation, coauthor list, explicit author label or explicit narrator clause. No extra work or unresolved name is present."
+    },
+    {
+      "index": 424,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 425,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 426,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 427,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 428,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 429,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 430,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 431,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 432,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and author; an explicit complete library subtitle supplies the matching named series and position."
+    },
+    {
+      "index": 433,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 434,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 435,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 436,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 437,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: missing_author_evidence. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 438,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: missing_author_evidence. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 439,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 440,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 441,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 442,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 443,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of the original release, complete reference title/author and applicable role layout; not inferred from outcome.",
+      "rationale": "Complete textual work/author evidence with a supported terminal group, dotted scene presentation, coauthor list, explicit author label or explicit narrator clause. No extra work or unresolved name is present."
+    },
+    {
+      "index": 444,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of the original release, complete reference title/author and applicable role layout; not inferred from outcome.",
+      "rationale": "Complete textual work/author evidence with a supported terminal group, dotted scene presentation, coauthor list, explicit author label or explicit narrator clause. No extra work or unresolved name is present."
+    },
+    {
+      "index": 445,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 446,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 447,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 449,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 450,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 451,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 452,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 453,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: missing_author_evidence. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 454,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 455,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 456,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: missing_author_evidence. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 457,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 458,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: missing_author_evidence. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 460,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 461,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 463,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 464,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 465,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 466,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 467,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 468,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: missing_author_evidence. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 469,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 470,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 471,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 472,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 473,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 475,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 476,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: missing_author_evidence. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 477,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 479,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 481,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 482,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and author; an explicit complete library subtitle supplies the matching named series and position."
+    },
+    {
+      "index": 483,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 484,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: trusted_title_or_author_variant_needed. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 485,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 486,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 487,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 488,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 489,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    },
+    {
+      "index": 490,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 491,
+      "expectedConfirmed": true,
+      "source": "Independent textual review of supplied release and library reference; not inferred from history outcome.",
+      "rationale": "Complete literal title or explicitly stored combined subtitle form, complete credited reference author, and bounded technical/edition annotations; no additional work visible."
+    },
+    {
+      "index": 492,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and author; an explicit complete library subtitle supplies the matching named series and position."
+    },
+    {
+      "index": 493,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+    },
+    {
+      "index": 495,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and complete anchored reference-author field; only recognized technical tags or terminal punctuation remain."
+    },
+    {
+      "index": 496,
+      "expectedConfirmed": true,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Complete title and author; an explicit complete library subtitle supplies the matching named series and position."
+    },
+    {
+      "index": 497,
+      "expectedConfirmed": false,
+      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
+      "rationale": "Visible different work, conflicting author, bundle, part, series-slot lure, or non-book attribution."
+    }
+  ]
+}

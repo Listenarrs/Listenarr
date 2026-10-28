@@ -25,13 +25,19 @@ public sealed record BookMatchContext(
     IReadOnlyList<string> Titles, IReadOnlyList<string> Authors, string? Asin, string Fingerprint)
 {
     public IReadOnlyList<string> Isbn { get; init; } = [];
+    public IReadOnlyList<string> Narrators { get; init; } = [];
+    public IReadOnlyList<ReleaseSeriesReference> SeriesReferences { get; init; } = [];
+    public ReferenceTitleParts? TitleParts { get; init; }
 
     public static BookMatchContext From(Audiobook book, QualityProfile? profile = null)
     {
+        if (book.Authors?.Count > 64 || book.Narrators?.Count > 64 || book.SeriesMemberships?.Count > 64)
+            throw new ArgumentException("Reference facts exceed assessment budget");
         var titles = new List<string>();
         var title = IdentityText.Canonical(book.Title);
         if (title.Length > 0) titles.Add(title);
         var subtitle = IdentityText.Canonical(book.Subtitle);
+        ReferenceTitleParts? titleParts = null;
         if (title.Length > 0 && subtitle.Length > 0)
         {
             // Only a separately supplied subtitle establishes this field relationship.
@@ -43,6 +49,7 @@ public sealed record BookMatchContext(
             }
             if (mainTitle.Length > 0)
             {
+                titleParts = new(mainTitle, subtitle);
                 titles.Add(mainTitle);
                 titles.Add(mainTitle + ": " + subtitle);
                 titles.Add(mainTitle + ":" + subtitle);
@@ -50,17 +57,30 @@ public sealed record BookMatchContext(
         }
         var authors = (book.Authors ?? []).Where(a => !string.IsNullOrWhiteSpace(a))
             .Select(IdentityText.Canonical).Where(IdentityText.IsContributorName).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var narrators = (book.Narrators ?? []).Where(n => !string.IsNullOrWhiteSpace(n))
+            .Select(IdentityText.Canonical).Where(IdentityText.IsContributorName)
+            .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(n => n, StringComparer.Ordinal).ToArray();
+        var subtitleSeries = ReleaseAnnotationGrammar.SeriesFromSubtitle(subtitle);
+        var series = (book.SeriesMemberships ?? []).Select(s => new ReleaseSeriesReference(
+                IdentityText.Canonical(s.SeriesName), IdentityText.Canonical(s.SeriesNumber)))
+            .Append(new(IdentityText.Canonical(book.Series), IdentityText.Canonical(book.SeriesNumber)))
+            .Concat(subtitleSeries is null ? [] : new[] { subtitleSeries })
+            .Where(s => s.Name.Length > 0).Distinct()
+            .OrderBy(s => s.Name, StringComparer.Ordinal).ThenBy(s => s.Position, StringComparer.Ordinal).ToArray();
         var p = profile ?? book.QualityProfile;
         var payload = JsonSerializer.Serialize(new
         {
             book.Id,
             book.Title,
             book.Subtitle,
+            TitleParts = titleParts,
             Authors = authors,
             book.Asin,
             book.Isbn,
             book.Series,
             book.SeriesNumber,
+            Narrators = narrators,
+            SeriesReferences = series,
             Profile = p == null ? null : new
             {
                 p.Id,
@@ -82,6 +102,6 @@ public sealed record BookMatchContext(
         });
         return new(titles.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), authors, book.Asin,
             Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload))))
-        { Isbn = book.Isbn?.ToArray() ?? [] };
+        { Isbn = book.Isbn?.ToArray() ?? [], Narrators = narrators, SeriesReferences = series, TitleParts = titleParts };
     }
 }

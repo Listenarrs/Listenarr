@@ -39,7 +39,7 @@ public sealed class AutomaticSearchScoringService(
         foreach (var result in results)
             identities.TryAdd(result, context.Fingerprint == "invalid_reference"
                 ? new(BookIdentityStatus.AssessmentUnavailable, "invalid_reference")
-                : _matcher.Evaluate(context, BookIdentityMatcher.Snapshot(result)));
+                : _matcher.Evaluate(context, BookIdentityMatcher.Snapshot(result), cancellationToken));
         // Every candidate is scored. The quality service sorts its output; associate by reference.
         var quality = await qualityService.ScoreSearchResults(results, profile);
         cancellationToken.ThrowIfCancellationRequested();

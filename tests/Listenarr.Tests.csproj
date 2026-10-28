@@ -39,5 +39,6 @@
 	</ItemGroup>
   <ItemGroup>
     <None Update="Fixtures/AutomaticSearch/identity-policy-v1.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures/AutomaticSearch/historical-*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

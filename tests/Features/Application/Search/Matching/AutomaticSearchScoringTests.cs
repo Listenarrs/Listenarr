@@ -113,6 +113,35 @@ public sealed class AutomaticSearchScoringTests : BaseTests
         Assert.False(await scorer.IsCurrentAsync(batch, 9));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task NarratorAndSecondarySeriesEditsInvalidateTheAssessment(bool narrator)
+    {
+        var book = new Audiobook
+        {
+            Id = 9,
+            Title = "Dune",
+            Authors = ["Frank Herbert"],
+            QualityProfile = new(),
+            Narrators = ["First Reader"],
+            SeriesMemberships = [new() { SeriesName = "Dune Series", SeriesNumber = "1" }]
+        };
+        var candidate = Result("Dune", "Frank Herbert");
+        var quality = new Mock<IQualityProfileService>();
+        quality.Setup(q => q.ScoreSearchResults(It.IsAny<List<SearchResult>>(), It.IsAny<QualityProfile>()))
+            .ReturnsAsync([new QualityScore { SearchResult = candidate, TotalScore = 100 }]);
+        var books = new Mock<IAudiobookRepository>();
+        books.Setup(b => b.GetByIdSnapshotAsync(9, It.IsAny<CancellationToken>())).ReturnsAsync(book);
+        var scorer = new AutomaticSearchScoringService(quality.Object, books.Object,
+            NullLogger<AutomaticSearchScoringService>.Instance);
+        var batch = await scorer.ScoreAsync(book, [candidate], book.QualityProfile);
+        Assert.True(await scorer.IsCurrentAsync(batch, 9));
+        if (narrator) book.Narrators = ["Second Reader"];
+        else book.SeriesMemberships[0].SeriesNumber = "2";
+        Assert.False(await scorer.IsCurrentAsync(batch, 9));
+    }
+
     [Fact]
     public async Task QualityMutationCannotSwapTheApprovedSource()
     {
