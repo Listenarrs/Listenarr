@@ -19,8 +19,13 @@ namespace Listenarr.Application.Search.Matching;
 
 public sealed class BookIdentityMatcher
 {
-    public BookIdentityAssessment Evaluate(BookMatchContext target, CandidateIdentityEvidence evidence)
+    public BookIdentityAssessment Evaluate(BookMatchContext target, CandidateIdentityEvidence evidence) =>
+        Evaluate(target, evidence, CancellationToken.None);
+
+    public BookIdentityAssessment Evaluate(BookMatchContext target, CandidateIdentityEvidence evidence,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         try
         {
             if (evidence.Authors is null || evidence.Identifiers is null
@@ -44,7 +49,9 @@ public sealed class BookIdentityMatcher
                 return identifierMatch && !authorConflict
                     ? new(BookIdentityStatus.ConfirmedIdentifier, "verified_identifier")
                     : new(BookIdentityStatus.MissingReference, "missing_reference");
-            var match = ReleaseNameInterpreter.Match(release, target, supplied);
+            var match = ReleaseNameInterpreter.Match(evidence.ReleaseName ?? string.Empty, target, supplied, cancellationToken);
+            if (match.Interpretation?.UnavailableReason == "assessment_budget_exceeded")
+                return new(BookIdentityStatus.AssessmentUnavailable, "assessment_budget_exceeded");
             if (authorConflict)
                 return new(BookIdentityStatus.ConflictingEvidence, "author_conflict", match.Title);
             if (identifierMatch && !match.Complete)
@@ -52,7 +59,7 @@ public sealed class BookIdentityMatcher
                     : new(BookIdentityStatus.ConflictingEvidence, "identifier_title_conflict");
             if (!match.Complete)
                 return new(match.FoundTitle ? BookIdentityStatus.UnresolvedTitle : BookIdentityStatus.DifferentWork,
-                    match.FoundTitle ? "unexplained_release_text" : "complete_title_not_found");
+                    match.Interpretation?.UnavailableReason ?? (match.FoundTitle ? "unexplained_release_text" : "complete_title_not_found"));
             if (identifierMatch) return new(BookIdentityStatus.ConfirmedIdentifier, "verified_identifier", match.Title);
             if (authorMatch || match.Credited)
                 return new(BookIdentityStatus.CorroboratedTitle, "complete_title_and_credit", match.Title);
