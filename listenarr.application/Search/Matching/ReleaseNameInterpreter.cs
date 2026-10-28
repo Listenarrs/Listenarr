@@ -15,170 +15,148 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using System.Text.RegularExpressions;
+
+using System.Text;
 
 namespace Listenarr.Application.Search.Matching;
 
-public sealed record ReleaseTitleMatch(bool Complete, bool Credited, string? Title, bool FoundTitle);
+public sealed record ReleaseTitleMatch(bool Complete, bool Credited, string? Title, bool FoundTitle)
+{
+    public ReleaseInterpretation? Interpretation { get; init; }
+}
 
-/// <summary>First protect a complete reference title; classify only text outside its span.</summary>
+/// <summary>Bind complete title and credit spans, then account for every surrounding field.</summary>
 public static class ReleaseNameInterpreter
 {
-    private const string MetadataToken = @"(?:a novel|novels?|edition|unabridged|abridged|m4b|mp3|flac|aac|opus|audiobook|audio book|\d{4})";
-    private static readonly Regex Metadata = new(
-        "^" + MetadataToken + @"(?:[\s.!。]+" + MetadataToken + @")*[\s.!。]*$",
-        RegexOptions.NonBacktracking | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-    private const int MaxText = 16384;
-    private const int MaxOccurrences = 32;
-    private const int MaxExplanationWork = 1_000_000;
+    private sealed record WorkTitle(string Display, string Main, string? Subtitle = null);
+    public static ReleaseTitleMatch Match(string release, BookMatchContext context,
+        IReadOnlyList<string> suppliedAuthors) => Match(release, context, suppliedAuthors, CancellationToken.None);
 
     public static ReleaseTitleMatch Match(string release, BookMatchContext context,
-        IReadOnlyList<string> suppliedAuthors)
+        IReadOnlyList<string> suppliedAuthors, CancellationToken cancellationToken)
     {
-        if (release.Length > MaxText || context.Titles.Count > 64 || context.Authors.Count > 64)
-            return new(false, false, null, false);
-        var names = context.Authors.Concat(suppliedAuthors).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        var parsedCredit = HasCreditBoundary(release, context.Authors);
+        var result = Interpret(release, context, suppliedAuthors, cancellationToken);
+        return new(result.Complete, result.Credited, result.Title, result.FoundTitle) { Interpretation = result };
+    }
+
+    public static ReleaseInterpretation Interpret(string release, BookMatchContext context,
+        IReadOnlyList<string> suppliedAuthors, CancellationToken cancellationToken = default)
+    {
+        var budget = new ReleaseAssessmentBudget(cancellationToken);
+        if (release.Length > 16384 || context.Titles.Count > 64 || context.Authors.Count > 64
+            || context.Narrators.Count > 64 || context.SeriesReferences.Count > 64 || suppliedAuthors.Count > 64)
+            return new(false, false, null, false, [], "assessment_budget_exceeded");
+        var scene = ReleaseTextView.LooksLikeScene(release);
         var found = false;
         var attempts = 0;
-        foreach (var title in context.Titles)
+        string? reason = null;
+        IReadOnlyList<ReleaseSpan> partial = [];
+        ReleaseInterpretation? uncredited = null;
+        var titles = context.Titles.Select(t => new WorkTitle(t, t)).ToList();
+        if (context.TitleParts is { } parts)
+            titles.Insert(0, new(parts.MainTitle + ": " + parts.Subtitle, parts.MainTitle, parts.Subtitle));
+        var views = new Dictionary<int, ReleaseTextView>();
+        var seenAnchors = new HashSet<(int Mode, int Start, int Length)>();
+        var seenSpans = new HashSet<(int Mode, int Start, int End)>();
+        var protectedMainSpans = new HashSet<(int Start, int Length)>();
+        // Resolve reference-backed subtitle roles across supported views before
+        // allowing a shorter literal title to treat those same words as a credit.
+        foreach (var title in titles)
         {
-            foreach (var presentation in new[] { false, true })
+            foreach (var mode in new[] { 0, 1, 2 })
             {
-                var hay = presentation ? IdentityText.Presentation(release) : release;
-                var needle = presentation ? IdentityText.Presentation(title) : title;
-                for (var offset = 0; offset <= hay.Length - needle.Length;)
+                if (mode == 2 && !scene) continue;
+                // A scene view cannot remove meaningful literal-title periods.
+                if (mode == 2 && (title.Main.Contains('.') || title.Subtitle?.Contains('.') == true)) continue;
+                if (!views.TryGetValue(mode, out var view))
+                    views.Add(mode, view = ReleaseTextView.Create(release, mode > 0, mode == 2, budget));
+                if (budget.Exhausted) break;
+                var interpreter = new ReleaseSpanInterpreter(view, context, suppliedAuthors, budget);
+                var needle = mode > 0 ? IdentityText.Presentation(title.Main) : title.Main;
+                var subtitle = title.Subtitle is null ? null : mode > 0
+                    ? IdentityText.Presentation(title.Subtitle) : title.Subtitle;
+                for (var offset = 0; offset <= view.Text.Length - needle.Length && budget.Spend(view.Text.Length - offset);)
                 {
-                    var index = hay.IndexOf(needle, offset, StringComparison.OrdinalIgnoreCase);
+                    var index = view.Text.IndexOf(needle, offset, StringComparison.OrdinalIgnoreCase);
                     if (index < 0) break;
                     offset = index + Math.Max(1, needle.Length);
-                    if (++attempts > MaxOccurrences) return new(false, false, null, found);
-                    if (!Boundary(hay, index - 1) || !Boundary(hay, index + needle.Length)) continue;
+                    if (seenAnchors.Add((mode, index, needle.Length)) && ++attempts > 32)
+                        return new(false, false, null, found, [], "assessment_budget_exceeded");
+                    var mainEnd = index + needle.Length;
+                    if (!Boundary(view.Text, index - 1) || !Boundary(view.Text, mainEnd)) continue;
+                    if (InExplicitNarrator(view.Text, index)) continue;
                     found = true;
-                    var left = Explain(hay[..index], names, context.Authors);
-                    var right = Explain(hay[(index + needle.Length)..], names, context.Authors);
-                    if (left.Explained && right.Explained)
-                        return new(true, parsedCredit && (left.Credited || right.Credited), title, true);
-                }
-            }
-        }
-        return new(false, false, null, found);
-    }
-
-    private static bool HasCreditBoundary(string release, IReadOnlyList<string> authors)
-    {
-        foreach (var normalizeInitialSpacing in new[] { false, true })
-        {
-            var hay = IdentityText.PersonKey(release, normalizeInitialSpacing);
-            var attempts = 0;
-            foreach (var author in authors)
-            {
-                var name = IdentityText.PersonKey(author, normalizeInitialSpacing);
-                for (var offset = 0; offset <= hay.Length - name.Length && name.Length > 0;)
-                {
-                    if (++attempts > MaxOccurrences) break;
-                    var at = hay.IndexOf(name, offset, StringComparison.OrdinalIgnoreCase);
-                    if (at < 0) break;
-                    offset = at + name.Length;
-                    var before = hay[..at].TrimEnd();
-                    var after = hay[(at + name.Length)..].TrimStart();
-                    if (before.Length == 0 && after.Length > 0 && "-‐‑‒–—―−".Contains(after[0])) return true;
-                    if (before.Length > 0 && "-‐‑‒–—―−".Contains(before[^1]) &&
-                        Explain(after, Array.Empty<string>(), Array.Empty<string>()).Explained) return true;
-                }
-                if (attempts > MaxOccurrences) break;
-            }
-        }
-        return false;
-    }
-
-    private static bool Boundary(string value, int index) =>
-        index < 0 || index >= value.Length || !char.IsLetterOrDigit(value[index])
-            && char.GetUnicodeCategory(value[index]) is not
-                (System.Globalization.UnicodeCategory.NonSpacingMark or System.Globalization.UnicodeCategory.SpacingCombiningMark);
-
-    private static (bool Explained, bool Credited) Explain(string extra, IReadOnlyList<string> names,
-        IReadOnlyList<string> credited)
-    {
-        extra = IdentityText.Canonical(extra).Trim(' ', '\t', '-', '‐', '‑', '‒', '–', '—', '―', '−', ':', ';', ',', '[', ']', '(', ')');
-        if (extra.Length == 0) return (true, false);
-        var remainingWork = MaxExplanationWork;
-        var people = new List<(string Name, int ContentLength)>();
-        foreach (var name in names)
-        {
-            if ((remainingWork -= name.Length) < 0) return (false, false);
-            people.Add((name, IdentityText.PersonKey(name, false).Count(c => !char.IsWhiteSpace(c))));
-        }
-        var maxNameContent = people.Count == 0 ? 0 : people.Max(person => person.ContentLength);
-        var pending = new Queue<(int Position, bool Credited, bool MetadataSeen)>();
-        var visited = new HashSet<(int Position, bool Credited, bool MetadataSeen)>();
-        var explained = false;
-        Add(0, false, false);
-        while (pending.TryDequeue(out var state))
-        {
-            if (--remainingWork < 0) return (false, false);
-            if (state.Position == extra.Length)
-            {
-                if (state.Credited) return (true, true);
-                explained = true;
-                continue;
-            }
-
-            // Metadata cannot cross a structural separator. Assess its whole chunk once.
-            var metadataEnd = state.Position;
-            while (metadataEnd < extra.Length && !IsExplanationSeparator(extra[metadataEnd]))
-            {
-                if (--remainingWork < 0) return (false, false);
-                metadataEnd++;
-            }
-            if ((remainingWork -= metadataEnd - state.Position) < 0) return (false, false);
-            var metadataPart = extra[state.Position..metadataEnd].Trim();
-            if (Metadata.IsMatch(metadataPart)) Add(metadataEnd, state.Credited, true);
-            else if (state.MetadataSeen && metadataPart.Length > 0 && metadataPart.All(c => c is '.' or '!' or '。'))
-                Add(metadataEnd, state.Credited, true);
-            if (remainingWork < 0) return (false, false);
-
-            // PersonEqual removes only periods and spacing. Stop probing once the span
-            // contains more other characters than any complete known name can contain.
-            var contentLength = 0;
-            for (var end = state.Position + 1; end <= extra.Length; end++)
-            {
-                if (--remainingWork < 0) return (false, false);
-                if (extra[end - 1] != '.' && !char.IsWhiteSpace(extra[end - 1])) contentLength++;
-                if (contentLength > maxNameContent || people.Count == 0) break;
-                if (end < extra.Length && !IsExplanationSeparator(extra[end])) continue;
-                if ((remainingWork -= end - state.Position) < 0) return (false, false);
-                var part = extra[state.Position..end].Trim();
-                foreach (var person in people)
-                {
-                    if (--remainingWork < 0) return (false, false);
-                    if (contentLength != person.ContentLength) continue;
-                    if ((remainingWork -= part.Length + person.Name.Length) < 0) return (false, false);
-                    if (!IdentityText.PersonEqual(person.Name, part)) continue;
-                    var isCredited = state.Credited;
-                    foreach (var author in credited)
+                    var end = mainEnd;
+                    var subtitleStart = mainEnd;
+                    var rawMain = view.Span(index, needle.Length, ReleaseSpanRole.PrimaryTitle);
+                    if (subtitle != null)
                     {
-                        if ((remainingWork -= part.Length + author.Length) < 0) return (false, false);
-                        if (IdentityText.PersonEqual(author, part)) { isCredited = true; break; }
+                        if (!BindSubtitle(view.Text, mainEnd, subtitle, budget, out subtitleStart, out end)) continue;
+                        // A stored subtitle cannot be reused as a credit by the shorter
+                        // main-title alternative, even if it happens to be a known name.
+                        protectedMainSpans.Add((rawMain.Start, rawMain.Length));
                     }
-                    Add(end, isCredited, state.MetadataSeen);
-                    break;
+                    else if (protectedMainSpans.Contains((rawMain.Start, rawMain.Length))) continue;
+                    if (!seenSpans.Add((mode, index, end))) continue;
+                    var left = interpreter.Explain(0, index, true);
+                    var right = interpreter.Explain(end, view.Text.Length, false);
+                    if (budget.Exhausted) break;
+                    reason ??= left.Reason ?? right.Reason;
+                    var spans = new List<ReleaseSpan> { view.Span(index, needle.Length, ReleaseSpanRole.PrimaryTitle) };
+                    if (subtitle != null) spans.Add(view.Span(subtitleStart, end - subtitleStart, ReleaseSpanRole.ReferenceSubtitle));
+                    spans.AddRange(left.Spans);
+                    spans.AddRange(right.Spans);
+                    if (!left.Complete || !right.Complete)
+                    {
+                        if (partial.Count == 0 || spans.Where(s => s.Role == ReleaseSpanRole.Unknown).Sum(s => s.Length)
+                            < partial.Where(s => s.Role == ReleaseSpanRole.Unknown).Sum(s => s.Length)) partial = spans.AsReadOnly();
+                        continue;
+                    }
+                    var complete = new ReleaseInterpretation(true, left.Credited || right.Credited, title.Display, true,
+                        spans.OrderBy(s => s.Start).ThenBy(s => s.Role).ToList().AsReadOnly());
+                    if (complete.Credited) return complete;
+                    uncredited ??= complete;
                 }
-                if (remainingWork < 0) return (false, false);
             }
+            if (budget.Exhausted) break;
         }
-        return (explained, false);
-
-        void Add(int position, bool author, bool metadata)
-        {
-            while (position < extra.Length && (char.IsWhiteSpace(extra[position]) || IsExplanationSeparator(extra[position])))
-            {
-                if (--remainingWork < 0) return;
-                position++;
-            }
-            if (visited.Add((position, author, metadata))) pending.Enqueue((position, author, metadata));
-        }
+        if (!budget.Exhausted && uncredited != null) return uncredited;
+        return new(false, false, null, found, partial,
+            budget.Exhausted ? "assessment_budget_exceeded" : reason);
     }
 
-    private static bool IsExplanationSeparator(char value) => "[]();:,-‐‑‒–—―−".Contains(value);
+    private static bool BindSubtitle(string text, int mainEnd, string subtitle,
+        ReleaseAssessmentBudget budget, out int start, out int end)
+    {
+        start = mainEnd;
+        end = mainEnd;
+        while (start < text.Length && (char.IsWhiteSpace(text[start]) || ":-‐‑‒–—―−".Contains(text[start])))
+        {
+            if (!budget.Spend()) return false;
+            start++;
+        }
+        if (start == mainEnd || !budget.Spend(subtitle.Length)
+            || !text.AsSpan(start).StartsWith(subtitle, StringComparison.OrdinalIgnoreCase)) return false;
+        end = start + subtitle.Length;
+        return Boundary(text, end);
+    }
+
+    private static bool InExplicitNarrator(string text, int at)
+    {
+        var boundary = at - 1;
+        while (boundary >= 0 && !ReleaseAnnotationGrammar.Separator(text[boundary])) boundary--;
+        var prefix = text[(boundary + 1)..at];
+        return prefix.Contains("narrated by ", StringComparison.OrdinalIgnoreCase)
+            || prefix.Contains("read by ", StringComparison.OrdinalIgnoreCase)
+            || prefix.Contains("narrator ", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool Boundary(string value, int index)
+    {
+        if (index < 0 || index >= value.Length) return true;
+        if (char.IsLowSurrogate(value[index]) && index > 0 && char.IsHighSurrogate(value[index - 1])) index--;
+        return Rune.TryGetRuneAt(value, index, out var rune) && !Rune.IsLetterOrDigit(rune)
+            && Rune.GetUnicodeCategory(rune) is not
+                (System.Globalization.UnicodeCategory.NonSpacingMark or System.Globalization.UnicodeCategory.SpacingCombiningMark);
+    }
 }
