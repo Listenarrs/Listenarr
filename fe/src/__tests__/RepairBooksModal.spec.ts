@@ -1967,6 +1967,64 @@ describe('RepairBooksModal', () => {
     expect(wrapper.emitted('done')).toHaveLength(1)
   })
 
+  it('uses the book the rescan answers with, without reading it back', async () => {
+    apiMocks.rescanAudiobookMetadata.mockResolvedValueOnce({
+      message: 'Metadata rescanned successfully',
+      audiobookId: 7,
+      asin: 'B0BK9W82PQ',
+      region: 'us',
+      audiobook: { ...mismatched, title: 'Primal Hunter 4', subtitle: 'A LitRPG Adventure' },
+    })
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+
+    await repair(wrapper)
+
+    // Read once, when the dialog opened
+    expect(apiMocks.getAudiobook).toHaveBeenCalledTimes(1)
+    expect(resultCard(wrapper).get('[data-testid="repair-result-record"]').text()).toBe(
+      'B0BK9W82PQ - Primal Hunter 4: A LitRPG Adventure - Zogarth - United States (US)',
+    )
+    expect(resultCard(wrapper).attributes('data-result-state')).toBe('done')
+  })
+
+  it('counts the book repaired once the rescan answered, even when it cannot be read back', async () => {
+    apiMocks.getAudiobook
+      .mockResolvedValueOnce(mismatched)
+      .mockRejectedValueOnce(new Error('Request timed out'))
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+
+    await repair(wrapper)
+
+    expect(resultCard(wrapper).attributes('data-result-state')).toBe('done')
+    expect(resultCard(wrapper).get('[data-testid="repair-result-message"]').text()).toMatch(
+      /^Repaired in .+ s; the book couldn't be read back to show it: Request timed out$/,
+    )
+    // The picked record, the one the server read
+    expect(resultCard(wrapper).get('[data-testid="repair-result-record"]').text()).toBe(
+      'B0BK9W82PQ - Primal Hunter 4 - Zogarth - United States (US)',
+    )
+    expect(wrapper.get('[data-testid="repair-organize"]').text()).toContain('Organize 1')
+  })
+
+  it("shows the book as the server has it, without the old record's subtitle", async () => {
+    apiMocks.getAudiobook
+      .mockResolvedValueOnce({ ...mismatched, subtitle: 'Wrong Subtitle' })
+      .mockResolvedValueOnce({ ...mismatched, title: 'Primal Hunter 4', subtitle: null })
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+
+    await repair(wrapper)
+
+    expect(resultCard(wrapper).get('[data-testid="repair-result-record"]').text()).toBe(
+      'B0BK9W82PQ - Primal Hunter 4 - Zogarth - United States (US)',
+    )
+  })
+
   // The server reads the record from the book's other identifiers when the picked one fails
   function rescannedFrom(asin: string, region: string) {
     apiMocks.rescanAudiobookMetadata.mockResolvedValueOnce({

@@ -17,6 +17,7 @@
  */
 import { computed, onScopeDispose, ref } from 'vue'
 import { apiService } from '@/services/api'
+import type { Audiobook } from '@/types'
 import { useLibraryImportStore } from '@/stores/libraryImport'
 import {
   FALLBACK_REGION,
@@ -316,15 +317,38 @@ export function useRepairBooks(audiobookIds: () => number[]) {
       isEmptied = true
       hasLibraryChanged.value = true
       const rescanResult = await rescanMetadata(repairRow)
-      const book = await apiService.getAudiobook(repairRow.audiobookId)
+      hasLibraryChanged.value = true
       const asin = rescanResult.asin ?? repairRow.bookMatch.pickedSearchResult?.asin ?? ''
       const region =
         rescanResult.region ??
         repairRow.bookMatch.pickedSearchResult?.region ??
         repairRow.bookMatch.region
-      repairRow.title = book.title || repairRow.title
-      repairRow.subtitle = book.subtitle ?? repairRow.subtitle
-      repairRow.authors = book.authors ?? repairRow.authors
+      // The server reads the record from the book's other identifiers when the picked one fails:
+      // the book then has another record's metadata, which it says, instead of Repaired
+      const pickedAsin = repairRow.bookMatch.pickedSearchResult?.asin ?? ''
+      const pickedRegion =
+        repairRow.bookMatch.pickedSearchResult?.region || repairRow.bookMatch.region
+      const isOtherRecord =
+        (!!rescanResult.asin && rescanResult.asin.toUpperCase() !== pickedAsin.toUpperCase()) ||
+        (!!rescanResult.region && rescanResult.region !== pickedRegion)
+      // The book as saved: in the rescan's answer once it holds it (#1128), else read back. Once
+      // the rescan has answered, the book is repaired: a read that fails only leaves the row
+      // showing the picked record instead
+      let book = (rescanResult as { audiobook?: Audiobook }).audiobook ?? null
+      let readBackError: string | null = null
+      if (!book)
+        try {
+          book = await apiService.getAudiobook(repairRow.audiobookId)
+        } catch (e) {
+          readBackError = e instanceof Error ? e.message : 'unknown error'
+        }
+      const shownRecord = book ?? (isOtherRecord ? null : repairRow.plannedRecord)
+      if (shownRecord) {
+        repairRow.title = shownRecord.title || repairRow.title
+        // What the server has: none left from the old record
+        repairRow.subtitle = shownRecord.subtitle ?? ''
+        repairRow.authors = shownRecord.authors ?? []
+      }
       repairRow.bookMatch.currentRecordKey = { asin, region }
       repairRow.recordAfter = {
         title: repairRow.title,
@@ -333,16 +357,7 @@ export function useRepairBooks(audiobookIds: () => number[]) {
         asin,
         region,
       }
-      hasLibraryChanged.value = true
-      // The server reads the record from the book's other identifiers when the picked one fails:
-      // the book then has another record's metadata, which it says, instead of Repaired
-      const pickedAsin = repairRow.bookMatch.pickedSearchResult?.asin ?? ''
-      const pickedRegion =
-        repairRow.bookMatch.pickedSearchResult?.region || repairRow.bookMatch.region
-      if (
-        (rescanResult.asin && rescanResult.asin.toUpperCase() !== pickedAsin.toUpperCase()) ||
-        (rescanResult.region && rescanResult.region !== pickedRegion)
-      ) {
+      if (isOtherRecord) {
         repairRow.repairTask = {
           state: 'warning',
           text: `The rescan read another record (${bookSummary({ asin, region })}) than the one picked (${elapsedText()}): check the book`,
@@ -350,7 +365,12 @@ export function useRepairBooks(audiobookIds: () => number[]) {
         return
       }
       // The record it now points at follows, drawn like New (step 2)
-      repairRow.repairTask = { state: 'done', text: `Repaired in ${elapsedText()}` }
+      repairRow.repairTask = {
+        state: 'done',
+        text: readBackError
+          ? `Repaired in ${elapsedText()}; the book couldn't be read back to show it: ${readBackError}`
+          : `Repaired in ${elapsedText()}`,
+      }
       // Ticked for Organize as soon as it is repaired
       audiobookIdsToOrganize.value = [...audiobookIdsToOrganize.value, repairRow.audiobookId]
     } catch (e) {
