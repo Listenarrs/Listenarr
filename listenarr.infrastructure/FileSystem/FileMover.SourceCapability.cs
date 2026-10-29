@@ -172,19 +172,22 @@ public partial class FileMover : IFilePublicationSourceCapability
 
         return linkedAncestor == null
             ? $"{cause} The source file could not be pinned long enough to capture a stable content proof."
-            : $"{cause} The source file could not be pinned: it is reached through a symbolic link at "
-              + $"'{LogRedaction.SanitizeText(linkedAncestor)}', which cannot be pinned, so configure the real path instead.";
+            : $"{cause} The source file could not be pinned. It may be reached through a symbolic link at "
+              + $"'{LogRedaction.SanitizeText(linkedAncestor)}', which cannot be pinned; if so, configure the real path instead.";
     }
 
     /// <summary>
-    /// The first directory in the path that is a symbolic link the pinned walk refuses, or null if
-    /// there is none.
+    /// The first directory the pinned walk would meet that is a symbolic link it refuses, which is
+    /// the outermost one on the path, or null if there is none.
     /// </summary>
     /// <remarks>
     /// Refusing a linked ancestor is deliberate and covered by
     /// CheckPublicationSource_LinkedAncestor_ReturnsUnsupported, so this does not change the
-    /// answer. It only says which segment caused it, because the raw failure is an ENOTDIR from
-    /// openat and gives an operator nothing to act on.
+    /// answer. It only says which segment may have caused it, because the raw failure is an ENOTDIR
+    /// from openat and gives an operator nothing to act on. The walk opens segments from the top
+    /// down and stops at the first link, so with nested links the outer one is named, not the
+    /// deeper one. The hint is a candidate rather than a diagnosis: a refusal that happens before
+    /// the walk, such as a root that cannot be authorized, can still leave a link on the path.
     ///
     /// Beneath a configured root only the segments below the root are opened without following
     /// links. The root itself is opened by the boundary authorizer, which follows its link, so a
@@ -211,6 +214,7 @@ public partial class FileMover : IFilePublicationSourceCapability
                 return null;
             }
 
+            string? outermostLink = null;
             while (!string.IsNullOrEmpty(current)
                 && (managed.Root == null || managed.Semantics == null
                     || IsStrictlyBelowRoot(current, managed.Root.Path, managed.Semantics.Value)))
@@ -218,10 +222,12 @@ public partial class FileMover : IFilePublicationSourceCapability
                 if (Directory.Exists(current)
                     && Directory.ResolveLinkTarget(current, returnFinalTarget: false) != null)
                 {
-                    return current;
+                    outermostLink = current;
                 }
                 current = Path.GetDirectoryName(current);
             }
+
+            return outermostLink;
         }
         catch (Exception exception) when (exception is not (
             OperationCanceledException or OutOfMemoryException

@@ -84,6 +84,9 @@ public sealed class FileMoverSymlinkedSourcePathTests : BaseTests
         Assert.Contains("symbolic link", result.Reason, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("configure the real path", result.Reason, StringComparison.OrdinalIgnoreCase);
 
+        // The walk cannot prove the link was the cause, so the sentence must not claim it was.
+        Assert.Contains("may be reached through a symbolic link", result.Reason, StringComparison.Ordinal);
+
         // Both phrases above are literals in the format string, so they survive a build that
         // captures no cause at all. These two do not: the linked segment comes from the walk and
         // the type name comes from the caught exception, so an empty cause fails here.
@@ -248,5 +251,29 @@ public sealed class FileMoverSymlinkedSourcePathTests : BaseTests
         Assert.Matches(@"^\w+Exception: \S", result.Reason!);
         Assert.Contains("symbolic link", result.Reason, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("LinkedSub", result.Reason, StringComparison.Ordinal);
+    }
+
+    [DirectoryLinkFact]
+    [Trait("Scenario", "With nested links the outer one, where the walk stops, is named")]
+    public async Task CheckAsync_NestedSymlinks_NamesTheOuterLink()
+    {
+        var directory = FileService.GetTempDirectory("symlink-nested-links");
+        var inner = Directory.CreateDirectory(Path.Join(directory, "inner-target", "completed")).FullName;
+        var source = Path.Join(inner, "book.m4b");
+        await File.WriteAllTextAsync(source, "audio");
+        var innerLink = Path.Join(directory, "inner-link");
+        Directory.CreateSymbolicLink(innerLink, Path.Join(directory, "inner-target"));
+        var outerLink = Path.Join(directory, "outer-link");
+        Directory.CreateSymbolicLink(outerLink, directory);
+        var viaBoth = Path.Join(outerLink, "inner-link", "completed", "book.m4b");
+        Assert.True(File.Exists(viaBoth), "the file must be reachable through both links");
+        var capability = Assert.IsAssignableFrom<IFilePublicationSourceCapability>(
+            _provider.GetRequiredService<IFileMover>());
+
+        var result = await capability.CheckAsync(viaBoth);
+
+        Assert.False(result.IsSupported);
+        Assert.Contains("'" + outerLink + "'", result.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain(innerLink, result.Reason, StringComparison.Ordinal);
     }
 }
