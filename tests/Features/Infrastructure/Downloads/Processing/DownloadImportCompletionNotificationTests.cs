@@ -90,18 +90,45 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Processing
             Assert.Equal([download.Id], _notifications.Imported);
         }
 
-        [Fact]
-        public async Task FailedImport_EmitsTheFailureAndNoCompletion()
+        public enum ImportFailurePoint
+        {
+            SourceFilesMissing,
+            ClientRefusesToMarkImported
+        }
+
+        public static TheoryData<ImportFailurePoint> ImportFailurePoints()
+            => [ImportFailurePoint.SourceFilesMissing, ImportFailurePoint.ClientRefusesToMarkImported];
+
+        /// <remarks>
+        /// A regression guard rather than a reproduction: before finalization emitted completions,
+        /// nothing emitted one, so this passes on that code too. It pins the other half of the
+        /// contract, that only a committed import is announced as complete. The second failure
+        /// point matters most, because by then the files are already in the library and only the
+        /// commit is missing.
+        /// </remarks>
+        [Theory]
+        [MemberData(nameof(ImportFailurePoints))]
+        public async Task FailedImport_EmitsTheFailureAndNoCompletion(ImportFailurePoint failurePoint)
         {
             var (download, jobId) = await EnqueueImportAsync(FileAction.Copy);
-            _downloadClientGateway.SourceFiles = [Path.Join(FileService.GetTempDirectory("dl-missing"), "missing.m4b")];
+            if (failurePoint == ImportFailurePoint.SourceFilesMissing)
+            {
+                _downloadClientGateway.SourceFiles = [Path.Join(FileService.GetTempDirectory("dl-missing"), "missing.m4b")];
+            }
+            else
+            {
+                _downloadClientGateway.MarkImportedResult = false;
+            }
+
             var job = (await _downloadProcessingJobRepository.GetByIdAsync(jobId))!;
             job.MaxRetries = 0;
             await _downloadProcessingJobRepository.UpdateAsync(job);
 
             await _processor.ProcessQueueAsync(CancellationToken.None);
 
-            Assert.Equal(ProcessingJobStatus.Failed, (await _downloadProcessingJobRepository.GetByIdAsync(jobId))!.Status);
+            var failed = (await _downloadProcessingJobRepository.GetByIdAsync(jobId))!;
+            Assert.Equal(ProcessingJobStatus.Failed, failed.Status);
+            Assert.Equal(failurePoint == ImportFailurePoint.ClientRefusesToMarkImported, failed.HasCheckpoint("FilesImported"));
             Assert.NotEqual(DownloadStatus.Moved, (await _downloadRepository.GetByIdAsync(download.Id))!.Status);
             Assert.Empty(_notifications.Imported);
             Assert.Equal([download.Id], _notifications.Failed);
