@@ -154,6 +154,13 @@ namespace Listenarr.Application.Audiobooks.Catalog
             };
         }
 
+        // Rows cached before SeriesEntries existed hold only the first series and no identifiers, and the
+        // cache has no expiry, so they are refetched rather than trusted for series data.
+        public static bool HasLegacySeriesShape(IEnumerable<CachedAuthorCatalogBook> books)
+        {
+            return books.Any(book => !string.IsNullOrWhiteSpace(book.Series) && book.SeriesEntries == null);
+        }
+
         public static AudibleSearchResult MapCachedCatalogBook(CachedAuthorCatalogBook book)
         {
             return new AudibleSearchResult

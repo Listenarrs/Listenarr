@@ -33,7 +33,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
     public class AuthorCatalogCacheSeriesFlowTests : BaseTests
     {
         private const string AuthorName = "H. Rider Haggard";
-        private const string AuthorAsin = "AUTHOR-PLACEHOLDER";
+        private const string AuthorAsin = "AUTHORPLACEHOLDER";
 
         [Fact]
         public async Task MonitorAuthorAfterCatalogPreview_PersistsEverySeriesMembershipWithItsAsin()
@@ -77,6 +77,58 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
             });
 
             Assert.Equal(2, result.SyncResult.AddedCount);
+            await AssertPersistedMembershipsAsync(fixture);
+        }
+
+        [Fact]
+        public async Task MonitorAuthorWithCatalogCachedBeforeSeriesEntries_RefetchesAndPersistsEverySeriesMembershipWithItsAsin()
+        {
+            await using var fixture = await CreateFixtureAsync();
+
+            // A catalog cached by an earlier build: first series only, no identifiers, and no expiry.
+            await fixture.AudiobookRepository.UpsertCachedAuthorAsync(new AuthorCacheEntry
+            {
+                AuthorName = AuthorName,
+                AuthorNameNormalized = "h rider haggard",
+                AuthorAsin = AuthorAsin,
+                Region = "us",
+                LastFetchedAt = DateTime.UtcNow.AddDays(-30),
+                CatalogBooks = new List<CachedAuthorCatalogBook>
+                {
+                    new()
+                    {
+                        Asin = "B00CQ5WAXW",
+                        Title = "She And Allan",
+                        Authors = new List<string> { AuthorName },
+                        Language = "english",
+                        Series = "Ayesha",
+                        SeriesNumber = "0"
+                    },
+                    new()
+                    {
+                        Asin = "B004YWTD30",
+                        Title = "She: A History of Adventure",
+                        Authors = new List<string> { AuthorName },
+                        Language = "english",
+                        Series = "Ayesha",
+                        SeriesNumber = "1"
+                    }
+                }
+            });
+
+            var result = await fixture.MonitoringService.MonitorAuthorAsync(new MonitorAuthorRequest
+            {
+                Name = AuthorName,
+                Region = "us",
+                Language = "english"
+            });
+
+            Assert.Equal(2, result.SyncResult.AddedCount);
+            fixture.AudibleService.Verify(
+                service => service.GetAllBooksByAuthorAsync(
+                    AuthorName, AuthorAsin, It.IsAny<int>(), "us", It.IsAny<string?>()),
+                Times.Once);
+
             await AssertPersistedMembershipsAsync(fixture);
         }
 

@@ -62,7 +62,8 @@ namespace Listenarr.Application.Audiobooks.Catalog
 
             if (!forceRefresh &&
                 cachedEntry?.CatalogBooks != null &&
-                cachedEntry.CatalogBooks.Count > 0)
+                cachedEntry.CatalogBooks.Count > 0 &&
+                !HasLegacySeriesShape(cachedEntry.CatalogBooks))
             {
                 return new AuthorCatalogFetchResult
                 {
