@@ -16,7 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import AudiobooksView from '@/views/library/AudiobooksView.vue'
@@ -813,6 +813,76 @@ describe('AudiobooksView Grouping', () => {
     expect(store.selectedIds.size).toBe(0)
   })
 
+  it('shows Repair Selected with the number of selected books', async () => {
+    if (
+      typeof (globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver === 'undefined'
+    ) {
+      ;(globalThis as unknown as Record<string, unknown>).ResizeObserver = class {
+        observe() {}
+        disconnect() {}
+      }
+    }
+    if (typeof (globalThis as unknown as { WebSocket?: unknown }).WebSocket === 'undefined') {
+      ;(globalThis as unknown as Record<string, unknown>).WebSocket = function () {
+        /* noop */
+      }
+    }
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: { template: '<div />' } },
+        { path: '/audiobooks', name: 'audiobooks', component: AudiobooksView },
+      ],
+    })
+    await router.push('/audiobooks')
+    await router.isReady().catch(() => {})
+
+    const store = useLibraryStore()
+    store.audiobooks = [
+      {
+        id: 1,
+        title: 'Book 1',
+        authors: ['Author A'],
+        series: 'Series 1',
+        imageUrl: 'cover1.jpg',
+        files: [],
+      },
+      {
+        id: 2,
+        title: 'Book 2',
+        authors: ['Author B'],
+        series: 'Series 2',
+        imageUrl: 'cover2.jpg',
+        files: [],
+      },
+    ] as unknown as import('@/types').Audiobook[]
+
+    store.fetchLibrary = vi.fn(async () => undefined)
+    const wrapper = mount(AudiobooksView, {
+      global: {
+        plugins: [pinia, router],
+        stubs: [
+          'BulkEditModal',
+          'EditAudiobookModal',
+          'CustomFilterModal',
+          'FiltersDropdown',
+          'CustomSelect',
+        ],
+      },
+    })
+    await new Promise((r) => setTimeout(r, 0))
+
+    store.toggleSelection(1)
+    store.toggleSelection(2)
+    await wrapper.vm.$nextTick()
+
+    const repair = wrapper.get('button.repair-btn')
+    expect(repair.text()).toContain('Repair Selected (2)')
+  })
+
   it('series bottom placard is only visible when showItemDetails is enabled', async () => {
     if (
       typeof (globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver === 'undefined'
@@ -893,5 +963,56 @@ describe('AudiobooksView Grouping', () => {
     }
     await wrapper.vm.$nextTick()
     expect(wrapper.find('.series-bottom-placard').exists()).toBe(true)
+  })
+
+  it('opens Organize from Repair at once, the library refreshed behind it', async () => {
+    if (
+      typeof (globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver === 'undefined'
+    ) {
+      ;(globalThis as unknown as Record<string, unknown>).ResizeObserver = class {
+        observe() {}
+        disconnect() {}
+      }
+    }
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/audiobooks', name: 'audiobooks', component: AudiobooksView }],
+    })
+    await router.push('/audiobooks')
+    await router.isReady().catch(() => {})
+    const store = useLibraryStore()
+    store.audiobooks = [
+      { id: 123, title: 'The Test Book', authors: ['Test Author'], files: [] },
+    ] as unknown as import('@/types').Audiobook[]
+    store.fetchLibrary = vi.fn(async () => undefined)
+    const wrapper = mount(AudiobooksView, {
+      global: {
+        plugins: [pinia, router],
+        stubs: [
+          'BulkEditModal',
+          'EditAudiobookModal',
+          'CustomFilterModal',
+          'FiltersDropdown',
+          'CustomSelect',
+          'RepairBooksModal',
+          'RenamePreviewModal',
+        ],
+      },
+    })
+    await new Promise((r) => setTimeout(r, 0))
+    // The library's refresh held (a big library)
+    let endRefresh!: () => void
+    store.fetchLibrary = vi.fn(() => new Promise<void>((resolve) => (endRefresh = resolve)))
+
+    wrapper.findComponent({ name: 'RepairBooksModal' }).vm.$emit('organize', [123])
+    await flushPromises()
+
+    const organize = wrapper.findComponent({ name: 'RenamePreviewModal' })
+    expect(organize.props('visible')).toBe(true)
+    expect(organize.props('audiobookIds')).toEqual([123])
+    expect(store.fetchLibrary).toHaveBeenCalledTimes(1)
+    endRefresh()
   })
 })

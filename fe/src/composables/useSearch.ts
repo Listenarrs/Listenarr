@@ -47,6 +47,10 @@ type AudibleMetadataRecord = Record<string, unknown> & {
   Description?: string
   narrators?: SearchResult['narrators']
   Narrators?: SearchResult['narrators']
+  // As the metadata endpoint gives them: Audible's series (name, ASIN, position) and genres
+  series?: { name?: string; asin?: string; position?: string }[]
+  genres?: ({ name?: string } | string)[]
+  publishDate?: string
   authors?: SearchResult['authors']
   Authors?: SearchResult['authors']
 }
@@ -60,6 +64,15 @@ type SearchType = 'asin' | 'title' | 'isbn' | null
 
 // options.searchType: shared state to keep the detected search type in (Add New keeps it in its
 // search store, with the results it belongs to)
+// The first of a record's series, as a search result holds it: its name, number and ASIN
+function asinResultSeries(
+  series: AudibleMetadataRecord['series'],
+): Pick<SearchResult, 'series' | 'seriesNumber' | 'seriesAsin'> {
+  const first = Array.isArray(series) ? series.find((item) => item?.name) : undefined
+  if (!first) return {}
+  return { series: first.name, seriesNumber: first.position, seriesAsin: first.asin }
+}
+
 export function useSearch(options: { searchType?: Ref<SearchType> } = {}) {
   // Reactive state
   const searchQuery = ref('')
@@ -353,6 +366,16 @@ export function useSearch(options: { searchType?: Ref<SearchType> } = {}) {
           : Array.isArray(meta.Authors)
             ? (meta.Authors as SearchResult['authors'])
             : undefined,
+        // The record's series, genres and dates, as a title search's results carry them: a
+        // book added from this result (Library Import's Find Match) keeps them
+        ...asinResultSeries(meta.series),
+        genres: Array.isArray(meta.genres)
+          ? meta.genres
+              .map((genre) => (typeof genre === 'string' ? genre : (genre?.name ?? '')))
+              .filter(Boolean)
+          : undefined,
+        releaseDate: typeof meta.releaseDate === 'string' ? meta.releaseDate : undefined,
+        publishDate: typeof meta.publishDate === 'string' ? meta.publishDate : undefined,
       }
 
       return [mapped]

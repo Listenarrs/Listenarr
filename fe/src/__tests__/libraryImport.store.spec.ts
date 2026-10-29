@@ -77,6 +77,67 @@ describe('library import store', () => {
     getAudibleMetadata.mockResolvedValue({})
   })
 
+  it('imports a match picked from an ASIN search with its series, genres and year', async () => {
+    // What the metadata endpoint answers for an ASIN (Add New's ASIN search, used by Find Match)
+    getAudibleMetadata.mockResolvedValue({
+      source: 'audible',
+      metadata: {
+        asin: 'B008DFUGCQ',
+        title: 'A Princess of Mars',
+        authors: [{ name: 'Edgar Rice Burroughs' }],
+        narrators: [{ name: 'Bob Thomley' }],
+        series: [{ name: 'Barsoom', asin: 'B007D0J4H0', position: '1' }],
+        genres: [{ asin: '1', name: 'Science Fiction', type: 'Genres' }],
+        releaseDate: '2012-06-23',
+      },
+    })
+    const { useSearch } = await import('@/composables/useSearch')
+    const search = useSearch()
+    search.searchQuery.value = 'B008DFUGCQ'
+    search.searchLanguage.value = 'us'
+    const [picked] = (await search.performSearch()) as SearchResult[]
+    expect(picked).toMatchObject({
+      series: 'Barsoom',
+      seriesNumber: '1',
+      seriesAsin: 'B007D0J4H0',
+      genres: ['Science Fiction'],
+      releaseDate: '2012-06-23',
+    })
+
+    const { useLibraryImportStore } = await import('@/stores/libraryImport')
+    const store = useLibraryImportStore()
+    store.items = {
+      '/incoming/Mars/01.m4b': {
+        id: '/incoming/Mars/01.m4b',
+        fullPath: '/incoming/Mars/01.m4b',
+        sourceFiles: ['/incoming/Mars/01.m4b'],
+        folderPath: '/incoming/Mars',
+        relativePath: 'Mars',
+        folderName: 'Mars',
+        format: 'M4B',
+        fileCount: 1,
+        selectedMatch: { ...picked!, region: 'us' },
+        hasSearched: true,
+        isSearching: false,
+        selected: true,
+      },
+    }
+    store.action = 'move'
+    await store.importSelected('/library')
+
+    expect(addToLibrary).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'A Princess of Mars',
+        series: 'Barsoom',
+        seriesNumber: '1',
+        seriesAsin: 'B007D0J4H0',
+        genres: ['Science Fiction'],
+        publishYear: '2012',
+      }),
+      expect.anything(),
+    )
+  })
+
   it('submits every grouped source file during import', async () => {
     const { useLibraryImportStore } = await import('@/stores/libraryImport')
     const store = useLibraryImportStore()
