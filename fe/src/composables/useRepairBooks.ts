@@ -257,17 +257,17 @@ export function useRepairBooks(audiobookIds: () => number[]) {
     return new Promise((resolve) => resumeWaiters.push(resolve))
   }
 
-  // One book's repair: its new record saved (when its ASIN or region changes), then its metadata
-  // rescanned and the book read again. Its row says where it is, then how it ended
+  // One book's repair: its new record saved (when its ASIN or region changes), its details emptied
+  // (it takes its record as a whole, the user agreed to it), then its metadata rescanned and the
+  // book read again. Its row says where it is, then how it ended
   async function repairOne(repairRow: RepairRow) {
     repairRow.repairTask = { state: 'running', text: 'Repairing…' }
     const startedAt = performance.now()
     const elapsedText = () => formatDuration(performance.now() - startedAt)
     let isAsinSaved = false
-    let isEmptying = false
+    let isEmptied = false
     try {
-      // The new record was looked up in its region: saved, the old record's details emptied, then
-      // the metadata read from it
+      // The new record was looked up in its region: saved first
       if (hasAsinChanged(repairRow.bookMatch)) {
         await apiService.updateAudiobookIdentifiers(
           repairRow.audiobookId,
@@ -275,10 +275,11 @@ export function useRepairBooks(audiobookIds: () => number[]) {
         )
         isAsinSaved = true
         hasLibraryChanged.value = true
-        isEmptying = true
-        await apiService.updateAudiobook(repairRow.audiobookId, EMPTIED_RECORD_FIELDS)
-        isEmptying = false
       }
+      // The rescan only writes what the record has: emptied first, the book keeps nothing else
+      await apiService.updateAudiobook(repairRow.audiobookId, EMPTIED_RECORD_FIELDS)
+      isEmptied = true
+      hasLibraryChanged.value = true
       const rescanResult = await rescanMetadata(repairRow)
       const book = await apiService.getAudiobook(repairRow.audiobookId)
       const asin = rescanResult.asin ?? repairRow.bookMatch.pickedSearchResult?.asin ?? ''
@@ -319,34 +320,39 @@ export function useRepairBooks(audiobookIds: () => number[]) {
       audiobookIdsToOrganize.value = [...audiobookIdsToOrganize.value, repairRow.audiobookId]
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : 'Repair failed'
-      // The new ASIN saved but its metadata not read: repaired in part
-      if (isAsinSaved)
+      // Something saved but its metadata not read: repaired in part, pointing at the picked record
+      if (isAsinSaved || isEmptied)
         repairRow.recordAfter = {
           ...repairRow.recordBefore,
           asin: repairRow.bookMatch.pickedSearchResult?.asin ?? '',
           region: repairRow.bookMatch.pickedSearchResult?.region || repairRow.bookMatch.region,
         }
-      // Canceled while it waited for the rescan cooldown: nothing done, or its new ASIN only
-      if (e instanceof RescanWaitCanceled) {
-        if (isAsinSaved)
-          repairRow.repairTask = {
-            state: 'warning',
-            text: 'The new ASIN is saved, but the metadata rescan was canceled',
-          }
-        else {
-          repairRow.repairTask = { state: 'skipped', text: 'Canceled: not repaired' }
-          canceledCount.value++
+      // What was saved before it stopped
+      const savedText = isAsinSaved
+        ? isEmptied
+          ? 'The new ASIN is saved and its details emptied'
+          : 'The new ASIN is saved'
+        : 'Its details are emptied'
+      if (e instanceof RescanWaitCanceled)
+        repairRow.repairTask = {
+          state: 'warning',
+          text: `${savedText}, but the metadata rescan was canceled`,
         }
-        return
-      }
-      repairRow.repairTask = isAsinSaved
-        ? {
-            state: 'warning',
-            text: isEmptying
-              ? `The new ASIN is saved, but the old record's details couldn't be emptied (${elapsedText()}): ${errorMessage}`
-              : `The new ASIN is saved, but the metadata rescan failed (${elapsedText()}): ${errorMessage}`,
-          }
-        : { state: 'failed', text: `Repair failed (${elapsedText()}): ${errorMessage}` }
+      else if (isAsinSaved && !isEmptied)
+        repairRow.repairTask = {
+          state: 'warning',
+          text: `The new ASIN is saved, but its old details couldn't be emptied (${elapsedText()}): ${errorMessage}`,
+        }
+      else if (isEmptied)
+        repairRow.repairTask = {
+          state: 'warning',
+          text: `${savedText}, but the metadata rescan failed (${elapsedText()}): ${errorMessage}`,
+        }
+      else
+        repairRow.repairTask = {
+          state: 'failed',
+          text: `Repair failed (${elapsedText()}): ${errorMessage}`,
+        }
     }
   }
 

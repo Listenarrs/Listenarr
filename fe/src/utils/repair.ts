@@ -129,10 +129,11 @@ export function isIncluded(repairRow: RepairRow): boolean {
   return repairRow.isSelected && isMatched(repairRow)
 }
 
-// What a book takes from its record and a new record may not have: emptied before the rescan when
-// a repair changes the record. The rescan only writes what the new record has, so the old record's
-// series, subtitle, narrators… would stay (and Organize would file the book under the old series).
-// The title, authors, cover and runtime are always read again, so they stay until then.
+// What a book takes from its record and the record may not have: emptied before every repair's
+// rescan, so the book takes its record as a whole. The rescan only writes what the record has, so
+// an old record's series, subtitle, narrators… would stay (and Organize would file the book under
+// the old series). The title, authors, cover and runtime are always read again: they stay until
+// then, so a failed rescan never leaves a book without a title or author.
 export const EMPTIED_RECORD_FIELDS: AudiobookUpdateRequest = {
   subtitle: '',
   series: '',
@@ -149,6 +150,13 @@ export const EMPTIED_RECORD_FIELDS: AudiobookUpdateRequest = {
   genres: [],
   isbn: [],
 }
+
+// Asked before the repairs start: what a repair does to each book, which can't be undone
+export function repairConfirmTitle(count: number): string {
+  return `Repair ${count} book${count === 1 ? '' : 's'}?`
+}
+export const REPAIR_CONFIRM_MESSAGE =
+  "Each book takes its new record as a whole: its title, authors, series, subtitle, narrators, description, genres and the rest are replaced by the record's, and what the record doesn't have is emptied. Changes made by hand are lost. The files, the folder and the book's settings stay.\n\nThis can't be undone."
 
 // The new ASIN becomes the primary one. Identifiers that came from the previous match (provider or
 // import) are dropped: an ISBN of the wrong book would let the rescan find it again. Manual ones stay.

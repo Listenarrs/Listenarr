@@ -144,7 +144,7 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, provide, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { PhInfo, PhSpinner, PhWarningCircle, PhWrench } from '@phosphor-icons/vue'
 import { Modal, ModalBody, ModalHeader } from '@/components/feedback'
 import NoticeBox from '@/components/base/NoticeBox.vue'
@@ -154,10 +154,16 @@ import RepairResults from './RepairResults.vue'
 import RepairSelection from './RepairSelection.vue'
 import { useRepairBooks } from '@/composables/useRepairBooks'
 import { usePageLeaveGuard } from '@/composables/usePageLeaveGuard'
-import { showConfirm } from '@/composables/confirmService'
+import { showConfirm, useConfirmService } from '@/composables/confirmService'
 import { SEARCH_CACHE } from '@/utils/bookMatch'
 import { pixels } from '@/utils/measure'
-import { isIncluded, isMatched, repairStepTitle } from '@/utils/repair'
+import {
+  isIncluded,
+  isMatched,
+  REPAIR_CONFIRM_MESSAGE,
+  repairConfirmTitle,
+  repairStepTitle,
+} from '@/utils/repair'
 
 const props = withDefaults(
   defineProps<{
@@ -254,13 +260,33 @@ function keepStepOneRoom(): () => Promise<void> {
   }
 }
 
-function startRepair() {
-  void repair(keepStepOneRoom())
+// A repair can't be undone: asked first. Cancel goes back to step 1 as it was
+async function startRepair() {
+  const count = selectedCount.value
+  const isConfirmed = await showConfirm(REPAIR_CONFIRM_MESSAGE, repairConfirmTitle(count), {
+    confirmText: `Repair ${count}`,
+    cancelText: 'Cancel',
+    danger: true,
+  })
+  if (isConfirmed) void repair(keepStepOneRoom())
 }
+
+// Escape on a confirmation shown over the dialog answers it only. Every open dialog hears Escape,
+// and the confirmation is gone by the time this one does, so it is noted first (capture phase),
+// and the dialog stays
+const { visible: isConfirmShown } = useConfirmService()
+let isEscapeForConfirmation = false
+function noteEscapeForConfirmation(event: KeyboardEvent) {
+  if (event.key !== 'Escape' || !isConfirmShown.value) return
+  isEscapeForConfirmation = true
+  setTimeout(() => (isEscapeForConfirmation = false))
+}
+onMounted(() => window.addEventListener('keydown', noteEscapeForConfirmation, true))
+onBeforeUnmount(() => window.removeEventListener('keydown', noteEscapeForConfirmation, true))
 
 // Closing stops the running search: the cards go away with the modal
 function handleClose() {
-  if (isExecuting.value) return
+  if (isExecuting.value || isEscapeForConfirmation) return
   if (isFinished.value || hasLibraryChanged.value) emit('done')
   else emit('close')
 }
