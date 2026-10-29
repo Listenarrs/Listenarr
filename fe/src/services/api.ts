@@ -1140,6 +1140,14 @@ class ApiService {
     )
   }
 
+  // Editions from catalogues beyond Audible's current search (audiosilo-meta), shaped like search results
+  async searchEditions(title: string, author?: string, region?: string): Promise<SearchResult[]> {
+    const params = new URLSearchParams({ title })
+    if (author) params.append('author', author)
+    if (region) params.append('region', region)
+    return this.request<SearchResult[]>(`/editions/search?${params}`)
+  }
+
   // Audible Metadata API
   async getAudibleMetadata<T>(asin: string, region: string = 'us'): Promise<T> {
     const params = new URLSearchParams()

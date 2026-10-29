@@ -28,6 +28,7 @@ const getUnmatchedResults = vi.fn()
 const getSavedUnmatchedFiles = vi.fn()
 const getAudibleMetadata = vi.fn()
 const getApplicationSettings = vi.fn()
+const searchEditions = vi.fn()
 let unmatchedScanHandler:
   | ((payload: { jobId: string; error?: string }) => void | Promise<void>)
   | null = null
@@ -43,6 +44,7 @@ vi.mock('@/services/api', () => ({
     scanUnmatchedFiles,
     getUnmatchedResults,
     getSavedUnmatchedFiles,
+    searchEditions,
   },
 }))
 
@@ -75,6 +77,7 @@ describe('library import store', () => {
     getSavedUnmatchedFiles.mockResolvedValue({ items: [], lastScannedAt: null })
     getApplicationSettings.mockResolvedValue({ defaultSearchRegion: 'fr' })
     getAudibleMetadata.mockResolvedValue({})
+    searchEditions.mockResolvedValue([])
   })
 
   it('submits every grouped source file during import', async () => {
@@ -911,5 +914,89 @@ describe('library import store', () => {
       expect.objectContaining({ authors: ['D. Rus'], region: 'fr' }),
       expect.anything(),
     )
+  })
+
+  describe('editions beyond Audible search', () => {
+    const planer = {
+      source: 'Audiosilo',
+      title: 'Guards! Guards!',
+      asin: 'B004FU8XPA',
+      region: 'uk',
+      authors: [{ name: 'Terry Pratchett' }],
+      narrators: [{ name: 'Nigel Planer' }],
+      lengthMinutes: 608,
+    } as unknown as SearchResult
+
+    it('matches the edition whose runtime equals the file, including one only the community catalogue lists', async () => {
+      const { useLibraryImportStore } = await import('@/stores/libraryImport')
+      const store = useLibraryImportStore()
+      store.items = {
+        '/incoming/Guards/01.mp3': {
+          ...unsearchedItem('/incoming/Guards/01.mp3'),
+          detectedTitle: 'Guards! Guards! (Unabridged)',
+          detectedAuthor: 'Terry Pratchett',
+          durationSeconds: 608 * 60,
+        },
+      }
+      advancedSearch.mockResolvedValue([
+        { title: 'Guards! Guards!', asin: 'B09M8W9JY5', lengthMinutes: 809, authors: [{ name: 'Terry Pratchett' }] },
+        { title: 'Guards! Guards!', asin: 'B004EXIHDQ', lengthMinutes: 194, authors: [{ name: 'Terry Pratchett' }] },
+      ] as unknown as SearchResult[])
+      searchEditions.mockResolvedValue([planer])
+
+      store.startProcessing()
+      await vi.waitFor(() => expect(store.isProcessing).toBe(false))
+
+      expect(searchEditions).toHaveBeenCalledWith('Guards! Guards!', 'Terry Pratchett', 'fr')
+      expect(store.items['/incoming/Guards/01.mp3']?.selectedMatch?.asin).toBe('B004FU8XPA')
+    })
+
+    it('imports a community-catalogue edition from its own record when Audible no longer serves it', async () => {
+      const { useLibraryImportStore } = await import('@/stores/libraryImport')
+      const store = useLibraryImportStore()
+      getAudibleMetadata.mockRejectedValue(Object.assign(new Error('Not Found'), { status: 404 }))
+      startManualImport.mockResolvedValueOnce({
+        importedCount: 1,
+        totalCount: 1,
+        results: [{ success: true, sourcePath: '/incoming/Guards/01.mp3' }],
+      })
+      store.items = {
+        '/incoming/Guards/01.mp3': {
+          ...unsearchedItem('/incoming/Guards/01.mp3'),
+          selectedMatch: planer,
+          hasSearched: true,
+          selected: true,
+        },
+      }
+      store.action = 'none'
+
+      const result = await store.importSelected('/media/audiobooks')
+
+      expect(result.imported).toBe(1)
+      expect(addToLibrary).toHaveBeenCalledWith(
+        expect.objectContaining({ asin: 'B004FU8XPA', narrators: ['Nigel Planer'], runtime: 608 * 60 }),
+        expect.anything(),
+      )
+    })
+
+    it('still refuses an Audible match whose record is gone', async () => {
+      const { useLibraryImportStore } = await import('@/stores/libraryImport')
+      const store = useLibraryImportStore()
+      getAudibleMetadata.mockRejectedValue(Object.assign(new Error('Not Found'), { status: 404 }))
+      store.items = {
+        '/incoming/Guards/01.mp3': {
+          ...unsearchedItem('/incoming/Guards/01.mp3'),
+          selectedMatch: { ...planer, source: 'Audible' } as SearchResult,
+          hasSearched: true,
+          selected: true,
+        },
+      }
+      store.action = 'none'
+
+      const result = await store.importSelected('/media/audiobooks')
+
+      expect(result.imported).toBe(0)
+      expect(addToLibrary).not.toHaveBeenCalled()
+    })
   })
 })

@@ -15,6 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Listenarr.Domain.Common;
@@ -32,6 +33,8 @@ namespace Listenarr.Infrastructure.Metadata.Parsing
         public string? Narrator { get; set; }
         public string? CoverPath { get; set; }
         public string? Asin { get; set; }
+        /// <summary>Playback length of the probed file, from ffprobe's format section.</summary>
+        public double? DurationSeconds { get; set; }
         internal string? BookFolderPath { get; set; }
     }
 
@@ -204,6 +207,14 @@ namespace Listenarr.Infrastructure.Metadata.Parsing
             var result = new PathParsedMetadata();
 
             if (!doc.TryGetProperty("format", out var fmt)) return result;
+            // -show_format already reports the length; it lets a match be checked against an edition's runtime.
+            if (fmt.TryGetProperty("duration", out var duration)
+                && duration.ValueKind == JsonValueKind.String
+                && double.TryParse(duration.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds)
+                && seconds > 0)
+            {
+                result.DurationSeconds = seconds;
+            }
             if (!fmt.TryGetProperty("tags", out var tags) || tags.ValueKind != JsonValueKind.Object) return result;
 
             result.Title = GetTag(tags, "album");

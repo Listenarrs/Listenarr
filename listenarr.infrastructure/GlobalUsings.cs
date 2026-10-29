@@ -95,6 +95,7 @@ global using Listenarr.Infrastructure.Images.Jobs;
 global using Listenarr.Infrastructure.Images.Validation;
 global using Listenarr.Infrastructure.Metadata.Jobs;
 global using Listenarr.Infrastructure.Metadata.Providers.Audible;
+global using Listenarr.Infrastructure.Metadata.Providers.Audiosilo;
 global using Listenarr.Infrastructure.Metadata.Providers.Audnexus;
 global using Listenarr.Infrastructure.Metadata.Providers.OpenLibrary;
 global using Listenarr.Infrastructure.HostedServices.Search;
