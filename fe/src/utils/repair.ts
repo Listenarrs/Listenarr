@@ -183,17 +183,26 @@ export const REPAIR_CONFIRM_MESSAGE =
   "Each book takes its new record as a whole: its title, authors, series, subtitle, narrators, description, genres and the rest are replaced by the record's, and what the record doesn't have is emptied. Changes made by hand are lost. The files, the folder and the book's settings stay.\n\nThis can't be undone."
 
 // The new ASIN becomes the primary one. Identifiers that came from the previous match (provider or
-// import) are dropped: an ISBN of the wrong book would let the rescan find it again. Manual ones stay.
+// import) are dropped: an ISBN of the wrong book would let the rescan find it again, and so is the
+// ASIN it is repaired away from. Other Manual ones stay.
 export function identifiersWithPrimaryAsin(
   repairRow: RepairRow,
 ): AudiobookExternalIdentifierInput[] {
   // Only a matched book is repaired: its new record is the picked one, whatever the fields hold
   const asin = (repairRow.bookMatch.pickedSearchResult?.asin ?? '').toUpperCase()
   const region = repairRow.bookMatch.pickedSearchResult?.region || repairRow.bookMatch.region
+  // The record it is repaired away from, whatever its source: a Manual one too (an earlier
+  // repair's, saved as Manual by the server, or a wrong one typed by hand) would stay a fallback
+  // the rescan can read
+  const replacedAsin = repairRow.bookMatch.currentRecordKey.asin.toUpperCase()
   const manualIdentifiers = repairRow.identifiers
     .filter((identifier) => identifier.source === 'Manual')
     .filter(
-      (identifier) => !(identifier.type === 'Asin' && identifier.value.toUpperCase() === asin),
+      (identifier) =>
+        !(
+          identifier.type === 'Asin' &&
+          [asin, replacedAsin].includes(identifier.value.toUpperCase())
+        ),
     )
     .map((identifier) => ({
       type: identifier.type,

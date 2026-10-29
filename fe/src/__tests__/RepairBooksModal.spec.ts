@@ -2025,6 +2025,33 @@ describe('RepairBooksModal', () => {
     )
   })
 
+  it('drops the ASIN it repairs the book away from, even a Manual one; other Manual ones stay', async () => {
+    // Its current record saved as Manual (by an earlier repair), an ASIN the user added for another
+    // region, and an ISBN typed by hand
+    const otherRegionAsin = {
+      type: 'Asin',
+      value: 'B0OTHER001',
+      region: 'uk',
+      isPrimary: false,
+      source: 'Manual',
+    }
+    apiMocks.getAudiobookIdentifiers.mockResolvedValue({
+      audiobookId: 7,
+      identifiers: [{ ...frenchAsin, source: 'Manual' }, otherRegionAsin, manualIsbn],
+    })
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+
+    await repair(wrapper)
+
+    expect(apiMocks.updateAudiobookIdentifiers).toHaveBeenCalledWith(7, [
+      { type: 'Asin', value: 'B0BK9W82PQ', region: 'us', isPrimary: true, source: 'Manual' },
+      { type: 'Asin', value: 'B0OTHER001', region: 'uk', isPrimary: false, source: 'Manual' },
+      { type: 'Isbn', value: '9781039400740', region: null, isPrimary: false, source: 'Manual' },
+    ])
+  })
+
   // The server reads the record from the book's other identifiers when the picked one fails
   function rescannedFrom(asin: string, region: string) {
     apiMocks.rescanAudiobookMetadata.mockResolvedValueOnce({
