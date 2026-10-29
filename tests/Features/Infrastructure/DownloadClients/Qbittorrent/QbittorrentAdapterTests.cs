@@ -583,6 +583,11 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
             Assert.Empty(items);
         }
 
+        // Gateway-level reads reject a save path that is not valid on the host, so the fixtures
+        // use host paths (JSON-encoded, as a Windows path carries backslashes).
+        private static string SavePathJson(string folder) =>
+            JsonSerializer.Serialize(FileUtils.GetAbsolutePath("downloads", folder));
+
         // A queue response whose middle torrent carries `downloaded` in the given JSON token form.
         // The torrents either side of it are well formed, so anything missing from the result is
         // attributable to that one field.
@@ -590,15 +595,15 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
         [
             {
                 "hash": "aaaa1111", "name": "First", "progress": 0.5, "size": 1000,
-                "downloaded": 500, "state": "downloading", "save_path": "/downloads/a"
+                "downloaded": 500, "state": "downloading", "save_path": {{SavePathJson("a")}}
             },
             {
                 "hash": "bbbb2222", "name": "Second", "progress": 0.5, "size": 1000,
-                "downloaded": {{malformedDownloaded}}, "state": "downloading", "save_path": "/downloads/b"
+                "downloaded": {{malformedDownloaded}}, "state": "downloading", "save_path": {{SavePathJson("b")}}
             },
             {
                 "hash": "cccc3333", "name": "Third", "progress": 0.5, "size": 1000,
-                "downloaded": 700, "state": "downloading", "save_path": "/downloads/c"
+                "downloaded": 700, "state": "downloading", "save_path": {{SavePathJson("c")}}
             }
         ]
         """;
