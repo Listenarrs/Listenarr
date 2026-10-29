@@ -165,7 +165,11 @@ import RepairResults from './RepairResults.vue'
 import RepairSelection from './RepairSelection.vue'
 import { useRepairBooks } from '@/composables/useRepairBooks'
 import { usePageLeaveGuard } from '@/composables/usePageLeaveGuard'
-import { showConfirm, useConfirmService } from '@/composables/confirmService'
+import {
+  cancel as cancelConfirmation,
+  showConfirm,
+  useConfirmService,
+} from '@/composables/confirmService'
 import { SEARCH_CACHE } from '@/utils/bookMatch'
 import { pixels } from '@/utils/measure'
 import {
@@ -274,15 +278,27 @@ function keepStepOneRoom(): () => Promise<void> {
 }
 
 // A repair can't be undone: asked first. Cancel goes back to step 1 as it was
+let isAskingRepair = false
+let isGone = false
 async function startRepair() {
   const count = selectedCount.value
+  isAskingRepair = true
   const isConfirmed = await showConfirm(REPAIR_CONFIRM_MESSAGE, repairConfirmTitle(count), {
     confirmText: `Repair ${count}`,
     cancelText: 'Cancel',
     danger: true,
   })
-  if (isConfirmed) void repair(keepStepOneRoom())
+  isAskingRepair = false
+  // An answer given once the dialog has gone (its page left meanwhile) starts nothing
+  if (isConfirmed && !isGone) void repair(keepStepOneRoom())
 }
+
+// The question is the app's, not this dialog's: left with its page, it would stay over the next
+// one. It goes with the dialog, as Cancel
+onBeforeUnmount(() => {
+  isGone = true
+  if (isAskingRepair) cancelConfirmation()
+})
 
 // Escape on a confirmation shown over the dialog answers it only. Every open dialog hears Escape,
 // and the confirmation is gone by the time this one does, so it is noted first (capture phase),
