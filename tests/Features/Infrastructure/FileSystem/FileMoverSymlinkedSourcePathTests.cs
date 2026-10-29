@@ -274,6 +274,6 @@ public sealed class FileMoverSymlinkedSourcePathTests : BaseTests
 
         Assert.False(result.IsSupported);
         Assert.Contains("'" + outerLink + "'", result.Reason, StringComparison.Ordinal);
-        Assert.DoesNotContain(innerLink, result.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain(Path.Join(outerLink, "inner-link"), result.Reason, StringComparison.Ordinal);
     }
 }
