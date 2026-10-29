@@ -58,6 +58,22 @@ namespace Listenarr.Api.Features.Library
                 return new NotFoundObjectResult(new { message = "Audiobook not found" });
             }
 
+            int? resolvedQualityProfileId = null;
+            if (request.QualityProfileId.HasValue)
+            {
+                try
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    resolvedQualityProfileId = await LibraryQualityProfileSelection.ResolveAsync(
+                        scope.ServiceProvider.GetRequiredService<IQualityProfileService>(),
+                        request.QualityProfileId.Value);
+                }
+                catch (ListenarrApplicationException ex)
+                {
+                    return ToApplicationExceptionResult(ex);
+                }
+            }
+
             var basePathRewritten = false;
             var suppressStaleImageUrl = false;
             var metadataUpdateRequested = HasMetadataUpdates(request);
@@ -117,6 +133,7 @@ namespace Listenarr.Api.Features.Library
                     basePathRewritten,
                     suppressStaleImageUrl,
                     metadataUpdateRequested,
+                    resolvedQualityProfileId,
                     token),
                 completionToken);
         }
@@ -241,43 +258,6 @@ namespace Listenarr.Api.Features.Library
             }
 
             AudiobookSeriesMembershipHelper.ApplyPrimarySeriesFields(existingAudiobook);
-        }
-
-        private async Task ApplyQualityProfileAsync(
-            Audiobook existingAudiobook,
-            AudiobookUpdateRequest request,
-            CancellationToken cancellationToken)
-        {
-            if (!request.QualityProfileId.HasValue)
-            {
-                return;
-            }
-
-            if (request.QualityProfileId.Value == -1)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                using var scope = _scopeFactory.CreateScope();
-                var qualityProfileService = scope.ServiceProvider.GetRequiredService<IQualityProfileService>();
-                var defaultProfile = await qualityProfileService.GetDefaultAsync();
-                cancellationToken.ThrowIfCancellationRequested();
-                if (defaultProfile != null)
-                {
-                    existingAudiobook.QualityProfileId = defaultProfile.Id;
-                    _logger.LogInformation("Assigned default quality profile '{ProfileName}' (ID: {ProfileId}) to audiobook '{Title}'",
-                        defaultProfile.Name, defaultProfile.Id, existingAudiobook.Title);
-                }
-                else
-                {
-                    _logger.LogWarning("No default quality profile found. Audiobook '{Title}' quality profile set to null.", LogRedaction.SanitizeText(existingAudiobook.Title));
-                    existingAudiobook.QualityProfileId = null;
-                }
-
-                return;
-            }
-
-            existingAudiobook.QualityProfileId = request.QualityProfileId.Value;
-            _logger.LogInformation("Updated quality profile for audiobook '{Title}' to ID {ProfileId}",
-                existingAudiobook.Title, request.QualityProfileId.Value);
         }
     }
 }

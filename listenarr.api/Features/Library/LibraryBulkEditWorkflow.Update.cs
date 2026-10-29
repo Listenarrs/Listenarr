@@ -244,6 +244,9 @@ namespace Listenarr.Api.Features.Library
                         var qualityProfileId = qualityProfileObj is JsonElement element
                             ? element.GetInt32()
                             : Convert.ToInt32(qualityProfileObj);
+                        qualityProfileId = await LibraryQualityProfileSelection.ResolveAsync(
+                            scope.ServiceProvider.GetRequiredService<IQualityProfileService>(),
+                            qualityProfileId);
                         audiobook.QualityProfileId = qualityProfileId;
                         changed = true;
                         _logger.LogInformation(
@@ -252,6 +255,10 @@ namespace Listenarr.Api.Features.Library
                             id);
                         historyMessages.Add(
                             $"Quality profile set to {qualityProfileId}");
+                    }
+                    catch (ListenarrApplicationException ex)
+                    {
+                        errors.Add(ex.SafeDetail);
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException
                         && ex is not OutOfMemoryException
