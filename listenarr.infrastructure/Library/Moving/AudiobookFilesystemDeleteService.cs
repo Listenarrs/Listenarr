@@ -107,23 +107,21 @@ namespace Listenarr.Infrastructure.Library.Moving
                     result,
                     cancellationToken);
 
-            // A tracked path with no live proof was renamed or removed outside Listenarr, so the
-            // folder can no longer be identified safely. Delete only the proven tracked files.
+            var folderIsOwned = deleteTarget != null && IsFolderDurablyOwned(deleteTarget);
+            // A tracked path with no live proof was renamed or removed outside Listenarr, so an
+            // unowned folder can no longer be identified safely. Delete only the proven tracked
+            // files there. A durable ownership row keeps the recursive path: Listenarr created
+            // the folder, and ownership retirement depends on it.
             var everyTrackedFileProven = trackedContentProofs.Count == trackedFilePaths.Count;
-            if (deleteTarget != null && !everyTrackedFileProven)
+            if (deleteTarget != null && !everyTrackedFileProven && !folderIsOwned)
             {
                 result.Warnings.Add(
                     "A tracked audiobook file is missing from the audiobook folder, so the folder was not removed recursively and only the remaining tracked files were deleted.");
             }
 
-            if (deleteTarget != null && everyTrackedFileProven)
+            if (deleteTarget != null && (everyTrackedFileProven || folderIsOwned))
             {
-                if (trackedContentProofs.Count == 0
-                    && !deleteTarget.OwnedDirectories.Any(ownership =>
-                        FileSystemPathIdentity.AreEquivalent(
-                            ownership.CanonicalPath,
-                            deleteTarget.FolderPath,
-                            deleteTarget.Semantics)))
+                if (trackedContentProofs.Count == 0 && !folderIsOwned)
                 {
                     result.Warnings.Add(
                         "The audiobook folder has no live tracked-file content proof or durable directory ownership, so filesystem deletion was blocked.");
@@ -223,6 +221,13 @@ namespace Listenarr.Infrastructure.Library.Moving
                     trackedFilePaths, deleteSemantics, CancellationToken.None);
             return result;
         }
+
+        private static bool IsFolderDurablyOwned(DeleteFolderTarget deleteTarget) =>
+            deleteTarget.OwnedDirectories.Any(ownership =>
+                FileSystemPathIdentity.AreEquivalent(
+                    ownership.CanonicalPath,
+                    deleteTarget.FolderPath,
+                    deleteTarget.Semantics));
 
         private sealed class DeleteFolderTarget
         {
