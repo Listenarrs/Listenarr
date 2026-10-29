@@ -92,6 +92,7 @@
                   :is-excluded="!repairRow.isSelected"
                   :is-narrow="footerRef?.isLegendAbove ?? false"
                   :should-keep-results-room="repairRows.length === 1"
+                  is-provider-record-required
                   :book="{
                     title: repairRow.title,
                     subtitle: repairRow.subtitle,

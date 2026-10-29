@@ -29,12 +29,15 @@
       :key="searchResult.asin ?? searchResult.title"
       class="result-item"
       :class="{
-        selected: isSameRecord(searchResult, selectedRecordKey),
-        'has-current': isSameRecord(searchResult, currentRecordKey),
+        selected: isResultOfRecord(searchResult, selectedRecordKey),
+        'has-current': isResultOfRecord(searchResult, currentRecordKey),
+        unpickable: isUnpickable(searchResult),
       }"
-      :aria-selected="isSameRecord(searchResult, selectedRecordKey)"
+      :aria-selected="isResultOfRecord(searchResult, selectedRecordKey)"
+      :aria-disabled="isUnpickable(searchResult) || undefined"
+      :title="isUnpickable(searchResult) ? NO_PROVIDER_RECORD_TITLE : undefined"
       data-testid="find-match-result"
-      @click="emit('select', searchResult)"
+      @click="isUnpickable(searchResult) || emit('select', searchResult)"
     >
       <img
         v-if="searchResult.imageUrl"
@@ -54,7 +57,15 @@
         </span>
       </div>
       <span
-        v-if="isSameRecord(searchResult, currentRecordKey)"
+        v-if="isUnpickable(searchResult)"
+        class="result-other-region"
+        :title="NO_PROVIDER_RECORD_TITLE"
+        data-testid="find-match-no-asin"
+      >
+        No ASIN
+      </span>
+      <span
+        v-else-if="isResultOfRecord(searchResult, currentRecordKey)"
         class="result-current"
         data-testid="find-match-current"
       >
@@ -90,7 +101,7 @@ import {
 } from '@/utils/languageMapping'
 import { getPlaceholderUrl } from '@/utils/placeholder'
 import { extractNarrators, type NormalizedResult } from '@/utils/searchResultHelpers'
-import { fullTitle, regionLabel, type RecordKey } from '@/utils/bookMatch'
+import { fullTitle, isResultOfRecord, regionLabel, type RecordKey } from '@/utils/bookMatch'
 import type { SearchResult } from '@/types'
 
 // selectedRecordKey: the record picked (green); currentRecordKey: the one the book points at
@@ -99,6 +110,8 @@ const props = defineProps<{
   searchResults: SearchResult[]
   selectedRecordKey?: RecordKey | null
   currentRecordKey?: RecordKey | null
+  // Repair: only a record a metadata provider can read again (its ASIN) can be picked
+  isProviderRecordRequired?: boolean
 }>()
 const emit = defineEmits<{ select: [searchResult: SearchResult] }>()
 
@@ -128,13 +141,11 @@ function languageLabel(searchResult: SearchResult): string {
   return rawLanguage!.charAt(0).toUpperCase() + rawLanguage!.slice(1)
 }
 
-function isSameRecord(
-  searchResult: SearchResult,
-  recordKey: RecordKey | null | undefined,
-): boolean {
-  if (!recordKey?.asin || searchResult.asin?.toUpperCase() !== recordKey.asin.toUpperCase())
-    return false
-  return !recordKey.region || !searchResult.region || searchResult.region === recordKey.region
+// A record no metadata provider can read again (no ASIN) can't be picked where one is required
+const NO_PROVIDER_RECORD_TITLE =
+  'No ASIN: a repair needs a book a metadata provider can read again (an Audible record)'
+function isUnpickable(searchResult: SearchResult): boolean {
+  return !!props.isProviderRecordRequired && !searchResult.asin
 }
 
 // The book's ASIN, found in another catalogue than the one it points at: a different record

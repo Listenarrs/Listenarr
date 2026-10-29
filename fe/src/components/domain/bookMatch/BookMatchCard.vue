@@ -86,6 +86,7 @@
         :should-keep-results-room="shouldKeepResultsRoom"
         :selected-record-key="pickedRecordKey"
         :current-record-key="bookMatch.currentRecordKey"
+        :is-provider-record-required="isProviderRecordRequired"
         @select="pick"
       />
     </fieldset>
@@ -113,6 +114,8 @@ import { useAbortableRequest } from '@/composables/useAbortableRequest'
 import { useResultsReveal } from '@/composables/useResultsReveal'
 import {
   isAsinValid,
+  isResultOfRecord,
+  type RecordKey,
   INVALID_ASIN_MESSAGE,
   bookSummary,
   isEdited,
@@ -154,6 +157,10 @@ const props = withDefaults(
     isExcluded?: boolean
     // Search as soon as the card shows, and focus the title
     shouldSearchOnMount?: boolean
+    // Repair: the new record must be one a metadata provider can read again (its ASIN, Audible
+    // today); Find Match also takes a record without one (another source), as Library Import can
+    // add a book from it
+    isProviderRecordRequired?: boolean
     // The dialog is short of room (Repair measures its footer): the fields take the narrow
     // screen's layout before the screen itself is narrow
     isNarrow?: boolean
@@ -166,6 +173,7 @@ const props = withDefaults(
     isSearchLocked: false,
     isExcluded: false,
     shouldSearchOnMount: false,
+    isProviderRecordRequired: false,
     isNarrow: false,
     shouldKeepResultsRoom: false,
   },
@@ -221,11 +229,12 @@ const currentRecord = computed<BookRecord>(() => ({
 const pendingText = computed(() => pendingSearchText(runningSearch.value))
 
 // The record picked, green in the results; the current one only wears a tag there
-const pickedRecordKey = computed(() => {
+const pickedRecordKey = computed<RecordKey | null>(() => {
   const { pickedSearchResult } = bookMatch.value
-  return pickedSearchResult?.asin
+  if (!pickedSearchResult) return null
+  return pickedSearchResult.asin
     ? { asin: pickedSearchResult.asin, region: pickedSearchResult.region ?? bookMatch.value.region }
-    : null
+    : { asin: '', id: pickedSearchResult.id ?? pickedSearchResult.title ?? null }
 })
 
 const pickedRecord = computed(() =>
@@ -402,18 +411,14 @@ function pick(searchResult: SearchResult) {
   // Not while a search runs (the results shown are the previous search's), nor while new ones are
   // revealed
   if (
-    !searchResult.asin ||
+    (!searchResult.asin && props.isProviderRecordRequired) ||
     props.isSearchLocked ||
     searchState.value.status === 'searching' ||
     resultsReveal.isRevealing.value
   )
     return
-  const pickedKey = pickedRecordKey.value
-  if (
-    pickedKey &&
-    pickedKey.asin.toUpperCase() === searchResult.asin.toUpperCase() &&
-    (!searchResult.region || searchResult.region === pickedKey.region)
-  ) {
+  // The picked record again: unpicked
+  if (isResultOfRecord(searchResult, pickedRecordKey.value)) {
     bookMatch.value.pickedSearchResult = null
     return
   }

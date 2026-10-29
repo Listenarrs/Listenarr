@@ -2084,6 +2084,29 @@ describe('RepairBooksModal', () => {
     ])
   })
 
+  it("shows a record without an ASIN but can't repair a book with it: no provider could read it again", async () => {
+    // Audible has nothing: the search merges a record from another source, without an ASIN
+    apiMocks.advancedSearch.mockResolvedValue([
+      { id: '/works/OL8090838W', title: 'An OpenLibrary Book', authors: [{ name: 'Someone' }] },
+    ])
+    const wrapper = mountModal()
+    await flushPromises()
+    await emptyAsin(wrapper)
+    await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
+    await flushPromises()
+
+    const result = bookCard(wrapper).get('[data-testid="find-match-result"]')
+    expect(result.classes()).toContain('unpickable')
+    expect(result.get('[data-testid="find-match-no-asin"]').text()).toBe('No ASIN')
+    expect(result.attributes('title')).toContain(
+      'a repair needs a book a metadata provider can read again',
+    )
+    await result.trigger('click')
+    await flushPromises()
+    expect(bookCard(wrapper).attributes('data-match-state')).not.toBe('matched')
+    expect(wrapper.get('[data-testid="repair-confirm"]').text()).toContain('Repair 0')
+  })
+
   // The server reads the record from the book's other identifiers when the picked one fails
   function rescannedFrom(asin: string, region: string) {
     apiMocks.rescanAudiobookMetadata.mockResolvedValueOnce({
