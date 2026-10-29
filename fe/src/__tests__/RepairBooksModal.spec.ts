@@ -38,6 +38,8 @@ vi.mock('@/services/api', () => ({
 const leaveMocks = vi.hoisted(() => ({
   routeLeaveGuards: [] as Array<() => Promise<boolean> | boolean>,
   showConfirm: vi.fn(),
+  // Whether the app's confirmation is shown (over the dialog)
+  isConfirmShown: { value: false },
 }))
 
 vi.mock('vue-router', async (importOriginal) => ({
@@ -46,7 +48,10 @@ vi.mock('vue-router', async (importOriginal) => ({
     leaveMocks.routeLeaveGuards.push(guard),
 }))
 
-vi.mock('@/composables/confirmService', () => ({ showConfirm: leaveMocks.showConfirm }))
+vi.mock('@/composables/confirmService', () => ({
+  showConfirm: leaveMocks.showConfirm,
+  useConfirmService: () => ({ visible: leaveMocks.isConfirmShown }),
+}))
 
 import RepairBooksModal from '@/components/domain/repair/RepairBooksModal.vue'
 import { resultsReveal } from '@/utils/resultsReveal'
@@ -164,6 +169,9 @@ async function repair(wrapper: ReturnType<typeof mountModal>) {
 describe('RepairBooksModal', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // Repair asks first: accepted, unless a test says otherwise
+    leaveMocks.showConfirm.mockReset().mockResolvedValue(true)
+    leaveMocks.isConfirmShown.value = false
     apiMocks.getApplicationSettings.mockResolvedValue({ defaultSearchRegion: 'fr' })
     apiMocks.getAudiobook.mockResolvedValue(mismatched)
     apiMocks.getAudiobookIdentifiers.mockResolvedValue({
@@ -1735,7 +1743,7 @@ describe('RepairBooksModal', () => {
     expect(resultCard(wrapper).attributes('data-result-state')).toBe('done')
   })
 
-  it('empties nothing on a rescan only (the record stays the same)', async () => {
+  it('empties the details on a rescan only too: the book takes its record as a whole', async () => {
     apiMocks.rescanAudiobookMetadata.mockResolvedValueOnce({
       message: 'ok',
       audiobookId: 7,
@@ -1753,7 +1761,11 @@ describe('RepairBooksModal', () => {
 
     await repair(wrapper)
 
-    expect(apiMocks.updateAudiobook).not.toHaveBeenCalled()
+    expect(apiMocks.updateAudiobookIdentifiers).not.toHaveBeenCalled()
+    expect(apiMocks.updateAudiobook).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({ series: '' }),
+    )
     expect(resultCard(wrapper).attributes('data-result-state')).toBe('done')
   })
 
@@ -1768,8 +1780,90 @@ describe('RepairBooksModal', () => {
     expect(apiMocks.rescanAudiobookMetadata).not.toHaveBeenCalled()
     expect(resultCard(wrapper).attributes('data-result-state')).toBe('warning')
     expect(resultCard(wrapper).get('[data-testid="repair-result-message"]').text()).toMatch(
-      /^The new ASIN is saved, but the old record's details couldn't be emptied \(.+ s\): Server error$/,
+      /^The new ASIN is saved, but its old details couldn't be emptied \(.+ s\): Server error$/,
     )
+  })
+
+  it('asks before repairing, since a repair cannot be undone; Cancel stays on step 1 as it was', async () => {
+    leaveMocks.showConfirm.mockResolvedValueOnce(false)
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+
+    await repair(wrapper)
+
+    expect(leaveMocks.showConfirm).toHaveBeenCalledWith(
+      "Each book takes its new record as a whole: its title, authors, series, subtitle, narrators, description, genres and the rest are replaced by the record's, and what the record doesn't have is emptied. Changes made by hand are lost. The files, the folder and the book's settings stay.\n\nThis can't be undone.",
+      'Repair 1 book?',
+      { confirmText: 'Repair 1', cancelText: 'Cancel', danger: true },
+    )
+    // Nothing done, still matching, the pick kept
+    expect(apiMocks.updateAudiobookIdentifiers).not.toHaveBeenCalled()
+    expect(apiMocks.updateAudiobook).not.toHaveBeenCalled()
+    expect(apiMocks.rescanAudiobookMetadata).not.toHaveBeenCalled()
+    expect(wrapper.get('#modal-title h2').text()).toBe('Repair Books - Matching - Step 1/3')
+    expect(wrapper.get('[data-testid="repair-confirm"]').text()).toContain('Repair 1')
+
+    // Asked again, accepted: repaired
+    await repair(wrapper)
+    expect(leaveMocks.showConfirm).toHaveBeenLastCalledWith(
+      expect.any(String),
+      'Repair 1 book?',
+      expect.objectContaining({ confirmText: 'Repair 1' }),
+    )
+    expect(resultCard(wrapper).attributes('data-result-state')).toBe('done')
+  })
+
+  it('names how many books it repairs in the question', async () => {
+    const wrapper = mountModal([7, 8])
+    await flushPromises()
+    for (const audiobookId of [7, 8])
+      await searchAndPick(wrapper, { audiobookId, query: 'Primal Hunter' })
+
+    await repair(wrapper)
+
+    expect(leaveMocks.showConfirm).toHaveBeenCalledWith(expect.any(String), 'Repair 2 books?', {
+      confirmText: 'Repair 2',
+      cancelText: 'Cancel',
+      danger: true,
+    })
+  })
+
+  it('does not ask again for a Retry (that book was already accepted)', async () => {
+    apiMocks.rescanAudiobookMetadata.mockRejectedValueOnce(new Error('Audible is down'))
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+    await repair(wrapper)
+    expect(leaveMocks.showConfirm).toHaveBeenCalledTimes(1)
+
+    await resultCard(wrapper).get('[data-testid="repair-result-retry"]').trigger('click')
+    await flushPromises()
+
+    expect(leaveMocks.showConfirm).toHaveBeenCalledTimes(1)
+    expect(resultCard(wrapper).attributes('data-result-state')).toBe('done')
+  })
+
+  it('stays open when Escape answers a confirmation shown over it', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+    await repair(wrapper)
+    const escape = () =>
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+
+    // A confirmation over it (leaving the page): Escape answers it, the dialog stays
+    leaveMocks.isConfirmShown.value = true
+    escape()
+    await flushPromises()
+    expect(wrapper.emitted('done')).toBeUndefined()
+    expect(wrapper.emitted('close')).toBeUndefined()
+
+    // On its own, Escape closes it
+    leaveMocks.isConfirmShown.value = false
+    await new Promise((resolve) => setTimeout(resolve))
+    escape()
+    expect(wrapper.emitted('done')).toHaveLength(1)
   })
 
   // The server reads the record from the book's other identifiers when the picked one fails
@@ -1896,7 +1990,7 @@ describe('RepairBooksModal', () => {
     // Its new ASIN was saved: repaired in part
     expect(resultCard(wrapper).attributes('data-result-state')).toBe('warning')
     expect(resultCard(wrapper).get('[data-testid="repair-result-message"]').text()).toMatch(
-      /^The new ASIN is saved, but the metadata rescan failed \(.+ s\): too many rescans of this book, retry in about 8 min$/,
+      /^The new ASIN is saved and its details emptied, but the metadata rescan failed \(.+ s\): too many rescans of this book, retry in about 8 min$/,
     )
   })
 
@@ -1914,15 +2008,15 @@ describe('RepairBooksModal', () => {
     await flushPromises()
     await vi.advanceTimersByTimeAsync(20_000)
 
-    // Not asked again; its new ASIN was saved, its metadata not read
+    // Not asked again; its new ASIN was saved and its details emptied, its metadata not read
     expect(apiMocks.rescanAudiobookMetadata).toHaveBeenCalledTimes(1)
     expect(resultCard(wrapper).attributes('data-result-state')).toBe('warning')
     expect(resultCard(wrapper).get('[data-testid="repair-result-message"]').text()).toBe(
-      'The new ASIN is saved, but the metadata rescan was canceled',
+      'The new ASIN is saved and its details emptied, but the metadata rescan was canceled',
     )
   })
 
-  it('Cancel during the cooldown leaves a book whose ASIN did not change not repaired', async () => {
+  it('Cancel during the cooldown leaves a book whose ASIN did not change with its details emptied', async () => {
     apiMocks.rescanAudiobookMetadata.mockRejectedValueOnce(tooSoon(12))
     catalogue({ us: [englishPrimalHunter4], fr: [frenchPrimalHunterVolume7] })
     const wrapper = mountModal()
@@ -1942,9 +2036,10 @@ describe('RepairBooksModal', () => {
     await flushPromises()
 
     expect(apiMocks.updateAudiobookIdentifiers).not.toHaveBeenCalled()
-    expect(resultCard(wrapper).attributes('data-result-state')).toBe('skipped')
+    // Its details were emptied before the cooldown: done in part, Retry reads them again
+    expect(resultCard(wrapper).attributes('data-result-state')).toBe('warning')
     expect(resultCard(wrapper).get('[data-testid="repair-result-message"]').text()).toBe(
-      'Canceled: not repaired',
+      'Its details are emptied, but the metadata rescan was canceled',
     )
   })
 
@@ -1999,7 +2094,7 @@ describe('RepairBooksModal', () => {
 
     expect(resultCard(wrapper).attributes('data-result-state')).toBe('warning')
     expect(resultCard(wrapper).get('[data-testid="repair-result-message"]').text()).toBe(
-      'The new ASIN is saved, but the metadata rescan failed (0.5 s): Audible is down',
+      'The new ASIN is saved and its details emptied, but the metadata rescan failed (0.5 s): Audible is down',
     )
     // Repaired in part: it can't be organized
     expect(
