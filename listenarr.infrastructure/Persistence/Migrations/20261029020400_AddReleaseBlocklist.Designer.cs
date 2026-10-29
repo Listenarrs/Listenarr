@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Listenarr.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(ListenArrDbContext))]
-    [Migration("20261018214323_AddReleaseBlocklist")]
+    [Migration("20261029020400_AddReleaseBlocklist")]
     partial class AddReleaseBlocklist
     {
         /// <inheritdoc />
@@ -1809,6 +1809,15 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Property<string>("AudnexusApiUrl")
                         .IsRequired()
                         .HasColumnType("TEXT");
+
+                    b.Property<int>("AutomaticSearchBookDelaySeconds")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AutomaticSearchCooldownHours")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AutomaticSearchIntervalHours")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int>("CompletedFileAction")
                         .HasColumnType("INTEGER");
