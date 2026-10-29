@@ -252,6 +252,39 @@ describe('RepairBooksModal', () => {
     expect(failedCard().text()).toContain('Book 8')
   })
 
+  it('keeps each error card loading until its own answer, and loads a book again only once', async () => {
+    booksFailing({ 8: new Error('Request timed out'), 9: new Error('Request timed out') })
+    const wrapper = mountModal([7, 8, 9])
+    await flushPromises()
+    // The answers of the books loaded again, held
+    const answers = new Map<number, (book: typeof mismatched) => void>()
+    apiMocks.getAudiobook.mockImplementation(
+      (audiobookId: number) => new Promise((resolve) => answers.set(audiobookId, resolve)),
+    )
+    const loadAgainButton = (audiobookId: number) =>
+      wrapper.get(`[data-testid="repair-row-${audiobookId}"] [data-testid="repair-load-again"]`)
+    await loadAgainButton(8).trigger('click')
+    await loadAgainButton(9).trigger('click')
+    await flushPromises()
+    for (const audiobookId of [8, 9]) {
+      expect(loadAgainButton(audiobookId).text()).toBe('Loading…')
+      expect(loadAgainButton(audiobookId).attributes('disabled')).toBeDefined()
+    }
+
+    answers.get(8)!({ ...mismatched, id: 8, title: 'Book 8' })
+    await flushPromises()
+
+    // 8 is in; 9 still loading, and asking again sends nothing
+    expect(wrapper.find('[data-testid="repair-row-8"] [data-testid="match-search"]').exists()).toBe(
+      true,
+    )
+    expect(loadAgainButton(9).text()).toBe('Loading…')
+    const requestsBefore = apiMocks.getAudiobook.mock.calls.length
+    await loadAgainButton(9).trigger('click')
+    await flushPromises()
+    expect(apiMocks.getAudiobook.mock.calls.length).toBe(requestsBefore)
+  })
+
   it('says why when no book could be loaded at all', async () => {
     booksFailing({ 7: notFound() })
     const wrapper = mountModal([7])
