@@ -32,7 +32,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Migrations;
 public sealed class QualityProfileUpgradeAllowedMigrationTests : BaseTests
 {
     /// <summary>The migration immediately before the one under test.</summary>
-    private const string PreviousMigrationId = "20261002210137_AddOperationEvidencePublications";
+    private const string PreviousMigrationId = "20261021212418_AddAutomaticSearchTiming";
 
     /// <summary>
     /// Every cutoff the engine reads as blank has to be backfilled as blank. The cases past the
