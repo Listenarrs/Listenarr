@@ -95,7 +95,7 @@ namespace Listenarr.Tests.Features.Api.Services
         [Fact]
         public void AuthorFolder_UsesTheContributorsCleanNameWhenEveryCreditNamesARole()
         {
-            // 1094179574, an anthology credited only to its editors. Better the editor's name
+            // An anthology credited only to its editors. Better the editor's name
             // than "Unknown Author", and better it without the job title in the folder name.
             Assert.Equal("Lisa Morton", RenderAuthor("Lisa Morton - editor", "Leslie S. Klinger - editor"));
         }

@@ -181,7 +181,7 @@ namespace Listenarr.Tests.Features.Domain.Utils
         [Fact]
         public void StripRole_CorrectsAnAdaptationCreditWithoutCallingItARole()
         {
-            // B0GTS5WKFF credits nobody but "Miguel de Cervantes (adapted)". Under the rejected
+            // An edition that credits nobody but "Miguel de Cervantes (adapted)". Under the rejected
             // rule this string was a liability: it matched, and dropping the credit took
             // Cervantes off his own book, with the never-empty guard saving him only by leaving
             // the string exactly as it was. Removing the tail gives the right answer.
@@ -339,10 +339,10 @@ namespace Listenarr.Tests.Features.Domain.Utils
         [Fact]
         public void WithoutRoleSuffixes_FixesABookCreditedToNobodyButContributors()
         {
-            // 1094179574 and the single-credit form of the same shape. This is the case the
-            // rejected rule could not touch: something had to survive, so it returned the list
-            // untouched and the book kept exactly the problem being fixed. There are dozens of
-            // these for every handful of the co-credited kind.
+            // An anthology credited only to its editors, and the single-credit form of the same
+            // shape. This is the case the rejected rule could not touch: something had to
+            // survive, so it returned the list untouched and the book kept exactly the problem
+            // being fixed. There are dozens of these for every handful of the co-credited kind.
             Assert.Equal(
                 new[] { "Lisa Morton", "Leslie S. Klinger" },
                 AuthorCredits.WithoutRoleSuffixes(new List<string> { "Lisa Morton - editor", "Leslie S. Klinger - editor" }));
@@ -380,7 +380,7 @@ namespace Listenarr.Tests.Features.Domain.Utils
         [Fact]
         public void WithoutRoleSuffixes_DropsSeveralRolesAtOnce()
         {
-            // 1541437438. One author and two different kinds of contributor, all three kept.
+            // One author and two different kinds of contributor, all three kept.
             Assert.Equal(
                 new[] { "Tacitus", "J. C. Yardley", "Anthony A. Barrett" },
                 AuthorCredits.WithoutRoleSuffixes(new List<string>

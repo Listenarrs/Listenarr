@@ -1126,8 +1126,8 @@ describe('library import store', () => {
   })
 
   it('treats a ten-character, non-B0 value typed into the manual search box as an ASIN', async () => {
-    // Real Audible product ASINs are not all B0-prefixed: ISBN-shaped ones like 1781105022
-    // and 177424599X are valid ten-character ASINs on the catalogue. The manual search box's
+    // Real Audible product ASINs are not all B0-prefixed: ISBN-shaped ones (ten digits, or nine
+    // and a trailing X) are valid ten-character ASINs on the catalogue. The manual search box's
     // own ASIN-vs-title detection has to accept those, even though a series membership's
     // seriesAsin is deliberately restricted to the B0 shape (see seriesUtils.ts). Regression
     // guard for the two detectors sharing one predicate.
@@ -1153,8 +1153,8 @@ describe('library import store', () => {
       },
     }
 
-    await store.searchItem('/incoming/Book.m4b', '1781105022')
+    await store.searchItem('/incoming/Book.m4b', '1000000001')
 
-    expect(advancedSearch).toHaveBeenCalledWith({ asin: '1781105022', cap: 5, region: 'fr' })
+    expect(advancedSearch).toHaveBeenCalledWith({ asin: '1000000001', cap: 5, region: 'fr' })
   })
 })

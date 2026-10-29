@@ -60,7 +60,7 @@ describe('looksLikeAsin', () => {
     expect(looksLikeAsin('B01E633FQMX')).toBe(false)
     expect(looksLikeAsin('A01E633FQM')).toBe(false)
     expect(looksLikeAsin('B1E633FQMX')).toBe(false)
-    expect(looksLikeAsin('0143122754')).toBe(false)
+    expect(looksLikeAsin('1000000001')).toBe(false)
     expect(looksLikeAsin('')).toBe(false)
     expect(looksLikeAsin(undefined)).toBe(false)
     expect(looksLikeAsin(null)).toBe(false)
