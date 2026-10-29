@@ -38,6 +38,7 @@ vi.mock('@/services/api', () => ({
 const leaveMocks = vi.hoisted(() => ({
   routeLeaveGuards: [] as Array<() => Promise<boolean> | boolean>,
   showConfirm: vi.fn(),
+  cancelConfirmation: vi.fn(),
   // Whether the app's confirmation is shown (over the dialog)
   isConfirmShown: { value: false },
 }))
@@ -50,6 +51,7 @@ vi.mock('vue-router', async (importOriginal) => ({
 
 vi.mock('@/composables/confirmService', () => ({
   showConfirm: leaveMocks.showConfirm,
+  cancel: leaveMocks.cancelConfirmation,
   useConfirmService: () => ({ visible: leaveMocks.isConfirmShown }),
 }))
 
@@ -1913,6 +1915,36 @@ describe('RepairBooksModal', () => {
       expect.objectContaining({ confirmText: 'Repair 1' }),
     )
     expect(resultCard(wrapper).attributes('data-result-state')).toBe('done')
+  })
+
+  it('closes its question and starts nothing when it goes while asking (the page left)', async () => {
+    let answer!: (isConfirmed: boolean) => void
+    leaveMocks.showConfirm.mockImplementationOnce(
+      () => new Promise<boolean>((resolve) => (answer = resolve)),
+    )
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+    await wrapper.get('[data-testid="repair-confirm"]').trigger('click')
+    await flushPromises()
+
+    // The page goes (browser Back) while "Repair 1 book?" is open
+    wrapper.unmount()
+    expect(leaveMocks.cancelConfirmation).toHaveBeenCalledTimes(1)
+
+    // Even a late yes starts nothing
+    answer(true)
+    await flushPromises()
+    expect(apiMocks.updateAudiobookIdentifiers).not.toHaveBeenCalled()
+    expect(apiMocks.updateAudiobook).not.toHaveBeenCalled()
+    expect(apiMocks.rescanAudiobookMetadata).not.toHaveBeenCalled()
+  })
+
+  it("leaves the app's question alone when it goes without asking", async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    wrapper.unmount()
+    expect(leaveMocks.cancelConfirmation).not.toHaveBeenCalled()
   })
 
   it('names how many books it repairs in the question', async () => {
