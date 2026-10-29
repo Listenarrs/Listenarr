@@ -22,7 +22,8 @@ namespace Listenarr.Tests.Features.Infrastructure.Notifications.Delivery
 {
     /// <summary>
     /// Covers how one event fans out across several notification targets: one target failing must not
-    /// cost the others their delivery.
+    /// cost the others their delivery, and two targets are only treated as one when they are the
+    /// same endpoint.
     /// </summary>
     [Trait("Name", "WebhookTargetIsolationTests")]
     [Trait("Category", "Notifications")]
@@ -109,6 +110,40 @@ namespace Listenarr.Tests.Features.Infrastructure.Notifications.Delivery
             probe.HttpClient.CancelPendingRequests();
 
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => dispatch.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.Equal([LegacyUrl], probe.PostedUrls);
+        }
+
+        [Fact]
+        public async Task WebhookWhosePathDiffersOnlyByCase_IsStillSent()
+        {
+            const string sameHostLowerCaseToken = "https://hooks.notification-target.example/tokenabc";
+            using var probe = new WebhookDispatchProbe(SettingsWithLegacyAnd(LegacyUrl, sameHostLowerCaseToken));
+
+            await probe.Service.SendNotificationAsync(NotificationTriggers.BookAdded, Payload);
+
+            Assert.Equal([LegacyUrl, sameHostLowerCaseToken], probe.PostedUrls);
+        }
+
+        [Fact]
+        public async Task WebhookWhoseQueryDiffersOnlyByCase_IsStillSent()
+        {
+            const string legacyWithQuery = "https://hooks.notification-target.example/inbound?key=TokenABC";
+            const string lowerCaseQuery = "https://hooks.notification-target.example/inbound?key=tokenabc";
+            using var probe = new WebhookDispatchProbe(SettingsWithLegacyAnd(legacyWithQuery, lowerCaseQuery));
+
+            await probe.Service.SendNotificationAsync(NotificationTriggers.BookAdded, Payload);
+
+            Assert.Equal([legacyWithQuery, lowerCaseQuery], probe.PostedUrls);
+        }
+
+        [Fact]
+        public async Task WebhookWhoseSchemeAndHostDifferOnlyByCase_IsTheLegacyTargetAndIsNotSentTwice()
+        {
+            using var probe = new WebhookDispatchProbe(
+                SettingsWithLegacyAnd(LegacyUrl, "HTTPS://Hooks.Notification-Target.example/TokenABC"));
+
+            await probe.Service.SendNotificationAsync(NotificationTriggers.BookAdded, Payload);
+
             Assert.Equal([LegacyUrl], probe.PostedUrls);
         }
 

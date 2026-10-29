@@ -58,7 +58,7 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
                     continue;
                 }
 
-                if (legacyDelivered && string.Equals(webhook.Url, legacyUrl, StringComparison.OrdinalIgnoreCase))
+                if (legacyDelivered && IsSameTarget(webhook.Url, legacyUrl))
                 {
                     continue;
                 }
@@ -83,6 +83,22 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
             {
                 _logger.LogWarning(ex, "Sending the {Trigger} notification to one target failed; continuing with the remaining targets", trigger);
             }
+        }
+
+        /// <summary>
+        /// Whether two configured URLs name the same endpoint. Scheme and host are case-insensitive,
+        /// but path and query are not: a webhook token in either one is a different target when only
+        /// its casing differs.
+        /// </summary>
+        private static bool IsSameTarget(string left, string right)
+        {
+            if (Uri.TryCreate(left, UriKind.Absolute, out var leftUri)
+                && Uri.TryCreate(right, UriKind.Absolute, out var rightUri))
+            {
+                return Uri.Compare(leftUri, rightUri, UriComponents.AbsoluteUri, UriFormat.UriEscaped, StringComparison.Ordinal) == 0;
+            }
+
+            return string.Equals(left, right, StringComparison.Ordinal);
         }
 
         private async Task SendNotificationSafelyAsync(string trigger, object data, string failureContext)
