@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-import { mount, flushPromises } from '@vue/test-utils'
+import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest'
 
@@ -56,6 +56,10 @@ vi.mock('@/composables/confirmService', () => ({
 }))
 
 import RepairBooksModal from '@/components/domain/repair/RepairBooksModal.vue'
+
+// Every dialog mounted on the page goes after its test: one left behind would still hear Escape,
+// warn before the tab closes, and call the shared mocks in the tests after it
+enableAutoUnmount(afterEach)
 import { resultsReveal } from '@/utils/resultsReveal'
 
 // An English book matched to the French translation on a French instance
@@ -2770,17 +2774,16 @@ describe('RepairBooksModal', () => {
     })
 
     it('lets the page go without asking when no repair runs', async () => {
-      const wrapper = mountModal()
+      mountModal()
       await flushPromises()
 
       expect(await leaveGuard()()).toBe(true)
       expect(leaveMocks.showConfirm).not.toHaveBeenCalled()
       expect(isUnloadWarned()).toBe(false)
-      wrapper.unmount()
     })
 
     it('asks before leaving; Stay keeps the books repairing', async () => {
-      const { wrapper, rescans, resultStates } = await startTwoRepairs()
+      const { rescans, resultStates } = await startTwoRepairs()
       expect(resultStates()).toEqual(['running', 'waiting'])
       // Closing or reloading the tab: the browser warns
       expect(isUnloadWarned()).toBe(true)
@@ -2801,11 +2804,10 @@ describe('RepairBooksModal', () => {
       expect(resultStates()).toEqual(['done', 'done'])
       // Over: nothing to warn about any more
       expect(isUnloadWarned()).toBe(false)
-      wrapper.unmount()
     })
 
     it('leaves once confirmed: the running book ends, the waiting ones are not repaired', async () => {
-      const { wrapper, rescans, resultStates } = await startTwoRepairs()
+      const { rescans, resultStates } = await startTwoRepairs()
 
       leaveMocks.showConfirm.mockResolvedValue(true)
       expect(await leaveGuard()()).toBe(true)
@@ -2815,7 +2817,6 @@ describe('RepairBooksModal', () => {
       await flushPromises()
       expect(resultStates()).toEqual(['done', 'skipped'])
       expect(apiMocks.rescanAudiobookMetadata).toHaveBeenCalledTimes(1)
-      wrapper.unmount()
     })
 
     // The question left open while the first book's repair ends: the second one waits for the
@@ -2834,7 +2835,7 @@ describe('RepairBooksModal', () => {
     }
 
     it('holds the next book while it asks; Stay goes on with it', async () => {
-      const { wrapper, rescans, resultStates, answer, leaving } = await askWhileFirstEnds()
+      const { rescans, resultStates, answer, leaving } = await askWhileFirstEnds()
       expect(resultStates()).toEqual(['done', 'waiting'])
       expect(apiMocks.rescanAudiobookMetadata).toHaveBeenCalledTimes(1)
 
@@ -2847,18 +2848,16 @@ describe('RepairBooksModal', () => {
       rescans[1]!({ message: 'ok', audiobookId: 8, asin: 'B0BK9W82PQ', region: 'us' })
       await flushPromises()
       expect(resultStates()).toEqual(['done', 'done'])
-      wrapper.unmount()
     })
 
     it('holds the next book while it asks; Leave never starts it', async () => {
-      const { wrapper, resultStates, answer, leaving } = await askWhileFirstEnds()
+      const { resultStates, answer, leaving } = await askWhileFirstEnds()
 
       answer(true)
       expect(await leaving).toBe(true)
       await flushPromises()
       expect(resultStates()).toEqual(['done', 'skipped'])
       expect(apiMocks.rescanAudiobookMetadata).toHaveBeenCalledTimes(1)
-      wrapper.unmount()
     })
 
     it('repairs again after Leave when the page stayed (its navigation failed)', async () => {
@@ -2890,7 +2889,6 @@ describe('RepairBooksModal', () => {
       await repair(wrapper)
 
       expect(resultCard(wrapper).attributes('data-result-state')).toBe('done')
-      wrapper.unmount()
     })
 
     // One book whose rescan is refused for coming too soon: it waits 12 s, then is rescanned
@@ -2922,7 +2920,6 @@ describe('RepairBooksModal', () => {
       // Rescanned after the wait, as the question promised: its details aren't left emptied
       expect(apiMocks.rescanAudiobookMetadata).toHaveBeenCalledTimes(2)
       expect(resultCard(wrapper).attributes('data-result-state')).toBe('done')
-      wrapper.unmount()
     })
 
     it('finishes the book waiting for the rescan cooldown when the dialog goes', async () => {

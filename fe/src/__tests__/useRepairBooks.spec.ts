@@ -16,7 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 import { createPinia, setActivePinia } from 'pinia'
-import { effectScope } from 'vue'
+import { effectScope, type EffectScope } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SearchResult } from '@/types'
 
@@ -40,9 +40,13 @@ const primalHunter4 = {
   region: 'us',
 } as unknown as SearchResult
 
+// The scopes the tests open, stopped after each test (as a component's when it goes)
+const scopes: EffectScope[] = []
+
 // The composable on its own, in a scope like a component's, its books loaded and picked
 async function repairBooksPicked(audiobookIds: number[], picked: SearchResult) {
   const scope = effectScope()
+  scopes.push(scope)
   const state = scope.run(() => useRepairBooks(() => audiobookIds))!
   await state.load()
   for (const repairRow of state.repairRows.value) {
@@ -78,6 +82,7 @@ describe("useRepairBooks: an error outside a book's own repair", () => {
   })
 
   afterEach(() => {
+    scopes.splice(0).forEach((scope) => scope.stop())
     vi.restoreAllMocks()
   })
 
