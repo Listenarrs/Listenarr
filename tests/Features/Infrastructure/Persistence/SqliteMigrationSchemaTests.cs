@@ -47,10 +47,10 @@ public class SqliteMigrationSchemaTests : BaseTests
         "20260825021432_AddWeakStorageVerifiedCleanup";
     private const string OperationEvidencePublicationsMigrationId =
         "20261002210137_AddOperationEvidencePublications";
-    private const string QualityProfileUpgradeAllowedMigrationId =
-        "20261018212549_AddQualityProfileUpgradeAllowed";
     private const string AutomaticSearchTimingMigrationId =
         "20261021212418_AddAutomaticSearchTiming";
+    private const string QualityProfileUpgradeAllowedMigrationId =
+        "20261029020317_AddQualityProfileUpgradeAllowed";
     private const string ReleaseBlocklistMigrationId =
         "20261029020400_AddReleaseBlocklist";
     private const string AudiobookAddedDateMigrationId =
@@ -307,9 +307,9 @@ public class SqliteMigrationSchemaTests : BaseTests
                 CompatibilityFilePublicationMigrationId,
                 WeakStorageVerifiedCleanupMigrationId,
                 OperationEvidencePublicationsMigrationId,
-                QualityProfileUpgradeAllowedMigrationId,
                 AutomaticSearchTimingMigrationId,
                 ReleaseBlocklistMigrationId,
+                QualityProfileUpgradeAllowedMigrationId,
                 AudiobookAddedDateMigrationId,
                 MonitoringQualityProfileMigrationId
             ],
