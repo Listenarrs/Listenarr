@@ -20,6 +20,58 @@ namespace Listenarr.Tests.Features.Infrastructure.Search.Providers.InternetArchi
 [Trait("Category", "InternetArchiveSearchProvider")]
 public sealed class InternetArchiveSearchProviderTests : BaseTests
 {
+    [Theory]
+    [InlineData("\"Lewis Carroll\"", "Lewis Carroll", true)]
+    [InlineData("[\"Charles Dickens\",\"Lewis Carroll\"]", "Lewis Carroll", true)]
+    [InlineData("[\"Unknown\",\"Lewis Carroll\"]", "Lewis Carroll", true)]
+    [InlineData("\"Carroll, Lewis\"", "Carroll, Lewis", true)]
+    [InlineData("\"L. C. Writer\"", "L.C. Writer", true)]
+    [InlineData("\"Charles Dickens\"", "Lewis Carroll", false)]
+    [InlineData("\"Unknown\"", "Lewis Carroll", false)]
+    [InlineData("\"Unknown Author\"", "Lewis Carroll", false)]
+    [InlineData("null", "Lewis Carroll", false)]
+    [InlineData("[]", "Lewis Carroll", false)]
+    [InlineData("[null,42,{},\"\"]", "Lewis Carroll", false)]
+    public async Task SearchAsync_CreatorEvidenceSurvivesTheAutomaticPolicy(string creatorJson, string author, bool expected)
+    {
+        // Use realistic audio sizes so the production quality scorer can accept both formats.
+        var metadata = CreateMultiRepresentationMetadata().Replace("\"900\"", "\"900000000\"", StringComparison.Ordinal)
+            .Replace("\"100\"", "\"100000000\"", StringComparison.Ordinal)
+            .Replace("\"200\"", "\"200000000\"", StringComparison.Ordinal)
+            .Replace("\"280\"", "\"280000000\"", StringComparison.Ordinal);
+        var provider = CreateProvider(uri => IsAdvancedSearch(uri)
+            ? Ok(CreateSearchResponse("Alice in Wonderland").Replace("\"Lewis Carroll\"", creatorJson, StringComparison.Ordinal)
+                .Replace("2010-03-01", DateTime.UtcNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal))
+            : Ok(metadata));
+        var results = await provider.SearchAsync(CreateIndexer(), "Alice in Wonderland");
+        Assert.Equal(2, results.Count);
+        var quality = new QualityProfileService(Mock.Of<IQualityProfileRepository>(), NullLogger<QualityProfileService>.Instance);
+        var scorer = new AutomaticSearchScoringService(quality, Mock.Of<IAudiobookRepository>(), NullLogger<AutomaticSearchScoringService>.Instance);
+        var profile = new QualityProfile
+        {
+            Name = "Review",
+            MinimumSeeders = 0,
+            PreferredLanguages = [],
+            Qualities = [new() { Quality = "M4B", Allowed = true, Priority = 1 }, new() { Quality = "MP3 128kbps", Allowed = true, Priority = 2 }]
+        };
+        var book = new Audiobook { Title = "Alice in Wonderland", Authors = [author] };
+        foreach (var result in results)
+        {
+            Assert.NotNull(result.IdentityEvidence);
+            Assert.Equal(result.Title, result.IdentityEvidence.ReleaseName);
+            Assert.All(result.IdentityEvidence.Authors, entry => Assert.Equal(IdentityEvidenceOrigin.ProviderSupplied, entry.Origin));
+            if (expected) Assert.Contains(result.IdentityEvidence.Authors, entry => entry.Name == author || entry.Name == "L. C. Writer");
+            var converted = SearchResultConverters.ToSearchResult(result);
+            var replay = JsonSerializer.Deserialize<SearchResult>(JsonSerializer.Serialize(converted))!;
+            var assessment = await scorer.ScoreAsync(book, [replay], profile);
+            Assert.False(assessment.Candidates[0].Quality.IsRejected, string.Join(", ", assessment.Candidates[0].Quality.RejectionReasons));
+            Assert.Equal(expected, scorer.SelectBest(assessment) != null);
+            book.Title = "A Different Book";
+            Assert.Null(scorer.SelectBest(await scorer.ScoreAsync(book, [replay], profile)));
+            book.Title = "Alice in Wonderland";
+        }
+    }
+
     [Fact]
     public async Task SearchAsync_MultiTrackItem_ReturnsCompleteRepresentations()
     {

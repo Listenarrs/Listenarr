@@ -90,9 +90,9 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             var downloadRepository = scope.ServiceProvider.GetRequiredService<IDownloadRepository>();
             var fileRepository = scope.ServiceProvider.GetRequiredService<IAudiobookFileRepository>();
             var searchService = scope.ServiceProvider.GetRequiredService<ISearchService>();
-            var qualityProfileService = scope.ServiceProvider.GetRequiredService<IQualityProfileService>();
             var downloadService = scope.ServiceProvider.GetRequiredService<IDownloadService>();
             var configurationService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+            var automaticScoring = scope.ServiceProvider.GetRequiredService<IAutomaticSearchScoringService>();
 
             var timing = AutomaticSearchTiming.FromSettings(await configurationService.GetApplicationSettingsAsync());
 
@@ -127,7 +127,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                     isFirstBook = false;
 
                     var downloadsQueuedForBook = await ProcessAudiobookAsync(
-                        audiobook, searchService, qualityProfileService, downloadService, audiobookRepository, downloadRepository, fileRepository, stoppingToken);
+                        audiobook, searchService, downloadService, automaticScoring, audiobookRepository, downloadRepository, fileRepository, stoppingToken);
 
                     downloadsQueued += downloadsQueuedForBook;
                     processedCount++;
@@ -160,8 +160,8 @@ namespace Listenarr.Infrastructure.HostedServices.Search
         private async Task<int> ProcessAudiobookAsync(
             Audiobook audiobook,
             ISearchService searchService,
-            IQualityProfileService qualityProfileService,
             IDownloadService downloadService,
+            IAutomaticSearchScoringService automaticScoring,
             IAudiobookRepository audiobookRepository,
             IDownloadRepository downloadRepository,
             IAudiobookFileRepository fileRepository,
@@ -212,8 +212,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
 
             // Author-free fallback: release names often omit the author, so a full title+author
             // query can return nothing even when the book is available. Retry without the author,
-            // then constrain the broadened results to titles that still match this book, so a
-            // same-title/different-book release can't pass quality scoring and be grabbed.
+            // then assess every broadened result with the same identity and quality policy.
             if (searchResults.Count == 0)
             {
                 var fallbackQuery = _resultClassifier.BuildTitleFallbackSearchQuery(audiobook);
@@ -223,9 +222,9 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                     _logger.LogInformation("No results for '{Title}' with the full query; retrying without the author: {Query}",
                         audiobook.Title, fallbackQuery);
                     var fallbackResults = await searchService.SearchAsync(fallbackQuery, isAutomaticSearch: true);
-                    searchResults = _resultClassifier.ConstrainFallbackResultsToTitle(fallbackResults, audiobook);
-                    _logger.LogInformation("Author-free fallback for '{Title}': {Raw} raw result(s), {Kept} kept after title match",
-                        audiobook.Title, fallbackResults.Count, searchResults.Count);
+                    searchResults = fallbackResults;
+                    _logger.LogInformation("Author-free fallback for '{Title}': {Raw} result(s) to assess",
+                        audiobook.Title, fallbackResults.Count);
                 }
             }
 
@@ -260,8 +259,8 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                 return 0;
             }
 
-            // Score results against quality profile
-            var scoredResults = await qualityProfileService.ScoreSearchResults(searchResults, audiobook.QualityProfile);
+            var assessment = await automaticScoring.ScoreAsync(audiobook, searchResults, audiobook.QualityProfile, stoppingToken);
+            var scoredResults = assessment.Candidates;
 
             // Log all scored results for debugging
             _logger.LogInformation("Scored {Count} search results for audiobook '{Title}':", scoredResults.Count, audiobook.Title);
@@ -274,6 +273,9 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                     title = s.SearchResult.Title,
                     asin = s.SearchResult.Asin,
                     totalScore = s.TotalScore,
+                    identityStatus = s.Identity.Status.ToString(),
+                    identityReason = s.Identity.Reason,
+                    policyVersion = AutomaticSearchAssessment.PolicyVersion,
                     isRejected = s.IsRejected,
                     rejectionReasons = s.RejectionReasons,
                     source = s.SearchResult.Source,
@@ -303,10 +305,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                 }
             }
 
-            var topResult = scoredResults
-                .Where(s => !s.IsRejected) // Only non-rejected results
-                .OrderByDescending(s => s.TotalScore)
-                .FirstOrDefault(); // Pick only the top scoring result
+            var topResult = automaticScoring.SelectBest(assessment);
 
             if (topResult == null)
             {
@@ -352,6 +351,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                     return 0;
                 }
 
+                if (!await automaticScoring.IsCurrentAsync(assessment, audiobook.Id, stoppingToken)) return 0;
                 await downloadService.StartDownloadAsync(topResult.SearchResult, downloadClientId, audiobook.Id);
                 downloadsQueued++;
 

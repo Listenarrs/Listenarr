@@ -189,6 +189,7 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton<IndexerSearchWorkflow>();
             services.AddSingleton<MetadataSourceCatalog>();
             services.AddSingleton<SearchResultFilterPipeline>();
+            services.AddScoped<IAutomaticSearchScoringService, AutomaticSearchScoringService>();
             services.AddSingleton<MetadataStrategyCoordinator>();
             services.AddSingleton<AsinCandidateCollector>();
             services.AddSingleton<AsinEnricher>();
