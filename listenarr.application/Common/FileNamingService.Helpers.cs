@@ -106,9 +106,10 @@ namespace Listenarr.Application.Common
                 // lists the author ahead of the translator. Measured against the catalogue that
                 // does not hold: B00S710A4U credits Homer then Samuel Butler - translator and
                 // B00EZAXAF8 credits Constance Garnett - translator then Fyodor Dostoevsky, so
-                // taking index 0 files the second of those books under its translator. Removing roles at ingestion does not settle
-                // this on its own, because both names come out clean and the translator can
-                // still be first; the role has to be read before it is removed.
+                // taking index 0 files the second of those books under its translator. Removing
+                // roles at ingestion does not settle this on its own, because both names come out
+                // clean and the translator can still be first; the role has to be read before it
+                // is removed.
                 author = AuthorCredits.Primary(metadata.Authors) ?? author;
             }
 

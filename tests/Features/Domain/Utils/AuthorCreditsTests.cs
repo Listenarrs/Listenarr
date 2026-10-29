@@ -314,12 +314,12 @@ namespace Listenarr.Tests.Features.Domain.Utils
         public void WithoutRoleSuffixes_GivesTheSameNamesWhateverTheBylineOrder()
         {
             // B00EZAXAF8 credits its translator first, so the same two credits can arrive in either order.
-            var asListed = new List<string> { "Fyodor Dostoevsky", "Constance Garnett - translator" };
-            var reversed = new List<string> { "Constance Garnett - translator", "Fyodor Dostoevsky" };
+            var authorFirst = new List<string> { "Fyodor Dostoevsky", "Constance Garnett - translator" };
+            var translatorFirst = new List<string> { "Constance Garnett - translator", "Fyodor Dostoevsky" };
 
             Assert.Equal(
-                AuthorCredits.WithoutRoleSuffixes(asListed).OrderBy(n => n, StringComparer.Ordinal),
-                AuthorCredits.WithoutRoleSuffixes(reversed).OrderBy(n => n, StringComparer.Ordinal));
+                AuthorCredits.WithoutRoleSuffixes(authorFirst).OrderBy(n => n, StringComparer.Ordinal),
+                AuthorCredits.WithoutRoleSuffixes(translatorFirst).OrderBy(n => n, StringComparer.Ordinal));
         }
 
         [Fact]

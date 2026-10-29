@@ -259,6 +259,23 @@ public sealed class ScanFileDiscoveryRegressionTests : BaseTests, IDisposable
         Assert.Equal([expected], found);
     }
 
+    [Fact]
+    public void Discover_LegacyRowStillCarriesRoleSuffix_MatchesItsOwnFolder()
+    {
+        // B00EZAXAF8. A row stored before roles were removed still holds the provider string,
+        // and the add path named its folder from that same string.
+        var expected = CreateAudioFile(
+            "Constance Garnett - translator",
+            "The Brothers Karamazov [Naxos AudioBooks Edition]",
+            "chapter.wav");
+
+        var found = Discover(Book(
+            "The Brothers Karamazov [Naxos AudioBooks Edition]",
+            "Constance Garnett - translator"));
+
+        Assert.Equal([expected], found);
+    }
+
     private IReadOnlyList<string> Discover(Audiobook audiobook) =>
         DiscoverResult(audiobook, FileSystemPathSemantics.CurrentHostDefault)
             .AttributedFiles;
