@@ -199,6 +199,7 @@ const {
   problemText,
   repairOutcomes,
   load,
+  forgetLoad,
   onSearching,
   repair,
   retryRepair,
@@ -267,7 +268,12 @@ function handleClose() {
 watch(
   () => props.visible,
   (visible) => {
-    if (!visible || props.isResumed) return
+    // Closed while its books load: their answers fill nothing
+    if (!visible) {
+      forgetLoad()
+      return
+    }
+    if (props.isResumed) return
     hasLibraryChanged.value = false
     void load()
   },

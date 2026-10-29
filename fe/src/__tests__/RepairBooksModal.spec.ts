@@ -188,6 +188,73 @@ describe('RepairBooksModal', () => {
     vi.restoreAllMocks()
   })
 
+  // Each book's answer held until the test gives it
+  function heldBooks(audiobookIds: number[]) {
+    const answers = new Map<number, (book: typeof mismatched) => void>()
+    apiMocks.getAudiobook.mockImplementation(
+      (audiobookId: number) =>
+        new Promise((resolve) => {
+          if (audiobookIds.includes(audiobookId)) answers.set(audiobookId, resolve)
+          else resolve({ ...mismatched, id: audiobookId })
+        }),
+    )
+    return (audiobookId: number) =>
+      answers.get(audiobookId)!({ ...mismatched, id: audiobookId, title: `Book ${audiobookId}` })
+  }
+
+  // Closed while its books load, then opened for other books (the library keeps one dialog)
+  async function reopenedForOtherBooks(wrapper: ReturnType<typeof mountModal>) {
+    await wrapper.setProps({ visible: false })
+    await wrapper.setProps({ audiobookIds: [8], visible: true })
+    await flushPromises()
+  }
+
+  it('shows the books it was opened for last, when the previous ones answer after them', async () => {
+    const answer = heldBooks([7, 8])
+    const wrapper = mountModal([7])
+    await flushPromises()
+    await reopenedForOtherBooks(wrapper)
+
+    answer(8)
+    await flushPromises()
+    answer(7)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="repair-row-8"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="repair-row-7"]').exists()).toBe(false)
+  })
+
+  it('keeps loading until its own books are in, when the previous ones answer first', async () => {
+    const answer = heldBooks([7, 8])
+    const wrapper = mountModal([7])
+    await flushPromises()
+    await reopenedForOtherBooks(wrapper)
+
+    answer(7)
+    await flushPromises()
+    expect(wrapper.text()).toContain('Loading the selected audiobooks')
+    expect(wrapper.find('[data-testid="repair-row-7"]').exists()).toBe(false)
+
+    answer(8)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="repair-row-8"]').exists()).toBe(true)
+  })
+
+  it('fills nothing with books that answer once it is closed', async () => {
+    const answer = heldBooks([7])
+    const wrapper = mountModal([7])
+    await flushPromises()
+    await wrapper.setProps({ visible: false })
+
+    answer(7)
+    await flushPromises()
+    // Shown again without loading (Back from Organize): nothing from the forgotten load
+    await wrapper.setProps({ isResumed: true, visible: true })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="repair-row-7"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Loading the selected audiobooks')
+  })
+
   it('opens with nothing to repair: each book shows its current record and no new one yet', async () => {
     const wrapper = mountModal()
     await flushPromises()

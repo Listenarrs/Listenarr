@@ -99,7 +99,15 @@ export function useRepairBooks(audiobookIds: () => number[]) {
   const problemText = computed(() => repairProblemText(repairRows.value, canceledCount.value))
   const repairOutcomes = computed(() => toRepairOutcomes(repairRows.value))
 
+  // Each load's number: only the latest one fills the dialog. One still waiting for its answers
+  // when the dialog opens again (for other books) or closes fills nothing, whenever they come
+  let latestLoadNumber = 0
+
   async function load() {
+    const loadNumber = ++latestLoadNumber
+    const isLatestLoad = () => loadNumber === latestLoadNumber
+    // The books asked when it opened
+    const loadedAudiobookIds = audiobookIds()
     isLoading.value = true
     isFinished.value = false
     isCanceling.value = false
@@ -112,26 +120,32 @@ export function useRepairBooks(audiobookIds: () => number[]) {
     totalRepairCount.value = 0
     searchingAudiobookId.value = null
     try {
-      configuredRegion.value = await libraryImportStore.configuredRegion()
-      repairRows.value = await Promise.all(
-        audiobookIds().map(async (audiobookId) => {
+      const region = await libraryImportStore.configuredRegion()
+      if (!isLatestLoad()) return
+      configuredRegion.value = region
+      const loadedRepairRows = await Promise.all(
+        loadedAudiobookIds.map(async (audiobookId) => {
           const [book, identifiersResponse] = await Promise.all([
             apiService.getAudiobook(audiobookId),
             apiService.getAudiobookIdentifiers(audiobookId),
           ])
-          return repairRowFrom(
-            audiobookId,
-            book,
-            identifiersResponse.identifiers ?? [],
-            configuredRegion.value,
-          )
+          return repairRowFrom(audiobookId, book, identifiersResponse.identifiers ?? [], region)
         }),
       )
+      if (!isLatestLoad()) return
+      repairRows.value = loadedRepairRows
     } catch (e) {
+      if (!isLatestLoad()) return
       loadError.value = e instanceof Error ? e.message : 'Failed to load the selected audiobooks'
     } finally {
-      isLoading.value = false
+      if (isLatestLoad()) isLoading.value = false
     }
+  }
+
+  // The dialog closed: a load still waiting for its answers fills nothing
+  function forgetLoad() {
+    latestLoadNumber++
+    isLoading.value = false
   }
 
   function onSearching(repairRow: RepairRow, isSearching: boolean) {
@@ -378,6 +392,7 @@ export function useRepairBooks(audiobookIds: () => number[]) {
     problemText,
     repairOutcomes,
     load,
+    forgetLoad,
     onSearching,
     repair,
     retryRepair,
