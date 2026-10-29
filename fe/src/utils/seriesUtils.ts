@@ -60,7 +60,7 @@ export interface SeriesFields {
 }
 
 // An Audible digital ASIN is the literal prefix B0 followed by eight alphanumerics. A bare
-// ten-character check is not enough: single-word series names of that length, Foundation
+// ten-character check is not enough: single-word series names of that length, Pellucidar
 // among them, pass it and then get stored as if they were identifiers.
 const ASIN_PATTERN = /^B0[A-Z0-9]{8}$/i
 

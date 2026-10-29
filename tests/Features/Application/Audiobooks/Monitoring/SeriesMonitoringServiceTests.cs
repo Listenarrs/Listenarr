@@ -195,7 +195,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
                 .WithAuthor("Brandon Sanderson")
                 .WithLanguage("english")
                 .WithSeries("Mistborn", "2", "SERIESONE")
-                .WithSeries("The Cosmere", "4", "SERIESTWO")
+                .WithSeries("Tarzan", "4", "SERIESTWO")
                 .Build());
 
             Assert.NotNull(metadata.SeriesMemberships);
@@ -211,7 +211,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
                 },
                 second =>
                 {
-                    Assert.Equal("The Cosmere", second.SeriesName);
+                    Assert.Equal("Tarzan", second.SeriesName);
                     Assert.Equal("4", second.SeriesNumber);
                     Assert.Equal("SERIESTWO", second.SeriesAsin);
                     Assert.False(second.IsPrimary);
