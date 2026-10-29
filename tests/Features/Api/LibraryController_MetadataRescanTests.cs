@@ -121,6 +121,70 @@ namespace Listenarr.Tests.Features.Api
         }
 
         [Fact]
+        public async Task RescanMetadata_StoresContributorNamesWithoutTheirRoleSuffix()
+        {
+            var metadataMock = new Mock<IAudiobookMetadataService>();
+            metadataMock
+                .Setup(m => m.GetMetadataAsync("B00EZAXAF8", "us", false))
+                .ReturnsAsync(new AudiobookMetadataEnvelope(
+                    new AudibleBookResponse
+                    {
+                        Asin = "B00EZAXAF8",
+                        Title = "The Brothers Karamazov [Naxos AudioBooks Edition]",
+                        Authors = new List<AudibleAuthor>
+                        {
+                            new() { Name = "Fyodor Dostoevsky" },
+                            new() { Name = "Constance Garnett - translator" }
+                        }
+                    },
+                    "Audible",
+                    "https://audible.com"));
+            var factory = _factory.WithWebHostBuilder(builder =>
+            {
+                builder.ConfigureServices(services =>
+                {
+                    services.RemoveAll<IAudiobookMetadataService>();
+                    services.AddSingleton(metadataMock.Object);
+                });
+            });
+            int audiobookId;
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+                var audiobook = new Audiobook
+                {
+                    Title = "The Brothers Karamazov [Naxos AudioBooks Edition]",
+                    Authors = new List<string> { "Fyodor Dostoevsky", "Constance Garnett - translator" },
+                    Asin = "B00EZAXAF8",
+                    ExternalIdentifiers =
+                    [
+                        new AudiobookExternalIdentifier
+                        {
+                            Type = AudiobookExternalIdentifierType.Asin,
+                            ValueRaw = "B00EZAXAF8",
+                            ValueNormalized = "B00EZAXAF8",
+                            Region = "us",
+                            IsPrimary = true,
+                            Source = AudiobookExternalIdentifierSource.Manual
+                        }
+                    ]
+                };
+                db.Audiobooks.Add(audiobook);
+                await db.SaveChangesAsync();
+                audiobookId = audiobook.Id;
+            }
+
+            using var client = factory.CreateClient();
+            var response = await PostRescanAsync(client, audiobookId);
+
+            Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+            using var verificationScope = factory.Services.CreateScope();
+            var verification = verificationScope.ServiceProvider.GetRequiredService<ListenArrDbContext>();
+            var updated = await verification.Audiobooks.SingleAsync(book => book.Id == audiobookId);
+            Assert.Equal(new[] { "Fyodor Dostoevsky", "Constance Garnett" }, updated.Authors);
+        }
+
+        [Fact]
         public async Task RescanMetadata_UsesIdentifiersAndUpdatesAudiobook()
         {
             var metadataMock = new Mock<IAudiobookMetadataService>();

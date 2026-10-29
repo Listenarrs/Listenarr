@@ -96,11 +96,21 @@ namespace Listenarr.Application.Common
 
         private Dictionary<string, object> BuildVariables(AudibleBookMetadata metadata)
         {
-            var author = metadata.Author ?? "Unknown Author";
+            // The singular field goes through the same role removal as the list below, so a
+            // payload that only fills Author names the same folder as one that fills Authors.
+            var author = metadata.Author != null ? AuthorCredits.StripRole(metadata.Author) : "Unknown Author";
             if (metadata.Authors != null && metadata.Authors.Count > 0)
             {
-                // Assume first one is the main author
-                author = metadata.Authors.First();
+                // The first credit that names no role, with any role removed from it. This used
+                // to be whichever credit came first, on the assumption that a publisher always
+                // lists the author ahead of the translator. Measured against the catalogue that
+                // does not hold: B00S710A4U credits Homer then Samuel Butler - translator and
+                // B00EZAXAF8 credits Constance Garnett - translator then Fyodor Dostoevsky, so
+                // taking index 0 files the second of those books under its translator. Removing
+                // roles at ingestion does not settle this on its own, because both names come out
+                // clean and the translator can still be first; the role has to be read before it
+                // is removed.
+                author = AuthorCredits.Primary(metadata.Authors) ?? author;
             }
 
             return new Dictionary<string, object>
