@@ -193,12 +193,12 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
         public async Task MonitorAuthorAsync_MapsEverySeriesEntryToAMembershipWithItsAsin()
         {
             var metadata = await CaptureAddedBookMetadataAsync(new AudibleSearchResultBuilder()
-                .WithAsin("B004YWTD30")
-                .WithTitle("She: A History of Adventure")
+                .WithAsin("B00CQ5WAXW")
+                .WithTitle("She And Allan")
                 .WithAuthor("H. Rider Haggard")
                 .WithLanguage("english")
-                .WithSeries("Ayesha", "1", "SERIESONE")
-                .WithSeries("Allan Quatermain", "3", "SERIESTWO")
+                .WithSeries("Ayesha", "0", "B01E633FQM")
+                .WithSeries("Allan Quatermain", "7", "B01F5TL5K4")
                 .Build());
 
             Assert.NotNull(metadata.SeriesMemberships);
@@ -207,22 +207,22 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
                 first =>
                 {
                     Assert.Equal("Ayesha", first.SeriesName);
-                    Assert.Equal("1", first.SeriesNumber);
-                    Assert.Equal("SERIESONE", first.SeriesAsin);
+                    Assert.Equal("0", first.SeriesNumber);
+                    Assert.Equal("B01E633FQM", first.SeriesAsin);
                     Assert.True(first.IsPrimary);
                     Assert.Equal(0, first.SortOrder);
                 },
                 second =>
                 {
                     Assert.Equal("Allan Quatermain", second.SeriesName);
-                    Assert.Equal("3", second.SeriesNumber);
-                    Assert.Equal("SERIESTWO", second.SeriesAsin);
+                    Assert.Equal("7", second.SeriesNumber);
+                    Assert.Equal("B01F5TL5K4", second.SeriesAsin);
                     Assert.False(second.IsPrimary);
                     Assert.Equal(1, second.SortOrder);
                 });
 
             Assert.Equal("Ayesha", metadata.Series);
-            Assert.Equal("1", metadata.SeriesNumber);
+            Assert.Equal("0", metadata.SeriesNumber);
         }
 
         [Fact]

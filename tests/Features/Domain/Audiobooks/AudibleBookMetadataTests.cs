@@ -28,8 +28,8 @@ namespace Listenarr.Tests.Features.Domain.Audiobooks
         {
             var metadata = new AudibleBookMetadata
             {
-                Title = "The Final Empire",
-                Series = "Mistborn",
+                Title = "A Princess of Mars",
+                Series = "Barsoom",
                 SeriesNumber = "1",
                 SeriesAsin = "SERIESONE"
             };
@@ -37,7 +37,7 @@ namespace Listenarr.Tests.Features.Domain.Audiobooks
             var audiobook = metadata.ToAudiobook();
 
             var membership = Assert.Single(audiobook.SeriesMemberships!);
-            Assert.Equal("Mistborn", membership.SeriesName);
+            Assert.Equal("Barsoom", membership.SeriesName);
             Assert.Equal("1", membership.SeriesNumber);
             Assert.Equal("SERIESONE", membership.SeriesAsin);
             Assert.True(membership.IsPrimary);
