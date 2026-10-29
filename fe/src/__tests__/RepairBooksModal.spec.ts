@@ -1634,9 +1634,13 @@ describe('RepairBooksModal', () => {
     expect(apiMocks.rescanAudiobookMetadata).toHaveBeenCalledWith(7)
   })
 
-  it('retries the rescan once when it is refused for coming too soon', async () => {
+  // The server's answer when the book was rescanned too recently: how long to wait
+  const tooSoon = (retryAfter?: number) =>
+    Object.assign(new Error('Too many requests'), { status: 429, retryAfter })
+
+  it('waits the time the server says when a rescan comes too soon, counting down, then rescans', async () => {
     apiMocks.rescanAudiobookMetadata
-      .mockRejectedValueOnce(Object.assign(new Error('Too many requests'), { status: 429 }))
+      .mockRejectedValueOnce(tooSoon(12))
       .mockResolvedValueOnce({ message: 'ok', audiobookId: 7, asin: 'B0HM45F8MW', region: 'fr' })
     const wrapper = mountModal()
     await flushPromises()
@@ -1644,13 +1648,106 @@ describe('RepairBooksModal', () => {
     vi.useFakeTimers()
 
     const done = repair(wrapper)
-    await vi.advanceTimersByTimeAsync(3000)
+    await flushPromises()
+    const message = () => resultCard(wrapper).get('[data-testid="repair-result-message"]').text()
+    expect(message()).toBe('Waiting 12 s: a book can be rescanned once every 15 s')
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(message()).toBe('Waiting 7 s: a book can be rescanned once every 15 s')
+    // Not asked again before the server allows it
+    await vi.advanceTimersByTimeAsync(7000)
+    expect(apiMocks.rescanAudiobookMetadata).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(500)
     await done
     await flushPromises()
 
     expect(apiMocks.rescanAudiobookMetadata).toHaveBeenCalledTimes(2)
+    expect(resultCard(wrapper).attributes('data-result-state')).toBe('done')
     expect(resultCard(wrapper).get('[data-testid="repair-result-record"]').text()).toBe(
       'B0HM45F8MW - Primal Hunter, Vol. 7 - Zogarth - France (FR)',
+    )
+  })
+
+  it('waits the whole cooldown (15 s) when the server says no time', async () => {
+    apiMocks.rescanAudiobookMetadata
+      .mockRejectedValueOnce(tooSoon())
+      .mockResolvedValueOnce({ message: 'ok', audiobookId: 7, asin: 'B0HM45F8MW', region: 'fr' })
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+    vi.useFakeTimers()
+
+    const done = repair(wrapper)
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(apiMocks.rescanAudiobookMetadata).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(500)
+    await done
+    await flushPromises()
+
+    expect(apiMocks.rescanAudiobookMetadata).toHaveBeenCalledTimes(2)
+    expect(resultCard(wrapper).attributes('data-result-state')).toBe('done')
+  })
+
+  it('fails at once, saying when to retry, when the book was rescanned too often (10 minutes limit)', async () => {
+    apiMocks.rescanAudiobookMetadata.mockRejectedValueOnce(tooSoon(480))
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+
+    await repair(wrapper)
+
+    expect(apiMocks.rescanAudiobookMetadata).toHaveBeenCalledTimes(1)
+    // Its new ASIN was saved: repaired in part
+    expect(resultCard(wrapper).attributes('data-result-state')).toBe('warning')
+    expect(resultCard(wrapper).get('[data-testid="repair-result-message"]').text()).toMatch(
+      /^The new ASIN is saved, but the metadata rescan failed \(.+ s\): too many rescans of this book, retry in about 8 min$/,
+    )
+  })
+
+  it('Cancel stops the book waiting for the rescan cooldown', async () => {
+    apiMocks.rescanAudiobookMetadata.mockRejectedValueOnce(tooSoon(12))
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+    vi.useFakeTimers()
+
+    const done = repair(wrapper)
+    await vi.advanceTimersByTimeAsync(2000)
+    await wrapper.get('[data-testid="repair-cancel"]').trigger('click')
+    await done
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(20_000)
+
+    // Not asked again; its new ASIN was saved, its metadata not read
+    expect(apiMocks.rescanAudiobookMetadata).toHaveBeenCalledTimes(1)
+    expect(resultCard(wrapper).attributes('data-result-state')).toBe('warning')
+    expect(resultCard(wrapper).get('[data-testid="repair-result-message"]').text()).toBe(
+      'The new ASIN is saved, but the metadata rescan was canceled',
+    )
+  })
+
+  it('Cancel during the cooldown leaves a book whose ASIN did not change not repaired', async () => {
+    apiMocks.rescanAudiobookMetadata.mockRejectedValueOnce(tooSoon(12))
+    catalogue({ us: [englishPrimalHunter4], fr: [frenchPrimalHunterVolume7] })
+    const wrapper = mountModal()
+    await flushPromises()
+    // Its current record: a rescan only
+    await searchAndPick(wrapper, {
+      region: 'fr',
+      title: 'Primal Hunter, Vol. 7',
+      query: 'Primal Hunter',
+    })
+    vi.useFakeTimers()
+
+    const done = repair(wrapper)
+    await vi.advanceTimersByTimeAsync(2000)
+    await wrapper.get('[data-testid="repair-cancel"]').trigger('click')
+    await done
+    await flushPromises()
+
+    expect(apiMocks.updateAudiobookIdentifiers).not.toHaveBeenCalled()
+    expect(resultCard(wrapper).attributes('data-result-state')).toBe('skipped')
+    expect(resultCard(wrapper).get('[data-testid="repair-result-message"]').text()).toBe(
+      'Canceled: not repaired',
     )
   })
 
