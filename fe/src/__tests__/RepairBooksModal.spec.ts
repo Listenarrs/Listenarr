@@ -338,6 +338,17 @@ describe('RepairBooksModal', () => {
     expect(bookCard(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(1)
   })
 
+  it('has no Selection block for a single book (its own checkbox says it all)', async () => {
+    const single = mountModal([7])
+    await flushPromises()
+    expect(single.find('[data-testid="repair-selection"]').exists()).toBe(false)
+    single.unmount()
+
+    const several = mountModal([7, 8])
+    await flushPromises()
+    expect(several.find('[data-testid="repair-selection"]').exists()).toBe(true)
+  })
+
   // Each book's answer held until the test gives it
   function heldBooks(audiobookIds: number[]) {
     const answers = new Map<number, (book: typeof mismatched) => void>()

@@ -26,7 +26,13 @@
     </template>
 
     <template #default>
-      <ModalBody compact maxHeight="72vh" class="repair-modal-body">
+      <ModalBody
+        ref="bodyRef"
+        compact
+        maxHeight="72vh"
+        class="repair-modal-body"
+        :style="roomStyle"
+      >
         <div v-if="isLoading" class="repair-state">
           <PhSpinner class="ph-spin repair-icon" />
           <p>Loading the selected audiobooks…</p>
@@ -58,7 +64,9 @@
             </p>
           </NoticeBox>
 
+          <!-- One book: its own checkbox says it all -->
           <RepairSelection
+            v-if="repairRows.length > 1"
             :selected-count="selectedCount"
             :total-count="repairRows.length"
             action="repair"
@@ -165,6 +173,7 @@ import RepairLoadErrorCard from './RepairLoadErrorCard.vue'
 import RepairResults from './RepairResults.vue'
 import RepairSelection from './RepairSelection.vue'
 import { useRepairBooks } from '@/composables/useRepairBooks'
+import { useResultsRoomFit } from '@/composables/useResultsRoomFit'
 import { usePageLeaveGuard } from '@/composables/usePageLeaveGuard'
 import {
   cancel as cancelConfirmation,
@@ -255,6 +264,17 @@ usePageLeaveGuard({
 })
 
 const footerRef = ref<InstanceType<typeof RepairFooter> | null>(null)
+
+// One book: its results' room fitted to the dialog, so step 1 doesn't scroll
+const bodyRef = ref<InstanceType<typeof ModalBody> | null>(null)
+const { roomStyle } = useResultsRoomFit(
+  () => bodyRef.value?.$el as HTMLElement | undefined,
+  () =>
+    !isLoading.value &&
+    !isRepairStep.value &&
+    repairRows.value.length === 1 &&
+    !repairRows.value[0]!.loadError,
+)
 // One book: the room step 1 took in the dialog's body, measured on Repair, kept by step 2 so the
 // dialog keeps its height
 const stepOneRef = ref<HTMLElement | null>(null)
