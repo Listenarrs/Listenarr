@@ -25,6 +25,7 @@ const apiMocks = vi.hoisted(() => ({
   advancedSearch: vi.fn(),
   getAudibleMetadata: vi.fn(),
   updateAudiobookIdentifiers: vi.fn(),
+  updateAudiobook: vi.fn(),
   rescanAudiobookMetadata: vi.fn(),
   getApplicationSettings: vi.fn(),
 }))
@@ -174,6 +175,7 @@ describe('RepairBooksModal', () => {
       audiobook: { id: 7 },
       identifiers: [],
     })
+    apiMocks.updateAudiobook.mockResolvedValue({ message: 'ok', audiobook: mismatched })
     apiMocks.rescanAudiobookMetadata.mockResolvedValue({
       message: 'ok',
       audiobookId: 7,
@@ -1699,6 +1701,75 @@ describe('RepairBooksModal', () => {
 
     expect(apiMocks.updateAudiobookIdentifiers).not.toHaveBeenCalled()
     expect(apiMocks.rescanAudiobookMetadata).toHaveBeenCalledWith(7)
+  })
+
+  it("empties the old record's details between saving the new ASIN and the rescan", async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+
+    await repair(wrapper)
+
+    // The rescan only writes what the new record has: the old series, subtitle… would stay
+    expect(apiMocks.updateAudiobook).toHaveBeenCalledWith(7, {
+      subtitle: '',
+      series: '',
+      seriesNumber: '',
+      seriesMemberships: [],
+      description: '',
+      publisher: '',
+      publishYear: '',
+      publishedDate: '',
+      language: '',
+      version: '',
+      edition: '',
+      narrators: [],
+      genres: [],
+      isbn: [],
+    })
+    const [identifiersSaved] = apiMocks.updateAudiobookIdentifiers.mock.invocationCallOrder
+    const [emptied] = apiMocks.updateAudiobook.mock.invocationCallOrder
+    const [rescanned] = apiMocks.rescanAudiobookMetadata.mock.invocationCallOrder
+    expect(identifiersSaved).toBeLessThan(emptied!)
+    expect(emptied).toBeLessThan(rescanned!)
+    expect(resultCard(wrapper).attributes('data-result-state')).toBe('done')
+  })
+
+  it('empties nothing on a rescan only (the record stays the same)', async () => {
+    apiMocks.rescanAudiobookMetadata.mockResolvedValueOnce({
+      message: 'ok',
+      audiobookId: 7,
+      asin: 'B0HM45F8MW',
+      region: 'fr',
+    })
+    catalogue({ us: [englishPrimalHunter4], fr: [frenchPrimalHunterVolume7] })
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper, {
+      region: 'fr',
+      title: 'Primal Hunter, Vol. 7',
+      query: 'Primal Hunter',
+    })
+
+    await repair(wrapper)
+
+    expect(apiMocks.updateAudiobook).not.toHaveBeenCalled()
+    expect(resultCard(wrapper).attributes('data-result-state')).toBe('done')
+  })
+
+  it('stops before the rescan, done in part, when the old details cannot be emptied', async () => {
+    apiMocks.updateAudiobook.mockRejectedValueOnce(new Error('Server error'))
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+
+    await repair(wrapper)
+
+    expect(apiMocks.rescanAudiobookMetadata).not.toHaveBeenCalled()
+    expect(resultCard(wrapper).attributes('data-result-state')).toBe('warning')
+    expect(resultCard(wrapper).get('[data-testid="repair-result-message"]').text()).toMatch(
+      /^The new ASIN is saved, but the old record's details couldn't be emptied \(.+ s\): Server error$/,
+    )
   })
 
   // The server reads the record from the book's other identifiers when the picked one fails

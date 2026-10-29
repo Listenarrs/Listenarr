@@ -19,6 +19,7 @@ import type {
   Audiobook,
   AudiobookExternalIdentifier,
   AudiobookExternalIdentifierInput,
+  AudiobookUpdateRequest,
 } from '@/types'
 import {
   createBookMatch,
@@ -126,6 +127,27 @@ export function isMatched(repairRow: RepairRow): boolean {
 // Only a book with a new record, looked up in its region, is repaired
 export function isIncluded(repairRow: RepairRow): boolean {
   return repairRow.isSelected && isMatched(repairRow)
+}
+
+// What a book takes from its record and a new record may not have: emptied before the rescan when
+// a repair changes the record. The rescan only writes what the new record has, so the old record's
+// series, subtitle, narrators… would stay (and Organize would file the book under the old series).
+// The title, authors, cover and runtime are always read again, so they stay until then.
+export const EMPTIED_RECORD_FIELDS: AudiobookUpdateRequest = {
+  subtitle: '',
+  series: '',
+  seriesNumber: '',
+  seriesMemberships: [],
+  description: '',
+  publisher: '',
+  publishYear: '',
+  publishedDate: '',
+  language: '',
+  version: '',
+  edition: '',
+  narrators: [],
+  genres: [],
+  isbn: [],
 }
 
 // The new ASIN becomes the primary one. Identifiers that came from the previous match (provider or
