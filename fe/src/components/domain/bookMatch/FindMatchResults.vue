@@ -208,6 +208,16 @@ function seriesName(searchResult: SearchResult): string | undefined {
   background: color-mix(in srgb, var(--status-success) 12%, transparent);
 }
 
+/* A record that can't be picked here (Repair: no ASIN): greyed, no hover */
+.result-item.unpickable {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.result-item.unpickable:hover {
+  background: transparent;
+}
+
 .result-thumb {
   width: 36px;
   height: 36px;
