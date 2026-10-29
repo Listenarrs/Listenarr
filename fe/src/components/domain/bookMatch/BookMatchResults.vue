@@ -269,10 +269,11 @@ defineExpose({ keepHeight, openRoom })
   text-align: center;
 }
 
-/* Kept room: the list at its full height, results or not */
+/* Kept room: the list at its full height, results or not (fitted to its dialog when it is alone
+   there, useResultsRoomFit) */
 .match-results-placeholders .match-search-results,
 .match-results-placeholders .match-results-empty {
-  height: 320px;
+  height: var(--match-results-room, 320px);
   box-sizing: border-box;
 }
 

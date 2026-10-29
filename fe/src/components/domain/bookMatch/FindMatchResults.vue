@@ -179,7 +179,7 @@ function seriesName(searchResult: SearchResult): string | undefined {
 
 <style scoped>
 .results-list {
-  max-height: 320px;
+  max-height: var(--match-results-room, 320px);
   overflow-y: auto;
   border: 1px solid #333;
   border-radius: 6px;

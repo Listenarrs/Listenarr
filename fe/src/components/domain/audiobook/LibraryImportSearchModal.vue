@@ -20,7 +20,7 @@
     <template #header>
       <ModalHeader :title="`Find Match — ${item.folderName}`" @close="emit('close')" />
     </template>
-    <ModalBody>
+    <ModalBody ref="bodyRef" :style="roomStyle">
       <NoticeBox class="find-match-info">
         <template #icon><PhInfo /></template>
         <p>Find the right Audible record for this book.</p>
@@ -72,6 +72,7 @@
 import { computed, onBeforeUnmount, onMounted, provide, ref } from 'vue'
 import { PhCheckCircle, PhInfo, PhX } from '@phosphor-icons/vue'
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '@/components/feedback'
+import { useResultsRoomFit } from '@/composables/useResultsRoomFit'
 import NoticeBox from '@/components/base/NoticeBox.vue'
 import BookMatchCard from '@/components/domain/bookMatch/BookMatchCard.vue'
 import MatchLegend from '@/components/domain/bookMatch/MatchLegend.vue'
@@ -117,6 +118,13 @@ const book = computed<BookRecord>(() => {
 })
 
 const bookTitle = computed(() => props.item.detectedTitle?.trim() || props.item.folderName)
+
+// The card's results' room fitted to the dialog, so it doesn't scroll
+const bodyRef = ref<InstanceType<typeof ModalBody> | null>(null)
+const { roomStyle } = useResultsRoomFit(
+  () => bodyRef.value?.$el as HTMLElement | undefined,
+  () => !!bookMatch.value,
+)
 
 // A new record, looked up in its region (picked, or the one found for the ASIN); the one the
 // folder already has is no change
