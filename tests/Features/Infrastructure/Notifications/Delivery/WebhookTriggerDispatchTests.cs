@@ -55,7 +55,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Notifications.Delivery
         {
             using var probe = WebhookDispatchProbe.ForWebhook(WebhookUrl, trigger);
 
-            await probe.Service.SendNotificationAsync(trigger, new { title = "A Synthetic Audiobook" });
+            await probe.Service.SendNotificationAsync(trigger, new { title = "A Princess of Mars" });
 
             Assert.Equal(
                 [WebhookUrl],
@@ -120,7 +120,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Notifications.Delivery
 
             await probe.Service.SendNotificationAsync(
                 NotificationTriggers.BookDownloading,
-                new { title = "A Synthetic Audiobook" });
+                new { title = "A Princess of Mars" });
 
             Assert.Empty(probe.PostedUrls);
         }
@@ -132,7 +132,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Notifications.Delivery
 
             await probe.Service.SendNotificationAsync(
                 NotificationTriggers.BookAdded,
-                new { title = "A Synthetic Audiobook" });
+                new { title = "A Princess of Mars" });
 
             Assert.Empty(probe.PostedUrls);
         }
@@ -144,7 +144,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Notifications.Delivery
 
             await probe.Service.SendNotificationAsync(
                 NotificationTriggers.BookAdded,
-                new { title = "A Synthetic Audiobook" });
+                new { title = "A Princess of Mars" });
 
             Assert.Equal(
                 [WebhookUrl],
@@ -170,7 +170,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Notifications.Delivery
 
             await probe.Service.SendNotificationAsync(
                 NotificationTriggers.BookAdded,
-                new { title = "A Synthetic Audiobook" });
+                new { title = "A Princess of Mars" });
 
             Assert.Equal(
                 [WebhookUrl, SecondWebhookUrl],
@@ -269,14 +269,14 @@ namespace Listenarr.Tests.Features.Infrastructure.Notifications.Delivery
             => new()
             {
                 Id = "download-imported",
-                Title = "A Synthetic Audiobook"
+                Title = "A Princess of Mars"
             };
 
         private static Download FailedDownload()
             => new()
             {
                 Id = "download-failed",
-                Title = "A Synthetic Audiobook",
+                Title = "A Princess of Mars",
                 ErrorMessage = "The synthetic download client refused the release"
             };
     }
