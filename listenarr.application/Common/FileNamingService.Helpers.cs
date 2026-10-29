@@ -96,7 +96,9 @@ namespace Listenarr.Application.Common
 
         private Dictionary<string, object> BuildVariables(AudibleBookMetadata metadata)
         {
-            var author = metadata.Author ?? "Unknown Author";
+            // The singular field goes through the same role removal as the list below, so a
+            // payload that only fills Author names the same folder as one that fills Authors.
+            var author = metadata.Author != null ? AuthorCredits.StripRole(metadata.Author) : "Unknown Author";
             if (metadata.Authors != null && metadata.Authors.Count > 0)
             {
                 // The first credit that names no role, with any role removed from it. This used

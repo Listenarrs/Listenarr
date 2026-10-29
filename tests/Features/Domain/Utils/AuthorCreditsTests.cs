@@ -323,6 +323,20 @@ namespace Listenarr.Tests.Features.Domain.Utils
         }
 
         [Fact]
+        public void WithoutRoleSuffixes_AContributorEntryDoesNotDisplaceTheSamePersonsAuthorEntry()
+        {
+            // B00S710A4U credits Homer and Samuel Butler - translator. When the translator is
+            // also credited plainly, listed after his translator entry, the plain entry is the
+            // author credit and has to be the one that is kept, ahead of the contributors.
+            Assert.Equal(
+                new[] { "Samuel Butler", "Homer" },
+                AuthorCredits.WithoutRoleSuffixes(new List<string> { "Samuel Butler - translator", "Samuel Butler", "Homer" }));
+            Assert.Equal(
+                new[] { "Homer", "Samuel Butler" },
+                AuthorCredits.WithoutRoleSuffixes(new List<string> { "Samuel Butler - translator", "Homer" }));
+        }
+
+        [Fact]
         public void WithoutRoleSuffixes_FixesABookCreditedToNobodyButContributors()
         {
             // A book credited only to contributors, and the single-credit form of the same shape. This is the case the
