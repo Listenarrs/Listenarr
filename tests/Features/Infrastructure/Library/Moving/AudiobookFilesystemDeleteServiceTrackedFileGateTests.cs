@@ -68,7 +68,7 @@ public sealed class AudiobookFilesystemDeleteServiceTrackedFileGateTests : BaseT
     }
 
     [LinuxFact]
-    public async Task DeleteAsync_OwnedFolderWithTrackedPartMissing_KeepsFolderAndOwnership()
+    public async Task DeleteAsync_OwnedFolderWithTrackedPartMissing_KeepsRecursiveDeleteAndRetiresOwnership()
     {
         var root = await CreateLibraryAsync("delete-gate-owned");
         var (book, parts) = await AddBookAsync(root, "The Three Musketeers", "Alexandre Dumas", partCount: 2);
@@ -77,15 +77,15 @@ public sealed class AudiobookFilesystemDeleteServiceTrackedFileGateTests : BaseT
         await store.RecordCreatedAsync(new LibraryDirectoryOwnershipClaim(
             folder, FileSystemPathSemantics.CurrentHostDefault, "test"));
         File.Move(parts[1], Path.Join(folder, "renamed.m4b"));
-        File.WriteAllText(Path.Join(folder, "foreign.m4b"), "foreign");
         var before = Manifest(root);
 
         var result = await DeleteAsync(book);
 
-        AssertManifestLosesOnly(root, before, parts[0]);
-        Assert.False(result.DeletedFolder);
-        var ownership = await store.GetOwnedWithinAsync(folder, FileSystemPathSemantics.CurrentHostDefault);
-        Assert.Contains(ownership, item => item.State != LibraryDirectoryOwnershipState.Removed);
+        Assert.Equal(before.Where(entry => !IsWithin(entry.Key, root, folder))
+            .ToDictionary(entry => entry.Key, entry => entry.Value), Manifest(root));
+        Assert.True(result.DeletedFolder, string.Join("; ", result.Warnings));
+        Assert.DoesNotContain(result.Warnings, warning => warning.StartsWith(MissingFileWarning, StringComparison.Ordinal));
+        Assert.Empty(await store.GetOwnedWithinAsync(folder, FileSystemPathSemantics.CurrentHostDefault));
     }
 
     [LinuxFact]
