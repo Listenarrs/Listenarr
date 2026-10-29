@@ -2406,6 +2406,7 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                 .Returns<IAudiobookFileRegistrationLease, string?, string?>(
                     (lease, asin, coverArtUrl) =>
                         recorder.WriteImportTagsAsync(lease, asin, coverArtUrl));
+            var writableMover = CreateMetadataWritableFileMover();
             var controller = GetController(
                 book,
                 new ApplicationSettings
@@ -2414,7 +2415,9 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                     FolderNamingPattern = "",
                     FileNamingPattern = "{Title}"
                 },
-                metadataMock: metadata);
+                metadataMock: metadata,
+                fileMover: writableMover.Mover.Object,
+                filePublicationSourceCapability: writableMover.Capability);
             var request = new ManualImportRequestDto
             {
                 Path = sourceDir,
@@ -2471,6 +2474,7 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                 .Returns<IAudiobookFileRegistrationLease, string?, string?>(
                     (lease, asin, coverArtUrl) =>
                         recorder.WriteImportTagsAsync(lease, asin, coverArtUrl));
+            var writableMover = CreateMetadataWritableFileMover();
             var controller = GetController(
                 book,
                 new ApplicationSettings
@@ -2479,7 +2483,9 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                     FolderNamingPattern = "",
                     FileNamingPattern = "{Title}"
                 },
-                metadataMock: metadata);
+                metadataMock: metadata,
+                fileMover: writableMover.Mover.Object,
+                filePublicationSourceCapability: writableMover.Capability);
             var request = new ManualImportRequestDto
             {
                 Path = sourceDir,
@@ -2534,6 +2540,7 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                     Format = "mp3",
                     BitRate = 128000
                 });
+            var writableMover = CreateMetadataWritableFileMover();
             var controller = GetController(
                 book,
                 new ApplicationSettings
@@ -2542,7 +2549,9 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
                     FolderNamingPattern = "",
                     FileNamingPattern = "{Title}"
                 },
-                metadataMock: metadata);
+                metadataMock: metadata,
+                fileMover: writableMover.Mover.Object,
+                filePublicationSourceCapability: writableMover.Capability);
             var request = new ManualImportRequestDto
             {
                 Path = sourceDir,
@@ -3529,11 +3538,49 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             scanQueue.VerifyNoOtherCalls();
         }
 
+        // The markerless mover never hands out a lease that accepts metadata writes, so tagging is
+        // deferred, which is not what these tests are about. This stands in for a lease that does
+        // accept them, so the controller's own tagging decisions can be observed.
+        private (Mock<IFileMover> Mover, FileMover Capability) CreateMetadataWritableFileMover()
+        {
+            var actualMover = CreateMarkerlessFileMover();
+            var mover = new Mock<IFileMover>();
+            mover.Setup(candidate => candidate.PrepareActionForRegistrationAsync(
+                    It.IsAny<FileAction>(),
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<Guid>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<FilePublicationSourceProof>()))
+                .Returns<FileAction, string, string, Guid, string?, FilePublicationSourceProof>(async (
+                    action,
+                    sourcePath,
+                    destination,
+                    operationId,
+                    expectedRegisteredIdentity,
+                    expectedSourceProof) =>
+                {
+                    var lease = await actualMover.PrepareActionForRegistrationAsync(
+                        action,
+                        sourcePath,
+                        destination,
+                        operationId,
+                        expectedRegisteredIdentity,
+                        expectedSourceProof);
+                    return lease == null
+                        ? null
+                        : new ControllableRegistrationLease(lease) { MetadataWritable = true };
+                });
+            return (mover, actualMover);
+        }
+
         private sealed class ControllableRegistrationLease(
             IAudiobookFileRegistrationLease inner) :
             IAudiobookFileRegistrationLease
         {
             public bool IsCurrent { get; set; } = true;
+            public bool MetadataWritable { get; init; }
+            public bool SupportsMetadataWrite => MetadataWritable;
             public string PublicPath => inner.PublicPath;
             public string MetadataPath => inner.MetadataPath;
             public string PhysicalObjectIdentity =>
