@@ -229,6 +229,41 @@ describe('LibraryImportSearchModal', () => {
     expect(field(wrapper, 'find-match-confirm').attributes('disabled')).toBeUndefined()
   })
 
+  it("opens with the scan's ASIN in the ASIN field, its title and author ready", async () => {
+    // Sold in the US only: France has no record for it
+    metadata.mockImplementation(async (asin: string, region: string) => {
+      if (region !== 'us') return notFound()
+      return { metadata: { ...primalHunter4, asin } }
+    })
+    const wrapper = mountModal({ ...primalHunter, detectedAsin: 'B0BK9W82PQ' })
+    await flushPromises()
+
+    expect((field(wrapper, 'match-asin').element as HTMLInputElement).value).toBe('B0BK9W82PQ')
+    expect((field(wrapper, 'match-title').element as HTMLInputElement).value).toBe(
+      'The Primal Hunter 4',
+    )
+    expect((field(wrapper, 'match-author').element as HTMLInputElement).value).toBe('Zogarth')
+    // Searched as an ASIN, in the configured region
+    expect(metadata).toHaveBeenLastCalledWith('B0BK9W82PQ', 'fr')
+    expect(field(wrapper, 'match-results-reason').text()).toContain(
+      'No record for B0BK9W82PQ in Audible France (FR)',
+    )
+
+    // The US sells it
+    await field(wrapper, 'match-region').setValue('us')
+    await flushPromises()
+    expect(metadata).toHaveBeenLastCalledWith('B0BK9W82PQ', 'us')
+    expect(wrapper.findAll('[data-testid="find-match-result"]')).toHaveLength(1)
+  })
+
+  it('keeps a scanned value that is not an ASIN in the title, as before', async () => {
+    const wrapper = mountModal({ ...primalHunter, detectedAsin: '1A2B3C4D5E' })
+    await flushPromises()
+
+    expect((field(wrapper, 'match-asin').element as HTMLInputElement).value).toBe('')
+    expect((field(wrapper, 'match-title').element as HTMLInputElement).value).toBe('1A2B3C4D5E')
+  })
+
   it('looks a typed ASIN up in its region before it can be used', async () => {
     const wrapper = mountModal(primalHunter)
     await flushPromises()

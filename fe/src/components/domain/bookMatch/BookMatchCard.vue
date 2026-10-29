@@ -466,7 +466,8 @@ watch(
 onMounted(() => {
   if (!props.shouldSearchOnMount) return
   fieldsRef.value?.focusTitle()
-  void search()
+  // By the same priority as Search: a filled ASIN on its own
+  void search(searchKind.value)
 })
 
 onBeforeUnmount(stopSearch)
