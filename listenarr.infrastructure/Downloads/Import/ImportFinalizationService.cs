@@ -14,7 +14,8 @@ using Microsoft.EntityFrameworkCore;
 namespace Listenarr.Infrastructure.Downloads.Import
 {
     public sealed class ImportFinalizationService(
-        IDbContextFactory<ListenArrDbContext> dbFactory) : IImportFinalizationService
+        IDbContextFactory<ListenArrDbContext> dbFactory,
+        INotificationService notificationService) : IImportFinalizationService
     {
         public async Task FinalizeAsync(
             string jobId,
@@ -94,6 +95,11 @@ namespace Listenarr.Infrastructure.Downloads.Import
             job.SetCheckpoint("ImportCommitted");
 
             await db.SaveChangesAsync(ct);
+
+            // The Moved status is written here rather than through the download service, so its
+            // status-change hook never sees this transition. Announce completion only once the
+            // files and library records are committed; a repeat call returns above and stays quiet.
+            await notificationService.OnDownloadImportedAsync(download);
         }
     }
 }
