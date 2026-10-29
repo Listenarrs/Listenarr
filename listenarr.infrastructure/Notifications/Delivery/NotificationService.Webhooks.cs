@@ -52,7 +52,7 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
                         imageContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(attachment.ContentType);
                         multipartContent.Add(imageContent, "files[0]", attachment.Filename);
 
-                        _logger.LogDebug("Posting multipart to {WebhookUrl} (attachment filename={Filename}, size={Size})", LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment()), attachment.Filename, attachment.ImageData?.Length ?? 0);
+                        _logger.LogDebug("Posting multipart to {WebhookUrl} (attachment filename={Filename}, size={Size})", LogRedaction.SanitizeWebhookUrl(webhookUrl), attachment.Filename, attachment.ImageData?.Length ?? 0);
                         var response = await PostValidatedAsync(webhookUrl, multipartContent);
                         if (!response.IsSuccessStatusCode) await NotificationDiagnostics.LogFailedResponseAsync(response, webhookUrl, _logger);
                     }
@@ -66,7 +66,7 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
                 }
                 catch (HttpRequestException ex)
                 {
-                    _logger.LogError(ex, "HTTP error sending Discord notification to {WebhookUrl}", LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                    _logger.LogError(ex, "HTTP error sending Discord notification to {WebhookUrl}", LogRedaction.SanitizeWebhookUrl(webhookUrl));
                 }
                 catch (OperationCanceledException)
                 {
@@ -77,7 +77,7 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
 #pragma warning disable CA1031
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                 {
-                    _logger.LogError(ex, "Error sending Discord notification to {WebhookUrl}", LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                    _logger.LogError(ex, "Error sending Discord notification to {WebhookUrl}", LogRedaction.SanitizeWebhookUrl(webhookUrl));
                 }
 #pragma warning restore CA1031
 
@@ -106,7 +106,7 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
                     request.Headers.TryAddWithoutValidation("Priority", "3");
                     request.Headers.TryAddWithoutValidation("Tags", trigger);
 
-                    var redactedUrl = LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment());
+                    var redactedUrl = LogRedaction.SanitizeWebhookUrl(webhookUrl);
                     var headers = string.Join(", ", request.Headers.Select(h => $"{h.Key}={string.Join(';', h.Value)}"));
                     var requestBody = request.Content != null ? await request.Content.ReadAsStringAsync() : string.Empty;
                     var redactedRequestBody = NotificationDiagnostics.AggressiveRedact(LogRedaction.RedactText(requestBody, LogRedaction.GetSensitiveValuesFromEnvironment()));
@@ -125,7 +125,7 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
                 }
                 catch (HttpRequestException ex)
                 {
-                    _logger.LogError(ex, "HTTP error sending NTFY notification to {WebhookUrl}", LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                    _logger.LogError(ex, "HTTP error sending NTFY notification to {WebhookUrl}", LogRedaction.SanitizeWebhookUrl(webhookUrl));
                 }
                 catch (OperationCanceledException)
                 {
@@ -134,11 +134,11 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
                 // OperationCanceledException is handled above (re-thrown). No TaskCanceledException handler here.
                 catch (JsonException ex)
                 {
-                    _logger.LogError(ex, "JSON error while building NTFY notification payload for {WebhookUrl}", LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                    _logger.LogError(ex, "JSON error while building NTFY notification payload for {WebhookUrl}", LogRedaction.SanitizeWebhookUrl(webhookUrl));
                 }
                 catch (InvalidOperationException ex)
                 {
-                    _logger.LogError(ex, "Invalid operation while sending NTFY notification to {WebhookUrl}", LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                    _logger.LogError(ex, "Invalid operation while sending NTFY notification to {WebhookUrl}", LogRedaction.SanitizeWebhookUrl(webhookUrl));
                 }
 
                 // NTFY handled; do not fall through to the generic sender (would double-post).
@@ -158,7 +158,7 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
 
                     if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(user))
                     {
-                        _logger.LogWarning("Pushover webhook URL missing 'token' or 'user' query parameter: {WebhookUrl}", LogRedaction.SanitizeUrl(webhookUrl));
+                        _logger.LogWarning("Pushover webhook URL missing 'token' or 'user' query parameter: {WebhookUrl}", LogRedaction.SanitizeWebhookUrl(webhookUrl));
                         // Fall through to generic webhook behaviour below
                     }
                     else
@@ -176,10 +176,12 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
                         };
 
                         using var content = new FormUrlEncodedContent(values);
-                        var requestBody = await NotificationDiagnostics.TryReadContentAsync(content, _logger);
-                        var redactedRequestBody = NotificationDiagnostics.AggressiveRedact(LogRedaction.RedactText(requestBody, LogRedaction.GetSensitiveValuesFromEnvironment()));
-                        var redactedUrl = LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment());
-                        _logger.LogInformation("Sending Pushover POST to {WebhookUrl} with body: {Body}", redactedUrl, redactedRequestBody);
+                        var redactedUrl = LogRedaction.SanitizeWebhookUrl(webhookUrl);
+                        // The Pushover form body carries the token/user credentials as plain fields
+                        // (token=, user=), which AggressiveRedact cannot catch since they are not
+                        // sourced from the environment. Drop the body from the log entirely rather
+                        // than half-redact it.
+                        _logger.LogInformation("Sending Pushover POST to {WebhookUrl}", redactedUrl);
 
                         // Post to the base path (without query) to comply with Pushover API expectations
                         var postUrl = uri.GetLeftPart(UriPartial.Path);
@@ -196,7 +198,7 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
                 }
                 catch (HttpRequestException ex)
                 {
-                    _logger.LogError(ex, "HTTP error sending Pushover notification to {WebhookUrl}", LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                    _logger.LogError(ex, "HTTP error sending Pushover notification to {WebhookUrl}", LogRedaction.SanitizeWebhookUrl(webhookUrl));
                     return;
                 }
                 catch (OperationCanceledException)
@@ -207,7 +209,7 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
                                             && ex is not StackOverflowException
                                             && ex is not ThreadAbortException)
                 {
-                    _logger.LogError(ex, "Error sending Pushover notification to {WebhookUrl}", LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                    _logger.LogError(ex, "Error sending Pushover notification to {WebhookUrl}", LogRedaction.SanitizeWebhookUrl(webhookUrl));
                     return;
                 }
             }
@@ -224,7 +226,7 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
 
                     if (string.IsNullOrWhiteSpace(chatId))
                     {
-                        _logger.LogWarning("Telegram webhook URL missing 'chat_id' query parameter: {WebhookUrl}", LogRedaction.SanitizeUrl(webhookUrl));
+                        _logger.LogWarning("Telegram webhook URL missing 'chat_id' query parameter: {WebhookUrl}", LogRedaction.SanitizeWebhookUrl(webhookUrl));
                         // Fall through to generic webhook behaviour below
                     }
                     else
@@ -237,7 +239,7 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
                         var json = JsonSerializer.Serialize(telegramBody);
                         using var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-                        var redactedUrl = LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment());
+                        var redactedUrl = LogRedaction.SanitizeWebhookUrl(webhookUrl);
                         _logger.LogInformation("Sending Telegram POST to {WebhookUrl} with body: {Body}", redactedUrl, NotificationDiagnostics.AggressiveRedact(LogRedaction.RedactText(json, LogRedaction.GetSensitiveValuesFromEnvironment())));
 
                         var response = await PostValidatedAsync(webhookUrl, content);
@@ -253,7 +255,7 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
                 }
                 catch (HttpRequestException ex)
                 {
-                    _logger.LogError(ex, "HTTP error sending Telegram notification to {WebhookUrl}", LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                    _logger.LogError(ex, "HTTP error sending Telegram notification to {WebhookUrl}", LogRedaction.SanitizeWebhookUrl(webhookUrl));
                     return;
                 }
                 catch (OperationCanceledException)
@@ -265,7 +267,7 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
 #pragma warning disable CA1031
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                 {
-                    _logger.LogError(ex, "Error sending Telegram notification to {WebhookUrl}", LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                    _logger.LogError(ex, "Error sending Telegram notification to {WebhookUrl}", LogRedaction.SanitizeWebhookUrl(webhookUrl));
                     return;
                 }
 #pragma warning restore CA1031
@@ -297,7 +299,7 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
 
                     if (string.IsNullOrWhiteSpace(token))
                     {
-                        _logger.LogWarning("Pushbullet webhook URL missing access token: {WebhookUrl}", LogRedaction.SanitizeUrl(webhookUrl));
+                        _logger.LogWarning("Pushbullet webhook URL missing access token: {WebhookUrl}", LogRedaction.SanitizeWebhookUrl(webhookUrl));
                         // Fall through to generic webhook behaviour below
                     }
                     else
@@ -324,7 +326,7 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
                         };
                         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-                        var redactedUrl = LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment());
+                        var redactedUrl = LogRedaction.SanitizeWebhookUrl(webhookUrl);
                         var redactedBody = NotificationDiagnostics.AggressiveRedact(LogRedaction.RedactText(json, LogRedaction.GetSensitiveValuesFromEnvironment()));
                         _logger.LogInformation("Sending Pushbullet POST to {WebhookUrl} with body: {Body}", redactedUrl, redactedBody);
 
@@ -341,7 +343,7 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
                 }
                 catch (HttpRequestException ex)
                 {
-                    _logger.LogError(ex, "HTTP error sending Pushbullet notification to {WebhookUrl}", LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                    _logger.LogError(ex, "HTTP error sending Pushbullet notification to {WebhookUrl}", LogRedaction.SanitizeWebhookUrl(webhookUrl));
                     return;
                 }
                 catch (OperationCanceledException)
@@ -353,7 +355,7 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
 #pragma warning disable CA1031
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                 {
-                    _logger.LogError(ex, "Error sending Pushbullet notification to {WebhookUrl}", LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                    _logger.LogError(ex, "Error sending Pushbullet notification to {WebhookUrl}", LogRedaction.SanitizeWebhookUrl(webhookUrl));
                     return;
                 }
 #pragma warning restore CA1031
@@ -377,7 +379,7 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
                     var json = slackObj.ToJsonString();
                     using var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-                    var redactedUrl = LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment());
+                    var redactedUrl = LogRedaction.SanitizeWebhookUrl(webhookUrl);
                     var redactedBody = NotificationDiagnostics.AggressiveRedact(LogRedaction.RedactText(json, LogRedaction.GetSensitiveValuesFromEnvironment()));
                     _logger.LogInformation("Sending Slack POST to {WebhookUrl} with body: {Body}", redactedUrl, redactedBody);
 
@@ -393,7 +395,7 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
                 }
                 catch (HttpRequestException ex)
                 {
-                    _logger.LogError(ex, "HTTP error sending Slack notification to {WebhookUrl}", LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                    _logger.LogError(ex, "HTTP error sending Slack notification to {WebhookUrl}", LogRedaction.SanitizeWebhookUrl(webhookUrl));
                     return;
                 }
                 catch (OperationCanceledException)
@@ -405,7 +407,7 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
 #pragma warning disable CA1031
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                 {
-                    _logger.LogError(ex, "Error sending Slack notification to {WebhookUrl}", LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                    _logger.LogError(ex, "Error sending Slack notification to {WebhookUrl}", LogRedaction.SanitizeWebhookUrl(webhookUrl));
                     return;
                 }
 #pragma warning restore CA1031
@@ -421,7 +423,7 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
 
                 using var defaultContent = new StringContent(defaultJson, Encoding.UTF8, "application/json");
 
-                var redactedUrl = LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment());
+                var redactedUrl = LogRedaction.SanitizeWebhookUrl(webhookUrl);
                 var redactedBody = NotificationDiagnostics.AggressiveRedact(LogRedaction.RedactText(defaultJson, LogRedaction.GetSensitiveValuesFromEnvironment()));
                 _logger.LogInformation("Sending Generic POST to {WebhookUrl} with body: {Body}", redactedUrl, redactedBody);
 
@@ -433,7 +435,7 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
             }
             catch (HttpRequestException ex)
             {
-                _logger.LogError(ex, "HTTP error sending Generic notification to {WebhookUrl}", LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                _logger.LogError(ex, "HTTP error sending Generic notification to {WebhookUrl}", LogRedaction.SanitizeWebhookUrl(webhookUrl));
             }
             catch (OperationCanceledException)
             {
@@ -444,7 +446,7 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
 #pragma warning disable CA1031
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
-                _logger.LogError(ex, "Error sending notification to {WebhookUrl}", LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment()));
+                _logger.LogError(ex, "Error sending notification to {WebhookUrl}", LogRedaction.SanitizeWebhookUrl(webhookUrl));
             }
 #pragma warning restore CA1031
         }

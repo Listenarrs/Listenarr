@@ -37,7 +37,7 @@ namespace Listenarr.Application.Notifications.Diagnostics
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                     {
-                        System.Diagnostics.Debug.WriteLine($"NotificationService.AggressiveRedact regex replace failed: {ex.Message}");
+                        // Nothing is logged here: the exception can carry the very value being redacted.
                     }
                 }
 
@@ -69,7 +69,7 @@ namespace Listenarr.Application.Notifications.Diagnostics
                 logger.LogDebug(ex, "Failed to read notification response body for diagnostic logging");
             }
 
-            var redactedUrl = LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment());
+            var redactedUrl = LogRedaction.SanitizeWebhookUrl(webhookUrl);
             var redactedBody = LogRedaction.RedactText(body, LogRedaction.GetSensitiveValuesFromEnvironment());
             redactedBody = AggressiveRedact(redactedBody);
             if (string.IsNullOrEmpty(redactedBody)) redactedBody = "<redacted>";

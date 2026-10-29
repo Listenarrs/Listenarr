@@ -185,8 +185,8 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
                     _logger.LogInformation("Downloaded ffprobe archive SHA256={Hash}", hashHex);
                 }
                 catch (Exception caughtEx_2) when (caughtEx_2 is not OperationCanceledException && caughtEx_2 is not OutOfMemoryException && caughtEx_2 is not StackOverflowException)
-                { /* non-fatal */
-                    System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                {
+                    _logger.LogDebug(caughtEx_2, "Could not compute the SHA256 of the downloaded ffprobe archive; continuing without a computed hash");
                 }
 
                 var expected = GetChecksumForPlatform();
@@ -212,13 +212,13 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
                             }
                             catch (Exception caughtEx_3) when (caughtEx_3 is not OperationCanceledException && caughtEx_3 is not OutOfMemoryException && caughtEx_3 is not StackOverflowException)
                             {
-                                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                _logger.LogDebug(caughtEx_3, "Could not read checksum file {ChecksumFile}; trying the next one", cf);
                             }
                         }
                     }
                     catch (Exception caughtEx_4) when (caughtEx_4 is not OperationCanceledException && caughtEx_4 is not OutOfMemoryException && caughtEx_4 is not StackOverflowException)
                     {
-                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                        _logger.LogDebug(caughtEx_4, "Could not enumerate checksum files in the ffprobe base directory; continuing without a local checksum");
                     }
                 }
 
@@ -256,14 +256,14 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
                                 await _processRunner.RunAsync(psiCh, 3000);
                             }
                             catch (Exception caughtEx_6) when (caughtEx_6 is not OperationCanceledException && caughtEx_6 is not OutOfMemoryException && caughtEx_6 is not StackOverflowException)
-                            { /* best effort */
-                                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                            {
+                                _logger.LogDebug(caughtEx_6, "Could not mark extracted candidate {Candidate} executable", cand);
                             }
                         }
                     }
                     catch (Exception caughtEx_7) when (caughtEx_7 is not OperationCanceledException && caughtEx_7 is not OutOfMemoryException && caughtEx_7 is not StackOverflowException)
-                    { /* best effort */
-                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                    {
+                        _logger.LogDebug(caughtEx_7, "Could not walk the extracted ffprobe directory to fix permissions");
                     }
                 }
 
@@ -335,8 +335,8 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
                                 {
                                     try { File.Delete(dest); }
                                     catch (Exception caughtEx_8) when (caughtEx_8 is not OperationCanceledException && caughtEx_8 is not OutOfMemoryException && caughtEx_8 is not StackOverflowException)
-                                    { /* best-effort */
-                                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                    {
+                                        _logger.LogDebug(caughtEx_8, "Could not delete the existing file at {Destination} before moving ffprobe into place", dest);
                                     }
                                 }
 
@@ -378,8 +378,8 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
                                     await _processRunner.RunAsync(psiCh, 3000);
                                 }
                                 catch (Exception caughtEx_9) when (caughtEx_9 is not OperationCanceledException && caughtEx_9 is not OutOfMemoryException && caughtEx_9 is not StackOverflowException)
-                                { /* best effort */
-                                    System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                {
+                                    _logger.LogDebug(caughtEx_9, "Could not mark {Destination} executable after installing ffprobe", dest);
                                 }
                             }
                         }

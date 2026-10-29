@@ -86,7 +86,7 @@ namespace Listenarr.Api.Middleware
                         }
                         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                         {
-                            System.Diagnostics.Debug.WriteLine($"ApiKeyMiddleware key fingerprint logging failed: {ex.Message}");
+                            // Nothing is logged here: the call that failed is the logging call itself.
                         }
 
                         if (provided == configuredKey)
@@ -107,7 +107,7 @@ namespace Listenarr.Api.Middleware
                             }
                             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                             {
-                                System.Diagnostics.Debug.WriteLine($"ApiKeyMiddleware accepted-key logging failed: {ex.Message}");
+                                // Nothing is logged here: the call that failed is the logging call itself.
                             }
                         }
                         else
@@ -115,7 +115,7 @@ namespace Listenarr.Api.Middleware
                             try { _logger?.LogDebug("ApiKeyMiddleware: API key provided but did not match configured key"); }
                             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                             {
-                                System.Diagnostics.Debug.WriteLine($"ApiKeyMiddleware invalid-key logging failed: {ex.Message}");
+                                // Nothing is logged here: the call that failed is the logging call itself.
                             }
                         }
                     }
