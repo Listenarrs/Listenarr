@@ -28,7 +28,9 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
         /// <remarks>
         /// Call sites used to reach only one of those two sets, which is why a webhook added through
         /// the settings screen never fired for a library or download event. Anything that emits a
-        /// notification should come through here so both sets are considered once.
+        /// notification should come through here so both sets are considered once. Each target is
+        /// delivered in isolation, so one that times out or fails does not cost the rest their
+        /// delivery.
         /// </remarks>
         public async Task SendNotificationAsync(string trigger, object data)
         {
@@ -43,7 +45,7 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
             if (!string.IsNullOrWhiteSpace(legacyUrl)
                 && NotificationTriggers.IsEnabled(settings.EnabledNotificationTriggers, trigger))
             {
-                await SendNotificationAsync(trigger, data, legacyUrl, settings.EnabledNotificationTriggers);
+                await SendToTargetAsync(trigger, data, legacyUrl, settings.EnabledNotificationTriggers);
                 legacyDelivered = true;
             }
 
@@ -61,7 +63,25 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
                     continue;
                 }
 
-                await SendNotificationAsync(trigger, data, webhook.Url, webhook.Triggers);
+                await SendToTargetAsync(trigger, data, webhook.Url, webhook.Triggers);
+            }
+        }
+
+        private async Task SendToTargetAsync(string trigger, object data, string url, List<string> enabledTriggers)
+        {
+            try
+            {
+                await SendNotificationAsync(trigger, data, url, enabledTriggers);
+            }
+            catch (OperationCanceledException ex) when (ex.InnerException is TimeoutException)
+            {
+                // HttpClient reports its own timeout as a cancellation. Only that one is absorbed here;
+                // a cancellation somebody asked for still stops the whole dispatch.
+                _logger.LogWarning(ex, "Sending the {Trigger} notification to one target timed out; continuing with the remaining targets", trigger);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+            {
+                _logger.LogWarning(ex, "Sending the {Trigger} notification to one target failed; continuing with the remaining targets", trigger);
             }
         }
 
