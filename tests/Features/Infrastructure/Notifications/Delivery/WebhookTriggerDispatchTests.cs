@@ -15,7 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using System.Net;
 using System.Text.RegularExpressions;
 using Listenarr.Tests.Common;
 
@@ -53,7 +52,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Notifications.Delivery
         [MemberData(nameof(UserSelectableTriggers))]
         public async Task WebhookSubscribedThroughTheSettingsScreen_ReceivesTheMatchingEvent(string trigger)
         {
-            using var probe = DispatchProbe.ForWebhook(trigger);
+            using var probe = WebhookDispatchProbe.ForWebhook(WebhookUrl, trigger);
 
             await probe.Service.SendNotificationAsync(trigger, new { title = "A Synthetic Audiobook" });
 
@@ -65,7 +64,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Notifications.Delivery
         [Fact]
         public async Task ImportedDownload_ReachesAWebhookSubscribedToProcessingComplete()
         {
-            using var probe = DispatchProbe.ForWebhook(NotificationTriggers.BookCompleted);
+            using var probe = WebhookDispatchProbe.ForWebhook(WebhookUrl, NotificationTriggers.BookCompleted);
 
             await probe.Service.OnDownloadImportedAsync(ImportedDownload());
 
@@ -77,7 +76,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Notifications.Delivery
         [Fact]
         public async Task ImportedDownload_StillReachesAWebhookSavedAgainstTheOlderInternalName()
         {
-            using var probe = DispatchProbe.ForWebhook("Imported");
+            using var probe = WebhookDispatchProbe.ForWebhook(WebhookUrl, "Imported");
 
             await probe.Service.OnDownloadImportedAsync(ImportedDownload());
 
@@ -89,7 +88,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Notifications.Delivery
         [Fact]
         public async Task FailedDownload_ReachesAWebhookSubscribedToTheFailureTrigger()
         {
-            using var probe = DispatchProbe.ForWebhook(NotificationTriggers.DownloadFailed);
+            using var probe = WebhookDispatchProbe.ForWebhook(WebhookUrl, NotificationTriggers.DownloadFailed);
 
             await probe.Service.OnDownloadFailedAsync(FailedDownload());
 
@@ -101,7 +100,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Notifications.Delivery
         [Fact]
         public async Task WebhookSubscribedToADifferentTrigger_HearsNothing()
         {
-            using var probe = DispatchProbe.ForWebhook(NotificationTriggers.BookAdded);
+            using var probe = WebhookDispatchProbe.ForWebhook(WebhookUrl, NotificationTriggers.BookAdded);
 
             await probe.Service.SendNotificationAsync(
                 NotificationTriggers.BookDownloading,
@@ -113,7 +112,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Notifications.Delivery
         [Fact]
         public async Task DisabledWebhook_HearsNothing()
         {
-            using var probe = DispatchProbe.ForWebhook(NotificationTriggers.BookAdded, isEnabled: false);
+            using var probe = WebhookDispatchProbe.ForWebhook(WebhookUrl, NotificationTriggers.BookAdded, isEnabled: false);
 
             await probe.Service.SendNotificationAsync(
                 NotificationTriggers.BookAdded,
@@ -125,7 +124,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Notifications.Delivery
         [Fact]
         public async Task StoredTriggerCasing_DoesNotDecideWhetherAWebhookFires()
         {
-            using var probe = DispatchProbe.ForWebhook("Book-Added");
+            using var probe = WebhookDispatchProbe.ForWebhook(WebhookUrl, "Book-Added");
 
             await probe.Service.SendNotificationAsync(
                 NotificationTriggers.BookAdded,
@@ -146,12 +145,12 @@ namespace Listenarr.Tests.Features.Infrastructure.Notifications.Delivery
                 Webhooks =
                 [
                     // Same URL as the legacy single-webhook setting: one event, one delivery.
-                    NewWebhook(WebhookUrl, NotificationTriggers.BookAdded),
-                    NewWebhook(SecondWebhookUrl, NotificationTriggers.BookAdded)
+                    WebhookDispatchProbe.NewWebhook(WebhookUrl, isEnabled: true, NotificationTriggers.BookAdded),
+                    WebhookDispatchProbe.NewWebhook(SecondWebhookUrl, isEnabled: true, NotificationTriggers.BookAdded)
                 ]
             };
 
-            using var probe = new DispatchProbe(settings);
+            using var probe = new WebhookDispatchProbe(settings);
 
             await probe.Service.SendNotificationAsync(
                 NotificationTriggers.BookAdded,
@@ -264,89 +263,5 @@ namespace Listenarr.Tests.Features.Infrastructure.Notifications.Delivery
                 Title = "A Synthetic Audiobook",
                 ErrorMessage = "The synthetic download client refused the release"
             };
-
-        private static WebhookConfiguration NewWebhook(string url, params string[] triggers)
-            => new()
-            {
-                Name = "Test target",
-                Url = url,
-                Type = "Zapier",
-                Triggers = [.. triggers],
-                IsEnabled = true
-            };
-
-        /// <summary>
-        /// A <see cref="NotificationService"/> wired to a captured transport, so a test can count the
-        /// outbound requests an event actually produced.
-        /// </summary>
-        private sealed class DispatchProbe : IDisposable
-        {
-            private readonly HttpClient _httpClient;
-            private readonly List<Uri> _postedUrls = [];
-
-            public DispatchProbe(ApplicationSettings settings)
-            {
-                var handler = new Mock<HttpMessageHandler>();
-                handler
-                    .Protected()
-                    .Setup<Task<HttpResponseMessage>>(
-                        "SendAsync",
-                        ItExpr.IsAny<HttpRequestMessage>(),
-                        ItExpr.IsAny<CancellationToken>())
-                    .Callback<HttpRequestMessage, CancellationToken>((request, _) =>
-                    {
-                        if (request.Method == HttpMethod.Post && request.RequestUri != null)
-                        {
-                            _postedUrls.Add(request.RequestUri);
-                        }
-                    })
-                    .ReturnsAsync(() => new HttpResponseMessage(HttpStatusCode.OK));
-
-                var configurationService = new Mock<IConfigurationService>();
-                configurationService
-                    .Setup(service => service.GetApplicationSettingsAsync())
-                    .ReturnsAsync(settings);
-                configurationService
-                    .Setup(service => service.GetWebhookConfigurationsAsync())
-                    .ReturnsAsync(settings.Webhooks ?? []);
-                configurationService
-                    .Setup(service => service.GetStartupConfigAsync())
-                    .ReturnsAsync(new StartupConfig());
-
-                _httpClient = new HttpClient(handler.Object);
-                Service = new NotificationService(
-                    _httpClient,
-                    Mock.Of<ILogger<NotificationService>>(),
-                    configurationService.Object,
-                    new NotificationPayloadBuilderAdapter(),
-                    Mock.Of<IRequestContextAccessor>());
-            }
-
-            public NotificationService Service { get; }
-
-            /// <summary>Every URL that received an outbound POST, in delivery order.</summary>
-            public IReadOnlyList<string> PostedUrls
-                => [.. _postedUrls.Select(uri => uri.ToString())];
-
-            public static DispatchProbe ForWebhook(string storedTrigger, bool isEnabled = true)
-                => new(new ApplicationSettings
-                {
-                    WebhookUrl = string.Empty,
-                    EnabledNotificationTriggers = [],
-                    Webhooks =
-                    [
-                        new WebhookConfiguration
-                        {
-                            Name = "Test target",
-                            Url = WebhookUrl,
-                            Type = "Zapier",
-                            Triggers = [storedTrigger],
-                            IsEnabled = isEnabled
-                        }
-                    ]
-                });
-
-            public void Dispose() => _httpClient.Dispose();
-        }
     }
 }
