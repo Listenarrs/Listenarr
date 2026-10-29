@@ -36,6 +36,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Notifications.Delivery
     {
         private const string WebhookUrl = "https://hooks.notification-target.example/inbound";
         private const string SecondWebhookUrl = "https://hooks.other-target.example/inbound";
+        private const string NtfyUrl = "https://ntfy.notification-target.example/library-events";
 
         public static TheoryData<string> UserSelectableTriggers()
         {
@@ -83,6 +84,21 @@ namespace Listenarr.Tests.Features.Infrastructure.Notifications.Delivery
             Assert.Equal(
                 [WebhookUrl],
                 probe.PostedUrls);
+        }
+
+        [Fact]
+        public async Task ImportedDownload_TagsTheNtfyMessageWithTheSharedCompletionTrigger()
+        {
+            // Completion notifications used to carry the internal name Imported in the NTFY Tags
+            // header. They now carry book-completed, the name the settings screen subscribes to.
+            // A subscription stored as Imported still matches, but an ntfy consumer filtering on
+            // the Imported tag has to filter on book-completed instead.
+            using var probe = WebhookDispatchProbe.ForWebhook(NtfyUrl, NotificationTriggers.BookCompleted);
+
+            await probe.Service.OnDownloadImportedAsync(ImportedDownload());
+
+            var request = Assert.Single(probe.Requests);
+            Assert.Equal([NotificationTriggers.BookCompleted], request.Headers.GetValues("Tags"));
         }
 
         [Fact]
