@@ -93,6 +93,35 @@ public static partial class FileUtils
         }
     }
 
+    /// <summary>
+    /// Reports whether a path is a bare filesystem root, meaning it carries a root
+    /// (<c>/</c>, a drive, or a UNC share) and no path segments beneath it. A common
+    /// directory that collapses to a bare root describes no shared structure: it is what
+    /// <see cref="GetCommonPathForDirectories(IEnumerable{string}, FileSystemPathSemantics)"/>
+    /// returns when the inputs live in disjoint trees.
+    ///
+    /// The argument is expected to be a path of the shape those functions produce, which is
+    /// canonicalised and carries no extended-length or device prefix. Anything else is
+    /// reported as not a root rather than guessed at.
+    /// </summary>
+    public static bool IsFilesystemRoot(string? path, FileSystemPathSemantics semantics)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        try
+        {
+            var decomposed = DecomposePathForCommonPath(path, semantics.Syntax);
+            return !string.IsNullOrEmpty(decomposed.Root) && decomposed.Segments.Count == 0;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
     private static string GetCommonPath(
         string firstPath,
         string secondPath,
