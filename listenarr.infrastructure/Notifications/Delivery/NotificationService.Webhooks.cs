@@ -17,7 +17,7 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
         /// </summary>
         public async Task SendNotificationAsync(string trigger, object data, string webhookUrl, List<string> enabledTriggers)
         {
-            if (string.IsNullOrWhiteSpace(webhookUrl) || enabledTriggers == null || !enabledTriggers.Contains(trigger))
+            if (string.IsNullOrWhiteSpace(webhookUrl) || !NotificationTriggers.IsEnabled(enabledTriggers, trigger))
                 return;
             var allowPrivateWebhookTargets = AllowPrivateWebhookTargetsForCurrentRequest();
             if (!NotificationDiagnostics.TryValidateWebhookTarget(webhookUrl, out var validationReason, allowPrivateWebhookTargets))
@@ -104,6 +104,8 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
                     // Helpful ntfy headers per docs: Title, Priority, Tags
                     if (!string.IsNullOrWhiteSpace(title)) request.Headers.TryAddWithoutValidation("Title", title);
                     request.Headers.TryAddWithoutValidation("Priority", "3");
+                    // The tag is the dispatched trigger name, so a completed import is tagged
+                    // book-completed (it was Imported before the trigger vocabulary was unified).
                     request.Headers.TryAddWithoutValidation("Tags", trigger);
 
                     var redactedUrl = LogRedaction.RedactText(webhookUrl, LogRedaction.GetSensitiveValuesFromEnvironment());
