@@ -63,6 +63,7 @@ public sealed partial class FileRegistrationRecoveryService
             }
             var tracked = await trackedQuery
                 .ToListAsync(cancellationToken);
+            var parked = tracked.Select(journal => (journal.OperationId, journal.State)).ToList();
             foreach (var journal in tracked)
             {
                 journal.State = FileMutationJournalState.NeedsAttention;
@@ -70,6 +71,10 @@ public sealed partial class FileRegistrationRecoveryService
                 journal.UpdatedAt = now;
             }
             await db.SaveChangesAsync(cancellationToken);
+            foreach (var (parkedOperationId, reachedState) in parked)
+            {
+                LogParked(parkedOperationId, reachedState, reason);
+            }
         }
         else
         {
@@ -89,15 +94,24 @@ public sealed partial class FileRegistrationRecoveryService
                 trackedQuery = trackedQuery.Where(
                     journal => journal.OperationId == relationalOperationId);
             }
-            await trackedQuery
-                .ExecuteUpdateAsync(
-                    setters => setters
-                        .SetProperty(
-                            journal => journal.State,
-                            FileMutationJournalState.NeedsAttention)
-                        .SetProperty(journal => journal.Error, reason)
-                        .SetProperty(journal => journal.UpdatedAt, now),
-                    cancellationToken);
+            foreach (var candidate in unsupported)
+            {
+                var affected = await trackedQuery
+                    .Where(journal => journal.OperationId == candidate.OperationId
+                        && journal.State == candidate.State)
+                    .ExecuteUpdateAsync(
+                        setters => setters
+                            .SetProperty(
+                                journal => journal.State,
+                                FileMutationJournalState.NeedsAttention)
+                            .SetProperty(journal => journal.Error, reason)
+                            .SetProperty(journal => journal.UpdatedAt, now),
+                        cancellationToken);
+                if (affected == 1)
+                {
+                    LogParked(candidate.OperationId, candidate.State, reason);
+                }
+            }
         }
 
         // Protocol ambiguity is operation-scoped. Startup recovery records
