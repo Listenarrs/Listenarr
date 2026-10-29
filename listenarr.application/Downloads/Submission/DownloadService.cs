@@ -481,20 +481,11 @@ namespace Listenarr.Application.Downloads.Submission
 
             await downloadRepository.UpdateAsync(download);
 
-            switch (previous.Status, download.Status)
-            {
-                case var (old, next) when old == next:
-                    return;
-                case (_, DownloadStatus.Moved):
-                    await notificationService.OnDownloadImportedAsync(download);
-                    return;
-                case (_, DownloadStatus.Failed):
-                case (_, DownloadStatus.ImportBlocked):
-                    await notificationService.OnDownloadFailedAsync(download);
-                    return;
-                default:
-                    return;
-            }
+            // Lifecycle notifications for completion/failure fire at their real pipeline points via
+            // IBookLifecycleNotifier (ImportFinalizationService, DownloadMonitorService,
+            // DownloadProcessingJobProcessor) against the configurable trigger catalog. The former
+            // status-switch here dispatched the legacy "Imported"/"Failed" webhook triggers, which
+            // were never in that catalog (book-*) and so never actually sent — see #909.
         }
     }
 }
