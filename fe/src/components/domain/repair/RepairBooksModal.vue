@@ -144,7 +144,7 @@
         :completed-repair-count="completedRepairCount"
         :total-repair-count="totalRepairCount"
         @close="handleClose"
-        @cancel-repair="cancelRepair"
+        @cancel-repair="cancelRepair()"
         @back="load"
         @repair="startRepair"
         @organize="emit('organize', audiobookIdsToOrganize)"
@@ -249,7 +249,8 @@ usePageLeaveGuard({
     if (!isLeaving) resumeRepair()
     return isLeaving
   },
-  onLeave: cancelRepair,
+  // The book being repaired finishes, even waiting for the rescan cooldown; the others don't start
+  onLeave: () => cancelRepair({ isWaitStopped: false }),
 })
 
 const footerRef = ref<InstanceType<typeof RepairFooter> | null>(null)
