@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Listenarr.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(ListenArrDbContext))]
-    [Migration("20261018212549_AddQualityProfileUpgradeAllowed")]
+    [Migration("20261029020317_AddQualityProfileUpgradeAllowed")]
     partial class AddQualityProfileUpgradeAllowed
     {
         /// <inheritdoc />
@@ -1814,6 +1814,15 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Property<string>("AudnexusApiUrl")
                         .IsRequired()
                         .HasColumnType("TEXT");
+
+                    b.Property<int>("AutomaticSearchBookDelaySeconds")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AutomaticSearchCooldownHours")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AutomaticSearchIntervalHours")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int>("CompletedFileAction")
                         .HasColumnType("INTEGER");
