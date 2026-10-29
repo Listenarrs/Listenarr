@@ -107,7 +107,16 @@ namespace Listenarr.Infrastructure.Library.Moving
                     result,
                     cancellationToken);
 
-            if (deleteTarget != null)
+            // A tracked path with no live proof was renamed or removed outside Listenarr, so the
+            // folder can no longer be identified safely. Delete only the proven tracked files.
+            var everyTrackedFileProven = trackedContentProofs.Count == trackedFilePaths.Count;
+            if (deleteTarget != null && !everyTrackedFileProven)
+            {
+                result.Warnings.Add(
+                    "A tracked audiobook file is missing from the audiobook folder, so the folder was not removed recursively and only the remaining tracked files were deleted.");
+            }
+
+            if (deleteTarget != null && everyTrackedFileProven)
             {
                 if (trackedContentProofs.Count == 0
                     && !deleteTarget.OwnedDirectories.Any(ownership =>
