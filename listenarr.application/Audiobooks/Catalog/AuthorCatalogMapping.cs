@@ -178,16 +178,25 @@ namespace Listenarr.Application.Audiobooks.Catalog
                     .Where(genre => !string.IsNullOrWhiteSpace(genre))
                     .Select(genre => new AudibleGenre { Name = genre })
                     .ToList(),
-                Series = string.IsNullOrWhiteSpace(book.Series)
-                    ? null
-                    : new List<AudibleSeries>
-                    {
-                        new()
+                Series = book.SeriesEntries is { Count: > 0 }
+                    ? book.SeriesEntries
+                        .Select(series => new AudibleSeries
                         {
-                            Name = book.Series,
-                            Position = book.SeriesNumber
-                        }
-                    },
+                            Asin = series.Asin,
+                            Name = series.Name,
+                            Position = series.Position
+                        })
+                        .ToList()
+                    : string.IsNullOrWhiteSpace(book.Series)
+                        ? null
+                        : new List<AudibleSeries>
+                        {
+                            new()
+                            {
+                                Name = book.Series,
+                                Position = book.SeriesNumber
+                            }
+                        },
                 ReleaseDate = book.PublishedDate,
                 Isbn = book.Isbn,
                 Link = book.Link
@@ -225,6 +234,14 @@ namespace Listenarr.Application.Audiobooks.Catalog
                     .ToList(),
                 Series = primarySeries?.Name,
                 SeriesNumber = primarySeries?.Position,
+                SeriesEntries = book.Series?
+                    .Select(series => new CachedCatalogSeries
+                    {
+                        Asin = series.Asin,
+                        Name = series.Name,
+                        Position = series.Position
+                    })
+                    .ToList(),
                 PublishedDate = book.ReleaseDate,
                 Isbn = book.Isbn,
                 Link = book.Link,

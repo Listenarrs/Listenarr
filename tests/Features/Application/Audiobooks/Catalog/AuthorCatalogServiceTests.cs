@@ -249,5 +249,46 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Catalog
                     entry.CatalogBooks[0].Title == "The Way of Kings")),
                 Times.Once);
         }
+
+        [Fact]
+        public async Task GetCatalogAsync_ReadsCacheRowsWrittenBeforeSeriesEntries_AsASingleSeries()
+        {
+            var audible = new Mock<AudibleService>(SharedHttpClient, Mock.Of<ILogger<AudibleService>>()) { CallBase = false };
+            var audiobookRepository = new Mock<IAudiobookRepository>();
+
+            audiobookRepository
+                .Setup(repository => repository.GetCachedAuthorByNameAsync("H. Rider Haggard", "us"))
+                .ReturnsAsync(new AuthorCacheEntry
+                {
+                    AuthorName = "H. Rider Haggard",
+                    AuthorNameNormalized = "h rider haggard",
+                    Region = "us",
+                    CatalogBooks = new List<CachedAuthorCatalogBook>
+                    {
+                        new()
+                        {
+                            Asin = "B00CQ5WAXW",
+                            Title = "She And Allan",
+                            Authors = new List<string> { "H. Rider Haggard" },
+                            Series = "Ayesha",
+                            SeriesNumber = "0"
+                        }
+                    }
+                });
+
+            var service = new AuthorCatalogService(
+                audible.Object,
+                Mock.Of<IAudnexusService>(),
+                audiobookRepository.Object,
+                Mock.Of<ISearchService>(),
+                Mock.Of<ILogger<AuthorCatalogService>>());
+
+            var result = await service.GetCatalogAsync("H. Rider Haggard", "us", 10);
+
+            var series = Assert.Single(Assert.Single(result!.Books).Series!);
+            Assert.Equal("Ayesha", series.Name);
+            Assert.Equal("0", series.Position);
+            Assert.Null(series.Asin);
+        }
     }
 }
