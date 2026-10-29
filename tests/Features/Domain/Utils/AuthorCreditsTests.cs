@@ -303,17 +303,17 @@ namespace Listenarr.Tests.Features.Domain.Utils
         [Fact]
         public void WithoutRoleSuffixes_CleansTheContributorAndKeepsEverybody()
         {
-            // B002V9ZF3K. Both credits survive, and both are spelled as people rather than as
+            // B00S710A4U. Both credits survive, and both are spelled as people rather than as
             // people plus a job title.
             Assert.Equal(
-                new[] { "Fyodor Dostoevsky", "Constance Garnett" },
-                AuthorCredits.WithoutRoleSuffixes(new List<string> { "Fyodor Dostoevsky", "Constance Garnett - translator" }));
+                new[] { "Homer", "Samuel Butler" },
+                AuthorCredits.WithoutRoleSuffixes(new List<string> { "Homer", "Samuel Butler - translator" }));
         }
 
         [Fact]
         public void WithoutRoleSuffixes_GivesTheSameNamesWhateverTheBylineOrder()
         {
-            // B00EZAXAF8 credits the same pair the other way round.
+            // B00EZAXAF8 credits its translator first, so the same two credits can arrive in either order.
             var asListed = new List<string> { "Fyodor Dostoevsky", "Constance Garnett - translator" };
             var reversed = new List<string> { "Constance Garnett - translator", "Fyodor Dostoevsky" };
 
