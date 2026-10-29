@@ -220,8 +220,12 @@ internal static partial class ScanFileDiscovery
                 canonicalRoot,
                 semantics)
             .Select(Path.GetFileName)
-            .Any(name =>
+            .Any(folderName =>
             {
+                // The stored author has had any contributor role removed, so the folder name
+                // gets the same treatment or "Name - translator" never matches "Name".
+                var name = AuthorCredits.StripRole(folderName);
+
                 // Match the folder's original normalization first so a dotted folder name still
                 // matches a dotted record (both directions), then fall back to the collapsed and
                 // stripped aliases so a folder carrying post-nominals matches clean author

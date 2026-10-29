@@ -273,7 +273,8 @@ namespace Listenarr.Domain.Common
         /// Removing a role can also make two credits identical, which is the one problem this
         /// rule creates that dropping the credit did not: somebody credited as both author and
         /// translator arrives as two names and would otherwise leave as the same name twice.
-        /// Duplicates are collapsed, first occurrence winning.
+        /// Duplicates are collapsed, an author credit winning over a contributor credit and the
+        /// first occurrence winning within each group.
         /// </remarks>
         public static IReadOnlyList<string> WithoutRoleSuffixes(IReadOnlyList<string>? credits)
         {
@@ -285,21 +286,38 @@ namespace Listenarr.Domain.Common
             var authors = new List<string>(credits.Count);
             var contributors = new List<string>(credits.Count);
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            // Two passes, authors before contributors: a contributor's cleaned name is the same
+            // string as the author's when one person holds both credits, and whichever is
+            // looked at first claims it. Walking the credits in arrival order let
+            // ["Samuel Butler - translator", "Samuel Butler", "Homer"] give the name to the
+            // translator entry and drop the author entry, which then stored the list in an
+            // order the add path, still reading the original strings, disagreed with.
             foreach (var credit in credits)
             {
-                var stripped = StripRole(credit);
-                if (stripped.Length == 0 || !seen.Add(stripped))
+                if (IsRoleCredit(credit))
                 {
                     continue;
                 }
 
-                if (IsRoleCredit(credit))
-                {
-                    contributors.Add(stripped);
-                }
-                else
+                var stripped = StripRole(credit);
+                if (stripped.Length > 0 && seen.Add(stripped))
                 {
                     authors.Add(stripped);
+                }
+            }
+
+            foreach (var credit in credits)
+            {
+                if (!IsRoleCredit(credit))
+                {
+                    continue;
+                }
+
+                var stripped = StripRole(credit);
+                if (stripped.Length > 0 && seen.Add(stripped))
+                {
+                    contributors.Add(stripped);
                 }
             }
 

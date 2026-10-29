@@ -224,6 +224,41 @@ public sealed class ScanFileDiscoveryRegressionTests : BaseTests, IDisposable
         Assert.Empty(found);
     }
 
+    [Fact]
+    public void Discover_AuthorFolderCarriesRoleSuffix_StillMatchesCleanedAuthor()
+    {
+        // B076PQXBV7. The stored author has its role removed, the folder on disk may not.
+        var expected = CreateAudioFile(
+            "George Makepeace Towle - translator",
+            "Around the World in Eighty Days (AmazonClassics Edition)",
+            "chapter.wav");
+
+        var found = Discover(Book(
+            "Around the World in Eighty Days (AmazonClassics Edition)",
+            "George Makepeace Towle"));
+
+        Assert.Equal([expected], found);
+    }
+
+    [Fact]
+    public void Discover_AuthorFolderCarriesRoleSuffix_DoesNotClaimSameTitleUnderAnotherAuthor()
+    {
+        var expected = CreateAudioFile(
+            "George Makepeace Towle - translator",
+            "Around the World in Eighty Days (AmazonClassics Edition)",
+            "chapter.wav");
+        _ = CreateAudioFile(
+            "Jules Verne",
+            "Around the World in Eighty Days (AmazonClassics Edition)",
+            "chapter.wav");
+
+        var found = Discover(Book(
+            "Around the World in Eighty Days (AmazonClassics Edition)",
+            "George Makepeace Towle"));
+
+        Assert.Equal([expected], found);
+    }
+
     private IReadOnlyList<string> Discover(Audiobook audiobook) =>
         DiscoverResult(audiobook, FileSystemPathSemantics.CurrentHostDefault)
             .AttributedFiles;

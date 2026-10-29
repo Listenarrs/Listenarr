@@ -112,5 +112,29 @@ namespace Listenarr.Tests.Features.Api.Services
             // "George Makepeace Towle - translator".
             Assert.Equal("George Makepeace Towle", RenderAuthor("George Makepeace Towle - translator"));
         }
+
+        [Fact]
+        public void AuthorFolder_CleansTheSingularAuthorWhenAuthorsIsNull()
+        {
+            Assert.Equal("Constance Garnett", RenderSingularAuthor(null));
+        }
+
+        [Fact]
+        public void AuthorFolder_CleansTheSingularAuthorWhenAuthorsIsEmpty()
+        {
+            Assert.Equal("Constance Garnett", RenderSingularAuthor(new List<string>()));
+        }
+
+        private string RenderSingularAuthor(List<string>? authors) =>
+            // B00EZAXAF8. A payload carrying only the singular field must name the same folder
+            // as the add path, which stores the cleaned name.
+            _service.ApplyNamingPattern(
+                "{Author}",
+                new AudibleBookMetadata
+                {
+                    Title = "The Brothers Karamazov [Naxos AudioBooks Edition]",
+                    Author = "Constance Garnett - translator",
+                    Authors = authors
+                });
     }
 }
