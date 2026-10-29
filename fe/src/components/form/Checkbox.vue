@@ -16,10 +16,11 @@
   along with this program. If not, see <https://www.gnu.org/licenses/>.
 -->
 <template>
-  <label class="input-checkbox">
+  <label class="input-checkbox" :class="{ 'is-disabled': disabled }">
     <input
       type="checkbox"
       :checked="modelValue"
+      :disabled="disabled"
       @change="$emit('update:modelValue', ($event.target as HTMLInputElement)?.checked ?? false)"
     />
     <span class="checkbox-box" aria-hidden="true"></span>
@@ -29,7 +30,10 @@
 
 <script setup lang="ts">
 defineOptions({ name: 'FormCheckbox' })
-defineProps({ modelValue: { type: Boolean, default: false } })
+defineProps({
+  modelValue: { type: Boolean, default: false },
+  disabled: { type: Boolean, default: false },
+})
 </script>
 
 <style scoped>
@@ -44,6 +48,10 @@ defineProps({ modelValue: { type: Boolean, default: false } })
   opacity: 0;
   width: 0;
   height: 0;
+}
+.input-checkbox.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 .checkbox-box {
   width: 18px;

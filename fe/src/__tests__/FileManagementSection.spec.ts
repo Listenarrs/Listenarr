@@ -63,6 +63,35 @@ describe('FileManagementSection', () => {
     expect(last.importBlacklistExtensions).toEqual(['.nfo', '.jpg'])
   })
 
+  it('shows both File Metadata Enrichment options off, disabled and marked not available', async () => {
+    const { default: FileManagementSection } =
+      await import('@/components/settings/FileManagementSection.vue')
+    const wrapper = mount(FileManagementSection, {
+      props: {
+        settings: { completedFileAction: 'move', importBlacklistExtensions: [] },
+      },
+    })
+
+    const group = wrapper.find('[role="group"]')
+    expect(group.text()).toContain('File Metadata Enrichment')
+
+    const boxes = group.findAll('input[type="checkbox"]')
+    expect(boxes).toHaveLength(2)
+    for (const box of boxes) {
+      expect((box.element as HTMLInputElement).checked).toBe(false)
+      expect((box.element as HTMLInputElement).disabled).toBe(true)
+    }
+
+    const text = group.text()
+    expect(text).toContain('Enable metadata enrichment')
+    expect(text).toContain('Include hardlinked files')
+    expect(text.match(/Not available yet/g)).toHaveLength(2)
+    expect(text).toContain('share the same bytes')
+
+    await boxes[0].trigger('change')
+    expect(wrapper.emitted()['update:settings']).toBeUndefined()
+  })
+
   it('shows preview for multi-file pattern with chapter numbers', async () => {
     const { default: FileManagementSection } =
       await import('@/components/settings/FileManagementSection.vue')
