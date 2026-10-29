@@ -18,11 +18,13 @@
 import { computed, onScopeDispose, ref } from 'vue'
 import { apiService } from '@/services/api'
 import type { Audiobook } from '@/types'
+import { logger } from '@/utils/logger'
 import { useLibraryImportStore } from '@/stores/libraryImport'
 import {
   FALLBACK_REGION,
   hasAsinChanged,
   formatDuration,
+  type BookRecord,
   bookSummary,
   recordFromResult,
   type SearchCache,
@@ -244,35 +246,61 @@ export function useRepairBooks(audiobookIds: () => number[]) {
     audiobookIdsToOrganize.value = []
     completedRepairCount.value = 0
     totalRepairCount.value = queuedRepairRows.length
-    for (const repairRow of repairRows.value) {
-      repairRow.recordBefore = {
-        title: repairRow.title,
-        subtitle: repairRow.subtitle,
-        authors: repairRow.authors,
-        asin: repairRow.bookMatch.currentRecordKey.asin,
-        region: repairRow.bookMatch.currentRecordKey.region,
+    try {
+      for (const repairRow of repairRows.value) {
+        repairRow.recordBefore = recordNow(repairRow)
+        const pickedSearchResult = queuedRepairRows.includes(repairRow)
+          ? repairRow.bookMatch.pickedSearchResult
+          : null
+        repairRow.plannedRecord = pickedSearchResult
+          ? recordFromResult(pickedSearchResult, repairRow.bookMatch.region)
+          : null
+        repairRow.repairTask = pickedSearchResult
+          ? { state: 'waiting', text: 'Waiting to be repaired' }
+          : null
       }
-      const pickedSearchResult = queuedRepairRows.includes(repairRow)
-        ? repairRow.bookMatch.pickedSearchResult
-        : null
-      repairRow.plannedRecord = pickedSearchResult
-        ? recordFromResult(pickedSearchResult, repairRow.bookMatch.region)
-        : null
-      repairRow.repairTask = pickedSearchResult
-        ? { state: 'waiting', text: 'Waiting to be repaired' }
-        : null
+      await beforeRun()
+      for (const repairRow of queuedRepairRows) {
+        await untilResumed()
+        // Canceled while it waited
+        if (repairRow.repairTask?.state !== 'waiting') continue
+        await repairOne(repairRow)
+        completedRepairCount.value++
+      }
+    } catch (e) {
+      stopRun(queuedRepairRows, e)
+    } finally {
+      // Whatever happened, the run ends: the dialog can be closed, nothing guards the page any more
+      isExecuting.value = false
+      isCanceling.value = false
+      isFinished.value = true
     }
-    await beforeRun()
+  }
+
+  // A book's record as it is now, before its repair
+  function recordNow(repairRow: RepairRow): BookRecord {
+    return {
+      title: repairRow.title,
+      subtitle: repairRow.subtitle,
+      authors: repairRow.authors,
+      asin: repairRow.bookMatch.currentRecordKey.asin,
+      region: repairRow.bookMatch.currentRecordKey.region,
+    }
+  }
+
+  // An error outside a book's own repair stopped the run: the books not repaired yet end failed,
+  // saying so, so step 2 shows them and each can be retried; nothing is left "repairing"
+  function stopRun(queuedRepairRows: RepairRow[], error: unknown) {
+    logger.error('Repair Books: the repairs stopped', error)
+    const reason = error instanceof Error ? error.message : 'unknown error'
     for (const repairRow of queuedRepairRows) {
-      await untilResumed()
-      // Canceled while it waited
-      if (repairRow.repairTask?.state !== 'waiting') continue
-      await repairOne(repairRow)
-      completedRepairCount.value++
+      const state = repairRow.repairTask?.state
+      if (state && state !== 'waiting' && state !== 'running') continue
+      repairRow.recordBefore ??= recordNow(repairRow)
+      repairRow.plannedRecord ??= repairRow.recordBefore
+      repairRow.repairTask = { state: 'failed', text: `Repair stopped: ${reason}` }
     }
-    isExecuting.value = false
-    isCanceling.value = false
-    isFinished.value = true
+    completedRepairCount.value = totalRepairCount.value
   }
 
   // Holds the repairs before the next book; the one being repaired ends (its request can't be
@@ -422,9 +450,14 @@ export function useRepairBooks(audiobookIds: () => number[]) {
     )
       return
     isExecuting.value = true
-    await repairOne(repairRow)
-    isExecuting.value = false
-    isCanceling.value = false
+    try {
+      await repairOne(repairRow)
+    } catch (e) {
+      stopRun([repairRow], e)
+    } finally {
+      isExecuting.value = false
+      isCanceling.value = false
+    }
   }
 
   // The books still waiting are left out at once; the one being repaired ends first (its request
