@@ -32,6 +32,7 @@ import {
   isIncluded,
   isMatched,
   repairProblemText,
+  failedRepairRow,
   repairRowFrom,
   toRepairOutcomes,
   type RepairRow,
@@ -125,16 +126,19 @@ export function useRepairBooks(audiobookIds: () => number[]) {
       const region = await libraryImportStore.configuredRegion()
       if (!isLatestLoad()) return
       configuredRegion.value = region
-      const loadedRepairRows = await Promise.all(
-        loadedAudiobookIds.map(async (audiobookId) => {
-          const [book, identifiersResponse] = await Promise.all([
-            apiService.getAudiobook(audiobookId),
-            apiService.getAudiobookIdentifiers(audiobookId),
-          ])
-          return repairRowFrom(audiobookId, book, identifiersResponse.identifiers ?? [], region)
-        }),
-      )
-      if (!isLatestLoad()) return
+      // One book at a time, like the repairs (they run in the browser, no backend task yet)
+      const loadedRepairRows: RepairRow[] = []
+      for (const audiobookId of loadedAudiobookIds) {
+        const repairRow = await loadRepairRow(audiobookId, region)
+        if (!isLatestLoad()) return
+        loadedRepairRows.push(repairRow)
+      }
+      // None of them: the dialog says why instead of a list of error cards
+      const firstLoadError = loadedRepairRows.find((repairRow) => repairRow.loadError)?.loadError
+      if (firstLoadError && loadedRepairRows.every((repairRow) => repairRow.loadError)) {
+        loadError.value = firstLoadError.message
+        return
+      }
       repairRows.value = loadedRepairRows
     } catch (e) {
       if (!isLatestLoad()) return
@@ -142,6 +146,35 @@ export function useRepairBooks(audiobookIds: () => number[]) {
     } finally {
       if (isLatestLoad()) isLoading.value = false
     }
+  }
+
+  // One book and its identifiers. A book that fails gets a card saying why, so the others can
+  // still be repaired
+  async function loadRepairRow(audiobookId: number, region: string): Promise<RepairRow> {
+    let title = ''
+    try {
+      const book = await apiService.getAudiobook(audiobookId)
+      title = book.title ?? ''
+      const identifiersResponse = await apiService.getAudiobookIdentifiers(audiobookId)
+      return repairRowFrom(audiobookId, book, identifiersResponse.identifiers ?? [], region)
+    } catch (e) {
+      return failedRepairRow(audiobookId, e, title)
+    }
+  }
+
+  // Load again, on a book that couldn't be (not a deleted one): its card is replaced by the book,
+  // or says why again
+  const reloadingAudiobookId = ref<number | null>(null)
+  async function loadAgain(audiobookId: number) {
+    const index = repairRows.value.findIndex((repairRow) => repairRow.audiobookId === audiobookId)
+    if (index < 0 || !repairRows.value[index]!.loadError?.canLoadAgain) return
+    const loadNumber = latestLoadNumber
+    reloadingAudiobookId.value = audiobookId
+    const repairRow = await loadRepairRow(audiobookId, configuredRegion.value)
+    reloadingAudiobookId.value = null
+    // Loaded afresh meanwhile (Back, opened again): that load has it
+    if (loadNumber !== latestLoadNumber) return
+    repairRows.value[index] = repairRow
   }
 
   // The dialog closed: a load still waiting for its answers fills nothing
@@ -407,6 +440,7 @@ export function useRepairBooks(audiobookIds: () => number[]) {
     isLoading,
     loadError,
     repairRows,
+    reloadingAudiobookId,
     isExecuting,
     isFinished,
     isCanceling,
@@ -423,6 +457,7 @@ export function useRepairBooks(audiobookIds: () => number[]) {
     repairOutcomes,
     load,
     forgetLoad,
+    loadAgain,
     onSearching,
     repair,
     retryRepair,

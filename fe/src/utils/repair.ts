@@ -61,6 +61,14 @@ export interface RepairRow {
   recordBefore: BookRecord | null
   plannedRecord: BookRecord | null
   recordAfter: BookRecord | null
+  // Why the book couldn't be loaded when the dialog opened (its card then shows only that), and
+  // whether loading it again can help (not for a book deleted since it was selected)
+  loadError: RepairLoadError | null
+}
+
+export interface RepairLoadError {
+  message: string
+  canLoadAgain: boolean
 }
 
 // One book to repair on step 2, from the moment the repair starts
@@ -117,6 +125,22 @@ export function repairRowFrom(
     recordBefore: null,
     plannedRecord: null,
     recordAfter: null,
+    loadError: null,
+  }
+}
+
+// A book that couldn't be loaded: its card says why and can't be matched. Its title when the book
+// itself was read (its identifiers failed), else its number
+export function failedRepairRow(audiobookId: number, error: unknown, title = ''): RepairRow {
+  const isNotFound = (error as { status?: number })?.status === 404
+  return {
+    ...repairRowFrom(audiobookId, { id: audiobookId, title } as Audiobook, [], ''),
+    loadError: {
+      message: isNotFound
+        ? 'Not found: deleted since it was selected'
+        : `Couldn't be loaded: ${error instanceof Error ? error.message : 'unknown error'}`,
+      canLoadAgain: !isNotFound,
+    },
   }
 }
 

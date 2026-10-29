@@ -72,45 +72,55 @@
               Books
             </label>
             <div class="repair-list">
-              <BookMatchCard
-                v-for="repairRow in repairRows"
-                :key="repairRow.audiobookId"
-                v-model:book-match="repairRow.bookMatch"
-                :configured-region="configuredRegion"
-                :is-search-locked="
-                  searchingAudiobookId !== null && searchingAudiobookId !== repairRow.audiobookId
-                "
-                :is-excluded="!repairRow.isSelected"
-                :is-narrow="footerRef?.isLegendAbove ?? false"
-                :should-keep-results-room="repairRows.length === 1"
-                :book="{
-                  title: repairRow.title,
-                  subtitle: repairRow.subtitle,
-                  authors: repairRow.authors,
-                }"
-                :data-testid="`repair-row-${repairRow.audiobookId}`"
-                @searching="(isSearching) => onSearching(repairRow, isSearching)"
-                @matched="repairRow.isSelected = true"
-              >
-                <template #heading>
-                  <label
-                    class="repair-heading"
-                    :title="isMatched(repairRow) ? undefined : 'Find its new record first'"
-                  >
-                    <input
-                      type="checkbox"
-                      class="repair-checkbox"
-                      data-testid="repair-include"
-                      :checked="isIncluded(repairRow)"
-                      :disabled="!isMatched(repairRow)"
-                      @change="repairRow.isSelected = !repairRow.isSelected"
-                    />
-                    <span class="repair-title">{{
-                      repairRow.title || `Audiobook #${repairRow.audiobookId}`
-                    }}</span>
-                  </label>
-                </template>
-              </BookMatchCard>
+              <template v-for="repairRow in repairRows" :key="repairRow.audiobookId">
+                <RepairLoadErrorCard
+                  v-if="repairRow.loadError"
+                  :audiobook-id="repairRow.audiobookId"
+                  :title="repairRow.title"
+                  :load-error="repairRow.loadError"
+                  :is-loading-again="reloadingAudiobookId === repairRow.audiobookId"
+                  :data-testid="`repair-row-${repairRow.audiobookId}`"
+                  @load-again="loadAgain(repairRow.audiobookId)"
+                />
+                <BookMatchCard
+                  v-else
+                  v-model:book-match="repairRow.bookMatch"
+                  :configured-region="configuredRegion"
+                  :is-search-locked="
+                    searchingAudiobookId !== null && searchingAudiobookId !== repairRow.audiobookId
+                  "
+                  :is-excluded="!repairRow.isSelected"
+                  :is-narrow="footerRef?.isLegendAbove ?? false"
+                  :should-keep-results-room="repairRows.length === 1"
+                  :book="{
+                    title: repairRow.title,
+                    subtitle: repairRow.subtitle,
+                    authors: repairRow.authors,
+                  }"
+                  :data-testid="`repair-row-${repairRow.audiobookId}`"
+                  @searching="(isSearching) => onSearching(repairRow, isSearching)"
+                  @matched="repairRow.isSelected = true"
+                >
+                  <template #heading>
+                    <label
+                      class="repair-heading"
+                      :title="isMatched(repairRow) ? undefined : 'Find its new record first'"
+                    >
+                      <input
+                        type="checkbox"
+                        class="repair-checkbox"
+                        data-testid="repair-include"
+                        :checked="isIncluded(repairRow)"
+                        :disabled="!isMatched(repairRow)"
+                        @change="repairRow.isSelected = !repairRow.isSelected"
+                      />
+                      <span class="repair-title">{{
+                        repairRow.title || `Audiobook #${repairRow.audiobookId}`
+                      }}</span>
+                    </label>
+                  </template>
+                </BookMatchCard>
+              </template>
             </div>
           </div>
         </div>
@@ -150,6 +160,7 @@ import { Modal, ModalBody, ModalHeader } from '@/components/feedback'
 import NoticeBox from '@/components/base/NoticeBox.vue'
 import BookMatchCard from '@/components/domain/bookMatch/BookMatchCard.vue'
 import RepairFooter from './RepairFooter.vue'
+import RepairLoadErrorCard from './RepairLoadErrorCard.vue'
 import RepairResults from './RepairResults.vue'
 import RepairSelection from './RepairSelection.vue'
 import { useRepairBooks } from '@/composables/useRepairBooks'
@@ -191,6 +202,7 @@ const {
   isLoading,
   loadError,
   repairRows,
+  reloadingAudiobookId,
   isExecuting,
   isFinished,
   isCanceling,
@@ -206,6 +218,7 @@ const {
   repairOutcomes,
   load,
   forgetLoad,
+  loadAgain,
   onSearching,
   repair,
   retryRepair,
