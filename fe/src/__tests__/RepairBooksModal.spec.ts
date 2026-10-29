@@ -1701,6 +1701,53 @@ describe('RepairBooksModal', () => {
     expect(apiMocks.rescanAudiobookMetadata).toHaveBeenCalledWith(7)
   })
 
+  // The server reads the record from the book's other identifiers when the picked one fails
+  function rescannedFrom(asin: string, region: string) {
+    apiMocks.rescanAudiobookMetadata.mockResolvedValueOnce({
+      message: 'Metadata rescanned successfully',
+      audiobookId: 7,
+      asin,
+      region,
+    })
+  }
+
+  it('says when the rescan read another record than the picked one, and leaves it out of Organize', async () => {
+    rescannedFrom('B01K7UYFXK', 'us')
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+
+    await repair(wrapper)
+
+    expect(resultCard(wrapper).attributes('data-result-state')).toBe('warning')
+    expect(resultCard(wrapper).get('[data-testid="repair-result-message"]').text()).toMatch(
+      /^The rescan read another record \(B01K7UYFXK - United States \(US\)\) than the one picked \(.+ s\): check the book$/,
+    )
+    expect(wrapper.get('[data-testid="repair-organize"]').text()).toContain('Organize 0')
+  })
+
+  it('says so as well when the rescan read the picked ASIN in another region', async () => {
+    rescannedFrom('B0BK9W82PQ', 'uk')
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+
+    await repair(wrapper)
+
+    expect(resultCard(wrapper).attributes('data-result-state')).toBe('warning')
+  })
+
+  it('takes the picked ASIN back in other letters as the same record', async () => {
+    rescannedFrom('b0bk9w82pq', 'us')
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+
+    await repair(wrapper)
+
+    expect(resultCard(wrapper).attributes('data-result-state')).toBe('done')
+  })
+
   // The server's answer when the book was rescanned too recently: how long to wait
   const tooSoon = (retryAfter?: number) =>
     Object.assign(new Error('Too many requests'), { status: 429, retryAfter })
@@ -1709,9 +1756,15 @@ describe('RepairBooksModal', () => {
     apiMocks.rescanAudiobookMetadata
       .mockRejectedValueOnce(tooSoon(12))
       .mockResolvedValueOnce({ message: 'ok', audiobookId: 7, asin: 'B0HM45F8MW', region: 'fr' })
+    catalogue({ us: [englishPrimalHunter4], fr: [frenchPrimalHunterVolume7] })
     const wrapper = mountModal()
     await flushPromises()
-    await searchAndPick(wrapper)
+    // Its current record: a rescan only, answered with that same record
+    await searchAndPick(wrapper, {
+      region: 'fr',
+      title: 'Primal Hunter, Vol. 7',
+      query: 'Primal Hunter',
+    })
     vi.useFakeTimers()
 
     const done = repair(wrapper)
@@ -1738,9 +1791,15 @@ describe('RepairBooksModal', () => {
     apiMocks.rescanAudiobookMetadata
       .mockRejectedValueOnce(tooSoon())
       .mockResolvedValueOnce({ message: 'ok', audiobookId: 7, asin: 'B0HM45F8MW', region: 'fr' })
+    catalogue({ us: [englishPrimalHunter4], fr: [frenchPrimalHunterVolume7] })
     const wrapper = mountModal()
     await flushPromises()
-    await searchAndPick(wrapper)
+    // Its current record: a rescan only, answered with that same record
+    await searchAndPick(wrapper, {
+      region: 'fr',
+      title: 'Primal Hunter, Vol. 7',
+      query: 'Primal Hunter',
+    })
     vi.useFakeTimers()
 
     const done = repair(wrapper)
@@ -1826,9 +1885,15 @@ describe('RepairBooksModal', () => {
       now += 1234.5
       return { message: 'ok', audiobookId: 7, asin: 'B0HM45F8MW', region: 'fr' }
     })
+    catalogue({ us: [englishPrimalHunter4], fr: [frenchPrimalHunterVolume7] })
     const wrapper = mountModal()
     await flushPromises()
-    await searchAndPick(wrapper)
+    // Its current record: a rescan only, answered with that same record
+    await searchAndPick(wrapper, {
+      region: 'fr',
+      title: 'Primal Hunter, Vol. 7',
+      query: 'Primal Hunter',
+    })
 
     await repair(wrapper)
 

@@ -22,6 +22,7 @@ import {
   FALLBACK_REGION,
   hasAsinChanged,
   formatDuration,
+  bookSummary,
   recordFromResult,
   type SearchCache,
 } from '@/utils/bookMatch'
@@ -290,9 +291,24 @@ export function useRepairBooks(audiobookIds: () => number[]) {
         asin,
         region,
       }
+      hasLibraryChanged.value = true
+      // The server reads the record from the book's other identifiers when the picked one fails:
+      // the book then has another record's metadata, which it says, instead of Repaired
+      const pickedAsin = repairRow.bookMatch.pickedSearchResult?.asin ?? ''
+      const pickedRegion =
+        repairRow.bookMatch.pickedSearchResult?.region || repairRow.bookMatch.region
+      if (
+        (rescanResult.asin && rescanResult.asin.toUpperCase() !== pickedAsin.toUpperCase()) ||
+        (rescanResult.region && rescanResult.region !== pickedRegion)
+      ) {
+        repairRow.repairTask = {
+          state: 'warning',
+          text: `The rescan read another record (${bookSummary({ asin, region })}) than the one picked (${elapsedText()}): check the book`,
+        }
+        return
+      }
       // The record it now points at follows, drawn like New (step 2)
       repairRow.repairTask = { state: 'done', text: `Repaired in ${elapsedText()}` }
-      hasLibraryChanged.value = true
       // Ticked for Organize as soon as it is repaired
       audiobookIdsToOrganize.value = [...audiobookIdsToOrganize.value, repairRow.audiobookId]
     } catch (e) {
