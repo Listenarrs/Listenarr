@@ -461,9 +461,10 @@ export function useRepairBooks(audiobookIds: () => number[]) {
   }
 
   // The books still waiting are left out at once; the one being repaired ends first (its request
-  // can't be taken back), unless it waits for the rescan cooldown: it stops there. Paused repairs
-  // end too
-  function cancelRepair() {
+  // can't be taken back). Cancel also stops it while it waits for the rescan cooldown (its row says
+  // so, Retry is there); leaving the page doesn't: its details are already emptied, so it finishes
+  // its rescan unseen, as the leave question promises. Paused repairs end too
+  function cancelRepair({ isWaitStopped = true } = {}) {
     // Leave chosen after the last repair ended under the question: nothing to cancel, but the pause
     // it set goes, in case the page stays (its navigation failed)
     if (!isExecuting.value) {
@@ -471,7 +472,7 @@ export function useRepairBooks(audiobookIds: () => number[]) {
       return
     }
     isCanceling.value = true
-    stopRescanWait?.()
+    if (isWaitStopped) stopRescanWait?.()
     for (const repairRow of repairRows.value)
       if (repairRow.repairTask?.state === 'waiting') {
         repairRow.repairTask = { state: 'skipped', text: 'Canceled: not repaired' }
@@ -491,8 +492,8 @@ export function useRepairBooks(audiobookIds: () => number[]) {
   }
 
   // The repairs run in the browser: once their dialog is gone (its page left), nothing would show
-  // them any more, so the books still waiting are left out, as by Cancel
-  onScopeDispose(cancelRepair)
+  // them any more, so the books still waiting are left out; the one being repaired finishes
+  onScopeDispose(() => cancelRepair({ isWaitStopped: false }))
 
   return {
     searchCache,

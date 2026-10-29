@@ -2837,6 +2837,47 @@ describe('RepairBooksModal', () => {
       wrapper.unmount()
     })
 
+    // One book whose rescan is refused for coming too soon: it waits 12 s, then is rescanned
+    async function repairWaitingForCooldown() {
+      apiMocks.rescanAudiobookMetadata
+        .mockRejectedValueOnce(
+          Object.assign(new Error('Too many requests'), { status: 429, retryAfter: 12 }),
+        )
+        .mockResolvedValueOnce({ message: 'ok', audiobookId: 7, asin: 'B0BK9W82PQ', region: 'us' })
+      const wrapper = mountModal()
+      await flushPromises()
+      await searchAndPick(wrapper)
+      vi.useFakeTimers()
+      await wrapper.get('[data-testid="repair-confirm"]').trigger('click')
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(resultCard(wrapper).get('[data-testid="repair-result-message"]').text()).toMatch(
+        /^Waiting \d+ s/,
+      )
+      return wrapper
+    }
+
+    it('Leave lets the book waiting for the rescan cooldown finish its repair', async () => {
+      const wrapper = await repairWaitingForCooldown()
+
+      leaveMocks.showConfirm.mockResolvedValue(true)
+      expect(await leaveGuard()()).toBe(true)
+      await vi.advanceTimersByTimeAsync(11_000)
+
+      // Rescanned after the wait, as the question promised: its details aren't left emptied
+      expect(apiMocks.rescanAudiobookMetadata).toHaveBeenCalledTimes(2)
+      expect(resultCard(wrapper).attributes('data-result-state')).toBe('done')
+      wrapper.unmount()
+    })
+
+    it('finishes the book waiting for the rescan cooldown when the dialog goes', async () => {
+      const wrapper = await repairWaitingForCooldown()
+
+      wrapper.unmount()
+      await vi.advanceTimersByTimeAsync(11_000)
+
+      expect(apiMocks.rescanAudiobookMetadata).toHaveBeenCalledTimes(2)
+    })
+
     it('stops the waiting books when the dialog goes during a repair, however it goes', async () => {
       const { wrapper, rescans } = await startTwoRepairs()
 
