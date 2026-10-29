@@ -15,6 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using System.Text.Json;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 using Listenarr.Tests.Mocks.Api;
@@ -125,20 +126,25 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
         private TimeSpan TimeUntilNextPoll() =>
             _provider.GetRequiredService<DownloadMonitorProcessor>()._nextClientPoll[_client.Id] - DateTime.UtcNow;
 
+        // Gateway-level reads reject a save path that is not valid on the host, so the fixtures
+        // use host paths (JSON-encoded, as a Windows path carries backslashes).
+        private static string SavePathJson(string folder) =>
+            JsonSerializer.Serialize(FileUtils.GetAbsolutePath("downloads", folder));
+
         // Three torrents; the middle one carries `downloaded` in the given JSON token form.
         private static string QueueWithMiddleTorrentDownloaded(string downloaded) => $$"""
         [
             {
                 "hash": "aaaa1111", "name": "First", "progress": 0.5, "size": 1000,
-                "downloaded": 500, "state": "downloading", "save_path": "/downloads/a"
+                "downloaded": 500, "state": "downloading", "save_path": {{SavePathJson("a")}}
             },
             {
                 "hash": "bbbb2222", "name": "Second", "progress": 0.5, "size": 1000,
-                "downloaded": {{downloaded}}, "state": "downloading", "save_path": "/downloads/b"
+                "downloaded": {{downloaded}}, "state": "downloading", "save_path": {{SavePathJson("b")}}
             },
             {
                 "hash": "cccc3333", "name": "Third", "progress": 0.5, "size": 1000,
-                "downloaded": 700, "state": "downloading", "save_path": "/downloads/c"
+                "downloaded": 700, "state": "downloading", "save_path": {{SavePathJson("c")}}
             }
         ]
         """;
