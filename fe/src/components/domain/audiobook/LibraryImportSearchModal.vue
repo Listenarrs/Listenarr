@@ -81,6 +81,7 @@ import {
   buildLibraryImportInitialQuery,
 } from '@/utils/libraryImportSearch'
 import {
+  ASIN_PATTERN,
   hasAsinChanged,
   createBookMatch,
   matchState,
@@ -133,13 +134,19 @@ onMounted(async () => {
   // Always the same search, from the folder's scan, whatever match the folder has (it stays its
   // current record, tagged Current): the scan's ASIN, else its title and author, in the configured
   // region. The user can pick another region, which the match keeps
+  const scanAsin = props.item.detectedAsin?.trim() ?? ''
+  // The scan's ASIN in the ASIN field, searched as one ("No record for … in Audible France" when
+  // the region doesn't sell it), its title and author ready for a search without it. A value the
+  // scan took for an ASIN but isn't one stays a title, so the card never opens on "Not an ASIN"
+  const isScanAsin = ASIN_PATTERN.test(scanAsin)
+  const scanWithoutAsin = { ...props.item, detectedAsin: undefined }
   bookMatch.value = createBookMatch(
     {
-      asin: '',
+      asin: isScanAsin ? scanAsin : '',
       region: configuredRegion.value,
-      // ASIN → filename stem (when more specific than folder) → folderName
-      query: buildLibraryImportInitialQuery(props.item),
-      author: buildLibraryImportInitialAuthor(props.item),
+      // Title: filename stem (when more specific than folder) → folderName
+      query: buildLibraryImportInitialQuery(isScanAsin ? scanWithoutAsin : props.item),
+      author: buildLibraryImportInitialAuthor(isScanAsin ? scanWithoutAsin : props.item),
     },
     { asin: selectedMatch?.asin ?? '', region: selectedMatch?.region ?? '' },
   )
