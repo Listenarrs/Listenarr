@@ -190,12 +190,12 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
         public async Task MonitorSeriesAsync_MapsEverySeriesEntryToAMembershipWithItsAsin()
         {
             var metadata = await CaptureAddedBookMetadataAsync(new AudibleSearchResultBuilder()
-                .WithAsin("BOOK2")
-                .WithTitle("The Well of Ascension")
-                .WithAuthor("Brandon Sanderson")
+                .WithAsin("B00CQ5WAXW")
+                .WithTitle("She And Allan")
+                .WithAuthor("H. Rider Haggard")
                 .WithLanguage("english")
-                .WithSeries("Mistborn", "2", "SERIESONE")
-                .WithSeries("The Cosmere", "4", "SERIESTWO")
+                .WithSeries("Ayesha", "0", "B01E633FQM")
+                .WithSeries("Allan Quatermain", null, "B01F5TL5K4")
                 .Build());
 
             Assert.NotNull(metadata.SeriesMemberships);
@@ -203,32 +203,32 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
                 metadata.SeriesMemberships!,
                 first =>
                 {
-                    Assert.Equal("Mistborn", first.SeriesName);
-                    Assert.Equal("2", first.SeriesNumber);
-                    Assert.Equal("SERIESONE", first.SeriesAsin);
+                    Assert.Equal("Ayesha", first.SeriesName);
+                    Assert.Equal("0", first.SeriesNumber);
+                    Assert.Equal("B01E633FQM", first.SeriesAsin);
                     Assert.True(first.IsPrimary);
                     Assert.Equal(0, first.SortOrder);
                 },
                 second =>
                 {
-                    Assert.Equal("The Cosmere", second.SeriesName);
-                    Assert.Equal("4", second.SeriesNumber);
-                    Assert.Equal("SERIESTWO", second.SeriesAsin);
+                    Assert.Equal("Allan Quatermain", second.SeriesName);
+                    Assert.Null(second.SeriesNumber);
+                    Assert.Equal("B01F5TL5K4", second.SeriesAsin);
                     Assert.False(second.IsPrimary);
                     Assert.Equal(1, second.SortOrder);
                 });
 
-            Assert.Equal("Mistborn", metadata.Series);
-            Assert.Equal("2", metadata.SeriesNumber);
+            Assert.Equal("Ayesha", metadata.Series);
+            Assert.Equal("0", metadata.SeriesNumber);
         }
 
         [Fact]
         public async Task MonitorSeriesAsync_LeavesSeriesFieldsUnsetWhenCatalogBookHasNoSeries()
         {
             var metadata = await CaptureAddedBookMetadataAsync(new AudibleSearchResultBuilder()
-                .WithAsin("BOOK2")
-                .WithTitle("The Well of Ascension")
-                .WithAuthor("Brandon Sanderson")
+                .WithAsin("B00CQ5WAXW")
+                .WithTitle("She And Allan")
+                .WithAuthor("H. Rider Haggard")
                 .WithLanguage("english")
                 .Build());
 
@@ -241,20 +241,20 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
         public async Task MonitorSeriesAsync_KeepsSeriesMembershipWhenCatalogEntryHasNoAsin()
         {
             var metadata = await CaptureAddedBookMetadataAsync(new AudibleSearchResultBuilder()
-                .WithAsin("BOOK2")
-                .WithTitle("The Well of Ascension")
-                .WithAuthor("Brandon Sanderson")
+                .WithAsin("B00CQ5WAXW")
+                .WithTitle("She And Allan")
+                .WithAuthor("H. Rider Haggard")
                 .WithLanguage("english")
-                .WithSeries("Mistborn", "2", "   ")
+                .WithSeries("Ayesha", "0", "   ")
                 .Build());
 
             var membership = Assert.Single(metadata.SeriesMemberships!);
-            Assert.Equal("Mistborn", membership.SeriesName);
-            Assert.Equal("2", membership.SeriesNumber);
+            Assert.Equal("Ayesha", membership.SeriesName);
+            Assert.Equal("0", membership.SeriesNumber);
             Assert.Null(membership.SeriesAsin);
             Assert.True(membership.IsPrimary);
-            Assert.Equal("Mistborn", metadata.Series);
-            Assert.Equal("2", metadata.SeriesNumber);
+            Assert.Equal("Ayesha", metadata.Series);
+            Assert.Equal("0", metadata.SeriesNumber);
         }
 
         private async Task<AudibleBookMetadata> CaptureAddedBookMetadataAsync(AudibleSearchResult catalogBook)
@@ -265,14 +265,14 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
 
             _seriesCatalogService
                 .Setup(service => service.GetCatalogAsync(
-                    "Mistborn",
+                    "Ayesha",
                     "us",
                     500,
                     null,
                     true,
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new SeriesCatalogFetchResultBuilder()
-                    .WithSeries("Mistborn", "SERIES123")
+                    .WithSeries("Ayesha", "B01E633FQM")
                     .WithBook(catalogBook)
                     .Build());
 
@@ -289,7 +289,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
                     Message = "Audiobook added to library successfully",
                     Audiobook = new AudiobookBuilder()
                         .WithTitle(catalogBook.Title!)
-                        .WithAuthor("Brandon Sanderson")
+                        .WithAuthor("H. Rider Haggard")
                         .WithMonitored()
                         .Build()
                 });
@@ -298,7 +298,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Monitoring
 
             var result = await service.MonitorSeriesAsync(new MonitorSeriesRequest
             {
-                Name = "Mistborn",
+                Name = "Ayesha",
                 Region = "us",
                 Language = "english"
             });
