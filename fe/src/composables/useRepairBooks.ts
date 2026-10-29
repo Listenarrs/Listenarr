@@ -235,6 +235,8 @@ export function useRepairBooks(audiobookIds: () => number[]) {
   // is awaited once step 2 is set, before the first repair
   async function repair(beforeRun: () => Promise<void>) {
     const queuedRepairRows = [...selectedRepairRows.value]
+    // A pause left from before (the leave question) never holds a new run
+    resumeRepair()
     isExecuting.value = true
     isCanceling.value = false
     canceledCount.value = 0
@@ -409,7 +411,12 @@ export function useRepairBooks(audiobookIds: () => number[]) {
   // can't be taken back), unless it waits for the rescan cooldown: it stops there. Paused repairs
   // end too
   function cancelRepair() {
-    if (!isExecuting.value) return
+    // Leave chosen after the last repair ended under the question: nothing to cancel, but the pause
+    // it set goes, in case the page stays (its navigation failed)
+    if (!isExecuting.value) {
+      resumeRepair()
+      return
+    }
     isCanceling.value = true
     stopRescanWait?.()
     for (const repairRow of repairRows.value)

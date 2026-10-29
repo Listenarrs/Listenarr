@@ -2670,6 +2670,38 @@ describe('RepairBooksModal', () => {
       wrapper.unmount()
     })
 
+    it('repairs again after Leave when the page stayed (its navigation failed)', async () => {
+      let endRescan!: (answer: { message: string; audiobookId: number }) => void
+      apiMocks.rescanAudiobookMetadata.mockImplementationOnce(
+        () => new Promise((resolve) => (endRescan = resolve)),
+      )
+      const wrapper = mountModal()
+      await flushPromises()
+      await searchAndPick(wrapper)
+      await repair(wrapper)
+
+      // Asked while the only repair runs; it ends under the question; Leave
+      let answer!: (isLeaving: boolean) => void
+      leaveMocks.showConfirm.mockImplementationOnce(
+        () => new Promise<boolean>((resolve) => (answer = resolve)),
+      )
+      const leaving = leaveGuard()()
+      await flushPromises()
+      endRescan({ message: 'ok', audiobookId: 7 })
+      await flushPromises()
+      answer(true)
+      expect(await leaving).toBe(true)
+
+      // The page stayed (the dialog wasn't destroyed): Back, the same book repaired again
+      await wrapper.get('[data-testid="repair-cancel"]').trigger('click')
+      await flushPromises()
+      await searchAndPick(wrapper)
+      await repair(wrapper)
+
+      expect(resultCard(wrapper).attributes('data-result-state')).toBe('done')
+      wrapper.unmount()
+    })
+
     it('stops the waiting books when the dialog goes during a repair, however it goes', async () => {
       const { wrapper, rescans } = await startTwoRepairs()
 
