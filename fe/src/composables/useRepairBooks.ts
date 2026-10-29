@@ -27,6 +27,7 @@ import {
   type SearchCache,
 } from '@/utils/bookMatch'
 import {
+  EMPTIED_RECORD_FIELDS,
   identifiersWithPrimaryAsin,
   isIncluded,
   isMatched,
@@ -263,8 +264,10 @@ export function useRepairBooks(audiobookIds: () => number[]) {
     const startedAt = performance.now()
     const elapsedText = () => formatDuration(performance.now() - startedAt)
     let isAsinSaved = false
+    let isEmptying = false
     try {
-      // The new record was looked up in its region: saved, then the metadata read from it
+      // The new record was looked up in its region: saved, the old record's details emptied, then
+      // the metadata read from it
       if (hasAsinChanged(repairRow.bookMatch)) {
         await apiService.updateAudiobookIdentifiers(
           repairRow.audiobookId,
@@ -272,6 +275,9 @@ export function useRepairBooks(audiobookIds: () => number[]) {
         )
         isAsinSaved = true
         hasLibraryChanged.value = true
+        isEmptying = true
+        await apiService.updateAudiobook(repairRow.audiobookId, EMPTIED_RECORD_FIELDS)
+        isEmptying = false
       }
       const rescanResult = await rescanMetadata(repairRow)
       const book = await apiService.getAudiobook(repairRow.audiobookId)
@@ -336,7 +342,9 @@ export function useRepairBooks(audiobookIds: () => number[]) {
       repairRow.repairTask = isAsinSaved
         ? {
             state: 'warning',
-            text: `The new ASIN is saved, but the metadata rescan failed (${elapsedText()}): ${errorMessage}`,
+            text: isEmptying
+              ? `The new ASIN is saved, but the old record's details couldn't be emptied (${elapsedText()}): ${errorMessage}`
+              : `The new ASIN is saved, but the metadata rescan failed (${elapsedText()}): ${errorMessage}`,
           }
         : { state: 'failed', text: `Repair failed (${elapsedText()}): ${errorMessage}` }
     }
