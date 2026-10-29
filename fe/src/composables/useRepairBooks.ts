@@ -35,6 +35,21 @@ import {
   type RepairRow,
 } from '@/utils/repair'
 
+// The server rescans a book at most once every 15 s, and 5 times in 10 minutes: a rescan refused
+// for coming too soon (429) waits what the server says (its card counting down), then is asked
+// once more; a longer wait (the 10 minutes' limit) fails at once, saying when to retry
+const RESCAN_COOLDOWN_SECONDS = 15
+const MAX_RESCAN_WAIT_SECONDS = 20
+const RESCAN_WAIT_MARGIN_MS = 500
+
+// Cancel asked while the book being repaired waits for the rescan cooldown
+class RescanWaitCanceled extends Error {}
+
+// About how long until a rescan is allowed again: 40 s, 8 min
+function waitText(seconds: number): string {
+  return seconds < 60 ? `${seconds} s` : `${Math.ceil(seconds / 60)} min`
+}
+
 // Repair Books' books and their repairs: loaded on step 1, each one's new record picked, then
 // repaired one after the other on step 2, with Cancel and Retry
 export function useRepairBooks(audiobookIds: () => number[]) {
@@ -55,6 +70,8 @@ export function useRepairBooks(audiobookIds: () => number[]) {
   // repaired ends, the next one waits until resumeRepair or cancelRepair
   const isPaused = ref(false)
   let resumeWaiters: (() => void)[] = []
+  // Ends the rescan cooldown wait of the book being repaired, when it waits (Cancel)
+  let stopRescanWait: (() => void) | null = null
   // A repair saved something since the dialog opened: closing it, even from step 1 after Back,
   // refreshes the page behind
   const hasLibraryChanged = ref(false)
@@ -122,14 +139,44 @@ export function useRepairBooks(audiobookIds: () => number[]) {
     else if (searchingAudiobookId.value === repairRow.audiobookId) searchingAudiobookId.value = null
   }
 
-  async function rescanMetadata(audiobookId: number) {
+  // The cooldown waited, the book's card saying how long is left: false when Cancel ended it
+  function waitForRescan(repairRow: RepairRow, seconds: number): Promise<boolean> {
+    let remainingSeconds = seconds
+    const showRemaining = () => {
+      repairRow.repairTask = {
+        state: 'running',
+        text: `Waiting ${remainingSeconds} s: a book can be rescanned once every ${RESCAN_COOLDOWN_SECONDS} s`,
+      }
+    }
+    showRemaining()
+    return new Promise((resolve) => {
+      const countdown = setInterval(() => {
+        remainingSeconds = Math.max(remainingSeconds - 1, 1)
+        showRemaining()
+      }, 1000)
+      const end = (isWaited: boolean) => {
+        clearInterval(countdown)
+        clearTimeout(timeout)
+        stopRescanWait = null
+        resolve(isWaited)
+      }
+      const timeout = setTimeout(() => end(true), seconds * 1000 + RESCAN_WAIT_MARGIN_MS)
+      stopRescanWait = () => end(false)
+    })
+  }
+
+  async function rescanMetadata(repairRow: RepairRow) {
     try {
-      return await apiService.rescanAudiobookMetadata(audiobookId)
+      return await apiService.rescanAudiobookMetadata(repairRow.audiobookId)
     } catch (e) {
-      // A rescan right after another one for the same book is refused (429): wait and retry once
-      if ((e as { status?: number })?.status !== 429) throw e
-      await new Promise((resolve) => setTimeout(resolve, 3000))
-      return apiService.rescanAudiobookMetadata(audiobookId)
+      const { status, retryAfter } = e as { status?: number; retryAfter?: number }
+      if (status !== 429) throw e
+      const waitSeconds = retryAfter || RESCAN_COOLDOWN_SECONDS
+      if (waitSeconds > MAX_RESCAN_WAIT_SECONDS)
+        throw new Error(`too many rescans of this book, retry in about ${waitText(waitSeconds)}`)
+      if (!(await waitForRescan(repairRow, waitSeconds))) throw new RescanWaitCanceled()
+      repairRow.repairTask = { state: 'running', text: 'Repairing…' }
+      return apiService.rescanAudiobookMetadata(repairRow.audiobookId)
     }
   }
 
@@ -211,7 +258,7 @@ export function useRepairBooks(audiobookIds: () => number[]) {
         isAsinSaved = true
         hasLibraryChanged.value = true
       }
-      const rescanResult = await rescanMetadata(repairRow.audiobookId)
+      const rescanResult = await rescanMetadata(repairRow)
       const book = await apiService.getAudiobook(repairRow.audiobookId)
       const asin = rescanResult.asin ?? repairRow.bookMatch.pickedSearchResult?.asin ?? ''
       const region =
@@ -243,6 +290,19 @@ export function useRepairBooks(audiobookIds: () => number[]) {
           asin: repairRow.bookMatch.pickedSearchResult?.asin ?? '',
           region: repairRow.bookMatch.pickedSearchResult?.region || repairRow.bookMatch.region,
         }
+      // Canceled while it waited for the rescan cooldown: nothing done, or its new ASIN only
+      if (e instanceof RescanWaitCanceled) {
+        if (isAsinSaved)
+          repairRow.repairTask = {
+            state: 'warning',
+            text: 'The new ASIN is saved, but the metadata rescan was canceled',
+          }
+        else {
+          repairRow.repairTask = { state: 'skipped', text: 'Canceled: not repaired' }
+          canceledCount.value++
+        }
+        return
+      }
       repairRow.repairTask = isAsinSaved
         ? {
             state: 'warning',
@@ -269,10 +329,12 @@ export function useRepairBooks(audiobookIds: () => number[]) {
   }
 
   // The books still waiting are left out at once; the one being repaired ends first (its request
-  // can't be taken back). Paused repairs end too
+  // can't be taken back), unless it waits for the rescan cooldown: it stops there. Paused repairs
+  // end too
   function cancelRepair() {
     if (!isExecuting.value) return
     isCanceling.value = true
+    stopRescanWait?.()
     for (const repairRow of repairRows.value)
       if (repairRow.repairTask?.state === 'waiting') {
         repairRow.repairTask = { state: 'skipped', text: 'Canceled: not repaired' }
