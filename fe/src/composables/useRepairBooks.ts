@@ -90,6 +90,8 @@ export function useRepairBooks(audiobookIds: () => number[]) {
   const audiobookIdsToOrganize = ref<number[]>([])
   // One book is searched at a time: the others wait for it
   const searchingAudiobookId = ref<number | null>(null)
+  // The books being loaded again, each one's card "Loading…" until its own answer
+  const reloadingAudiobookIds = ref<number[]>([])
 
   // Step 2 from Repair on: the repairs as they run, then their results
   const isRepairStep = computed(() => isExecuting.value || isFinished.value)
@@ -125,6 +127,7 @@ export function useRepairBooks(audiobookIds: () => number[]) {
     completedRepairCount.value = 0
     totalRepairCount.value = 0
     searchingAudiobookId.value = null
+    reloadingAudiobookIds.value = []
     try {
       const region = await libraryImportStore.configuredRegion()
       if (!isLatestLoad()) return
@@ -167,17 +170,18 @@ export function useRepairBooks(audiobookIds: () => number[]) {
 
   // Load again, on a book that couldn't be (not a deleted one): its card is replaced by the book,
   // or says why again
-  const reloadingAudiobookId = ref<number | null>(null)
   async function loadAgain(audiobookId: number) {
-    const index = repairRows.value.findIndex((repairRow) => repairRow.audiobookId === audiobookId)
-    if (index < 0 || !repairRows.value[index]!.loadError?.canLoadAgain) return
+    const failedRow = repairRows.value.find((repairRow) => repairRow.audiobookId === audiobookId)
+    if (!failedRow?.loadError?.canLoadAgain || reloadingAudiobookIds.value.includes(audiobookId))
+      return
     const loadNumber = latestLoadNumber
-    reloadingAudiobookId.value = audiobookId
+    reloadingAudiobookIds.value = [...reloadingAudiobookIds.value, audiobookId]
     const repairRow = await loadRepairRow(audiobookId, configuredRegion.value)
-    reloadingAudiobookId.value = null
     // Loaded afresh meanwhile (Back, opened again): that load has it
     if (loadNumber !== latestLoadNumber) return
-    repairRows.value[index] = repairRow
+    reloadingAudiobookIds.value = reloadingAudiobookIds.value.filter((id) => id !== audiobookId)
+    const index = repairRows.value.findIndex((row) => row.audiobookId === audiobookId)
+    if (index >= 0) repairRows.value[index] = repairRow
   }
 
   // The dialog closed: a load still waiting for its answers fills nothing
@@ -501,7 +505,7 @@ export function useRepairBooks(audiobookIds: () => number[]) {
     isLoading,
     loadError,
     repairRows,
-    reloadingAudiobookId,
+    reloadingAudiobookIds,
     isExecuting,
     isFinished,
     isCanceling,

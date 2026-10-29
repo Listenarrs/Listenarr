@@ -78,7 +78,7 @@
                   :audiobook-id="repairRow.audiobookId"
                   :title="repairRow.title"
                   :load-error="repairRow.loadError"
-                  :is-loading-again="reloadingAudiobookId === repairRow.audiobookId"
+                  :is-loading-again="reloadingAudiobookIds.includes(repairRow.audiobookId)"
                   :data-testid="`repair-row-${repairRow.audiobookId}`"
                   @load-again="loadAgain(repairRow.audiobookId)"
                 />
@@ -207,7 +207,7 @@ const {
   isLoading,
   loadError,
   repairRows,
-  reloadingAudiobookId,
+  reloadingAudiobookIds,
   isExecuting,
   isFinished,
   isCanceling,
