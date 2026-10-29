@@ -25,7 +25,6 @@
       <span class="match-field-label">ASIN</span>
       <ClearableInput
         v-model.trim="bookMatch.asin"
-        maxlength="10"
         clear-label="Empty the ASIN field"
         clear-test-id="match-asin-clear"
         data-testid="match-asin"

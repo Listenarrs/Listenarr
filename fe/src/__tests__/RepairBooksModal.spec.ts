@@ -281,6 +281,24 @@ describe('RepairBooksModal', () => {
     expect(peak).toBe(1)
   })
 
+  it('takes a pasted ASIN with spaces around it whole: no length limit cuts it before the trim', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    // A browser applies a length limit to a paste before the trim: " B0BK9W82PQ" would lose its
+    // last letter. jsdom doesn't apply it, so the field must simply have none
+    expect(field(wrapper, 'match-asin').maxLength).toBe(-1)
+
+    await bookCard(wrapper).get('[data-testid="match-region"]').setValue('us')
+    await flushPromises()
+    await bookCard(wrapper).get('[data-testid="match-asin"]').setValue(' B0BK9W82PQ ')
+    await bookCard(wrapper).get('[data-testid="match-asin"]').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+
+    expect(field(wrapper, 'match-asin').value).toBe('B0BK9W82PQ')
+    expect(apiMocks.getAudibleMetadata).toHaveBeenLastCalledWith('B0BK9W82PQ', 'us')
+    expect(bookCard(wrapper).findAll('[data-testid="find-match-result"]')).toHaveLength(1)
+  })
+
   // Each book's answer held until the test gives it
   function heldBooks(audiobookIds: number[]) {
     const answers = new Map<number, (book: typeof mismatched) => void>()
