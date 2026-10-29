@@ -47,6 +47,12 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Processing
             Init();
             await AddAuthorizedRootAsync(FileService.GetTempPath());
             _processor = _provider.GetRequiredService<DownloadProcessingJobProcessor>();
+            _notifications.ReadPersistedStatus = async downloadId =>
+            {
+                using var scope = _provider.CreateScope();
+                var download = await scope.ServiceProvider.GetRequiredService<IDownloadRepository>().GetByIdAsync(downloadId);
+                return download?.Status;
+            };
             _jobService = _provider.GetRequiredService<IDownloadProcessingJobService>();
         }
 
@@ -65,6 +71,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Processing
             Assert.Equal(DownloadStatus.Moved, committed!.Status);
             Assert.Equal(ProcessingJobStatus.Completed, (await _downloadProcessingJobRepository.GetByIdAsync(jobId))!.Status);
             Assert.Equal([download.Id], _notifications.Imported);
+            Assert.Equal([DownloadStatus.Moved], _notifications.PersistedStatusWhenImported);
             Assert.Empty(_notifications.Failed);
         }
 
@@ -203,12 +210,20 @@ namespace Listenarr.Tests.Features.Infrastructure.Downloads.Processing
         {
             public List<string> Imported { get; } = [];
 
+            /// <summary>
+            /// The download's status as stored when each completion was raised, so a test can tell
+            /// an event sent after the commit from one sent before it.
+            /// </summary>
+            public List<DownloadStatus?> PersistedStatusWhenImported { get; } = [];
+
+            public Func<string, Task<DownloadStatus?>> ReadPersistedStatus { get; set; } = _ => Task.FromResult<DownloadStatus?>(null);
+
             public List<string> Failed { get; } = [];
 
-            public Task OnDownloadImportedAsync(Download download)
+            public async Task OnDownloadImportedAsync(Download download)
             {
                 Imported.Add(download.Id);
-                return Task.CompletedTask;
+                PersistedStatusWhenImported.Add(await ReadPersistedStatus(download.Id));
             }
 
             public Task OnDownloadFailedAsync(Download download)
