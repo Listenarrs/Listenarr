@@ -1429,8 +1429,10 @@ async function refreshAudiobookAfterScan(jobId: string) {
   if (isCurrent()) await loadWeakStorageMissingFiles()
 }
 
-async function loadAudiobook() {
-  loading.value = true
+// Quietly: the book shown until the new one is in, without the page's loading state (a dialog
+// is open over it)
+async function loadAudiobook({ isQuiet = false } = {}) {
+  if (!isQuiet) loading.value = true
   error.value = null
 
   try {
@@ -1853,9 +1855,10 @@ async function handleRepairDone() {
 
 async function organizeAfterRepair() {
   showRepairModal.value = false
-  await loadAudiobook()
   isOrganizeFromRepair.value = true
   showOrganizeModal.value = true
+  // Organize reads its previews from the server: the book behind is refreshed meanwhile, quietly
+  await loadAudiobook({ isQuiet: true })
 }
 
 // Back from Organize to Repair's step 2, as it was left

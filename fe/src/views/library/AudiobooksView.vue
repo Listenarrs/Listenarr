@@ -2380,10 +2380,12 @@ async function handleRepairDone() {
 
 async function organizeRepaired(audiobookIds: number[]) {
   showRepairModal.value = false
-  await libraryStore.fetchLibrary()
   organizeAudiobookIds.value = audiobookIds
   isOrganizeFromRepair.value = true
   showOrganizeModal.value = true
+  // Organize reads its previews from the server: the library behind is refreshed meanwhile, so
+  // no moment passes without a dialog
+  await libraryStore.fetchLibrary()
 }
 
 // Back from Organize to Repair's step 2, as it was left
