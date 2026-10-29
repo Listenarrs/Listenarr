@@ -136,6 +136,21 @@ export interface BookRecord {
 export interface RecordKey {
   asin: string
   region?: string | null
+  // A record without an ASIN (a source other than Audible, e.g. OpenLibrary): its id there
+  id?: string | null
+}
+
+// Whether a search result is that record: by its ASIN (and region, when both have one), or, for a
+// record without an ASIN, by its id at its source
+export function isResultOfRecord(
+  searchResult: SearchResult,
+  recordKey: RecordKey | null | undefined,
+): boolean {
+  if (!recordKey) return false
+  if (!recordKey.asin)
+    return !searchResult.asin && !!recordKey.id && searchResult.id === recordKey.id
+  if (searchResult.asin?.toUpperCase() !== recordKey.asin.toUpperCase()) return false
+  return !recordKey.region || !searchResult.region || searchResult.region === recordKey.region
 }
 
 // A search result as a book record, in the region it was found in

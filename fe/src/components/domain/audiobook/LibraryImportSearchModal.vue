@@ -125,8 +125,16 @@ const canConfirm = computed(
     !!bookMatch.value &&
     !isSearching.value &&
     matchState(bookMatch.value) === 'matched' &&
-    hasAsinChanged(bookMatch.value),
+    (hasAsinChanged(bookMatch.value) || isNewRecordWithoutAsin(bookMatch.value)),
 )
+
+// A record without an ASIN (a source other than Audible), picked: a new match unless it is the
+// folder's current one
+function isNewRecordWithoutAsin({ pickedSearchResult }: BookMatch): boolean {
+  if (!pickedSearchResult || pickedSearchResult.asin) return false
+  const current = props.item.selectedMatch
+  return !current || !!current.asin || current.id !== pickedSearchResult.id
+}
 
 onMounted(async () => {
   configuredRegion.value = await store.configuredRegion()

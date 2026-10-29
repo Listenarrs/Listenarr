@@ -264,6 +264,41 @@ describe('LibraryImportSearchModal', () => {
     expect((field(wrapper, 'match-title').element as HTMLInputElement).value).toBe('1A2B3C4D5E')
   })
 
+  // A record from a source other than Audible (OpenLibrary), without an ASIN
+  const openLibraryBook = {
+    id: '/works/OL8090838W',
+    title: 'An OpenLibrary Book',
+    authors: [{ name: 'Someone' }],
+    metadataSource: 'OpenLibrary',
+  } as unknown as SearchResult
+
+  it('picks and uses a record without an ASIN, as Library Import can add a book from it', async () => {
+    vi.mocked(apiService.advancedSearch).mockResolvedValue([openLibraryBook])
+    const wrapper = mountModal()
+    await flushPromises()
+
+    const result = wrapper.get('[data-testid="find-match-result"]')
+    expect(result.classes()).not.toContain('unpickable')
+    await result.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="find-match-card"]').attributes('data-match-state')).toBe(
+      'matched',
+    )
+    expect(field(wrapper, 'find-match-confirm').attributes('disabled')).toBeUndefined()
+    await field(wrapper, 'find-match-confirm').trigger('click')
+    expect(wrapper.emitted('select')?.[0]?.[0]).toMatchObject({ id: '/works/OL8090838W' })
+  })
+
+  it("doesn't use again the record without an ASIN the folder already has", async () => {
+    vi.mocked(apiService.advancedSearch).mockResolvedValue([openLibraryBook])
+    const wrapper = mountModal({ ...alchemised, selectedMatch: openLibraryBook } as never)
+    await flushPromises()
+
+    await wrapper.get('[data-testid="find-match-result"]').trigger('click')
+    await flushPromises()
+    expect(field(wrapper, 'find-match-confirm').attributes('disabled')).toBeDefined()
+  })
+
   it('looks a typed ASIN up in its region before it can be used', async () => {
     const wrapper = mountModal(primalHunter)
     await flushPromises()
