@@ -198,6 +198,89 @@ describe('RepairBooksModal', () => {
     vi.restoreAllMocks()
   })
 
+  // The books' answers: the ones listed fail with that error, the others load
+  function booksFailing(failures: Record<number, Error>) {
+    apiMocks.getAudiobook.mockImplementation(async (audiobookId: number) => {
+      if (failures[audiobookId]) throw failures[audiobookId]
+      return { ...mismatched, id: audiobookId, title: `Book ${audiobookId}` }
+    })
+  }
+  const notFound = () =>
+    Object.assign(new Error('API error: 404 {"message":"Audiobook not found"}'), { status: 404 })
+
+  it('keeps the other books repairable when one was deleted since it was selected', async () => {
+    booksFailing({ 8: notFound() })
+    const wrapper = mountModal([7, 8, 9])
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="repair-row-7"] [data-testid="match-search"]').exists()).toBe(
+      true,
+    )
+    expect(wrapper.find('[data-testid="repair-row-9"] [data-testid="match-search"]').exists()).toBe(
+      true,
+    )
+    // Its own card, in the error state, saying why; nothing to load again
+    const failedCard = wrapper.get('[data-testid="repair-row-8"]')
+    expect(failedCard.attributes('data-match-state')).toBe('error')
+    expect(failedCard.text()).toContain('Audiobook #8')
+    expect(failedCard.get('[data-testid="repair-load-error"]').text()).toBe(
+      'Not found: deleted since it was selected',
+    )
+    expect(failedCard.find('[data-testid="repair-load-again"]').exists()).toBe(false)
+    expect(failedCard.get('input[type="checkbox"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="repair-count"]').text()).toBe('3 skipped')
+  })
+
+  it('loads a book again when it failed for another reason', async () => {
+    booksFailing({ 8: new Error('Request timed out') })
+    const wrapper = mountModal([7, 8])
+    await flushPromises()
+    const failedCard = () => wrapper.get('[data-testid="repair-row-8"]')
+    expect(failedCard().get('[data-testid="repair-load-error"]').text()).toBe(
+      "Couldn't be loaded: Request timed out",
+    )
+
+    booksFailing({})
+    await failedCard().get('[data-testid="repair-load-again"]').trigger('click')
+    await flushPromises()
+
+    // The book's own card now, to match and repair
+    expect(failedCard().find('[data-testid="repair-load-error"]').exists()).toBe(false)
+    expect(failedCard().find('[data-testid="match-search"]').exists()).toBe(true)
+    expect(failedCard().text()).toContain('Book 8')
+  })
+
+  it('says why when no book could be loaded at all', async () => {
+    booksFailing({ 7: notFound() })
+    const wrapper = mountModal([7])
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="repair-row-7"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Not found: deleted since it was selected')
+  })
+
+  it('loads the books one at a time', async () => {
+    let inFlight = 0
+    let peak = 0
+    const oneRequest = async <T>(value: T) => {
+      inFlight++
+      peak = Math.max(peak, inFlight)
+      await new Promise((resolve) => setTimeout(resolve, 1))
+      inFlight--
+      return value
+    }
+    apiMocks.getAudiobook.mockImplementation((audiobookId: number) =>
+      oneRequest({ ...mismatched, id: audiobookId }),
+    )
+    apiMocks.getAudiobookIdentifiers.mockImplementation(() =>
+      oneRequest({ audiobookId: 7, identifiers: [frenchAsin] }),
+    )
+    const wrapper = mountModal([7, 8, 9, 10, 11])
+    await vi.waitFor(() => expect(wrapper.findAll('[data-testid^="repair-row-"]')).toHaveLength(5))
+
+    expect(peak).toBe(1)
+  })
+
   // Each book's answer held until the test gives it
   function heldBooks(audiobookIds: number[]) {
     const answers = new Map<number, (book: typeof mismatched) => void>()
