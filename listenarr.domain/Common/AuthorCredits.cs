@@ -26,14 +26,14 @@ namespace Listenarr.Domain.Common
     /// <remarks>
     /// Audible has no role field. A translator or an editor arrives as an ordinary author name
     /// with the role appended to it, so a book comes back credited to
-    /// <c>["Fyodor Dostoevsky", "Constance Garnett - translator"]</c>, and the second of those
+    /// <c>["Homer", "Samuel Butler - translator"]</c> (<c>B00S710A4U</c>), and the second of those
     /// is displayed, grouped and looked up as though somebody were named that.
     ///
     /// Two rules were considered for this. Readarr's is positional: keep the first credit and
     /// drop the rest. That is unsafe here, because the order is a publisher's editorial choice.
-    /// Two editions of the same work credit the same pair in opposite orders: <c>B002V9ZF3K</c>
-    /// lists Dostoevsky then Garnett, <c>B00EZAXAF8</c> lists Garnett then Dostoevsky, so
-    /// keeping index 0 files the second under its translator.
+    /// The catalogue has both orders: <c>B00S710A4U</c> lists Homer then Samuel Butler - translator,
+    /// while <c>B00EZAXAF8</c> lists Constance Garnett - translator then Fyodor Dostoevsky, so
+    /// keeping index 0 files the second book under its translator.
     ///
     /// The second was to drop any credit that names a role. This class does neither: it removes
     /// the role and keeps the person. Two reasons, both measured.
