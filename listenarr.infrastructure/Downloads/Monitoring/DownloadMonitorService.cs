@@ -402,28 +402,10 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
             // a qBittorrent 409 out of the blocklist: that answer means the client already
             // holds the release, so blocking it would ban something the user is currently
             // downloading. The carve-out is structural rather than a condition to remember.
-            if (download.AudiobookId.HasValue)
-            {
-                var blocklistService = scope.ServiceProvider.GetRequiredService<IBlocklistService>();
-                // Read back the identity stamped on the download when it was grabbed. This method
-                // must not work one out for itself: by the time a download fails, its TotalSize
-                // has been overwritten from the client's queue snapshot and its OriginalUrl may be
-                // a spent per-fetch link, so anything derived here disagrees with what the search
-                // side derives from the indexer's listing and the row never matches. A live
-                // install wrote one correctly formatted row after the first failure and then
-                // grabbed the identical release more than a hundred times over the next eleven
-                // hours.
-                var identifier = ReleaseIdentity.ForGrabbed(download);
-                if (identifier is not null)
-                {
-                    await blocklistService.BlockAsync(
-                        download.AudiobookId.Value,
-                        identifier,
-                        download.Title ?? "Unknown",
-                        download.ExpectedFileSize ?? (download.TotalSize > 0 ? download.TotalSize : null),
-                        errorMessage);
-                }
-            }
+            await FailedDownloadBlocker.BlockAsync(
+                scope.ServiceProvider.GetRequiredService<IBlocklistService>(),
+                download,
+                errorMessage);
 
             var clientItemId = download.GetExternalId();
             // NZBGet history is part of failure diagnostics and final-path recovery.
