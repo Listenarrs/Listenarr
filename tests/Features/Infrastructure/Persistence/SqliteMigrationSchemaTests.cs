@@ -46,6 +46,10 @@ public class SqliteMigrationSchemaTests : BaseTests
         "20261002210137_AddOperationEvidencePublications";
     private const string AutomaticSearchTimingMigrationId =
         "20261021212418_AddAutomaticSearchTiming";
+    private const string NarratorPreferencesMigrationId =
+        "20261025121334_AddNarratorPreferencesToQualityProfile";
+    private const string BookLevelNarratorMigrationId =
+        "20261025121623_AddBookLevelNarratorAndAudiobookshelfSettings";
 
     private static (SqliteConnection Connection, ListenArrDbContext Context)
         CreateMigratedSqliteContext()
@@ -229,7 +233,9 @@ public class SqliteMigrationSchemaTests : BaseTests
                 CompatibilityFilePublicationMigrationId,
                 WeakStorageVerifiedCleanupMigrationId,
                 OperationEvidencePublicationsMigrationId,
-                AutomaticSearchTimingMigrationId
+                AutomaticSearchTimingMigrationId,
+                NarratorPreferencesMigrationId,
+                BookLevelNarratorMigrationId
             ],
             postCanary);
         Assert.Contains("20251124102000_AddMoveJobSourcePath", applied);

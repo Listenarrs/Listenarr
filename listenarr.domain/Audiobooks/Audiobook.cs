@@ -39,6 +39,18 @@ namespace Listenarr.Domain.Audiobooks
         public List<string>? Genres { get; set; }
         public List<string>? Tags { get; set; }
         public List<string>? Narrators { get; set; }
+
+        /// <summary>
+        /// The specific narrator this audiobook must be acquired from, set by the user
+        /// (directly, or via picking a specific AudiobookDB release) when a book has
+        /// multiple distinct narrated editions and only one is wanted. Independent of
+        /// <see cref="Narrators"/>, which reflects whatever edition's metadata was last
+        /// matched for display (cover/description/etc.) and may name a different narrator
+        /// than the one actually desired. When set, this drives search query construction,
+        /// is enforced strictly during release scoring, and is checked against the
+        /// downloaded file's own embedded narrator tag after import.
+        /// </summary>
+        public string? RequiredNarrator { get; set; }
         public List<string>? Isbn { get; set; }
         public string? Asin { get; set; }
         // OpenLibrary identifier (OLID) when the audiobook originates from OpenLibrary

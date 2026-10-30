@@ -184,6 +184,7 @@ namespace Listenarr.Api.Features.Library
             || request.Runtime.HasValue
             || request.Edition != null
             || request.Version != null
+            || request.RequiredNarrator != null
             || request.Explicit.HasValue
             || request.Abridged.HasValue
             || request.Monitored.HasValue

@@ -36,6 +36,7 @@ namespace Listenarr.Application.Audiobooks.Catalog
         public string? Language { get; set; }
         public int? Runtime { get; set; }
         public string? Edition { get; set; }
+        public string? RequiredNarrator { get; set; }
         public string? ImageUrl { get; set; }
         public bool Monitored { get; set; }
         public string? BasePath { get; set; }

@@ -245,6 +245,52 @@
                 </div>
               </div>
             </div>
+
+            <!-- Narrator Filters Section -->
+            <div
+              v-if="profile.preferredNarrators?.length || profile.excludedNarrators?.length"
+              class="profile-section"
+            >
+              <h5><PhMicrophone /> Narrator Filters</h5>
+              <div class="word-filters">
+                <div
+                  v-if="profile.preferredNarrators && profile.preferredNarrators.length > 0"
+                  class="word-filter-group"
+                >
+                  <span class="filter-type">
+                    <PhSparkle />
+                    Preferred
+                  </span>
+                  <div class="word-tags">
+                    <span
+                      v-for="name in profile.preferredNarrators"
+                      :key="name"
+                      class="word-tag positive"
+                    >
+                      {{ name }}
+                    </span>
+                  </div>
+                </div>
+                <div
+                  v-if="profile.excludedNarrators && profile.excludedNarrators.length > 0"
+                  class="word-filter-group"
+                >
+                  <span class="filter-type">
+                    <PhX />
+                    Excluded
+                  </span>
+                  <div class="word-tags">
+                    <span
+                      v-for="name in profile.excludedNarrators"
+                      :key="name"
+                      class="word-tag forbidden"
+                    >
+                      {{ name }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -316,6 +362,7 @@ import {
   PhCheck,
   PhX,
   PhWarning,
+  PhMicrophone,
 } from '@phosphor-icons/vue'
 
 const toast = useToast()

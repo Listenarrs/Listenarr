@@ -402,6 +402,103 @@
             </div>
           </FormSection>
 
+          <!-- Narrator Filters -->
+          <FormSection title="Narrator Filters" :icon="PhMicrophone">
+            <!-- Preferred Narrators -->
+            <div class="filter-group">
+              <h4><PhMicrophone /> Preferred Narrators (Bonus Points)</h4>
+              <p class="section-description">
+                Releases narrated by one of these people will receive bonus points in scoring.
+                Both the release's narrator metadata and its title are checked.
+              </p>
+              <div class="tag-input-group">
+                <div
+                  :class="[
+                    'tags-list',
+                    { 'tags-list-empty': (formData.preferredNarrators?.length || 0) === 0 },
+                  ]"
+                >
+                  <div
+                    v-for="(name, index) in formData.preferredNarrators"
+                    :key="index"
+                    class="tag positive removable"
+                  >
+                    {{ name }}
+                    <button type="button" @click="removePreferredNarrator(index)" class="tag-remove">
+                      <PhX />
+                    </button>
+                  </div>
+                </div>
+                <div class="tag-input">
+                  <input
+                    v-model="newPreferredNarrator"
+                    @keypress.enter.prevent="addPreferredNarrator"
+                    type="text"
+                    placeholder="e.g., Scott Brick, Stephen Fry"
+                  />
+                  <button
+                    type="button"
+                    @click="addPreferredNarrator"
+                    :disabled="!newPreferredNarrator.trim()"
+                    :aria-disabled="!newPreferredNarrator.trim()"
+                    class="btn icon-btn btn-primary btn-sm"
+                    title="Add preferred narrator"
+                    aria-label="Add preferred narrator"
+                  >
+                    <PhPlus />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Excluded Narrators -->
+            <div class="filter-group">
+              <h4><PhMicrophoneSlash /> Excluded Narrators (Rejected)</h4>
+              <p class="section-description">
+                Releases narrated by one of these people will be rejected outright. Both the
+                release's narrator metadata and its title are checked.
+              </p>
+              <div class="tag-input-group">
+                <div
+                  :class="[
+                    'tags-list',
+                    { 'tags-list-empty': (formData.excludedNarrators?.length || 0) === 0 },
+                  ]"
+                >
+                  <div
+                    v-for="(name, index) in formData.excludedNarrators"
+                    :key="index"
+                    class="tag forbidden removable"
+                  >
+                    {{ name }}
+                    <button type="button" @click="removeExcludedNarrator(index)" class="tag-remove">
+                      <PhX />
+                    </button>
+                  </div>
+                </div>
+                <div class="tag-input">
+                  <input
+                    v-model="newExcludedNarrator"
+                    @keypress.enter.prevent="addExcludedNarrator"
+                    type="text"
+                    placeholder="e.g., narrator name to avoid"
+                  />
+                  <button
+                    type="button"
+                    @click="addExcludedNarrator"
+                    :disabled="!newExcludedNarrator.trim()"
+                    :aria-disabled="!newExcludedNarrator.trim()"
+                    class="btn icon-btn btn-primary btn-sm"
+                    title="Add excluded narrator"
+                    aria-label="Add excluded narrator"
+                  >
+                    <PhPlus />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </FormSection>
+
           <!-- Language Preferences -->
           <FormSection title="Language Preferences" :icon="PhTranslate">
             <p class="section-description">Preferred languages in order of preference.</p>
@@ -529,6 +626,8 @@ import {
   PhClockCounterClockwise,
   PhDotsSixVertical,
   PhMusicNotesSimple,
+  PhMicrophone,
+  PhMicrophoneSlash,
 } from '@phosphor-icons/vue'
 import type { QualityProfile, CodecDefinition, QualityItem, QualityDefinition } from '@/types'
 import { useToast } from '@/services/toastService'
@@ -796,6 +895,8 @@ const formData = ref<QualityProfile>({
   preferredWords: [],
   mustNotContain: [],
   mustContain: [],
+  preferredNarrators: [],
+  excludedNarrators: [],
   preferredLanguages: [],
   minimumSeeders: 0,
   minimumScore: 0,
@@ -809,6 +910,8 @@ const preferM4b = ref(false)
 const newPreferredWord = ref('')
 const newMustContain = ref('')
 const newMustNotContain = ref('')
+const newPreferredNarrator = ref('')
+const newExcludedNarrator = ref('')
 const newLanguage = ref('')
 
 // Initialize form when profile changes
@@ -833,6 +936,12 @@ watch(
         ? [...newProfile.mustNotContain]
         : []
       formData.value.mustContain = newProfile.mustContain ? [...newProfile.mustContain] : []
+      formData.value.preferredNarrators = newProfile.preferredNarrators
+        ? [...newProfile.preferredNarrators]
+        : []
+      formData.value.excludedNarrators = newProfile.excludedNarrators
+        ? [...newProfile.excludedNarrators]
+        : []
       formData.value.preferredLanguages = newProfile.preferredLanguages
         ? [...newProfile.preferredLanguages]
         : []
@@ -872,6 +981,8 @@ watch(
         preferredWords: [],
         mustNotContain: [],
         mustContain: [],
+        preferredNarrators: [],
+        excludedNarrators: [],
         preferredLanguages: [],
         minimumSeeders: 0,
         minimumScore: 0,
@@ -1151,6 +1262,38 @@ const addMustNotContain = () => {
 
 const removeMustNotContain = (index: number) => {
   formData.value.mustNotContain?.splice(index, 1)
+}
+
+// Preferred narrator management
+const addPreferredNarrator = () => {
+  const name = newPreferredNarrator.value.trim()
+  if (name && !formData.value.preferredNarrators?.includes(name)) {
+    if (!formData.value.preferredNarrators) {
+      formData.value.preferredNarrators = []
+    }
+    formData.value.preferredNarrators.push(name)
+    newPreferredNarrator.value = ''
+  }
+}
+
+const removePreferredNarrator = (index: number) => {
+  formData.value.preferredNarrators?.splice(index, 1)
+}
+
+// Excluded narrator management
+const addExcludedNarrator = () => {
+  const name = newExcludedNarrator.value.trim()
+  if (name && !formData.value.excludedNarrators?.includes(name)) {
+    if (!formData.value.excludedNarrators) {
+      formData.value.excludedNarrators = []
+    }
+    formData.value.excludedNarrators.push(name)
+    newExcludedNarrator.value = ''
+  }
+}
+
+const removeExcludedNarrator = (index: number) => {
+  formData.value.excludedNarrators?.splice(index, 1)
 }
 
 // Language management

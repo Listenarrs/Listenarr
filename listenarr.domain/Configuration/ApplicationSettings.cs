@@ -229,6 +229,18 @@ namespace Listenarr.Domain.Configuration
         public bool EnableOpenLibrarySearch { get; set; } = true;
 
         /// <summary>
+        /// Base URL of an Audiobookshelf instance to pull already-owned library metadata from
+        /// (e.g. narrator names for files Audiobookshelf has already scanned/matched), such as
+        /// "http://192.168.4.48:13378". Blank disables the integration.
+        /// </summary>
+        public string? AudiobookshelfBaseUrl { get; set; }
+
+        /// <summary>
+        /// API key for the Audiobookshelf instance at <see cref="AudiobookshelfBaseUrl"/>.
+        /// </summary>
+        public string? AudiobookshelfApiKey { get; set; }
+
+        /// <summary>
         /// Preferred default Audible/Audible market region for Add New searches.
         /// </summary>
         public string DefaultSearchRegion { get; set; } = "us";

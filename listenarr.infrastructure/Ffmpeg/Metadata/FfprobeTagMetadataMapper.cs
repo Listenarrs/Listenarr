@@ -20,6 +20,10 @@ namespace Listenarr.Infrastructure.Ffmpeg.Metadata
             metadata.Artist = FirstNonEmpty(metadata.Artist, GetTag(tags, "artist", "ARTIST"));
             metadata.Album = FirstNonEmpty(metadata.Album, GetTag(tags, "album", "ALBUM"));
             metadata.AlbumArtist = FirstNonEmpty(metadata.AlbumArtist, GetTag(tags, "album_artist", "ALBUM_ARTIST", "album artist"));
+            // Audiobook tagging convention repurposes the MP4/ID3 "composer" field for the
+            // narrator, since neither format has a dedicated narrator tag; a literal
+            // "narrator" tag is checked first in case the file was tagged more explicitly.
+            metadata.Narrator = FirstNonEmpty(metadata.Narrator, GetTag(tags, "narrator", "NARRATOR", "composer", "COMPOSER"));
 
             metadata.TrackNumber ??= ParseNumericTag(tags, "track", "TRACK", "tracknumber", "TRACKNUMBER");
             metadata.DiscNumber ??= ParseNumericTag(tags, "disc", "DISC", "discnumber", "DISCNUMBER");
