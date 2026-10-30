@@ -999,6 +999,13 @@ class ApiService {
     return this.request<UnmatchedFilesResponse>(`/rootfolders/unmatched-results/${jobId}`)
   }
 
+  async cancelUnmatchedScan(jobId: string): Promise<{ jobId: string; status: string }> {
+    return this.request<{ jobId: string; status: string }>(
+      `/rootfolders/unmatched-jobs/${jobId}/cancel`,
+      { method: 'POST' },
+    )
+  }
+
   async getSavedUnmatchedFiles(rootFolderId: number): Promise<SavedUnmatchedResponse> {
     return this.request<SavedUnmatchedResponse>(`/rootfolders/${rootFolderId}/unmatched`)
   }
