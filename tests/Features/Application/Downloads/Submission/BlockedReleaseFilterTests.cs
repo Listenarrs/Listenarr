@@ -59,6 +59,28 @@ public sealed class BlockedReleaseFilterTests : BaseTests
         Assert.Empty(kept);
     }
 
+    [Theory]
+    [InlineData("ABCDEF1234567890ABCDEF1234567890ABCDEF12", "VPG66ERUKZ4JBK6N54JDIVTYSCV433YS")]
+    [InlineData("VPG66ERUKZ4JBK6N54JDIVTYSCV433YS", "ABCDEF1234567890ABCDEF1234567890ABCDEF12")]
+    public async Task ExcludeAsync_MatchesATorrentWhateverEncodingTheInfoHashIsWrittenIn(
+        string blockedHash,
+        string candidateHash)
+    {
+        // BEP 9 allows a magnet to carry the same 20-byte hash as 40 hex characters or 32 base32
+        // characters. An entry written under one must still stop the other.
+        var blocklist = new Mock<IBlocklistService>();
+        blocklist.Setup(service => service.GetBlockedIdentifiersAsync(7))
+            .ReturnsAsync([ReleaseIdentity.For(blockedHash, null, null, null)!]);
+
+        var kept = await BlockedReleaseFilter.ExcludeAsync(
+            blocklist.Object,
+            7,
+            [Scored($"magnet:?xt=urn:btih:{candidateHash}&dn=book")],
+            NullLogger.Instance);
+
+        Assert.Empty(kept);
+    }
+
     [Fact]
     public async Task ExcludeAsync_WithNothingBlocked_DoesNotQueryPerResult()
     {
