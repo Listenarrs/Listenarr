@@ -219,20 +219,30 @@ namespace Listenarr.Tests.Features.Infrastructure.Configuration.Paths
             var middle = await CreateDownloadClientConfiguration();
             _counter.HoldLookups = true;
             var move = _service.UpdateAsync(MovedTo(mapping, middle));
-            await _counter.LookupReachedDatabase[0].Task;
+            try
+            {
+                await _counter.LookupReachedDatabase[0].Task;
 
-            var second = secondWriter();
-            // Not awaited: a serialised writer queues behind the move before its lookup, so awaiting
-            // its lookup would deadlock. The delay gives an unserialised lookup time to read the row.
-            await Task.WhenAny(_counter.LookupReachedDatabase[1].Task, Task.Delay(TimeSpan.FromSeconds(1)));
+                var second = secondWriter();
+                // Not awaited: a serialised writer queues behind the move before its lookup, so awaiting
+                // its lookup would deadlock. The delay gives an unserialised lookup time to read the row.
+                await Task.WhenAny(_counter.LookupReachedDatabase[1].Task, Task.Delay(TimeSpan.FromSeconds(1)));
 
-            _counter.ReleaseLookup[0].SetResult();
-            await move;
-            Assert.Single(await _service.GetPathMappingByClientAsync(middle));
+                _counter.ReleaseLookup[0].SetResult();
+                await move;
+                Assert.Single(await _service.GetPathMappingByClientAsync(middle));
 
-            _counter.ReleaseLookup[1].SetResult();
-            await second;
-            return middle;
+                _counter.ReleaseLookup[1].SetResult();
+                await second;
+                return middle;
+            }
+            finally
+            {
+                // A writer parked on a gate holds the process-wide writer lock, so a failed step must
+                // still let it go or every later mapping write in the run waits forever.
+                _counter.ReleaseLookup[0].TrySetResult();
+                _counter.ReleaseLookup[1].TrySetResult();
+            }
         }
 
         [Fact]
