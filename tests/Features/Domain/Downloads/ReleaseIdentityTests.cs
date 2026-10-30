@@ -17,6 +17,25 @@ public sealed class ReleaseIdentityTests : BaseTests
     }
 
     [Fact]
+    public void For_Base32AndHexSpellingsOfOneInfoHash_AreOneIdentity()
+    {
+        var hex = ReleaseIdentity.For("ABCDEF1234567890ABCDEF1234567890ABCDEF12", null, null, null);
+        var base32 = ReleaseIdentity.For("vpg66erukz4jbk6n54jdivtyscv433ys", null, null, null);
+
+        Assert.Equal("btih:abcdef1234567890abcdef1234567890abcdef12", hex);
+        Assert.Equal(hex, base32);
+    }
+
+    [Fact]
+    public void For_ThirtyTwoCharactersThatAreNotBase32_KeepTheirOwnSpelling()
+    {
+        // Not decodable, so there is nothing to normalise to: key on what the indexer sent.
+        Assert.Equal(
+            "btih:not-a-base32-hash-0123456789!@xy",
+            ReleaseIdentity.For("NOT-A-BASE32-HASH-0123456789!@XY", null, null, null));
+    }
+
+    [Fact]
     public void For_UsenetReleaseGrabbedTwice_HasTheSameIdentityBothTimes()
     {
         // The failure this replaced. A Usenet release URL is a per-fetch download link: the
