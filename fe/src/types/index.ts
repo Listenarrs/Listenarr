@@ -670,6 +670,14 @@ export interface MonitorAuthorResponse {
   errorMessage?: string
 }
 
+export interface AudibleSeriesSearchItem {
+  asin?: string | null
+  name: string
+  region?: string | null
+  description?: string | null
+  image?: string | null
+}
+
 export interface MonitoredSeries {
   id: number
   seriesName: string
