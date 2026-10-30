@@ -436,9 +436,8 @@ internal sealed class DirectDownloadProcessor(
         download.SetMetadata(DirectDownloadMetadataKeys.FailedAt, DateTime.UtcNow.ToString("O"));
         await services.GetRequiredService<IDownloadRepository>().UpdateAsync(download);
 
-        // The external-client monitor never sees a direct download, so this is the only place its
-        // failure can reach the blocklist. Same gate as there: an operator who turned failed-download
-        // handling off asked for failures to be left alone, and an entry has no expiry.
+        // The external-client monitor never sees a direct download, so this is the only way its
+        // failure reaches the blocklist, behind the same failed-download-handling gate as there.
         var settings = await services.GetRequiredService<IConfigurationService>().GetApplicationSettingsAsync();
         if (!settings.FailedDownloadHandlingEnabled)
         {
@@ -454,8 +453,7 @@ internal sealed class DirectDownloadProcessor(
         }
         catch (Exception exception) when (exception is not OperationCanceledException && exception is not OutOfMemoryException && exception is not StackOverflowException)
         {
-            // The download is already recorded as failed; losing the blocklist row must not turn
-            // that into an unhandled error in the worker cycle.
+            // The download is already recorded as failed; a lost blocklist row must not fault the cycle.
             logger.LogWarning(
                 "Could not blocklist failed direct-download item {DownloadId}: {ErrorType}",
                 download.Id,
