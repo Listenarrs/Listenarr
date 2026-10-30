@@ -118,7 +118,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
             string hash,
             CancellationToken ct)
         {
-            var baseUrl = DownloadClientUriBuilder.BuildAuthority(client);
+            var baseUrl = QBittorrentHelpers.BuildBaseUrl(client);
 
             try
             {
