@@ -389,6 +389,24 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
                 return;
             }
 
+            // Block the release before the auto-search below, so the search that follows a
+            // failure cannot pick the same broken release straight back up.
+            //
+            // Below the FailedDownloadHandlingEnabled gate rather than above it. An operator who
+            // has turned failed-download handling off has said they want failures left alone, and
+            // a blocklist entry is durable state with no expiry: writing one anyway would
+            // accumulate permanent bans that the setting gives no hint exist.
+            //
+            // Only downloads the client accepted and then failed reach this method. A
+            // release the client refused at submission never gets here, which is what keeps
+            // a qBittorrent 409 out of the blocklist: that answer means the client already
+            // holds the release, so blocking it would ban something the user is currently
+            // downloading. The carve-out is structural rather than a condition to remember.
+            await FailedDownloadBlocker.BlockAsync(
+                scope.ServiceProvider.GetRequiredService<IBlocklistService>(),
+                download,
+                errorMessage);
+
             var clientItemId = download.GetExternalId();
             // NZBGet history is part of failure diagnostics and final-path recovery.
             // Do not remove failed NZBGet history here; successful imports remove client

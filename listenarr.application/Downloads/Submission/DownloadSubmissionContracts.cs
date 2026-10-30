@@ -45,7 +45,11 @@ public sealed record TrustedDownloadCandidate(
     string? Language,
     long Size,
     int? Seeders,
-    DownloadSourceDescriptor SourceDescriptor);
+    DownloadSourceDescriptor SourceDescriptor,
+    // The blocklist key for this release, worked out once from the search result that was
+    // grabbed and carried here so the download record can be stamped with it. Nothing
+    // downstream of the grab is allowed to derive its own; see ReleaseIdentity.
+    string? ReleaseIdentifier = null);
 
 public abstract record PreparedDownloadSubmission(
     DownloadProtocol Protocol,
