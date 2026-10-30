@@ -42,7 +42,25 @@ namespace Listenarr.Tests.Features.Infrastructure.Configuration.Paths
             public readonly TaskCompletionSource ReleaseReads = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
             public Task<List<RemotePathMapping>> GetAllAsync(CancellationToken ct = default) => inner.GetAllAsync(ct);
-            public Task<RemotePathMapping?> GetByIdAsync(int id, CancellationToken ct = default) => inner.GetByIdAsync(id, ct);
+            // When set, the first two by-id lookups each hold after reading the row until released.
+            public bool HoldLookups;
+            private int _lookups = -1;
+            public readonly TaskCompletionSource[] LookupReachedDatabase = [NewSignal(), NewSignal()];
+            public readonly TaskCompletionSource[] ReleaseLookup = [NewSignal(), NewSignal()];
+
+            private static TaskCompletionSource NewSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            public async Task<RemotePathMapping?> GetByIdAsync(int id, CancellationToken ct = default)
+            {
+                var mapping = await inner.GetByIdAsync(id, ct);
+                if (HoldLookups)
+                {
+                    var lookup = Interlocked.Increment(ref _lookups);
+                    LookupReachedDatabase[lookup].TrySetResult();
+                    await ReleaseLookup[lookup].Task;
+                }
+                return mapping;
+            }
             public async Task<List<RemotePathMapping>> GetByClientIdAsync(string downloadClientId, CancellationToken ct = default)
             {
                 Interlocked.Increment(ref _byClientReads);
@@ -178,6 +196,66 @@ namespace Listenarr.Tests.Features.Infrastructure.Configuration.Paths
             await _service.UpdateAsync(mapping);
 
             Assert.Single(await _service.GetPathMappingByClientAsync(otherClient));
+            Assert.Empty(await _service.GetPathMappingByClientAsync(_client));
+        }
+
+        private static RemotePathMapping MovedTo(RemotePathMapping mapping, DownloadClientConfiguration client) =>
+            new()
+            {
+                Id = mapping.Id,
+                DownloadClientId = client.Id,
+                Name = mapping.Name,
+                RemotePath = mapping.RemotePath,
+                LocalPath = mapping.LocalPath,
+            };
+
+        // Two writers race on one mapping that the first moves from _client to `middle`. The second
+        // writer looks the mapping up while the first is still between its own lookup and save,
+        // and is held until a read has cached the mapping under `middle`. Whatever the second
+        // writer then does, `middle` must not go on serving a mapping it no longer owns.
+        private async Task<DownloadClientConfiguration> RaceAWriterAgainstAMove(
+            RemotePathMapping mapping, Func<Task> secondWriter)
+        {
+            var middle = await CreateDownloadClientConfiguration();
+            _counter.HoldLookups = true;
+            var move = _service.UpdateAsync(MovedTo(mapping, middle));
+            await _counter.LookupReachedDatabase[0].Task;
+
+            var second = secondWriter();
+            // Not awaited: a serialised writer queues behind the move before its lookup, so awaiting
+            // its lookup would deadlock. The delay gives an unserialised lookup time to read the row.
+            await Task.WhenAny(_counter.LookupReachedDatabase[1].Task, Task.Delay(TimeSpan.FromSeconds(1)));
+
+            _counter.ReleaseLookup[0].SetResult();
+            await move;
+            Assert.Single(await _service.GetPathMappingByClientAsync(middle));
+
+            _counter.ReleaseLookup[1].SetResult();
+            await second;
+            return middle;
+        }
+
+        [Fact]
+        public async Task UpdateAsync_OverlappingMovesFromOneClient_ClearTheIntermediateClient()
+        {
+            var last = await CreateDownloadClientConfiguration();
+            var mapping = await CreateMapping("downloads", "library");
+
+            var middle = await RaceAWriterAgainstAMove(mapping, () => _service.UpdateAsync(MovedTo(mapping, last)));
+
+            Assert.Empty(await _service.GetPathMappingByClientAsync(middle));
+            Assert.Single(await _service.GetPathMappingByClientAsync(last));
+            Assert.Empty(await _service.GetPathMappingByClientAsync(_client));
+        }
+
+        [Fact]
+        public async Task DeleteAsync_OverlappingAMoveFromOneClient_ClearsTheClientItMovedTo()
+        {
+            var mapping = await CreateMapping("downloads", "library");
+
+            var middle = await RaceAWriterAgainstAMove(mapping, () => _service.DeleteAsync(mapping.Id));
+
+            Assert.Empty(await _service.GetPathMappingByClientAsync(middle));
             Assert.Empty(await _service.GetPathMappingByClientAsync(_client));
         }
 
