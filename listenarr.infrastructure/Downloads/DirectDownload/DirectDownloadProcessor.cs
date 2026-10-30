@@ -438,18 +438,16 @@ internal sealed class DirectDownloadProcessor(
 
         // The external-client monitor never sees a direct download, so this is the only way its
         // failure reaches the blocklist, behind the same failed-download-handling gate as there.
-        var settings = await services.GetRequiredService<IConfigurationService>().GetApplicationSettingsAsync();
-        if (!settings.FailedDownloadHandlingEnabled)
-        {
-            return;
-        }
-
         try
         {
-            await FailedDownloadBlocker.BlockAsync(
-                services.GetRequiredService<IBlocklistService>(),
-                download,
-                reason);
+            var settings = await services.GetRequiredService<IConfigurationService>().GetApplicationSettingsAsync();
+            if (settings.FailedDownloadHandlingEnabled)
+            {
+                await FailedDownloadBlocker.BlockAsync(
+                    services.GetRequiredService<IBlocklistService>(),
+                    download,
+                    reason);
+            }
         }
         catch (Exception exception) when (exception is not OperationCanceledException && exception is not OutOfMemoryException && exception is not StackOverflowException)
         {
