@@ -115,3 +115,18 @@ export function stripHtmlAndNormalize(text: string | undefined | null): string {
 
   return decodeHtmlEntities(raw)
 }
+
+/**
+ * Normalises a collection grouping key (author name, series name, etc.) for
+ * case- and punctuation-insensitive comparison and Map keying.
+ * NFKD → strip diacritics → lowercase → collapse non-alphanumeric runs to spaces → trim.
+ */
+export function normalizeCollectionText(value: string | undefined | null): string {
+  if (!value) return ''
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
