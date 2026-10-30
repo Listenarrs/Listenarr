@@ -16,22 +16,37 @@ namespace Listenarr.Domain.Downloads
     /// torrent. The blocklist key is built from the result, so a release blocked under one spelling
     /// is still blocked when an indexer lists it under the other.
     /// </summary>
-    internal static class TorrentInfoHash
+    public static class TorrentInfoHash
     {
         private const string Base32Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
         private const int HexLength = 40;
         private const int Base32Length = 32;
 
         /// <summary>
-        /// Lower-case hexadecimal for a 32-character base32 hash; any other value is trimmed and
-        /// lower-cased unchanged, so a malformed hash still keys on what the indexer sent.
+        /// Lower-case hexadecimal for a 40-character hex or 32-character base32 hash; any other
+        /// value is trimmed and lower-cased unchanged, so a malformed hash still keys on what the
+        /// indexer sent.
         /// </summary>
         public static string Normalize(string torrentInfoHash)
         {
             var trimmed = torrentInfoHash.Trim();
-            return trimmed.Length == Base32Length && TryDecodeBase32(trimmed, out var bytes)
+            return ToHex(trimmed) ?? trimmed.ToLowerInvariant();
+        }
+
+        /// <summary>
+        /// The info-hash as lower-case hexadecimal, or null when the value is neither 40 hex
+        /// characters nor 32 base32 characters.
+        /// </summary>
+        public static string? ToHex(string value)
+        {
+            if (value.Length == HexLength && value.All(Uri.IsHexDigit))
+            {
+                return value.ToLowerInvariant();
+            }
+
+            return value.Length == Base32Length && TryDecodeBase32(value, out var bytes)
                 ? Convert.ToHexString(bytes).ToLowerInvariant()
-                : trimmed.ToLowerInvariant();
+                : null;
         }
 
         private static bool TryDecodeBase32(string value, out byte[] decoded)
