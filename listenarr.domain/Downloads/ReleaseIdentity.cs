@@ -97,7 +97,7 @@ namespace Listenarr.Domain.Downloads
             // A torrent info-hash is the release, across indexers and across submissions.
             if (!string.IsNullOrWhiteSpace(torrentInfoHash))
             {
-                return "btih:" + torrentInfoHash.Trim().ToLowerInvariant();
+                return "btih:" + TorrentInfoHash.Normalize(torrentInfoHash);
             }
 
             // Title and size next, and ahead of the URL, because a Usenet release URL is a
