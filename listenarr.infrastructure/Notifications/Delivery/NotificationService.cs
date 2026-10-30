@@ -43,51 +43,11 @@ namespace Listenarr.Infrastructure.Notifications.Delivery
             _httpSender = new NotificationHttpSender(httpClient, httpClient, logger, AllowPrivateWebhookTargetsForCurrentRequest);
         }
 
-        // INotificationService interface stubs — webhook dispatch goes through SendNotificationAsync;
-        // these typed convenience methods delegate to the main webhook loop or no-op.
-        public async Task OnDownloadImportedAsync(Download download)
-        {
-            try
-            {
-                var webhooks = await _configurationService.GetWebhookConfigurationsAsync();
-                foreach (var wh in webhooks.Where(w => w.IsEnabled && w.Triggers.Contains("Imported")))
-                    await SendNotificationAsync("Imported", new { AudiobookTitle = download.Title, Timestamp = DateTime.UtcNow }, wh.Url, wh.Triggers);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogDebug(ex, "SendDownloadCompletedNotificationAsync failed for {Id}", download.Id);
-            }
-        }
-
-        public async Task OnDownloadFailedAsync(Download download)
-        {
-            try
-            {
-                var webhooks = await _configurationService.GetWebhookConfigurationsAsync();
-                foreach (var wh in webhooks.Where(w => w.IsEnabled && w.Triggers.Contains("Failed")))
-                    await SendNotificationAsync("Failed", new { AudiobookTitle = download.Title, Error = download.ErrorMessage, Timestamp = DateTime.UtcNow }, wh.Url, wh.Triggers);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogDebug(ex, "SendDownloadFailedNotificationAsync failed for {Id}", download.Id);
-            }
-        }
-
-        public async Task SendSystemNotificationAsync(string title, string message)
-        {
-            try
-            {
-                var webhooks = await _configurationService.GetWebhookConfigurationsAsync();
-                foreach (var wh in webhooks.Where(w => w.IsEnabled && w.Triggers.Contains("System")))
-                    await SendNotificationAsync("System", new { Title = title, Message = message, Timestamp = DateTime.UtcNow }, wh.Url, wh.Triggers);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
-            {
-                _logger.LogDebug(ex, "SendSystemNotificationAsync failed");
-            }
-        }
-
-        // Compatibility shims removed — callers/tests should use NotificationPayloadBuilder directly.
+        // Webhook dispatch goes through SendNotificationAsync (see NotificationService.Webhooks.cs),
+        // driven by IBookLifecycleNotifier against the configurable trigger catalog. The former
+        // OnDownloadImportedAsync/OnDownloadFailedAsync/SendSystemNotificationAsync shims filtered on
+        // the hardcoded "Imported"/"Failed"/"System" names, which were never in that catalog (book-*)
+        // and so never sent — removed as part of #909.
 
         private bool AllowPrivateWebhookTargetsForCurrentRequest()
         {

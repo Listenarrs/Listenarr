@@ -17,6 +17,7 @@
  */
 
 using Listenarr.Application.Common;
+using Listenarr.Domain.Notifications;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Downloads.Submission
@@ -391,8 +392,9 @@ namespace Listenarr.Application.Downloads.Submission
                 downloadId,
                 ToSearchResult(candidate, prepared),
                 downloadClient);
-
-            await notificationService.SendNotificationAsync("book-downloading", notificationData, settings.WebhookUrl, settings.EnabledNotificationTriggers);
+            // Accepted by the client (grabbed) and now downloading — both fire at submission.
+            await notificationService.SendNotificationAsync(NotificationTriggers.BookGrabbed, notificationData, settings.WebhookUrl, settings.EnabledNotificationTriggers);
+            await notificationService.SendNotificationAsync(NotificationTriggers.BookDownloading, notificationData, settings.WebhookUrl, settings.EnabledNotificationTriggers);
 
             // Trigger an immediate realtime queue update so the UI shows the new download right away
             // Add a small delay to allow the download client to process and index the new download
@@ -479,20 +481,11 @@ namespace Listenarr.Application.Downloads.Submission
 
             await downloadRepository.UpdateAsync(download);
 
-            switch (previous.Status, download.Status)
-            {
-                case var (old, next) when old == next:
-                    return;
-                case (_, DownloadStatus.Moved):
-                    await notificationService.OnDownloadImportedAsync(download);
-                    return;
-                case (_, DownloadStatus.Failed):
-                case (_, DownloadStatus.ImportBlocked):
-                    await notificationService.OnDownloadFailedAsync(download);
-                    return;
-                default:
-                    return;
-            }
+            // Lifecycle notifications for completion/failure fire at their real pipeline points via
+            // IBookLifecycleNotifier (ImportFinalizationService, DownloadMonitorService,
+            // DownloadProcessingJobProcessor) against the configurable trigger catalog. The former
+            // status-switch here dispatched the legacy "Imported"/"Failed" webhook triggers, which
+            // were never in that catalog (book-*) and so never actually sent — see #909.
         }
     }
 }

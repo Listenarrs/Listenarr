@@ -1,3 +1,4 @@
+using Listenarr.Domain.Notifications;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -193,6 +194,17 @@ internal partial class MoveJobProcessor
                     webhook.Url,
                     webhook.Triggers);
             }
+
+            // Post-import move/organize finished: fire the standard "completed" lifecycle trigger
+            // (in addition to the legacy per-webhook "Moved" above), gated by the global enabled set.
+            var lifecycleNotifier = scope.ServiceProvider.GetRequiredService<IBookLifecycleNotifier>();
+            await lifecycleNotifier.NotifyAsync(NotificationTriggers.BookCompleted, new
+            {
+                title = context.AudiobookTitle,
+                source = context.Source,
+                target = context.Target,
+                context.SourceRetained,
+            });
 
             return true;
         }

@@ -7,25 +7,6 @@ namespace Listenarr.Application.Notifications.Contracts
     public interface INotificationService
     {
         /// <summary>
-        /// Sends a notification when a download completes successfully
-        /// </summary>
-        /// <param name="download">The completed download</param>
-        Task OnDownloadImportedAsync(Download download);
-
-        /// <summary>
-        /// Sends a notification when a download fails
-        /// </summary>
-        /// <param name="download">The failed download</param>
-        Task OnDownloadFailedAsync(Download download);
-
-        /// <summary>
-        /// Sends a general system notification
-        /// </summary>
-        /// <param name="title">Notification title</param>
-        /// <param name="message">Notification message</param>
-        Task SendSystemNotificationAsync(string title, string message);
-
-        /// <summary>
         /// Sends a notification to a specific webhook
         /// </summary>
         /// <param name="trigger">The event trigger name</param>
