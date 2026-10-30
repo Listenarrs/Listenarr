@@ -321,10 +321,27 @@ internal sealed partial class PinnedDirectoryCreation
         int command,
         IntPtr buffer);
 
-    [DllImport("libc", EntryPoint = "fstat", SetLastError = true)]
-    private static extern int FStatMac(
+    // macOS exposes two incompatible fstat ABIs. On x86_64 the bare "fstat" symbol is the
+    // pre-10.5 variant whose struct predates the 64-bit inode layout, so reading it as
+    // MacStatInformation yields garbage - st_mode lands on the wrong offset and every regular
+    // file is misreported (observed: type 0x2000, a character device). C code never hits this
+    // because <sys/stat.h> redirects fstat to fstat$INODE64; a raw P/Invoke does not.
+    // On arm64 there is no $INODE64 suffix - the bare symbol is already the modern ABI, and
+    // binding "fstat$INODE64" there fails with EntryPointNotFoundException.
+    [DllImport("libc", EntryPoint = "fstat$INODE64", SetLastError = true)]
+    private static extern int FStatMacInode64(
         int fileDescriptor,
         out MacStatInformation information);
+
+    [DllImport("libc", EntryPoint = "fstat", SetLastError = true)]
+    private static extern int FStatMacNative(
+        int fileDescriptor,
+        out MacStatInformation information);
+
+    private static int FStatMac(int fileDescriptor, out MacStatInformation information) =>
+        RuntimeInformation.ProcessArchitecture == Architecture.X64
+            ? FStatMacInode64(fileDescriptor, out information)
+            : FStatMacNative(fileDescriptor, out information);
 
     [DllImport("libc", EntryPoint = "fsync", SetLastError = true)]
     private static extern int FSync(int fileDescriptor);
