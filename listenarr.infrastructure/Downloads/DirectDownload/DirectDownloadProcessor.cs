@@ -62,13 +62,13 @@ internal sealed class DirectDownloadProcessor(
         {
             if (!TryResolveSourcePolicy(download, out var policy, out var policyError))
             {
-                await MarkFailedAsync(downloadRepository, download, policyError, cancellationToken);
+                await MarkFailedAsync(scope.ServiceProvider, download, policyError, cancellationToken);
                 return;
             }
 
             if (!TryResolveArtifacts(download, policy, out var artifacts, out var validationError))
             {
-                await MarkFailedAsync(downloadRepository, download, validationError, cancellationToken);
+                await MarkFailedAsync(scope.ServiceProvider, download, validationError, cancellationToken);
                 return;
             }
 
@@ -208,7 +208,7 @@ internal sealed class DirectDownloadProcessor(
                 TryDeleteStagingDirectory(stagingRoot);
             }
 
-            await MarkFailedAsync(downloadRepository, download, $"Direct download failed: {exception.Message}", cancellationToken);
+            await MarkFailedAsync(scope.ServiceProvider, download, $"Direct download failed: {exception.Message}", cancellationToken);
             logger.LogWarning(exception, "Direct-download item {DownloadId} failed", download.Id);
         }
     }
@@ -426,15 +426,41 @@ internal sealed class DirectDownloadProcessor(
         }
     }
 
-    private static async Task MarkFailedAsync(
-        IDownloadRepository downloadRepository,
+    private async Task MarkFailedAsync(
+        IServiceProvider services,
         Download download,
         string reason,
         CancellationToken cancellationToken)
     {
         download.Failed(reason);
         download.SetMetadata(DirectDownloadMetadataKeys.FailedAt, DateTime.UtcNow.ToString("O"));
-        await downloadRepository.UpdateAsync(download);
+        await services.GetRequiredService<IDownloadRepository>().UpdateAsync(download);
+
+        // The external-client monitor never sees a direct download, so this is the only place its
+        // failure can reach the blocklist. Same gate as there: an operator who turned failed-download
+        // handling off asked for failures to be left alone, and an entry has no expiry.
+        var settings = await services.GetRequiredService<IConfigurationService>().GetApplicationSettingsAsync();
+        if (!settings.FailedDownloadHandlingEnabled)
+        {
+            return;
+        }
+
+        try
+        {
+            await FailedDownloadBlocker.BlockAsync(
+                services.GetRequiredService<IBlocklistService>(),
+                download,
+                reason);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException && exception is not OutOfMemoryException && exception is not StackOverflowException)
+        {
+            // The download is already recorded as failed; losing the blocklist row must not turn
+            // that into an unhandled error in the worker cycle.
+            logger.LogWarning(
+                "Could not blocklist failed direct-download item {DownloadId}: {ErrorType}",
+                download.Id,
+                exception.GetType().Name);
+        }
     }
 
     private async Task EnsureResolvedExternalTargetAsync(Uri uri)
