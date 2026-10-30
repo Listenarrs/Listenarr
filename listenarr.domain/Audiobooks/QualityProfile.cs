@@ -74,6 +74,17 @@ namespace Listenarr.Domain.Audiobooks
         public List<string> MustContain { get; set; } = new();
 
         /// <summary>
+        /// Narrator names that increase score when a release's Narrator field matches
+        /// (e.g., "Scott Brick", "Stephen Fry")
+        /// </summary>
+        public List<string> PreferredNarrators { get; set; } = new();
+
+        /// <summary>
+        /// Narrator names that cause a release to be rejected when its Narrator field matches
+        /// </summary>
+        public List<string> ExcludedNarrators { get; set; } = new();
+
+        /// <summary>
         /// Preferred languages in order of preference (e.g., "English", "Spanish")
         /// </summary>
         public List<string> PreferredLanguages { get; set; } = new() { "English" };

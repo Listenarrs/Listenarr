@@ -976,6 +976,8 @@ export interface QualityProfile {
   preferredWords?: string[] // Words that increase score
   mustNotContain?: string[] // Instant rejection
   mustContain?: string[] // Must be present
+  preferredNarrators?: string[] // Narrator names that increase score
+  excludedNarrators?: string[] // Narrator names that cause instant rejection
   preferredLanguages?: string[] // e.g., ["English", "Spanish"]
   minimumSeeders?: number
   minimumScore?: number // Minimum score threshold for automatic downloads
