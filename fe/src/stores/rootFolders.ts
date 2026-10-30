@@ -40,9 +40,7 @@ export const useRootFoldersStore = defineStore('rootFolders', () => {
       }
     } catch (err) {
       logger.debug('Failed to load root folders:', err)
-      if (generation === loadGeneration) {
-        folders.value = []
-      }
+      // keep previously loaded folders on a failed reload
     } finally {
       if (generation === loadGeneration) {
         loading.value = false

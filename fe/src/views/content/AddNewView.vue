@@ -3341,6 +3341,8 @@ onMounted(async () => {
   await configStore.loadApplicationSettings()
   await configStore.loadApiConfigurations()
 
+  if (rootFoldersStore.folders.length === 0) await rootFoldersStore.load()
+
   const defaultRegion = normalizeSearchRegion(configStore.applicationSettings?.defaultSearchRegion)
   const defaultLanguage = configStore.applicationSettings?.defaultSearchLanguage
   // Coming back to a search of this session: show it with the region and language it was made in
