@@ -44,6 +44,13 @@ namespace Listenarr.Infrastructure.Configuration.Paths
         private static readonly TimeSpan ClientCacheLifetime = TimeSpan.FromSeconds(10);
         private static readonly AsyncKeyedLocker<string> ClientCacheLocks = new();
 
+        // Update and delete read the mapping's current owner, write, then clear the owners they saw.
+        // Two writers that both read the same owner before either saves would each miss the client the
+        // other moved the mapping to, so the read, write and clears run as one step across writers.
+        // Lock order: WriterLock, then one ClientCacheLocks key at a time. A fill takes only its own
+        // key and never WriterLock, so neither can wait on the other in a cycle.
+        private static readonly SemaphoreSlim WriterLock = new(1, 1);
+
         public async Task<List<RemotePathMapping>> GetPathMappingByClientAsync(DownloadClientConfiguration client)
         {
             var cacheKey = ClientCacheKey(client.Id);
@@ -103,6 +110,19 @@ namespace Listenarr.Infrastructure.Configuration.Paths
 
         public async Task<RemotePathMapping> UpdateAsync(RemotePathMapping mapping)
         {
+            await WriterLock.WaitAsync();
+            try
+            {
+                return await UpdateUnderWriterLockAsync(mapping);
+            }
+            finally
+            {
+                WriterLock.Release();
+            }
+        }
+
+        private async Task<RemotePathMapping> UpdateUnderWriterLockAsync(RemotePathMapping mapping)
+        {
             var existing = await remotePathMappingRepository.GetByIdAsync(mapping.Id);
             if (existing == null)
             {
@@ -135,6 +155,19 @@ namespace Listenarr.Infrastructure.Configuration.Paths
         }
 
         public async Task<bool> DeleteAsync(int id)
+        {
+            await WriterLock.WaitAsync();
+            try
+            {
+                return await DeleteUnderWriterLockAsync(id);
+            }
+            finally
+            {
+                WriterLock.Release();
+            }
+        }
+
+        private async Task<bool> DeleteUnderWriterLockAsync(int id)
         {
             var existing = await remotePathMappingRepository.GetByIdAsync(id);
             if (existing == null) return false;
