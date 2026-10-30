@@ -46,6 +46,13 @@
         title="Show completed external downloads in Activity"
         description="When enabled, completed torrents/NZBs from external clients will remain visible in the Activity view. When disabled, completed external items will be hidden to reduce clutter."
       />
+
+      <CheckboxCard
+        :modelValue="settings.metadataAutoBackfillEnabled ?? false"
+        @update:modelValue="updateMetadataAutoBackfillEnabled"
+        title="Fill missing metadata from online sources automatically"
+        description="Books that have files but lack a description, cover, narrators, publisher, language or release date are looked up by their own ASIN/ISBN in the background and only the blank fields are filled in. Existing values are never overwritten. Runs a small batch every 15 minutes."
+      />
     </div>
   </div>
 </template>
@@ -80,6 +87,10 @@ function updateEnableNotifications(value: boolean) {
 
 function updateShowCompletedExternalDownloads(value: boolean) {
   updateField('showCompletedExternalDownloads', value)
+}
+
+function updateMetadataAutoBackfillEnabled(value: boolean) {
+  updateField('metadataAutoBackfillEnabled', value)
 }
 </script>
 

@@ -76,6 +76,14 @@ namespace Listenarr.Domain.Audiobooks
         public DateTime? LastSearchTime { get; set; }
 
         /// <summary>
+        /// UTC time the automatic metadata backfill last looked this book up
+        /// online (whether or not anything was filled). Lets the worker rotate
+        /// through candidates and retry misses on a slow cadence instead of
+        /// hammering the same unresolvable ASIN every cycle.
+        /// </summary>
+        public DateTime? MetadataBackfillAttemptedAt { get; set; }
+
+        /// <summary>
         /// Create AudioMetadata from the Audiobook as a basic metadata for imported files
         /// </summary>
         /// <returns>AudioMetada based on the audiobook retrieved metadata</returns>
