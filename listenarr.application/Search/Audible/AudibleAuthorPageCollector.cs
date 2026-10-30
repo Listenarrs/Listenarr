@@ -42,12 +42,13 @@ namespace Listenarr.Application.Search.Audible
                     aggregated.AddRange(pageRes?.Results ?? Enumerable.Empty<AudibleSearchResult>());
 
                     _logger.LogInformation(
-                        "Audible {Context}: page {Page} returned {PageCount} results (aggregated {AggregatedCount}) for author '{Author}'",
+                        "Audible {Context}: page {Page} returned {PageCount} results (aggregated {AggregatedCount}) for author '{Author}' in region {Region}",
                         logContext,
                         page,
                         pageCount,
                         aggregated.Count,
-                        author);
+                        author,
+                        region);
 
                     if (pageRes?.Results == null || pageCount == 0)
                     {

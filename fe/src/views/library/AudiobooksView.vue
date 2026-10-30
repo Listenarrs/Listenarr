@@ -120,6 +120,10 @@
           <PhFolderOpen />
           Organize Selected
         </button>
+        <button v-if="selectedCount > 0" class="toolbar-btn repair-btn" @click="showRepair">
+          <PhWrench />
+          Repair Selected ({{ selectedCount }})
+        </button>
         <button v-if="selectedCount > 0" class="toolbar-btn delete-btn" @click="confirmBulkDelete">
           <PhTrash />
           Delete Selected ({{ selectedCount }})
@@ -703,8 +707,20 @@
     <RenamePreviewModal
       :visible="showOrganizeModal"
       :audiobook-ids="organizeAudiobookIds"
+      :title="isOrganizeFromRepair ? REPAIR_ORGANIZE_TITLE : undefined"
+      :back="isOrganizeFromRepair"
+      @back="backToRepair"
       @close="closeOrganize"
       @done="handleOrganizeDone"
+    />
+
+    <RepairBooksModal
+      :visible="showRepairModal"
+      :audiobook-ids="repairAudiobookIds"
+      :is-resumed="isRepairResumed"
+      @close="showRepairModal = false"
+      @done="handleRepairDone"
+      @organize="organizeRepaired"
     />
 
     <!-- Custom Filter Modal -->
@@ -823,6 +839,7 @@ import {
   PhUser,
   PhBooks,
   PhFolderOpen,
+  PhWrench,
 } from '@phosphor-icons/vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
@@ -836,6 +853,8 @@ import { logger } from '@/utils/logger'
 import BulkEditModal from '@/components/domain/collection/BulkEditModal.vue'
 import EditAudiobookModal from '@/components/domain/audiobook/EditAudiobookModal.vue'
 import RenamePreviewModal from '@/components/domain/organize/RenamePreviewModal.vue'
+import RepairBooksModal from '@/components/domain/repair/RepairBooksModal.vue'
+import { REPAIR_ORGANIZE_TITLE } from '@/utils/repair'
 import DeleteConfirmationModal from '@/components/feedback/DeleteConfirmationModal.vue'
 import CustomSelect from '@/components/form/CustomSelect.vue'
 import FiltersDropdown from '@/components/ui/FiltersDropdown.vue'
@@ -1823,6 +1842,12 @@ const qualityProfiles = ref<QualityProfile[]>([])
 const showBulkEditModal = ref(false)
 const showOrganizeModal = ref(false)
 const organizeAudiobookIds = ref<number[]>([])
+// Organize opened by Repair, as its last step
+const isOrganizeFromRepair = ref(false)
+const showRepairModal = ref(false)
+const repairAudiobookIds = ref<number[]>([])
+// Repair shown again by Back from its step 3 (Organize): as it was left
+const isRepairResumed = ref(false)
 const showEditModal = ref(false)
 const editAudiobook = ref<Audiobook | null>(null)
 const lastClickedIndex = ref<number | null>(null)
@@ -2334,11 +2359,38 @@ function closeBulkEdit() {
 
 function showOrganize() {
   organizeAudiobookIds.value = Array.from(libraryStore.selectedIds)
+  isOrganizeFromRepair.value = false
   showOrganizeModal.value = true
 }
 
 function closeOrganize() {
   showOrganizeModal.value = false
+}
+
+function showRepair() {
+  repairAudiobookIds.value = Array.from(libraryStore.selectedIds)
+  isRepairResumed.value = false
+  showRepairModal.value = true
+}
+
+async function handleRepairDone() {
+  showRepairModal.value = false
+  await libraryStore.fetchLibrary()
+}
+
+async function organizeRepaired(audiobookIds: number[]) {
+  showRepairModal.value = false
+  await libraryStore.fetchLibrary()
+  organizeAudiobookIds.value = audiobookIds
+  isOrganizeFromRepair.value = true
+  showOrganizeModal.value = true
+}
+
+// Back from Organize to Repair's step 2, as it was left
+function backToRepair() {
+  showOrganizeModal.value = false
+  isRepairResumed.value = true
+  showRepairModal.value = true
 }
 
 async function handleOrganizeDone() {
@@ -2550,6 +2602,17 @@ defineExpose({
 
 .toolbar-btn.edit-btn:hover {
   background-color: #1976d2;
+}
+
+/* Orange, like the problems Repair fixes; dark text stays readable on it */
+.toolbar-btn.repair-btn {
+  background-color: var(--warning-500);
+  border-color: var(--warning-600);
+  color: #1a1a1a;
+}
+
+.toolbar-btn.repair-btn:hover {
+  background-color: var(--warning-600);
 }
 
 .toolbar-btn.delete-btn {
@@ -3064,19 +3127,19 @@ defineExpose({
 }
 
 .legend-dot.status-downloading {
-  background-color: #3498db;
+  background-color: var(--status-progress);
 }
 
 .legend-dot.status-no-file {
-  background-color: #e74c3c;
+  background-color: var(--status-error);
 }
 
 .legend-dot.status-quality-mismatch {
-  background-color: #f39c12;
+  background-color: var(--status-warning);
 }
 
 .legend-dot.status-quality-match {
-  background-color: #2ecc71;
+  background-color: var(--status-success);
 }
 
 @media (max-width: 768px) {
@@ -3162,48 +3225,48 @@ defineExpose({
 }
 
 .audiobook-item.status-no-file .audiobook-poster-container {
-  border-bottom: 3px solid #e74c3c;
+  border-bottom: 3px solid var(--status-error);
 }
 
 .audiobook-item.status-downloading .audiobook-poster-container {
-  border-bottom: 3px solid #3498db;
+  border-bottom: 3px solid var(--status-progress);
   animation: pulse 2s ease-in-out infinite;
 }
 
 @keyframes pulse {
   0%,
   100% {
-    border-bottom-color: #3498db;
+    border-bottom-color: var(--status-progress);
   }
   50% {
-    border-bottom-color: #5dade2;
+    border-bottom-color: var(--status-progress-light);
   }
 }
 
 .audiobook-item.status-quality-mismatch .audiobook-poster-container {
-  border-bottom: 3px solid #f39c12;
+  border-bottom: 3px solid var(--status-warning);
 }
 
 .audiobook-item.status-quality-match .audiobook-poster-container {
-  border-bottom: 3px solid #2ecc71;
+  border-bottom: 3px solid var(--status-success);
 }
 
 /* List view status borders */
 .audiobook-list-item.status-no-file .list-thumb {
-  border-bottom: 3px solid #e74c3c;
+  border-bottom: 3px solid var(--status-error);
 }
 
 .audiobook-list-item.status-downloading .list-thumb {
-  border-bottom: 3px solid #3498db;
+  border-bottom: 3px solid var(--status-progress);
   animation: pulse 2s ease-in-out infinite;
 }
 
 .audiobook-list-item.status-quality-mismatch .list-thumb {
-  border-bottom: 3px solid #f39c12;
+  border-bottom: 3px solid var(--status-warning);
 }
 
 .audiobook-list-item.status-quality-match .list-thumb {
-  border-bottom: 3px solid #2ecc71;
+  border-bottom: 3px solid var(--status-success);
 }
 
 .selection-checkbox {
