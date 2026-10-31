@@ -122,11 +122,13 @@ public partial class AudiobookFileService
             cancellationToken);
     }
 
-    // Distinguishes a real ffprobe extraction from a filename-only fallback, mirroring the retry
-    // signal in ExtractMetadataAsync: a genuine read yields a duration and/or a format.
+    // Distinguishes a real ffprobe extraction from a filename-only fallback. CreateFilenameFallback
+    // sets Title and a Format (the upper-cased file extension, e.g. "M4B") but never a Duration, so
+    // a positive duration is the only reliable proof the audio was actually decoded. Gating on
+    // Format too would treat the fallback as a success, record the replaced file's size, and advance
+    // the scan's size gate so the file is never re-probed after ffprobe recovers (#1084 review).
     private static bool HasExtractedAudioMetadata(AudioMetadata metadata) =>
-        metadata.Duration > TimeSpan.Zero
-        || !string.IsNullOrEmpty(metadata.Format);
+        metadata.Duration > TimeSpan.Zero;
 
     private async Task<bool> CanRefreshOwnedMetadataAsync(
         Audiobook audiobook,

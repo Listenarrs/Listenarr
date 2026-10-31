@@ -546,48 +546,60 @@ public sealed class AudiobookScanServiceTests : BaseTests
     [Fact]
     public async Task ScanAsync_MetadataExtractionFails_StaysEligibleUntilItSucceeds()
     {
-        // If ffprobe fails, extraction falls back to filename-only metadata. Recording the new
-        // size for that fallback would advance the size gate and skip the file forever, even after
-        // ffprobe recovers (#1084 review). The size must stay unrecorded until a real extraction,
-        // so an unchanged file is re-probed on the next scan.
+        // A failed ffprobe falls back to filename-only metadata that still carries a Format (the
+        // upper-cased file extension, e.g. "M4B") but no duration. Treating that as a successful
+        // extraction would record the replaced file's size, advance the cheap size gate, and skip
+        // the file forever even after ffprobe recovers (#1084 review). A fallback must leave the
+        // stored size unchanged, so the file is re-probed on the next scan until a real read
+        // (one that yields a duration) succeeds.
         var root = FileService.GetTempDirectory("scan-service-refresh-retry");
         var candidate = await FileService.GetFileAsync(
             root,
             "Requested Book.m4b",
-            "the-real-audio-bytes");
-        var probeSucceeds = false;
+            "original");
+        var probeSucceeds = true;
         var metadata = new Mock<IMetadataService>();
         metadata.Setup(service => service.ExtractFileMetadataAsync(
                 It.IsAny<MetadataFileSource>()))
             .ReturnsAsync(() => probeSucceeds
                 ? new AudioMetadata { Duration = TimeSpan.FromSeconds(1), Format = "m4b" }
-                : new AudioMetadata()); // ffprobe failed: filename-only fallback, no audio metadata
+                // Real CreateFilenameFallback shape when ffprobe fails: a Format from the
+                // extension and a Title, but no duration.
+                : new AudioMetadata { Title = "Requested Book", Format = "M4B" });
         Init(services => services.WithSingleton<IMetadataService>(metadata.Object));
         var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
             .WithTitle("Requested Book")
             .WithBasePath(root)
             .Build());
-        // Pre-seed the tracked file with no recorded size/metadata so the refresh pass runs.
-        var tracked = await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
-            .WithAudiobook(audiobook)
-            .WithPath(candidate)
-            .Build());
-        Assert.Null(tracked.Size);
+
+        // First scan: a real extraction tracks the file with its original size.
+        await ScanAsync(audiobook, root);
+        var original = Assert.Single(
+            await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id));
+        var originalSize = original.Size;
+        Assert.NotNull(originalSize);
+
+        // Replace the tracked file with a different-size body, then make the next probe fail.
+        await File.WriteAllTextAsync(candidate, "a-much-longer-replacement-body");
+        var newLength = new FileInfo(candidate).Length;
+        Assert.NotEqual(originalSize, newLength);
+        probeSucceeds = false;
 
         await ScanAsync(audiobook, root);
         var afterFailure = Assert.Single(
             await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id));
-        Assert.Null(afterFailure.Format);
-        Assert.Null(afterFailure.Size); // the failed probe did not advance the size gate
+        // The filename fallback (carrying its "M4B" format) must not advance the size gate.
+        Assert.Equal(originalSize, afterFailure.Size);
 
-        // The file is not touched between scans; only ffprobe recovers.
+        // The file is not touched again; only ffprobe recovers. Because the size stayed stale, the
+        // file is still eligible, so this scan re-probes and records both the new size and metadata.
         probeSucceeds = true;
         await ScanAsync(audiobook, root);
 
         var afterSuccess = Assert.Single(
             await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id));
+        Assert.Equal(newLength, afterSuccess.Size);
         Assert.Equal("m4b", afterSuccess.Format);
-        Assert.Equal(new FileInfo(candidate).Length, afterSuccess.Size);
     }
 
     [LinuxFact]
