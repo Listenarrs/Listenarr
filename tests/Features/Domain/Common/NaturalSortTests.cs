@@ -16,12 +16,13 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Tests.Builders;
+using Listenarr.Tests.Common;
 
 namespace Listenarr.Tests.Features.Domain.Common;
 
 [Trait("Name", "NaturalSortTests")]
 [Trait("Category", "Domain")]
-public sealed class NaturalSortTests
+public sealed class NaturalSortTests : BaseTests
 {
     private static int Compare(string left, string right) =>
         string.CompareOrdinal(NaturalSort.ToKey(left), NaturalSort.ToKey(right));
