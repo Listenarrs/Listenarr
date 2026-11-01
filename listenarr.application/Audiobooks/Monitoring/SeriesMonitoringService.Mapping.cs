@@ -11,7 +11,8 @@ namespace Listenarr.Application.Audiobooks.Monitoring
     {
         private static AudibleBookMetadata MapToMetadata(AudibleSearchResult book)
         {
-            var primarySeries = book.Series?.FirstOrDefault();
+            var seriesMemberships = MetadataConverters.BuildSeriesMemberships(book.Series);
+            var primarySeries = AudiobookSeriesMembershipHelper.GetPrimaryMembership(seriesMemberships);
             var runtime = book.LengthMinutes ?? book.RuntimeLengthMin ?? book.RuntimeMinutes;
 
             return new AudibleBookMetadata
@@ -38,8 +39,9 @@ namespace Listenarr.Application.Audiobooks.Monitoring
                     .Where(genre => !string.IsNullOrWhiteSpace(genre))
                     .Cast<string>()
                     .ToList(),
-                Series = primarySeries?.Name,
-                SeriesNumber = primarySeries?.Position,
+                SeriesMemberships = seriesMemberships,
+                Series = primarySeries?.SeriesName,
+                SeriesNumber = primarySeries?.SeriesNumber,
                 PublishedDate = book.ReleaseDate,
                 PublishYear = TryExtractPublishYear(book.ReleaseDate),
                 Isbn = string.IsNullOrWhiteSpace(book.Isbn) ? new List<string>() : new List<string> { book.Isbn },

@@ -66,7 +66,8 @@ namespace Listenarr.Api.Features.Library
                     audiobook,
                     metadata.SeriesMemberships,
                     metadata.Series,
-                    metadata.SeriesNumber);
+                    metadata.SeriesNumber,
+                    metadata.SeriesAsin);
             }
 
             var authors = NormalizeMetadataStringList(

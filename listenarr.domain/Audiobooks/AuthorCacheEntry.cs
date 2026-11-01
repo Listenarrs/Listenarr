@@ -80,6 +80,10 @@ namespace Listenarr.Domain.Audiobooks
 
         public string? SeriesNumber { get; set; }
 
+        // Every series the catalog listed, with identifiers. Series/SeriesNumber stay as the first entry for
+        // readers of rows cached before this list existed, which also read back with it null.
+        public List<CachedCatalogSeries>? SeriesEntries { get; set; }
+
         public string? PublishedDate { get; set; }
 
         public string? Isbn { get; set; }
@@ -87,5 +91,14 @@ namespace Listenarr.Domain.Audiobooks
         public string? Link { get; set; }
 
         public string? MetadataSource { get; set; }
+    }
+
+    public class CachedCatalogSeries
+    {
+        public string? Asin { get; set; }
+
+        public string? Name { get; set; }
+
+        public string? Position { get; set; }
     }
 }
