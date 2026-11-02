@@ -132,7 +132,7 @@ public partial class TorznabNewznabSearchProvider : IIndexerSearchProvider
                                     // The same bitrate test the description branch uses, so a filetype of
                                     // "1920x1080" is not read as 192kbps. This attribute outranks the text
                                     // below, so it has to be at least as careful.
-                                    result.Quality = SearchResultAttributeParser.DetectBitrateQuality(normalizedFmt)
+                                    result.Quality = SearchResultAttributeParser.DetectBitrateQuality(normalizedFmt, result.Format)
                                         ?? (normalizedFmt.Contains("m4b") ? "M4B" : null);
                                 }
                                 break;
@@ -340,26 +340,31 @@ public partial class TorznabNewznabSearchProvider : IIndexerSearchProvider
                         // Try to extract quality/format from description or title
                         var titleAndDesc = $"{result.Title} {description}".ToLower();
 
-                        // A filetype/format attribute is the indexer stating what the release is;
-                        // the title and description are free text we are guessing from. Only fill
-                        // Quality from the text when the attributes left it empty, so the guess
-                        // cannot overwrite a label the indexer declared.
-                        if (string.IsNullOrEmpty(result.Quality))
+                        // A filetype/format attribute is the indexer stating what the release
+                        // is; the title and description are free text we are guessing from. The text
+                        // fills Format and Quality only where the attributes left them empty, so the
+                        // guess cannot overwrite a value the indexer declared: a book called "Magnum
+                        // Opus" with format=mp3 is an MP3, not an OPUS release.
+                        if (string.IsNullOrEmpty(result.Format))
                         {
-                            result.Quality = SearchResultAttributeParser.DetectQualityFromTags(titleAndDesc);
+                            if (titleAndDesc.Contains("m4b"))
+                                result.Format = "M4B";
+                            else if (titleAndDesc.Contains("flac"))
+                                result.Format = "FLAC";
+                            else if (titleAndDesc.Contains("mp3"))
+                                result.Format = "MP3";
+                            else if (titleAndDesc.Contains("opus"))
+                                result.Format = "OPUS";
+                            else if (titleAndDesc.Contains("aac"))
+                                result.Format = "AAC";
                         }
 
-                        // Detect format
-                        if (titleAndDesc.Contains("m4b"))
-                            result.Format = "M4B";
-                        else if (titleAndDesc.Contains("flac"))
-                            result.Format = "FLAC";
-                        else if (titleAndDesc.Contains("mp3"))
-                            result.Format = "MP3";
-                        else if (titleAndDesc.Contains("opus"))
-                            result.Format = "OPUS";
-                        else if (titleAndDesc.Contains("aac"))
-                            result.Format = "AAC";
+                        // The bitrate in the text is a rate, not a codec: the label takes its codec from the
+                        // Format settled above, so a declared AAC release is not relabelled MP3.
+                        if (string.IsNullOrEmpty(result.Quality))
+                        {
+                            result.Quality = SearchResultAttributeParser.DetectQualityFromTags(titleAndDesc, result.Format);
+                        }
 
                         // Detect language codes present in title or description (e.g. [ENG / M4B])
                         try

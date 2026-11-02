@@ -272,12 +272,11 @@ namespace Listenarr.Application.Search.Scoring
                     // one stays in the pool carrying the missing-quality penalty below.
                     //
                     // Both gates are only as good as whatever classified the release. For Torznab
-                    // that is TorznabResponseParser. Its Quality no longer comes from a bare digit
-                    // scan and no longer overwrites a declared attribute, but its Format still
-                    // does: a substring scan of title plus description replaces the filetype
-                    // attribute, so a book called "Magnum Opus" arrives here with Format "OPUS".
-                    // Neither gate reads a title itself, and neither can tell a parsed title apart
-                    // from a declared attribute. Fixing that precedence belongs in the parser.
+                    // that is the Torznab parsers. Neither Quality nor Format comes from a bare
+                    // text scan any more where the indexer declared an attribute: the scan only
+                    // fills what the attributes left empty. Neither gate reads a title itself, and
+                    // neither can tell a parsed title apart from a declared attribute, so that
+                    // precedence has to hold in the parser.
                     //
                     // DetectFormatFromTitle can also write into normalizedFormat, but only under
                     // isNzb, and this branch is torrent-only. Anyone hoisting these gates out of

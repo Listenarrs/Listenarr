@@ -91,12 +91,13 @@ public static class SearchResultAttributeParser
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     /// <summary>
-    /// Returns the highest recognised MP3 bitrate label that <paramref name="text"/> states as a
+    /// Returns the highest bitrate tier, in kbps, that <paramref name="text"/> states as a
     /// bitrate, or null when it states none. A number that merely happens to be 64, 128, 192, 256
     /// or 320 is not one: not inside a longer token (x264, 1964, 1280x720) and not standing on its
-    /// own either (Size: 320 MB, Chapter 64, 128,000 words).
+    /// own either (Size: 320 MB, Chapter 64, 128,000 words). This reads the rate only; which codec
+    /// the rate belongs to is the caller's to say.
     /// </summary>
-    public static string? DetectBitrateQuality(string text)
+    public static int? DetectBitrateKbps(string text)
     {
         if (string.IsNullOrEmpty(text))
             return null;
@@ -105,15 +106,22 @@ public static class SearchResultAttributeParser
         if (bestKbps == 0 && Mp3CodecWordPattern.IsMatch(text))
             bestKbps = HighestTier(BracketedTierPattern.Matches(text));
 
-        return bestKbps switch
-        {
-            320 => "MP3 320kbps",
-            256 => "MP3 256kbps",
-            192 => "MP3 192kbps",
-            128 => "MP3 128kbps",
-            64 => "MP3 64kbps",
-            _ => null
-        };
+        return bestKbps == 0 ? null : bestKbps;
+    }
+
+    /// <summary>
+    /// Returns the bitrate label for the highest tier <paramref name="text"/> states, or null when
+    /// it states none. The label carries <paramref name="codec"/> when that is AAC and MP3 for any
+    /// other value, because those are the only two codecs the quality ladder has bitrate rungs for.
+    /// </summary>
+    public static string? DetectBitrateQuality(string text, string? codec = null)
+    {
+        var kbps = DetectBitrateKbps(text);
+        if (kbps is null)
+            return null;
+
+        var family = string.Equals(codec, "AAC", StringComparison.OrdinalIgnoreCase) ? "AAC" : "MP3";
+        return $"{family} {kbps}kbps";
     }
 
     private static int HighestTier(MatchCollection matches)
@@ -128,14 +136,14 @@ public static class SearchResultAttributeParser
         return best;
     }
 
-    public static string DetectQualityFromTags(string tags)
+    public static string DetectQualityFromTags(string tags, string? codec = null)
     {
         var lowerTags = tags.ToLowerInvariant();
 
         if (lowerTags.Contains("flac"))
             return "FLAC";
 
-        var bitrate = DetectBitrateQuality(lowerTags);
+        var bitrate = DetectBitrateQuality(lowerTags, codec);
         if (bitrate != null)
             return bitrate;
 
