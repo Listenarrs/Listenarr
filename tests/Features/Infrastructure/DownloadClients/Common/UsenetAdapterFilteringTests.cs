@@ -18,6 +18,7 @@
 using System.Net;
 using System.Text;
 using System.Xml.Linq;
+using Listenarr.Domain.Downloads.Exceptions;
 
 using Listenarr.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -243,6 +244,65 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Common
                 logger.Levels,
                 level => level >= LogLevel.Warning);
         }
+
+        [Fact]
+        [Trait("Scenario", "NzbgetTrackedLookupIgnoresConfiguredCategory")]
+        public async Task Nzbget_GetTrackedQueue_IgnoresConfiguredCategory()
+        {
+            var xml = BuildNzbGetListGroupsResponse(
+                ("101", "Book One", "audiobooks", "DOWNLOADING"),
+                ("202", "Movie One", "movies", "DOWNLOADING"));
+            var adapter = CreateNzbgetAdapter(methodName => methodName == "listgroups" ? xml : BuildNzbGetListGroupsResponse());
+            var client = CreateCategorizedNzbgetClient();
+
+            var monitored = await adapter.GetQueueAsync(client, ["202"], CancellationToken.None);
+            var tracked = await adapter.GetTrackedQueueAsync(client, ["202"], CancellationToken.None);
+
+            Assert.Empty(monitored);
+            var item = Assert.Single(tracked);
+            Assert.Equal("Movie One", item.Title);
+        }
+
+        [Fact]
+        [Trait("Scenario", "NzbgetFullPollUnreadableEntryFails")]
+        public async Task Nzbget_GetQueue_FullPoll_Throws_WhenListGroupsEntryIsUnreadable()
+        {
+            const string xml = "<?xml version=\"1.0\"?><methodResponse><params><param><value><array><data><value><string>not a group</string></value></data></array></value></param></params></methodResponse>";
+            var adapter = CreateNzbgetAdapter(methodName => methodName == "listgroups" ? xml : BuildNzbGetListGroupsResponse());
+
+            await Assert.ThrowsAsync<DownloadClientAdapterPollingException>(
+                () => adapter.GetQueueAsync(CreateCategorizedNzbgetClient(), CancellationToken.None));
+        }
+
+        private static NzbgetAdapter CreateNzbgetAdapter(Func<string, string> responseForMethod)
+        {
+            var handler = new DelegatingHandlerMock(async (req, ct) =>
+            {
+                var body = await req.Content!.ReadAsStringAsync(ct);
+                var methodName = XDocument.Parse(body).Root?.Element("methodName")?.Value ?? string.Empty;
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(responseForMethod(methodName), Encoding.UTF8, "text/xml")
+                };
+            });
+
+            return new NzbgetAdapter(
+                new TestHttpClientFactory(new HttpClient(handler)),
+                Mock.Of<INzbUrlResolver>(),
+                NullLogger<NzbgetAdapter>.Instance);
+        }
+
+        private static DownloadClientConfiguration CreateCategorizedNzbgetClient() => new()
+        {
+            Id = "nzb-client",
+            Type = "nzbget",
+            Host = "localhost",
+            Port = 6789,
+            Settings = new Dictionary<string, object>
+            {
+                ["category"] = "audiobooks"
+            }
+        };
 
         private static string BuildNzbGetListGroupsResponse(params (string Id, string Name, string Category, string Status)[] groups)
         {

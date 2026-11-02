@@ -979,11 +979,11 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
         [InlineData("malformed")]
         [InlineData("authentication")]
         [InlineData("fault")]
-        public async Task QueuePath_HistoryFailure_ReturnsActiveOnlyForNonCancellationFailure(
+        public async Task QueuePath_HistoryFailure_FailsFullPollForNonCancellationFailure(
             string failureKind)
         {
             // AC: AC-NZB-014 requires malformed/auth/fault history failures to fail polling explicitly.
-            // Behavior: Non-cancellation history boundary failure -> public poll -> contextual polling exception.
+            // Behavior: Non-cancellation history boundary failure on a full poll -> polling exception, so orphan cleanup never sees a partial snapshot.
             // @category: edge-case
             // @lane: integration
             // @dependency: XML-RPC HTTP/status/fault parsing
@@ -1019,11 +1019,12 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
             using var http = new HttpClient(apiMock);
             var adapter = CreateAdapter(http);
 
-            await FetchDownloadsThroughQueuePathAsync(
-                adapter,
-                CreateClient(),
-                [],
-                CancellationToken.None);
+            await Assert.ThrowsAsync<DownloadClientAdapterPollingException>(
+                () => FetchDownloadsThroughQueuePathAsync(
+                    adapter,
+                    CreateClient(),
+                    [],
+                    CancellationToken.None));
 
             Assert.Collection(
                 apiMock.XmlRpcCalls,
@@ -1551,10 +1552,10 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
         }
 
         [Fact]
-        public async Task GetQueueAndItemsAsync_HistoryFailure_ReturnEquivalentActiveOnlyResults()
+        public async Task GetQueueAndItemsAsync_HistoryFailure_FailsFullQueueAndKeepsActiveItems()
         {
-            // AC: AC-NZB-014 requires paired non-cancellation degradation without losing either active prefix.
-            // Behavior: Equivalent malformed history responses -> both public surfaces -> active-only output and one sanitized surface warning each.
+            // AC: AC-NZB-014 requires non-cancellation history failure to fail the full queue poll; the items surface keeps its active-only fallback.
+            // Behavior: Equivalent malformed history responses -> queue throws, items return active-only, one sanitized surface warning each.
             // @category: edge-case
             // @lane: integration
             // @dependency: typed history failure contract
@@ -1573,20 +1574,13 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
             var client = CreateClient();
             client.Id = "parity-client";
 
-            var queue = await adapter.GetQueueAsync(client);
+            await Assert.ThrowsAsync<DownloadClientAdapterPollingException>(() => adapter.GetQueueAsync(client));
             var items = await adapter.GetItemsAsync(client);
 
-            var queueActive = Assert.Single(queue);
             var itemActive = Assert.Single(items);
-            Assert.Equal("9301", queueActive.Id);
             Assert.Equal("9301", itemActive.DownloadId);
-            Assert.Equal("Active Only", queueActive.Title);
             Assert.Equal("Active Only", itemActive.Title);
-            Assert.Equal("queued", queueActive.Status);
             Assert.Equal(DownloadItemStatus.Queued, itemActive.Status);
-            Assert.Null(queueActive.ContentPath);
-            Assert.NotNull(queueActive.SourceFiles);
-            Assert.Empty(queueActive.SourceFiles);
             Assert.Equal(string.Empty, itemActive.OutputPath);
             Assert.Equal(
                 ["GetQueueAsync", "GetItemsAsync"],
@@ -2475,11 +2469,11 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
         [InlineData("authentication")]
         [InlineData("fault")]
         [InlineData("invalid-shape")]
-        public async Task GetQueueAsync_HistoryFailure_LogsSanitizedWarningAndReturnsActiveOnly(
+        public async Task GetQueueAsync_HistoryFailure_LogsSanitizedWarningAndFailsFullPoll(
             string failureKind)
         {
-            // AC: AC-NZB-014 requires non-cancellation history failure to return fully mapped active output with sanitized warning context.
-            // Behavior: Malformed/auth/fault/shape history failure -> queue boundary -> exact active-only fields and non-sensitive warning.
+            // AC: AC-NZB-014 requires non-cancellation history failure to fail the full queue poll with sanitized warning context.
+            // Behavior: Malformed/auth/fault/shape history failure -> queue boundary -> polling exception and non-sensitive warning.
             // @category: edge-case
             // @lane: integration
             // @dependency: typed history reader failure contract and LogRedaction
@@ -2519,32 +2513,8 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
             client.Username = "private-user";
             client.Password = "private-password";
 
-            var queue = await adapter.GetQueueAsync(client);
+            await Assert.ThrowsAsync<DownloadClientAdapterPollingException>(() => adapter.GetQueueAsync(client));
 
-            var active = Assert.Single(queue);
-            AssertQueueItemStableFields(
-                new QueueItem
-                {
-                    Id = "9501",
-                    Title = "Active Only",
-                    Quality = "audiobooks",
-                    Status = "queued",
-                    Progress = 0,
-                    Size = 5L * 1024 * 1024,
-                    Downloaded = 0,
-                    DownloadSpeed = 1_048_576,
-                    Eta = 5,
-                    DownloadClient = "private-name",
-                    DownloadClientId = "queue-client\r\nforged",
-                    DownloadClientType = "nzbget",
-                    CanPause = true,
-                    CanRemove = true,
-                    RemotePath = "/active",
-                    LocalPath = "/active",
-                    ContentPath = null,
-                    SourceFiles = []
-                },
-                active);
             var warning = Assert.Single(
                 logger.Entries,
                 entry => entry.Level == LogLevel.Warning);
@@ -2633,15 +2603,14 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
         public async Task GetQueueAsync_NormalizesHostWithSchemeAndPath()
         {
             Uri? capturedUri = null;
-            using var response = new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(
-                    "<?xml version=\"1.0\"?><methodResponse><params><param><value><array><data></data></array></value></param></params></methodResponse>")
-            };
             var handler = new DelegatingHandlerMock((req, _) =>
             {
                 capturedUri = req.RequestUri;
-                return Task.FromResult(response);
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        "<?xml version=\"1.0\"?><methodResponse><params><param><value><array><data></data></array></value></param></params></methodResponse>")
+                });
             });
 
             using var http = new HttpClient(handler);
@@ -2768,7 +2737,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
         }
 
         [Fact]
-        public async Task GetQueueAsync_FullSnapshot_DoesNotThrow_WhenHistoryFails()
+        public async Task GetQueueAsync_FullSnapshot_Throws_WhenHistoryFails()
         {
             using var apiMock = new NzbgetApiMock();
             apiMock.QueueXmlRpcResponse(
@@ -2779,9 +2748,8 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
             using var http = new HttpClient(apiMock);
             var adapter = CreateAdapter(http);
 
-            var queue = await adapter.GetQueueAsync(CreateClient());
+            await Assert.ThrowsAsync<DownloadClientAdapterPollingException>(() => adapter.GetQueueAsync(CreateClient()));
 
-            Assert.Single(queue);
             Assert.Equal(["listgroups", "history"], apiMock.XmlRpcCalls.Select(call => call.MethodName));
         }
 

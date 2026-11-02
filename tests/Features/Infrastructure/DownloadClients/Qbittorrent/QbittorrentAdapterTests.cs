@@ -507,16 +507,60 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
         }
 
         [Fact]
-        public async Task GetQueueAsync_WithoutIds_ReturnsEmpty_OnQueueRequestFailure()
+        public async Task GetQueueAsync_WithoutIds_ThrowsPollingException_OnQueueRequestFailure()
         {
             var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
-            apiMock.InfoStatusCode = HttpStatusCode.InternalServerError;
+            apiMock.InfoStatusCode = HttpStatusCode.ServiceUnavailable;
             var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
             var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
 
-            var items = await adapter.GetQueueAsync(_client);
+            // A failed full-queue request must not look like a live empty queue: orphan
+            // cleanup treats a live empty snapshot as "every tracked item is gone".
+            await Assert.ThrowsAsync<DownloadClientAdapterPollingException>(
+                () => adapter.GetQueueAsync(_client));
+        }
 
-            Assert.Empty(items);
+        [Fact]
+        public async Task GetTrackedQueueAsync_OmitsCategory_WhileIdPollKeepsIt()
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            var categorizedClient = await _downloadClientConfigurationRepository.SaveAsync(new DownloadClientConfigurationBuilder()
+                .WithHost("localhost")
+                .WithPort(443)
+                .WithSsl()
+                .WithUsername("admin")
+                .WithPassword("admin")
+                .WithType("qbittorrent")
+                .WithSettings("category", "audiobooks")
+                .Build());
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(categorizedClient);
+
+            apiMock.ResetRequestHistory();
+            await adapter.GetQueueAsync(categorizedClient, ["NEWHASH"]);
+            var idPoll = Assert.Single(apiMock.RequestHistory, request => request.RequestUri.AbsolutePath.EndsWith("/torrents/info", StringComparison.Ordinal));
+            Assert.Contains("category=audiobooks", idPoll.RequestUri.Query, StringComparison.Ordinal);
+
+            apiMock.ResetRequestHistory();
+            var tracked = await adapter.GetTrackedQueueAsync(categorizedClient, ["NEWHASH"]);
+            var trackedLookup = Assert.Single(apiMock.RequestHistory, request => request.RequestUri.AbsolutePath.EndsWith("/torrents/info", StringComparison.Ordinal));
+            Assert.DoesNotContain("category=", trackedLookup.RequestUri.Query, StringComparison.Ordinal);
+            Assert.Contains("hashes=", trackedLookup.RequestUri.Query, StringComparison.Ordinal);
+            Assert.Single(tracked);
+        }
+
+        [Theory]
+        [InlineData("{not json")]
+        [InlineData("null")]
+        public async Task GetQueueAsync_WithoutIds_ThrowsPollingException_OnMalformedQueueResponse(string body)
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = body;
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            await Assert.ThrowsAsync<DownloadClientAdapterPollingException>(
+                () => adapter.GetQueueAsync(_client));
         }
 
         [Fact]

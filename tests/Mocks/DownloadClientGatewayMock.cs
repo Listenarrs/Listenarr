@@ -64,6 +64,13 @@ namespace Listenarr.Tests.Mocks
             return [];
         }
 
+        public async Task<List<QueueItem>> GetTrackedQueueItemsAsync(DownloadClientConfiguration client, List<Download> downloads, CancellationToken ct = default)
+        {
+            RegisterMethodCall(nameof(GetTrackedQueueItemsAsync));
+
+            return [];
+        }
+
         public async Task<List<(string Id, string Name)>> GetRecentHistoryAsync(DownloadClientConfiguration client, int limit = 100, CancellationToken ct = default)
         {
             RegisterMethodCall(nameof(GetRecentHistoryAsync));

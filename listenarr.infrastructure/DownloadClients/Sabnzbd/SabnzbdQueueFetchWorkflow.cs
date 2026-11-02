@@ -29,18 +29,22 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
     {
         private const int DisplayHistoryLimit = 30;
         private const int MonitorHistoryLimit = 100;
+        private const string IncompleteSnapshotMessage = "Incomplete SABnzbd queue snapshot.";
 
         public async Task<List<QueueItem>> GetQueueAsync(
             DownloadClientConfiguration client,
             IReadOnlyCollection<string>? monitoredIds = null,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            bool ignoreCategory = false)
         {
             var items = new List<QueueItem>();
             if (client == null) return items;
 
             var monitoredIdSet = BuildMonitoredIdSet(monitoredIds);
             var isMonitorPoll = monitoredIdSet.Count > 0;
-            var configuredCategory = DownloadClientCategoryFilter.GetConfiguredCategory(client);
+            // Tracked lookups for orphan cleanup ignore the category. Monitor polls
+            // already keep tracked nzo_ids across a category change (#759).
+            var configuredCategory = ignoreCategory ? null : DownloadClientCategoryFilter.GetConfiguredCategory(client);
 
             try
             {
@@ -49,11 +53,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                 {
                     var message = $"SABnzbd API key not configured for client {LogRedaction.SanitizeText(client.Name ?? client.Id)}.";
                     logger.LogWarning("SABnzbd API key not configured for {ClientName}", client.Name);
-                    if (isMonitorPoll)
-                    {
-                        throw new DownloadClientAdapterPollingException(message);
-                    }
-                    return items;
+                    throw new DownloadClientAdapterPollingException(message);
                 }
 
                 var requestUrl = requestBuilder.BuildUrl(requestContext, new Dictionary<string, string>
@@ -69,11 +69,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                 {
                     var message = $"SABnzbd queue request failed with status {response.StatusCode} for client {LogRedaction.SanitizeText(client.Name ?? client.Id)}.";
                     logger.LogWarning("SABnzbd queue request failed with status {Status}", response.StatusCode);
-                    if (isMonitorPoll)
-                    {
-                        throw new DownloadClientAdapterPollingException(message);
-                    }
-                    return items;
+                    throw new DownloadClientAdapterPollingException(message);
                 }
 
                 var jsonContent = await response.Content.ReadAsStringAsync(ct);
@@ -81,11 +77,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                 {
                     var message = $"SABnzbd returned empty queue response for client {LogRedaction.SanitizeText(client.Name ?? client.Id)}.";
                     logger.LogWarning("SABnzbd returned empty response for client {ClientName}", LogRedaction.SanitizeText(client.Name));
-                    if (isMonitorPoll)
-                    {
-                        throw new DownloadClientAdapterPollingException(message);
-                    }
-                    return items;
+                    throw new DownloadClientAdapterPollingException(message);
                 }
 
                 var doc = JsonDocument.Parse(jsonContent);
@@ -95,11 +87,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                 {
                     var message = $"SABnzbd returned an invalid queue response for client {LogRedaction.SanitizeText(client.Name ?? client.Id)}.";
                     logger.LogWarning("SABnzbd returned an invalid queue response for client {ClientName}", LogRedaction.SanitizeText(client.Name ?? client.Id));
-                    if (isMonitorPoll)
-                    {
-                        throw new DownloadClientAdapterPollingException(message);
-                    }
-                    return items;
+                    throw new DownloadClientAdapterPollingException(message);
                 }
 
                 var speed = 0.0;
@@ -115,11 +103,23 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                         var queueItem = SabnzbdResponseMapper.MapQueueSlotToQueueItem(client, slot, configuredCategory ?? string.Empty, speed, monitoredIdSet);
                         if (queueItem != null)
                         {
+                            if (!isMonitorPoll && string.IsNullOrWhiteSpace(queueItem.Id))
+                            {
+                                throw new DownloadClientAdapterPollingException(IncompleteSnapshotMessage);
+                            }
+
                             items.Add(queueItem);
                         }
                     }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                    catch (Exception ex) when (ex is not DownloadClientAdapterPollingException && ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                     {
+                        // A full poll drives orphan cleanup, so a slot we cannot read
+                        // must fail the snapshot instead of silently dropping out of it.
+                        if (!isMonitorPoll)
+                        {
+                            throw new DownloadClientAdapterPollingException(IncompleteSnapshotMessage, ex);
+                        }
+
                         logger.LogError(ex, "Error parsing SABnzbd queue item");
                     }
                 }
@@ -140,7 +140,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                 }
 
                 var historyLimit = isMonitorPoll ? MonitorHistoryLimit : DisplayHistoryLimit;
-                var historyFailureIsFatal = isMonitorPoll && missingTrackedIds.Count > 0;
+                var historyFailureIsFatal = !isMonitorPoll || missingTrackedIds.Count > 0;
                 await AddHistoryItemsAsync(client, requestContext, configuredCategory, items, http, historyLimit, historyFailureIsFatal, monitoredIdSet, ct);
             }
             catch (DownloadClientAdapterPollingException)
@@ -150,10 +150,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 logger.LogError(ex, "Error getting SABnzbd queue");
-                if (isMonitorPoll)
-                {
-                    throw new DownloadClientAdapterPollingException("Error polling SABnzbd queue.", ex);
-                }
+                throw new DownloadClientAdapterPollingException("Error polling SABnzbd queue.", ex);
             }
 
             return items;
@@ -217,18 +214,29 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                     return;
                 }
 
+                var isFullPoll = monitoredIdSet.Count == 0;
                 foreach (var slot in histSlots.EnumerateArray())
                 {
                     try
                     {
+                        if (isFullPoll && !HasUsableNzoId(slot))
+                        {
+                            throw new DownloadClientAdapterPollingException(IncompleteSnapshotMessage);
+                        }
+
                         var historyItem = SabnzbdResponseMapper.MapHistorySlotToQueueItem(client, slot, configuredCategory ?? string.Empty, existingNzoIds, monitoredIdSet);
                         if (historyItem != null)
                         {
                             items.Add(historyItem);
                         }
                     }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                    catch (Exception ex) when (ex is not DownloadClientAdapterPollingException && ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                     {
+                        if (isFullPoll)
+                        {
+                            throw new DownloadClientAdapterPollingException(IncompleteSnapshotMessage, ex);
+                        }
+
                         logger.LogDebug(ex, "Error parsing SABnzbd history item");
                     }
                 }
@@ -246,6 +254,13 @@ namespace Listenarr.Infrastructure.DownloadClients.Sabnzbd
                     throw new DownloadClientAdapterPollingException("Error polling SABnzbd history.", ex);
                 }
             }
+        }
+
+        private static bool HasUsableNzoId(JsonElement slot)
+        {
+            return slot.TryGetProperty("nzo_id", out var nzoId) &&
+                nzoId.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(nzoId.GetString());
         }
 
         private static HashSet<string> BuildMonitoredIdSet(IReadOnlyCollection<string>? monitoredIds)
