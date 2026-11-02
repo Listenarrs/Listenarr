@@ -134,6 +134,49 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Quality
 
         [Theory]
         [MemberData(nameof(Parsers))]
+        public async Task DeclaredFormat_IsNotContradictedByAFormatWordInTheDescription(string parser)
+        {
+            var profile = Profile(("MP3 320kbps", true), ("MP3 128kbps", true));
+            var service = CreateService();
+
+            // The description names other containers in passing; the indexer declared MP3.
+            var flac = await ParseOne(parser, Feed(BookTitle, "Not a flac rip. Read in full.", "mp3"));
+            var m4b = await ParseOne(parser, Feed(BookTitle, "Also sold as m4b. Read in full.", "mp3"));
+            var control = await ParseOne(parser, Feed(BookTitle, "Read in full.", "mp3"));
+
+            var controlScore = await service.ScoreSearchResult(control, profile);
+            foreach (var release in new[] { flac, m4b })
+            {
+                var score = await service.ScoreSearchResult(release, profile);
+                Assert.Equal("MP3", release.Format);
+                Assert.Equal(control.Quality, release.Quality);
+                Assert.False(score.IsRejected, $"A declared MP3 must not be refused: {string.Join("; ", score.RejectionReasons)}");
+                Assert.Equal(controlScore.TotalScore, score.TotalScore);
+            }
+        }
+
+        [Theory]
+        [MemberData(nameof(Parsers))]
+        public async Task DeclaredFlac_KeepsItsQualityLabel_WhenTheTextAgrees(string parser)
+        {
+            var profile = Profile(("MP3 320kbps", true), ("FLAC", true));
+            var service = CreateService();
+
+            var declared = await ParseOne(parser, Feed($"{BookTitle} [FLAC]", "Read in full.", "flac"));
+            // Control: the same release with no usable attribute, labelled from the text alone.
+            var undeclared = await ParseOne(parser, Feed($"{BookTitle} [FLAC]", "Read in full.", "unlisted"));
+
+            var declaredScore = await service.ScoreSearchResult(declared, profile);
+            var undeclaredScore = await service.ScoreSearchResult(undeclared, profile);
+
+            Assert.Equal("FLAC", declared.Format);
+            Assert.Equal("FLAC", declared.Quality);
+            Assert.Equal(undeclared.Quality, declared.Quality);
+            Assert.Equal(undeclaredScore.TotalScore, declaredScore.TotalScore);
+        }
+
+        [Theory]
+        [MemberData(nameof(Parsers))]
         public async Task TextGuess_StillFillsAFormatTheIndexerDidNotDeclare(string parser)
         {
             // The guess is the fallback, not removed: with no usable attribute it still decides.
