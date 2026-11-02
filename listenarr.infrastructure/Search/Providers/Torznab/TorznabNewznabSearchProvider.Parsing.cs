@@ -345,7 +345,8 @@ public partial class TorznabNewznabSearchProvider : IIndexerSearchProvider
                         // fills Format and Quality only where the attributes left them empty, so the
                         // guess cannot overwrite a value the indexer declared: a book called "Magnum
                         // Opus" with format=mp3 is an MP3, not an OPUS release.
-                        if (string.IsNullOrEmpty(result.Format))
+                        var formatDeclared = !string.IsNullOrEmpty(result.Format);
+                        if (!formatDeclared)
                         {
                             if (titleAndDesc.Contains("m4b"))
                                 result.Format = "M4B";
@@ -360,10 +361,19 @@ public partial class TorznabNewznabSearchProvider : IIndexerSearchProvider
                         }
 
                         // The bitrate in the text is a rate, not a codec: the label takes its codec from the
-                        // Format settled above, so a declared AAC release is not relabelled MP3.
+                        // Format settled above, so a declared AAC release is not relabelled MP3. Once the
+                        // indexer has declared the format, a "flac" or "m4b" in the text only counts when it
+                        // agrees with that format; otherwise the text may supply the rate and nothing else, so
+                        // a stray word cannot become the quality of a declared MP3.
                         if (string.IsNullOrEmpty(result.Quality))
                         {
-                            result.Quality = SearchResultAttributeParser.DetectQualityFromTags(titleAndDesc, result.Format);
+                            var guessedQuality = SearchResultAttributeParser.DetectQualityFromTags(titleAndDesc, result.Format);
+                            var contradictsDeclaredFormat = formatDeclared
+                                && (guessedQuality == "FLAC" || guessedQuality == "M4B")
+                                && !string.Equals(guessedQuality, result.Format, StringComparison.OrdinalIgnoreCase);
+                            result.Quality = contradictsDeclaredFormat
+                                ? SearchResultAttributeParser.DetectBitrateQuality(titleAndDesc, result.Format)
+                                : guessedQuality;
                         }
 
                         // Detect language codes present in title or description (e.g. [ENG / M4B])
