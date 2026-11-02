@@ -24,7 +24,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
             if (client == null) return items;
 
             var isMonitorPoll = ids.Count > 0;
-            var baseUrl = DownloadClientUriBuilder.BuildAuthority(client);
+            var baseUrl = QBittorrentHelpers.BuildBaseUrl(client);
 
             try
             {

@@ -69,5 +69,51 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 logger.LogInformation("Fetching qBittorrent queue filtered by category: {Category}", category);
             }
         }
+
+        /// <summary>
+        /// Builds the base URL used for every qBittorrent WebAPI call, including an optional
+        /// "urlBase" path prefix from client settings (e.g. "/qbittorrent") for instances that
+        /// sit behind a reverse proxy at a path prefix.
+        /// Unlike Transmission's urlBase (which replaces the whole RPC path to match Transmission's
+        /// own configurable --rpc-url-base setting), qBittorrent has no equivalent server-side base
+        /// path setting, so this is a plain prefix prepended before the fixed "/api/v2/..." routes -
+        /// it must match whatever prefix the reverse proxy strips before forwarding to qBittorrent.
+        /// </summary>
+        /// <param name="client">The download client configuration providing host/port and settings.</param>
+        /// <returns>The authority (scheme://host:port) with the normalized urlBase prefix appended, if configured.</returns>
+        public static string BuildBaseUrl(DownloadClientConfiguration client)
+        {
+            var authority = DownloadClientUriBuilder.BuildAuthority(client);
+            var prefix = ResolveUrlBasePrefix(client);
+            return prefix.Length == 0 ? authority : authority + prefix;
+        }
+
+        private static string ResolveUrlBasePrefix(DownloadClientConfiguration client)
+        {
+            if (client.Settings?.TryGetValue("urlBase", out var urlBaseObj) is true)
+            {
+                var trimmed = urlBaseObj?.ToString()?.Trim().TrimEnd('/');
+                if (!string.IsNullOrEmpty(trimmed))
+                {
+                    // A pasted full URL (e.g. "https://seedbox.example.com/qbittorrent") would
+                    // otherwise be concatenated onto the authority as-is, producing a broken URL
+                    // instead of a clear error. Reject only a genuine http/https absolute URI -
+                    // Uri.TryCreate(trimmed, UriKind.Absolute, out _) alone would also match an
+                    // ordinary leading-slash path like "/qbittorrent" as an absolute "file:" URI
+                    // on Unix (though not on Windows), rejecting the placeholder value from this
+                    // field's own help text.
+                    if (DownloadClientUriBuilder.TryParseHttpOrHttpsAbsoluteUri(trimmed, out _))
+                    {
+                        throw new QbittorrentException(
+                            $"qBittorrent URL Base must be a path (e.g. \"/qbittorrent\"), not a full URL. " +
+                            $"Remove the scheme and host from \"{trimmed}\" and enter only the path.");
+                    }
+
+                    return trimmed.StartsWith('/') ? trimmed : "/" + trimmed;
+                }
+            }
+
+            return string.Empty;
+        }
     }
 }
