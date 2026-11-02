@@ -12,6 +12,7 @@ namespace Listenarr.Tests.Mocks.Api
         public NameValueCollection? LastCategoryForm { get; private set; }
         public HttpStatusCode InfoStatusCode { get; set; } = HttpStatusCode.OK;
         public string? InfoResponseOverride { get; set; }
+        public Func<HttpResponseMessage>? LoginResponseOverride { get; set; }
 
         public QbittorrentApiMock()
         {
@@ -26,6 +27,11 @@ namespace Listenarr.Tests.Mocks.Api
 
         private async Task<HttpResponseMessage> DoLogin(HttpRequestMessage request, CancellationToken ct)
         {
+            if (LoginResponseOverride != null)
+            {
+                return LoginResponseOverride();
+            }
+
             string rawRequestBody = await request.Content.ReadAsStringAsync();
             NameValueCollection formData = HttpUtility.ParseQueryString(rawRequestBody);
 
