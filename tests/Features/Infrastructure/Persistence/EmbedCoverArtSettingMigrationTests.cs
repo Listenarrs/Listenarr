@@ -16,9 +16,9 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace Listenarr.Tests.Features.Infrastructure.Persistence;
 
 /// <summary>
-/// Upgrades and rolls back a database across the cover art setting migration alone. The
-/// migration that precedes it is whichever one sorts last among the others, so a migration
-/// id that sorts before an existing migration leaves that one still pending or never undone.
+/// Upgrades and rolls back a database across the cover art setting migration alone, starting
+/// from the migration that sorts immediately before it. Later migrations stay out of the way,
+/// so the tests keep holding once newer migrations land on top of this one.
 /// </summary>
 [Trait("Area", "Persistence")]
 [Trait("Name", "EmbedCoverArtSettingMigrationTests")]
@@ -41,12 +41,14 @@ public class EmbedCoverArtSettingMigrationTests : BaseTests
         await InsertSettingsRowAsync(connection);
         Assert.False(await ColumnExistsAsync(connection, EmbedCoverArtColumn));
         Assert.Equal(
-            [EmbedCoverArtSettingMigrationId],
-            await context.Database.GetPendingMigrationsAsync());
+            EmbedCoverArtSettingMigrationId,
+            (await context.Database.GetPendingMigrationsAsync()).First());
 
-        await context.Database.MigrateAsync();
+        await context.GetService<IMigrator>().MigrateAsync(EmbedCoverArtSettingMigrationId);
 
-        Assert.Empty(await context.Database.GetPendingMigrationsAsync());
+        Assert.Contains(
+            EmbedCoverArtSettingMigrationId,
+            await context.Database.GetAppliedMigrationsAsync());
         Assert.Equal(0L, await ExecuteScalarAsync(
             connection,
             $"SELECT \"{EmbedCoverArtColumn}\" FROM \"{SettingsTable}\" WHERE \"Id\" = 1"));
@@ -75,7 +77,7 @@ public class EmbedCoverArtSettingMigrationTests : BaseTests
         var migrations = context.Database.GetMigrations().ToList();
         Assert.Contains(EmbedCoverArtSettingMigrationId, migrations);
         return migrations
-            .Where(id => !string.Equals(id, EmbedCoverArtSettingMigrationId, StringComparison.Ordinal))
+            .Where(id => string.CompareOrdinal(id, EmbedCoverArtSettingMigrationId) < 0)
             .Max(StringComparer.Ordinal)!;
     }
 
