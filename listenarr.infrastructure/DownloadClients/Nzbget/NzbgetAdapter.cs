@@ -59,7 +59,8 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
             IHttpClientFactory httpClientFactory,
             INzbUrlResolver nzbUrlResolver,
             ILogger<NzbgetAdapter> logger,
-            TimeProvider timeProvider)
+            TimeProvider timeProvider,
+            NzbgetFailedHistoryWarningTracker? failedHistoryWarningTracker = null)
         {
             ArgumentNullException.ThrowIfNull(httpClientFactory);
             ArgumentNullException.ThrowIfNull(nzbUrlResolver);
@@ -68,10 +69,15 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
 
             var xmlRpcClient = new NzbgetXmlRpcClient(httpClientFactory, ClientType);
             var historyReader = new NzbgetHistoryReader(xmlRpcClient);
+
+            // This constructor builds a self-contained adapter for callers that have no
+            // container. Production resolves the adapter from DI, where the tracker is a
+            // singleton and so outlives the scoped workflow that reads it.
             var historyEnrichmentWorkflow = new NzbgetHistoryEnrichmentWorkflow(
                 historyReader,
                 logger,
-                timeProvider);
+                timeProvider,
+                failedHistoryWarningTracker ?? new NzbgetFailedHistoryWarningTracker());
 
             _connectionTester = new NzbgetConnectionTester(xmlRpcClient, logger);
             _addWorkflow = new NzbgetAddWorkflow(xmlRpcClient, logger);

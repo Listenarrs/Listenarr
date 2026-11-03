@@ -28,7 +28,8 @@ namespace Listenarr.Application.Downloads.Queue
             TimeSpan? snapshotAge,
             string? failureReason,
             string snapshotState,
-            DateTimeOffset? snapshotRefreshedAtUtc)
+            DateTimeOffset? snapshotRefreshedAtUtc,
+            bool isIncomplete = false)
         {
             Client = client;
             QueueItems = queueItems ?? new List<QueueItem>();
@@ -38,6 +39,7 @@ namespace Listenarr.Application.Downloads.Queue
             FailureReason = failureReason;
             SnapshotState = snapshotState;
             SnapshotRefreshedAtUtc = snapshotRefreshedAtUtc;
+            IsIncomplete = isIncomplete;
         }
 
         public DownloadClientConfiguration Client { get; }
@@ -48,5 +50,10 @@ namespace Listenarr.Application.Downloads.Queue
         public string? FailureReason { get; }
         public string SnapshotState { get; }
         public DateTimeOffset? SnapshotRefreshedAtUtc { get; }
+
+        /// <summary>
+        /// True when the client reported items that could not be read into <see cref="QueueItems"/>.
+        /// </summary>
+        public bool IsIncomplete { get; }
     }
 }
