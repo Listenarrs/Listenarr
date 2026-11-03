@@ -58,6 +58,17 @@ public sealed class ManualImportItemPathValidationTests : BaseTests
     }
 
     [Fact]
+    public void FullPath_RejectsInvalidPathCharactersAsValidationFailure()
+    {
+        var path = FileService.GetTempPath() + "/chapter\0.mp3";
+
+        var exception = Assert.Throws<ApplicationValidationException>(
+            () => new ManualImportItemDto { FullPath = path });
+
+        Assert.Equal("manual_import_path_invalid", exception.Code);
+    }
+
+    [Fact]
     public async Task HttpPipeline_DottedFileName_ReachesPerItemProcessing()
     {
         var sourceDirectory = Path.Join(FileService.GetTempPath(), "Vol.");
@@ -90,13 +101,21 @@ public sealed class ManualImportItemPathValidationTests : BaseTests
         string sourceDirectory,
         string fullPath)
     {
-        using var factory = new Listenarr.Tests.Mocks.ListenarrWebApplicationFactory();
+        using var baseFactory = new Listenarr.Tests.Mocks.ListenarrWebApplicationFactory();
+        // The test host skips worker registration and filesystem initialization, both of
+        // which the controller needs before body binding runs.
+        using var factory = baseFactory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services =>
+            {
+                services.AddSingleton(Mock.Of<IScanQueueService>());
+                services.AddSingleton(Mock.Of<ILibraryFilesystemMutationGate>());
+            }));
         using var client = factory.CreateClient();
         var csrfToken = await GetAntiforgeryTokenAsync(client);
         var payload = JsonSerializer.Serialize(new
         {
             path = sourceDirectory,
-            action = "None",
+            action = "none",
             items = new[]
             {
                 new { fullPath, matchedAudiobookId = 4242 }
