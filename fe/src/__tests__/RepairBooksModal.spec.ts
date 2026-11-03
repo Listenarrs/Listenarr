@@ -184,11 +184,18 @@ describe('RepairBooksModal', () => {
       audiobookId: 7,
       identifiers: [frenchAsin, isbn, manualIsbn],
     })
-    apiMocks.updateAudiobookIdentifiers.mockResolvedValue({
-      message: 'ok',
-      audiobook: { id: 7 },
-      identifiers: [],
-    })
+    // The server answers with the identifiers it saved
+    apiMocks.updateAudiobookIdentifiers.mockImplementation(
+      async (audiobookId: number, identifiers: { value: string }[]) => ({
+        message: 'ok',
+        audiobook: { id: audiobookId },
+        identifiers: identifiers.map((identifier, index) => ({
+          ...identifier,
+          id: index + 1,
+          valueNormalized: identifier.value.toUpperCase(),
+        })),
+      }),
+    )
     apiMocks.updateAudiobook.mockResolvedValue({ message: 'ok', audiobook: mismatched })
     apiMocks.rescanAudiobookMetadata.mockResolvedValue({
       message: 'ok',
@@ -2153,6 +2160,63 @@ describe('RepairBooksModal', () => {
     await flushPromises()
     expect(bookCard(wrapper).attributes('data-match-state')).not.toBe('matched')
     expect(wrapper.get('[data-testid="repair-confirm"]').text()).toContain('Repair 0')
+  })
+
+  it('keeps a Manual entry for the picked ASIN in another region: another record', async () => {
+    const britishAsin = {
+      type: 'Asin',
+      value: 'B0BK9W82PQ',
+      region: 'uk',
+      isPrimary: false,
+      source: 'Manual',
+    }
+    apiMocks.getAudiobookIdentifiers.mockResolvedValue({
+      audiobookId: 7,
+      identifiers: [frenchAsin, britishAsin, manualIsbn],
+    })
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+
+    await repair(wrapper)
+
+    expect(apiMocks.updateAudiobookIdentifiers).toHaveBeenCalledWith(7, [
+      { type: 'Asin', value: 'B0BK9W82PQ', region: 'us', isPrimary: true, source: 'Manual' },
+      { type: 'Asin', value: 'B0BK9W82PQ', region: 'uk', isPrimary: false, source: 'Manual' },
+      { type: 'Isbn', value: '9781039400740', region: null, isPrimary: false, source: 'Manual' },
+    ])
+  })
+
+  it("doesn't bring back the ASIN it repaired the book away from when Retry follows a fallback", async () => {
+    // Its current record saved as Manual, and another Manual ASIN the rescan falls back to
+    const fallbackAsin = {
+      type: 'Asin',
+      value: 'B01K7UYFXK',
+      region: 'us',
+      isPrimary: false,
+      source: 'Manual',
+    }
+    apiMocks.getAudiobookIdentifiers.mockResolvedValue({
+      audiobookId: 7,
+      identifiers: [{ ...frenchAsin, source: 'Manual' }, fallbackAsin, manualIsbn],
+    })
+    rescannedFrom('B01K7UYFXK', 'us')
+    const wrapper = mountModal()
+    await flushPromises()
+    await searchAndPick(wrapper)
+    await repair(wrapper)
+    expect(resultCard(wrapper).attributes('data-result-state')).toBe('warning')
+
+    await resultCard(wrapper).get('[data-testid="repair-result-retry"]').trigger('click')
+    await flushPromises()
+
+    // Saved again from what the server holds: the old record stays out, the fallback stays in
+    expect(apiMocks.updateAudiobookIdentifiers).toHaveBeenLastCalledWith(7, [
+      { type: 'Asin', value: 'B0BK9W82PQ', region: 'us', isPrimary: true, source: 'Manual' },
+      { type: 'Asin', value: 'B01K7UYFXK', region: 'us', isPrimary: false, source: 'Manual' },
+      { type: 'Isbn', value: '9781039400740', region: null, isPrimary: false, source: 'Manual' },
+    ])
+    expect(resultCard(wrapper).attributes('data-result-state')).toBe('done')
   })
 
   // The server reads the record from the book's other identifiers when the picked one fails

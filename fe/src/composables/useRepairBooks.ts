@@ -337,10 +337,12 @@ export function useRepairBooks(audiobookIds: () => number[]) {
     try {
       // The new record was looked up in its region: saved first
       if (hasAsinChanged(repairRow.bookMatch)) {
-        await apiService.updateAudiobookIdentifiers(
+        const savedIdentifiers = await apiService.updateAudiobookIdentifiers(
           repairRow.audiobookId,
           identifiersWithPrimaryAsin(repairRow),
         )
+        // What the server now holds: a Retry starts from it, never from the list it replaced
+        repairRow.identifiers = savedIdentifiers.identifiers
         isAsinSaved = true
         hasLibraryChanged.value = true
       }

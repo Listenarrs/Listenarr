@@ -49,7 +49,12 @@ export interface RepairRow {
   title: string
   subtitle: string
   authors: string[]
+  // The book's identifiers as the server holds them: read when the dialog opens, then the ones its
+  // repair saved
   identifiers: AudiobookExternalIdentifier[]
+  // The record the book pointed at when the dialog opened: the one the user repairs it away from.
+  // It stays when a rescan lands on another record, so a Retry still drops it
+  replacedRecordKey: { asin: string; region: string }
   // The record the book should point at, edited in its card
   bookMatch: BookMatch
   // Ticked: repaired once it has a new record (finding one ticks it)
@@ -101,6 +106,10 @@ export function repairRowFrom(
   configuredRegion: string,
 ): RepairRow {
   const primaryAsinIdentifier = primaryAsin(identifiers)
+  const currentRecordKey = {
+    asin: primaryAsinIdentifier?.value ?? book.asin ?? '',
+    region: primaryAsinIdentifier?.region ?? '',
+  }
   const bookMatch = createBookMatch(
     {
       asin: primaryAsinIdentifier?.value ?? book.asin ?? '',
@@ -108,10 +117,7 @@ export function repairRowFrom(
       query: book.title ?? '',
       author: book.authors?.[0] ?? '',
     },
-    {
-      asin: primaryAsinIdentifier?.value ?? book.asin ?? '',
-      region: primaryAsinIdentifier?.region ?? '',
-    },
+    { ...currentRecordKey },
   )
   return {
     audiobookId,
@@ -119,6 +125,7 @@ export function repairRowFrom(
     subtitle: book.subtitle ?? '',
     authors: book.authors ?? [],
     identifiers,
+    replacedRecordKey: currentRecordKey,
     bookMatch,
     isSelected: false,
     repairTask: null,
@@ -184,7 +191,8 @@ export const REPAIR_CONFIRM_MESSAGE =
 
 // The new ASIN becomes the primary one. Identifiers that came from the previous match (provider or
 // import) are dropped: an ISBN of the wrong book would let the rescan find it again, and so is the
-// ASIN it is repaired away from. Other Manual ones stay.
+// ASIN it is repaired away from. Other Manual ones stay, the same ASIN in another region too (another
+// record)
 export function identifiersWithPrimaryAsin(
   repairRow: RepairRow,
 ): AudiobookExternalIdentifierInput[] {
@@ -193,15 +201,17 @@ export function identifiersWithPrimaryAsin(
   const region = repairRow.bookMatch.pickedSearchResult?.region || repairRow.bookMatch.region
   // The record it is repaired away from, whatever its source: a Manual one too (an earlier
   // repair's, saved as Manual by the server, or a wrong one typed by hand) would stay a fallback
-  // the rescan can read
-  const replacedAsin = repairRow.bookMatch.currentRecordKey.asin.toUpperCase()
+  // the rescan can read. The one the dialog opened on, not one a rescan fell back to
+  const droppedRecordKeys = [{ asin, region }, repairRow.replacedRecordKey].map(recordKeyText)
   const manualIdentifiers = repairRow.identifiers
     .filter((identifier) => identifier.source === 'Manual')
     .filter(
       (identifier) =>
         !(
           identifier.type === 'Asin' &&
-          [asin, replacedAsin].includes(identifier.value.toUpperCase())
+          droppedRecordKeys.includes(
+            recordKeyText({ asin: identifier.value, region: identifier.region ?? '' }),
+          )
         ),
     )
     .map((identifier) => ({
@@ -215,6 +225,11 @@ export function identifiersWithPrimaryAsin(
     { type: 'Asin', value: asin, region, isPrimary: true, source: 'Manual' },
     ...manualIdentifiers,
   ]
+}
+
+// A record as the server tells them apart: its ASIN and its region, in any letters
+function recordKeyText({ asin, region }: { asin: string; region: string }): string {
+  return `${asin.toUpperCase()}|${region.toLowerCase()}`
 }
 
 // Step 2: the books to repair only, the unticked or unmatched ones stay behind on step 1
