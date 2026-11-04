@@ -238,9 +238,9 @@
     },
     {
       "index": 40,
-      "expectedConfirmed": false,
-      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
-      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+      "expectedConfirmed": true,
+      "source": "Explicit policy review of release and reference for the V4 annotation extension; not inferred from history outcome.",
+      "rationale": "Complete Jack and Jill title and James Patterson credit; the explicit WEB/SE/year/CRAViNGS iNT suffix is now supported technical annotation."
     },
     {
       "index": 41,
@@ -508,9 +508,9 @@
     },
     {
       "index": 86,
-      "expectedConfirmed": false,
-      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
-      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+      "expectedConfirmed": true,
+      "source": "Explicit policy review of release and reference for the V4 annotation extension; not inferred from history outcome.",
+      "rationale": "Complete stored main title The Adventures of Tom Sawyer and credited Mark Twain; the year and bracketed Classic Fiction annotation are explained. This confirms work identity only, not the adaptation or audio edition."
     },
     {
       "index": 87,
@@ -760,9 +760,9 @@
     },
     {
       "index": 132,
-      "expectedConfirmed": false,
-      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
-      "rationale": "Conservative policy deferral: unsupported_annotations_or_partial_release. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+      "expectedConfirmed": true,
+      "source": "Explicit policy review of release and reference for the V4 annotation extension; not inferred from history outcome.",
+      "rationale": "Complete The Talisman title and both stored credited authors; year, known miok group, Audiobook and bracketed Horror annotations are explained."
     },
     {
       "index": 133,
@@ -778,9 +778,9 @@
     },
     {
       "index": 136,
-      "expectedConfirmed": false,
-      "source": "Explicit textual adjudication of the supplied release and reference, before running the revised replay; not inferred from import outcome.",
-      "rationale": "Conservative policy deferral: series_or_narrator_evidence_and_layout. More trusted reference evidence or explicit layout support is required; this does not label the audio as a different book."
+      "expectedConfirmed": true,
+      "source": "Explicit policy review for V4 complete dotted author suffix and bounded group recognition.",
+      "rationale": "Complete protected The Return of the King title, complete separate J. R.R. Tolkien credit and supported Audiobook/MP3/JD07 suffix; author words are outside the title span."
     },
     {
       "index": 137,

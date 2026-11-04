@@ -25,6 +25,9 @@ public enum ReleaseSpanRole
 public sealed record ReleaseSpan(int Start, int Length, ReleaseSpanRole Role, string Value)
 {
     public IdentityEvidenceOrigin Origin => IdentityEvidenceOrigin.ReleaseNameDerived;
+    public string? RuleId { get; init; }
+    public string? Reference { get; init; }
+    public string? MatchStrength { get; init; }
 }
 
 public sealed record ReleaseSeriesReference(string Name, string? Position);

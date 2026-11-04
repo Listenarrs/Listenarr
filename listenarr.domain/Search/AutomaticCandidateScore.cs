@@ -32,5 +32,5 @@ public sealed record AutomaticCandidateScore(QualityScore Quality, BookIdentityA
 public sealed record AutomaticSearchAssessment(
     string TargetFingerprint, IReadOnlyList<AutomaticCandidateScore> Candidates)
 {
-    public const string PolicyVersion = "CorroboratedAutomaticV3";
+    public const string PolicyVersion = "CorroboratedAutomaticV4";
 }
