@@ -70,9 +70,7 @@ public sealed class ReleaseTextView
             var value = string.IsNullOrWhiteSpace(element) ? " " : IdentityText.Canonical(element);
             if (presentation)
                 value = value.Replace("'", "", StringComparison.Ordinal).Replace("-", " ", StringComparison.Ordinal);
-            if (scene && value == "." && start > 0 && start + 1 < original.Length
-                && char.IsLetterOrDigit(original[start - 1]) && char.IsLetterOrDigit(original[start + 1])
-                && !(char.IsDigit(original[start - 1]) && char.IsDigit(original[start + 1])))
+            if (scene && value == "." && SceneSeparator(original, start))
                 value = " ";
             foreach (var c in value)
             {
@@ -101,8 +99,7 @@ public sealed class ReleaseTextView
     {
         var separators = 0;
         for (var i = 1; i + 1 < release.Length; i++)
-            if (release[i] == '.' && char.IsLetterOrDigit(release[i - 1]) && char.IsLetterOrDigit(release[i + 1])
-                && !(char.IsDigit(release[i - 1]) && char.IsDigit(release[i + 1])) && ++separators >= 2)
+            if (SceneSeparator(release, i) && ++separators >= 2)
                 return true;
         return false;
     }
@@ -112,8 +109,20 @@ public sealed class ReleaseTextView
         var text = IdentityText.Presentation(value);
         var output = new StringBuilder(text);
         for (var i = 1; i + 1 < text.Length; i++)
-            if (text[i] == '.' && char.IsLetterOrDigit(text[i - 1]) && char.IsLetterOrDigit(text[i + 1])
-                && !(char.IsDigit(text[i - 1]) && char.IsDigit(text[i + 1]))) output[i] = ' ';
+            if (SceneSeparator(text, i)) output[i] = ' ';
         return IdentityText.Canonical(output.ToString());
+    }
+
+    private static bool SceneSeparator(string value, int index) => value[index] == '.'
+        && index > 0 && index + 1 < value.Length
+        && (WordPart(value, index - 1) || value[index - 1] is ',' or '&')
+        && (WordPart(value, index + 1) || value[index + 1] == '&')
+        && !(char.IsDigit(value[index - 1]) && char.IsDigit(value[index + 1]));
+
+    private static bool WordPart(string value, int index)
+    {
+        if (char.IsLowSurrogate(value[index]) && index > 0 && char.IsHighSurrogate(value[index - 1])) index--;
+        return Rune.TryGetRuneAt(value, index, out var rune) && (Rune.IsLetterOrDigit(rune)
+            || Rune.GetUnicodeCategory(rune) is UnicodeCategory.NonSpacingMark or UnicodeCategory.SpacingCombiningMark);
     }
 }
