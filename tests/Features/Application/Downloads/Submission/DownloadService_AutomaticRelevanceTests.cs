@@ -88,6 +88,10 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
         [InlineData("Morning Star", "Pierce Brown", "Pierce.Brown-Red.Rising.03-Morning.Star.Unabr-64k.[2016]", "Red Rising", "3")]
         [InlineData("Memory's Legion: The Complete Expanse Story Collection", "James S. A. Corey", "Memorys.Legion-The.Complete.Expanse.Story.Collection.by.James.S.A.Corey", null, null)]
         [InlineData("Fahrenheit 451", "Ray Bradbury", "Fahrenheit.451.by.Ray.Bradbury", null, null)]
+        [InlineData("The Quiet Orchard", "Marisol Vega", "Marisol Vega - Northern Shore 3 - The Quiet Orchard [M4B]", "Northern Shore", null)]
+        [InlineData("The Shadow Rising", "Robert Jordan", "The Shadow Rising (Wheel of Time #4) - Robert Jordan [M4B]", "The Wheel of Time", "4")]
+        [InlineData("Jack and Jill", "James Patterson", "James Patterson - Jack And Jill-AUDiOBOOK-WEB-SE-2021-CRAViNGS iNT", null, null)]
+        [InlineData("The Return of the King", "J. R.R. Tolkien", "The.Return.of.the.King.J.R.R.Tolkien.Audiobook.MP3-JD07", null, null)]
         public async Task SearchAndDownloadAsync_AnnotatedReleaseReachesOnlyTheCorrectSubmission(string title,
             string author, string release, string? series, string? number)
         {

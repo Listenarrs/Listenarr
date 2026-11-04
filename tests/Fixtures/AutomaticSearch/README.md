@@ -89,3 +89,43 @@ available before this partition was recorded; this is a regression split, not
 an untouched external evaluation. Historical replay uses only the supplied
 metadata. Separate synthetic tests exercise additional library series/narrator
 metadata and ensure missing or conflicting facts continue to defer.
+
+## V4 annotation extensions
+
+The fixed internal rule families separately recognize technical fields, narrators,
+groups and reference-backed series. Rules explain raw spans and expose a rule ID,
+reference and match strength; they cannot supply missing title or author evidence.
+Known numbered series fields are reserved before broader annotation rules so a
+technical interpretation cannot hide a position conflict. Unknown library positions
+are distinguishable from malformed or contradictory facts. Release-side positions
+must also agree with one another, including across both sides of the title.
+
+Series comparison supports punctuation and article presentation plus explicit
+aliases scoped to a stored canonical series. Opaque group identifiers remain a
+versioned catalog, not a wildcard for arbitrary trailing text. Sizes, supported
+scene suffixes and bracketed genres have bounded whole-field rules. Narrator
+surnames require a unique stored reference in the supported scene/year/group
+layout. A missing reference narrator or unknown series still defers.
+
+`historical-reference-facts.json` preserves the author's 423-context supplement
+unchanged from gist revision `84c981422528bddbad6f68abd24591a95f3d66ab`.
+SHA-256: `bd9f2414e8e9b527f5312fc109350393a81c1f80abbadd065b8af49f6ccfbced`.
+Join by original zero-based corpus index. Missing rows are unknown, not empty
+metadata. Its reported verdicts are observations rather than correctness labels.
+The author clarified that case 27 is the correct Anastasia pairing and should
+confirm; its Honor Bound 2 attribution is stale library metadata. The comment
+meant case 28, the same release against Griffin's book, which correctly defers.
+Case 28 is absent from the supplement because its download row was deleted.
+The supplement note says 34 rows are absent, while the files contain 498 and 423
+cases (75 absent). The frozen source files are not silently corrected.
+
+Original-context expectations 40, 86, 132 and 136 now explicitly permit supported
+scene/group/genre layouts and a complete separate dotted author credit. Work
+identity does not verify an adaptation, edition, audio contents or import success.
+
+To support another variation, add a sanitized release and reference context,
+adjudicate the expected identity independently, extend the existing rule or
+catalog, and add a paired wrong-work/conflict case plus raw-span assertions.
+Changing semantics requires a policy version bump (and fingerprints for new
+reference facts), corpus replay and the affected API/worker checks. Do not derive
+trusted aliases or library facts from the candidate release itself.

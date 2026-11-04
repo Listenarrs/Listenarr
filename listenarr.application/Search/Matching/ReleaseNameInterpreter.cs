@@ -101,6 +101,12 @@ public static class ReleaseNameInterpreter
                     var left = interpreter.Explain(0, index, true);
                     var right = interpreter.Explain(end, view.Text.Length, false);
                     if (budget.Exhausted) break;
+                    if (!budget.Spend(left.Claims.Concat(right.Claims).Sum(c => c.Name.Length) + 1)) break;
+                    if (left.Complete && right.Complete && !ReleaseSeriesClaim.Compatible(left.Claims.Concat(right.Claims)))
+                    {
+                        reason ??= "series_position_conflict";
+                        continue;
+                    }
                     reason ??= left.Reason ?? right.Reason;
                     var spans = new List<ReleaseSpan> { view.Span(index, needle.Length, ReleaseSpanRole.PrimaryTitle) };
                     if (subtitle != null) spans.Add(view.Span(subtitleStart, end - subtitleStart, ReleaseSpanRole.ReferenceSubtitle));

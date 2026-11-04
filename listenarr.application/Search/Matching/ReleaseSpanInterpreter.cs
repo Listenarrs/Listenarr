@@ -21,8 +21,11 @@ internal sealed class ReleaseSpanInterpreter(
     ReleaseTextView view, BookMatchContext context, IReadOnlyList<string> supplied, ReleaseAssessmentBudget budget)
 {
     private sealed record Step(ReleaseSpan Span, Step? Previous, ReleaseSpan? Position = null);
-    private sealed record State(int At, bool Credited, bool Metadata, Step? Path);
-    internal sealed record Explanation(bool Complete, bool Credited, IReadOnlyList<ReleaseSpan> Spans, string? Reason);
+    private sealed record State(int At, bool Credited, bool Metadata, Step? Path, IReadOnlyList<ReleaseSeriesClaim> Claims);
+    internal sealed record Explanation(bool Complete, bool Credited, IReadOnlyList<ReleaseSpan> Spans, string? Reason)
+    {
+        public IReadOnlyList<ReleaseSeriesClaim> Claims { get; init; } = [];
+    }
 
     public Explanation Explain(int start, int end, bool beforeTitle)
     {
@@ -31,13 +34,13 @@ internal sealed class ReleaseSpanInterpreter(
             .Concat((view.IsScene && !beforeTitle ? context.Narrators : []).Select(n =>
                 (Name: n, Role: ReleaseSpanRole.NarratorCredit, Credited: false))).ToArray();
         var maxName = names.Length == 0 ? 0 : names.Max(n => n.Name.Length) * 2 + 16;
-        var maxSeries = context.SeriesReferences.Count == 0 ? 0 : context.SeriesReferences.Max(s => s.Name.Length) * 2 + 64;
+        var maxSeries = context.SeriesCatalog.MaxNameLength == 0 ? 0 : context.SeriesCatalog.MaxNameLength * 2 + 64;
         var pending = new Queue<State>();
-        var seen = new HashSet<(int, bool, bool)>();
+        var seen = new HashSet<(int, bool, bool, string)>();
         string? conflict = null;
         State? complete = null;
         State? furthest = null;
-        Add(start, false, false, null);
+        Add(start, false, false, null, []);
         while (pending.TryDequeue(out var state) && budget.Spend())
         {
             if (furthest == null || state.At > furthest.At) furthest = state;
@@ -47,20 +50,26 @@ internal sealed class ReleaseSpanInterpreter(
                 if (state.Credited) break;
                 continue;
             }
+            // Reference-backed numbered series fields own their role before broader
+            // annotation rules. Missing positions still carry release-side claims.
+            if (ReserveSeries(state.At, out var reservedLength, out var reserved))
+            {
+                if (reservedLength > 0 && !HasFollowingPosition(state.At + reservedLength, end))
+                    AddSeries(view.Text.Substring(state.At, reservedLength), reserved);
+                continue;
+            }
+            if (budget.Exhausted) break;
             var chunkEnd = state.At;
             while (chunkEnd < end && !ReleaseAnnotationGrammar.Separator(view.Text[chunkEnd]) && budget.Spend()) chunkEnd++;
             if (!budget.Spend(chunkEnd - state.At)) break;
             var chunk = view.Text[state.At..chunkEnd].Trim();
-            if (ReleaseAnnotationGrammar.IsTechnical(chunk))
+            if ((state.Metadata || view.IsScene) && chunk.Length > 0 && chunk.All(c => c is '.' or '!' or '。'))
                 AddSpan(chunkEnd, state.Credited, true, ReleaseSpanRole.TechnicalMetadata);
-            else if ((state.Metadata || view.IsScene) && chunk.Length > 0 && chunk.All(c => c is '.' or '!' or '。'))
-                AddSpan(chunkEnd, state.Credited, true, ReleaseSpanRole.TechnicalMetadata);
-            if (ReleaseAnnotationGrammar.IsExplicitNarrator(chunk))
-                AddSpan(chunkEnd, state.Credited, state.Metadata, ReleaseSpanRole.NarratorCredit);
-            if (!beforeTitle && OnlySeparators(chunkEnd, end) && ReleaseAnnotationGrammar.IsGroup(chunk))
-                AddSpan(chunkEnd, state.Credited, state.Metadata, ReleaseSpanRole.GroupMarker);
 
-            var limit = Math.Min(end, state.At + Math.Max(maxName + 12, maxSeries));
+            var limit = Math.Min(end, state.At + Math.Max(ReleaseAnnotationRules.MaximumFieldLength, Math.Max(maxName + 12, maxSeries)));
+            // None of the field recognizers may cross an annotation bracket.
+            for (var boundary = state.At; boundary < limit && budget.Spend(); boundary++)
+                if ("[]{}()".Contains(view.Text[boundary])) { limit = boundary; break; }
             for (var partEnd = state.At + 1; partEnd <= limit && budget.Spend(); partEnd++)
             {
                 if (partEnd < end && !ReleaseAnnotationGrammar.Separator(view.Text[partEnd])
@@ -69,9 +78,20 @@ internal sealed class ReleaseSpanInterpreter(
                 var part = view.Text[state.At..partEnd].TrimEnd();
                 if (part.Length == 0) continue;
                 var actualEnd = state.At + part.Length;
+                if (part.Length <= ReleaseAnnotationRules.MaximumFieldLength && !part.Any(c => "[]{}()".Contains(c)))
+                {
+                    var rawStart = view.Span(state.At, part.Length, ReleaseSpanRole.Unknown).Start;
+                    var signed = rawStart > 0 && "-−+".Contains(view.Original[rawStart - 1]);
+                    var annotation = ReleaseAnnotationRules.Recognize(part, view.Text.AsSpan(actualEnd, end - actualEnd), context,
+                        view.IsScene, beforeTitle, state.Metadata, IsBracketed(state.At, actualEnd), signed, budget);
+                    if (annotation.Explained)
+                        Add(actualEnd, state.Credited, state.Metadata || annotation.Role == ReleaseSpanRole.TechnicalMetadata,
+                            new(annotation.Span(view, state.At, part.Length), state.Path), state.Claims);
+                    else conflict ??= annotation.Reason;
+                }
                 // Names may cross their own commas/hyphens, never an annotation bracket.
                 var raw = view.Raw(state.At, part.Length);
-                if (part.Length <= maxName + 12 && !part.Any(c => "[]()".Contains(c)))
+                if (part.Length <= maxName + 12 && !part.Any(c => "[]{}()".Contains(c)))
                 {
                     var labelLength = AuthorLabelLength(part);
                     // Cue lengths belong to the comparison view. Map the name range
@@ -89,31 +109,37 @@ internal sealed class ReleaseSpanInterpreter(
                                 || !ReleaseAnnotationGrammar.IsTechnical(person)
                                     && AnchoredWhitespaceCredit(state.At, actualEnd) || state.Credited);
                             Add(actualEnd, state.Credited || credit, state.Metadata,
-                                new(view.Span(state.At, part.Length, name.Role), state.Path));
+                                new(view.Span(state.At, part.Length, name.Role), state.Path), state.Claims);
                         }
                     }
                 }
-                if (part.Length <= maxSeries && !part.Any(c => "[]()".Contains(c)))
+                if (part.Length <= maxSeries && !part.Any(c => "[]{}()".Contains(c)))
                 {
-                    if (ReleaseAnnotationGrammar.Series(part, context, view.IsScene,
-                        beforeTitle || IsBracketed(state.At, actualEnd), out var reason))
+                    var annotation = ReleaseSeriesRule.Recognize(part, context.SeriesCatalog,
+                        beforeTitle || IsBracketed(state.At, actualEnd));
+                    if (annotation.Explained)
                     {
-                        // A bare known series name cannot hide a following unbracketed position.
-                        if (!HasFollowingPosition(actualEnd, end))
-                        {
-                            var span = view.Span(state.At, part.Length, ReleaseSpanRole.SeriesName);
-                            ReleaseSpan? position = null;
-                            if (ReleaseAnnotationGrammar.PositionRange(part) is { } range)
-                                position = view.Span(state.At + range.Start, range.Length, ReleaseSpanRole.SeriesPosition);
-                            Add(actualEnd, state.Credited, state.Metadata, new(span, state.Path, position));
-                        }
+                        if (!HasFollowingPosition(actualEnd, end)) AddSeries(part, annotation);
                     }
-                    else conflict ??= reason;
+                    else conflict ??= annotation.Reason;
                 }
             }
 
             void AddSpan(int to, bool credit, bool metadata, ReleaseSpanRole role) =>
-                Add(to, credit, metadata, new(view.Span(state.At, chunkEnd - state.At, role), state.Path));
+                Add(to, credit, metadata, new(view.Span(state.At, chunkEnd - state.At, role), state.Path), state.Claims);
+
+            void AddSeries(string part, ReleaseAnnotationResult annotation)
+            {
+                var span = annotation.Span(view, state.At, part.Length);
+                ReleaseSpan? position = null;
+                if (ReleaseSeriesRule.PositionRange(part) is { } range)
+                    position = view.Span(state.At + range.Start, range.Length, ReleaseSpanRole.SeriesPosition);
+                var claims = state.Claims.Concat(annotation.PositionClaims ?? []).Distinct().ToArray();
+                if (!budget.Spend(claims.Sum(c => c.Name.Length) + 1)) return;
+                if (ReleaseSeriesClaim.Compatible(claims))
+                    Add(state.At + part.Length, state.Credited, state.Metadata, new(span, state.Path, position), claims);
+                else conflict ??= "series_position_conflict";
+            }
         }
         if (budget.Exhausted) return new(false, false, [], "assessment_budget_exceeded");
         var spans = new List<ReleaseSpan>();
@@ -128,16 +154,18 @@ internal sealed class ReleaseSpanInterpreter(
             if (unknownStart < end) spans.Add(view.Span(unknownStart, end - unknownStart, ReleaseSpanRole.Unknown));
             return new(false, false, spans.AsReadOnly(), conflict);
         }
-        return new(true, complete.Credited, spans.AsReadOnly(), null);
+        return new(true, complete.Credited, spans.AsReadOnly(), null) { Claims = complete.Claims };
 
-        void Add(int position, bool credit, bool metadata, Step? path)
+        void Add(int position, bool credit, bool metadata, Step? path, IReadOnlyList<ReleaseSeriesClaim> claims)
         {
             while (position < end && (char.IsWhiteSpace(view.Text[position]) || ReleaseAnnotationGrammar.Separator(view.Text[position])))
             {
                 if (!budget.Spend()) return;
                 position++;
             }
-            if (seen.Add((position, credit, metadata))) pending.Enqueue(new(position, credit, metadata, path));
+            if (!budget.Spend(claims.Sum(c => c.Name.Length) + 1)) return;
+            if (seen.Add((position, credit, metadata, claims.Count == 0 ? string.Empty : ReleaseSeriesClaim.Signature(claims))))
+                pending.Enqueue(new(position, credit, metadata, path, claims));
         }
 
         bool AnchoredWhitespaceCredit(int from, int to)
@@ -150,7 +178,36 @@ internal sealed class ReleaseSpanInterpreter(
                     && span.Start + span.Length < view.Original.Length
                     && char.IsWhiteSpace(view.Original[span.Start + span.Length])
                 : OnlySeparators(start, from) && span.Start > 0
-                    && char.IsWhiteSpace(view.Original[span.Start - 1]);
+                    && (char.IsWhiteSpace(view.Original[span.Start - 1])
+                        || view.IsScene && view.Original[span.Start - 1] == '.');
+        }
+
+        bool ReserveSeries(int from, out int length, out ReleaseAnnotationResult reserved)
+        {
+            length = 0;
+            reserved = default;
+            var limit = Math.Min(end, from + maxSeries);
+            for (var to = from + 1; to <= limit && budget.Spend(); to++)
+            {
+                if (view.Text[to - 1] is '[' or ']' or '(' or ')' or '{' or '}') break;
+                if (to < end && !ReleaseAnnotationGrammar.Separator(view.Text[to]) && !char.IsWhiteSpace(view.Text[to])) continue;
+                var part = view.Text[from..to].TrimEnd();
+                if (part.Length == 0 || !budget.Spend(part.Length)) continue;
+                var result = ReleaseSeriesRule.Recognize(part, context.SeriesCatalog,
+                    beforeTitle || IsBracketed(from, from + part.Length));
+                if (result.Outcome is AnnotationOutcome.Conflict or AnnotationOutcome.Ambiguous)
+                {
+                    length = 0;
+                    conflict ??= result.Reason;
+                    return true;
+                }
+                if (result.Explained && result.PositionClaims?.Count > 0)
+                {
+                    length = part.Length;
+                    reserved = result;
+                }
+            }
+            return length > 0;
         }
     }
 
@@ -167,7 +224,8 @@ internal sealed class ReleaseSpanInterpreter(
         while (end < view.Text.Length && char.IsWhiteSpace(view.Text[end])) end++;
         return start > 0 && end < view.Text.Length
             && (view.Text[start - 1] == '(' && view.Text[end] == ')'
-                || view.Text[start - 1] == '[' && view.Text[end] == ']');
+                || view.Text[start - 1] == '[' && view.Text[end] == ']'
+                || view.Text[start - 1] == '{' && view.Text[end] == '}');
     }
 
     private bool CreditBoundary(int start, int end)

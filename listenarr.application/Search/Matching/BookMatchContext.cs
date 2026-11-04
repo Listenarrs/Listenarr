@@ -26,7 +26,17 @@ public sealed record BookMatchContext(
 {
     public IReadOnlyList<string> Isbn { get; init; } = [];
     public IReadOnlyList<string> Narrators { get; init; } = [];
-    public IReadOnlyList<ReleaseSeriesReference> SeriesReferences { get; init; } = [];
+    private IReadOnlyList<ReleaseSeriesReference> _seriesReferences = [];
+    internal ReleaseSeriesCatalog SeriesCatalog { get; private init; } = ReleaseSeriesCatalog.Empty;
+    public IReadOnlyList<ReleaseSeriesReference> SeriesReferences
+    {
+        get => _seriesReferences;
+        init
+        {
+            _seriesReferences = Array.AsReadOnly(value.ToArray());
+            SeriesCatalog = new(_seriesReferences);
+        }
+    }
     public ReferenceTitleParts? TitleParts { get; init; }
 
     public static BookMatchContext From(Audiobook book, QualityProfile? profile = null)
