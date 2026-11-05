@@ -104,24 +104,22 @@ namespace Listenarr.Api.Features.Configuration
 
         private static bool TryGetProperty(JsonElement element, string name, out JsonElement value)
         {
-            if (element.TryGetProperty(name, out value))
-            {
-                return true;
-            }
-
             // The SPA posts camelCase while the serialized file is PascalCase, and the
-            // reader that loads config.json is already case-insensitive. Match that.
+            // reader that loads config.json is already case-insensitive. Match that,
+            // including its last-match-wins rule when a body carries the same property
+            // under several casings, so a client's later override is not silently dropped.
+            value = default;
+            var found = false;
             foreach (var candidate in element.EnumerateObject())
             {
                 if (string.Equals(candidate.Name, name, StringComparison.OrdinalIgnoreCase))
                 {
                     value = candidate.Value;
-                    return true;
+                    found = true;
                 }
             }
 
-            value = default;
-            return false;
+            return found;
         }
 
         private static StartupConfig? Clone(StartupConfig? source)
