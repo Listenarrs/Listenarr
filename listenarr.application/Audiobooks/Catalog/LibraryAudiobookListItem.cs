@@ -31,6 +31,8 @@ namespace Listenarr.Application.Audiobooks.Catalog
         public AudiobookSeriesMembershipDto[]? SeriesMemberships { get; set; }
         public string[]? Genres { get; set; }
         public string? Asin { get; set; }
+        /// <summary>The Audible region of <see cref="Asin"/>, when the book's identifiers say it.</summary>
+        public string? AsinRegion { get; set; }
         public string? OpenLibraryId { get; set; }
         public string? Publisher { get; set; }
         public string? Language { get; set; }

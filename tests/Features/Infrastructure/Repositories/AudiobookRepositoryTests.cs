@@ -64,6 +64,33 @@ namespace Listenarr.Tests.Features.Infrastructure.Repositories
         }
 
         [Fact]
+        public async Task GetAsinRegions_GivesEachAsinsRegion_PrimaryFirst()
+        {
+            var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+            await using var db = new ListenArrDbContext(options);
+            var book = new AudiobookBuilder().WithTitle("Book").WithAsin("B000000001").Build();
+            db.Audiobooks.Add(book);
+            await db.SaveChangesAsync();
+
+            AudiobookExternalIdentifier Identifier(AudiobookExternalIdentifierType type, string value, string? region, bool isPrimary) =>
+                new() { AudiobookId = book.Id, Type = type, ValueRaw = value, ValueNormalized = value, Region = region, IsPrimary = isPrimary };
+            db.AudiobookExternalIdentifiers.AddRange(
+                Identifier(AudiobookExternalIdentifierType.Asin, "B000000001", "uk", false),
+                Identifier(AudiobookExternalIdentifierType.Asin, "B000000001", "fr", true),
+                Identifier(AudiobookExternalIdentifierType.Asin, "B000000002", null, false),
+                Identifier(AudiobookExternalIdentifierType.Isbn, "9781039400740", null, true));
+            await db.SaveChangesAsync();
+
+            var regions = await new AudiobookRepository(db).GetAsinRegionsAsync();
+
+            Assert.Equal(2, regions.Count);
+            Assert.Equal("fr", regions[(book.Id, "B000000001")]);
+            Assert.Null(regions[(book.Id, "B000000002")]);
+        }
+
+        [Fact]
         public async Task GetByIdQueries_DoNotTriggerMultipleCollectionIncludeWarning()
         {
             await using var connection = new SqliteConnection("DataSource=:memory:");
