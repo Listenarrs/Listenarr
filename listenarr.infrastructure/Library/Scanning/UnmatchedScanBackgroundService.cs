@@ -464,7 +464,9 @@ namespace Listenarr.Infrastructure.Library.Scanning
                             Description = parsed.Description,
                             CoverPath = parsed.CoverPath,
                             Asin = parsed.Asin,
-                            Format = Path.GetExtension(representative).TrimStart('.').ToUpperInvariant()
+                            Format = Path.GetExtension(representative).TrimStart('.').ToUpperInvariant(),
+                            // Only the representative file is probed, so a total is known for single-file books only.
+                            DurationSeconds = orderedFiles.Count == 1 ? tags?.DurationSeconds : null
                         });
                     }
                 });

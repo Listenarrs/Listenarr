@@ -89,6 +89,26 @@
               <span v-if="extractNarrators(result)" class="result-narrator">
                 Narrated by {{ extractNarrators(result) }}
               </span>
+              <span
+                v-if="result.lengthMinutes || result.source === 'Audiosilo'"
+                class="result-edition"
+                data-testid="find-match-edition"
+              >
+                <span v-if="result.lengthMinutes">{{ formatRuntime(result.lengthMinutes) }}</span>
+                <span
+                  v-if="runtimeDelta(result) !== undefined"
+                  class="result-runtime-delta"
+                  :class="{ 'is-match': runtimeMatches(result, item.durationSeconds) }"
+                >
+                  ({{ describeDelta(runtimeDelta(result)!) }})
+                </span>
+                <span
+                  v-if="result.source === 'Audiosilo'"
+                  class="result-source"
+                  title="Edition from audiosilo-meta, a community catalogue that keeps recordings Audible's search no longer lists"
+                  >Audiosilo</span
+                >
+              </span>
             </div>
           </div>
         </div>
@@ -120,6 +140,11 @@ import {
 import { getPlaceholderUrl } from '@/utils/placeholder'
 import type { SearchResult } from '@/types'
 import { extractNarrators } from '@/utils/searchResultHelpers'
+import {
+  formatRuntime,
+  runtimeDeltaMinutes,
+  runtimeMatches,
+} from '@/utils/libraryImportEditions'
 
 const props = defineProps<{ item: LibraryImportItem }>()
 const emit = defineEmits<{
@@ -137,6 +162,16 @@ function initialQuery(): string {
 }
 const searchQuery = ref(initialQuery())
 const authorQuery = ref(buildLibraryImportInitialAuthor(props.item))
+
+// Runtime against the file's own length tells editions (narrators, abridged/unabridged) apart
+function runtimeDelta(result: SearchResult): number | undefined {
+  return runtimeDeltaMinutes(result, props.item.durationSeconds)
+}
+
+function describeDelta(delta: number): string {
+  if (delta === 0) return 'same length as your file'
+  return `${delta > 0 ? '+' : ''}${delta} min vs your file`
+}
 const searchResults = ref<SearchResult[]>([])
 const isSearching = ref(false)
 const hasSearched = ref(false)
@@ -340,6 +375,24 @@ function select(result: SearchResult) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.result-edition {
+  display: block;
+  font-size: 0.75rem;
+  color: #888;
+}
+
+.result-runtime-delta.is-match {
+  color: #4caf50;
+}
+
+.result-source {
+  margin-left: 0.4rem;
+  padding: 0 0.35rem;
+  border: 1px solid #666;
+  border-radius: 3px;
+  font-size: 0.65rem;
 }
 
 .no-results,

@@ -46,14 +46,44 @@ export function buildLibraryImportFallbackTitle(
   return base
 }
 
+const EDITION_MARKER =
+  /\s*[([]\s*(?:full[\s-]*cast(?:\s+edition)?|unabridged|abridged|dramati[sz]ed|dramati[sz]ation|audiobook|audio\s*drama)\s*[)\]]/gi
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * Tag and folder titles carry noise that catalogue searches match literally and then miss: edition
+ * markers ("(Full Cast)", "(Unabridged)"), an "Author - " prefix, a trailing " - Series, Book N",
+ * an embedded [ASIN], underscores and look-alike colons. Returns the original when nothing is left.
+ */
+export function cleanLibraryImportTitle(title: string, author?: string): string {
+  let cleaned = title
+    .replace(/\u{A789}/gu, ':')
+    .replace(/_/g, ' ')
+    .replace(/\s*\[[A-Z0-9]{10}\]\s*/g, ' ')
+    .replace(EDITION_MARKER, '')
+  const trimmedAuthor = author?.trim()
+  if (trimmedAuthor) {
+    cleaned = cleaned.replace(new RegExp(`^\\s*${escapeRegExp(trimmedAuthor)}\\s*[-–—:]\\s*`, 'i'), '')
+  }
+  cleaned = cleaned
+    .replace(/\s+[-–—]\s+[^-–—]+,\s*Book\s+\d+\s*$/i, '')
+    .replace(/\s*\([^()]+,\s*Book\s+\d+\)\s*$/i, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+  return cleaned || title.trim()
+}
+
 export function buildLibraryImportInitialQuery(item: LibraryImportSearchCandidate): string {
   const asin = item.detectedAsin?.trim()
   if (asin) return asin
 
   const detectedTitle = item.detectedTitle?.trim()
-  if (detectedTitle) return detectedTitle
+  if (detectedTitle) return cleanLibraryImportTitle(detectedTitle, item.detectedAuthor)
 
-  return buildLibraryImportFallbackTitle(item)
+  return cleanLibraryImportTitle(buildLibraryImportFallbackTitle(item), item.detectedAuthor)
 }
 
 export function buildLibraryImportInitialAuthor(item: LibraryImportSearchCandidate): string {

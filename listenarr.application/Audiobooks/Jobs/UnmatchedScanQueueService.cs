@@ -40,6 +40,8 @@ namespace Listenarr.Application.Audiobooks.Jobs
         public string? CoverPath { get; set; }
         public string? Asin { get; set; }
         public string Format { get; set; } = string.Empty;
+        /// <summary>Length of a single-file book in seconds; null when the book spans several files.</summary>
+        public double? DurationSeconds { get; set; }
     }
 
     public static class UnmatchedScanPublicError

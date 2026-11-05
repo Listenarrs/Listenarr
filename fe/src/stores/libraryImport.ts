@@ -21,6 +21,7 @@ import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import { logger } from '@/utils/logger'
 import { buildLibraryImportSearchParams } from '@/utils/libraryImportSearch'
+import { mergeEditionResults, pickByRuntime } from '@/utils/libraryImportEditions'
 import { normalizeSearchRegion, searchRegionOptions } from '@/utils/languageMapping'
 import { useConfigurationStore } from '@/stores/configuration'
 import type { SearchResult, AudibleBookMetadata, UnmatchedFileItem } from '@/types'
@@ -39,6 +40,8 @@ export interface LibraryImportItem {
   detectedSeries?: string
   format: string
   fileCount: number
+  // Length of a single-file book (seconds): picks the matching edition by runtime
+  durationSeconds?: number
   // Match state
   selectedMatch: SearchResult | null
   hasSearched: boolean // true once auto-search was attempted
@@ -109,6 +112,7 @@ function unmatchedToImportItem(item: UnmatchedFileItem): LibraryImportItem {
     detectedSeries: item.series,
     format: item.format,
     fileCount: item.fileCount,
+    durationSeconds: item.durationSeconds,
     selectedMatch: null,
     hasSearched: false,
     isSearching: false,
@@ -417,16 +421,26 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   // Search one Audible region: the one given (picked by the user) or the configured one. There is no
   // automatic switch to another catalogue. Results are tagged with their region, so the import
   // fetches their full metadata (authors, narrators) from the same catalogue and keeps that region.
+  // Title searches also add recordings from audiosilo-meta that Audible's search no longer lists
+  // (superseded editions); an unavailable community catalogue just adds nothing.
   async function searchInRegion(
     params: AdvancedSearchParams,
     region?: string,
     signal?: AbortSignal,
   ): Promise<SearchResult[]> {
     const searchRegion = region || (await _configuredRegion())
+    // The optional catalogue must never break the Audible search, even by throwing synchronously
+    const title = params.title
+    const editionsRequest: Promise<SearchResult[]> =
+      title && !params.asin
+        ? Promise.resolve()
+            .then(() => apiService.searchEditions(title, params.author, searchRegion))
+            .catch(() => [])
+        : Promise.resolve([])
     const results = signal
       ? await apiService.advancedSearch({ ...params, region: searchRegion }, signal)
       : await apiService.advancedSearch({ ...params, region: searchRegion })
-    return usableInRegion(results, searchRegion)
+    return mergeEditionResults(usableInRegion(results, searchRegion), await editionsRequest)
   }
 
   // ─── Queue Processing ─────────────────────────────────────────────────────
@@ -472,8 +486,12 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
         const byAsin = !!searchParams.asin
         const results = await searchInRegion(searchParams)
         metadataFetchCount.value++
-        // ASIN results are authoritative — take the first result directly without author comparison
-        const first = byAsin ? (results[0] ?? null) : pickBestMatch(results, item.detectedAuthor)
+        // ASIN results are authoritative — take the first result directly without author comparison.
+        // Otherwise a known file length picks the edition with the matching runtime.
+        const first = byAsin
+          ? (results[0] ?? null)
+          : (pickByRuntime(results, item.durationSeconds) ??
+            pickBestMatch(results, item.detectedAuthor))
         // The row may have left the page meanwhile (another folder loaded or scanned)
         const current = items.value[id]
         if (!current) continue
@@ -572,6 +590,9 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     const region = match.region || (await _configuredRegion())
     const base = { ...matchToMetadata(match), region }
     if (!match.asin) return base
+    // A community-catalogue edition may be one Audible no longer serves: its own record is complete
+    // (authors, narrators, runtime), so it imports from that instead of being refused.
+    const fromEditionCatalogue = match.source === 'Audiosilo'
     const notFound = new MatchRecordNotFoundError(
       `Audible ${regionLabel(region)} has no record for ${match.asin}. ` +
         'Use "Search for a match" to pick the book again, in the right region.',
@@ -588,13 +609,19 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
         { source?: string; metadata?: AudiblePayload } | AudiblePayload
       >(match.asin, region)
     } catch (e: unknown) {
-      if ((e as { status?: number })?.status === 404) throw notFound
+      if ((e as { status?: number })?.status === 404) {
+        if (fromEditionCatalogue) return base
+        throw notFound
+      }
       throw new Error(`Audible metadata lookup failed: ${(e as Error)?.message ?? 'unknown error'}`)
     }
     const raw: AudiblePayload =
       (resp && 'metadata' in resp && resp.metadata ? resp.metadata : (resp as AudiblePayload)) ?? {}
     // Audible answers an ASIN it doesn't sell in that market with an empty stub: ASIN, no title
-    if (raw.asin && !raw.title) throw notFound
+    if (raw.asin && !raw.title) {
+      if (fromEditionCatalogue) return base
+      throw notFound
+    }
     const enrichedAuthors = (raw.authors ?? []).map((a) => a?.name ?? '').filter(Boolean)
     const enrichedNarrators = (raw.narrators ?? []).map((n) => n?.name ?? '').filter(Boolean)
     return {

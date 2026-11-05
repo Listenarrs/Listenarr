@@ -1208,6 +1208,8 @@ export interface UnmatchedFileItem {
   asin?: string
   format: string
   duration?: string
+  // Length of a single-file book in seconds (from ffprobe); absent for books spanning several files
+  durationSeconds?: number
 }
 
 export interface UnmatchedFilesResponse {

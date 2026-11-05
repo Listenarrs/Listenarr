@@ -79,6 +79,24 @@ namespace Listenarr.Tests.Features.Infrastructure.Metadata.Parsing
         }
 
         [Fact]
+        public void ParseEmbeddedTagsFromFfprobeJson_ReadsFormatDuration_EvenWithoutTags()
+        {
+            var withTags = JsonDocument.Parse("""
+            { "format": { "duration": "36486.400000", "tags": { "album": "Guards! Guards!" } } }
+            """);
+            var withoutTags = JsonDocument.Parse("""
+            { "format": { "duration": "12.5" } }
+            """);
+            var unusable = JsonDocument.Parse("""
+            { "format": { "duration": "N/A", "tags": { "album": "X" } } }
+            """);
+
+            Assert.Equal(36486.4, PathMetadataParser.ParseEmbeddedTagsFromFfprobeJson(withTags.RootElement).DurationSeconds);
+            Assert.Equal(12.5, PathMetadataParser.ParseEmbeddedTagsFromFfprobeJson(withoutTags.RootElement).DurationSeconds);
+            Assert.Null(PathMetadataParser.ParseEmbeddedTagsFromFfprobeJson(unusable.RootElement).DurationSeconds);
+        }
+
+        [Fact]
         public void ParseEmbeddedTagsFromFfprobeJson_ParsesMp3UserTextAsinTag()
         {
             var doc = JsonDocument.Parse("""

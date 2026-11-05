@@ -21,7 +21,35 @@ import {
   buildLibraryImportInitialAuthor,
   buildLibraryImportInitialQuery,
   buildLibraryImportSearchParams,
+  cleanLibraryImportTitle,
 } from '@/utils/libraryImportSearch'
+
+describe('library import title cleanup', () => {
+  it.each([
+    ['Mort (Full Cast)', 'Terry Pratchett', 'Mort'],
+    ['Harry Potter and the Chamber of Secrets (Full-Cast Edition)', 'J.K. Rowling', 'Harry Potter and the Chamber of Secrets'],
+    ['Birdsong (Unabridged)', undefined, 'Birdsong'],
+    ['Michael Palin - Full Circle', 'Michael Palin', 'Full Circle'],
+    ['61 Hours - Jack Reacher, Book 14', 'Lee Child', '61 Hours'],
+    ['Empire of Silver (Conqueror, Book 4)', 'Conn Iggulden', 'Empire of Silver'],
+    ['The_Big_Fix꞉_A_Jack_Bergin_Mystery_[B0DTKV2H8X]', 'John Mankiewicz', 'The Big Fix: A Jack Bergin Mystery'],
+    ['Guards! Guards!', 'Terry Pratchett', 'Guards! Guards!'],
+    ['(Unabridged)', undefined, '(Unabridged)'],
+  ])('cleans %s', (title, author, expected) => {
+    expect(cleanLibraryImportTitle(title, author)).toBe(expected)
+  })
+
+  it('searches with the cleaned detected title', () => {
+    expect(
+      buildLibraryImportInitialQuery({
+        fullPath: '/books/Mort (Full Cast).m4b',
+        folderName: 'Terry Pratchett',
+        detectedTitle: 'Mort (Full Cast)',
+        detectedAuthor: 'Terry Pratchett',
+      }),
+    ).toBe('Mort')
+  })
+})
 
 describe('library import search helpers', () => {
   it('prefers detected title and author before folder fallback', () => {
