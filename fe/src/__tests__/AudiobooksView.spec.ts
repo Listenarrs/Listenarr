@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory } from 'vue-router'
@@ -45,7 +45,8 @@ vi.mock('@/services/api', () => ({
 }))
 
 type AudiobooksVm = {
-  setGroupBy?: (value: string) => Promise<void> | void
+  setGroupBy?: (value: string, options?: { brokenOnly?: boolean }) => Promise<void> | void
+  audiobooks?: Array<{ id: number }>
   groupedCollections?: Array<{ name: string; count: number; coverUrl?: string }>
   showItemDetails?: boolean
   groupBy?: string
@@ -811,6 +812,129 @@ describe('AudiobooksView Grouping', () => {
     await vm.setGroupBy?.('authors')
     await wrapper.vm.$nextTick()
     expect(store.selectedIds.size).toBe(0)
+  })
+
+  describe('Broken books group', () => {
+    // brokenReasons come from the server
+    const books = [
+      { id: 1, title: 'Fine', brokenReasons: [] },
+      { id: 2, title: 'No ASIN', brokenReasons: ['missing_asin'] },
+      {
+        id: 3,
+        title: '',
+        brokenReasons: ['missing_title', 'missing_region'],
+      },
+      { id: 4, title: 'Also fine', brokenReasons: [] },
+    ]
+
+    async function mountLibrary(
+      library: Array<{ id: number; title: string; brokenReasons: string[] }>,
+      path = '/audiobooks',
+    ) {
+      if (
+        typeof (globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver ===
+        'undefined'
+      ) {
+        ;(globalThis as unknown as Record<string, unknown>).ResizeObserver = class {
+          observe() {}
+          disconnect() {}
+        }
+      }
+      const pinia = createPinia()
+      setActivePinia(pinia)
+      const router = createRouter({
+        history: createMemoryHistory(),
+        routes: [
+          { path: '/', name: 'home', component: { template: '<div />' } },
+          { path: '/audiobooks', name: 'audiobooks', component: AudiobooksView },
+        ],
+      })
+      await router.push(path)
+      await router.isReady().catch(() => {})
+      const store = useLibraryStore()
+      store.audiobooks = library.map((b) => ({
+        ...b,
+        authors: ['Author'],
+        files: [],
+      })) as unknown as import('@/types').Audiobook[]
+      store.fetchLibrary = vi.fn(async () => undefined)
+      const wrapper = mount(AudiobooksView, {
+        global: {
+          plugins: [pinia, router],
+          stubs: [
+            'BulkEditModal',
+            'EditAudiobookModal',
+            'CustomFilterModal',
+            'FiltersDropdown',
+            'CustomSelect',
+          ],
+        },
+      })
+      await new Promise((r) => setTimeout(r, 0))
+      return { wrapper, router }
+    }
+
+    const shownIds = (wrapper: ReturnType<typeof mount>) =>
+      (getVm(wrapper).audiobooks ?? []).map((b) => b.id).sort()
+
+    beforeEach(() => {
+      localStorage.removeItem('listenarr.groupBy')
+    })
+
+    afterEach(() => {
+      // The group is remembered: later tests must not open on it
+      localStorage.removeItem('listenarr.groupBy')
+    })
+
+    it('lists only the books the server gives reasons for, from the last item of the group menu', async () => {
+      const { wrapper, router } = await mountLibrary(books)
+
+      await wrapper.get('.group-btn').trigger('click')
+      expect(wrapper.findAll('.group-menu .menu-item').map((i) => i.text())).toEqual([
+        'Books',
+        'Authors',
+        'Series',
+        'Broken books',
+      ])
+      await wrapper.get('[data-testid="group-broken"]').trigger('click')
+      await new Promise((r) => setTimeout(r, 0))
+
+      expect(shownIds(wrapper)).toEqual([2, 3])
+      expect(wrapper.get('.group-btn').text()).toContain('Broken books')
+      expect(router.currentRoute.value.query.group).toBe('broken')
+      expect(localStorage.getItem('listenarr.groupBy')).toBe('broken')
+
+      await getVm(wrapper).setGroupBy?.('books')
+      await new Promise((r) => setTimeout(r, 0))
+      expect(shownIds(wrapper)).toEqual([1, 2, 3, 4])
+      expect(router.currentRoute.value.query.group).toBe('books')
+    })
+
+    it("shows each book's reasons as the server gives them, only in the broken group", async () => {
+      const { wrapper } = await mountLibrary(books, '/audiobooks?group=broken')
+
+      const tagsPerBook = wrapper
+        .findAll('[data-testid="broken-reasons"]')
+        .map((r) => r.findAll('.broken-reason').map((tag) => tag.text()))
+      expect(tagsPerBook).toEqual(expect.arrayContaining([['No ASIN'], ['No title', 'No region']]))
+
+      await getVm(wrapper).setGroupBy?.('books')
+      await new Promise((r) => setTimeout(r, 0))
+      expect(wrapper.find('[data-testid="broken-reasons"]').exists()).toBe(false)
+    })
+
+    it('opens on the broken books from the address', async () => {
+      const { wrapper } = await mountLibrary(books, '/audiobooks?group=broken')
+
+      expect(shownIds(wrapper)).toEqual([2, 3])
+    })
+
+    it('says when no book is broken, keeps the group menu and offers all books', async () => {
+      const { wrapper } = await mountLibrary([books[0]!], '/audiobooks?group=broken')
+
+      expect(wrapper.text()).toContain('No broken books')
+      expect(wrapper.find('.group-btn').exists()).toBe(true)
+    })
   })
 
   it('series bottom placard is only visible when showItemDetails is enabled', async () => {

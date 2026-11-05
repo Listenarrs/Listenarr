@@ -61,18 +61,27 @@
               : ''
           }}
         </span>
-        <div class="group-dropdown" v-if="audiobooks.length > 0">
+        <div class="group-dropdown" v-if="rawAudiobooksLength > 0">
           <button class="toolbar-btn group-btn" @click="showGroupMenu = !showGroupMenu">
-            <PhBook v-if="groupBy === 'books'" />
+            <PhWarning v-if="brokenOnly" />
+            <PhBook v-else-if="groupBy === 'books'" />
             <PhUser v-else-if="groupBy === 'authors'" />
             <PhBooks v-else />
-            {{ groupBy === 'books' ? 'Books' : groupBy === 'authors' ? 'Authors' : 'Series' }}
+            {{
+              brokenOnly
+                ? 'Broken books'
+                : groupBy === 'books'
+                  ? 'Books'
+                  : groupBy === 'authors'
+                    ? 'Authors'
+                    : 'Series'
+            }}
             <PhCaretDown />
           </button>
           <div v-if="showGroupMenu" class="group-menu">
             <button
               class="menu-item"
-              :class="{ active: groupBy === 'books' }"
+              :class="{ active: groupBy === 'books' && !brokenOnly }"
               @click="setGroupBy('books')"
             >
               <PhBook />
@@ -93,6 +102,18 @@
             >
               <PhBooks />
               Series
+            </button>
+            <!-- Temporary help until the Issues page: books Audible can't fetch metadata for, to
+                 repair -->
+            <button
+              class="menu-item"
+              :class="{ active: brokenOnly }"
+              title="Books Audible can't fetch metadata for (no title, no author, no ASIN or one that isn't an ASIN, or no region), each with its reasons. A temporary shortcut until the Issues page."
+              data-testid="group-broken"
+              @click="setGroupBy('books', { brokenOnly: true })"
+            >
+              <PhWarning />
+              Broken books
             </button>
           </div>
         </div>
@@ -189,6 +210,20 @@
           <PhPlus v-else />
           {{ !hasRootFolderConfigured ? 'Go to Settings' : 'Add Audiobooks' }}
         </router-link>
+      </template>
+    </EmptyState>
+
+    <!-- Broken books: none left to repair (in the current search and filters) -->
+    <EmptyState
+      v-else-if="audiobooks.length === 0 && brokenOnly"
+      title="No broken books"
+      message="Every book shown has a title and a valid ASIN."
+    >
+      <template #icon>
+        <PhCheckCircle :size="48" />
+      </template>
+      <template #action>
+        <button class="btn btn-primary" @click="setGroupBy('books')">Show all books</button>
       </template>
     </EmptyState>
 
@@ -495,6 +530,17 @@
                   </button>
                 </div>
               </div>
+              <!-- Why the server considers the book broken: always shown under the cover, in the
+                   "Broken books" group (the overlay only appears on hover) -->
+              <div
+                v-if="brokenOnly && audiobook.brokenReasons?.length"
+                class="broken-reasons grid-broken-reasons"
+                data-testid="broken-reasons"
+              >
+                <span v-for="reason in audiobook.brokenReasons" :key="reason" class="broken-reason">
+                  {{ brokenReasonLabel(reason) }}
+                </span>
+              </div>
               <!-- Extra details shown physically under poster when toggle is enabled -->
               <div v-if="showItemDetails" class="grid-bottom-details">
                 <div class="detail-line title">{{ safeText(audiobook.title) }}</div>
@@ -588,6 +634,15 @@
                   audiobook.authors?.map((author) => safeText(author)).join(', ') ||
                   'Unknown Author'
                 }}
+              </div>
+              <div
+                v-if="brokenOnly && audiobook.brokenReasons?.length"
+                class="broken-reasons"
+                data-testid="broken-reasons"
+              >
+                <span v-for="reason in audiobook.brokenReasons" :key="reason" class="broken-reason">
+                  {{ brokenReasonLabel(reason) }}
+                </span>
               </div>
               <div v-if="showItemDetails" class="list-extra-details">
                 <div v-if="formatSeriesMemberships(audiobook)" class="detail-line small">
@@ -823,6 +878,8 @@ import {
   PhUser,
   PhBooks,
   PhFolderOpen,
+  PhWarning,
+  PhCheckCircle,
 } from '@phosphor-icons/vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
@@ -833,6 +890,7 @@ import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import { apiService } from '@/services/api'
 import { buildApiPath } from '@/services/apiBase'
 import { logger } from '@/utils/logger'
+import { brokenReasonLabel } from '@/utils/brokenBookReasons'
 import BulkEditModal from '@/components/domain/collection/BulkEditModal.vue'
 import EditAudiobookModal from '@/components/domain/audiobook/EditAudiobookModal.vue'
 import RenamePreviewModal from '@/components/domain/organize/RenamePreviewModal.vue'
@@ -1063,6 +1121,9 @@ const filteredAndSortedAudiobooks = computed(() => {
       year.includes(q)
     )
   })
+
+  // "Broken books": the books the server gives reasons for
+  if (brokenOnly.value) filtered = filtered.filter((b) => (b.brokenReasons?.length ?? 0) > 0)
 
   // Apply selected filter (built-in or custom)
   if (selectedFilterId.value) {
@@ -1333,12 +1394,21 @@ const GROUP_BY_MODES = ['books', 'authors', 'series'] as const
 type GroupByMode = (typeof GROUP_BY_MODES)[number]
 const DEFAULT_VISIBLE_RANGE_END = 20
 const groupBy = ref<'books' | 'authors' | 'series'>('books')
+// "Broken books": the Books group showing only the books to repair (group=broken in the address)
+const BROKEN_GROUP = 'broken'
+const brokenOnly = ref(false)
 const showGroupMenu = ref(false)
 
 function normalizeGroupBy(value: unknown): GroupByMode | null {
+  if (value === BROKEN_GROUP) return 'books'
   return typeof value === 'string' && GROUP_BY_MODES.includes(value as GroupByMode)
     ? (value as GroupByMode)
     : null
+}
+
+// The group as the address and the saved preference name it
+function groupQueryValue(): string {
+  return brokenOnly.value ? BROKEN_GROUP : groupBy.value
 }
 
 // --- GroupBy and SortKey Initialization ---
@@ -1348,22 +1418,33 @@ try {
   const storedGroup = normalizeGroupBy(stored)
   if (storedGroup) {
     groupBy.value = storedGroup
+    brokenOnly.value = stored === BROKEN_GROUP
   }
   const initialGroup = normalizeGroupBy(route.query.group)
-  if (initialGroup && initialGroup !== groupBy.value) {
+  if (initialGroup) {
     groupBy.value = initialGroup
+    brokenOnly.value = route.query.group === BROKEN_GROUP
   }
   // No need to set sortKey/order here; handled per-group below
   if (!initialGroup) {
-    router.replace({ path: '/audiobooks', query: { group: groupBy.value } })
-  } else if (route.query.group !== initialGroup) {
-    router.replace({ path: '/audiobooks', query: { ...(route.query || {}), group: initialGroup } })
+    router.replace({ path: '/audiobooks', query: { group: groupQueryValue() } })
+  } else if (route.query.group !== groupQueryValue()) {
+    router.replace({
+      path: '/audiobooks',
+      query: { ...(route.query || {}), group: groupQueryValue() },
+    })
   }
 } catch {}
 
+watch(brokenOnly, () => {
+  try {
+    localStorage.setItem(GROUP_BY_KEY, groupQueryValue())
+  } catch {}
+})
+
 watch(groupBy, (v) => {
   try {
-    localStorage.setItem(GROUP_BY_KEY, v)
+    localStorage.setItem(GROUP_BY_KEY, groupQueryValue())
   } catch {}
 
   // Ensure selected sort key is valid for the new grouping; reset to sensible defaults if needed
@@ -1707,12 +1788,16 @@ watch(
   (g) => {
     try {
       const mode = normalizeGroupBy(g) ?? 'books'
+      const broken = g === BROKEN_GROUP
       // If the route changed the group, use setGroupBy so we run the same DOM/update/observer logic
-      if (mode !== groupBy.value) {
+      if (mode !== groupBy.value || broken !== brokenOnly.value) {
         // fire-and-forget async to avoid blocking the router navigation
-        void setGroupBy(mode)
-      } else if (g !== mode) {
-        void router.replace({ path: '/audiobooks', query: { ...(route.query || {}), group: mode } })
+        void setGroupBy(mode, { brokenOnly: broken })
+      } else if (g !== groupQueryValue()) {
+        void router.replace({
+          path: '/audiobooks',
+          query: { ...(route.query || {}), group: groupQueryValue() },
+        })
       }
     } catch {}
   },
@@ -2033,9 +2118,11 @@ function resetVirtualScroller() {
   }
 }
 
-async function setGroupBy(mode: GroupByMode) {
-  const changed = mode !== groupBy.value
+async function setGroupBy(mode: GroupByMode, options: { brokenOnly?: boolean } = {}) {
+  const broken = mode === 'books' && !!options.brokenOnly
+  const changed = mode !== groupBy.value || broken !== brokenOnly.value
   groupBy.value = mode
+  brokenOnly.value = broken
   showGroupMenu.value = false
   if (changed) {
     resetVirtualScroller()
@@ -2057,7 +2144,10 @@ async function setGroupBy(mode: GroupByMode) {
   }
   try {
     // update route query so sidebar subnav and URL stay in sync
-    router.replace({ path: '/audiobooks', query: { ...(route.query || {}), group: mode } })
+    router.replace({
+      path: '/audiobooks',
+      query: { ...(route.query || {}), group: groupQueryValue() },
+    })
   } catch (err) {
     logger.debug('Failed to update route query for group:', err)
   }
@@ -3491,6 +3581,29 @@ defineExpose({
 .audiobook-poster-container:hover .status-overlay {
   padding: 80px 8px 8px;
   opacity: 1;
+}
+
+/* Why a book is broken, as orange tags (the warning color, like the problems Repair fixes) */
+.broken-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+}
+
+.grid-broken-reasons {
+  padding: 0.35rem 0.25rem 0;
+}
+
+.broken-reason {
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--warning-600);
+  border-radius: 4px;
+  background: rgba(255, 165, 0, 0.15);
+  color: var(--warning-500);
+  font-size: 0.7rem;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 /* When 'show-details' class is present, render overlay expanded */

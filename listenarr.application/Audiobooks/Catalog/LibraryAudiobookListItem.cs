@@ -31,6 +31,9 @@ namespace Listenarr.Application.Audiobooks.Catalog
         public AudiobookSeriesMembershipDto[]? SeriesMemberships { get; set; }
         public string[]? Genres { get; set; }
         public string? Asin { get; set; }
+        // Why Audible can't be asked for this book (BrokenBookReasons codes); empty when it can. The
+        // "Broken books" group lists the books that have reasons.
+        public string[] BrokenReasons { get; set; } = [];
         public string? OpenLibraryId { get; set; }
         public string? Publisher { get; set; }
         public string? Language { get; set; }
