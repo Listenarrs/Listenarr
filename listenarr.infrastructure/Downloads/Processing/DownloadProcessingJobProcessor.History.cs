@@ -9,6 +9,7 @@
  */
 
 using System.Text.Json;
+using Listenarr.Domain.Notifications;
 
 namespace Listenarr.Infrastructure.Downloads.Processing
 {
@@ -18,6 +19,7 @@ namespace Listenarr.Infrastructure.Downloads.Processing
             DownloadProcessingJob job,
             IDownloadProcessingJobService jobService,
             IHistoryRepository historyRepository,
+            IBookLifecycleNotifier lifecycleNotifier,
             Download download,
             Audiobook audiobook,
             string correlationId,
@@ -41,12 +43,20 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                     ["RetryCount"] = job.RetryCount
                 },
                 ct);
+
+            // Only a terminal failure (retries exhausted) is a lifecycle "import failed";
+            // intermediate retries stay internal.
+            if (exhausted)
+            {
+                await NotifyImportFailedAsync(lifecycleNotifier, audiobook, download, reason, ct);
+            }
         }
 
         private static async Task FailImportAsync(
             DownloadProcessingJob job,
             IDownloadProcessingJobService jobService,
             IHistoryRepository historyRepository,
+            IBookLifecycleNotifier lifecycleNotifier,
             Download download,
             Audiobook audiobook,
             string correlationId,
@@ -86,7 +96,26 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                 reason,
                 details,
                 ct);
+
+            await NotifyImportFailedAsync(lifecycleNotifier, audiobook, download, reason, ct);
         }
+
+        private static Task NotifyImportFailedAsync(
+            IBookLifecycleNotifier lifecycleNotifier,
+            Audiobook audiobook,
+            Download download,
+            string reason,
+            CancellationToken ct) =>
+            lifecycleNotifier.NotifyAsync(
+                NotificationTriggers.BookImportFailed,
+                new
+                {
+                    id = audiobook.Id,
+                    title = audiobook.Title,
+                    downloadId = download.Id,
+                    error = reason,
+                },
+                ct);
 
         private static Task RecordHistoryAsync(
             IHistoryRepository historyRepository,

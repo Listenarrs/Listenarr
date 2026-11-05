@@ -1,3 +1,4 @@
+using Listenarr.Domain.Notifications;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 
@@ -5,31 +6,22 @@ namespace Listenarr.Tests.Features.Application.Notifications
 {
     public class NotificationsTests : BaseTests
     {
-        private Mock<INotificationService> notificationServiceMock = new();
-        private int failedCount = 0;
-        private int importedCount = 0;
+        private readonly Mock<INotificationService> notificationServiceMock = new();
 
         public override async Task InitializeAsync()
         {
-            notificationServiceMock.Setup(m => m.OnDownloadFailedAsync(It.IsAny<Download>()))
-                .Returns(async (Download _) =>
-                {
-                    failedCount++;
-                    return;
-                });
-            notificationServiceMock.Setup(m => m.OnDownloadImportedAsync(It.IsAny<Download>()))
-                .Returns(async (Download _) =>
-                {
-                    importedCount++;
-                    return;
-                });
+            notificationServiceMock
+                .Setup(m => m.SendNotificationAsync(
+                    It.IsAny<string>(), It.IsAny<object>(), It.IsAny<string>(), It.IsAny<List<string>>()))
+                .Returns(Task.CompletedTask);
 
             _services.AddSingleton(notificationServiceMock.Object);
             Init();
+            await Task.CompletedTask;
         }
 
         [Fact]
-        public async Task Notification_OnBLockedImport()
+        public async Task TerminalImportFailure_FiresBookImportFailedTrigger()
         {
             var download = await _downloadRepository.AddAsync(new DownloadBuilder()
                 .WithCompletedStatus(at: DateTime.UtcNow)
@@ -47,9 +39,14 @@ namespace Listenarr.Tests.Features.Application.Notifications
             job.RetryCount = job.MaxRetries;
             await _downloadProcessingJobRepository.UpdateAsync(job);
 
-            // Check notifications
-            Assert.Equal(0, failedCount);
-            Assert.Equal(0, importedCount);
+            // Nothing fires until the job is actually processed to its terminal state.
+            notificationServiceMock.Verify(
+                m => m.SendNotificationAsync(
+                    NotificationTriggers.BookImportFailed,
+                    It.IsAny<object>(),
+                    It.IsAny<string>(),
+                    It.IsAny<List<string>>()),
+                Times.Never);
 
             var downloadProcessingJobProcessor = _provider.GetRequiredService<DownloadProcessingJobProcessor>();
             await downloadProcessingJobProcessor.ProcessQueueAsync(CancellationToken.None);
@@ -58,9 +55,17 @@ namespace Listenarr.Tests.Features.Application.Notifications
             Assert.NotNull(download);
             Assert.Equal(DownloadStatus.ImportBlocked, download.Status);
 
-            // Check notifications
-            Assert.Equal(1, failedCount);
-            Assert.Equal(0, importedCount);
+            // Retry-exhausted terminal failure fires the real book-import-failed lifecycle trigger
+            // (the configurable catalog name) through IBookLifecycleNotifier, not the old hardcoded
+            // "Failed" shim that never matched a configured webhook. Regression coverage for #909 —
+            // exercising the real completion path end-to-end, which the previous test mocked away.
+            notificationServiceMock.Verify(
+                m => m.SendNotificationAsync(
+                    NotificationTriggers.BookImportFailed,
+                    It.IsAny<object>(),
+                    It.IsAny<string>(),
+                    It.IsAny<List<string>>()),
+                Times.Once);
         }
     }
 }

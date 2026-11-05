@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Listenarr.Domain.Notifications;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -342,6 +343,14 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
                     })
                 });
                 await downloadProcessingJobService.EnqueueAsync(download);
+
+                var notifier = scope.ServiceProvider.GetRequiredService<IBookLifecycleNotifier>();
+                await notifier.NotifyAsync(NotificationTriggers.BookDownloadCompleted, new
+                {
+                    id = download.AudiobookId,
+                    downloadId = download.Id,
+                    title = download.Title,
+                });
             }
             catch (InvalidOperationException exception)
             {
@@ -383,6 +392,15 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
                 download.DownloadClientId,
                 download.Title ?? "Unknown",
                 errorMessage);
+
+            var notifier = scope.ServiceProvider.GetRequiredService<IBookLifecycleNotifier>();
+            await notifier.NotifyAsync(NotificationTriggers.BookDownloadFailed, new
+            {
+                id = download.AudiobookId,
+                downloadId = download.Id,
+                title = download.Title,
+                error = errorMessage,
+            });
 
             if (!settings.FailedDownloadHandlingEnabled)
             {

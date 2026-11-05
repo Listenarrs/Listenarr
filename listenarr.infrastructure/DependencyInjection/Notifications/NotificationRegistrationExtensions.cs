@@ -21,6 +21,7 @@ internal static class NotificationRegistrationExtensions
             ActivatorUtilities.CreateInstance<NotificationService>(provider));
         services.AddScoped<INotificationService>(provider =>
             provider.GetRequiredService<NotificationService>());
+        services.AddScoped<IBookLifecycleNotifier, BookLifecycleNotifier>();
         services.AddSingleton<INotificationPayloadBuilder, NotificationPayloadBuilderAdapter>();
         services.AddSingleton<IDiscordBotService, DiscordBotService>();
         services.AddSingleton<IToastService, ToastService>();

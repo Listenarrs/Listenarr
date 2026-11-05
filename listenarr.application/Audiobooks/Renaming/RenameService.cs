@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Application.Common;
+using Listenarr.Domain.Notifications;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Audiobooks.Renaming
@@ -42,6 +43,7 @@ namespace Listenarr.Application.Audiobooks.Renaming
         private readonly IFileRenameCommitStore _fileRenameCommitStore;
         private readonly IFilePublicationSourceCapability _filePublicationSourceCapability;
         private readonly IVerifiedFileRenameTransactionCoordinator _verifiedFileRenameTransactionCoordinator;
+        private readonly IBookLifecycleNotifier? _lifecycleNotifier;
 
         public RenameService(
             IConfigurationService configService,
@@ -61,7 +63,8 @@ namespace Listenarr.Application.Audiobooks.Renaming
             IFilePublicationSourceCapability filePublicationSourceCapability,
             IVerifiedFileRenameTransactionCoordinator verifiedFileRenameTransactionCoordinator,
             IRootFolderService? rootFolderService = null,
-            IHistoryRepository? historyRepository = null)
+            IHistoryRepository? historyRepository = null,
+            IBookLifecycleNotifier? lifecycleNotifier = null)
         {
             _configService = configService;
             _fileNamingService = fileNamingService;
@@ -81,6 +84,7 @@ namespace Listenarr.Application.Audiobooks.Renaming
             _fileRenameCommitStore = fileRenameCommitStore ?? throw new ArgumentNullException(nameof(fileRenameCommitStore));
             _filePublicationSourceCapability = filePublicationSourceCapability ?? throw new ArgumentNullException(nameof(filePublicationSourceCapability));
             _verifiedFileRenameTransactionCoordinator = verifiedFileRenameTransactionCoordinator ?? throw new ArgumentNullException(nameof(verifiedFileRenameTransactionCoordinator));
+            _lifecycleNotifier = lifecycleNotifier;
         }
 
         public async Task<List<RenamePreview>> PreviewRenameAsync(int[] audiobookIds, CancellationToken ct = default)
@@ -405,6 +409,18 @@ namespace Listenarr.Application.Audiobooks.Renaming
                     }
 
                     await AddHistoryAsync(audiobook, result);
+
+                    if (result.Success && _lifecycleNotifier != null)
+                    {
+                        await _lifecycleNotifier.NotifyAsync(
+                            NotificationTriggers.BookRenamed,
+                            new
+                            {
+                                id = audiobook.Id,
+                                title = audiobook.Title,
+                            },
+                            ct);
+                    }
                 }
 
                 return result;
