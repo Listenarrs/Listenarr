@@ -220,6 +220,11 @@ internal static partial class ScanFileDiscovery
                 canonicalRoot,
                 semantics)
             .Select(Path.GetFileName)
+            // The stored author has had any contributor role removed, so the folder name also
+            // gets the same treatment or "Name - translator" never matches "Name". The name as
+            // it sits on disk is kept too, for a row stored before that removal whose folder was
+            // named from the same role-carrying string.
+            .SelectMany(folderName => new[] { folderName, AuthorCredits.StripRole(folderName) })
             .Any(name =>
             {
                 // Match the folder's original normalization first so a dotted folder name still
