@@ -204,6 +204,7 @@ namespace Listenarr.Tests.Features.Api.Features.Configuration
         [InlineData("""{"InstanceName":"first","instanceName":"second"}""", "second")]
         [InlineData("""{"instanceName":"first","InstanceName":"second"}""", "second")]
         [InlineData("""{"InstanceName":"first","instanceName":"second","INSTANCENAME":"third"}""", "third")]
+        [InlineData("""{"instanceName":"first","instanceName":"second"}""", "second")]
         public void ApplyTo_PropertyUnderSeveralCasings_LastMatchWins(string body, string expected)
         {
             var merged = StartupConfigPatchReader.ApplyTo(OnDisk(), Body(body));
