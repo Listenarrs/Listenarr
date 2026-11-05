@@ -200,6 +200,29 @@ namespace Listenarr.Tests.Features.Api.Features.Configuration
             Assert.Equal("on-disk-api-key", merged.ApiKey);
         }
 
+        [Theory]
+        [InlineData("""{"InstanceName":"first","instanceName":"second"}""", "second")]
+        [InlineData("""{"instanceName":"first","InstanceName":"second"}""", "second")]
+        [InlineData("""{"InstanceName":"first","instanceName":"second","INSTANCENAME":"third"}""", "third")]
+        public void ApplyTo_PropertyUnderSeveralCasings_LastMatchWins(string body, string expected)
+        {
+            var merged = StartupConfigPatchReader.ApplyTo(OnDisk(), Body(body));
+
+            Assert.Equal(expected, merged.InstanceName);
+            Assert.Equal("on-disk-api-key", merged.ApiKey);
+        }
+
+        [Fact]
+        public void ApplyTo_NestedPropertyUnderSeveralCasings_LastMatchWins()
+        {
+            var merged = StartupConfigPatchReader.ApplyTo(
+                OnDisk(),
+                Body("""{"ffmpeg":{"Arch":"first","arch":"second"}}"""));
+
+            Assert.Equal("second", merged.Ffmpeg?.Arch);
+            Assert.Equal("gyan", merged.Ffmpeg?.Provider);
+        }
+
         [Fact]
         public void ApplyTo_BodyThatIsNotAnObject_Throws()
         {
