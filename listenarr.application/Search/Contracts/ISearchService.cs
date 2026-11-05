@@ -15,8 +15,9 @@ namespace Listenarr.Application.Search.Contracts
         /// <param name="sortBy">Sort results by seeders, peers, size, or age</param>
         /// <param name="sortDirection">Sort direction (ascending or descending)</param>
         /// <param name="isAutomaticSearch">Whether this is an automatic search (affects logging)</param>
+        /// <param name="origin">Who caused the search; decides how much of each indexer's daily request limit it may spend</param>
         /// <returns>List of search results from all configured indexers</returns>
-        Task<List<SearchResult>> SearchAsync(string query, string? category = null, List<string>? apiIds = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false);
+        Task<List<SearchResult>> SearchAsync(string query, string? category = null, List<string>? apiIds = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false, SearchOrigin origin = SearchOrigin.Interactive);
 
         /// <summary>
         /// Performs intelligent search with metadata enrichment
@@ -62,8 +63,9 @@ namespace Listenarr.Application.Search.Contracts
         /// <param name="sortDirection">Sort direction (ascending or descending)</param>
         /// <param name="isAutomaticSearch">Whether this is an automatic search</param>
         /// <param name="request">Optional request object to pass indexer-specific parameters</param>
+        /// <param name="origin">Who caused the search; decides how much of each indexer's daily request limit it may spend</param>
         /// <returns>List of search results from indexers only</returns>
-        Task<List<IndexerSearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false, SearchRequest? request = null);
+        Task<List<IndexerSearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false, SearchRequest? request = null, SearchOrigin origin = SearchOrigin.Interactive);
 
         /// <summary>
         /// Gets all enabled metadata sources (Audible, Audnexus, OpenLibrary, etc.)

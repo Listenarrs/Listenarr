@@ -848,6 +848,7 @@ export interface Indexer {
   minimumAge: number
   retention: number
   maximumSize: number
+  dailyRequestLimit?: number | null // null = no daily request budget
   additionalSettings?: string
   createdAt: string
   updatedAt: string

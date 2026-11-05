@@ -80,6 +80,12 @@ namespace Listenarr.Tests.Builders
             return this;
         }
 
+        public IndexerBuilder WithDailyRequestLimit(int? value)
+        {
+            _indexer.DailyRequestLimit = value;
+            return this;
+        }
+
         public IndexerBuilder WithSetting(string key, string value)
         {
             _additionalSettings[key] = value;

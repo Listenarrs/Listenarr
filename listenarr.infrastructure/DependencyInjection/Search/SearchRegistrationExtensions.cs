@@ -9,6 +9,7 @@
  */
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Listenarr.Infrastructure.DependencyInjection.Search;
 
@@ -31,6 +32,9 @@ internal static class SearchRegistrationExtensions
     public static IServiceCollection AddSearchInfrastructure(this IServiceCollection services)
     {
         services.AddScoped<IIndexerRepository, EfIndexerRepository>();
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddSingleton<IIndexerRequestUsageStore, EfIndexerRequestUsageStore>();
+        services.AddSingleton<IIndexerRequestBudget, IndexerRequestBudget>();
         return services;
     }
 }

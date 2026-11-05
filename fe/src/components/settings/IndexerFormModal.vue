@@ -269,6 +269,20 @@
             >
               <input id="maximumSize" v-model.number="formData.maximumSize" type="number" min="0" />
             </FormRow>
+
+            <FormRow
+              label="Daily Request Limit"
+              labelFor="dailyRequestLimit"
+              help="Most searches this indexer allows in 24 hours (blank = unlimited). Automatic searches leave a reserve (25% by default) for searches you start yourself."
+            >
+              <input
+                id="dailyRequestLimit"
+                v-model.number="formData.dailyRequestLimit"
+                type="number"
+                min="1"
+                placeholder="Unlimited"
+              />
+            </FormRow>
           </FormSection>
         </ModalBody>
       </ModalForm>
@@ -354,6 +368,7 @@ const defaultFormData = {
   minimumAge: 0,
   retention: 0,
   maximumSize: 0,
+  dailyRequestLimit: null as number | null,
   additionalSettings: '',
 }
 
@@ -364,6 +379,9 @@ type IndexerPayload = Omit<Indexer, 'id' | 'createdAt' | 'updatedAt'>
 const buildIndexerPayload = (): IndexerPayload => {
   const payload = { ...formData.value } as IndexerPayload
   payload.additionalSettings = payload.additionalSettings || ''
+  // A cleared number input yields '' rather than a number; send that as no limit.
+  const limit = payload.dailyRequestLimit
+  payload.dailyRequestLimit = typeof limit === 'number' && limit > 0 ? Math.floor(limit) : null
 
   if (payload.implementation === 'MyAnonamouse') {
     const mamOpts: Record<string, unknown> = {
@@ -413,6 +431,7 @@ watch(
         minimumAge: newIndexer.minimumAge,
         retention: newIndexer.retention,
         maximumSize: newIndexer.maximumSize,
+        dailyRequestLimit: newIndexer.dailyRequestLimit ?? null,
         additionalSettings: newIndexer.additionalSettings || '',
       }
 

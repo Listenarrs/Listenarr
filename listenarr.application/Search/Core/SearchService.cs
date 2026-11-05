@@ -98,7 +98,7 @@ namespace Listenarr.Application.Search.Core
                 NullLogger<SearchFinalDispositionLogger>.Instance);
         }
 
-        public async Task<List<SearchResult>> SearchAsync(string query, string? category = null, List<string>? apiIds = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false)
+        public async Task<List<SearchResult>> SearchAsync(string query, string? category = null, List<string>? apiIds = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false, SearchOrigin origin = SearchOrigin.Interactive)
         {
             var results = new List<SearchResult>();
 
@@ -108,7 +108,7 @@ namespace Listenarr.Application.Search.Core
             // For automatic search, only search indexers - skip Amazon/Audible entirely
             if (isAutomaticSearch)
             {
-                var automaticIndexerResults = await SearchIndexersAsync(query, category, sortBy, sortDirection, isAutomaticSearch);
+                var automaticIndexerResults = await SearchIndexersAsync(query, category, sortBy, sortDirection, isAutomaticSearch, origin: origin);
                 if (automaticIndexerResults.Any())
                 {
                     results.AddRange(automaticIndexerResults.Select((IndexerSearchResult r) => SearchResultConverters.ToSearchResult(r)));
@@ -134,7 +134,7 @@ namespace Listenarr.Application.Search.Core
             }
 
             // Also search configured indexers for additional results (including DDL downloads)
-            var indexerResults = await SearchIndexersAsync(query, category, sortBy, sortDirection, isAutomaticSearch);
+            var indexerResults = await SearchIndexersAsync(query, category, sortBy, sortDirection, isAutomaticSearch, origin: origin);
             if (indexerResults.Any())
             {
                 results.AddRange(indexerResults.Select(r => SearchResultConverters.ToSearchResult(r)));
@@ -151,9 +151,9 @@ namespace Listenarr.Application.Search.Core
             return composite.Total;
         }
 
-        public async Task<List<IndexerSearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false, SearchRequest? request = null)
+        public async Task<List<IndexerSearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false, SearchRequest? request = null, SearchOrigin origin = SearchOrigin.Interactive)
         {
-            return await _indexerSearchWorkflow.SearchIndexersAsync(query, category, sortBy, sortDirection, isAutomaticSearch, request);
+            return await _indexerSearchWorkflow.SearchIndexersAsync(query, category, sortBy, sortDirection, isAutomaticSearch, request, origin);
         }
 
     }

@@ -62,6 +62,8 @@ namespace Listenarr.Infrastructure.HostedServices.Search
 
     public class AutomaticSearchProcessor : IAutomaticSearchProcessor
     {
+        public const int MaxBooksPerCycleLimit = 100_000;
+
         private readonly ILogger<AutomaticSearchProcessor> _logger;
         private readonly IServiceScopeFactory _serviceScopeFactory;
         private readonly AutomaticSearchResultClassifier _resultClassifier;
@@ -93,8 +95,13 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             var qualityProfileService = scope.ServiceProvider.GetRequiredService<IQualityProfileService>();
             var downloadService = scope.ServiceProvider.GetRequiredService<IDownloadService>();
             var configurationService = scope.ServiceProvider.GetRequiredService<IConfigurationService>();
+            var indexerRepository = scope.ServiceProvider.GetRequiredService<IIndexerRepository>();
+            var requestBudget = scope.ServiceProvider.GetRequiredService<IIndexerRequestBudget>();
 
-            var timing = AutomaticSearchTiming.FromSettings(await configurationService.GetApplicationSettingsAsync());
+            var settings = await configurationService.GetApplicationSettingsAsync();
+            var timing = AutomaticSearchTiming.FromSettings(settings);
+            var maxBooksPerCycle = Math.Clamp(settings.AutomaticSearchMaxBooksPerCycle, 0, MaxBooksPerCycleLimit);
+            var interactiveReservePercent = settings.IndexerInteractiveReservePercent;
 
             // A book is eligible once per cooldown, however often the sweep itself runs.
             var cutoffTime = timing.EligibilityCutoff(DateTime.UtcNow);
@@ -108,7 +115,9 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                 return;
             }
 
+            var automaticIndexers = await indexerRepository.GetEnabledAsync(isAutomaticSearch: true, stoppingToken);
             var processedCount = 0;
+            var searchedCount = 0;
             var downloadsQueued = 0;
 
             var isFirstBook = true;
@@ -116,6 +125,14 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             {
                 if (stoppingToken.IsCancellationRequested)
                     break;
+
+                // Books left over keep their last search time, so the ordering puts them at the
+                // front of the next cycle.
+                if (maxBooksPerCycle > 0 && searchedCount >= maxBooksPerCycle)
+                {
+                    _logger.LogInformation("Automatic search reached its cap of {Cap} searched books for this cycle; the remaining books wait for a later cycle", maxBooksPerCycle);
+                    break;
+                }
 
                 try
                 {
@@ -126,11 +143,21 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                     }
                     isFirstBook = false;
 
-                    var downloadsQueuedForBook = await ProcessAudiobookAsync(
+                    // Searching on with every indexer refusing would send nothing yet still stamp
+                    // each book as searched, hiding it for a whole cooldown.
+                    if (!await requestBudget.HasSweepHeadroomAsync(automaticIndexers, interactiveReservePercent))
+                    {
+                        _logger.LogInformation("Every automatic-search indexer has used its daily request budget for unattended searches; stopping this cycle with the remaining books unsearched");
+                        break;
+                    }
+
+                    var (searched, downloadsQueuedForBook) = await ProcessAudiobookAsync(
                         audiobook, searchService, qualityProfileService, downloadService, audiobookRepository, downloadRepository, fileRepository, stoppingToken);
 
                     downloadsQueued += downloadsQueuedForBook;
                     processedCount++;
+                    if (searched)
+                        searchedCount++;
 
                     // Update last search time
                     audiobook.LastSearchTime = DateTime.UtcNow;
@@ -153,11 +180,11 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                 }
             }
 
-            _logger.LogInformation("Automatic search cycle completed. Processed {ProcessedCount} audiobooks, queued {DownloadsQueued} total downloads",
-                processedCount, downloadsQueued);
+            _logger.LogInformation("Automatic search cycle completed. Processed {ProcessedCount} audiobooks ({SearchedCount} searched), queued {DownloadsQueued} total downloads",
+                processedCount, searchedCount, downloadsQueued);
         }
 
-        private async Task<int> ProcessAudiobookAsync(
+        private async Task<(bool Searched, int DownloadsQueued)> ProcessAudiobookAsync(
             Audiobook audiobook,
             ISearchService searchService,
             IQualityProfileService qualityProfileService,
@@ -170,7 +197,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             if (audiobook.QualityProfile == null)
             {
                 _logger.LogWarning("Audiobook '{Title}' has no quality profile assigned", audiobook.Title);
-                return 0;
+                return (false, 0);
             }
 
             // Check if there's already an active download for this audiobook
@@ -187,7 +214,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             {
                 _logger.LogInformation("Audiobook '{Title}' already has an active download (ID: {DownloadId}, Status: {Status}), skipping automatic search",
                     audiobook.Title, activeDownload.Id, activeDownload.Status);
-                return 0;
+                return (false, 0);
             }
 
             // Check existing quality and decide whether to search
@@ -199,7 +226,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             if (cutoffMet)
             {
                 _logger.LogInformation("Quality cutoff already met for audiobook '{Title}', skipping automatic search", audiobook.Title);
-                return 0;
+                return (false, 0);
             }
 
             // Build search query
@@ -207,7 +234,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             _logger.LogInformation("Searching for audiobook '{Title}' with query: {Query}", audiobook.Title, searchQuery);
 
             // Search for results
-            var searchResults = await searchService.SearchAsync(searchQuery, isAutomaticSearch: true);
+            var searchResults = await searchService.SearchAsync(searchQuery, isAutomaticSearch: true, origin: SearchOrigin.Sweep);
             _logger.LogInformation("Found {Count} raw search results for audiobook '{Title}'", searchResults.Count, audiobook.Title);
 
             // Author-free fallback: release names often omit the author, so a full title+author
@@ -222,7 +249,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                 {
                     _logger.LogInformation("No results for '{Title}' with the full query; retrying without the author: {Query}",
                         audiobook.Title, fallbackQuery);
-                    var fallbackResults = await searchService.SearchAsync(fallbackQuery, isAutomaticSearch: true);
+                    var fallbackResults = await searchService.SearchAsync(fallbackQuery, isAutomaticSearch: true, origin: SearchOrigin.Sweep);
                     searchResults = _resultClassifier.ConstrainFallbackResultsToTitle(fallbackResults, audiobook);
                     _logger.LogInformation("Author-free fallback for '{Title}': {Raw} raw result(s), {Kept} kept after title match",
                         audiobook.Title, fallbackResults.Count, searchResults.Count);
@@ -257,7 +284,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             if (!searchResults.Any())
             {
                 _logger.LogInformation("No search results found for audiobook '{Title}'", audiobook.Title);
-                return 0;
+                return (true, 0);
             }
 
             // Score results against quality profile
@@ -323,7 +350,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             if (topResult == null)
             {
                 _logger.LogInformation("No acceptable search results found for audiobook '{Title}' after quality filtering", audiobook.Title);
-                return 0;
+                return (true, 0);
             }
 
             _logger.LogInformation("Found top result for audiobook '{Title}': {ResultTitle} (Score: {Score}, Quality: {Quality})",
@@ -337,7 +364,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                 {
                     _logger.LogInformation("Top result quality '{ResultQuality}' is not better than existing quality '{ExistingQuality}' for audiobook '{Title}', skipping download",
                         topResult.SearchResult.Quality, bestExistingQuality, audiobook.Title);
-                    return 0;
+                    return (true, 0);
                 }
                 _logger.LogInformation("Top result quality '{ResultQuality}' is better than existing quality '{ExistingQuality}', proceeding with download",
                     topResult.SearchResult.Quality, bestExistingQuality);
@@ -361,7 +388,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                 if (string.IsNullOrEmpty(downloadClientId))
                 {
                     _logger.LogWarning("No suitable download client found for result type: {Type}", isTorrent ? "torrent" : "NZB");
-                    return 0;
+                    return (true, 0);
                 }
 
                 await downloadService.StartDownloadAsync(topResult.SearchResult, downloadClientId, audiobook.Id);
@@ -376,7 +403,7 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                     audiobook.Title, topResult.SearchResult.Title);
             }
 
-            return downloadsQueued;
+            return (true, downloadsQueued);
         }
 
     }
