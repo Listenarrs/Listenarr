@@ -48,7 +48,7 @@ public sealed class UnixOpenFlagsTests : BaseTests
             UnixOpenFlags.GetLinuxDirectorySafetyFlags(architecture));
     }
 
-    [Fact]
+    [UnixFact]
     public void OpenReadWriteNoFollow_AsksForReadAccessWhereOpenWriteDoesNot()
     {
         // Given / When

@@ -22,6 +22,17 @@ public sealed class LinuxFactAttribute : FactAttribute
     }
 }
 
+public sealed class UnixFactAttribute : FactAttribute
+{
+    public UnixFactAttribute()
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        {
+            Skip = "This test requires native Unix behavior.";
+        }
+    }
+}
+
 public sealed class NativeStorageIdentityFactAttribute : FactAttribute
 {
     public const string PathEnvironmentVariable =

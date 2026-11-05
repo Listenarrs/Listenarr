@@ -43,10 +43,13 @@ public sealed class TagLibAudioTagWriterRoundTripTests : BaseTests
         var before = ReadAudioShape(path);
         var writer = new TagLibAudioTagWriter(Mock.Of<ILogger<TagLibAudioTagWriter>>());
 
-        using (var lease = PinnedAudiobookFileRegistrationLease.Open(path))
+        using (var lease = PinnedAudiobookFileRegistrationLease.Open(
+            path,
+            supportsMetadataWrite: true))
         {
             // Fail loudly rather than skip when this storage cannot authorize a metadata write.
             Assert.True(lease.HasDurablePhysicalObjectIdentity);
+            Assert.True(lease.SupportsMetadataWrite);
 
             await writer.WriteAsinTagAsync(lease, Asin);
         }

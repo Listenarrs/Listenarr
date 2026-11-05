@@ -73,7 +73,8 @@ internal sealed partial class PinnedDirectoryCreation
     private static SafeFileHandle OpenRelativeFileStableReadWindows(
         SafeFileHandle parentHandle,
         string fileName,
-        string fullPath)
+        string fullPath,
+        bool allowMetadataWrite = false)
     {
         var nameBuffer = Marshal.StringToHGlobalUni(fileName);
         var unicodeStringPointer = IntPtr.Zero;
@@ -93,9 +94,13 @@ internal sealed partial class PinnedDirectoryCreation
                 RootDirectory = parentHandle.DangerousGetHandle(),
                 ObjectName = unicodeStringPointer
             };
+            // Write access is granted to this handle itself rather than to a second open,
+            // because the share mode below denies write and delete to every other open,
+            // including our own. That denial is what blocks replacement for the lease's
+            // lifetime, so a write-authorized lease must hold its write access from here.
             var status = NtCreateFile(
                 out var rawHandle,
-                GenericRead | Synchronize,
+                GenericRead | (allowMetadataWrite ? GenericWrite : 0u) | Synchronize,
                 ref attributes,
                 out _,
                 IntPtr.Zero,
@@ -259,8 +264,7 @@ internal sealed partial class PinnedDirectoryCreation
     private static SafeFileHandle OpenRelativeFileForWriteWindows(
         SafeFileHandle parentHandle,
         string fileName,
-        string fullPath,
-        bool readable = false)
+        string fullPath)
     {
         var nameBuffer = Marshal.StringToHGlobalUni(fileName);
         var unicodeStringPointer = IntPtr.Zero;
@@ -282,8 +286,7 @@ internal sealed partial class PinnedDirectoryCreation
             };
             var status = NtCreateFile(
                 out var rawHandle,
-                (readable ? GenericRead : 0u)
-                    | GenericWrite | FileReadAttributes | Synchronize,
+                GenericWrite | FileReadAttributes | Synchronize,
                 ref attributes,
                 out _,
                 IntPtr.Zero,
