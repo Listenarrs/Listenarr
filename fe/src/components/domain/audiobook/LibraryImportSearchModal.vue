@@ -32,6 +32,7 @@
       <BookMatchCard
         v-if="bookMatch"
         v-model:book-match="bookMatch"
+        :other-book-title="otherBookTitle"
         :configured-region="configuredRegion"
         :book="book"
         should-search-on-mount
@@ -84,6 +85,10 @@ import {
 import {
   ASIN_PATTERN,
   hasAsinChanged,
+  isResultOfRecord,
+  libraryBookHolding,
+  libraryBooksByAsin,
+  type LibraryBooksByAsin,
   createBookMatch,
   matchState,
   recordFromResult,
@@ -92,6 +97,8 @@ import {
   type BookRecord,
   type SearchCache,
 } from '@/utils/bookMatch'
+import { apiService } from '@/services/api'
+import { logger } from '@/utils/logger'
 import type { SearchResult } from '@/types'
 
 const props = defineProps<{ item: LibraryImportItem }>()
@@ -144,8 +151,38 @@ function isNewRecordWithoutAsin({ pickedSearchResult }: BookMatch): boolean {
   return !current || !!current.asin || current.id !== pickedSearchResult.id
 }
 
+// The library's books when the dialog opened
+let booksByAsin: LibraryBooksByAsin = new Map()
+
+async function readLibrary() {
+  try {
+    booksByAsin = libraryBooksByAsin(await apiService.getLibrary())
+  } catch (e) {
+    // Find Match still works: the import itself goes to the book holding a record
+    logger.warn('Find Match: the library could not be read', e)
+  }
+}
+
+// What holds a result's record, if anything: a record goes on one book. A book with files, or
+// another folder matched to it. A book without files stays out: importing this folder is how a
+// wanted book gets its files. The folder's own match is never taken
+function otherBookTitle(searchResult: SearchResult): string | null {
+  if (!searchResult.asin || isResultOfRecord(searchResult, bookMatch.value?.currentRecordKey))
+    return null
+  const libraryBook = libraryBookHolding(searchResult, booksByAsin, (book) => !!book.fileCount)
+  if (libraryBook) return libraryBook.title
+  const otherFolder = Object.values(store.items).find(
+    ({ id, selectedMatch }) =>
+      id !== props.item.id &&
+      !!selectedMatch?.asin &&
+      isResultOfRecord(searchResult, { asin: selectedMatch.asin, region: selectedMatch.region }),
+  )
+  return otherFolder ? otherFolder.detectedTitle?.trim() || otherFolder.folderName : null
+}
+
 onMounted(async () => {
-  configuredRegion.value = await store.configuredRegion()
+  const [region] = await Promise.all([store.configuredRegion(), readLibrary()])
+  configuredRegion.value = region
   const selectedMatch = props.item.selectedMatch
   // Always the same search, from the folder's scan, whatever match the folder has (it stays its
   // current record, tagged Current): the scan's ASIN, else its title and author, in the configured

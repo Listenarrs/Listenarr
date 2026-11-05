@@ -20,6 +20,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { apiService } from '@/services/api'
 import type { SearchResult } from '@/types'
+import { useLibraryImportStore } from '@/stores/libraryImport'
 import LibraryImportSearchModal from '@/components/domain/audiobook/LibraryImportSearchModal.vue'
 
 const getProtectedImageSrc = vi.fn(() => 'https://example.com/protected.jpg')
@@ -75,6 +76,7 @@ function field(wrapper: ReturnType<typeof mountModal>, testId: string) {
 }
 
 const metadata = vi.fn()
+const library = vi.fn()
 
 // The metadata endpoint's answer for an ASIN the region doesn't sell
 const notFound = () => Promise.reject(Object.assign(new Error('Not found'), { status: 404 }))
@@ -94,6 +96,8 @@ describe('LibraryImportSearchModal', () => {
         authors: [{ name: 'SenLinYu' }],
       } as unknown as SearchResult,
     ])
+    Object.assign(apiService, { getLibrary: library })
+    library.mockResolvedValue([])
     // Add New's ASIN search goes through the metadata endpoint (missing from the shared API mock)
     Object.assign(apiService, { getAudibleMetadata: metadata })
     metadata.mockImplementation(async (asin: string) => ({
@@ -103,6 +107,84 @@ describe('LibraryImportSearchModal', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  describe('a record goes on one book', () => {
+    const held = { id: 9, title: 'The other book', asin: 'B000APXZHK', asinRegion: 'fr' }
+    const result = (wrapper: ReturnType<typeof mountModal>) =>
+      wrapper.get('[data-testid="find-match-result"]')
+    // The region the results are tagged with is the search's, France here
+    async function openOn(libraryBooks: unknown[]) {
+      library.mockResolvedValue(libraryBooks)
+      const wrapper = mountModal()
+      await flushPromises()
+      return wrapper
+    }
+
+    it("greys a record a book with files holds: it can't be used", async () => {
+      const wrapper = await openOn([{ ...held, fileCount: 3 }])
+
+      expect(result(wrapper).get('[data-testid="find-match-in-use"]').text()).toBe('In use')
+      expect(result(wrapper).attributes('title')).toBe(
+        'In use: this record is already on "The other book"',
+      )
+      await result(wrapper).trigger('click')
+      await flushPromises()
+      expect(wrapper.get('[data-testid="find-match-confirm"]').attributes('disabled')).toBeDefined()
+    })
+
+    it("keeps a wanted book's record pickable: this import is how it gets its files", async () => {
+      const wrapper = await openOn([{ ...held, fileCount: 0 }])
+
+      expect(result(wrapper).classes()).not.toContain('unpickable')
+      await result(wrapper).trigger('click')
+      await flushPromises()
+      expect(
+        wrapper.get('[data-testid="find-match-confirm"]').attributes('disabled'),
+      ).toBeUndefined()
+    })
+
+    it('keeps the same ASIN in another region pickable', async () => {
+      const wrapper = await openOn([{ ...held, fileCount: 3, asinRegion: 'us' }])
+      expect(result(wrapper).classes()).not.toContain('unpickable')
+    })
+
+    it('counts a region not known as the same one', async () => {
+      const wrapper = await openOn([{ ...held, fileCount: 3, asinRegion: null }])
+      expect(result(wrapper).classes()).toContain('unpickable')
+    })
+
+    it('greys a record another folder is matched to', async () => {
+      const store = useLibraryImportStore()
+      store.items = {
+        other: {
+          id: 'other',
+          folderName: 'Other folder',
+          selectedMatch: { asin: 'B000APXZHK', region: 'fr' },
+        },
+      } as unknown as typeof store.items
+      const wrapper = await openOn([])
+      expect(result(wrapper).attributes('title')).toBe(
+        'In use: this record is already on "Other folder"',
+      )
+    })
+
+    it("keeps the folder's own match pickable", async () => {
+      library.mockResolvedValue([{ ...held, fileCount: 3 }])
+      const wrapper = mountModal({
+        ...alchemised,
+        selectedMatch: { asin: 'B000APXZHK', region: 'fr' },
+      } as unknown as typeof alchemised)
+      await flushPromises()
+      expect(result(wrapper).classes()).not.toContain('unpickable')
+    })
+
+    it("still opens when the library can't be read", async () => {
+      library.mockRejectedValue(new Error('down'))
+      const wrapper = mountModal()
+      await flushPromises()
+      expect(result(wrapper).classes()).not.toContain('unpickable')
+    })
   })
 
   it('keeps the room of the results from the start, the list at its full height', async () => {
