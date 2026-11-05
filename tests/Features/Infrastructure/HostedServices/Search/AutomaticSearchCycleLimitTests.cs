@@ -141,6 +141,48 @@ namespace Listenarr.Tests.Features.Infrastructure.HostedServices.Search
             Assert.Equal(3, await CountStampedAsync(books));
         }
 
+        [Fact]
+        public async Task PerCycleCap_TakesNeverSearchedBooksFirst_ThenTheLeastRecentlySearched()
+        {
+            var provider = new CountingProvider();
+            Init(builder => builder.WithSingleton<IIndexerSearchProvider>(provider));
+            await ConfigureAsync(maxBooksPerCycle: 2, reservePercent: 25);
+            await AddIndexerAsync(dailyRequestLimit: null);
+            var books = await SeedBooksAsync();
+            var twoDaysAgo = DateTime.UtcNow.AddDays(-2);
+            var threeDaysAgo = DateTime.UtcNow.AddDays(-3);
+            // Table order is books[0..4]; give the front of the table the most recent searches.
+            await SetLastSearchAsync(books[0], twoDaysAgo);
+            await SetLastSearchAsync(books[1], threeDaysAgo);
+            await SetLastSearchAsync(books[2], twoDaysAgo);
+            await SetLastSearchAsync(books[3], twoDaysAgo);
+
+            await RunCycleAsync();
+
+            // books[4] was never searched and books[1] is the oldest search: those two go first.
+            var searchedNow = await SearchedSinceAsync(books, DateTime.UtcNow.AddMinutes(-5));
+            Assert.Equal(new[] { books[1].Id, books[4].Id }, searchedNow.OrderBy(id => id));
+        }
+
+        private async Task SetLastSearchAsync(Audiobook book, DateTime lastSearch)
+        {
+            book.LastSearchTime = lastSearch;
+            await _audiobookRepository.UpdateAsync(book);
+        }
+
+        private async Task<List<int>> SearchedSinceAsync(IEnumerable<Audiobook> books, DateTime since)
+        {
+            var ids = new List<int>();
+            foreach (var book in books)
+            {
+                using var scope = _provider.CreateScope();
+                var repository = scope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
+                if ((await repository.GetByIdAsync(book.Id))?.LastSearchTime > since)
+                    ids.Add(book.Id);
+            }
+            return ids;
+        }
+
         private async Task ConfigureAsync(int maxBooksPerCycle, int reservePercent)
         {
             var settings = await _applicationSettingsRepository.GetAsync() ?? new ApplicationSettings();

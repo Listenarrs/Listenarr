@@ -465,6 +465,7 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                 .Where(a => a.Monitored &&
                             a.QualityProfileId != null &&
                             (a.LastSearchTime == null || a.LastSearchTime < cutoff))
+                .OrderBy(a => a.LastSearchTime != null).ThenBy(a => a.LastSearchTime).ThenBy(a => a.Id)
                 .ToListAsync(ct);
         }
 
