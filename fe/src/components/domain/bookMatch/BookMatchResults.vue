@@ -58,6 +58,7 @@
         :selected-record-key="selectedRecordKey"
         :current-record-key="currentRecordKey"
         :is-provider-record-required="isProviderRecordRequired"
+        :other-book-title="otherBookTitle"
         @select="(searchResult) => emit('select', searchResult)"
       />
       <!-- No results: the empty list, at its full height when the card keeps its room, else at
@@ -133,6 +134,8 @@ const props = defineProps<{
   currentRecordKey: RecordKey | null
   // Repair: only a record a metadata provider can read again (its ASIN) can be picked
   isProviderRecordRequired?: boolean
+  // The other book a result's record is taken by, if any (it can't be picked)
+  otherBookTitle?: (searchResult: SearchResult) => string | null
 }>()
 
 const emit = defineEmits<{ select: [searchResult: SearchResult] }>()

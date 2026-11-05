@@ -101,6 +101,7 @@
                   :is-narrow="footerRef?.isLegendAbove ?? false"
                   :should-keep-results-room="repairRows.length === 1"
                   is-provider-record-required
+                  :other-book-title="(searchResult) => otherBookTitle(repairRow, searchResult)"
                   :book="{
                     title: repairRow.title,
                     subtitle: repairRow.subtitle,
@@ -212,6 +213,7 @@ const emit = defineEmits<{
 
 const {
   searchCache,
+  otherBookTitle,
   configuredRegion,
   isLoading,
   loadError,

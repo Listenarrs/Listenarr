@@ -20,14 +20,18 @@ import type {
   AudiobookExternalIdentifier,
   AudiobookExternalIdentifierInput,
   AudiobookUpdateRequest,
+  SearchResult,
 } from '@/types'
 import {
   createBookMatch,
+  isResultOfRecord,
+  libraryBookHolding,
   matchState,
   type BookMatch,
   type BookRecord,
   type BookTask,
   type BookTaskState,
+  type LibraryBooksByAsin,
 } from '@/utils/bookMatch'
 
 // Repair Books: each book's new record picked (step 1), the repairs and their results (step 2),
@@ -225,6 +229,38 @@ export function identifiersWithPrimaryAsin(
     { type: 'Asin', value: asin, region, isPrimary: true, source: 'Manual' },
     ...manualIdentifiers,
   ]
+}
+
+// The title of the other book that holds this result's record, or that it is picked for on another
+// card: a record, an ASIN in a region, goes on one book. A book's own record is never taken (a rescan), even when
+// another book shares it today. Two books can't swap their records yet: each record is the other's
+// until a repair moves it
+export function otherBookTitleOf(
+  searchResult: SearchResult,
+  repairRow: RepairRow,
+  repairRows: RepairRow[],
+  booksByAsin: LibraryBooksByAsin,
+): string | null {
+  if (!searchResult.asin || isResultOfRecord(searchResult, repairRow.bookMatch.currentRecordKey))
+    return null
+  const otherBook = libraryBookHolding(
+    searchResult,
+    booksByAsin,
+    (book) => book.id !== repairRow.audiobookId,
+  )
+  if (otherBook) return otherBook.title
+  const otherRepairRow = repairRows.find((candidate) => {
+    const pickedSearchResult = candidate.bookMatch.pickedSearchResult
+    return (
+      candidate !== repairRow &&
+      !!pickedSearchResult?.asin &&
+      isResultOfRecord(searchResult, {
+        asin: pickedSearchResult.asin,
+        region: pickedSearchResult.region,
+      })
+    )
+  })
+  return otherRepairRow?.title ?? null
 }
 
 // A record as the server tells them apart: its ASIN and its region, in any letters

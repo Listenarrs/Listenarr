@@ -23,6 +23,7 @@ import type { SearchResult } from '@/types'
 const apiMocks = vi.hoisted(() => ({
   getAudiobook: vi.fn(),
   getAudiobookIdentifiers: vi.fn(),
+  getLibrary: vi.fn(),
   updateAudiobookIdentifiers: vi.fn(),
   updateAudiobook: vi.fn(),
   rescanAudiobookMetadata: vi.fn(),
@@ -61,6 +62,7 @@ describe("useRepairBooks: an error outside a book's own repair", () => {
     vi.clearAllMocks()
     setActivePinia(createPinia())
     apiMocks.getApplicationSettings.mockResolvedValue({ defaultSearchRegion: 'fr' })
+    apiMocks.getLibrary.mockResolvedValue([])
     apiMocks.getAudiobook.mockImplementation(async (audiobookId: number) => ({
       id: audiobookId,
       title: `Book ${audiobookId}`,

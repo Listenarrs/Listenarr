@@ -35,7 +35,7 @@
       }"
       :aria-selected="isResultOfRecord(searchResult, selectedRecordKey)"
       :aria-disabled="isUnpickable(searchResult) || undefined"
-      :title="isUnpickable(searchResult) ? NO_PROVIDER_RECORD_TITLE : undefined"
+      :title="unpickableReason(searchResult) ?? undefined"
       data-testid="find-match-result"
       @click="isUnpickable(searchResult) || emit('select', searchResult)"
     >
@@ -57,12 +57,20 @@
         </span>
       </div>
       <span
-        v-if="isUnpickable(searchResult)"
+        v-if="isProviderRecordMissing(searchResult)"
         class="result-other-region"
         :title="NO_PROVIDER_RECORD_TITLE"
         data-testid="find-match-no-asin"
       >
         No ASIN
+      </span>
+      <span
+        v-else-if="otherBookTitle?.(searchResult)"
+        class="result-other-region"
+        :title="unpickableReason(searchResult) ?? undefined"
+        data-testid="find-match-in-use"
+      >
+        In use
       </span>
       <span
         v-else-if="isResultOfRecord(searchResult, currentRecordKey)"
@@ -112,6 +120,8 @@ const props = defineProps<{
   currentRecordKey?: RecordKey | null
   // Repair: only a record a metadata provider can read again (its ASIN) can be picked
   isProviderRecordRequired?: boolean
+  // The other book a result's record is taken by, if any: a record goes on one book
+  otherBookTitle?: (searchResult: SearchResult) => string | null
 }>()
 const emit = defineEmits<{ select: [searchResult: SearchResult] }>()
 
@@ -144,8 +154,19 @@ function languageLabel(searchResult: SearchResult): string {
 // A record no metadata provider can read again (no ASIN) can't be picked where one is required
 const NO_PROVIDER_RECORD_TITLE =
   'No ASIN: a repair needs a book a metadata provider can read again (an Audible record)'
-function isUnpickable(searchResult: SearchResult): boolean {
+function isProviderRecordMissing(searchResult: SearchResult): boolean {
   return !!props.isProviderRecordRequired && !searchResult.asin
+}
+
+// Why a result can't be picked, if it can't
+function unpickableReason(searchResult: SearchResult): string | null {
+  if (isProviderRecordMissing(searchResult)) return NO_PROVIDER_RECORD_TITLE
+  const otherBookTitle = props.otherBookTitle?.(searchResult)
+  return otherBookTitle ? `In use: this record is already on "${otherBookTitle}"` : null
+}
+
+function isUnpickable(searchResult: SearchResult): boolean {
+  return !!unpickableReason(searchResult)
 }
 
 // The book's ASIN, found in another catalogue than the one it points at: a different record

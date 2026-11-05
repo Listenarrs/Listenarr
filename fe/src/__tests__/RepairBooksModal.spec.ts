@@ -22,6 +22,7 @@ import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest'
 const apiMocks = vi.hoisted(() => ({
   getAudiobook: vi.fn(),
   getAudiobookIdentifiers: vi.fn(),
+  getLibrary: vi.fn(),
   advancedSearch: vi.fn(),
   getAudibleMetadata: vi.fn(),
   updateAudiobookIdentifiers: vi.fn(),
@@ -167,6 +168,27 @@ async function searchAndPick(
   await flushPromises()
 }
 
+// Each book picks a record of its own: a record goes on one book. The last one picks
+// englishPrimalHunter4, the others one catalogued for them
+async function pickOwnRecords(wrapper: ReturnType<typeof mountModal>, audiobookIds: number[]) {
+  const records = audiobookIds.map((audiobookId, index) =>
+    index === audiobookIds.length - 1
+      ? englishPrimalHunter4
+      : {
+          ...englishPrimalHunter4,
+          asin: `B0BK9W82P${index}`,
+          title: `Primal Hunter ${audiobookId}`,
+        },
+  )
+  catalogue({ us: records })
+  for (const [index, audiobookId] of audiobookIds.entries())
+    await searchAndPick(wrapper, {
+      audiobookId,
+      query: 'Primal Hunter',
+      title: records[index]!.title,
+    })
+}
+
 async function repair(wrapper: ReturnType<typeof mountModal>) {
   await wrapper.get('[data-testid="repair-confirm"]').trigger('click')
   await flushPromises()
@@ -179,6 +201,7 @@ describe('RepairBooksModal', () => {
     leaveMocks.showConfirm.mockReset().mockResolvedValue(true)
     leaveMocks.isConfirmShown.value = false
     apiMocks.getApplicationSettings.mockResolvedValue({ defaultSearchRegion: 'fr' })
+    apiMocks.getLibrary.mockResolvedValue([])
     apiMocks.getAudiobook.mockResolvedValue(mismatched)
     apiMocks.getAudiobookIdentifiers.mockResolvedValue({
       audiobookId: 7,
@@ -2005,8 +2028,7 @@ describe('RepairBooksModal', () => {
   it('names how many books it repairs in the question', async () => {
     const wrapper = mountModal([7, 8])
     await flushPromises()
-    for (const audiobookId of [7, 8])
-      await searchAndPick(wrapper, { audiobookId, query: 'Primal Hunter' })
+    await pickOwnRecords(wrapper, [7, 8])
 
     await repair(wrapper)
 
@@ -2638,8 +2660,7 @@ describe('RepairBooksModal', () => {
     )
     const wrapper = mountModal([7, 8, 9])
     await flushPromises()
-    for (const audiobookId of [7, 8, 9])
-      await searchAndPick(wrapper, { audiobookId, query: 'Primal Hunter' })
+    await pickOwnRecords(wrapper, [7, 8, 9])
     // Step 1: the footer's bar unseen (standby), its room kept
     expect(wrapper.get('[data-testid="repair-progress"]').attributes('data-standby')).toBe('true')
 
@@ -2666,10 +2687,10 @@ describe('RepairBooksModal', () => {
     expect(resultCard(wrapper, 8).find('[data-testid="repair-result-loading"]').exists()).toBe(true)
     // Its first line: the record it is to get
     expect(resultCard(wrapper, 8).get('[data-testid="repair-result-record"]').text()).toContain(
-      'B0BK9W82PQ',
+      'B0BK9W82P1',
     )
 
-    rescans[0]!({ message: 'ok', audiobookId: 7, asin: 'B0BK9W82PQ', region: 'us' })
+    rescans[0]!({ message: 'ok', audiobookId: 7, asin: 'B0BK9W82P0', region: 'us' })
     await flushPromises()
     expect(resultStates()).toEqual(['done', 'running', 'waiting'])
     expect(wrapper.get('[data-testid="repair-results-message"]').text()).toContain(
@@ -2702,7 +2723,7 @@ describe('RepairBooksModal', () => {
       'Not all repaired: 1 canceled',
     )
 
-    rescans[1]!({ message: 'ok', audiobookId: 8, asin: 'B0BK9W82PQ', region: 'us' })
+    rescans[1]!({ message: 'ok', audiobookId: 8, asin: 'B0BK9W82P1', region: 'us' })
     await flushPromises()
     expect(resultStates()).toEqual(['done', 'done', 'skipped'])
     expect(rescans).toHaveLength(2)
@@ -2731,6 +2752,196 @@ describe('RepairBooksModal', () => {
 
     expect(wrapper.get('.repair-results').attributes('style')).toContain('min-height: 640px')
     expect(wrapper.find('[data-testid="repair-results-room"]').exists()).toBe(true)
+  })
+
+  describe('a record goes on one book', () => {
+    const resultOf = (wrapper: ReturnType<typeof mountModal>, audiobookId = 7) =>
+      bookCard(wrapper, audiobookId).get('[data-testid="find-match-result"]')
+    const confirmText = (wrapper: ReturnType<typeof mountModal>) =>
+      wrapper.get('[data-testid="repair-confirm"]').text()
+    const searchUs = async (wrapper: ReturnType<typeof mountModal>, audiobookId = 7) => {
+      await bookCard(wrapper, audiobookId).get('[data-testid="match-region"]').setValue('us')
+      await flushPromises()
+      await emptyAsin(wrapper, audiobookId)
+      await bookCard(wrapper, audiobookId).get('[data-testid="match-search"]').trigger('click')
+      await flushPromises()
+    }
+
+    // Book 7 and book 8 in one dialog, each on its own record
+    function twoBooks() {
+      apiMocks.getAudiobook.mockImplementation(async (audiobookId: number) => ({
+        ...mismatched,
+        id: audiobookId,
+        title: `Book ${audiobookId}`,
+      }))
+      catalogue({ us: [englishPrimalHunter4] })
+    }
+
+    it("greys a record another book holds: tagged, says whose, can't be picked", async () => {
+      apiMocks.getLibrary.mockResolvedValue([
+        { id: 7, title: mismatched.title, asin: mismatched.asin },
+        { id: 9, title: 'The other book', asin: englishPrimalHunter4.asin.toLowerCase() },
+      ])
+      catalogue({ us: [englishPrimalHunter4] })
+      const wrapper = mountModal()
+      await flushPromises()
+      await searchUs(wrapper)
+
+      const result = resultOf(wrapper)
+      expect(result.classes()).toContain('unpickable')
+      expect(result.get('[data-testid="find-match-in-use"]').text()).toBe('In use')
+      expect(result.attributes('title')).toBe('In use: this record is already on "The other book"')
+
+      await result.trigger('click')
+      await flushPromises()
+      expect(confirmText(wrapper)).toBe('Repair 0')
+    })
+
+    it('keeps a record the library has on no other book pickable', async () => {
+      apiMocks.getLibrary.mockResolvedValue([
+        { id: 7, title: mismatched.title, asin: mismatched.asin },
+        { id: 9, title: 'The other book', asin: 'B000000001' },
+      ])
+      catalogue({ us: [englishPrimalHunter4] })
+      const wrapper = mountModal()
+      await flushPromises()
+      await searchAndPick(wrapper)
+      expect(confirmText(wrapper)).toBe('Repair 1')
+    })
+
+    it("keeps the book's own record pickable, even shared with another book", async () => {
+      apiMocks.getLibrary.mockResolvedValue([
+        { id: 7, title: mismatched.title, asin: mismatched.asin },
+        { id: 9, title: 'The other book', asin: mismatched.asin },
+      ])
+      catalogue({ fr: [frenchPrimalHunterVolume7] })
+      const wrapper = mountModal()
+      await flushPromises()
+      await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
+      await flushPromises()
+
+      const result = resultOf(wrapper)
+      expect(result.classes()).not.toContain('unpickable')
+      expect(result.find('[data-testid="find-match-in-use"]').exists()).toBe(false)
+      await result.trigger('click')
+      await flushPromises()
+      expect(confirmText(wrapper)).toBe('Repair 1')
+    })
+
+    it('greys on the other cards a record picked on one, until it is unpicked', async () => {
+      twoBooks()
+      const wrapper = mountModal([7, 8])
+      await flushPromises()
+      await searchAndPick(wrapper, { audiobookId: 7 })
+      await searchUs(wrapper, 8)
+
+      const result = resultOf(wrapper, 8)
+      expect(result.attributes('title')).toBe('In use: this record is already on "Book 7"')
+      await result.trigger('click')
+      await flushPromises()
+      expect(confirmText(wrapper)).toBe('Repair 1')
+
+      // Unpicked on the first card: free for the second
+      await resultOf(wrapper, 7).trigger('click')
+      await flushPromises()
+      expect(resultOf(wrapper, 8).classes()).not.toContain('unpickable')
+      await resultOf(wrapper, 8).trigger('click')
+      await flushPromises()
+      expect(confirmText(wrapper)).toBe('Repair 1')
+    })
+
+    // Book 9 holds the ASIN searched, in that region, as the library's list says
+    function otherBookOn(asinRegion: string | null) {
+      apiMocks.getLibrary.mockResolvedValue([
+        { id: 7, title: mismatched.title, asin: mismatched.asin, asinRegion: 'fr' },
+        { id: 9, title: 'The other book', asin: englishPrimalHunter4.asin, asinRegion },
+      ])
+      catalogue({ us: [englishPrimalHunter4] })
+    }
+
+    it('keeps pickable the same ASIN another book holds in another region', async () => {
+      otherBookOn('uk')
+      const wrapper = mountModal()
+      await flushPromises()
+      await searchUs(wrapper)
+
+      const result = resultOf(wrapper)
+      expect(result.classes()).not.toContain('unpickable')
+      expect(result.find('[data-testid="find-match-in-use"]').exists()).toBe(false)
+      await result.trigger('click')
+      await flushPromises()
+      expect(confirmText(wrapper)).toBe('Repair 1')
+    })
+
+    it('greys it when the other book holds it in the same region', async () => {
+      otherBookOn('us')
+      const wrapper = mountModal()
+      await flushPromises()
+      await searchUs(wrapper)
+      expect(resultOf(wrapper).get('[data-testid="find-match-in-use"]').text()).toBe('In use')
+    })
+
+    it('greys it when the other book has no region for it', async () => {
+      otherBookOn(null)
+      const wrapper = mountModal()
+      await flushPromises()
+      await searchUs(wrapper)
+      expect(resultOf(wrapper).classes()).toContain('unpickable')
+    })
+
+    it("can't take the region of its ASIN another book holds", async () => {
+      // Book 7 on this ASIN in the UK, book 9 in the US: the US record is book 9's
+      otherBookOn('us')
+      apiMocks.getAudiobookIdentifiers.mockResolvedValue({
+        audiobookId: 7,
+        identifiers: [{ ...frenchAsin, value: englishPrimalHunter4.asin, region: 'uk' }],
+      })
+      const wrapper = mountModal()
+      await flushPromises()
+      await bookCard(wrapper).get('[data-testid="match-region"]').setValue('us')
+      await flushPromises()
+      expect(resultOf(wrapper).get('[data-testid="find-match-in-use"]').text()).toBe('In use')
+    })
+
+    it('asks for no identifiers of other books: the list says their regions', async () => {
+      otherBookOn('uk')
+      const wrapper = mountModal()
+      await flushPromises()
+      await searchUs(wrapper)
+      expect(apiMocks.getAudiobookIdentifiers.mock.calls.map(([id]) => id)).toEqual([7])
+    })
+
+    it('lets two cards pick the same ASIN in two regions', async () => {
+      twoBooks()
+      catalogue({ us: [englishPrimalHunter4], uk: [{ ...englishPrimalHunter4, region: 'uk' }] })
+      const wrapper = mountModal([7, 8])
+      await flushPromises()
+      await searchAndPick(wrapper, { audiobookId: 7, region: 'us' })
+      await searchAndPick(wrapper, { audiobookId: 8, region: 'uk' })
+      expect(confirmText(wrapper)).toBe('Repair 2')
+    })
+
+    it("doesn't let two books swap their records yet", async () => {
+      apiMocks.getLibrary.mockResolvedValue([
+        { id: 7, title: 'Book 7', asin: mismatched.asin },
+        { id: 8, title: 'Book 8', asin: englishPrimalHunter4.asin },
+      ])
+      catalogue({ us: [englishPrimalHunter4] })
+      const wrapper = mountModal()
+      await flushPromises()
+      await searchUs(wrapper)
+      expect(resultOf(wrapper).attributes('title')).toBe(
+        'In use: this record is already on "Book 8"',
+      )
+    })
+
+    it("says why when the library can't be read, as nothing could be checked", async () => {
+      apiMocks.getLibrary.mockRejectedValue(new Error('library down'))
+      const wrapper = mountModal()
+      await flushPromises()
+      expect(wrapper.text()).toContain('library down')
+      expect(wrapper.find('[data-testid="repair-row-7"]').exists()).toBe(false)
+    })
   })
 
   it('keeps no room on step 2 with several books', async () => {
@@ -2826,8 +3037,7 @@ describe('RepairBooksModal', () => {
       )
       const wrapper = mountModal([7, 8])
       await flushPromises()
-      for (const audiobookId of [7, 8])
-        await searchAndPick(wrapper, { audiobookId, query: 'Primal Hunter' })
+      await pickOwnRecords(wrapper, [7, 8])
       await repair(wrapper)
       const resultStates = () =>
         [7, 8].map((audiobookId) =>
@@ -2872,7 +3082,7 @@ describe('RepairBooksModal', () => {
       )
       expect(resultStates()).toEqual(['running', 'waiting'])
 
-      rescans[0]!({ message: 'ok', audiobookId: 7, asin: 'B0BK9W82PQ', region: 'us' })
+      rescans[0]!({ message: 'ok', audiobookId: 7, asin: 'B0BK9W82P0', region: 'us' })
       await flushPromises()
       rescans[1]!({ message: 'ok', audiobookId: 8, asin: 'B0BK9W82PQ', region: 'us' })
       await flushPromises()
@@ -2888,7 +3098,7 @@ describe('RepairBooksModal', () => {
       expect(await leaveGuard()()).toBe(true)
       expect(resultStates()).toEqual(['running', 'skipped'])
 
-      rescans[0]!({ message: 'ok', audiobookId: 7, asin: 'B0BK9W82PQ', region: 'us' })
+      rescans[0]!({ message: 'ok', audiobookId: 7, asin: 'B0BK9W82P0', region: 'us' })
       await flushPromises()
       expect(resultStates()).toEqual(['done', 'skipped'])
       expect(apiMocks.rescanAudiobookMetadata).toHaveBeenCalledTimes(1)
@@ -2904,7 +3114,7 @@ describe('RepairBooksModal', () => {
       )
       const leaving = leaveGuard()()
       await flushPromises()
-      repairs.rescans[0]!({ message: 'ok', audiobookId: 7, asin: 'B0BK9W82PQ', region: 'us' })
+      repairs.rescans[0]!({ message: 'ok', audiobookId: 7, asin: 'B0BK9W82P0', region: 'us' })
       await flushPromises()
       return { ...repairs, answer: (isLeaving: boolean) => answer(isLeaving), leaving }
     }
@@ -3012,7 +3222,7 @@ describe('RepairBooksModal', () => {
       wrapper.unmount()
       // The browser no longer warns: nothing shows the repairs any more
       expect(isUnloadWarned()).toBe(false)
-      rescans[0]!({ message: 'ok', audiobookId: 7, asin: 'B0BK9W82PQ', region: 'us' })
+      rescans[0]!({ message: 'ok', audiobookId: 7, asin: 'B0BK9W82P0', region: 'us' })
       await flushPromises()
 
       // The book being repaired ended; the waiting one never started
@@ -3068,8 +3278,7 @@ describe('RepairBooksModal', () => {
       .mockResolvedValue({ message: 'ok', audiobookId: 8, asin: 'B0BK9W82PQ', region: 'us' })
     const wrapper = mountModal([7, 8])
     await flushPromises()
-    for (const audiobookId of [7, 8])
-      await searchAndPick(wrapper, { audiobookId, query: 'Primal Hunter' })
+    await pickOwnRecords(wrapper, [7, 8])
     await repair(wrapper)
 
     expect(resultCard(wrapper).attributes('data-result-state')).toBe('warning')

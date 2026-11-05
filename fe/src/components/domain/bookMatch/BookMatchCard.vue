@@ -87,6 +87,7 @@
         :selected-record-key="pickedRecordKey"
         :current-record-key="bookMatch.currentRecordKey"
         :is-provider-record-required="isProviderRecordRequired"
+        :other-book-title="otherBookTitle"
         @select="pick"
       />
     </fieldset>
@@ -161,6 +162,8 @@ const props = withDefaults(
     // today); Find Match also takes a record without one (another source), as Library Import can
     // add a book from it
     isProviderRecordRequired?: boolean
+    // The other book a search result's record is taken by, if any (it can't be picked)
+    otherBookTitle?: (searchResult: SearchResult) => string | null
     // The dialog is short of room (Repair measures its footer): the fields take the narrow
     // screen's layout before the screen itself is narrow
     isNarrow?: boolean
@@ -412,6 +415,7 @@ function pick(searchResult: SearchResult) {
   // revealed
   if (
     (!searchResult.asin && props.isProviderRecordRequired) ||
+    props.otherBookTitle?.(searchResult) ||
     props.isSearchLocked ||
     searchState.value.status === 'searching' ||
     resultsReveal.isRevealing.value

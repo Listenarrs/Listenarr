@@ -17,16 +17,18 @@
  */
 import { computed, onScopeDispose, ref } from 'vue'
 import { apiService } from '@/services/api'
-import type { Audiobook } from '@/types'
+import type { Audiobook, SearchResult } from '@/types'
 import { logger } from '@/utils/logger'
 import { useLibraryImportStore } from '@/stores/libraryImport'
 import {
   FALLBACK_REGION,
   hasAsinChanged,
+  libraryBooksByAsin,
   formatDuration,
   type BookRecord,
   bookSummary,
   recordFromResult,
+  type LibraryBooksByAsin,
   type SearchCache,
 } from '@/utils/bookMatch'
 import {
@@ -34,6 +36,7 @@ import {
   identifiersWithPrimaryAsin,
   isIncluded,
   isMatched,
+  otherBookTitleOf,
   repairProblemText,
   failedRepairRow,
   repairRowFrom,
@@ -68,6 +71,8 @@ export function useRepairBooks(audiobookIds: () => number[]) {
   const isLoading = ref(false)
   const loadError = ref<string | null>(null)
   const repairRows = ref<RepairRow[]>([])
+  // The library's books when the dialog loaded: a record on another book can't be picked
+  let booksByAsin: LibraryBooksByAsin = new Map()
   const isExecuting = ref(false)
   const isFinished = ref(false)
   // Cancel asked while the repairs run: the books still waiting are left out
@@ -129,9 +134,13 @@ export function useRepairBooks(audiobookIds: () => number[]) {
     searchingAudiobookId.value = null
     reloadingAudiobookIds.value = []
     try {
-      const region = await libraryImportStore.configuredRegion()
+      const [region, libraryBooks] = await Promise.all([
+        libraryImportStore.configuredRegion(),
+        apiService.getLibrary(),
+      ])
       if (!isLatestLoad()) return
       configuredRegion.value = region
+      booksByAsin = libraryBooksByAsin(libraryBooks)
       // One book at a time, like the repairs (they run in the browser, no backend task yet)
       const loadedRepairRows: RepairRow[] = []
       for (const audiobookId of loadedAudiobookIds) {
@@ -188,6 +197,11 @@ export function useRepairBooks(audiobookIds: () => number[]) {
   function forgetLoad() {
     latestLoadNumber++
     isLoading.value = false
+  }
+
+  // The other book holding a search result's record, or picking it on its own card
+  function otherBookTitle(repairRow: RepairRow, searchResult: SearchResult): string | null {
+    return otherBookTitleOf(searchResult, repairRow, repairRows.value, booksByAsin)
   }
 
   function onSearching(repairRow: RepairRow, isSearching: boolean) {
@@ -525,6 +539,7 @@ export function useRepairBooks(audiobookIds: () => number[]) {
     load,
     forgetLoad,
     loadAgain,
+    otherBookTitle,
     onSearching,
     repair,
     retryRepair,

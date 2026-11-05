@@ -16,7 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 import type { InjectionKey } from 'vue'
-import type { SearchResult } from '@/types'
+import type { Audiobook, SearchResult } from '@/types'
 import { useSearch } from '@/composables/useSearch'
 import { searchRegionOptions } from '@/utils/languageMapping'
 
@@ -151,6 +151,38 @@ export function isResultOfRecord(
     return !searchResult.asin && !!recordKey.id && searchResult.id === recordKey.id
   if (searchResult.asin?.toUpperCase() !== recordKey.asin.toUpperCase()) return false
   return !recordKey.region || !searchResult.region || searchResult.region === recordKey.region
+}
+
+// The library's books by ASIN: which records they hold. A record goes on one book
+export type LibraryBooksByAsin = Map<string, Audiobook[]>
+
+export function libraryBooksByAsin(libraryBooks: Audiobook[]): LibraryBooksByAsin {
+  const booksByAsin: LibraryBooksByAsin = new Map()
+  for (const book of libraryBooks) {
+    if (!book.asin) continue
+    const asinKey = book.asin.toUpperCase()
+    booksByAsin.set(asinKey, [...(booksByAsin.get(asinKey) ?? []), book])
+  }
+  return booksByAsin
+}
+
+// The library book holding a search result's record, among the ones that count: the same ASIN in
+// the same region, a region not known counting as the same one
+export function libraryBookHolding(
+  searchResult: SearchResult,
+  booksByAsin: LibraryBooksByAsin,
+  isCounted: (book: Audiobook) => boolean,
+): Audiobook | null {
+  const asin = searchResult.asin?.toUpperCase()
+  if (!asin) return null
+  return (
+    booksByAsin
+      .get(asin)
+      ?.find(
+        (book) =>
+          isCounted(book) && isResultOfRecord(searchResult, { asin, region: book.asinRegion }),
+      ) ?? null
+  )
 }
 
 // A search result as a book record, in the region it was found in
