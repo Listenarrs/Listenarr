@@ -22,7 +22,7 @@ namespace Listenarr.Application.Downloads.Submission
 {
     public partial class DownloadService
     {
-        public async Task<SearchAndDownloadResult> SearchAndDownloadAsync(int audiobookId)
+        public async Task<SearchAndDownloadResult> SearchAndDownloadAsync(int audiobookId, SearchOrigin origin = SearchOrigin.Interactive)
         {
             // Get the audiobook
             var audiobook = await audiobookRepository.GetByIdAsync(audiobookId);
@@ -61,8 +61,9 @@ namespace Listenarr.Application.Downloads.Submission
 
             // Search using the working search service. This is an automatic search (triggered
             // by the background/manual 'search-and-download' endpoint), so set isAutomaticSearch
-            // to true to ensure only indexers are queried (no Amazon/Audible scraping).
-            var searchResults = await searchService.SearchAsync(searchQuery, isAutomaticSearch: true);
+            // to true to ensure only indexers are queried (no Amazon/Audible scraping). The origin,
+            // not that flag, says whether a person asked, and so how much indexer budget it may use.
+            var searchResults = await searchService.SearchAsync(searchQuery, isAutomaticSearch: true, origin: origin);
 
             if (searchResults == null || !searchResults.Any())
             {

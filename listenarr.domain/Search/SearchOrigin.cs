@@ -34,6 +34,12 @@ namespace Listenarr.Domain.Search
         /// <summary>
         /// The automatic-search sweep. It stops at the share of the limit outside the reserve.
         /// </summary>
-        Sweep = 1
+        Sweep = 1,
+
+        /// <summary>
+        /// The search that follows a failed download. Unattended, so it stops where the sweep
+        /// does.
+        /// </summary>
+        Retry = 2
     }
 }

@@ -586,7 +586,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
             Assert.Equal(expectSearch, pending != null);
             downloads.Verify(
-                service => service.SearchAndDownloadAsync(audiobook.Id),
+                service => service.SearchAndDownloadAsync(audiobook.Id, SearchOrigin.Interactive),
                 expectSearch ? Times.Once() : Times.Never());
         }
 

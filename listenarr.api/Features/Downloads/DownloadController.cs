@@ -55,7 +55,7 @@ namespace Listenarr.Api.Features.Downloads
         {
             try
             {
-                var result = await _downloadService.SearchAndDownloadAsync(request.AudiobookId);
+                var result = await _downloadService.SearchAndDownloadAsync(request.AudiobookId, SearchOrigin.Interactive);
                 return Ok(result);
             }
             catch (DownloadClientRejectedReleaseException ex)

@@ -73,6 +73,18 @@ namespace Listenarr.Tests.Features.Application.Search.Indexers.Common
         }
 
         [Fact]
+        public async Task TryAcquireAsync_RetryStopsWhereTheSweepDoes()
+        {
+            var budget = CreateBudget(new RecordingUsageStore(), new MutableClock(Start));
+            var indexer = BudgetedIndexer(1, limit: 100);
+
+            Assert.Equal(40, await AcquireUntilRefusedAsync(budget, indexer, SearchOrigin.Sweep, stopAfter: 40));
+            Assert.Equal(35, await AcquireUntilRefusedAsync(budget, indexer, SearchOrigin.Retry));
+            Assert.False(await budget.TryAcquireAsync(indexer, SearchOrigin.Sweep, Reserve));
+            Assert.True(await budget.TryAcquireAsync(indexer, SearchOrigin.Interactive, Reserve));
+        }
+
+        [Fact]
         public async Task TryAcquireAsync_IndexersHaveSeparateBudgets()
         {
             var budget = CreateBudget(new RecordingUsageStore(), new MutableClock(Start));
@@ -227,10 +239,10 @@ namespace Listenarr.Tests.Features.Application.Search.Indexers.Common
         private static Indexer BudgetedIndexer(int id, int? limit) =>
             new() { Id = id, Name = $"Indexer {id}", DailyRequestLimit = limit };
 
-        private static async Task<int> AcquireUntilRefusedAsync(IIndexerRequestBudget budget, Indexer indexer, SearchOrigin origin)
+        private static async Task<int> AcquireUntilRefusedAsync(IIndexerRequestBudget budget, Indexer indexer, SearchOrigin origin, int stopAfter = int.MaxValue)
         {
             var admitted = 0;
-            while (await budget.TryAcquireAsync(indexer, origin, Reserve))
+            while (admitted < stopAfter && await budget.TryAcquireAsync(indexer, origin, Reserve))
             {
                 admitted++;
                 Assert.True(admitted <= 1_000_000, "budget never refused");
