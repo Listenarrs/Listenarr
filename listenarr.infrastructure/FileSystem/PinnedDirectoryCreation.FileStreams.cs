@@ -25,18 +25,18 @@ internal sealed partial class PinnedDirectoryCreation
 
         // Tag libraries rewrite a container in place: they parse the existing box or frame
         // structure through the same stream they then write back to, so a write-only handle
-        // fails while still reading. The pinning is unaffected by the wider access mode. The
-        // handle is still opened relative to the pinned parent, still refuses to follow a
-        // link, and is still checked against the validated file object below.
+        // fails while still reading. The pinning is unaffected by the wider access mode.
+        // On Windows a second open would fail with a sharing violation, because the pinned
+        // handle shares read only. The stream therefore duplicates the pinned handle, which
+        // a write-authorized lease opened with write access. Duplication does not pass a
+        // share check, and the handle is the validated file object by construction. On Unix
+        // the handle is still opened relative to the pinned parent, still refuses to follow
+        // a link, and is still checked against the validated file object below.
         internal FileStream OpenIndependentReadWriteStream(int bufferSize, bool asynchronous)
         {
             ThrowIfDisposed();
             var handle = OperatingSystem.IsWindows()
-                ? OpenRelativeFileForWriteWindows(
-                    _parentHandle,
-                    _fileName,
-                    FullPath,
-                    readable: true)
+                ? DuplicateSafeHandle(_fileHandle)
                 : OpenRelativeFileForWriteUnix(
                     _parentHandle,
                     _fileName,

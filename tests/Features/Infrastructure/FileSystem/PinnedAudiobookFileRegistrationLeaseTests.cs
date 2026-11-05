@@ -100,7 +100,9 @@ public sealed class PinnedAudiobookFileRegistrationLeaseTests : BaseTests
             "book.m4b",
             "original generation");
         var displacedPath = Path.Join(parent, "book-original.m4b");
-        using var lease = PinnedAudiobookFileRegistrationLease.Open(publicPath);
+        using var lease = PinnedAudiobookFileRegistrationLease.Open(
+            publicPath,
+            supportsMetadataWrite: true);
 
         File.Move(publicPath, displacedPath);
         await File.WriteAllTextAsync(publicPath, "replacement generation");
@@ -124,7 +126,9 @@ public sealed class PinnedAudiobookFileRegistrationLeaseTests : BaseTests
             parent,
             "book.m4b",
             "original generation");
-        using var lease = PinnedAudiobookFileRegistrationLease.Open(publicPath);
+        using var lease = PinnedAudiobookFileRegistrationLease.Open(
+            publicPath,
+            supportsMetadataWrite: true);
 
         using var stream = lease.OpenMetadataWriteStream();
 
@@ -139,6 +143,56 @@ public sealed class PinnedAudiobookFileRegistrationLeaseTests : BaseTests
         var buffer = new byte[stream.Length];
         Assert.Equal(buffer.Length, stream.Read(buffer, 0, buffer.Length));
         Assert.Equal("original generation", System.Text.Encoding.UTF8.GetString(buffer));
+    }
+
+    [Fact]
+    public async Task OpenMetadataWriteStream_LeaseNotWriteAuthorized_Refuses()
+    {
+        var parent = FileService.GetTempDirectory(
+            "registration-lease-metadata-read-only");
+        var publicPath = await FileService.GetFileAsync(
+            parent,
+            "book.m4b",
+            "original generation");
+        using var lease = PinnedAudiobookFileRegistrationLease.Open(publicPath);
+
+        Assert.False(lease.SupportsMetadataWrite);
+        Assert.Throws<NotSupportedException>(() => lease.OpenMetadataWriteStream());
+        Assert.Equal("original generation", await File.ReadAllTextAsync(publicPath));
+    }
+
+    [WindowsFact]
+    public async Task WriteAuthorizedLease_WritesThroughPinnedHandleAndStillBlocksReplacement()
+    {
+        var parent = FileService.GetTempDirectory(
+            "registration-lease-metadata-write-windows");
+        var publicPath = await FileService.GetFileAsync(
+            parent,
+            "book.m4b",
+            "original generation");
+        var displacedPath = Path.Join(parent, "book-original.m4b");
+
+        using (var lease = PinnedAudiobookFileRegistrationLease.Open(
+            publicPath,
+            supportsMetadataWrite: true))
+        {
+            using (var stream = lease.OpenMetadataWriteStream())
+            {
+                stream.SetLength(0);
+                stream.Write(System.Text.Encoding.UTF8.GetBytes("enriched generation"));
+            }
+
+            // The lease still shares read only, so no other open may write or rename it.
+            Assert.ThrowsAny<IOException>(() =>
+                File.Move(publicPath, displacedPath));
+            Assert.ThrowsAny<IOException>(() => new FileStream(
+                publicPath,
+                FileMode.Open,
+                FileAccess.Write,
+                FileShare.ReadWrite | FileShare.Delete));
+        }
+
+        Assert.Equal("enriched generation", await File.ReadAllTextAsync(publicPath));
     }
 
     [WindowsFact]
