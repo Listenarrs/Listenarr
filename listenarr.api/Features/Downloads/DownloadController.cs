@@ -55,7 +55,8 @@ namespace Listenarr.Api.Features.Downloads
         {
             try
             {
-                var result = await _downloadService.SearchAndDownloadAsync(request.AudiobookId, SearchOrigin.Interactive);
+                var origin = request.Bulk ? SearchOrigin.Bulk : SearchOrigin.Interactive;
+                var result = await _downloadService.SearchAndDownloadAsync(request.AudiobookId, origin);
                 return Ok(result);
             }
             catch (DownloadClientRejectedReleaseException ex)
@@ -367,6 +368,12 @@ namespace Listenarr.Api.Features.Downloads
     public class SearchAndDownloadRequest
     {
         public int AudiobookId { get; set; }
+
+        /// <summary>
+        /// True when the search is one of many started together (the Wanted page's search all),
+        /// so it stays out of the indexer's interactive reserve.
+        /// </summary>
+        public bool Bulk { get; set; }
     }
 
     public class SendDownloadRequest

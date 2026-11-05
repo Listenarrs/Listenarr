@@ -37,6 +37,10 @@ vi.mock('@/services/api', () => ({
   ensureImageCached: vi.fn(async () => true),
 }))
 
+// Ids passed to searchAndDownload, whatever the options, so a "not searched" check cannot pass
+// just because the call carried a different second argument.
+const searchedIds = () => vi.mocked(apiService.searchAndDownload).mock.calls.map((call) => call[0])
+
 describe('WantedView image recache behavior', () => {
   beforeEach(() => {
     const pinia = createPinia()
@@ -307,8 +311,8 @@ describe('WantedView - Search All (Issue #936)', () => {
     await confirmModal.vm.$emit('confirm')
     await flushPromises()
 
-    expect(apiService.searchAndDownload).toHaveBeenCalledWith(1)
-    expect(apiService.searchAndDownload).not.toHaveBeenCalledWith(2)
+    expect(apiService.searchAndDownload).toHaveBeenCalledWith(1, { bulk: true })
+    expect(searchedIds()).not.toContain(2)
   })
 
   it('excludes audiobooks with active downloads from Search All execution', async () => {
@@ -349,8 +353,8 @@ describe('WantedView - Search All (Issue #936)', () => {
     await confirmModal.vm.$emit('confirm')
     await flushPromises()
 
-    expect(apiService.searchAndDownload).toHaveBeenCalledWith(1)
-    expect(apiService.searchAndDownload).not.toHaveBeenCalledWith(2)
+    expect(apiService.searchAndDownload).toHaveBeenCalledWith(1, { bulk: true })
+    expect(searchedIds()).not.toContain(2)
   })
 
   it('aborts in-flight Search All loop when component is unmounted', async () => {
@@ -369,7 +373,7 @@ describe('WantedView - Search All (Issue #936)', () => {
       const searchPromise = vm.searchMissing()
 
       // First audiobook should start immediately
-      expect(apiService.searchAndDownload).toHaveBeenCalledWith(1)
+      expect(apiService.searchAndDownload).toHaveBeenCalledWith(1, { bulk: true })
 
       // Unmount while delay between iterations is active
       wrapper.unmount()
@@ -377,8 +381,8 @@ describe('WantedView - Search All (Issue #936)', () => {
       await searchPromise
 
       // Subsequent books must not be searched after unmount
-      expect(apiService.searchAndDownload).not.toHaveBeenCalledWith(2)
-      expect(apiService.searchAndDownload).not.toHaveBeenCalledWith(3)
+      expect(searchedIds()).not.toContain(2)
+      expect(searchedIds()).not.toContain(3)
     } finally {
       vi.useRealTimers()
     }
@@ -427,7 +431,20 @@ describe('WantedView - Search All (Issue #936)', () => {
     await confirmModal.vm.$emit('confirm')
     await flushPromises()
 
-    expect(apiService.searchAndDownload).toHaveBeenCalledWith(102)
-    expect(apiService.searchAndDownload).not.toHaveBeenCalledWith(101)
+    expect(apiService.searchAndDownload).toHaveBeenCalledWith(102, { bulk: true })
+    expect(searchedIds()).not.toContain(101)
+  })
+  it('sends a single-row automatic search without the bulk flag', async () => {
+    libraryStore.audiobooks = [
+      { id: 7, title: 'Little Women', monitored: true, files: [] },
+    ] as unknown as ReturnType<typeof useLibraryStore>['audiobooks']
+
+    const wrapper = mount(WantedView, { global: { plugins: [pinia] } })
+    await flushPromises()
+
+    await wrapper.find('button[title="Automatic Search"]').trigger('click')
+    await flushPromises()
+
+    expect(apiService.searchAndDownload).toHaveBeenCalledWith(7, {})
   })
 })

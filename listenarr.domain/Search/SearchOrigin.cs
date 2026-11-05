@@ -40,6 +40,14 @@ namespace Listenarr.Domain.Search
         /// The search that follows a failed download. Unattended, so it stops where the sweep
         /// does.
         /// </summary>
-        Retry = 2
+        Retry = 2,
+
+        /// <summary>
+        /// One request in a search over many books at once, such as the Wanted page's search
+        /// all. A person clicked, but one click must not spend the reserve kept for single
+        /// searches, so it stops where the sweep does. Kept apart from Sweep so logs and the
+        /// sweep's own limits do not mix the two.
+        /// </summary>
+        Bulk = 3
     }
 }

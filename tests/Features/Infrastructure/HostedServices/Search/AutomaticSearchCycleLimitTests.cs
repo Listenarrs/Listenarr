@@ -69,6 +69,34 @@ namespace Listenarr.Tests.Features.Infrastructure.HostedServices.Search
         }
 
         [Fact]
+        public async Task BulkSearchAll_IsRefusedOnceTheSweepShareIsSpent_WhileASingleSearchGetsThrough()
+        {
+            // Limit 4 with the 25% reserve: unattended searches, the Wanted page's search all
+            // included, may send 3; a single search a person starts may use the fourth.
+            var provider = new CountingProvider();
+            Init(builder => builder.WithSingleton<IIndexerSearchProvider>(provider));
+            await ConfigureAsync(maxBooksPerCycle: 0, reservePercent: 25);
+            await AddIndexerAsync(dailyRequestLimit: 4);
+            var books = await SeedBooksAsync();
+            await RunCycleAsync();
+            Assert.Equal(3, provider.Calls);
+
+            using var scope = _provider.CreateScope();
+            var controller = new DownloadController(
+                scope.ServiceProvider.GetRequiredService<IDownloadService>(),
+                scope.ServiceProvider.GetRequiredService<IDownloadQueueService>(),
+                scope.ServiceProvider.GetRequiredService<IDownloadProcessingJobService>(),
+                NullLogger<DownloadController>.Instance);
+
+            await controller.SearchAndDownload(new SearchAndDownloadRequest { AudiobookId = books[3].Id, Bulk = true });
+            await controller.SearchAndDownload(new SearchAndDownloadRequest { AudiobookId = books[4].Id, Bulk = true });
+            Assert.Equal(3, provider.Calls);
+
+            await controller.SearchAndDownload(new SearchAndDownloadRequest { AudiobookId = books[3].Id });
+            Assert.Equal(4, provider.Calls);
+        }
+
+        [Fact]
         public async Task SweepStoppedByTheBudget_LeavesTheRestUnstampedForTheNextCycle()
         {
             var provider = new CountingProvider();

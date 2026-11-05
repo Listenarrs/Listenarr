@@ -61,8 +61,10 @@ namespace Listenarr.Tests.Features.Application.Search
                 Times.Once);
         }
 
-        [Fact]
-        public async Task SearchAndDownloadEndpoint_IsInteractive()
+        [Theory]
+        [InlineData(false, SearchOrigin.Interactive)]
+        [InlineData(true, SearchOrigin.Bulk)]
+        public async Task SearchAndDownloadEndpoint_IsInteractiveUnlessFlaggedBulk(bool bulk, SearchOrigin expected)
         {
             var downloads = new Mock<IDownloadService>();
             downloads.Setup(d => d.SearchAndDownloadAsync(It.IsAny<int>(), It.IsAny<SearchOrigin>()))
@@ -73,9 +75,9 @@ namespace Listenarr.Tests.Features.Application.Search
                 Mock.Of<IDownloadProcessingJobService>(),
                 NullLogger<DownloadController>.Instance);
 
-            await controller.SearchAndDownload(new SearchAndDownloadRequest { AudiobookId = 42 });
+            await controller.SearchAndDownload(new SearchAndDownloadRequest { AudiobookId = 42, Bulk = bulk });
 
-            downloads.Verify(d => d.SearchAndDownloadAsync(42, SearchOrigin.Interactive), Times.Once);
+            downloads.Verify(d => d.SearchAndDownloadAsync(42, expected), Times.Once);
         }
 
         [Fact]
