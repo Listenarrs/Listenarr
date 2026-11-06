@@ -24,8 +24,7 @@ import { buildLibraryImportSearchParams } from '@/utils/libraryImportSearch'
 import {
   isEmptyRecord,
   recordOfResponse,
-  searchFields,
-  usableInRegion,
+  searchCandidates,
   type SearchFields,
 } from '@/services/audiobookSearch'
 import { normalizeSearchRegion, regionLabel } from '@/utils/languageMapping'
@@ -417,12 +416,10 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   // automatic switch to another catalogue. Results are tagged with their region, so the import
   // fetches their full metadata (authors, narrators) from the same catalogue and keeps that region.
   async function searchInRegion(
-    { cap, ...fields }: SearchFields & { cap: number },
+    params: SearchFields & { cap: number },
     region?: string,
   ): Promise<SearchResult[]> {
-    const searchRegion = region || (await _configuredRegion())
-    const searchResults = await searchFields(fields, { region: searchRegion, language: 'all', cap })
-    return usableInRegion(searchResults, searchRegion)
+    return searchCandidates(params, region || (await _configuredRegion()))
   }
 
   // ─── Queue Processing ─────────────────────────────────────────────────────
