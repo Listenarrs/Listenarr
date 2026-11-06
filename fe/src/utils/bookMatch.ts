@@ -17,7 +17,7 @@
  */
 import type { InjectionKey } from 'vue'
 import type { Audiobook, SearchResult } from '@/types'
-import { ASIN_PATTERN, searchTitleAndAuthor } from '@/services/audiobookSearch'
+import { ASIN_PATTERN, searchTitleAndAuthor, usableInRegion } from '@/services/audiobookSearch'
 import { searchRegionOptions } from '@/utils/languageMapping'
 
 // The Audible record a book points at, as edited in a book match card (Repair and Find Match)
@@ -274,9 +274,7 @@ export async function searchLikeAddNew(
       }),
       searchAborted,
     ])
-    return searchResults
-      .filter((searchResult) => !(searchResult.asin && !searchResult.title))
-      .map((searchResult) => ({ ...searchResult, region: searchResult.region || region }))
+    return usableInRegion(searchResults, region)
   } catch (e) {
     if ((e as { status?: number })?.status === 404) return []
     throw e
