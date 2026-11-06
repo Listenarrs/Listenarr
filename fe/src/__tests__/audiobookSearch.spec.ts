@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { SearchResult } from '@/types'
 
 const apiMocks = vi.hoisted(() => ({
   advancedSearch: vi.fn(),
@@ -30,7 +31,9 @@ import {
   parseSearchTokens,
   queryAsin,
   searchAudiobooks,
+  searchFields,
   searchTitleAndAuthor,
+  usableInRegion,
 } from '@/services/audiobookSearch'
 
 describe('audiobookSearch (Add New, Repair and Find Match)', () => {
@@ -144,6 +147,34 @@ describe('audiobookSearch (Add New, Repair and Find Match)', () => {
       }),
     )
     expect(apiMocks.advancedSearch.mock.calls[0]?.[0]).not.toHaveProperty('series')
+  })
+
+  it('asks a pool of candidates instead of a number of results when given a cap', async () => {
+    await searchFields({ title: 'Primal Hunter 4' }, { region: 'us', language: 'all', cap: 5 })
+
+    expect(apiMocks.advancedSearch).toHaveBeenCalledWith({
+      title: 'Primal Hunter 4',
+      region: 'us',
+      cap: 5,
+    })
+  })
+
+  it('keeps usable results only, each tagged with its region', () => {
+    const results = usableInRegion(
+      [
+        { title: 'Primal Hunter 4', asin: 'B0BK9W82PQ' },
+        { asin: 'B0ZZZZZZZZ' },
+        { title: 'Found in Germany', asin: 'B0AAAAAAAA', region: 'de' },
+        { title: 'No ASIN' },
+      ] as SearchResult[],
+      'us',
+    )
+
+    expect(results.map(({ title, region }) => [title, region])).toEqual([
+      ['Primal Hunter 4', 'us'],
+      ['Found in Germany', 'de'],
+      ['No ASIN', 'us'],
+    ])
   })
 
   it('leaves an empty author out of a title search', async () => {
