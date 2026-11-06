@@ -64,7 +64,7 @@ export type AudibleMetadataResponse = {
 export type SearchType = 'asin' | 'title' | 'isbn'
 
 // An ASIN: B and 9 letters or digits, or a 10-digit ISBN-10 (ending with a digit or X)
-const ASIN_OR_ISBN10_PATTERN = /^(B[0-9A-Z]{9}|\d{9}(?:X|\d))$/
+export const ASIN_PATTERN = /^(B[0-9A-Z]{9}|\d{9}(?:X|\d))$/i
 const ISBN13_PATTERN = /^\d{13}$/
 // Results asked for a title search
 const TITLE_SEARCH_LIMIT = 50
@@ -86,7 +86,7 @@ export function detectSearchType(query: string): SearchType {
   if (normalizedQuery.startsWith('AUTHOR:') || normalizedQuery.startsWith('TITLE:')) return 'title'
   if (ISBN13_PATTERN.test(normalizedQuery)) return 'isbn'
   // A strict pattern, so short title-like strings aren't taken for ASINs
-  if (ASIN_OR_ISBN10_PATTERN.test(normalizedQuery)) return 'asin'
+  if (ASIN_PATTERN.test(normalizedQuery)) return 'asin'
   return 'title'
 }
 
@@ -97,7 +97,7 @@ export function queryAsin(query: string): string | null {
     .replace(/^ASIN:/i, '')
     .trim()
     .toUpperCase()
-  return ASIN_OR_ISBN10_PATTERN.test(asinCandidate) ? asinCandidate : null
+  return ASIN_PATTERN.test(asinCandidate) ? asinCandidate : null
 }
 
 // The search fields of a title query: TITLE:, AUTHOR:, ISBN:, ASIN: and SERIES: tokens (values can

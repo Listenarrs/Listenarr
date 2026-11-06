@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 import { ref, computed, type Ref } from 'vue'
-import { apiService } from '@/services/api'
 import {
   detectSearchType,
   queryAsin,
@@ -25,7 +24,6 @@ import {
   searchTitle,
 } from '@/services/audiobookSearch'
 import { logger } from '@/utils/logger'
-import { getPreferredSearchLanguageFilter } from '@/utils/languageMapping'
 
 type SearchType = 'asin' | 'title' | 'isbn' | null
 
@@ -154,62 +152,6 @@ export function useSearch(options: { searchType?: Ref<SearchType> } = {}) {
     }
   }
 
-  const searchByTitle = async (query: string) => {
-    logger.debug('searchByTitle called with:', query)
-
-    isSearching.value = true
-    searchError.value = ''
-    searchStatus.value = 'Searching for audiobooks and fetching metadata...'
-
-    try {
-      // Cancel any previous search
-      try {
-        searchAbortController.value?.abort()
-      } catch {}
-      searchAbortController.value = new AbortController()
-
-      // Use canonical /search/title endpoint
-      const requestOptions: RequestInit & { region?: string; language?: string } = {
-        signal: searchAbortController.value.signal,
-        region: searchLanguage.value,
-      }
-      const languageFilter = getPreferredSearchLanguageFilter(preferredSearchLanguage.value)
-      if (languageFilter) requestOptions.language = languageFilter
-
-      const results = await apiService.searchByTitle(query, requestOptions)
-
-      logger.debug('Title search returned:', results)
-      logger.debug('Number of results:', results?.length)
-
-      searchStatus.value = 'Processing search results...'
-
-      return results
-    } catch (error) {
-      if (error && (error as Error).name === 'AbortError') {
-        logger.debug('Title search aborted by user')
-        searchError.value = 'Search cancelled'
-      } else {
-        logger.error('Title search failed:', error)
-        searchError.value =
-          error instanceof Error ? error.message : 'Failed to search for audiobooks'
-      }
-      throw error
-    } finally {
-      isSearching.value = false
-      // Clear status shortly after completion
-      setTimeout(() => {
-        searchStatus.value = ''
-      }, 1000)
-    }
-  }
-
-  const searchByISBN = async (isbn: string) => {
-    // This will be implemented when extracting the ISBN logic
-    logger.debug('searchByISBN called with:', isbn)
-    // For now, delegate to title search with ISBN prefix
-    return await searchByTitle(`ISBN:${isbn}`)
-  }
-
   const cancelSearch = () => {
     if (searchAbortController.value) {
       try {
@@ -246,8 +188,6 @@ export function useSearch(options: { searchType?: Ref<SearchType> } = {}) {
     handleSearchInput,
     performSearch,
     searchByAsin,
-    searchByTitle,
-    searchByISBN,
     cancelSearch,
   }
 }
