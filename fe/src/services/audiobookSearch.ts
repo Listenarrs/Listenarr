@@ -137,15 +137,24 @@ export function parseSearchTokens(query: string): SearchFields {
   return Object.keys(valuesByToken).length ? valuesByToken : { title: query }
 }
 
+// What the metadata endpoint answers: the record, inside its envelope or on its own
+export function recordOfResponse<TRecord extends object>(response: unknown): TRecord {
+  if (!response || typeof response !== 'object') return {} as TRecord
+  const { metadata } = response as { metadata?: unknown }
+  return (metadata && typeof metadata === 'object' ? metadata : response) as TRecord
+}
+
+// Audible answers an ASIN it doesn't sell in that market with an empty stub: an ASIN but no title
+export function isEmptyRecord(record: { asin?: unknown; title?: unknown }): boolean {
+  return !!record.asin && !record.title
+}
+
 // Audible's metadata for an ASIN as a search result
 export function metadataToSearchResult(
   metadataResponse: AudibleMetadataResponse,
   asin: string,
 ): SearchResult {
-  const metadataRecord =
-    metadataResponse?.metadata && typeof metadataResponse.metadata === 'object'
-      ? metadataResponse.metadata
-      : (metadataResponse as AudibleMetadataRecord)
+  const metadataRecord = recordOfResponse<AudibleMetadataRecord>(metadataResponse)
   const { series, seriesNumber, seriesAsin } = buildSeriesFields(metadataRecord.series)
   return {
     id: String(metadataRecord.guid ?? metadataRecord.id ?? metadataRecord.asin ?? asin),
@@ -268,11 +277,10 @@ export async function searchIsbn(
   })
 }
 
-// Keep usable results only (Audible answers an ASIN it doesn't sell in that market with an empty
-// stub: an ASIN but no title) and tag each one with the region it came from
+// Keep usable results only, and tag each one with the region it came from
 export function usableInRegion(searchResults: SearchResult[], region: string): SearchResult[] {
   return searchResults
-    .filter((searchResult) => !(searchResult.asin && !searchResult.title))
+    .filter((searchResult) => !isEmptyRecord(searchResult))
     .map((searchResult) => ({ ...searchResult, region: searchResult.region || region }))
 }
 

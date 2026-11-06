@@ -518,6 +518,7 @@ import type {
   AudiobookSeriesMembership,
 } from '@/types'
 import { apiService } from '@/services/api'
+import { isEmptyRecord, recordOfResponse } from '@/services/audiobookSearch'
 import { getApiValidationError } from '@/services/apiErrors'
 import { useConfigurationStore } from '@/stores/configuration'
 import { useToast } from '@/services/toastService'
@@ -1166,13 +1167,8 @@ async function lookupMetadata(
     | Partial<Audible>
   const source =
     'source' in payload && typeof payload.source === 'string' ? payload.source : undefined
-  const metadata =
-    'metadata' in payload && payload.metadata && typeof payload.metadata === 'object'
-      ? payload.metadata
-      : (payload as Partial<Audible>)
-  if (!metadata || typeof metadata !== 'object') return { found: true, enriched: null, source }
-  // Audible answers an ASIN it doesn't sell in that market with an empty stub: ASIN, no title
-  if (metadata.asin && !metadata.title) return { found: false, enriched: null }
+  const metadata = recordOfResponse<Partial<Audible>>(payload)
+  if (isEmptyRecord(metadata)) return { found: false, enriched: null }
   // The record's region, else the region this request found it in: never the book's own region,
   // which may be the catalogue that just failed
   const enrichedMeta = {
