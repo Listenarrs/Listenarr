@@ -123,7 +123,6 @@ import {
   matchState,
   noRecordError,
   recordFromResult,
-  addNewQuery,
   searchCacheKey,
   searchLikeAddNew,
   SEARCH_CACHE,
@@ -342,8 +341,10 @@ async function search(kind: SearchKind = 'title', fresh = false) {
     author: bookMatch.value.author.trim(),
     region,
   }
-  const query = kind === 'asin' ? asin : addNewQuery(bookMatch.value)
-  const cacheKey = searchCacheKey(query, region)
+  // An ASIN is looked up on its own, the title and author left out
+  const title = kind === 'asin' ? asin : searchParameters.title
+  const author = kind === 'asin' ? '' : searchParameters.author
+  const cacheKey = searchCacheKey(title, author, region)
   lastSearchKind.value = kind
   isEditedSinceSearch.value = false
   // A new search starts over: the record picked in the previous results is no longer selected, and
@@ -361,7 +362,9 @@ async function search(kind: SearchKind = 'title', fresh = false) {
   searchState.value = { ...searchState.value, status: 'searching', kind, error: null }
   runningSearch.value = searchParameters
   const startedAt = performance.now()
-  const searchOutcome = await searchRequest.run((signal) => searchLikeAddNew(query, region, signal))
+  const searchOutcome = await searchRequest.run((signal) =>
+    searchLikeAddNew(title, author, region, signal),
+  )
   // A canceled search answers to nobody: the card already went back to its fields
   if (searchOutcome.status === 'stale') return
   runningSearch.value = null
