@@ -74,7 +74,8 @@ internal sealed partial class PinnedDirectoryCreation
 
     private static SafeFileHandle OpenDirectoryAtUnix(
         SafeFileHandle parentHandle,
-        string childName)
+        string childName,
+        string failureMessage)
     {
         var fd = OpenAt(
             parentHandle.DangerousGetHandle().ToInt32(),
@@ -88,7 +89,7 @@ internal sealed partial class PinnedDirectoryCreation
 
         throw new Win32Exception(
             Marshal.GetLastWin32Error(),
-            "Could not open a newly created pinned directory.");
+            failureMessage);
     }
 
     private static bool HandlesIdentifySameDirectory(

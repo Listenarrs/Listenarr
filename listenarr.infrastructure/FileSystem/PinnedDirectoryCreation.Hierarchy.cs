@@ -352,7 +352,10 @@ internal sealed partial class PinnedDirectoryCreation
 
             var childHandle = OperatingSystem.IsWindows()
                 ? OpenRelativeDirectoryWindows(_handle, childName, childPath)
-                : OpenDirectoryAtUnix(_handle, childName);
+                : OpenDirectoryAtUnix(
+                    _handle,
+                    childName,
+                    "Could not open an existing pinned directory.");
             var child = new PinnedDirectoryAnchor(
                 childHandle,
                 childPath,
