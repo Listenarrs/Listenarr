@@ -72,9 +72,12 @@ const TITLE_SEARCH_LIMIT = 50
 export interface AudiobookSearchOptions {
   // The Audible region searched
   region: string
-  // The preferred search language (e.g. 'english', or 'all' for no filter)
+  // The preferred search language (e.g. 'english', or 'all' for no filter; left out, it falls back
+  // to the default language, not to no filter)
   language?: string
   signal?: AbortSignal
+  // How many candidates the server pools (Start Matching): asked instead of a number of results
+  cap?: number
 }
 
 // What a query is searched as: explicit prefixes first, then an ISBN-13, then an ASIN or ISBN-10,
@@ -100,15 +103,17 @@ export function queryAsin(query: string): string | null {
   return ASIN_PATTERN.test(asinCandidate) ? asinCandidate : null
 }
 
-// The search fields of a title query: TITLE:, AUTHOR:, ISBN:, ASIN: and SERIES: tokens (values can
-// hold several words), or the whole query as the title when it has none
-export function parseSearchTokens(query: string): {
+export interface SearchFields {
   title?: string
   author?: string
   isbn?: string
   asin?: string
   series?: string
-} {
+}
+
+// The search fields of a title query: TITLE:, AUTHOR:, ISBN:, ASIN: and SERIES: tokens (values can
+// hold several words), or the whole query as the title when it has none
+export function parseSearchTokens(query: string): SearchFields {
   const valuesByToken: Record<string, string> = {}
   const tokenPattern = /(TITLE:|AUTHOR:|ISBN:|ASIN:|SERIES:)/gi
   const tokenMatches: Array<{ token: string; index: number; length: number }> = []
@@ -266,10 +271,18 @@ export async function searchIsbn(
   })
 }
 
+// Keep usable results only (Audible answers an ASIN it doesn't sell in that market with an empty
+// stub: an ASIN but no title) and tag each one with the region it came from
+export function usableInRegion(searchResults: SearchResult[], region: string): SearchResult[] {
+  return searchResults
+    .filter((searchResult) => !(searchResult.asin && !searchResult.title))
+    .map((searchResult) => ({ ...searchResult, region: searchResult.region || region }))
+}
+
 // The search fields through the advanced search, filtered on the language
-async function searchFields(
-  fields: ReturnType<typeof parseSearchTokens>,
-  { region, language }: AudiobookSearchOptions,
+export async function searchFields(
+  fields: SearchFields,
+  { region, language, cap }: AudiobookSearchOptions,
 ): Promise<SearchResult[]> {
   const languageFilter = getPreferredSearchLanguageFilter(language)
   return (
@@ -277,7 +290,7 @@ async function searchFields(
       ...fields,
       region,
       ...(languageFilter ? { language: languageFilter } : {}),
-      pagination: { page: 1, limit: TITLE_SEARCH_LIMIT },
+      ...(cap ? { cap } : { pagination: { page: 1, limit: TITLE_SEARCH_LIMIT } }),
     })) || []
   )
 }
