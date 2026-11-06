@@ -272,7 +272,11 @@ namespace Listenarr.Tests.Features.Infrastructure.Notifications.Delivery
                 year = "2023"
             };
             var webhookUrl = "https://discord.com/api/webhooks/test";
-            var enabledTriggers = new List<string> { trigger };
+            // Pin the shipped vocabulary rather than echoing the trigger back at the guard.
+            // Building this list from `trigger` made the assertion hold for any name at all,
+            // which is how the two trigger vocabularies drifted apart unnoticed.
+            var enabledTriggers = NotificationTriggers.UserSelectable.ToList();
+            Assert.Contains(trigger, enabledTriggers);
 
             // Mock HttpClient to capture the posted content
             string? capturedJson = null;
@@ -388,7 +392,11 @@ namespace Listenarr.Tests.Features.Infrastructure.Notifications.Delivery
         {
             var trigger = "book-added";
             var webhookUrl = "http://127.0.0.1:4545/webhook";
-            var enabledTriggers = new List<string> { trigger };
+            // Pin the shipped vocabulary rather than echoing the trigger back at the guard.
+            // Building this list from `trigger` made the assertion hold for any name at all,
+            // which is how the two trigger vocabularies drifted apart unnoticed.
+            var enabledTriggers = NotificationTriggers.UserSelectable.ToList();
+            Assert.Contains(trigger, enabledTriggers);
             var data = new { title = "Local Webhook Book" };
 
             HttpRequestMessage? capturedRequest = null;
@@ -452,7 +460,11 @@ namespace Listenarr.Tests.Features.Infrastructure.Notifications.Delivery
                 imageUrl = "https://listenarr.example.com/api/v1/images/BATTACH.jpg"
             };
             var webhookUrl = "https://discord.com/api/webhooks/test-attach";
-            var enabledTriggers = new List<string> { trigger };
+            // Pin the shipped vocabulary rather than echoing the trigger back at the guard.
+            // Building this list from `trigger` made the assertion hold for any name at all,
+            // which is how the two trigger vocabularies drifted apart unnoticed.
+            var enabledTriggers = NotificationTriggers.UserSelectable.ToList();
+            Assert.Contains(trigger, enabledTriggers);
 
             var capturedBodies = new List<string>();
 
