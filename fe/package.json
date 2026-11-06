@@ -60,7 +60,7 @@
     "@vue/compiler-sfc": "^3.5.44",
     "@vue/eslint-config-prettier": "^10.2.0",
     "@vue/eslint-config-typescript": "^14.8.0",
-    "@vue/test-utils": "^2.4.11",
+    "@vue/test-utils": "^2.5.1",
     "@vue/tsconfig": "^0.9.1",
     "concurrently": "^10.0.3",
     "cypress": "^15.17.0",
