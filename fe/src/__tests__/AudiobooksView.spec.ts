@@ -894,4 +894,127 @@ describe('AudiobooksView Grouping', () => {
     await wrapper.vm.$nextTick()
     expect(wrapper.find('.series-bottom-placard').exists()).toBe(true)
   })
+
+  it('merges author cards when names differ only in spacing or punctuation around initials', async () => {
+    if (
+      typeof (globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver === 'undefined'
+    ) {
+      ;(globalThis as unknown as Record<string, unknown>).ResizeObserver = class {
+        observe() {}
+        disconnect() {}
+      }
+    }
+    if (typeof (globalThis as unknown as { WebSocket?: unknown }).WebSocket === 'undefined') {
+      ;(globalThis as unknown as Record<string, unknown>).WebSocket = function () {
+        /* noop */
+      }
+    }
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: { template: '<div />' } },
+        { path: '/audiobooks', name: 'audiobooks', component: AudiobooksView },
+      ],
+    })
+    await router.push('/audiobooks')
+    await router.isReady().catch(() => {})
+
+    const store = useLibraryStore()
+    // "George R.R. Martin" (no spaces) vs "George R. R. Martin" (spaced) — same person
+    store.audiobooks = [
+      { id: 1, title: 'A Clash of Kings', authors: ['George R. R. Martin'], files: [] },
+      { id: 2, title: 'A Dance with Dragons', authors: ['George R.R. Martin'], files: [] },
+      { id: 3, title: 'A Feast for Crows', authors: ['George R. R. Martin'], files: [] },
+    ] as unknown as import('@/types').Audiobook[]
+
+    store.fetchLibrary = vi.fn(async () => undefined)
+    const wrapper = mount(AudiobooksView, {
+      global: {
+        plugins: [pinia, router],
+        stubs: [
+          'BulkEditModal',
+          'EditAudiobookModal',
+          'CustomFilterModal',
+          'FiltersDropdown',
+          'CustomSelect',
+        ],
+      },
+    })
+    await new Promise((r) => setTimeout(r, 0))
+
+    const vm = getVm(wrapper)
+    await vm.setGroupBy?.('authors')
+    await wrapper.vm.$nextTick()
+
+    const groupedCollections = vm.groupedCollections ?? []
+    // Both name variants must collapse into a single author card
+    expect(groupedCollections).toHaveLength(1)
+    expect(groupedCollections[0].count).toBe(3)
+    // The surviving card keeps the first-seen raw display name (not the normalized key)
+    expect(groupedCollections[0].name).toBe('George R. R. Martin')
+  })
+
+  it('merges series cards when series names differ only in case or spacing', async () => {
+    if (
+      typeof (globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver === 'undefined'
+    ) {
+      ;(globalThis as unknown as Record<string, unknown>).ResizeObserver = class {
+        observe() {}
+        disconnect() {}
+      }
+    }
+    if (typeof (globalThis as unknown as { WebSocket?: unknown }).WebSocket === 'undefined') {
+      ;(globalThis as unknown as Record<string, unknown>).WebSocket = function () {
+        /* noop */
+      }
+    }
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: { template: '<div />' } },
+        { path: '/audiobooks', name: 'audiobooks', component: AudiobooksView },
+      ],
+    })
+    await router.push('/audiobooks')
+    await router.isReady().catch(() => {})
+
+    const store = useLibraryStore()
+    // "Wheel of Time" vs "wheel of time" — same series, formatting drift across books
+    store.audiobooks = [
+      { id: 1, title: 'The Eye of the World', series: 'Wheel of Time', imageUrl: 'c1', files: [] },
+      { id: 2, title: 'The Great Hunt', series: 'wheel of time', imageUrl: 'c2', files: [] },
+    ] as unknown as import('@/types').Audiobook[]
+
+    store.fetchLibrary = vi.fn(async () => undefined)
+    const wrapper = mount(AudiobooksView, {
+      global: {
+        plugins: [pinia, router],
+        stubs: [
+          'BulkEditModal',
+          'EditAudiobookModal',
+          'CustomFilterModal',
+          'FiltersDropdown',
+          'CustomSelect',
+        ],
+      },
+    })
+    await new Promise((r) => setTimeout(r, 0))
+
+    const vm = getVm(wrapper)
+    await vm.setGroupBy?.('series')
+    await wrapper.vm.$nextTick()
+
+    const groupedCollections = vm.groupedCollections ?? []
+    // Both spelling variants must collapse into a single series card
+    expect(groupedCollections).toHaveLength(1)
+    expect(groupedCollections[0].count).toBe(2)
+    // The surviving card keeps the first-seen raw display name (not the normalized key)
+    expect(groupedCollections[0].name).toBe('Wheel of Time')
+  })
 })
