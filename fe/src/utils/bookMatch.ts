@@ -17,14 +17,10 @@
  */
 import type { InjectionKey } from 'vue'
 import type { Audiobook, SearchResult } from '@/types'
-import { useSearch } from '@/composables/useSearch'
-import { searchRegionOptions } from '@/utils/languageMapping'
+import { ASIN_PATTERN } from '@/services/audiobookSearch'
+import { regionLabel } from '@/utils/languageMapping'
 
 // The Audible record a book points at, as edited in a book match card (Repair and Find Match)
-
-// An ASIN as Add New's search reads one: B and 9 letters or digits, or 10 digits (an ISBN-10, the
-// last one possibly X)
-export const ASIN_PATTERN = /^(B[0-9A-Z]{9}|\d{9}(?:X|\d))$/i
 
 // What an ASIN must look like, shown when Search is asked for one that doesn't
 export const INVALID_ASIN_MESSAGE =
@@ -78,9 +74,7 @@ export function answerSource(requestMs: number | null): string {
   return requestMs === null ? 'Cached results' : `Request: ${formatDuration(requestMs)}`
 }
 
-export function regionLabel(region: string): string {
-  return searchRegionOptions.find((option) => option.value === region)?.label ?? region
-}
+export { regionLabel }
 
 export function isAsinValid(bookMatch: BookMatch): boolean {
   return ASIN_PATTERN.test(bookMatch.asin.trim())
@@ -240,15 +234,6 @@ export function isEdited(bookMatch: BookMatch): boolean {
   )
 }
 
-// What Add New's search box would hold for this book: the title and author as TITLE:/AUTHOR:
-// tokens, or the title alone when it is an ASIN (Add New then looks the ASIN up)
-export function addNewQuery(bookMatch: BookMatch): string {
-  const title = bookMatch.query.trim()
-  const author = bookMatch.author.trim()
-  if (ASIN_PATTERN.test(title) || !author) return title
-  return `TITLE:${title} AUTHOR:${author}`
-}
-
 // The searches answered while a dialog is open, shared by its book cards: a search with values
 // already answered (back to a region, a field typed back, Revert, another book searched the same
 // way) is served from here, without a request. Retry skips it; a failed search is never kept. The
@@ -256,38 +241,6 @@ export function addNewQuery(bookMatch: BookMatch): string {
 export type SearchCache = Map<string, SearchResult[]>
 export const SEARCH_CACHE: InjectionKey<SearchCache> = Symbol('bookMatchSearchCache')
 
-export function searchCacheKey(query: string, region: string): string {
-  return `${region}|${query}`
-}
-
-// Add New's own search (useSearch), so a book is searched the way it is added: titles through the
-// search endpoint, an ASIN through the metadata sources in their priority order. No language
-// filter: language isn't a search field here, a region's catalogue also sells other languages'
-// editions (Audible France sells English books), and each result shows its language. Results are
-// tagged with the region they were found in; aborting the signal rejects at once. An ASIN the
-// region has no record for answers no result.
-export async function searchLikeAddNew(
-  query: string,
-  region: string,
-  signal: AbortSignal,
-): Promise<SearchResult[]> {
-  const addNewSearch = useSearch()
-  addNewSearch.searchQuery.value = query
-  addNewSearch.searchLanguage.value = region
-  addNewSearch.preferredSearchLanguage.value = 'all'
-  const searchAborted = new Promise<never>((_, reject) =>
-    signal.addEventListener('abort', () => {
-      addNewSearch.cancelSearch()
-      reject(new DOMException('The search was stopped', 'AbortError'))
-    }),
-  )
-  try {
-    const searchResults = (await Promise.race([addNewSearch.performSearch(), searchAborted])) ?? []
-    return (searchResults as SearchResult[])
-      .filter((searchResult) => !(searchResult.asin && !searchResult.title))
-      .map((searchResult) => ({ ...searchResult, region: searchResult.region || region }))
-  } catch (e) {
-    if ((e as { status?: number })?.status === 404) return []
-    throw e
-  }
+export function searchCacheKey(title: string, author: string, region: string): string {
+  return `${region}|${title}|${author}`
 }
