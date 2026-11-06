@@ -21,6 +21,7 @@ import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import { logger } from '@/utils/logger'
 import { buildLibraryImportSearchParams } from '@/utils/libraryImportSearch'
+import { searchFields, usableInRegion, type SearchFields } from '@/services/audiobookSearch'
 import { normalizeSearchRegion, searchRegionOptions } from '@/utils/languageMapping'
 import { useConfigurationStore } from '@/stores/configuration'
 import { buildSeriesFields } from '@/utils/seriesUtils'
@@ -77,16 +78,6 @@ class MatchRecordNotFoundError extends Error {}
 
 function regionLabel(region: string): string {
   return searchRegionOptions.find((o) => o.value === region)?.label ?? region
-}
-
-type AdvancedSearchParams = Parameters<typeof apiService.advancedSearch>[0]
-
-// Keep usable results only (Audible answers an ASIN it doesn't sell in that market with an empty
-// stub: an ASIN but no title) and tag each one with the region it came from.
-function usableInRegion(results: SearchResult[], region: string): SearchResult[] {
-  return results
-    .filter((result) => !(result.asin && !result.title))
-    .map((result) => ({ ...result, region: result.region || region }))
 }
 
 function normalizeGenres(genres: unknown): string[] | undefined {
@@ -424,15 +415,12 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   // automatic switch to another catalogue. Results are tagged with their region, so the import
   // fetches their full metadata (authors, narrators) from the same catalogue and keeps that region.
   async function searchInRegion(
-    params: AdvancedSearchParams,
+    { cap, ...fields }: SearchFields & { cap: number },
     region?: string,
-    signal?: AbortSignal,
   ): Promise<SearchResult[]> {
     const searchRegion = region || (await _configuredRegion())
-    const results = signal
-      ? await apiService.advancedSearch({ ...params, region: searchRegion }, signal)
-      : await apiService.advancedSearch({ ...params, region: searchRegion })
-    return usableInRegion(results, searchRegion)
+    const searchResults = await searchFields(fields, { region: searchRegion, language: 'all', cap })
+    return usableInRegion(searchResults, searchRegion)
   }
 
   // ─── Queue Processing ─────────────────────────────────────────────────────
