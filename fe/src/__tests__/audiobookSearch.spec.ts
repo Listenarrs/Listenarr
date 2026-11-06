@@ -135,6 +135,25 @@ describe('audiobookSearch (Add New, Repair and Find Match)', () => {
     )
   })
 
+  it("reads an ASIN record's series by the shared rule: a name is no series ASIN", async () => {
+    apiMocks.getAudibleMetadata.mockResolvedValue({
+      metadata: {
+        asin: 'B0BK9W82PQ',
+        title: 'Primal Hunter 4',
+        series: [
+          { name: '', asin: 'B0IGNORED0' },
+          { name: 'The Primal Hunter', position: ' 4 ', asin: 'The Primal Hunter' },
+        ],
+      },
+    })
+
+    const [searchResult] = await searchAudiobooks('B0BK9W82PQ', { region: 'us' })
+
+    expect(searchResult?.series).toBe('The Primal Hunter')
+    expect(searchResult?.seriesNumber).toBe('4')
+    expect(searchResult?.seriesAsin).toBeUndefined()
+  })
+
   it('sends a title and an author as they are: nothing in them is read as a token', async () => {
     await searchTitleAndAuthor('The Wheel of Time Series: Book 1', 'Robert Jordan', {
       region: 'us',
