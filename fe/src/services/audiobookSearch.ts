@@ -21,6 +21,7 @@
 import type { SearchResult } from '@/types'
 import { apiService } from '@/services/api'
 import { getPreferredSearchLanguageFilter } from '@/utils/languageMapping'
+import { buildSeriesFields, type SeriesEntry } from '@/utils/seriesUtils'
 
 export type AudibleMetadataRecord = Record<string, unknown> & {
   guid?: string
@@ -49,7 +50,7 @@ export type AudibleMetadataRecord = Record<string, unknown> & {
   narrators?: SearchResult['narrators']
   Narrators?: SearchResult['narrators']
   // As the metadata endpoint gives them: Audible's series (name, ASIN, position) and genres
-  series?: { name?: string; asin?: string; position?: string }[]
+  series?: SeriesEntry[]
   genres?: ({ name?: string } | string)[]
   publishDate?: string
   authors?: SearchResult['authors']
@@ -134,15 +135,6 @@ export function parseSearchTokens(query: string): SearchFields {
   return Object.keys(valuesByToken).length ? valuesByToken : { title: query }
 }
 
-// The first of a record's series, as a search result holds it: its name, number and ASIN
-function asinResultSeries(
-  series: AudibleMetadataRecord['series'],
-): Pick<SearchResult, 'series' | 'seriesNumber' | 'seriesAsin'> {
-  const first = Array.isArray(series) ? series.find((item) => item?.name) : undefined
-  if (!first) return {}
-  return { series: first.name, seriesNumber: first.position, seriesAsin: first.asin }
-}
-
 // Audible's metadata for an ASIN as a search result
 export function metadataToSearchResult(
   metadataResponse: AudibleMetadataResponse,
@@ -152,6 +144,7 @@ export function metadataToSearchResult(
     metadataResponse?.metadata && typeof metadataResponse.metadata === 'object'
       ? metadataResponse.metadata
       : (metadataResponse as AudibleMetadataRecord)
+  const { series, seriesNumber, seriesAsin } = buildSeriesFields(metadataRecord.series)
   return {
     id: String(metadataRecord.guid ?? metadataRecord.id ?? metadataRecord.asin ?? asin),
     asin,
@@ -223,7 +216,9 @@ export function metadataToSearchResult(
         : undefined,
     // The record's series, genres and dates, as a title search's results carry them: a book added
     // from this result (Library Import's Find Match) keeps them
-    ...asinResultSeries(metadataRecord.series),
+    series,
+    seriesNumber,
+    seriesAsin,
     genres: Array.isArray(metadataRecord.genres)
       ? metadataRecord.genres
           .map((genre) => (typeof genre === 'string' ? genre : (genre?.name ?? '')))
