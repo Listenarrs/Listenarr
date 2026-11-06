@@ -21,7 +21,13 @@ import { apiService } from '@/services/api'
 import { signalRService } from '@/services/signalr'
 import { logger } from '@/utils/logger'
 import { buildLibraryImportSearchParams } from '@/utils/libraryImportSearch'
-import { searchFields, usableInRegion, type SearchFields } from '@/services/audiobookSearch'
+import {
+  isEmptyRecord,
+  recordOfResponse,
+  searchFields,
+  usableInRegion,
+  type SearchFields,
+} from '@/services/audiobookSearch'
 import { normalizeSearchRegion, searchRegionOptions } from '@/utils/languageMapping'
 import { useConfigurationStore } from '@/stores/configuration'
 import { buildSeriesFields } from '@/utils/seriesUtils'
@@ -593,10 +599,8 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
       if ((e as { status?: number })?.status === 404) throw notFound
       throw new Error(`Audible metadata lookup failed: ${(e as Error)?.message ?? 'unknown error'}`)
     }
-    const raw: AudiblePayload =
-      (resp && 'metadata' in resp && resp.metadata ? resp.metadata : (resp as AudiblePayload)) ?? {}
-    // Audible answers an ASIN it doesn't sell in that market with an empty stub: ASIN, no title
-    if (raw.asin && !raw.title) throw notFound
+    const raw = recordOfResponse<AudiblePayload>(resp)
+    if (isEmptyRecord(raw)) throw notFound
     const enrichedAuthors = (raw.authors ?? []).map((a) => a?.name ?? '').filter(Boolean)
     const enrichedNarrators = (raw.narrators ?? []).map((n) => n?.name ?? '').filter(Boolean)
     // The product record is the better source of series data than the search match, and

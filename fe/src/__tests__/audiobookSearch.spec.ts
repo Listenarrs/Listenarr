@@ -31,7 +31,9 @@ import {
   parseSearchTokens,
   queryAsin,
   searchAudiobooks,
+  isEmptyRecord,
   isSeriesOnlySearch,
+  recordOfResponse,
   searchAdvancedFields,
   searchFields,
   searchTitle,
@@ -263,6 +265,20 @@ describe('audiobookSearch (Add New, Repair and Find Match)', () => {
         expect.objectContaining({ title: 'The Primal Hunter', author: 'Zogarth' }),
       )
     })
+  })
+
+  it("reads a record from the metadata endpoint's answer, in its envelope or not", () => {
+    const record = { asin: 'B0BK9W82PQ', title: 'Primal Hunter 4' }
+
+    expect(recordOfResponse({ metadata: record, source: 'audible' })).toBe(record)
+    expect(recordOfResponse(record)).toBe(record)
+    expect(recordOfResponse(null)).toEqual({})
+  })
+
+  it('tells an empty record: an ASIN without a title', () => {
+    expect(isEmptyRecord({ asin: 'B0BK9W82PQ' })).toBe(true)
+    expect(isEmptyRecord({ asin: 'B0BK9W82PQ', title: 'Primal Hunter 4' })).toBe(false)
+    expect(isEmptyRecord({ title: 'No ASIN' })).toBe(false)
   })
 
   it('leaves an empty author out of a title search', async () => {
