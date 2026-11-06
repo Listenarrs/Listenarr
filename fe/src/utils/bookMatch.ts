@@ -18,7 +18,7 @@
 import type { InjectionKey } from 'vue'
 import type { Audiobook, SearchResult } from '@/types'
 import { ASIN_PATTERN, searchTitleAndAuthor, usableInRegion } from '@/services/audiobookSearch'
-import { searchRegionOptions } from '@/utils/languageMapping'
+import { regionLabel } from '@/utils/languageMapping'
 
 // The Audible record a book points at, as edited in a book match card (Repair and Find Match)
 
@@ -74,9 +74,7 @@ export function answerSource(requestMs: number | null): string {
   return requestMs === null ? 'Cached results' : `Request: ${formatDuration(requestMs)}`
 }
 
-export function regionLabel(region: string): string {
-  return searchRegionOptions.find((option) => option.value === region)?.label ?? region
-}
+export { regionLabel }
 
 export function isAsinValid(bookMatch: BookMatch): boolean {
   return ASIN_PATTERN.test(bookMatch.asin.trim())

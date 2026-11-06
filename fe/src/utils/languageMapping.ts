@@ -62,6 +62,11 @@ export const searchRegionOptions = [
   { value: 'jp', label: 'Japan (JP)' },
 ] as const
 
+// A region's name, or the code itself when it isn't one of Audible's
+export function regionLabel(region: string): string {
+  return searchRegionOptions.find((option) => option.value === region)?.label ?? region
+}
+
 type SearchRegionOption = (typeof searchRegionOptions)[number]
 
 // Region choices ordered by usefulness: the given regions first (in that order, without
