@@ -79,6 +79,8 @@ export interface AudiobookSearchOptions {
   signal?: AbortSignal
   // How many candidates the server pools (Start Matching): asked instead of a number of results
   cap?: number
+  // How many results are asked, 50 unless said otherwise
+  limit?: number
 }
 
 // What a query is searched as: explicit prefixes first, then an ISBN-13, then an ASIN or ISBN-10,
@@ -277,7 +279,7 @@ export function usableInRegion(searchResults: SearchResult[], region: string): S
 // The search fields through the advanced search, filtered on the language
 export async function searchFields(
   fields: SearchFields,
-  { region, language, cap }: AudiobookSearchOptions,
+  { region, language, cap, limit = TITLE_SEARCH_LIMIT }: AudiobookSearchOptions,
 ): Promise<SearchResult[]> {
   const languageFilter = getPreferredSearchLanguageFilter(language)
   return (
@@ -285,9 +287,50 @@ export async function searchFields(
       ...fields,
       region,
       ...(languageFilter ? { language: languageFilter } : {}),
-      ...(cap ? { cap } : { pagination: { page: 1, limit: TITLE_SEARCH_LIMIT } }),
+      ...(cap ? { cap } : { pagination: { page: 1, limit } }),
     })) || []
   )
+}
+
+// A series alone: the server looks the series up on Audible
+export function isSeriesOnlySearch({ title, author, isbn, asin, series }: SearchFields): boolean {
+  return !!series && !title && !author && !isbn && !asin
+}
+
+// Whether a result belongs to a series, by the series' ASIN or name. A result can hold its series
+// as a list or as text, and its own record under searchResult
+function isInSeries(searchResult: SearchResult, seriesName: string): boolean {
+  const wanted = seriesName.toLowerCase()
+  const holds = (value: unknown) => !!value && String(value).toLowerCase().includes(wanted)
+  const nested = (searchResult as unknown as { searchResult?: SearchResult }).searchResult
+  const record = nested ?? searchResult
+  const series: unknown = record.series
+  if (Array.isArray(series)) {
+    const isListed = series.some((item: Record<string, unknown> | string) =>
+      typeof item === 'string'
+        ? holds(item)
+        : holds(item?.asin ?? item?.Asin ?? item?.ASIN) || holds(item?.name ?? item?.Name),
+    )
+    if (isListed) return true
+  }
+  return (
+    (typeof series === 'string' && holds(series)) ||
+    (typeof searchResult.series === 'string' && holds(searchResult.series))
+  )
+}
+
+// Add New's advanced form. A series alone is looked up as a series. With an author, the author takes
+// priority: the author's books filtered on the series, or all of them when none is in it. With
+// anything else the series is left out of the search
+export async function searchAdvancedFields(
+  { series, ...fields }: SearchFields,
+  options: AudiobookSearchOptions,
+): Promise<SearchResult[]> {
+  if (isSeriesOnlySearch({ ...fields, series })) return searchFields({ series }, options)
+  const searchResults = await searchFields(fields, options)
+  if (!fields.author || !series) return searchResults
+  const inSeries = searchResults.filter((searchResult) => isInSeries(searchResult, series))
+  return inSeries.length ? inSeries : searchResults
 }
 
 // A title (or TITLE:/AUTHOR:/… tokens)

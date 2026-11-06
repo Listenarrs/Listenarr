@@ -31,7 +31,10 @@ import {
   parseSearchTokens,
   queryAsin,
   searchAudiobooks,
+  isSeriesOnlySearch,
+  searchAdvancedFields,
   searchFields,
+  searchTitle,
   searchTitleAndAuthor,
   usableInRegion,
 } from '@/services/audiobookSearch'
@@ -194,6 +197,72 @@ describe('audiobookSearch (Add New, Repair and Find Match)', () => {
       ['Found in Germany', 'de'],
       ['No ASIN', 'us'],
     ])
+  })
+
+  describe("Add New's advanced form", () => {
+    const options = { region: 'us', language: 'all', limit: 25 }
+    const inSeries = { title: 'In', series: 'The Primal Hunter' }
+    const elsewhere = { title: 'Out', series: 'Dungeon Crawler' }
+
+    it('looks a series alone up as a series', async () => {
+      await searchAdvancedFields({ series: 'Primal Hunter' }, options)
+
+      expect(isSeriesOnlySearch({ series: 'Primal Hunter' })).toBe(true)
+      expect(apiMocks.advancedSearch).toHaveBeenCalledWith({
+        series: 'Primal Hunter',
+        region: 'us',
+        pagination: { page: 1, limit: 25 },
+      })
+    })
+
+    it("filters an author's books on the series, asked without it", async () => {
+      apiMocks.advancedSearch.mockResolvedValue([inSeries, elsewhere])
+
+      const searchResults = await searchAdvancedFields(
+        { author: 'Zogarth', series: 'primal hunter' },
+        options,
+      )
+
+      expect(apiMocks.advancedSearch.mock.calls[0]?.[0]).not.toHaveProperty('series')
+      expect(searchResults).toEqual([inSeries])
+    })
+
+    it("reads a series from a list, by name or ASIN, and from a result's own record", async () => {
+      const byName = { title: 'A', series: [{ name: 'The Primal Hunter' }] }
+      const byAsin = { title: 'B', series: [{ Asin: 'PRIMAL HUNTER-1' }] }
+      const nested = { title: 'C', searchResult: { series: 'The Primal Hunter' } }
+      apiMocks.advancedSearch.mockResolvedValue([byName, byAsin, nested, elsewhere])
+
+      const searchResults = await searchAdvancedFields(
+        { author: 'Zogarth', series: 'Primal Hunter' },
+        options,
+      )
+
+      expect(searchResults).toEqual([byName, byAsin, nested])
+    })
+
+    it("keeps all the author's books when none is in the series", async () => {
+      apiMocks.advancedSearch.mockResolvedValue([elsewhere])
+
+      expect(
+        await searchAdvancedFields({ author: 'Zogarth', series: 'Primal Hunter' }, options),
+      ).toEqual([elsewhere])
+    })
+
+    it('leaves the series out with a title and no author', async () => {
+      await searchAdvancedFields({ title: 'Book', series: 'Primal Hunter' }, options)
+
+      expect(isSeriesOnlySearch({ title: 'Book', series: 'Primal Hunter' })).toBe(false)
+      expect(apiMocks.advancedSearch.mock.calls[0]?.[0]).not.toHaveProperty('series')
+    })
+
+    it('keeps the words of a token whole', async () => {
+      await searchTitle('TITLE:The Primal Hunter AUTHOR:Zogarth', options)
+
+      expect(apiMocks.advancedSearch).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'The Primal Hunter', author: 'Zogarth' }),
+      )
+    })
   })
 
   it('leaves an empty author out of a title search', async () => {
