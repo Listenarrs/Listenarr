@@ -133,8 +133,8 @@ namespace Listenarr.Tests.Features.Api
                         Title = "The Brothers Karamazov [Naxos AudioBooks Edition]",
                         Authors = new List<AudibleAuthor>
                         {
-                            new() { Name = "Fyodor Dostoevsky" },
-                            new() { Name = "Constance Garnett - translator" }
+                            new() { Name = "Constance Garnett - translator" },
+                            new() { Name = "Fyodor Dostoevsky" }
                         }
                     },
                     "Audible",
