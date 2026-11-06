@@ -223,7 +223,10 @@ internal sealed partial class PinnedDirectoryCreation : IDisposable
                     $"Could not create the requested directory beneath '{parentPath}'.");
             }
 
-            directoryHandle = OpenDirectoryAtUnix(parentHandle, childName);
+            directoryHandle = OpenDirectoryAtUnix(
+                parentHandle,
+                childName,
+                "Could not open a newly created pinned directory.");
             var created = new PinnedDirectoryCreation(
                 parentHandle,
                 directoryHandle,
