@@ -2,8 +2,8 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <Version>1.6.0</Version>
-    <AssemblyVersion>1.6.0</AssemblyVersion>
+    <Version>1.6.1</Version>
+    <AssemblyVersion>1.6.1</AssemblyVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <DefaultItemExcludes>$(DefaultItemExcludes);bin\**;bin/**;artifacts\**;artifacts/**;docker-publish\**;docker-publish/**;publish\**;publish/**</DefaultItemExcludes>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
