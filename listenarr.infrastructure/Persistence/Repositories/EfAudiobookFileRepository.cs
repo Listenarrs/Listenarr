@@ -42,7 +42,10 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                 .ToListAsync(ct);
         }
 
-        public async Task<List<AudiobookFile>> GetMissingMetadataAsync(int max, CancellationToken ct = default)
+        public async Task<List<AudiobookFile>> GetMissingMetadataAsync(
+            int max,
+            Func<AudiobookFile, bool>? isEligible = null,
+            CancellationToken ct = default)
         {
             if (max <= 0)
             {
@@ -81,7 +84,8 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
 
                 foreach (var candidate in page)
                 {
-                    if (CanRescanOnCurrentHost(candidate.File, candidate.BasePath, hostSyntax))
+                    if (CanRescanOnCurrentHost(candidate.File, candidate.BasePath, hostSyntax)
+                        && (isEligible == null || isEligible(candidate.File)))
                     {
                         results.Add(candidate.File);
                         if (results.Count == max)

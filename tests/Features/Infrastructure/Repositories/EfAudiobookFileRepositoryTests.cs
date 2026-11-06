@@ -203,6 +203,42 @@ public sealed class EfAudiobookFileRepositoryTests : BaseTests
     }
 
     [Fact]
+    public async Task GetMissingMetadataAsync_IneligibleRowsBeyondFirstPage_ArePagedPast()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ListenArrDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        var library = OperatingSystem.IsWindows() ? "C:\\library" : "/library";
+        var separator = OperatingSystem.IsWindows() ? "\\" : "/";
+
+        await using var context = new ListenArrDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        var audiobook = new Audiobook { Title = "A Princess of Mars" };
+        context.Audiobooks.Add(audiobook);
+        var files = Enumerable.Range(0, 1026)
+            .Select(index =>
+            {
+                var file = AudiobookFile.CreateUnresolved($"{library}{separator}part-{index:D4}.m4b");
+                file.Audiobook = audiobook;
+                return file;
+            })
+            .ToList();
+        context.AudiobookFiles.AddRange(files);
+        await context.SaveChangesAsync();
+        var ineligibleIds = files.Take(1025).Select(file => file.Id).ToHashSet();
+
+        var repository = new EfAudiobookFileRepository(context);
+        var candidates = await repository.GetMissingMetadataAsync(
+            1,
+            file => !ineligibleIds.Contains(file.Id));
+
+        var candidate = Assert.Single(candidates);
+        Assert.Equal(files[^1].Id, candidate.Id);
+    }
+
+    [Fact]
     public async Task ReplacePhysicalGenerationAsync_RelationalUpdate_SynchronizesTrackedEntity()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
