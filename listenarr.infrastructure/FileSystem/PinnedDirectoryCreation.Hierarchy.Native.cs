@@ -103,7 +103,10 @@ internal sealed partial class PinnedDirectoryCreation
 
             PinnedFilesystemMutationHooks.InvokeAfterUnixDirectoryCreateBeforeOpen(
                 Path.Join(parentPath, childName));
-            directoryHandle = OpenDirectoryAtUnix(parentHandle, childName);
+            directoryHandle = OpenDirectoryAtUnix(
+                parentHandle,
+                childName,
+                "Could not open a newly created pinned directory.");
             var created = new PinnedDirectoryCreation(
                 ownedParentHandle,
                 directoryHandle,

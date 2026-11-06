@@ -26,7 +26,10 @@ internal sealed partial class PinnedDirectoryCreation
                     childName,
                     childPath,
                     requireDeleteAccess: true)
-                : OpenDirectoryAtUnix(parentHandle, childName);
+                : OpenDirectoryAtUnix(
+                    parentHandle,
+                    childName,
+                    "Could not open an existing pinned directory for publication.");
             var publication = new PinnedDirectoryCreation(
                 parentHandle,
                 directoryHandle,
@@ -233,7 +236,10 @@ internal sealed partial class PinnedDirectoryCreation
 
         PinnedFilesystemMutationHooks.InvokeBeforeUnixDirectoryDeleteRevalidation(
             currentPath);
-        using var reopened = OpenDirectoryAtUnix(_parentHandle, currentName);
+        using var reopened = OpenDirectoryAtUnix(
+            _parentHandle,
+            currentName,
+            "Could not reopen a pinned directory before handle-relative deletion.");
         if (!HandlesIdentifySameDirectory(_directoryHandle, reopened))
         {
             throw new InvalidOperationException(
