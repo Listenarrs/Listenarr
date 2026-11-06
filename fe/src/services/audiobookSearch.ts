@@ -365,6 +365,47 @@ export function searchTitleAndAuthor(
   return searchFields({ title, ...(author ? { author } : {}) }, options)
 }
 
+// Repair and Find Match's search, so a book is searched the way it is added, in the region. No language filter: language isn't a search field here, a region's catalogue also sells
+// other languages' editions (Audible France sells English books), and each result shows its
+// language. Results are tagged with the region they were found in, and records
+// without a title (an empty stub for an ASIN the region doesn't sell) are left out; an ASIN the
+// region has no record for (404) answers no result. Aborting the signal rejects at once, even
+// when the request can't be stopped.
+export async function searchLikeAddNew(
+  title: string,
+  author: string,
+  region: string,
+  signal: AbortSignal,
+): Promise<SearchResult[]> {
+  const searchAborted = new Promise<never>((_, reject) =>
+    signal.addEventListener('abort', () =>
+      reject(new DOMException('The search was stopped', 'AbortError')),
+    ),
+  )
+  try {
+    const searchResults = await Promise.race([
+      searchTitleAndAuthor(title, author, {
+        region,
+        language: 'all',
+        signal,
+      }),
+      searchAborted,
+    ])
+    return usableInRegion(searchResults, region)
+  } catch (e) {
+    if ((e as { status?: number })?.status === 404) return []
+    throw e
+  }
+}
+
+// Start Matching's search, in the region: a pool of candidates, in every language
+export async function searchCandidates(
+  { cap, ...fields }: SearchFields & { cap: number },
+  region: string,
+): Promise<SearchResult[]> {
+  return usableInRegion(await searchFields(fields, { region, language: 'all', cap }), region)
+}
+
 // A query searched the way Add New does, whatever it holds
 export async function searchAudiobooks(
   query: string,

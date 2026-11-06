@@ -124,7 +124,6 @@ import {
   noRecordError,
   recordFromResult,
   searchCacheKey,
-  searchLikeAddNew,
   SEARCH_CACHE,
   type BookMatch,
   type BookRecord,
@@ -144,6 +143,7 @@ import {
   type SearchParameters,
 } from '@/utils/bookSearch'
 import type { SearchResult } from '@/types'
+import { searchLikeAddNew } from '@/services/audiobookSearch'
 
 const props = withDefaults(
   defineProps<{

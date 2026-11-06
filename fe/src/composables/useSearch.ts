@@ -20,8 +20,7 @@ import {
   detectSearchType,
   queryAsin,
   searchAsin,
-  searchIsbn,
-  searchTitle,
+  searchAudiobooks,
 } from '@/services/audiobookSearch'
 import { logger } from '@/utils/logger'
 
@@ -98,10 +97,7 @@ export function useSearch(options: { searchType?: Ref<SearchType> } = {}) {
           region: searchLanguage.value,
           language: preferredSearchLanguage.value,
         }
-        results =
-          detectedType === 'isbn'
-            ? await searchIsbn(query, searchOptions)
-            : await searchTitle(query, searchOptions)
+        results = await searchAudiobooks(query, searchOptions)
       } catch (err) {
         searchError.value = err instanceof Error ? err.message : 'Failed to search for audiobooks'
         throw err
