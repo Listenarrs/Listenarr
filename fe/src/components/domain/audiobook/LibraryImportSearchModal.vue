@@ -82,8 +82,8 @@ import {
   buildLibraryImportInitialAuthor,
   buildLibraryImportInitialQuery,
 } from '@/utils/libraryImportSearch'
+import { ASIN_PATTERN } from '@/services/audiobookSearch'
 import {
-  ASIN_PATTERN,
   hasAsinChanged,
   isResultOfRecord,
   libraryBookHolding,
