@@ -423,25 +423,6 @@ namespace Listenarr.Api.Features.Library
         }
 
         /// <summary>
-        /// Returns the status and results of a previously enqueued unmatched scan job.
-        /// </summary>
-        [HttpGet("unmatched-results/{jobId}")]
-        public IActionResult GetUnmatchedResults(Guid jobId)
-        {
-            if (!_unmatchedQueue.TryGetJob(jobId, out var job) || job == null)
-                return NotFound(new { message = "Scan job not found" });
-
-            return Ok(new
-            {
-                jobId = job.Id.ToString(),
-                status = job.Status,
-                error = UnmatchedScanPublicError.FromInternal(job.Error),
-                warnings = job.Warnings,
-                items = job.Results ?? new List<UnmatchedFileResult>()
-            });
-        }
-
-        /// <summary>
         /// Returns the cached results from the last completed unmatched scan for a root folder.
         /// Returns an empty list if no scan has been run yet this session.
         /// </summary>

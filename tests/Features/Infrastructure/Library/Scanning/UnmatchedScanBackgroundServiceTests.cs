@@ -220,6 +220,108 @@ public sealed class UnmatchedScanBackgroundServiceTests : BaseTests
         }
     }
 
+    [Fact]
+    public async Task ExecuteAsync_JobCanceledWhileQueued_IsSkipped()
+    {
+        var queue = new UnmatchedScanQueueService(
+            NullLogger<UnmatchedScanQueueService>.Instance,
+            new Mock<IFileSystemSemanticsResolver>().Object);
+        var canceledJobId = await queue.EnqueueAsync("/library/canceled");
+        var nextJobId = await queue.EnqueueAsync("/library/next");
+        queue.TryCancel(canceledJobId, out _);
+        var processor = new Mock<IUnmatchedScanProcessor>(MockBehavior.Strict);
+        var nextProcessed = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        processor.Setup(candidate => candidate.ProcessJobAsync(
+                It.Is<UnmatchedScanJob>(job => job.Id == nextJobId),
+                It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                nextProcessed.TrySetResult();
+                return Task.CompletedTask;
+            });
+        var service = CreateService(queue, processor, CreateHubContext(notificationFailure: null));
+
+        await service.StartAsync(CancellationToken.None);
+        try
+        {
+            await nextProcessed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            processor.Verify(candidate => candidate.ProcessJobAsync(
+                It.Is<UnmatchedScanJob>(job => job.Id == canceledJobId),
+                It.IsAny<CancellationToken>()), Times.Never);
+            Assert.True(queue.TryGetJob(canceledJobId, out var canceledJob));
+            Assert.Equal("Canceled", canceledJob!.Status);
+        }
+        finally
+        {
+            await service.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_JobCanceledWhileRunning_StaysCanceledAndTheNextJobRuns()
+    {
+        var queue = new UnmatchedScanQueueService(
+            NullLogger<UnmatchedScanQueueService>.Instance,
+            new Mock<IFileSystemSemanticsResolver>().Object);
+        var runningJobId = await queue.EnqueueAsync("/library/running");
+        var nextJobId = await queue.EnqueueAsync("/library/next");
+        var runningStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var nextProcessed = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var processor = new Mock<IUnmatchedScanProcessor>(MockBehavior.Strict);
+        processor.Setup(candidate => candidate.ProcessJobAsync(
+                It.IsAny<UnmatchedScanJob>(),
+                It.IsAny<CancellationToken>()))
+            .Returns<UnmatchedScanJob, CancellationToken>(async (job, token) =>
+            {
+                if (job.Id == nextJobId)
+                {
+                    nextProcessed.TrySetResult();
+                    return;
+                }
+
+                queue.UpdateJob(job.Id, "Processing");
+                runningStarted.TrySetResult();
+                await Task.Delay(Timeout.Infinite, token);
+            });
+        var notifications = new List<string>();
+        var hub = CreateHubContext(notificationFailure: null, notifications);
+        var service = CreateService(queue, processor, hub);
+
+        await service.StartAsync(CancellationToken.None);
+        try
+        {
+            await runningStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            queue.TryCancel(runningJobId, out _);
+            await nextProcessed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.True(queue.TryGetJob(runningJobId, out var canceledJob));
+            Assert.Equal("Canceled", canceledJob!.Status);
+            Assert.Null(canceledJob.Error);
+            var notification = Assert.Single(notifications);
+            Assert.Contains(runningJobId.ToString(), notification, StringComparison.Ordinal);
+            Assert.Contains("\"canceled\":true", notification, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await service.StopAsync(CancellationToken.None);
+        }
+    }
+
+    private static UnmatchedScanBackgroundService CreateService(
+        IUnmatchedScanQueueService queue,
+        Mock<IUnmatchedScanProcessor> processor,
+        Mock<IHubContext<SettingsHub>> hub) =>
+        new(
+            queue,
+            processor.Object,
+            TestLibraryFilesystemReadiness.Ready(),
+            NullLogger<UnmatchedScanBackgroundService>.Instance,
+            hub.Object,
+            new Mock<IAppMetricsService>().Object);
+
     private static UnmatchedScanBackgroundService CreateService(
         Mock<IUnmatchedScanQueueService> queue,
         Mock<IUnmatchedScanProcessor> processor,
@@ -304,7 +406,8 @@ public sealed class UnmatchedScanBackgroundServiceTests : BaseTests
     }
 
     private static Mock<IHubContext<SettingsHub>> CreateHubContext(
-        Exception? notificationFailure)
+        Exception? notificationFailure,
+        List<string>? notifications = null)
     {
         var proxy = new Mock<IClientProxy>(MockBehavior.Strict);
         var send = proxy.Setup(candidate => candidate.SendCoreAsync(
@@ -313,7 +416,9 @@ public sealed class UnmatchedScanBackgroundServiceTests : BaseTests
             It.IsAny<CancellationToken>()));
         if (notificationFailure == null)
         {
-            send.Returns(Task.CompletedTask);
+            send.Callback<string, object?[], CancellationToken>((_, arguments, _) =>
+                    notifications?.Add(System.Text.Json.JsonSerializer.Serialize(arguments[0])))
+                .Returns(Task.CompletedTask);
         }
         else
         {
