@@ -272,6 +272,7 @@ public class InternetArchiveSearchProvider : IIndexerSearchProvider
                             Format = representation.Format,
                             Quality = representation.Quality,
                             Language = plan.Language,
+                            LanguageOrigin = plan.LanguageOrigin,
                             Source = $"{indexer.Name} (Internet Archive)",
                             PublishedDate = publishedDate,
                             IndexerId = indexer.Id,

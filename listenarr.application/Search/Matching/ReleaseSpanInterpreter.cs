@@ -31,7 +31,7 @@ internal sealed class ReleaseSpanInterpreter(
     {
         var names = context.Authors.Concat(supplied).Distinct(StringComparer.OrdinalIgnoreCase)
             .Select(n => (Name: n, Role: ReleaseSpanRole.AuthorCredit, Credited: context.Authors.Any(a => IdentityText.PersonEqual(a, n))))
-            .Concat((view.IsScene && !beforeTitle ? context.Narrators : []).Select(n =>
+            .Concat((view.IsScene && (!beforeTitle || view.Text.AsSpan(start, end - start).Contains(',')) ? context.Narrators : []).Select(n =>
                 (Name: n, Role: ReleaseSpanRole.NarratorCredit, Credited: false))).ToArray();
         var maxName = names.Length == 0 ? 0 : names.Max(n => n.Name.Length) * 2 + 16;
         var maxSeries = context.SeriesCatalog.MaxNameLength == 0 ? 0 : context.SeriesCatalog.MaxNameLength * 2 + 64;
@@ -48,6 +48,16 @@ internal sealed class ReleaseSpanInterpreter(
             {
                 complete = state;
                 if (state.Credited) break;
+                continue;
+            }
+            // A bare year-shaped field immediately following an unnumbered series
+            // remains ambiguous; do not hide it inside a larger technical-token span.
+            if (state.Path is { Span.Role: ReleaseSpanRole.SeriesName, Position: null }
+                && state.At + 4 <= end && view.Text.AsSpan(state.At, 4).IndexOfAnyExceptInRange('0', '9') < 0
+                && (state.At + 4 == end || char.IsWhiteSpace(view.Text[state.At + 4])
+                    || ReleaseAnnotationGrammar.Separator(view.Text[state.At + 4])) && !StartsBracketed(state.At))
+            {
+                conflict ??= "numeric_annotation_ambiguous";
                 continue;
             }
             // Reference-backed numbered series fields own their role before broader
@@ -83,11 +93,16 @@ internal sealed class ReleaseSpanInterpreter(
                     var rawStart = view.Span(state.At, part.Length, ReleaseSpanRole.Unknown).Start;
                     var signed = rawStart > 0 && "-−+".Contains(view.Original[rawStart - 1]);
                     var annotation = ReleaseAnnotationRules.Recognize(part, view.Text.AsSpan(actualEnd, end - actualEnd), context,
-                        view.IsScene, beforeTitle, state.Metadata, IsBracketed(state.At, actualEnd), signed, budget);
+                        view.IsScene, beforeTitle, state.Metadata, IsBracketed(state.At, actualEnd), signed,
+                        DelimitedPrefix(state.At, actualEnd), budget);
                     if (annotation.Explained)
                         Add(actualEnd, state.Credited, state.Metadata || annotation.Role == ReleaseSpanRole.TechnicalMetadata,
                             new(annotation.Span(view, state.At, part.Length), state.Path), state.Claims);
-                    else conflict ??= annotation.Reason;
+                    else
+                    {
+                        conflict ??= annotation.Reason;
+                        if (annotation.Outcome == AnnotationOutcome.Ambiguous) continue;
+                    }
                 }
                 // Names may cross their own commas/hyphens, never an annotation bracket.
                 var raw = view.Raw(state.At, part.Length);
@@ -105,10 +120,16 @@ internal sealed class ReleaseSpanInterpreter(
                         {
                             if (!budget.Spend(person.Length + name.Name.Length)) break;
                             if (!ReleaseAnnotationGrammar.PersonEqual(name.Name, person, view.IsScene)) continue;
+                            var narratorPrefix = name.Role == ReleaseSpanRole.NarratorCredit && beforeTitle
+                                && CompleteNarratorPrefix(state.At, actualEnd, end);
+                            if (name.Role == ReleaseSpanRole.NarratorCredit && beforeTitle && !narratorPrefix) continue;
                             var credit = name.Credited && (prefixLength > 0 || CreditBoundary(state.At, actualEnd)
                                 || !ReleaseAnnotationGrammar.IsTechnical(person)
-                                    && AnchoredWhitespaceCredit(state.At, actualEnd) || state.Credited);
-                            Add(actualEnd, state.Credited || credit, state.Metadata,
+                                    && AnchoredWhitespaceCredit(state.At, actualEnd) || state.Credited
+                                || !beforeTitle && state.Path?.Span.Role == ReleaseSpanRole.SeriesName
+                                    && IsParenthetical(state.At, actualEnd)
+                                    && !ReleaseAnnotationGrammar.PersonEqual(context.TitleParts?.Subtitle ?? string.Empty, person, view.IsScene));
+                            Add(actualEnd, state.Credited || credit || narratorPrefix, state.Metadata,
                                 new(view.Span(state.At, part.Length, name.Role), state.Path), state.Claims);
                         }
                     }
@@ -116,7 +137,7 @@ internal sealed class ReleaseSpanInterpreter(
                 if (part.Length <= maxSeries && !part.Any(c => "[]{}()".Contains(c)))
                 {
                     var annotation = ReleaseSeriesRule.Recognize(part, context.SeriesCatalog,
-                        beforeTitle || IsBracketed(state.At, actualEnd));
+                        beforeTitle || IsBracketed(state.At, actualEnd) || ColonField(state.At) || FollowedByCreditedAuthor(actualEnd));
                     if (annotation.Explained)
                     {
                         if (!HasFollowingPosition(actualEnd, end)) AddSeries(part, annotation);
@@ -132,7 +153,7 @@ internal sealed class ReleaseSpanInterpreter(
             {
                 var span = annotation.Span(view, state.At, part.Length);
                 ReleaseSpan? position = null;
-                if (ReleaseSeriesRule.PositionRange(part) is { } range)
+                if (annotation.PositionClaims?.Count > 0 && ReleaseSeriesRule.PositionRange(part) is { } range)
                     position = view.Span(state.At + range.Start, range.Length, ReleaseSpanRole.SeriesPosition);
                 var claims = state.Claims.Concat(annotation.PositionClaims ?? []).Distinct().ToArray();
                 if (!budget.Spend(claims.Sum(c => c.Name.Length) + 1)) return;
@@ -194,8 +215,9 @@ internal sealed class ReleaseSpanInterpreter(
                 var part = view.Text[from..to].TrimEnd();
                 if (part.Length == 0 || !budget.Spend(part.Length)) continue;
                 var result = ReleaseSeriesRule.Recognize(part, context.SeriesCatalog,
-                    beforeTitle || IsBracketed(from, from + part.Length));
-                if (result.Outcome is AnnotationOutcome.Conflict or AnnotationOutcome.Ambiguous)
+                    beforeTitle || IsBracketed(from, from + part.Length) || ColonField(from) || FollowedByCreditedAuthor(from + part.Length));
+                if ((result.Outcome is AnnotationOutcome.Conflict or AnnotationOutcome.Ambiguous)
+                    && ReleaseSeriesRule.PositionRange(part) != null)
                 {
                     length = 0;
                     conflict ??= result.Reason;
@@ -226,6 +248,54 @@ internal sealed class ReleaseSpanInterpreter(
             && (view.Text[start - 1] == '(' && view.Text[end] == ')'
                 || view.Text[start - 1] == '[' && view.Text[end] == ']'
                 || view.Text[start - 1] == '{' && view.Text[end] == '}');
+    }
+
+    private bool DelimitedPrefix(int start, int end)
+    {
+        var span = view.Span(start, end - start, ReleaseSpanRole.Unknown);
+        if (!view.Original[..span.Start].All(char.IsWhiteSpace)) return false;
+        var after = view.Original.AsSpan(span.Start + span.Length).TrimStart();
+        return after.Length > 0 && "-‐‑‒–—―−".Contains(after[0]);
+    }
+
+    private bool CompleteNarratorPrefix(int start, int to, int end)
+    {
+        var span = view.Span(start, to - start, ReleaseSpanRole.NarratorCredit);
+        var before = view.Original[..span.Start].TrimEnd(' ', '.', '\t');
+        return before.EndsWith(',') && OnlySeparators(to, end)
+            && context.Authors.Any(a => ReleaseAnnotationGrammar.PersonEqual(a, before[..^1].TrimEnd('.', ' '), view.IsScene));
+    }
+
+    private bool ColonField(int start)
+    {
+        var span = view.Span(start, 1, ReleaseSpanRole.Unknown);
+        return view.Original[..span.Start].TrimEnd().EndsWith(':');
+    }
+
+    private bool IsParenthetical(int start, int end)
+    {
+        var span = view.Span(start, end - start, ReleaseSpanRole.Unknown);
+        return view.Original[..span.Start].TrimEnd().EndsWith('(')
+            && view.Original.AsSpan(span.Start + span.Length).TrimStart().StartsWith(")", StringComparison.Ordinal);
+    }
+
+    private bool StartsBracketed(int start)
+    {
+        var span = view.Span(start, 1, ReleaseSpanRole.Unknown);
+        var before = view.Original[..span.Start].TrimEnd();
+        return before.Length > 0 && "([{ ".Contains(before[^1]);
+    }
+
+    private bool FollowedByCreditedAuthor(int end)
+    {
+        if (end == 0) return false;
+        var span = view.Span(end - 1, 1, ReleaseSpanRole.Unknown);
+        var tail = view.Original.AsSpan(span.Start + span.Length).TrimStart();
+        if (tail.Length == 0 || tail[0] != '(') return false;
+        var close = tail.IndexOf(')');
+        if (close is < 2 or > 256 || !budget.Spend(close)) return false;
+        var name = tail[1..close].ToString();
+        return context.Authors.Any(a => ReleaseAnnotationGrammar.PersonEqual(a, name, view.IsScene));
     }
 
     private bool CreditBoundary(int start, int end)

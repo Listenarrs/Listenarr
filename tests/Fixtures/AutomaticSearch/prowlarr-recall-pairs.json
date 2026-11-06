@@ -1,0 +1,562 @@
+{
+  "description": "17 distinct read-only Prowlarr observations paired with independently exported book facts. Work-identity expectations, not audio/edition or grab guarantees. No API keys or download references.",
+  "cases": [
+    {
+      "releaseName": "NMR--James Patterson - Tick Tock",
+      "inferredArtist": "Unknown Author",
+      "book": {
+        "title": "Tick Tock",
+        "subtitle": "(Michael Bennett 4). Michael Bennett is running out of time to stop a deadly mastermind",
+        "authors": [
+          "James Patterson"
+        ]
+      },
+      "outcome": "live-search-observation",
+      "occurrences": 1,
+      "observationId": "080869938f40aab4",
+      "targetCorpusIndex": 89,
+      "facts": null,
+      "expectedConfirmed": true
+    },
+    {
+      "releaseName": "Robin Hobb - The Tawny Man, Bk 2 - Golden Fool (Audible) (NMR",
+      "inferredArtist": "Unknown Author",
+      "book": {
+        "title": "Golden Fool",
+        "subtitle": "The Tawny Man Trilogy, Book 2",
+        "authors": [
+          "Robin Hobb"
+        ]
+      },
+      "outcome": "live-search-observation",
+      "occurrences": 1,
+      "observationId": "d68ea98f89a0380f",
+      "targetCorpusIndex": 103,
+      "facts": null,
+      "expectedConfirmed": true
+    },
+    {
+      "releaseName": "Rebecca.Yarros-The.Empyrean.3.5-Threshing.Day.[GraphicAudio]",
+      "inferredArtist": "Unknown Author",
+      "book": {
+        "title": "Threshing Day [Dramatized Adaptation]",
+        "subtitle": "The Empyrean",
+        "authors": [
+          "Rebecca Yarros"
+        ]
+      },
+      "outcome": "live-search-observation",
+      "occurrences": 1,
+      "observationId": "ba5567e58c4e5642",
+      "targetCorpusIndex": 137,
+      "facts": {
+        "index": 2,
+        "series": "The Empyrean",
+        "seriesNumber": null,
+        "narrators": [
+          "Full Cast"
+        ],
+        "memberships": [
+          {
+            "SeriesName": "The Empyrean",
+            "SeriesNumber": null,
+            "IsPrimary": 1
+          }
+        ],
+        "fullMetadataVerdict": {
+          "IsConfirmed": false,
+          "Status": "UnresolvedTitle",
+          "Reason": "unexplained_release_text"
+        }
+      },
+      "expectedConfirmed": false
+    },
+    {
+      "releaseName": "Rebecca.Yarros-The.Empyrean.3.5-Threshing.Day",
+      "inferredArtist": "Unknown Author",
+      "book": {
+        "title": "Threshing Day [Dramatized Adaptation]",
+        "subtitle": "The Empyrean",
+        "authors": [
+          "Rebecca Yarros"
+        ]
+      },
+      "outcome": "live-search-observation",
+      "occurrences": 1,
+      "observationId": "3cd24ae52e73a60c",
+      "targetCorpusIndex": 137,
+      "facts": {
+        "index": 3,
+        "series": "The Empyrean",
+        "seriesNumber": null,
+        "narrators": [
+          "Full Cast"
+        ],
+        "memberships": [
+          {
+            "SeriesName": "The Empyrean",
+            "SeriesNumber": null,
+            "IsPrimary": 1
+          }
+        ],
+        "fullMetadataVerdict": {
+          "IsConfirmed": false,
+          "Status": "UnresolvedTitle",
+          "Reason": "unexplained_release_text"
+        }
+      },
+      "expectedConfirmed": false
+    },
+    {
+      "releaseName": "Piers.Anthony-Apprentice.Adept.02-Blue.Adept.Unabr-M4B.dcrypt64k-Burns.2010.NMR",
+      "inferredArtist": "Unknown Author",
+      "book": {
+        "title": "Blue Adept",
+        "subtitle": "Apprentice Adept Series, Book 2",
+        "authors": [
+          "Piers Anthony"
+        ]
+      },
+      "outcome": "live-search-observation",
+      "occurrences": 1,
+      "observationId": "15026d96dadd7f6e",
+      "targetCorpusIndex": 98,
+      "facts": {
+        "index": 4,
+        "series": "Apprentice Adept",
+        "seriesNumber": "2",
+        "narrators": [
+          "Traber Burns"
+        ],
+        "memberships": [
+          {
+            "SeriesName": "Apprentice Adept",
+            "SeriesNumber": "2",
+            "IsPrimary": 1
+          }
+        ],
+        "fullMetadataVerdict": {
+          "IsConfirmed": false,
+          "Status": "UnresolvedTitle",
+          "Reason": "unexplained_release_text"
+        }
+      },
+      "expectedConfirmed": true
+    },
+    {
+      "releaseName": "Piers.Anthony-Apprentice.Adept.01-Split.Infinity.Unabr-M4B.dcrypt64k-Burns.2010.NMR",
+      "inferredArtist": "Unknown Author",
+      "book": {
+        "title": "Split Infinity",
+        "subtitle": "Apprentice Adept Series, Book 1",
+        "authors": [
+          "Piers Anthony"
+        ]
+      },
+      "outcome": "live-search-observation",
+      "occurrences": 1,
+      "observationId": "dfaa28f8bc6fafc8",
+      "targetCorpusIndex": 97,
+      "facts": {
+        "index": 5,
+        "series": "Apprentice Adept",
+        "seriesNumber": "1",
+        "narrators": [
+          "Traber Burns"
+        ],
+        "memberships": [
+          {
+            "SeriesName": "Apprentice Adept",
+            "SeriesNumber": "1",
+            "IsPrimary": 1
+          }
+        ],
+        "fullMetadataVerdict": {
+          "IsConfirmed": false,
+          "Status": "UnresolvedTitle",
+          "Reason": "unexplained_release_text"
+        }
+      },
+      "expectedConfirmed": true
+    },
+    {
+      "releaseName": "Daniel.Suarez-A.Delta-v.Novel.2-Critical.Mass",
+      "inferredArtist": "Unknown Author",
+      "book": {
+        "title": "Critical Mass",
+        "subtitle": null,
+        "authors": [
+          "Arthur C. Clarke"
+        ]
+      },
+      "outcome": "live-search-observation",
+      "occurrences": 1,
+      "observationId": "549ac1a59d9773ff",
+      "targetCorpusIndex": 163,
+      "facts": {
+        "index": 6,
+        "series": null,
+        "seriesNumber": null,
+        "narrators": [
+          "Ralph Lister"
+        ],
+        "memberships": [],
+        "fullMetadataVerdict": {
+          "IsConfirmed": false,
+          "Status": "UnresolvedTitle",
+          "Reason": "unexplained_release_text"
+        }
+      },
+      "expectedConfirmed": false
+    },
+    {
+      "releaseName": "NMR - WHITLEY STRIEBER - CRITICAL MASS Whitley Strieber - Critical Mass",
+      "inferredArtist": "Unknown Author",
+      "book": {
+        "title": "Critical Mass",
+        "subtitle": null,
+        "authors": [
+          "Arthur C. Clarke"
+        ]
+      },
+      "outcome": "live-search-observation",
+      "occurrences": 1,
+      "observationId": "c20d325a6aac7056",
+      "targetCorpusIndex": 163,
+      "facts": {
+        "index": 7,
+        "series": null,
+        "seriesNumber": null,
+        "narrators": [
+          "Ralph Lister"
+        ],
+        "memberships": [],
+        "fullMetadataVerdict": {
+          "IsConfirmed": false,
+          "Status": "UnresolvedTitle",
+          "Reason": "unexplained_release_text"
+        }
+      },
+      "expectedConfirmed": false
+    },
+    {
+      "releaseName": "NMR-WHITLEY.STRIEBER-CRITICAL.MASS.Whitley.Strieber-Critical.Mass",
+      "inferredArtist": "Unknown Author",
+      "book": {
+        "title": "Critical Mass",
+        "subtitle": null,
+        "authors": [
+          "Arthur C. Clarke"
+        ]
+      },
+      "outcome": "live-search-observation",
+      "occurrences": 1,
+      "observationId": "758dbf5af0f30a86",
+      "targetCorpusIndex": 163,
+      "facts": {
+        "index": 8,
+        "series": null,
+        "seriesNumber": null,
+        "narrators": [
+          "Ralph Lister"
+        ],
+        "memberships": [],
+        "fullMetadataVerdict": {
+          "IsConfirmed": false,
+          "Status": "UnresolvedTitle",
+          "Reason": "unexplained_release_text"
+        }
+      },
+      "expectedConfirmed": false
+    },
+    {
+      "releaseName": "Sara Paretsky - Critical Mass",
+      "inferredArtist": "Unknown Author",
+      "book": {
+        "title": "Critical Mass",
+        "subtitle": null,
+        "authors": [
+          "Arthur C. Clarke"
+        ]
+      },
+      "outcome": "live-search-observation",
+      "occurrences": 1,
+      "observationId": "1f646bc19b8e7c3a",
+      "targetCorpusIndex": 163,
+      "facts": {
+        "index": 9,
+        "series": null,
+        "seriesNumber": null,
+        "narrators": [
+          "Ralph Lister"
+        ],
+        "memberships": [],
+        "fullMetadataVerdict": {
+          "IsConfirmed": false,
+          "Status": "UnresolvedTitle",
+          "Reason": "unexplained_release_text"
+        }
+      },
+      "expectedConfirmed": false
+    },
+    {
+      "releaseName": "Tom Wood - Victor the Assassin - 13 - Unlucky for Some",
+      "inferredArtist": "Unknown Author",
+      "book": {
+        "title": "Unlucky 13",
+        "subtitle": null,
+        "authors": [
+          "James Patterson",
+          "Maxine Paetro"
+        ]
+      },
+      "outcome": "live-search-observation",
+      "occurrences": 1,
+      "observationId": "be0451b392bfcc4b",
+      "targetCorpusIndex": 316,
+      "facts": {
+        "index": 10,
+        "series": "Women's Murder Club",
+        "seriesNumber": "13",
+        "narrators": [
+          "January LaVoy"
+        ],
+        "memberships": [
+          {
+            "SeriesName": "Women's Murder Club",
+            "SeriesNumber": "13",
+            "IsPrimary": 1
+          }
+        ],
+        "fullMetadataVerdict": {
+          "IsConfirmed": false,
+          "Status": "UnresolvedTitle",
+          "Reason": "unexplained_release_text"
+        }
+      },
+      "expectedConfirmed": false
+    },
+    {
+      "releaseName": "A. J. Rivers - Emma Griffin FBI Mystery - 13 - The Girl and the Unlucky 13",
+      "inferredArtist": "Unknown Author",
+      "book": {
+        "title": "Unlucky 13",
+        "subtitle": null,
+        "authors": [
+          "James Patterson",
+          "Maxine Paetro"
+        ]
+      },
+      "outcome": "live-search-observation",
+      "occurrences": 1,
+      "observationId": "f052935ad4beda85",
+      "targetCorpusIndex": 316,
+      "facts": {
+        "index": 11,
+        "series": "Women's Murder Club",
+        "seriesNumber": "13",
+        "narrators": [
+          "January LaVoy"
+        ],
+        "memberships": [
+          {
+            "SeriesName": "Women's Murder Club",
+            "SeriesNumber": "13",
+            "IsPrimary": 1
+          }
+        ],
+        "fullMetadataVerdict": {
+          "IsConfirmed": false,
+          "Status": "UnresolvedTitle",
+          "Reason": "unexplained_release_text"
+        }
+      },
+      "expectedConfirmed": false
+    },
+    {
+      "releaseName": "James Patterson - Women's Murder Club - 13 - Unlucky 13",
+      "inferredArtist": "Unknown Author",
+      "book": {
+        "title": "Unlucky 13",
+        "subtitle": null,
+        "authors": [
+          "James Patterson",
+          "Maxine Paetro"
+        ]
+      },
+      "outcome": "live-search-observation",
+      "occurrences": 1,
+      "observationId": "269d171dc7940a38",
+      "targetCorpusIndex": 316,
+      "facts": {
+        "index": 12,
+        "series": "Women's Murder Club",
+        "seriesNumber": "13",
+        "narrators": [
+          "January LaVoy"
+        ],
+        "memberships": [
+          {
+            "SeriesName": "Women's Murder Club",
+            "SeriesNumber": "13",
+            "IsPrimary": 1
+          }
+        ],
+        "fullMetadataVerdict": {
+          "IsConfirmed": false,
+          "Status": "UnresolvedTitle",
+          "Reason": "unexplained_release_text"
+        }
+      },
+      "expectedConfirmed": true
+    },
+    {
+      "releaseName": "A. D. Justice - Crossing Lines - 03 - Hard Line",
+      "inferredArtist": "Unknown Author",
+      "book": {
+        "title": "Cross Justice",
+        "subtitle": null,
+        "authors": [
+          "James Patterson"
+        ]
+      },
+      "outcome": "live-search-observation",
+      "occurrences": 1,
+      "observationId": "77ed8669c18981f4",
+      "targetCorpusIndex": 238,
+      "facts": {
+        "index": 13,
+        "series": "Alex Cross Adventures",
+        "seriesNumber": "23",
+        "narrators": [
+          "Ruben Santiago-Hudson",
+          "Jefferson Mays"
+        ],
+        "memberships": [
+          {
+            "SeriesName": "Alex Cross Adventures",
+            "SeriesNumber": "23",
+            "IsPrimary": 1
+          }
+        ],
+        "fullMetadataVerdict": {
+          "IsConfirmed": false,
+          "Status": "UnresolvedTitle",
+          "Reason": "unexplained_release_text"
+        }
+      },
+      "expectedConfirmed": false
+    },
+    {
+      "releaseName": "A. D. Justice - Crossing Lines - 02 - Blurred Line",
+      "inferredArtist": "Unknown Author",
+      "book": {
+        "title": "Cross Justice",
+        "subtitle": null,
+        "authors": [
+          "James Patterson"
+        ]
+      },
+      "outcome": "live-search-observation",
+      "occurrences": 1,
+      "observationId": "8e1b6047c5e34f72",
+      "targetCorpusIndex": 238,
+      "facts": {
+        "index": 14,
+        "series": "Alex Cross Adventures",
+        "seriesNumber": "23",
+        "narrators": [
+          "Ruben Santiago-Hudson",
+          "Jefferson Mays"
+        ],
+        "memberships": [
+          {
+            "SeriesName": "Alex Cross Adventures",
+            "SeriesNumber": "23",
+            "IsPrimary": 1
+          }
+        ],
+        "fullMetadataVerdict": {
+          "IsConfirmed": false,
+          "Status": "UnresolvedTitle",
+          "Reason": "unexplained_release_text"
+        }
+      },
+      "expectedConfirmed": false
+    },
+    {
+      "releaseName": "A. D. Justice - Crossing Lines - 01 - Fine Line",
+      "inferredArtist": "Unknown Author",
+      "book": {
+        "title": "Cross Justice",
+        "subtitle": null,
+        "authors": [
+          "James Patterson"
+        ]
+      },
+      "outcome": "live-search-observation",
+      "occurrences": 1,
+      "observationId": "863560e72d190725",
+      "targetCorpusIndex": 238,
+      "facts": {
+        "index": 15,
+        "series": "Alex Cross Adventures",
+        "seriesNumber": "23",
+        "narrators": [
+          "Ruben Santiago-Hudson",
+          "Jefferson Mays"
+        ],
+        "memberships": [
+          {
+            "SeriesName": "Alex Cross Adventures",
+            "SeriesNumber": "23",
+            "IsPrimary": 1
+          }
+        ],
+        "fullMetadataVerdict": {
+          "IsConfirmed": false,
+          "Status": "UnresolvedTitle",
+          "Reason": "unexplained_release_text"
+        }
+      },
+      "expectedConfirmed": false
+    },
+    {
+      "releaseName": "James Patterson - Alex Cross - 23 - Cross Justice",
+      "inferredArtist": "Unknown Author",
+      "book": {
+        "title": "Cross Justice",
+        "subtitle": null,
+        "authors": [
+          "James Patterson"
+        ]
+      },
+      "outcome": "live-search-observation",
+      "occurrences": 1,
+      "observationId": "5bbb10102dec64dd",
+      "targetCorpusIndex": 238,
+      "facts": {
+        "index": 16,
+        "series": "Alex Cross Adventures",
+        "seriesNumber": "23",
+        "narrators": [
+          "Ruben Santiago-Hudson",
+          "Jefferson Mays"
+        ],
+        "memberships": [
+          {
+            "SeriesName": "Alex Cross Adventures",
+            "SeriesNumber": "23",
+            "IsPrimary": 1
+          }
+        ],
+        "fullMetadataVerdict": {
+          "IsConfirmed": false,
+          "Status": "UnresolvedTitle",
+          "Reason": "unexplained_release_text"
+        }
+      },
+      "expectedConfirmed": true
+    }
+  ]
+}

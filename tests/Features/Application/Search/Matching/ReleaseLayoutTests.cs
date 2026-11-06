@@ -8,7 +8,7 @@ namespace Listenarr.Tests.Features.Application.Search.Matching;
 public sealed class ReleaseLayoutTests : BaseTests
 {
     private static BookIdentityAssessment Assess(Audiobook book, string release) =>
-        new BookIdentityMatcher().Evaluate(BookMatchContext.From(book), new() { ReleaseName = release });
+        new BookIdentityMatcher().Evaluate(BookMatchContext.From(book, catalog: TestAnnotationCatalog.Current), new() { ReleaseName = release });
 
     [Theory]
     [InlineData("Memorys.Legion-The.Complete.Expanse.Story.Collection.by.James.S.A.Corey")]
@@ -83,7 +83,7 @@ public sealed class ReleaseLayoutTests : BaseTests
     {
         const string release = "The.Quiet.Orchard-Notes.from.the.Northern.Shore.author：\tRene\u0301.Descartes";
         var book = new Audiobook { Title = "The Quiet Orchard", Subtitle = "Notes from the Northern Shore", Authors = ["René Descartes"] };
-        var parsed = ReleaseNameInterpreter.Interpret(release, BookMatchContext.From(book), []);
+        var parsed = ReleaseNameInterpreter.Interpret(release, BookMatchContext.From(book, catalog: TestAnnotationCatalog.Current), []);
         Assert.True(parsed.Complete);
         Assert.True(parsed.Credited);
         var title = Assert.Single(parsed.Spans, s => s.Role == ReleaseSpanRole.PrimaryTitle);
@@ -195,7 +195,7 @@ public sealed class ReleaseLayoutTests : BaseTests
     {
         const string release = "Pierce.Brown-Red.Rising.03-Morning.Star.Unabr-64k.[2016]";
         var book = new Audiobook { Title = "Morning Star", Authors = ["Pierce Brown"], Series = "Red Rising", SeriesNumber = "3" };
-        var parsed = ReleaseNameInterpreter.Interpret(release, BookMatchContext.From(book), []);
+        var parsed = ReleaseNameInterpreter.Interpret(release, BookMatchContext.From(book, catalog: TestAnnotationCatalog.Current), []);
         Assert.True(parsed.Complete, parsed.UnavailableReason);
         Assert.True(parsed.Credited);
         var title = Assert.Single(parsed.Spans, s => s.Role == ReleaseSpanRole.PrimaryTitle);
@@ -237,7 +237,7 @@ public sealed class ReleaseLayoutTests : BaseTests
     {
         const string release = "The Long Walk - (Narrated by Kirby Heyborne) - Stephen King [M4B]";
         var book = new Audiobook { Title = "The Long Walk", Authors = ["Stephen King"] };
-        var parsed = ReleaseNameInterpreter.Interpret(release, BookMatchContext.From(book), []);
+        var parsed = ReleaseNameInterpreter.Interpret(release, BookMatchContext.From(book, catalog: TestAnnotationCatalog.Current), []);
         Assert.True(parsed.Complete);
         Assert.True(parsed.Credited);
         Assert.Contains(parsed.Spans, s => s.Role == ReleaseSpanRole.NarratorCredit && s.Value.Contains("Kirby Heyborne"));
@@ -296,7 +296,7 @@ public sealed class ReleaseLayoutTests : BaseTests
     {
         const string release = "Rene\u0301 Descartes - Discourse on Method [64 Kbps]";
         var book = new Audiobook { Title = "Discourse on Method", Authors = ["René Descartes"] };
-        var result = ReleaseNameInterpreter.Interpret(release, BookMatchContext.From(book), []);
+        var result = ReleaseNameInterpreter.Interpret(release, BookMatchContext.From(book, catalog: TestAnnotationCatalog.Current), []);
         Assert.True(result.Complete);
         var author = Assert.Single(result.Spans, s => s.Role == ReleaseSpanRole.AuthorCredit);
         Assert.Equal("Rene\u0301 Descartes", release.Substring(author.Start, author.Length));
@@ -320,12 +320,12 @@ public sealed class ReleaseLayoutTests : BaseTests
             Narrators = ["First Reader"],
             SeriesMemberships = [new() { SeriesName = "Secondary", SeriesNumber = "3.5" }]
         };
-        var first = BookMatchContext.From(book).Fingerprint;
+        var first = BookMatchContext.From(book, catalog: TestAnnotationCatalog.Current).Fingerprint;
         book.Narrators = ["Second Reader"];
-        Assert.NotEqual(first, BookMatchContext.From(book).Fingerprint);
-        first = BookMatchContext.From(book).Fingerprint;
+        Assert.NotEqual(first, BookMatchContext.From(book, catalog: TestAnnotationCatalog.Current).Fingerprint);
+        first = BookMatchContext.From(book, catalog: TestAnnotationCatalog.Current).Fingerprint;
         book.SeriesMemberships[0].SeriesNumber = "35";
-        Assert.NotEqual(first, BookMatchContext.From(book).Fingerprint);
+        Assert.NotEqual(first, BookMatchContext.From(book, catalog: TestAnnotationCatalog.Current).Fingerprint);
     }
 
     [Fact]
@@ -334,7 +334,7 @@ public sealed class ReleaseLayoutTests : BaseTests
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
         Assert.Throws<OperationCanceledException>(() => new BookIdentityMatcher().Evaluate(
-            BookMatchContext.From(new() { Title = "The Book", Authors = ["Some Writer"] }),
+            BookMatchContext.From(new() { Title = "The Book", Authors = ["Some Writer"] }, catalog: TestAnnotationCatalog.Current),
             new() { ReleaseName = "Some Writer - The Book [64 Kbps]" }, cancellation.Token));
     }
 
@@ -343,7 +343,7 @@ public sealed class ReleaseLayoutTests : BaseTests
     {
         const string release = "The Long Walk - Stephen King [64 Kbps] - Another Work";
         var parsed = ReleaseNameInterpreter.Interpret(release,
-            BookMatchContext.From(new() { Title = "The Long Walk", Authors = ["Stephen King"] }), []);
+            BookMatchContext.From(new() { Title = "The Long Walk", Authors = ["Stephen King"] }, catalog: TestAnnotationCatalog.Current), []);
         Assert.False(parsed.Complete);
         var unknown = Assert.Single(parsed.Spans, s => s.Role == ReleaseSpanRole.Unknown);
         Assert.Equal("Another Work", release.Substring(unknown.Start, unknown.Length));

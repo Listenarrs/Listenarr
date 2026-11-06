@@ -115,7 +115,9 @@ metadata. Its reported verdicts are observations rather than correctness labels.
 The author clarified that case 27 is the correct Anastasia pairing and should
 confirm; its Honor Bound 2 attribution is stale library metadata. The comment
 meant case 28, the same release against Griffin's book, which correctly defers.
-Case 28 is absent from the supplement because its download row was deleted.
+Case 28 is absent from this download-row-linked supplement because the original
+download row was deleted. Griffin's library record still exists; its absence from
+the supplement does not mean that the book was missing from the library.
 The supplement note says 34 rows are absent, while the files contain 498 and 423
 cases (75 absent). The frozen source files are not silently corrected.
 
@@ -123,9 +125,53 @@ Original-context expectations 40, 86, 132 and 136 now explicitly permit supporte
 scene/group/genre layouts and a complete separate dotted author credit. Work
 identity does not verify an adaptation, edition, audio contents or import success.
 
+### Automatic compatibility (V5)
+
+Work identity remains separate from automatic eligibility. Every result still
+receives its normal quality score, and manual selection retains that behavior.
+Automatic selection additionally checks language and edition compatibility:
+
+- A recognized scene-language suffix keeps its language meaning and provenance.
+  Explicit language metadata that disagrees with the target language or the
+  profile's allowed languages defers automatic selection, even with a positive
+  score or a verified matching identifier. Conflicting language claims defer too.
+- Loose title/description guesses and language copied from request context are
+  not promoted into authoritative candidate facts. Missing/unknown language alone
+  does not establish a mismatch. Literal title words are not language annotations.
+- Explicit edition-sensitive subtitles or title annotations require matching
+  edition evidence or a verified identifier for that reference edition. Adaptation
+  designations retain their qualifiers; a bare "adapted" tag does not establish
+  "Adapted for Modern Readers". Contradictions still defer with a matching ID.
+- Abridged/adapted/dramatized releases do not automatically establish compatibility
+  with an unspecified target edition. An unabridged label alone does not invent a
+  conflict with an otherwise unspecified target. Adaptation and abridgement are
+  separate: an unabridged recording of the matching adaptation can be compatible.
+- Coauthor completeness is not an edition proxy. Normal collaborations continue
+  using the existing credited-author identity policy.
+
+Thus corpus 40 can confirm work identity while deferring under an English profile,
+and 86 can confirm the Twain work while deferring for missing adaptation evidence.
+Neither the historical `imported` label nor work confirmation proves audio language,
+edition compatibility, successful download, or successful import. The frozen gist
+files and work-identity adjudications are unchanged; automatic eligibility is tested
+separately. Group/alias recall expansions and year-versus-position parsing were
+deferred at V5; the reviewed V6 extensions are documented below.
+
 To support another variation, add a sanitized release and reference context,
 adjudicate the expected identity independently, extend the existing rule or
 catalog, and add a paired wrong-work/conflict case plus raw-span assertions.
 Changing semantics requires a policy version bump (and fingerprints for new
 reference facts), corpus replay and the affected API/worker checks. Do not derive
 trusted aliases or library facts from the candidate release itself.
+
+### Annotation catalog (V6)
+
+The immutable annotation catalog now supplies reviewed group/source labels,
+reference-scoped series aliases, bounded series descriptors and narrator-name
+data. Its content hash joins assessment fingerprints. The V5 language/edition
+compatibility checks remain in force. See [RELEASE_ANNOTATIONS.md](RELEASE_ANNOTATIONS.md)
+for placement rules, validation, reviewed aliases and the extension workflow.
+`recall-adjudications-v6.json` records independently reviewed new expectations;
+the original corpus, fact supplement and adjudications remain frozen.
+`prowlarr-recall-pairs.json` preserves 17 real search observations paired with
+existing exported target facts, including wrong-book and adaptation controls.

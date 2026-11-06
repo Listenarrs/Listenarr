@@ -46,7 +46,7 @@ public sealed class InternetArchiveSearchProviderTests : BaseTests
         var results = await provider.SearchAsync(CreateIndexer(), "Alice in Wonderland");
         Assert.Equal(2, results.Count);
         var quality = new QualityProfileService(Mock.Of<IQualityProfileRepository>(), NullLogger<QualityProfileService>.Instance);
-        var scorer = new AutomaticSearchScoringService(quality, Mock.Of<IAudiobookRepository>(), NullLogger<AutomaticSearchScoringService>.Instance);
+        var scorer = new AutomaticSearchScoringService(quality, Mock.Of<IAudiobookRepository>(), NullLogger<AutomaticSearchScoringService>.Instance, TestAnnotationCatalog.Current);
         var profile = new QualityProfile
         {
             Name = "Review",
@@ -154,6 +154,28 @@ public sealed class InternetArchiveSearchProviderTests : BaseTests
 
         // Then
         Assert.Equal("German", result.Language);
+    }
+
+    [Fact]
+    public async Task SearchAsync_MultipleMetadataLanguagesArePreservedAsProviderClaims()
+    {
+        const string metadata = """
+        {"metadata":{"language":["eng","swe"]},"files":[{"name":"book.m4b","format":"LibriVox Apple Audiobook","size":"900"}]}
+        """;
+        var result = Assert.Single(await CreateProvider(metadata).SearchAsync(CreateIndexer(), "Alice"));
+        Assert.Equal("English; Swedish", result.Language);
+        Assert.Equal(IdentityEvidenceOrigin.ProviderSupplied, result.LanguageOrigin);
+    }
+
+    [Fact]
+    public async Task SearchAsync_TitleLanguageGuessIsNotPromotedToMetadata()
+    {
+        const string metadata = """
+        {"metadata":{},"files":[{"name":"book.m4b","format":"LibriVox Apple Audiobook","size":"900"}]}
+        """;
+        var result = Assert.Single(await CreateProvider(metadata, "French Lessons").SearchAsync(CreateIndexer(), "French"));
+        Assert.Equal("French", result.Language);
+        Assert.Equal(IdentityEvidenceOrigin.ReleaseNameDerived, result.LanguageOrigin);
     }
 
     [Fact]

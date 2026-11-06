@@ -15,11 +15,15 @@ public sealed class HistoricalReleaseCorpusTests : BaseTests
     {
         using var corpus = JsonDocument.Parse(File.ReadAllText(Fixture("historical-releases.json")));
         using var judgments = JsonDocument.Parse(File.ReadAllText(Fixture("historical-adjudications.json")));
+        using var recall = JsonDocument.Parse(File.ReadAllText(Fixture("recall-adjudications-v6.json")));
+        Assert.Equal(AutomaticSearchAssessment.PolicyVersion, recall.RootElement.GetProperty("policyVersion").GetString());
+        var revised = recall.RootElement.GetProperty("cases").EnumerateArray().Where(c => c.GetProperty("context").GetString() == "plain")
+            .ToDictionary(c => c.GetProperty("index").GetInt32(), c => c.GetProperty("expectedConfirmed").GetBoolean());
         foreach (var judgment in judgments.RootElement.GetProperty("cases").EnumerateArray())
         {
             var index = judgment.GetProperty("index").GetInt32();
             yield return [index, corpus.RootElement.GetProperty("cases")[index].GetRawText(),
-                judgment.GetProperty("expectedConfirmed").GetBoolean()];
+                revised.GetValueOrDefault(index, judgment.GetProperty("expectedConfirmed").GetBoolean())];
         }
     }
 
@@ -41,7 +45,7 @@ public sealed class HistoricalReleaseCorpusTests : BaseTests
             ReleaseName = c.GetProperty("releaseName").GetString()!,
             Authors = [new(c.GetProperty("inferredArtist").GetString()!, IdentityEvidenceOrigin.ReleaseNameDerived)]
         };
-        var result = new BookIdentityMatcher().Evaluate(BookMatchContext.From(book), evidence);
+        var result = new BookIdentityMatcher().Evaluate(BookMatchContext.From(book, catalog: TestAnnotationCatalog.Current), evidence);
         Assert.True(result.IsConfirmed == expected, index + ": " + result);
     }
 

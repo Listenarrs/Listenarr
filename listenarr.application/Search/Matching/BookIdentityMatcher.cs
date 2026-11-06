@@ -25,7 +25,28 @@ public sealed class BookIdentityMatcher
     public BookIdentityAssessment Evaluate(BookMatchContext target, CandidateIdentityEvidence evidence,
         CancellationToken cancellationToken)
     {
+        var result = EvaluateCore(target, evidence, cancellationToken, out var interpretation);
+        if (interpretation == null) return result;
+        return result with
+        {
+            Languages = Array.AsReadOnly(interpretation.Spans
+                .Where(s => s.RuleId == "technical.scene_suffix" && s.Reference != null)
+                .Select(s => new LanguageEvidence(s.Reference!, s.Origin, s.RuleId!)).Distinct().ToArray()),
+            Editions = Array.AsReadOnly(interpretation.Spans
+                .Where(s => s.Role is ReleaseSpanRole.TechnicalMetadata or ReleaseSpanRole.ReferenceSubtitle)
+                .SelectMany(s => EditionCompatibilityPolicy.Parse(s.Value, s.Role == ReleaseSpanRole.TechnicalMetadata))
+                .Concat(EditionCompatibilityPolicy.FromTitle(result.MatchedTitle))
+                .Distinct().Select(s => new EditionEvidence(s, IdentityEvidenceOrigin.ReleaseNameDerived)).ToArray())
+        };
+    }
+
+    private static BookIdentityAssessment EvaluateCore(BookMatchContext target, CandidateIdentityEvidence evidence,
+        CancellationToken cancellationToken, out ReleaseInterpretation? interpretation)
+    {
+        interpretation = null;
         cancellationToken.ThrowIfCancellationRequested();
+        if (!target.AnnotationCatalog.IsAvailable)
+            return new(BookIdentityStatus.AssessmentUnavailable, "annotation_catalog_unavailable");
         try
         {
             if (evidence.Authors is null || evidence.Identifiers is null
@@ -50,6 +71,7 @@ public sealed class BookIdentityMatcher
                     ? new(BookIdentityStatus.ConfirmedIdentifier, "verified_identifier")
                     : new(BookIdentityStatus.MissingReference, "missing_reference");
             var match = ReleaseNameInterpreter.Match(evidence.ReleaseName ?? string.Empty, target, supplied, cancellationToken);
+            interpretation = match.Interpretation;
             if (match.Interpretation?.UnavailableReason == "assessment_budget_exceeded")
                 return new(BookIdentityStatus.AssessmentUnavailable, "assessment_budget_exceeded");
             if (authorConflict)

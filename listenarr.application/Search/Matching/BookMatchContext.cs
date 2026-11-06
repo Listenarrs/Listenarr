@@ -25,23 +25,49 @@ public sealed record BookMatchContext(
     IReadOnlyList<string> Titles, IReadOnlyList<string> Authors, string? Asin, string Fingerprint)
 {
     public IReadOnlyList<string> Isbn { get; init; } = [];
-    public IReadOnlyList<string> Narrators { get; init; } = [];
+    private IReadOnlyList<string> _narrators = [];
+    internal NarratorNameCatalog NarratorCatalog { get; private init; } = NarratorNameCatalog.Empty;
+    public IReadOnlyList<string> Narrators
+    {
+        get => _narrators;
+        init
+        {
+            _narrators = Array.AsReadOnly(value.ToArray());
+            NarratorCatalog = _narrators.Count == 0 ? NarratorNameCatalog.Empty : new(_narrators, _annotationCatalog);
+        }
+    }
     private IReadOnlyList<ReleaseSeriesReference> _seriesReferences = [];
     internal ReleaseSeriesCatalog SeriesCatalog { get; private init; } = ReleaseSeriesCatalog.Empty;
+    private ReleaseAnnotationCatalog _annotationCatalog = ReleaseAnnotationCatalog.Unavailable;
+    public ReleaseAnnotationCatalog AnnotationCatalog
+    {
+        get => _annotationCatalog;
+        init
+        {
+            _annotationCatalog = value ?? ReleaseAnnotationCatalog.Unavailable;
+            SeriesCatalog = _seriesReferences.Count == 0 ? ReleaseSeriesCatalog.Empty : new(_seriesReferences, _annotationCatalog);
+            NarratorCatalog = _narrators.Count == 0 ? NarratorNameCatalog.Empty : new(_narrators, _annotationCatalog);
+        }
+    }
     public IReadOnlyList<ReleaseSeriesReference> SeriesReferences
     {
         get => _seriesReferences;
         init
         {
             _seriesReferences = Array.AsReadOnly(value.ToArray());
-            SeriesCatalog = new(_seriesReferences);
+            SeriesCatalog = _seriesReferences.Count == 0 ? ReleaseSeriesCatalog.Empty : new(_seriesReferences, _annotationCatalog);
         }
     }
     public ReferenceTitleParts? TitleParts { get; init; }
+    public string? Language { get; init; }
+    public IReadOnlyList<string> PreferredLanguages { get; init; } = [];
+    public IReadOnlyList<string> Editions { get; init; } = [];
 
-    public static BookMatchContext From(Audiobook book, QualityProfile? profile = null)
+    public static BookMatchContext From(Audiobook book, QualityProfile? profile = null, ReleaseAnnotationCatalog? catalog = null)
     {
-        if (book.Authors?.Count > 64 || book.Narrators?.Count > 64 || book.SeriesMemberships?.Count > 64)
+        catalog ??= ReleaseAnnotationCatalog.Unavailable;
+        if (book.Authors?.Count > 64 || book.Narrators?.Count > 64 || book.SeriesMemberships?.Count > 64
+            || book.Language?.Length > 256 || (profile ?? book.QualityProfile)?.PreferredLanguages?.Count > 64)
             throw new ArgumentException("Reference facts exceed assessment budget");
         var titles = new List<string>();
         var title = IdentityText.Canonical(book.Title);
@@ -83,6 +109,7 @@ public sealed record BookMatchContext(
             book.Id,
             book.Title,
             book.Subtitle,
+            book.Language,
             TitleParts = titleParts,
             Authors = authors,
             book.Asin,
@@ -108,10 +135,21 @@ public sealed record BookMatchContext(
                 p.PreferNewerReleases,
                 p.MaximumAge
             },
-            Policy = AutomaticSearchAssessment.PolicyVersion
+            Policy = AutomaticSearchAssessment.PolicyVersion,
+            Catalog = catalog.Fingerprint
         });
         return new(titles.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), authors, book.Asin,
             Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload))))
-        { Isbn = book.Isbn?.ToArray() ?? [], Narrators = narrators, SeriesReferences = series, TitleParts = titleParts };
+        {
+            AnnotationCatalog = catalog,
+            Isbn = book.Isbn?.ToArray() ?? [],
+            Narrators = narrators,
+            SeriesReferences = series,
+            TitleParts = titleParts,
+            Language = book.Language,
+            PreferredLanguages = Array.AsReadOnly((p?.PreferredLanguages ?? []).ToArray()),
+            Editions = Array.AsReadOnly(EditionCompatibilityPolicy.Parse(book.Subtitle)
+                .Concat(EditionCompatibilityPolicy.FromTitle(book.Title)).Distinct().ToArray())
+        };
     }
 }

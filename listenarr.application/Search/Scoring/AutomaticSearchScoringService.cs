@@ -22,7 +22,7 @@ namespace Listenarr.Application.Search.Scoring;
 
 public sealed class AutomaticSearchScoringService(
     IQualityProfileService qualityService, IAudiobookRepository books,
-    ILogger<AutomaticSearchScoringService> logger) : IAutomaticSearchScoringService
+    ILogger<AutomaticSearchScoringService> logger, ReleaseAnnotationCatalog catalog) : IAutomaticSearchScoringService
 {
     private readonly BookIdentityMatcher _matcher = new();
 
@@ -31,15 +31,19 @@ public sealed class AutomaticSearchScoringService(
     {
         cancellationToken.ThrowIfCancellationRequested();
         BookMatchContext context;
-        try { context = BookMatchContext.From(book, profile); }
+        try { context = BookMatchContext.From(book, profile, catalog); }
         catch (ArgumentException) { context = new([], [], null, "invalid_reference"); }
         var identities = new Dictionary<SearchResult, BookIdentityAssessment>(ReferenceEqualityComparer.Instance);
         var sources = new Dictionary<SearchResult, string>(ReferenceEqualityComparer.Instance);
+        var compatibility = new Dictionary<SearchResult, CandidateCompatibilityAssessment>(ReferenceEqualityComparer.Instance);
         foreach (var result in results) sources.TryAdd(result, SearchCandidateFingerprint.Compute(result));
         foreach (var result in results)
+        {
             identities.TryAdd(result, context.Fingerprint == "invalid_reference"
                 ? new(BookIdentityStatus.AssessmentUnavailable, "invalid_reference")
                 : _matcher.Evaluate(context, BookIdentityMatcher.Snapshot(result), cancellationToken));
+            compatibility.TryAdd(result, AutomaticCompatibilityPolicy.Evaluate(context, result, identities[result]));
+        }
         // Every candidate is scored. The quality service sorts its output; associate by reference.
         var quality = await qualityService.ScoreSearchResults(results, profile);
         cancellationToken.ThrowIfCancellationRequested();
@@ -54,11 +58,12 @@ public sealed class AutomaticSearchScoringService(
                     SearchResult = result,
                     RejectionReasons = ["Quality result association unavailable"]
                 }, new(BookIdentityStatus.AssessmentUnavailable, "unassociated_quality_result"), sources[result]);
-            return new AutomaticCandidateScore(associated, identities[result], sources[result]);
+            return new AutomaticCandidateScore(associated, identities[result], sources[result])
+            { Compatibility = compatibility[result] };
         }).ToArray();
         foreach (var score in scores)
-            logger.LogInformation("Automatic candidate {Id}: identity={Identity}, reason={Reason}, quality={Quality}, eligible={Eligible}",
-                score.SearchResult.Id, score.Identity.Status, score.Identity.Reason, score.TotalScore, !score.IsRejected);
+            logger.LogInformation("Automatic candidate {Id}: identity={Identity}, reason={Reason}, compatibility={Compatibility}, quality={Quality}, eligible={Eligible}",
+                score.SearchResult.Id, score.Identity.Status, score.Identity.Reason, string.Join(",", score.Compatibility.Reasons), score.TotalScore, !score.IsRejected);
         return new(context.Fingerprint, scores);
     }
 
@@ -78,7 +83,7 @@ public sealed class AutomaticSearchScoringService(
         var current = await books.GetByIdSnapshotAsync(bookId, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         if (current == null || current.QualityProfile == null || assessment.TargetFingerprint == "invalid_reference") return false;
-        try { return BookMatchContext.From(current, current.QualityProfile).Fingerprint == assessment.TargetFingerprint; }
+        try { return BookMatchContext.From(current, current.QualityProfile, catalog).Fingerprint == assessment.TargetFingerprint; }
         catch (ArgumentException) { return false; }
     }
 }
