@@ -194,6 +194,7 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton<MetadataSourceCatalog>();
             services.AddSingleton<SearchResultFilterPipeline>();
             services.AddScoped<IAutomaticSearchScoringService, AutomaticSearchScoringService>();
+            services.AddSingleton(TestAnnotationCatalog.Current);
             services.AddSingleton<MetadataStrategyCoordinator>();
             services.AddSingleton<AsinCandidateCollector>();
             services.AddSingleton<AsinEnricher>();

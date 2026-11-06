@@ -382,7 +382,11 @@ namespace Listenarr.Application.Search.Indexers.Torznab
                             try
                             {
                                 var lang = SearchResultAttributeParser.ParseLanguageFromText(result.Title + " " + description);
-                                if (!string.IsNullOrEmpty(lang)) result.Language = lang;
+                                if (string.IsNullOrWhiteSpace(result.Language) && !string.IsNullOrEmpty(lang))
+                                {
+                                    result.Language = lang;
+                                    result.LanguageOrigin = IdentityEvidenceOrigin.ReleaseNameDerived;
+                                }
                             }
                             catch (Exception caughtEx_25) when (caughtEx_25 is not OperationCanceledException && caughtEx_25 is not OutOfMemoryException && caughtEx_25 is not StackOverflowException)
                             { /* Non-critical */

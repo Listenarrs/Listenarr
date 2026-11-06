@@ -31,24 +31,21 @@ internal static class ReleaseNarratorRule
         bool scene, bool beforeTitle, bool technical, ReleaseAssessmentBudget budget)
     {
         if (Match(value)) return new(AnnotationOutcome.Explained, ReleaseSpanRole.NarratorCredit, "narrator.explicit");
-        if (!scene || beforeTitle || !technical || tail.Length > 64 || value.Length == 0 || !value.All(char.IsLetter)) return default;
+        if (!scene || beforeTitle || !technical || tail.Length > 64 || value.Length is 0 or > 200
+            || !value.All(c => char.IsLetter(c) || char.IsWhiteSpace(c) || ".'’,-".Contains(c)
+                || char.GetUnicodeCategory(c) == System.Globalization.UnicodeCategory.NonSpacingMark)) return default;
         // A partial narrator is supported only in the historical surname/year/group suffix.
         var fields = tail.Trim().ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (fields.Length != 2 || fields[0].Length != 4 || !fields[0].All(char.IsDigit) || !ReleaseGroupRule.Match(fields[1])) return default;
-        string? known = null;
-        foreach (var narrator in context.Narrators)
-        {
-            if (!budget.Spend(narrator.Length)) return default;
-            if (!IdentityText.Equal(narrator[(narrator.LastIndexOf(' ') + 1)..], value)) continue;
-            if (known != null) return new(AnnotationOutcome.Ambiguous, ReleaseSpanRole.NarratorCredit, Reason: "narrator_reference_ambiguous");
-            known = narrator;
-        }
-        if (known == null) return default;
+        if (fields.Length != 2 || fields[0].Length != 4 || !fields[0].All(char.IsDigit) || !ReleaseGroupRule.Match(fields[1], context.AnnotationCatalog)) return default;
+        if (!budget.Spend(value.Length)) return default;
+        var known = context.NarratorCatalog.Resolve(value);
+        if (known.Count > 1) return new(AnnotationOutcome.Ambiguous, ReleaseSpanRole.NarratorCredit, Reason: "narrator_reference_ambiguous");
+        if (known.Count == 0) return default;
         foreach (var author in context.Authors)
         {
             if (!budget.Spend(author.Length)) return default;
-            if (IdentityText.Equal(author[(author.LastIndexOf(' ') + 1)..], value)) return default;
+            if (NarratorNameCatalog.Variants(author, context.AnnotationCatalog).Any(v => ReleaseAnnotationGrammar.PersonEqual(v, value, true))) return default;
         }
-        return new(AnnotationOutcome.Explained, ReleaseSpanRole.NarratorCredit, "narrator.surname_year_group", known, "unique_surname");
+        return new(AnnotationOutcome.Explained, ReleaseSpanRole.NarratorCredit, "narrator.surname_year_group", known[0], "unique_surname");
     }
 }

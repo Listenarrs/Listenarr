@@ -26,26 +26,36 @@ internal static class ReleaseTechnicalRule
         @"^\.?" + Token + @"(?:[\s.!。]+" + Token + @")*[\s.!。]*$",
         RegexOptions.NonBacktracking | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     public static bool Match(string value) => Technical.IsMatch(value);
+    private static readonly Regex Bitrate = new(@"^\d{2,4}\s*(?:kbps|kb/s|k)$",
+        RegexOptions.NonBacktracking | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex LegacyBits = new(@"^\d{2,4}[kK]b$", RegexOptions.NonBacktracking | RegexOptions.CultureInvariant);
 
     private static readonly Regex Size = new(
         @"^(?<size>\d{1,9}(?:\.\d{1,3})?)\s*(?:KB|MB|GB|KiB|MiB|GiB)$",
         RegexOptions.NonBacktracking | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex SceneSuffix = new(
-        @"^WEB[- ](?:SE|EN|DE|FR|ES|IT|NL)[- ]\d{4}[- ](?<group>[a-z0-9]{2,32}) iNT$",
+        @"^WEB[- ](?<language>SE|EN|DE|FR|ES|IT|NL)[- ]\d{4}[- ](?<group>[a-z0-9]{2,32}) iNT$",
         RegexOptions.NonBacktracking | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly HashSet<string> Genres = new(
         ["Horror", "Thriller", "Sci-Fi", "Sci Fi", "Science Fiction", "Classic Fiction"], StringComparer.OrdinalIgnoreCase);
 
-    public static ReleaseAnnotationResult Recognize(string value, bool bracketed, bool signed)
+    public static ReleaseAnnotationResult Recognize(string value, bool bracketed, bool signed, ReleaseAnnotationCatalog catalog, bool technical = false)
     {
+        if (Bitrate.IsMatch(value)) return new(AnnotationOutcome.Explained, ReleaseSpanRole.TechnicalMetadata, "technical.bitrate");
+        if (LegacyBits.IsMatch(value)) return bracketed || technical
+            ? new(AnnotationOutcome.Explained, ReleaseSpanRole.TechnicalMetadata, "technical.legacy_bits") : default;
+        if (value.Length == 4 && value.All(char.IsAsciiDigit))
+            return new(AnnotationOutcome.Explained, ReleaseSpanRole.TechnicalMetadata, "technical.year");
         if (Match(value)) return new(AnnotationOutcome.Explained, ReleaseSpanRole.TechnicalMetadata, "technical.tokens");
         var size = !signed && value.Length > 0 && char.IsAsciiDigit(value[0]) ? Size.Match(value) : null;
         if (size?.Success == true && decimal.TryParse(size.Groups["size"].Value,
             System.Globalization.NumberStyles.AllowDecimalPoint, System.Globalization.CultureInfo.InvariantCulture, out var amount) && amount > 0)
             return new(AnnotationOutcome.Explained, ReleaseSpanRole.TechnicalMetadata, "technical.size");
         var scene = value.StartsWith("WEB", StringComparison.OrdinalIgnoreCase) ? SceneSuffix.Match(value) : null;
-        if (scene?.Success == true && ReleaseGroupRule.Match(scene.Groups["group"].Value))
-            return new(AnnotationOutcome.Explained, ReleaseSpanRole.TechnicalMetadata, "technical.scene_suffix");
+        if (scene?.Success == true && ReleaseGroupRule.Match(scene.Groups["group"].Value, catalog))
+            return new(AnnotationOutcome.Explained, ReleaseSpanRole.TechnicalMetadata, "technical.scene_suffix",
+                Reference: Parsing.SearchResultAttributeParser.ParseLanguageFromCode(scene.Groups["language"].Value),
+                Strength: "declared_release_language");
         return bracketed && Genres.Contains(value)
             ? new(AnnotationOutcome.Explained, ReleaseSpanRole.TechnicalMetadata, "technical.genre") : default;
     }

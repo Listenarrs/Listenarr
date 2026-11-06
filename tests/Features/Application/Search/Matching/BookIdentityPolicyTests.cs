@@ -37,7 +37,7 @@ public sealed class BookIdentityPolicyTests : BaseTests
     public void CompleteAuthorSpansAndMetadataMustAccountForAllReleaseText(string requested, string supplied)
     {
         var matcher = new BookIdentityMatcher();
-        var target = BookMatchContext.From(new() { Title = "The Book", Authors = [requested] });
+        var target = BookMatchContext.From(new() { Title = "The Book", Authors = [requested] }, catalog: TestAnnotationCatalog.Current);
         foreach (var annotation in new[] { " [M4B]", " (Unabridged Edition).", " - 2024 - M4B", " [M4B] (Unabridged Edition)." })
             foreach (var release in new[] { supplied + " - The Book" + annotation, "The Book - " + supplied + annotation, "The Book" + annotation + " - " + supplied })
                 foreach (var structured in new[] { false, true })
@@ -60,7 +60,7 @@ public sealed class BookIdentityPolicyTests : BaseTests
     [InlineData("Jean")]
     public void OverlappingKnownNamesDoNotHideUnmatchedRemainders(string firstAuthor)
     {
-        var target = BookMatchContext.From(new() { Title = "The Book", Authors = firstAuthor == "Jean" ? ["Jean", "Jean-Paul Sartre"] : ["Jean-Paul Sartre", "Jean"] });
+        var target = BookMatchContext.From(new() { Title = "The Book", Authors = firstAuthor == "Jean" ? ["Jean", "Jean-Paul Sartre"] : ["Jean-Paul Sartre", "Jean"] }, catalog: TestAnnotationCatalog.Current);
         var matcher = new BookIdentityMatcher();
         Assert.True(matcher.Evaluate(target, new() { ReleaseName = "The Book - Jean-Paul Sartre [M4B]" }).IsConfirmed);
         foreach (var release in new[] { "The Book - Jean-X Sartre [M4B]", "The Book - Jean-Paul Sartre Extra [M4B]", "The Book - Jean-Paul Sartrex [M4B]" })
@@ -70,7 +70,7 @@ public sealed class BookIdentityPolicyTests : BaseTests
     [Fact]
     public void LongDelimiterAndNamePrefixInputDefersWithoutAcceptingTheUnknownTail()
     {
-        var target = BookMatchContext.From(new() { Title = "The Book", Authors = ["Jean", "Jean-Paul Sartre"] });
+        var target = BookMatchContext.From(new() { Title = "The Book", Authors = ["Jean", "Jean-Paul Sartre"] }, catalog: TestAnnotationCatalog.Current);
         var release = "The Book - " + string.Join(',', Enumerable.Repeat("Jean", 1800)) + " unknown";
         Assert.False(new BookIdentityMatcher().Evaluate(target, new() { ReleaseName = release }).IsConfirmed);
         var repeatedTitle = string.Join(" - ", Enumerable.Repeat("The Book - Jean", 32)) + " - " + release;
@@ -91,7 +91,7 @@ public sealed class BookIdentityPolicyTests : BaseTests
     [InlineData("JR R Tolkien", "J.R. R. Tolkien")]
     public void CompleteInitialFormattingMatchesBothContributorAndReleaseCredits(string requested, string supplied)
     {
-        var context = BookMatchContext.From(new Audiobook { Title = "The Book", Authors = [requested] });
+        var context = BookMatchContext.From(new Audiobook { Title = "The Book", Authors = [requested] }, catalog: TestAnnotationCatalog.Current);
         var matcher = new BookIdentityMatcher();
         Assert.True(IdentityText.PersonEqual(requested, supplied));
         foreach (var evidence in new CandidateIdentityEvidence[]
@@ -118,7 +118,7 @@ public sealed class BookIdentityPolicyTests : BaseTests
     [InlineData("St.John Smith", "St. John Smith")]
     public void InitialFormattingCannotDropOrReorderNameEvidence(string requested, string supplied)
     {
-        var context = BookMatchContext.From(new Audiobook { Title = "The Book", Authors = [requested] });
+        var context = BookMatchContext.From(new Audiobook { Title = "The Book", Authors = [requested] }, catalog: TestAnnotationCatalog.Current);
         var matcher = new BookIdentityMatcher();
         Assert.False(IdentityText.PersonEqual(requested, supplied));
         foreach (var evidence in new CandidateIdentityEvidence[]
@@ -144,11 +144,11 @@ public sealed class BookIdentityPolicyTests : BaseTests
             ReleaseName = "Good Omens",
             Authors = [new("Neil Gaiman", IdentityEvidenceOrigin.ProviderSupplied)]
         };
-        Assert.True(matcher.Evaluate(BookMatchContext.From(book), evidence).IsConfirmed);
-        Assert.False(matcher.Evaluate(BookMatchContext.From(book), evidence with
+        Assert.True(matcher.Evaluate(BookMatchContext.From(book, catalog: TestAnnotationCatalog.Current), evidence).IsConfirmed);
+        Assert.False(matcher.Evaluate(BookMatchContext.From(book, catalog: TestAnnotationCatalog.Current), evidence with
         { Authors = [new("Other Writer", IdentityEvidenceOrigin.ProviderSupplied)] }).IsConfirmed);
         book.Subtitle = null;
-        Assert.False(matcher.Evaluate(BookMatchContext.From(book), evidence).IsConfirmed);
+        Assert.False(matcher.Evaluate(BookMatchContext.From(book, catalog: TestAnnotationCatalog.Current), evidence).IsConfirmed);
     }
 
     [Theory]
@@ -157,7 +157,7 @@ public sealed class BookIdentityPolicyTests : BaseTests
     public void SeparateTitleAndSubtitleSupportBothCombinedReleaseSpellings(string release)
     {
         var target = BookMatchContext.From(new Audiobook
-        { Title = "Good Omens", Subtitle = "A Long Subtitle", Authors = ["Neil Gaiman"] });
+        { Title = "Good Omens", Subtitle = "A Long Subtitle", Authors = ["Neil Gaiman"] }, catalog: TestAnnotationCatalog.Current);
         Assert.True(new BookIdentityMatcher().Evaluate(target, new()
         {
             ReleaseName = release,
@@ -170,7 +170,7 @@ public sealed class BookIdentityPolicyTests : BaseTests
     {
         var book = new Audiobook
         { Title = "Book: Other Subtitle", Subtitle = "Subtitle", Authors = ["Some Writer"] };
-        var context = BookMatchContext.From(book);
+        var context = BookMatchContext.From(book, catalog: TestAnnotationCatalog.Current);
         Assert.Contains("Book: Other Subtitle", context.Titles);
         Assert.DoesNotContain("Book", context.Titles);
         Assert.DoesNotContain("Book: Other", context.Titles);
@@ -186,7 +186,7 @@ public sealed class BookIdentityPolicyTests : BaseTests
     public void RetainedFallbackCasesUseTheCommonIdentityPolicy(string title, string author,
         string release, string? suppliedAuthor, bool expected)
     {
-        var target = BookMatchContext.From(new Audiobook { Title = title, Authors = [author] });
+        var target = BookMatchContext.From(new Audiobook { Title = title, Authors = [author] }, catalog: TestAnnotationCatalog.Current);
         Assert.Equal(expected, new BookIdentityMatcher().Evaluate(target, new()
         {
             ReleaseName = release,
@@ -200,7 +200,7 @@ public sealed class BookIdentityPolicyTests : BaseTests
     [InlineData("unabridgedaudiobook")]
     public void UnknownConcatenatedAnnotationsRemainUnresolved(string annotation)
     {
-        var target = BookMatchContext.From(new Audiobook { Title = "Dune", Authors = ["Frank Herbert"] });
+        var target = BookMatchContext.From(new Audiobook { Title = "Dune", Authors = ["Frank Herbert"] }, catalog: TestAnnotationCatalog.Current);
         var result = new BookIdentityMatcher().Evaluate(target, new()
         {
             ReleaseName = $"Dune [{annotation}]",
@@ -236,7 +236,7 @@ public sealed class BookIdentityPolicyTests : BaseTests
                 Authors = r.GetProperty("contributors").EnumerateArray().Select(a => new ContributorEvidence(
                     a.GetString()!, Enum.Parse<IdentityEvidenceOrigin>(r.GetProperty("origin").GetString()!))).ToArray()
             };
-            var assessment = new BookIdentityMatcher().Evaluate(BookMatchContext.From(target), evidence);
+            var assessment = new BookIdentityMatcher().Evaluate(BookMatchContext.From(target, catalog: TestAnnotationCatalog.Current), evidence);
             Assert.True(assessment.IsConfirmed == r.GetProperty("expectedConfirmed").GetBoolean(),
                 $"{id}: {evidence.ReleaseName}: {assessment.Status} ({assessment.Reason})");
         }
@@ -253,7 +253,7 @@ public sealed class BookIdentityPolicyTests : BaseTests
     [InlineData("𐐀𐐁")]
     public void LiteralTitleIsPreserved_AndAuthorChangesOnlyCorroboration(string title)
     {
-        var target = BookMatchContext.From(new Audiobook { Title = title, Authors = ["Some Writer"] });
+        var target = BookMatchContext.From(new Audiobook { Title = title, Authors = ["Some Writer"] }, catalog: TestAnnotationCatalog.Current);
         var evidence = new CandidateIdentityEvidence { ReleaseName = title + " [M4B]" };
         var matcher = new BookIdentityMatcher();
         var alone = matcher.Evaluate(target, evidence);
@@ -277,9 +277,9 @@ public sealed class BookIdentityPolicyTests : BaseTests
             Authors = [new("Neil Gaiman", IdentityEvidenceOrigin.ProviderSupplied)]
         };
         var target = new Audiobook { Title = "Good Omens: A Long Subtitle", Authors = ["Neil Gaiman"] };
-        Assert.False(matcher.Evaluate(BookMatchContext.From(target), evidence).IsConfirmed);
+        Assert.False(matcher.Evaluate(BookMatchContext.From(target, catalog: TestAnnotationCatalog.Current), evidence).IsConfirmed);
         target.Subtitle = "A Long Subtitle";
-        Assert.True(matcher.Evaluate(BookMatchContext.From(target), evidence).IsConfirmed);
+        Assert.True(matcher.Evaluate(BookMatchContext.From(target, catalog: TestAnnotationCatalog.Current), evidence).IsConfirmed);
     }
 
     [Theory]
@@ -293,7 +293,7 @@ public sealed class BookIdentityPolicyTests : BaseTests
         {
             Title = "Dune Unabridged Edition" + punctuation,
             Authors = ["Frank Herbert"]
-        });
+        }, catalog: TestAnnotationCatalog.Current);
         var result = new BookIdentityMatcher().Evaluate(target, new()
         {
             ReleaseName = "The Shining Unabridged Edition" + punctuation,
@@ -305,7 +305,7 @@ public sealed class BookIdentityPolicyTests : BaseTests
     [Fact]
     public void InferredArtistIsNotAnIndependentCredit()
     {
-        var target = BookMatchContext.From(new Audiobook { Title = "Dune", Authors = ["Frank Herbert"] });
+        var target = BookMatchContext.From(new Audiobook { Title = "Dune", Authors = ["Frank Herbert"] }, catalog: TestAnnotationCatalog.Current);
         var result = new BookIdentityMatcher().Evaluate(target, new()
         {
             ReleaseName = "Dune",
@@ -320,7 +320,7 @@ public sealed class BookIdentityPolicyTests : BaseTests
     [InlineData("Dune - Novel [M4B]", true)]
     public void EditionWordsDoNotCreateAParsedCredit(string release, bool expected)
     {
-        var target = BookMatchContext.From(new Audiobook { Title = "Dune", Authors = ["Novel"] });
+        var target = BookMatchContext.From(new Audiobook { Title = "Dune", Authors = ["Novel"] }, catalog: TestAnnotationCatalog.Current);
         Assert.Equal(expected, new BookIdentityMatcher().Evaluate(target, new() { ReleaseName = release }).IsConfirmed);
     }
 }

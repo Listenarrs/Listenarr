@@ -23,7 +23,7 @@ namespace Listenarr.Application.Search.Matching;
 internal static class ReleaseSeriesRule
 {
     private static readonly Regex NumberedSeries = new(
-        @"^(?<name>.+?)(?:\s*[,#:.]\s*|\s+)(?:(?:books?|bk|vol(?:ume)?|part)\s*)?(?<position>\d{1,4}(?:\.\d{1,3})?|[IVXLCDM]{1,12})$",
+        @"^(?<name>.+?)(?:\s*[,#:.]\s*|\s+)(?:(?<cue>books?|bk|vol(?:ume)?|part)\s*)?(?<position>\d{1,4}(?:\.\d{1,3})?|[IVXLCDM]{1,12})$",
         RegexOptions.NonBacktracking | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex PositionOnly = new(
         @"^(?:books?|bk|vol(?:ume)?|part)\s*#?\s*(?<position>\d{1,4}(?:\.\d{1,3})?|[IVXLCDM]{1,12})$",
@@ -46,7 +46,7 @@ internal static class ReleaseSeriesRule
         return match.Success ? (match.Groups["position"].Index, match.Groups["position"].Length) : null;
     }
 
-    public static ReleaseAnnotationResult Recognize(string value, ReleaseSeriesCatalog catalog, bool beforeTitle)
+    public static ReleaseAnnotationResult Recognize(string value, ReleaseSeriesCatalog catalog, bool allowUnnumbered)
     {
         var explicitLabel = value.StartsWith("Series:", StringComparison.OrdinalIgnoreCase);
         if (explicitLabel) value = value[7..].Trim();
@@ -54,7 +54,12 @@ internal static class ReleaseSeriesRule
         var positionOnly = PositionOnly.Match(value);
         string? position = null;
         IReadOnlyList<ReleaseSeriesCatalog.Binding> known;
-        if (positionOnly.Success)
+        var explicitPosition = positionOnly.Success || numbered.Success && (numbered.Groups["cue"].Success
+            || value[..numbered.Groups["position"].Index].TrimEnd().EndsWith('#'));
+        var literal = allowUnnumbered && !explicitPosition ? catalog.ResolveExact(value) : [];
+        if (literal.Count > 0 && !positionOnly.Success)
+            known = literal;
+        else if (positionOnly.Success)
         {
             position = positionOnly.Groups["position"].Value;
             if (catalog.Facts.Count != 1) return default;
@@ -68,10 +73,15 @@ internal static class ReleaseSeriesRule
         }
         else
         {
-            if (!beforeTitle && !explicitLabel) return default;
+            if (!allowUnnumbered && !explicitLabel) return default;
             known = catalog.Resolve(value);
         }
         if (known.Count == 0) return new(AnnotationOutcome.UnknownReference, ReleaseSpanRole.SeriesName);
+        if (numbered.Success && !positionOnly.Success && position is { Length: 4 } && position.All(char.IsAsciiDigit)
+            && !explicitPosition)
+            return new(AnnotationOutcome.Ambiguous, ReleaseSpanRole.SeriesPosition, Reason: "numeric_annotation_ambiguous");
+        if (known.Select(k => k.Fact).Distinct().Count() > 1)
+            return new(AnnotationOutcome.Ambiguous, ReleaseSpanRole.SeriesName, Reason: "series_alias_ambiguous");
         var positions = known.SelectMany(k => k.Fact.Positions).Distinct().ToArray();
         if (known.Any(k => k.Fact.Invalid) || positions.Length > 1)
             return new(AnnotationOutcome.Ambiguous, ReleaseSpanRole.SeriesName, Reason: "reference_series_conflict");

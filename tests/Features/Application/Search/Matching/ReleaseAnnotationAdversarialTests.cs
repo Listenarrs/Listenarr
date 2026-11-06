@@ -16,7 +16,7 @@ public sealed class ReleaseAnnotationAdversarialTests : BaseTests
         Narrators = ["Simon Burns"]
     };
     private static bool Assess(Audiobook book, string release) => new BookIdentityMatcher().Evaluate(
-        BookMatchContext.From(book), new() { ReleaseName = release }).IsConfirmed;
+        BookMatchContext.From(book, catalog: TestAnnotationCatalog.Current), new() { ReleaseName = release }).IsConfirmed;
 
     public static IEnumerable<object[]> Mutations()
     {
@@ -68,7 +68,7 @@ public sealed class ReleaseAnnotationAdversarialTests : BaseTests
     public void ContextClonesRebuildTheIndexAndSnapshotCallerOwnedReferences()
     {
         var source = new[] { new ReleaseSeriesReference("Northern Shore", "3") };
-        var context = BookMatchContext.From(Book()) with { SeriesReferences = source };
+        var context = BookMatchContext.From(Book(), catalog: TestAnnotationCatalog.Current) with { SeriesReferences = source };
         source[0] = new("Northern Shore", "4");
         var evidence = new CandidateIdentityEvidence { ReleaseName = "Marisol Vega - Northern Shore 3 - The Quiet Orchard" };
         Assert.True(new BookIdentityMatcher().Evaluate(context, evidence).IsConfirmed);
@@ -83,10 +83,10 @@ public sealed class ReleaseAnnotationAdversarialTests : BaseTests
         book.SeriesMemberships = [new() { SeriesName = "Northern Shore", SeriesNumber = "III" },
             new() { SeriesName = "Other Series", SeriesNumber = "2" }, new() { SeriesName = "Northern Shore" }];
         const string release = "Marisol Vega - Northern Shore 03 - The Quiet Orchard [M4B]";
-        var before = BookMatchContext.From(book).Fingerprint;
+        var before = BookMatchContext.From(book, catalog: TestAnnotationCatalog.Current).Fingerprint;
         Assert.True(Assess(book, release));
         book.SeriesMemberships.Reverse();
-        Assert.Equal(before, BookMatchContext.From(book).Fingerprint);
+        Assert.Equal(before, BookMatchContext.From(book, catalog: TestAnnotationCatalog.Current).Fingerprint);
         Assert.True(Assess(book, release));
     }
 
@@ -95,7 +95,7 @@ public sealed class ReleaseAnnotationAdversarialTests : BaseTests
     {
         var book = Book(); book.Authors = ["René Vega"];
         const string release = "Rene\u0301.Vega-Northern.Shore.3-The.Quiet.Orchard.MP3-JD07";
-        var context = BookMatchContext.From(book);
+        var context = BookMatchContext.From(book, catalog: TestAnnotationCatalog.Current);
         var parsed = ReleaseNameInterpreter.Interpret(release, context, []);
         Assert.True(parsed.Complete);
         Assert.True(parsed.Credited);

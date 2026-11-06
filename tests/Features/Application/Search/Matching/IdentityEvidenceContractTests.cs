@@ -59,7 +59,7 @@ public sealed class IdentityEvidenceContractTests : BaseTests
             parsed = await new Listenarr.Application.Search.Indexers.Torznab.TorznabResponseParser(client, NullLogger.Instance).ParseAsync(xml.ToString(), indexer);
         }
         var result = SearchResultConverters.ToSearchResult(Assert.Single(parsed));
-        var target = BookMatchContext.From(new() { Title = title, Authors = [author] });
+        var target = BookMatchContext.From(new() { Title = title, Authors = [author] }, catalog: TestAnnotationCatalog.Current);
         var matcher = new BookIdentityMatcher();
         var assessment = matcher.Evaluate(target, BookIdentityMatcher.Snapshot(result));
         Assert.True(assessment.IsConfirmed, assessment.ToString());
@@ -73,7 +73,7 @@ public sealed class IdentityEvidenceContractTests : BaseTests
     public void DisplayPlaceholdersCannotCorroborateTheSameTitle(string author)
     {
         var matcher = new BookIdentityMatcher();
-        var target = BookMatchContext.From(new() { Title = "Dune", Authors = [author] });
+        var target = BookMatchContext.From(new() { Title = "Dune", Authors = [author] }, catalog: TestAnnotationCatalog.Current);
         var evidence = new CandidateIdentityEvidence
         {
             ReleaseName = "Dune [M4B]",
@@ -89,7 +89,7 @@ public sealed class IdentityEvidenceContractTests : BaseTests
         var evidence = new CandidateIdentityEvidence { ReleaseName = "Dune", Authors = null! };
         var result = new SearchResult { IdentityEvidence = evidence };
         Assert.Equal(BookIdentityStatus.AssessmentUnavailable, new BookIdentityMatcher().Evaluate(
-            BookMatchContext.From(new() { Title = "Dune" }), BookIdentityMatcher.Snapshot(result)).Status);
+            BookMatchContext.From(new() { Title = "Dune" }, catalog: TestAnnotationCatalog.Current), BookIdentityMatcher.Snapshot(result)).Status);
     }
 
     [Fact]
@@ -97,16 +97,16 @@ public sealed class IdentityEvidenceContractTests : BaseTests
     {
         var matcher = new BookIdentityMatcher();
         Assert.Equal(BookIdentityStatus.MissingReference, matcher.Evaluate(
-            BookMatchContext.From(new()), new() { ReleaseName = "Some Writer - Dune" }).Status);
+            BookMatchContext.From(new(), catalog: TestAnnotationCatalog.Current), new() { ReleaseName = "Some Writer - Dune" }).Status);
         Assert.Equal(BookIdentityStatus.AssessmentUnavailable, matcher.Evaluate(
-            BookMatchContext.From(new() { Title = "Dune" }), new() { ReleaseName = new string('x', 16385) }).Status);
+            BookMatchContext.From(new() { Title = "Dune" }, catalog: TestAnnotationCatalog.Current), new() { ReleaseName = new string('x', 16385) }).Status);
     }
 
     [Fact]
     public void VerifiedIsbnUsesTheCandidateIdentifier()
     {
         var matcher = new BookIdentityMatcher();
-        var target = BookMatchContext.From(new() { Title = "Dune", Isbn = ["978-0-441-17271-9"] });
+        var target = BookMatchContext.From(new() { Title = "Dune", Isbn = ["978-0-441-17271-9"] }, catalog: TestAnnotationCatalog.Current);
         var evidence = new CandidateIdentityEvidence
         {
             ReleaseName = "Dune",
@@ -147,7 +147,7 @@ public sealed class IdentityEvidenceContractTests : BaseTests
         var evidence = BookIdentityMatcher.Snapshot(legacy);
         Assert.Empty(evidence.Authors);
         var result = new BookIdentityMatcher().Evaluate(BookMatchContext.From(new()
-        { Title = "Dune", Authors = ["Frank Herbert"] }), evidence);
+        { Title = "Dune", Authors = ["Frank Herbert"] }, catalog: TestAnnotationCatalog.Current), evidence);
         Assert.Equal(BookIdentityStatus.ExactTitleOnly, result.Status);
     }
 
@@ -157,7 +157,7 @@ public sealed class IdentityEvidenceContractTests : BaseTests
     [InlineData(IdentityEvidenceOrigin.Verified, true)]
     public void IdentifierAssuranceIsExplicit(IdentityEvidenceOrigin origin, bool expected)
     {
-        var target = BookMatchContext.From(new() { Title = "Dune", Asin = "B000000001" });
+        var target = BookMatchContext.From(new() { Title = "Dune", Asin = "B000000001" }, catalog: TestAnnotationCatalog.Current);
         var evidence = new CandidateIdentityEvidence
         {
             ReleaseName = "Dune",
@@ -169,7 +169,7 @@ public sealed class IdentityEvidenceContractTests : BaseTests
     [Fact]
     public void IdentifierCannotOverrideReliableContradictoryTitleOrAuthor()
     {
-        var context = BookMatchContext.From(new() { Title = "Dune", Authors = ["Frank Herbert"], Asin = "B000000001" });
+        var context = BookMatchContext.From(new() { Title = "Dune", Authors = ["Frank Herbert"], Asin = "B000000001" }, catalog: TestAnnotationCatalog.Current);
         var evidence = new CandidateIdentityEvidence
         {
             ReleaseName = "The Shining",
@@ -187,7 +187,7 @@ public sealed class IdentityEvidenceContractTests : BaseTests
     [Fact]
     public void AChangedEditionIdentifierDoesNotVetoAnOtherwiseCorroboratedWork()
     {
-        var target = BookMatchContext.From(new() { Title = "Dune", Authors = ["Frank Herbert"], Asin = "B000000001" });
+        var target = BookMatchContext.From(new() { Title = "Dune", Authors = ["Frank Herbert"], Asin = "B000000001" }, catalog: TestAnnotationCatalog.Current);
         Assert.True(new BookIdentityMatcher().Evaluate(target, new()
         {
             ReleaseName = "Dune",
@@ -204,7 +204,7 @@ public sealed class IdentityEvidenceContractTests : BaseTests
             foreach (var separator in new[] { " - ", " – ", " — ", "−" })
                 foreach (var annotation in new[] { "", " [M4B]", " (Unabridged Edition).", " - 2024 - M4B" })
                 {
-                    var context = BookMatchContext.From(new() { Title = title, Authors = ["Some Writer"] });
+                    var context = BookMatchContext.From(new() { Title = title, Authors = ["Some Writer"] }, catalog: TestAnnotationCatalog.Current);
                     var correct = matcher.Evaluate(context, new() { ReleaseName = "Some Writer" + separator + title + annotation });
                     Assert.True(correct.IsConfirmed, $"{title}/{separator}/{annotation}: {correct}");
                     var wrong = matcher.Evaluate(context, new() { ReleaseName = "Some Writer" + separator + "Unrelated Work" + annotation });

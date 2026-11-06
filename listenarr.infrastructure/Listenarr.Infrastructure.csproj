@@ -31,6 +31,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Listenarr.Tests" />
+    <EmbeddedResource Include="Search\Matching\release-annotations.json" LogicalName="Listenarr.Infrastructure.Search.Matching.release-annotations.json" />
   </ItemGroup>
 
 </Project>
