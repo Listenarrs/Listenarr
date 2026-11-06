@@ -285,22 +285,7 @@ class ApiService {
   }
 
   // Search API
-  // Deprecated compatibility shim removed. Use `intelligentSearch`, `searchIndexers`, or `searchByApi`.
-
-  async intelligentSearch(
-    query: string,
-    category?: string,
-    signal?: AbortSignal,
-  ): Promise<SearchResult[]> {
-    const body: Record<string, unknown> = { mode: 'Simple', query }
-    if (category) body['category'] = category
-    const resp = await this.request<SearchResult[] | { results?: SearchResult[] } | null>(
-      '/search',
-      { method: 'POST', body: JSON.stringify(body), signal },
-    )
-    const results = Array.isArray(resp) ? resp : (resp?.results ?? [])
-    return results
-  }
+  // Deprecated compatibility shim removed. Use `searchIndexers` or `searchByApi`.
 
   async searchIndexers(
     query: string,
@@ -2254,9 +2239,6 @@ class ApiService {
 }
 
 export const apiService = new ApiService()
-
-// Compatibility export for legacy code expecting apiService.search
-export const search = apiService.advancedSearch.bind(apiService)
 
 // Export individual indexer functions for convenience
 export const getIndexers = () => apiService.getIndexers()
