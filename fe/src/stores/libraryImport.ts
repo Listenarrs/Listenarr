@@ -28,7 +28,7 @@ import {
   usableInRegion,
   type SearchFields,
 } from '@/services/audiobookSearch'
-import { normalizeSearchRegion, searchRegionOptions } from '@/utils/languageMapping'
+import { normalizeSearchRegion, regionLabel } from '@/utils/languageMapping'
 import { useConfigurationStore } from '@/stores/configuration'
 import { buildSeriesFields } from '@/utils/seriesUtils'
 import type { SeriesEntry } from '@/utils/seriesUtils'
@@ -81,10 +81,6 @@ function pickBestMatch(results: SearchResult[], detectedAuthor?: string): Search
 // The Audible catalogue has no usable record for the match's ASIN in its region: the book must not
 // be imported without it, the user picks the match (and its region) again
 class MatchRecordNotFoundError extends Error {}
-
-function regionLabel(region: string): string {
-  return searchRegionOptions.find((o) => o.value === region)?.label ?? region
-}
 
 function normalizeGenres(genres: unknown): string[] | undefined {
   if (!Array.isArray(genres)) return genres as string[] | undefined
