@@ -59,6 +59,7 @@ namespace Listenarr.Domain.Search
             {
                 Id = result.Id,
                 IdentityEvidence = result.IdentityEvidence,
+                LanguageOrigin = result.LanguageOrigin,
                 Title = result.Title,
                 Artist = result.Artist,
                 Album = result.Album,
@@ -91,6 +92,7 @@ namespace Listenarr.Domain.Search
             {
                 Id = result.Id,
                 IdentityEvidence = result.IdentityEvidence,
+                LanguageOrigin = NormalizeLanguage(result.Language) != null ? result.LanguageOrigin : IdentityEvidenceOrigin.ReleaseNameDerived,
                 Title = result.Title,
                 Artist = result.Artist,
                 Album = result.Album,
@@ -130,6 +132,8 @@ namespace Listenarr.Domain.Search
             {
                 Id = result.Id,
                 IdentityEvidence = result.IdentityEvidence,
+                LanguageOrigin = result.LanguageOrigin,
+                Language = NormalizeLanguage(result.Language),
                 Title = result.Title,
                 Artist = result.Artist,
                 Album = result.Album,
@@ -209,6 +213,7 @@ namespace Listenarr.Domain.Search
             {
                 Id = result.Id,
                 IdentityEvidence = result.IdentityEvidence,
+                LanguageOrigin = result.LanguageOrigin,
                 Title = result.Title,
                 Artist = result.Artist,
                 Album = result.Album,

@@ -41,6 +41,7 @@ namespace Listenarr.Domain.Search
         public string Title { get; set; } = string.Empty;
         public string Artist { get; set; } = string.Empty;
         public CandidateIdentityEvidence? IdentityEvidence { get; set; }
+        public IdentityEvidenceOrigin LanguageOrigin { get; set; }
         // Backwards-compatibility: some tests and callers expect `Author` property name.
         public string Author { get => Artist; set => Artist = value; }
         public string Album { get; set; } = string.Empty;

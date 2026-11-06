@@ -17,7 +17,7 @@
  */
 namespace Listenarr.Domain.Search;
 
-public enum IdentityEvidenceOrigin { Unattributed, ProviderSupplied, ReleaseNameDerived, Verified }
+public enum IdentityEvidenceOrigin { Unattributed, ProviderSupplied, ReleaseNameDerived, Verified, ContextDerived }
 
 public sealed record ContributorEvidence(string Name, IdentityEvidenceOrigin Origin);
 public sealed record IdentifierEvidence(string Namespace, string Value, IdentityEvidenceOrigin Origin);
@@ -40,4 +40,6 @@ public sealed record BookIdentityAssessment(
     BookIdentityStatus Status, string Reason, string? MatchedTitle = null)
 {
     public bool IsConfirmed => Status is BookIdentityStatus.ConfirmedIdentifier or BookIdentityStatus.CorroboratedTitle;
+    public IReadOnlyList<LanguageEvidence> Languages { get; init; } = [];
+    public IReadOnlyList<EditionEvidence> Editions { get; init; } = [];
 }

@@ -19,12 +19,14 @@ namespace Listenarr.Domain.Search;
 
 public sealed record AutomaticCandidateScore(QualityScore Quality, BookIdentityAssessment Identity, string SourceFingerprint)
 {
+    public CandidateCompatibilityAssessment Compatibility { get; init; } = CandidateCompatibilityAssessment.Compatible;
     public SearchResult SearchResult => Quality.SearchResult;
     public int TotalScore => Quality.TotalScore;
     public bool SourceIsCurrent => SearchCandidateFingerprint.Compute(SearchResult) == SourceFingerprint;
-    public bool IsRejected => !Identity.IsConfirmed || Quality.IsRejected || TotalScore <= 0 || !SourceIsCurrent;
+    public bool IsRejected => !Identity.IsConfirmed || !Compatibility.IsCompatible || Quality.IsRejected || TotalScore <= 0 || !SourceIsCurrent;
     public IReadOnlyList<string> RejectionReasons =>
         Quality.RejectionReasons.Concat(!Identity.IsConfirmed ? [Identity.Reason] : Array.Empty<string>())
+            .Concat(Compatibility.Reasons)
             .Concat(!SourceIsCurrent ? ["candidate_changed"] : Array.Empty<string>())
             .Concat(TotalScore <= 0 ? ["quality_score_not_positive"] : Array.Empty<string>()).ToArray();
 }
@@ -32,5 +34,5 @@ public sealed record AutomaticCandidateScore(QualityScore Quality, BookIdentityA
 public sealed record AutomaticSearchAssessment(
     string TargetFingerprint, IReadOnlyList<AutomaticCandidateScore> Candidates)
 {
-    public const string PolicyVersion = "CorroboratedAutomaticV4";
+    public const string PolicyVersion = "CorroboratedAutomaticV6";
 }

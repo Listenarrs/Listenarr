@@ -92,6 +92,7 @@ public static class ReleaseNameInterpreter
                     if (subtitle != null)
                     {
                         if (!BindSubtitle(view.Text, mainEnd, subtitle, budget, out subtitleStart, out end)) continue;
+                        end = ExtendSeriesSubtitle(view.Text, subtitleStart, end, context, budget);
                         // A stored subtitle cannot be reused as a credit by the shorter
                         // main-title alternative, even if it happens to be a known name.
                         protectedMainSpans.Add((rawMain.Start, rawMain.Length));
@@ -145,6 +146,21 @@ public static class ReleaseNameInterpreter
             || !text.AsSpan(start).StartsWith(subtitle, StringComparison.OrdinalIgnoreCase)) return false;
         end = start + subtitle.Length;
         return Boundary(text, end);
+    }
+
+    private static int ExtendSeriesSubtitle(string text, int start, int end, BookMatchContext context, ReleaseAssessmentBudget budget)
+    {
+        var original = context.SeriesCatalog.Resolve(text[start..end]);
+        if (original.Count != 1 || original[0].Fact.Invalid || original[0].Fact.Positions.Length > 1) return end;
+        foreach (var descriptor in context.AnnotationCatalog.SeriesDescriptors)
+        {
+            var suffix = " " + descriptor;
+            if (!budget.Spend(suffix.Length)) return end;
+            if (!text.AsSpan(end).StartsWith(suffix, StringComparison.OrdinalIgnoreCase) || !Boundary(text, end + suffix.Length)) continue;
+            var resolved = context.SeriesCatalog.Resolve(text[start..(end + suffix.Length)]);
+            if (resolved.Count == 1 && resolved[0].Fact == original[0].Fact) return end + suffix.Length;
+        }
+        return end;
     }
 
     private static bool InExplicitNarrator(string text, int at)

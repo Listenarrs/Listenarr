@@ -17,7 +17,7 @@ public sealed class ReleaseAnnotationExtensionTests : BaseTests
     };
 
     private static bool Confirms(Audiobook book, string release) => new BookIdentityMatcher().Evaluate(
-        BookMatchContext.From(book), new() { ReleaseName = release }).IsConfirmed;
+        BookMatchContext.From(book, catalog: TestAnnotationCatalog.Current), new() { ReleaseName = release }).IsConfirmed;
 
     [Theory]
     [InlineData(null, "3", true)]
@@ -143,9 +143,9 @@ public sealed class ReleaseAnnotationExtensionTests : BaseTests
     public void MissingFactsAndConflictingFactsInvalidateTheAssessment()
     {
         var book = Book(null);
-        var first = BookMatchContext.From(book).Fingerprint;
+        var first = BookMatchContext.From(book, catalog: TestAnnotationCatalog.Current).Fingerprint;
         book.SeriesNumber = "4";
-        Assert.NotEqual(first, BookMatchContext.From(book).Fingerprint);
+        Assert.NotEqual(first, BookMatchContext.From(book, catalog: TestAnnotationCatalog.Current).Fingerprint);
         Assert.False(Confirms(book, "Marisol Vega - Northern Shore 3 - The Quiet Orchard"));
     }
 
@@ -162,14 +162,14 @@ public sealed class ReleaseAnnotationExtensionTests : BaseTests
     public void RuleDiagnosticsPreserveRawSpansAndDoNotClaimVerifiedPositions()
     {
         const string release = "Marisol.Vega-Northern.Shore.03-The.Quiet.Orchard.MP3-JD07";
-        var parsed = ReleaseNameInterpreter.Interpret(release, BookMatchContext.From(Book(null)), []);
+        var parsed = ReleaseNameInterpreter.Interpret(release, BookMatchContext.From(Book(null), catalog: TestAnnotationCatalog.Current), []);
         Assert.True(parsed.Complete);
         var series = Assert.Single(parsed.Spans, s => s.Role == ReleaseSpanRole.SeriesName);
         Assert.Equal("series.reference", series.RuleId);
         Assert.Equal("unverified_position", series.MatchStrength);
         Assert.Equal("Northern.Shore.03", release.Substring(series.Start, series.Length));
         var group = Assert.Single(parsed.Spans, s => s.Role == ReleaseSpanRole.GroupMarker);
-        Assert.Equal("group.catalog", group.RuleId);
+        Assert.Equal("group.jd07", group.RuleId);
         Assert.Equal("JD07", release.Substring(group.Start, group.Length));
         Assert.All(parsed.Spans, s => Assert.Equal(IdentityEvidenceOrigin.ReleaseNameDerived, s.Origin));
     }

@@ -103,7 +103,7 @@ namespace Listenarr.Tests.Features.Infrastructure.HostedServices.Search
         [InlineData("Fahrenheit 451", "Ray Bradbury", "Fahrenheit.451.by.Ray.Bradbury", null, null)]
         [InlineData("The Quiet Orchard", "Marisol Vega", "Marisol Vega - Northern Shore 3 - The Quiet Orchard [M4B]", "Northern Shore", null)]
         [InlineData("The Shadow Rising", "Robert Jordan", "The Shadow Rising (Wheel of Time #4) - Robert Jordan [M4B]", "The Wheel of Time", "4")]
-        [InlineData("Jack and Jill", "James Patterson", "James Patterson - Jack And Jill-AUDiOBOOK-WEB-SE-2021-CRAViNGS iNT", null, null)]
+        [InlineData("Jack and Jill", "James Patterson", "James Patterson - Jack And Jill-AUDiOBOOK-WEB-EN-2021-CRAViNGS iNT", null, null)]
         [InlineData("The Return of the King", "J. R.R. Tolkien", "The.Return.of.the.King.J.R.R.Tolkien.Audiobook.MP3-JD07", null, null)]
         public async Task RunCycleAsync_AnnotatedReleaseUsesTheSharedSelector(string title, string author,
             string release, string? series, string? number)
@@ -123,6 +123,28 @@ namespace Listenarr.Tests.Features.Infrastructure.HostedServices.Search
             download.Verify(d => d.StartDownloadAsync(It.IsAny<SearchResult>(), It.IsAny<string>(), It.IsAny<int?>()), Times.Once);
         }
 
+
+
+        [Theory]
+        [InlineData(null, "Mira Chen - The Harbor Lantern-AUDiOBOOK-WEB-SE-2021-CRAViNGS iNT", null, false)]
+        [InlineData(null, "Mira Chen - The Harbor Lantern [M4B]", "Swedish", false)]
+        [InlineData("Adapted for Modern Readers", "Mira Chen - The Harbor Lantern [M4B]", null, false)]
+        [InlineData("Adapted for Modern Readers", "Mira Chen - The Harbor Lantern: Adapted for Modern Readers [M4B]", null, true)]
+        [InlineData(null, "Mira Chen - The Harbor Lantern-AUDiOBOOK-WEB-EN-2021-CRAViNGS iNT", null, true)]
+        public async Task RunCycleAsync_CompatibilityCannotBeOverriddenByQuality(string? subtitle,
+            string release, string? language, bool expected)
+        {
+            var candidate = Release(release, artist: ""); candidate.Language = language;
+            var search = SearchReturning(candidate);
+            var download = new Mock<IDownloadService>();
+            download.Setup(d => d.StartDownloadAsync(It.IsAny<SearchResult>(), It.IsAny<string>(), It.IsAny<int?>())).ReturnsAsync("compatibility");
+            Init(builder => { builder.WithSingleton(search.Object); builder.WithSingleton(download.Object); builder.WithSingleton(AcceptingQualityService().Object); });
+            var book = await SeedMonitoredAudiobookAsync("The Harbor Lantern", "Mira Chen");
+            book.Subtitle = subtitle;
+            await _audiobookRepository.UpdateAsync(book);
+            await RunCycleAsync();
+            download.Verify(d => d.StartDownloadAsync(It.IsAny<SearchResult>(), It.IsAny<string>(), It.IsAny<int?>()), expected ? Times.Once() : Times.Never());
+        }
 
         private static SearchResult Release(string title, string artist) => new()
         {

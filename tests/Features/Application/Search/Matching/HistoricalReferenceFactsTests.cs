@@ -68,7 +68,7 @@ public sealed class HistoricalReferenceFactsTests : BaseTests
                 SeriesNumber = m.GetProperty("SeriesNumber").GetString()
             }).ToList()
         };
-        var result = new BookIdentityMatcher().Evaluate(BookMatchContext.From(book), new()
+        var result = new BookIdentityMatcher().Evaluate(BookMatchContext.From(book, catalog: TestAnnotationCatalog.Current), new()
         {
             ReleaseName = c.GetProperty("releaseName").GetString()!,
             Authors = [new(c.GetProperty("inferredArtist").GetString()!, IdentityEvidenceOrigin.ReleaseNameDerived)]
@@ -98,7 +98,7 @@ public sealed class HistoricalReferenceFactsTests : BaseTests
             SeriesMemberships = series ? [new() { SeriesName = "Honor Bound", SeriesNumber = "2", IsPrimary = true }] : []
         };
         var release = releaseAuthor + " - Blood and Honor (2021)";
-        var result = new BookIdentityMatcher().Evaluate(BookMatchContext.From(book), new()
+        var result = new BookIdentityMatcher().Evaluate(BookMatchContext.From(book, catalog: TestAnnotationCatalog.Current), new()
         {
             ReleaseName = release,
             Authors = [new(releaseAuthor, IdentityEvidenceOrigin.ReleaseNameDerived)]

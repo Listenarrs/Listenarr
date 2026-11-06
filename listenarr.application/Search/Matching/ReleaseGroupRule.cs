@@ -21,13 +21,23 @@ namespace Listenarr.Application.Search.Matching;
 internal static class ReleaseGroupRule
 {
     // Opaque group names are data. Position alone cannot distinguish a group from another work.
-    private static readonly HashSet<string> Groups = new(["NMR", "PoF", "BoB", "BBtv", "miok", "JD07", "FerraBit", "CRAViNGS"], StringComparer.OrdinalIgnoreCase);
-    public static bool Match(string value) => Groups.Contains(value);
+    public static bool Match(string value, ReleaseAnnotationCatalog catalog) => catalog.Find(value) is { Kind: AnnotationKind.Group } entry
+        && (entry.Placements & (AnnotationPlacement.Suffix | AnnotationPlacement.TechnicalSuffix)) != 0;
 
-    public static ReleaseAnnotationResult Recognize(string value, bool beforeTitle)
+    public static ReleaseAnnotationResult Recognize(string value, bool beforeTitle, bool bracketed,
+        bool technical, bool delimitedPrefix, ReleaseAnnotationCatalog catalog)
     {
-        if (beforeTitle) return default;
-        var name = value.EndsWith(" iNT", StringComparison.OrdinalIgnoreCase) ? value[..^4] : value;
-        return Match(name) ? new(AnnotationOutcome.Explained, ReleaseSpanRole.GroupMarker, "group.catalog", name, "catalog") : default;
+        var entry = catalog.Find(value);
+        if (entry == null && value.EndsWith(" iNT", StringComparison.OrdinalIgnoreCase)
+            && catalog.Find(value[..^4]) is { Kind: AnnotationKind.Group } group) entry = group;
+        if (entry == null) return default;
+        var allowed = beforeTitle ? delimitedPrefix && entry.Placements.HasFlag(AnnotationPlacement.DelimitedPrefix)
+            : entry.Placements.HasFlag(AnnotationPlacement.Suffix)
+                || technical && entry.Placements.HasFlag(AnnotationPlacement.TechnicalSuffix)
+                || bracketed && entry.Placements.HasFlag(AnnotationPlacement.BracketedSuffix);
+        if (!allowed) return default;
+        return new(AnnotationOutcome.Explained,
+            entry.Kind == AnnotationKind.Group ? ReleaseSpanRole.GroupMarker : ReleaseSpanRole.TechnicalMetadata,
+            entry.Id, entry.Name, "catalog");
     }
 }

@@ -418,6 +418,7 @@ namespace Listenarr.Application.Search.Indexers.MyAnonamouse
                             if (!string.IsNullOrEmpty(detectedLang))
                             {
                                 result.Language = detectedLang;
+                                result.LanguageOrigin = IdentityEvidenceOrigin.ReleaseNameDerived;
                             }
                         }
 
