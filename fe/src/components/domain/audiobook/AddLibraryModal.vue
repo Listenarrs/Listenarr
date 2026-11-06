@@ -551,7 +551,7 @@ import { usePathLengthCheck } from '@/composables/usePathLengthCheck'
 import {
   normalizeSearchRegion,
   orderedSearchRegionOptions,
-  searchRegionOptions,
+  regionLabel,
 } from '@/utils/languageMapping'
 
 interface Props {
@@ -957,10 +957,6 @@ const metadataRegionOptions = computed(() =>
     'us',
   ]),
 )
-
-function regionLabel(region: string): string {
-  return searchRegionOptions.find((o) => o.value === region)?.label ?? region
-}
 
 // An ASIN can be corrected by hand (Audible sometimes republishes a book under a new one), but a
 // malformed one could never be looked up again, so it blocks the add; no ASIN is still allowed
