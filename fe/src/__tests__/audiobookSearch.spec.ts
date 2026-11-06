@@ -17,6 +17,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SearchResult } from '@/types'
+import { looksLikeAsin } from '@/utils/seriesUtils'
 
 const apiMocks = vi.hoisted(() => ({
   advancedSearch: vi.fn(),
@@ -63,6 +64,26 @@ describe('audiobookSearch (Add New, Repair and Find Match)', () => {
     expect(queryAsin('B0BK9W82PQ')).toBe('B0BK9W82PQ')
     expect(queryAsin('B0BK9')).toBeNull()
     expect(queryAsin('Primal Hunter')).toBeNull()
+  })
+
+  it('takes a ten-character, non-B0 value for an ASIN, unlike a series identifier', async () => {
+    // Real Audible product ASINs are not all B0-prefixed: ISBN-shaped ones (ten digits, or nine and
+    // a trailing X) are valid ten-character ASINs on the catalogue, even though a series
+    // membership's seriesAsin is deliberately restricted to the B0 shape (seriesUtils). Regression
+    // guard for the two detectors sharing one predicate.
+    for (const asin of ['1000000001', '100000000X']) {
+      expect(detectSearchType(asin)).toBe('asin')
+      expect(queryAsin(asin)).toBe(asin)
+      expect(looksLikeAsin(asin)).toBe(false)
+    }
+    apiMocks.getAudibleMetadata.mockResolvedValue({
+      metadata: { asin: '1000000001', title: 'A Book' },
+    })
+
+    await searchAudiobooks('1000000001', { region: 'fr' })
+
+    expect(apiMocks.getAudibleMetadata).toHaveBeenCalledWith('1000000001', 'fr')
+    expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
   })
 
   it('reads TITLE:, AUTHOR:, SERIES:, ISBN: and ASIN: tokens, or takes the query as a title', () => {

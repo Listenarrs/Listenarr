@@ -496,34 +496,6 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     if (run === currentMatchingRun) isProcessing.value = false
   }
 
-  // ─── Per-row manual search ────────────────────────────────────────────────
-
-  // Manual search box detection, not a series-identifier guard: a real Audible product ASIN
-  // is not always B0-prefixed (ISBN-shaped ones, ten digits or nine and an X, are valid
-  // ten-character ASINs on the catalogue too), so this stays the loose ten-character check
-  // rather than looksLikeAsin, which is deliberately narrower for series-membership
-  // identifiers.
-  const MANUAL_SEARCH_ASIN_PATTERN = /^[A-Z0-9]{10}$/i
-
-  async function searchItem(id: string, query: string, region?: string) {
-    const item = items.value[id]
-    if (!item) return
-
-    items.value[id] = { ...item, isSearching: true }
-    try {
-      const isAsin = MANUAL_SEARCH_ASIN_PATTERN.test(query.trim())
-      const results = await searchInRegion(
-        isAsin ? { asin: query.trim(), cap: 5 } : { title: query, cap: 5 },
-        region,
-      )
-      items.value[id] = { ...items.value[id], isSearching: false, hasSearched: true }
-      return results
-    } catch {
-      items.value[id] = { ...items.value[id], isSearching: false }
-      return []
-    }
-  }
-
   // ─── Match management ─────────────────────────────────────────────────────
 
   function selectMatch(id: string, match: SearchResult) {
@@ -751,7 +723,6 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     startProcessing,
     stopProcessing,
     processNext,
-    searchItem,
     searchInRegion,
     configuredRegion: _configuredRegion,
     selectMatch,
