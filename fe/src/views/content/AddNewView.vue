@@ -999,6 +999,7 @@ import type {
 import { apiService } from '@/services/api'
 import {
   isSeriesOnlySearch,
+  recordOfResponse,
   searchAdvancedFields,
   searchTitle,
   type SearchFields,
@@ -2672,12 +2673,7 @@ const selectTitleResult = async (book: TitleSearchResult) => {
         response && typeof response === 'object'
           ? (response as AudibleMetadataResponse | AudibleMetadataPayload)
           : {}
-      const audibleData =
-        'metadata' in responseObj &&
-        responseObj.metadata &&
-        typeof responseObj.metadata === 'object'
-          ? responseObj.metadata
-          : (responseObj as AudibleMetadataPayload)
+      const audibleData = recordOfResponse<AudibleMetadataPayload>(responseObj)
       const metadataSource =
         ('source' in responseObj && typeof responseObj.source === 'string'
           ? responseObj.source
