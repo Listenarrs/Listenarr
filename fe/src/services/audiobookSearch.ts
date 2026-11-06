@@ -64,7 +64,9 @@ export type AudibleMetadataResponse = {
 
 export type SearchType = 'asin' | 'title' | 'isbn'
 
-// An ASIN: B and 9 letters or digits, or a 10-digit ISBN-10 (ending with a digit or X)
+// An ASIN: B and 9 letters or digits, or a 10-digit ISBN-10 (ending with a digit or X). A product's
+// ASIN isn't always B0-prefixed: ISBN-shaped ones are valid on the catalogue too, so this stays wider
+// than looksLikeAsin (seriesUtils), which is deliberately narrower for series identifiers
 export const ASIN_PATTERN = /^(B[0-9A-Z]{9}|\d{9}(?:X|\d))$/i
 const ISBN13_PATTERN = /^\d{13}$/
 // Results asked for a title search
