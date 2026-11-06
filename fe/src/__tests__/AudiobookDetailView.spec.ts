@@ -30,6 +30,8 @@ const routeParams = vi.hoisted(() => ({ id: '5' }))
 vi.mock('vue-router', () => ({
   useRoute: () => ({ params: routeParams }),
   useRouter: () => ({ push: routerPushMock }),
+  // Repair Books asks before the page is left while it repairs
+  onBeforeRouteLeave: vi.fn(),
 }))
 
 // Mock api service ensureImageCached and getImageUrl
@@ -501,5 +503,35 @@ describe('AudiobookDetailView image recache behavior', () => {
     expect(scanButton.attributes('title')).toContain('filesystem initialization')
     await scanButton.trigger('click')
     expect(apiService.scanAudiobook).not.toHaveBeenCalled()
+  })
+
+  it('opens Organize from Repair at once, the book refreshed quietly behind it', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useLibraryStore()
+    store.audiobooks = [{ id: 5, title: 'Detail Book', files: [] }] as unknown as ReturnType<
+      typeof useLibraryStore
+    >['audiobooks']
+    store.fetchLibrary = vi.fn(async () => undefined)
+    const wrapper = mount(AudiobookDetailViewCmp, {
+      global: { plugins: [pinia], stubs: ['RepairBooksModal', 'RenamePreviewModal'] },
+    })
+    await new Promise((r) => setTimeout(r, 10))
+    // The book's reload held
+    let endReload!: (book: unknown) => void
+    vi.mocked(apiService.getAudiobook).mockImplementation(
+      () => new Promise((resolve) => (endReload = resolve)) as never,
+    )
+
+    wrapper.findComponent({ name: 'RepairBooksModal' }).vm.$emit('organize', [5])
+    await flushPromises()
+
+    expect(wrapper.findComponent({ name: 'RenamePreviewModal' }).props('visible')).toBe(true)
+    // The page keeps showing the book, without its loading state, under the dialog
+    expect(wrapper.find('.audiobook-detail').exists()).toBe(true)
+    expect(wrapper.find('.loading-container').exists()).toBe(false)
+    endReload({ id: 5, title: 'Detail Book (repaired)', files: [] })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Detail Book (repaired)')
   })
 })

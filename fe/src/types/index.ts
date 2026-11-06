@@ -777,6 +777,8 @@ export interface Audiobook {
   // Optional list of author ASINs (populated by backend when available)
   authorAsins?: string[]
   identifiers?: AudiobookExternalIdentifier[]
+  // The library's list: the region of asin, when the book's identifiers say it
+  asinRegion?: string | null
   // Server-computed flag indicating if this audiobook is wanted (monitored and missing files)
   wanted?: boolean
   // Server-computed list status used by slim /library responses.

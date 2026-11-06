@@ -18,7 +18,7 @@
 <template>
   <Modal :visible="visible" size="lg" @close="handleClose">
     <template #header>
-      <ModalHeader title="Organize Files" :icon="PhFolderOpen" @close="handleClose" />
+      <ModalHeader :title="title" :icon="PhFolderOpen" @close="handleClose" />
     </template>
 
     <template #default>
@@ -162,7 +162,20 @@
     <template #footer>
       <ModalFooter :showCancel="false">
         <template #left>
-          <button type="button" class="btn cancel-button" @click="handleClose">
+          <!-- Opened as another dialog's step (Repair): Back to it instead of Cancel, until it has
+               organized -->
+          <button
+            v-if="canGoBack && !finished"
+            type="button"
+            class="btn cancel-button"
+            :disabled="executing"
+            data-testid="organize-back"
+            @click="emit('back')"
+          >
+            <PhArrowLeft :size="16" />
+            Back
+          </button>
+          <button v-else type="button" class="btn cancel-button" @click="handleClose">
             <PhX :size="16" />
             {{ finished ? 'Close' : 'Cancel' }}
           </button>
@@ -202,6 +215,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import {
+  PhArrowLeft,
   PhCheckCircle,
   PhCheckSquare,
   PhFolderOpen,
@@ -220,16 +234,24 @@ const props = withDefaults(
   defineProps<{
     visible?: boolean
     audiobookIds?: number[]
+    // Opened by another dialog's last step (Repair): its title says which
+    title?: string
+    // That dialog can be gone back to: Back instead of Cancel
+    canGoBack?: boolean
   }>(),
   {
     visible: false,
     audiobookIds: () => [],
+    title: 'Organize Files',
+    canGoBack: false,
   },
 )
 
 const emit = defineEmits<{
   close: []
   done: []
+  // Back to the dialog it is a step of
+  back: []
 }>()
 
 const filesystemReadinessStore = useFilesystemReadinessStore()

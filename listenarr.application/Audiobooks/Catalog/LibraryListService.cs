@@ -70,6 +70,7 @@ namespace Listenarr.Application.Audiobooks.Catalog
             var fileSummaryRows = await _audiobookFileRepository.GetFormatSummariesAsync();
             var fileCountById = await _audiobookFileRepository.GetCountsByAudiobookIdAsync();
             var membershipsByAudiobookId = await _audiobookRepository.GetAllSeriesMembershipsGroupedByAudiobookIdAsync();
+            var asinRegions = await _audiobookRepository.GetAsinRegionsAsync();
             var filesByAudiobookId = fileSummaryRows
                 .GroupBy(f => f.AudiobookId)
                 .ToDictionary(g => g.Key, g => (IReadOnlyList<AudiobookFormatSummary>)g.ToList());
@@ -126,6 +127,9 @@ namespace Listenarr.Application.Audiobooks.Catalog
                         : null,
                     Genres = a.Genres?.ToArray(),
                     Asin = a.Asin,
+                    AsinRegion = a.Asin != null && asinRegions.TryGetValue((a.Id, a.Asin.Trim().ToUpperInvariant()), out var asinRegion)
+                        ? asinRegion
+                        : null,
                     OpenLibraryId = a.OpenLibraryId,
                     Publisher = a.Publisher,
                     Language = a.Language,
