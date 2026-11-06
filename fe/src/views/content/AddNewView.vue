@@ -997,6 +997,12 @@ import type {
   AudibleSearchResult,
 } from '@/types'
 import { apiService } from '@/services/api'
+import {
+  isSeriesOnlySearch,
+  searchAdvancedFields,
+  searchTitle,
+  type SearchFields,
+} from '@/services/audiobookSearch'
 import { getPlaceholderUrl } from '@/utils/placeholder'
 import { handleImageError } from '@/utils/imageFallback'
 import type { OpenLibraryBook } from '@/services/openlibrary'
@@ -1821,122 +1827,27 @@ const performAdvancedSearch = async () => {
     searchError.value = ''
 
     try {
-      const languageFilter = getPreferredSearchLanguageFilter(preferredSearchLanguage.value)
-      // Use the unified advanced search endpoint for all advanced queries.
-      // The backend returns enriched SearchResult objects which are mapped
-      // into the UI by handleAdvancedSearchResults.
+      // The rules live in the shared search; the backend returns enriched SearchResult objects,
+      // mapped into the UI by handleAdvancedSearchResults.
       isAudiblePaged.value = false
-      const params: Record<string, unknown> = {}
-      if (p.title && p.title.trim()) params.title = p.title.trim()
-      if (p.author && p.author.trim()) params.author = p.author.trim()
-      if (p.isbn && p.isbn.trim()) params.isbn = p.isbn.trim()
-      if (p.asin && p.asin.trim()) params.asin = p.asin.trim()
-      params.region = searchLanguage.value
-      if (languageFilter) params.language = languageFilter
-
-      const seriesName = p.series ? p.series.trim() : ''
-
-      // If the user only provided a series, use the unified advanced search POST
-      // so the backend performs the Audible series lookup and conversion.
-      if (seriesName && !params.title && !params.author && !params.isbn && !params.asin) {
-        try {
-          const seriesSearchParams: Record<string, unknown> = {
-            series: seriesName,
-            region: searchLanguage.value,
-            pagination: { page: 1, limit: resultsPerPage.value },
-          }
-          if (languageFilter) seriesSearchParams.language = languageFilter
-          const resp = await apiService.advancedSearch(seriesSearchParams)
-          // backend returns enriched SearchResult objects
-          if (!searchStore.isCurrent(searchRequestId)) return
-          await handleAdvancedSearchResults(resp as Partial<SearchResult>[])
-          searchStore.complete(searchRequestId)
-        } catch (e) {
-          throw e
-        }
-
-        return
+      const fields: SearchFields = {
+        title: p.title?.trim() || undefined,
+        author: p.author?.trim() || undefined,
+        isbn: p.isbn?.trim() || undefined,
+        asin: p.asin?.trim() || undefined,
+        series: p.series?.trim() || undefined,
       }
-
-      // Include pagination and candidate limits so the backend can adjust candidate/return caps
-      params.pagination = { page: 1, limit: resultsPerPage.value }
-
-      currentAdvancedPage.value = 1
-
-      // If both author and series provided, author takes priority; perform author search then filter by series (no extra Audible series lookup)
-      if (params.author && seriesName) {
-        const results = (await apiService.advancedSearch(params)) as Partial<SearchResult>[]
-
-        const filtered = results.filter((r) => {
-          try {
-            const sr =
-              ((r as unknown as Record<string, unknown>)['searchResult'] as
-                | Partial<SearchResult>
-                | undefined) ?? (r as Partial<SearchResult>)
-
-            // If searchResult.series is an array of objects with asin fields, check asin or name
-            if (Array.isArray(sr.series) && sr.series.length) {
-              for (const s of sr.series) {
-                const a =
-                  (s &&
-                    ((s as Record<string, unknown>)['asin'] ??
-                      (s as Record<string, unknown>)['Asin'] ??
-                      (s as Record<string, unknown>)['ASIN'])) ??
-                  (typeof s === 'string' ? s : undefined)
-                if (
-                  a &&
-                  (String(a).toLowerCase().includes(seriesName.toLowerCase()) ||
-                    String(a) === seriesName)
-                )
-                  return true
-                const n =
-                  (s &&
-                    ((s as Record<string, unknown>)['name'] ??
-                      (s as Record<string, unknown>)['Name'])) ??
-                  undefined
-                if (n && String(n).toLowerCase().includes(seriesName.toLowerCase())) return true
-              }
-            }
-
-            // If series is a string
-            if (
-              sr.series &&
-              typeof sr.series === 'string' &&
-              sr.series.toLowerCase().includes(seriesName.toLowerCase())
-            )
-              return true
-
-            // Fallback: check top-level result.series
-            if (
-              r.series &&
-              typeof r.series === 'string' &&
-              r.series.toLowerCase().includes(seriesName.toLowerCase())
-            )
-              return true
-          } catch {}
-          return false
-        })
-
-        // If filtering produced no matches, fall back to returning the unfiltered author results
-        if (!searchStore.isCurrent(searchRequestId)) return
-        await handleAdvancedSearchResults(filtered.length ? filtered : results)
-        searchStore.complete(searchRequestId)
-
-        // done: scroll into view
-        nextTick(() => {
-          const titleResultsElement = document.querySelector('.title-results')
-          if (titleResultsElement) {
-            const elementTop = titleResultsElement.getBoundingClientRect().top + window.scrollY
-            window.scrollTo({ top: elementTop - 125, behavior: 'smooth' })
-          }
-        })
-        return
-      }
-
-      const results = await apiService.advancedSearch(params)
+      const isSeriesOnly = isSeriesOnlySearch(fields)
+      if (!isSeriesOnly) currentAdvancedPage.value = 1
+      const results = await searchAdvancedFields(fields, {
+        region: searchLanguage.value,
+        language: preferredSearchLanguage.value,
+        limit: resultsPerPage.value,
+      })
       if (!searchStore.isCurrent(searchRequestId)) return
       await handleAdvancedSearchResults(results)
       searchStore.complete(searchRequestId)
+      if (isSeriesOnly) return
 
       // Scroll to top of results after search
       nextTick(() => {
@@ -1970,37 +1881,12 @@ const performAdvancedSearch = async () => {
   searchError.value = ''
 
   try {
-    // Parse the query to extract advanced params
-    const params: Record<string, unknown> = {}
-    const parts = query.split(/\s+/)
-
-    for (const part of parts) {
-      if (part.toUpperCase().startsWith('TITLE:')) {
-        params.title = part.substring(6).trim()
-      } else if (part.toUpperCase().startsWith('AUTHOR:')) {
-        params.author = part.substring(7).trim()
-      } else if (part.toUpperCase().startsWith('ISBN:')) {
-        params.isbn = part.substring(5).trim()
-      } else if (part.toUpperCase().startsWith('ASIN:')) {
-        params.asin = part.substring(5).trim()
-      }
-    }
-
-    // If no explicit prefixes were provided, treat the entire query as a title search
-    const hasExplicit = params.title || params.author || params.isbn || params.asin
-    if (!hasExplicit) {
-      params.title = query
-    }
-
-    // Always include the configured default region for Audible/Audible lookups
-    params.region = searchLanguage.value
-    const languageFilter = getPreferredSearchLanguageFilter(preferredSearchLanguage.value)
-    if (languageFilter) params.language = languageFilter
-
-    // Include pagination/cap when calling advanced search from unified query
-    params.pagination = { page: 1, limit: resultsPerPage.value }
     currentAdvancedPage.value = 1
-    const results = await apiService.advancedSearch(params)
+    const results = await searchTitle(query, {
+      region: searchLanguage.value,
+      language: preferredSearchLanguage.value,
+      limit: resultsPerPage.value,
+    })
     if (!searchStore.isCurrent(searchRequestId)) return
     await handleAdvancedSearchResults(results)
     searchStore.complete(searchRequestId)
