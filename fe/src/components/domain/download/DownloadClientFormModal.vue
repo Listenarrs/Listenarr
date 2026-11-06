@@ -290,8 +290,8 @@
                 <option value="nosubfolder">Don't Create Subfolder</option>
               </select>
               <small
-                >Whether to use the original layout from the torrent, always create a subfolder,
-                or leave it to qBittorrent's own configured content layout (Default)</small
+                >Whether to use the original layout from the torrent, always create a subfolder, or
+                leave it to qBittorrent's own configured content layout (Default)</small
               >
             </div>
           </FormSection>
