@@ -30,6 +30,7 @@ import {
   parseSearchTokens,
   queryAsin,
   searchAudiobooks,
+  searchTitleAndAuthor,
 } from '@/services/audiobookSearch'
 
 describe('audiobookSearch (Add New, Repair and Find Match)', () => {
@@ -128,6 +129,48 @@ describe('audiobookSearch (Add New, Repair and Find Match)', () => {
         releaseDate: '2022-11-01',
         publishDate: '2022-10-31',
       }),
+    )
+  })
+
+  it('sends a title and an author as they are: nothing in them is read as a token', async () => {
+    await searchTitleAndAuthor('The Wheel of Time Series: Book 1', 'Robert Jordan', {
+      region: 'us',
+    })
+
+    expect(apiMocks.advancedSearch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'The Wheel of Time Series: Book 1',
+        author: 'Robert Jordan',
+      }),
+    )
+    expect(apiMocks.advancedSearch.mock.calls[0]?.[0]).not.toHaveProperty('series')
+  })
+
+  it('leaves an empty author out of a title search', async () => {
+    await searchTitleAndAuthor('Primal Hunter 4', '', { region: 'us' })
+
+    expect(apiMocks.advancedSearch.mock.calls[0]?.[0]).not.toHaveProperty('author')
+  })
+
+  it('looks an ASIN in the title up on its own, even with an author', async () => {
+    apiMocks.getAudibleMetadata.mockResolvedValue({
+      metadata: { asin: 'B0BK9W82PQ', title: 'Primal Hunter 4' },
+    })
+
+    await searchTitleAndAuthor('b0bk9w82pq', 'Zogarth', { region: 'us' })
+
+    expect(apiMocks.getAudibleMetadata).toHaveBeenCalledWith('B0BK9W82PQ', 'us')
+    expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
+  })
+
+  it('searches an ISBN alone in the title as an ISBN, and as a title with an author', async () => {
+    await searchTitleAndAuthor('9780547928227', '', { region: 'us' })
+    expect(apiMocks.searchByTitle).toHaveBeenCalledWith('ISBN:9780547928227', expect.anything())
+    expect(apiMocks.advancedSearch).not.toHaveBeenCalled()
+
+    await searchTitleAndAuthor('9780547928227', 'Tolkien', { region: 'us' })
+    expect(apiMocks.advancedSearch).toHaveBeenCalledWith(
+      expect.objectContaining({ title: '9780547928227', author: 'Tolkien' }),
     )
   })
 

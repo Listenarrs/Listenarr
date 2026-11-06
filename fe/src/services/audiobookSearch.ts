@@ -266,20 +266,42 @@ export async function searchIsbn(
   })
 }
 
-// A title (or TITLE:/AUTHOR:/… tokens) through the advanced search, filtered on the language
-export async function searchTitle(
-  query: string,
+// The search fields through the advanced search, filtered on the language
+async function searchFields(
+  fields: ReturnType<typeof parseSearchTokens>,
   { region, language }: AudiobookSearchOptions,
 ): Promise<SearchResult[]> {
   const languageFilter = getPreferredSearchLanguageFilter(language)
   return (
     (await apiService.advancedSearch({
-      ...parseSearchTokens(query),
+      ...fields,
       region,
       ...(languageFilter ? { language: languageFilter } : {}),
       pagination: { page: 1, limit: TITLE_SEARCH_LIMIT },
     })) || []
   )
+}
+
+// A title (or TITLE:/AUTHOR:/… tokens)
+export function searchTitle(
+  query: string,
+  options: AudiobookSearchOptions,
+): Promise<SearchResult[]> {
+  return searchFields(parseSearchTokens(query), options)
+}
+
+// A title and an author held apart (Repair and Find Match's fields), sent as they are: no token is
+// read in them, so a title holding "Series:" stays whole. An ASIN in the title is looked up, and an
+// ISBN alone searched as one, as Add New does
+export function searchTitleAndAuthor(
+  title: string,
+  author: string,
+  options: AudiobookSearchOptions,
+): Promise<SearchResult[]> {
+  const asin = queryAsin(title)
+  if (asin) return searchAsin(asin, options.region)
+  if (!author && detectSearchType(title) === 'isbn') return searchIsbn(title, options)
+  return searchFields({ title, ...(author ? { author } : {}) }, options)
 }
 
 // A query searched the way Add New does, whatever it holds
