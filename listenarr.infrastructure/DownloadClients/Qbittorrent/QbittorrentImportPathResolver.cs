@@ -28,6 +28,29 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
             return TorrentClientPathMapper.BuildQbittorrentSourceFiles(savePath, files);
         }
 
+        public static bool HasUnusableFileMetadata(List<Dictionary<string, JsonElement>> files)
+        {
+            return files.Count > 0
+                && files.All(file => IsZero(file, "priority") && IsZero(file, "progress"));
+        }
+
+        private static bool IsZero(Dictionary<string, JsonElement> file, string key)
+        {
+            if (!file.TryGetValue(key, out var value) || value.ValueKind != JsonValueKind.Number)
+            {
+                return false;
+            }
+
+            // Inspect the validated JSON mantissa so nonzero values cannot underflow to zero.
+            foreach (var character in value.GetRawText())
+            {
+                if (character is 'e' or 'E') break;
+                if (character is >= '1' and <= '9') return false;
+            }
+
+            return true;
+        }
+
         public static List<string> TranslateSourceFiles(IEnumerable<string> sourceFiles)
         {
             return sourceFiles
