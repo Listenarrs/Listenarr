@@ -1298,6 +1298,10 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                     b.Property<string>("Description")
                         .HasColumnType("TEXT");
 
+                    b.PrimitiveCollection<string>("ExcludedNarrators")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("IsDefault")
                         .HasColumnType("INTEGER");
 
@@ -1343,6 +1347,10 @@ namespace Listenarr.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT")
                         .HasColumnName("PreferredLanguages");
+
+                    b.PrimitiveCollection<string>("PreferredNarrators")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
 
                     b.PrimitiveCollection<string>("PreferredWords")
                         .IsRequired()
