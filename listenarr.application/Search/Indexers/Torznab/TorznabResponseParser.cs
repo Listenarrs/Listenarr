@@ -159,7 +159,7 @@ namespace Listenarr.Application.Search.Indexers.Torznab
                                     }
                                     catch (Exception caughtEx_22) when (caughtEx_22 is not OperationCanceledException && caughtEx_22 is not OutOfMemoryException && caughtEx_22 is not StackOverflowException)
                                     {
-                                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                        _logger.LogDebug(caughtEx_22, "Could not parse a language from Torznab attribute {Attribute}; leaving the language unset", name);
                                     }
                                     break;
                                 case "language":
@@ -178,7 +178,7 @@ namespace Listenarr.Application.Search.Indexers.Torznab
                                         }
                                         catch (Exception caughtEx_23) when (caughtEx_23 is not OperationCanceledException && caughtEx_23 is not OutOfMemoryException && caughtEx_23 is not StackOverflowException)
                                         {
-                                            System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                            _logger.LogDebug(caughtEx_23, "Could not parse a language from the Torznab 'language' attribute; leaving the language unset");
                                         }
                                     }
                                     break;
@@ -201,7 +201,7 @@ namespace Listenarr.Application.Search.Indexers.Torznab
                                         }
                                         catch (Exception caughtEx_24) when (caughtEx_24 is not OperationCanceledException && caughtEx_24 is not OutOfMemoryException && caughtEx_24 is not StackOverflowException)
                                         {
-                                            System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                            _logger.LogDebug(caughtEx_24, "Could not convert the Torznab usenetdate value {Value}; leaving the published date unset", value);
                                         }
                                     }
                                     else if (DateTime.TryParse(value, out var udt))
@@ -385,8 +385,8 @@ namespace Listenarr.Application.Search.Indexers.Torznab
                                 if (!string.IsNullOrEmpty(lang)) result.Language = lang;
                             }
                             catch (Exception caughtEx_25) when (caughtEx_25 is not OperationCanceledException && caughtEx_25 is not OutOfMemoryException && caughtEx_25 is not StackOverflowException)
-                            { /* Non-critical */
-                                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                            {
+                                _logger.LogDebug(caughtEx_25, "Could not detect a language from the Torznab title and description; leaving the language unset");
                             }
                         }
 
