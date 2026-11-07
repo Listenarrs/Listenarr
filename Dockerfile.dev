@@ -1,0 +1,22 @@
+# Development image: SDK + Node, source is bind-mounted at runtime (nothing is
+# COPYed in). Kept separate from the production Dockerfile so upstream changes
+# to that file merge cleanly.
+FROM mcr.microsoft.com/dotnet/sdk:10.0
+
+# Node 24 to match package.json "engines" and .nvmrc.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates gnupg procps \
+    && curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs ffmpeg \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Native filesystem scanning needs a real Linux mount; ffmpeg above also gives
+# us a working ffprobe, which the macOS auto-installer cannot provide.
+WORKDIR /src
+
+ENV DOTNET_USE_POLLING_FILE_WATCHER=1 \
+    DOTNET_WATCH_SUPPRESS_LAUNCH_BROWSER=1 \
+    ASPNETCORE_ENVIRONMENT=Development \
+    LISTENARR_CONTENT_ROOT=/src/.env/development
+
+EXPOSE 4545 5173
