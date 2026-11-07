@@ -24,6 +24,19 @@ namespace Listenarr.Infrastructure.Ffmpeg.Metadata
             metadata.TrackNumber ??= ParseNumericTag(tags, "track", "TRACK", "tracknumber", "TRACKNUMBER");
             metadata.DiscNumber ??= ParseNumericTag(tags, "disc", "DISC", "discnumber", "DISCNUMBER");
             metadata.Year ??= ParseNumericTag(tags, "date", "DATE", "year", "YEAR");
+
+            // Embedded audiobook identifiers. Audible/OpenAudible-tagged m4b files carry
+            // the ASIN (and sometimes an ISBN) in these tags; reading them here lets a scan
+            // adopt the identifier onto a bare audiobook and auto-populate its metadata.
+            if (string.IsNullOrWhiteSpace(metadata.Asin))
+            {
+                metadata.Asin = GetTag(tags, "ASIN", "asin", "AUDIBLE_ASIN", "audible_asin");
+            }
+
+            if (string.IsNullOrWhiteSpace(metadata.Isbn))
+            {
+                metadata.Isbn = GetTag(tags, "ISBN", "isbn");
+            }
         }
 
         private static string FirstNonEmpty(params string?[] candidates)
