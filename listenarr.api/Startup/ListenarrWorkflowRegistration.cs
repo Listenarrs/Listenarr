@@ -63,6 +63,14 @@ public static class ListenarrWorkflowRegistration
         services.AddScoped<ISearchResultFilter, ProductLikeTitleFilter>();
         services.AddScoped<ISearchResultFilter, MissingInformationFilter>();
         services.AddScoped<SearchResultFilterPipeline>();
+        services.AddScoped<IAutomaticSearchScoringService, AutomaticSearchScoringService>();
+        services.AddSingleton(provider =>
+        {
+            var catalog = Listenarr.Infrastructure.Search.Matching.ReleaseAnnotationCatalogLoader.LoadDefault();
+            if (!catalog.IsAvailable) provider.GetRequiredService<ILoggerFactory>().CreateLogger("ReleaseAnnotationCatalog")
+                .LogError("Release annotation catalog is unavailable; automatic identity confirmation is deferred");
+            return catalog;
+        });
         services.AddScoped<AsinCandidateCollector>();
         services.AddScoped<AsinEnricher>();
         services.AddScoped<SearchResultScorerService>();

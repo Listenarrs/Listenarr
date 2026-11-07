@@ -1,0 +1,7817 @@
+{
+ "note": "Library reference facts for the PR #591 historical corpus, keyed by case index. Taken from the same library on 2026-10-29; 34 corpus cases no longer have a download row and are absent. fullMetadataVerdict is BookIdentityMatcher at d1d1fb9e with these facts supplied.",
+ "cases": [
+  {
+   "index": 1,
+   "series": "Twain's Tom and Huck",
+   "seriesNumber": "2",
+   "narrators": [
+    "Elijah Wood"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Twain's Tom and Huck",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 2,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Ralph Cosham"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 3,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 4,
+   "series": "Leviathan",
+   "seriesNumber": "1",
+   "narrators": [
+    "Alan Cumming"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Leviathan",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 5,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Ron McLarty"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 9,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Ralph Cosham"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 14,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Michael Pennington"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 16,
+   "series": "The Mortal Instruments",
+   "seriesNumber": "5",
+   "narrators": [
+    "Molly C. Quinn"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Mortal Instruments",
+     "SeriesNumber": "5",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 17,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "John Slattery"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 18,
+   "series": "A Jack Ryan Novel (chronological order)",
+   "seriesNumber": "26",
+   "narrators": [
+    "Scott Brick"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "A Jack Ryan Novel (chronological order)",
+     "SeriesNumber": "26",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 19,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Scott Brick"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 25,
+   "series": "Honor Bound",
+   "seriesNumber": "5",
+   "narrators": [],
+   "memberships": [
+    {
+     "SeriesName": "Honor Bound",
+     "SeriesNumber": "5",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 26,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Alyssa Bresnahan"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 27,
+   "series": "Honor Bound",
+   "seriesNumber": "2",
+   "narrators": [
+    "Joe Barrett"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Honor Bound",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 29,
+   "series": "A Song of Ice and Fire",
+   "seriesNumber": null,
+   "narrators": [
+    "Roy Dotrice",
+    "Nicholas Guy Smith"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "A Song of Ice and Fire",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 30,
+   "series": "A Song of Ice and Fire",
+   "seriesNumber": null,
+   "narrators": [
+    "Roy Dotrice",
+    "Nicholas Guy Smith"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "A Song of Ice and Fire",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 31,
+   "series": "The Boxcar Children Mysteries",
+   "seriesNumber": "128",
+   "narrators": [
+    "Tim Gregory"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Boxcar Children Mysteries",
+     "SeriesNumber": "128",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 32,
+   "series": "War Dogs",
+   "seriesNumber": "2",
+   "narrators": [
+    "Jay Snyder"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "War Dogs",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 34,
+   "series": "Robots",
+   "seriesNumber": "1",
+   "narrators": [
+    "William Hope"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Robots",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 35,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Duke Fontaine"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 36,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Graeme Malcolm"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 37,
+   "series": "Private Australia",
+   "seriesNumber": "2",
+   "narrators": [
+    "Daniel Lepaine"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Private Australia",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 38,
+   "series": "Private",
+   "seriesNumber": "10",
+   "narrators": [
+    "Daniel Lapaine"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Private",
+     "SeriesNumber": "10",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 39,
+   "series": "Private",
+   "seriesNumber": "9",
+   "narrators": [
+    "Jay Snyder"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Private",
+     "SeriesNumber": "9",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 40,
+   "series": "Alex Cross Adventures",
+   "seriesNumber": "3",
+   "narrators": [
+    "Ako Mitchell"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Alex Cross Adventures",
+     "SeriesNumber": "3",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 41,
+   "series": "Tom Moon",
+   "seriesNumber": "1",
+   "narrators": [
+    "Corey Carthew"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Tom Moon",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 43,
+   "series": "The Expanse",
+   "seriesNumber": "6.5",
+   "narrators": [
+    "Jefferson Mays"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Expanse",
+     "SeriesNumber": "6.5",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 44,
+   "series": "The Expanse",
+   "seriesNumber": "7.5",
+   "narrators": [
+    "Jefferson Mays"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Expanse",
+     "SeriesNumber": "7.5",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "series_position_conflict"
+   }
+  },
+  {
+   "index": 45,
+   "series": "Alex Cross Adventures",
+   "seriesNumber": "36",
+   "narrators": [
+    "Dion Graham"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Alex Cross Adventures",
+     "SeriesNumber": "36",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 46,
+   "series": "Private",
+   "seriesNumber": "1",
+   "narrators": [
+    "Peter Hermann"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Private",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 48,
+   "series": "The Expanse",
+   "seriesNumber": "6",
+   "narrators": [
+    "Jefferson Mays"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Expanse",
+     "SeriesNumber": "6",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 49,
+   "series": "The Expanse",
+   "seriesNumber": "8",
+   "narrators": [
+    "Jefferson Mays"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Expanse",
+     "SeriesNumber": "8",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 50,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Tim Gregory"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 51,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Tim Gregory"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 52,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Rebecca Gallagher"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 53,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Tim Gregory"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 54,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Tim Gregory"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 55,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Rebecca Gallagher"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 56,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Tim Gregory"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 57,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Tim Gregory"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 58,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Tim Gregory"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 59,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Rebecca Gallagher"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 60,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Tim Gregory"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 61,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Rebecca Gallagher"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 62,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Tim Gregory"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 63,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Tim Gregory"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 64,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Rebecca Gallagher"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 65,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Rebecca Gallagher"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 66,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Tim Gregory"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 67,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Tim Gregory"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 68,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Rebecca Gallagher"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 69,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Tim Gregory"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 70,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Tim Gregory"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 71,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Rebecca Gallagher"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 72,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Tim Gregory"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 73,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Tim Gregory"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 74,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Tim Gregory"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 75,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Tim Gregory"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 76,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Tim Gregory"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 77,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Tim Gregory"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 78,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Rebecca Gallagher"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 79,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Tim Gregory"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 80,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Tim Gregory"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 81,
+   "series": "The First Law Trilogy",
+   "seriesNumber": "2",
+   "narrators": [
+    "Steven Pacey"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The First Law Trilogy",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 82,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Jonathan Keeble"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 83,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Karissa Vacker"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 84,
+   "series": "Jack Reacher",
+   "seriesNumber": "27",
+   "narrators": [
+    "Jeff Harding"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Jack Reacher",
+     "SeriesNumber": "27",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 85,
+   "series": "Twain's Tom and Huck",
+   "seriesNumber": "1",
+   "narrators": [
+    "Robin Field"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Twain's Tom and Huck",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 86,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Virtual Voice"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 87,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 91,
+   "series": "The Ender Saga",
+   "seriesNumber": "18",
+   "narrators": [],
+   "memberships": [
+    {
+     "SeriesName": "The Ender Saga",
+     "SeriesNumber": "18",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 92,
+   "series": "Maps in a Mirror",
+   "seriesNumber": "1",
+   "narrators": [
+    "David Birney",
+    "Scott Brick",
+    "Don Leslie"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Maps in a Mirror",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 94,
+   "series": "Red Rising",
+   "seriesNumber": "3",
+   "narrators": [
+    "Tim Gerard Reynolds"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Red Rising",
+     "SeriesNumber": "3",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 95,
+   "series": "Red Rising",
+   "seriesNumber": "4",
+   "narrators": [
+    "Tim Gerard Reynolds",
+    "John Curless",
+    "Julian Elfer",
+    "Aedin Moloney"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Red Rising",
+     "SeriesNumber": "4",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 96,
+   "series": "Red Rising",
+   "seriesNumber": "5",
+   "narrators": [
+    "Tim Gerard Reynolds",
+    "John Curless",
+    "Moira Quirk",
+    "James Langton",
+    "Rendah Heywood"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Red Rising",
+     "SeriesNumber": "5",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 97,
+   "series": "Apprentice Adept",
+   "seriesNumber": "1",
+   "narrators": [
+    "Traber Burns"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Apprentice Adept",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 98,
+   "series": "Apprentice Adept",
+   "seriesNumber": "2",
+   "narrators": [
+    "Traber Burns"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Apprentice Adept",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 99,
+   "series": "Private",
+   "seriesNumber": "21",
+   "narrators": [
+    "Trevor White"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Private",
+     "SeriesNumber": "21",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 101,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Steven Weber"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 102,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Stephen King",
+    "Joe Hill",
+    "Owen King"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 104,
+   "series": "A Jack Ryan Novel (chronological order)",
+   "seriesNumber": "27",
+   "narrators": [
+    "Scott Brick"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "A Jack Ryan Novel (chronological order)",
+     "SeriesNumber": "27",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 105,
+   "series": "Throne of Glass",
+   "seriesNumber": "3",
+   "narrators": [
+    "Elizabeth Evans"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Throne of Glass",
+     "SeriesNumber": "3",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 106,
+   "series": "Crescent City",
+   "seriesNumber": "1",
+   "narrators": [
+    "Elizabeth Evans"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Crescent City",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 107,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Marin Ireland"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 108,
+   "series": "The Dark Tower",
+   "seriesNumber": "6",
+   "narrators": [
+    "George Guidall"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Dark Tower",
+     "SeriesNumber": "6",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 109,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Holter Graham"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 110,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Seth Numrich",
+    "Stephen King"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 111,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Michael C. Hall"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 112,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Stephen King",
+    "Dylan Baker",
+    "Brooke Bloom",
+    "Hope Davis",
+    "Kathleen Chalfant",
+    "Santino Fontana",
+    "Peter Friedman",
+    "Cotter Smith",
+    "Will Patton",
+    "Edward Herrmann",
+    "Frederick Weller",
+    "Mare Winningham",
+    "Craig Wasson",
+    "Thomas Sadoski",
+    "Tim Sample"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 113,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Frank Muller"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 114,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Will Patton",
+    "Maggie Siff",
+    "Stephen King"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 115,
+   "series": "Presidential Agent",
+   "seriesNumber": "5",
+   "narrators": [],
+   "memberships": [
+    {
+     "SeriesName": "Presidential Agent",
+     "SeriesNumber": "5",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 116,
+   "series": "Otherland",
+   "seriesNumber": "3",
+   "narrators": [
+    "George Newbern"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Otherland",
+     "SeriesNumber": "3",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 119,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Lee Howard"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 120,
+   "series": "Fall of Radiance",
+   "seriesNumber": "1-5",
+   "narrators": [
+    "George Newbern"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Fall of Radiance",
+     "SeriesNumber": "1-5",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 121,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Robin Field"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 122,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Wil Wheaton"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 123,
+   "series": "The Dark Tower",
+   "seriesNumber": "1",
+   "narrators": [
+    "George Guidall"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Dark Tower",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 124,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Kevin T. Collins"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 125,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Kirby Heyborne"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 126,
+   "series": "Confessions",
+   "seriesNumber": "4",
+   "narrators": [
+    "Lauren Fortgang"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Confessions",
+     "SeriesNumber": "4",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 127,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Frank Muller"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 128,
+   "series": "Robots",
+   "seriesNumber": "0.2",
+   "narrators": [
+    "William Hope"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Robots",
+     "SeriesNumber": "0.2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 129,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Hugh Bonneville",
+    "Jason Isaacs",
+    "Sophie Okonedo",
+    "David Tennant",
+    "Alexander Vlahos",
+    "Eli Roth - introduction"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 130,
+   "series": "The Wheel of Time",
+   "seriesNumber": "4",
+   "narrators": [
+    "Rosamund Pike"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Wheel of Time",
+     "SeriesNumber": "4",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 131,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Emma Love",
+    "Charlie Thurston",
+    "Max Meyers"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 132,
+   "series": "Talisman",
+   "seriesNumber": "1",
+   "narrators": [
+    "Frank Muller"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Talisman",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 133,
+   "series": "Talisman",
+   "seriesNumber": "2",
+   "narrators": [
+    "Frank Muller"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Talisman",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 134,
+   "series": "The Dark Tower",
+   "seriesNumber": "8",
+   "narrators": [
+    "Stephen King"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Dark Tower",
+     "SeriesNumber": "8",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 135,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Anton Lesser"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 136,
+   "series": "The Lord of the Rings",
+   "seriesNumber": "3",
+   "narrators": [
+    "Rob Inglis"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Lord of the Rings",
+     "SeriesNumber": "3",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 137,
+   "series": "The Empyrean",
+   "seriesNumber": null,
+   "narrators": [
+    "Full Cast"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Empyrean",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 138,
+   "series": "Honor Bound",
+   "seriesNumber": "2",
+   "narrators": [],
+   "memberships": [
+    {
+     "SeriesName": "Honor Bound",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 139,
+   "series": "Badge of Honor",
+   "seriesNumber": "1",
+   "narrators": [],
+   "memberships": [
+    {
+     "SeriesName": "Badge of Honor",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 140,
+   "series": "Badge of Honor",
+   "seriesNumber": "9",
+   "narrators": [],
+   "memberships": [
+    {
+     "SeriesName": "Badge of Honor",
+     "SeriesNumber": "9",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 141,
+   "series": "Honor Bound",
+   "seriesNumber": "3",
+   "narrators": [],
+   "memberships": [
+    {
+     "SeriesName": "Honor Bound",
+     "SeriesNumber": "3",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 142,
+   "series": "Honor Bound",
+   "seriesNumber": "4",
+   "narrators": [],
+   "memberships": [
+    {
+     "SeriesName": "Honor Bound",
+     "SeriesNumber": "4",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 144,
+   "series": "Presidential Agent",
+   "seriesNumber": "4",
+   "narrators": [],
+   "memberships": [
+    {
+     "SeriesName": "Presidential Agent",
+     "SeriesNumber": "4",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 145,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Gary Bennett"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 146,
+   "series": "The Dark Tower",
+   "seriesNumber": "5",
+   "narrators": [
+    "George Guidall"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Dark Tower",
+     "SeriesNumber": "5",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 147,
+   "series": "Alcatraz versus the Evil Librarians",
+   "seriesNumber": "4",
+   "narrators": [
+    "Ramón de Ocampo"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Alcatraz versus the Evil Librarians",
+     "SeriesNumber": "4",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 148,
+   "series": "A Dark Holiday",
+   "seriesNumber": "1",
+   "narrators": [
+    "Amanda Willow",
+    "Joe Arden"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "A Dark Holiday",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 149,
+   "series": "Women's Murder Club",
+   "seriesNumber": "27",
+   "narrators": [],
+   "memberships": [
+    {
+     "SeriesName": "Women's Murder Club",
+     "SeriesNumber": "27",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 150,
+   "series": "Secret Projects",
+   "seriesNumber": null,
+   "narrators": [],
+   "memberships": [
+    {
+     "SeriesName": "Secret Projects",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 151,
+   "series": "Star Force",
+   "seriesNumber": "5",
+   "narrators": [
+    "Mark Boyett"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Star Force",
+     "SeriesNumber": "5",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 152,
+   "series": "Jack Reacher",
+   "seriesNumber": "31",
+   "narrators": [
+    "Scott Brick"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Jack Reacher",
+     "SeriesNumber": "31",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 154,
+   "series": "The Dark Tower",
+   "seriesNumber": "3",
+   "narrators": [
+    "Frank Muller"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Dark Tower",
+     "SeriesNumber": "3",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 155,
+   "series": "Clandestine Operations",
+   "seriesNumber": "5",
+   "narrators": [
+    "Scott Brick"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Clandestine Operations",
+     "SeriesNumber": "5",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 157,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Tim Gregory"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 158,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Ray Porter"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 159,
+   "series": "Xanth",
+   "seriesNumber": "44",
+   "narrators": [],
+   "memberships": [
+    {
+     "SeriesName": "Xanth",
+     "SeriesNumber": "44",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 160,
+   "series": "The Demon Cycle",
+   "seriesNumber": "3.5",
+   "narrators": [],
+   "memberships": [
+    {
+     "SeriesName": "The Demon Cycle",
+     "SeriesNumber": "3.5",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 161,
+   "series": "Alice in Wonderland",
+   "seriesNumber": "1",
+   "narrators": [
+    "Stephanie Lundberg"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Alice in Wonderland",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 162,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Glenn Hascall"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 163,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Ralph Lister"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 164,
+   "series": "Arisen",
+   "seriesNumber": null,
+   "narrators": [
+    "R.C. Bray"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Arisen",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 165,
+   "series": "The Empyrean",
+   "seriesNumber": "3",
+   "narrators": [
+    "Megan Poppy",
+    "Laura C. Harris",
+    "Su Ling Chan",
+    "Torian Brackett",
+    "full cast",
+    "Khaya Fraites",
+    "Gabriel Michael",
+    "Taylor Coan",
+    "Jessica Schly",
+    "LaMont Ridgell",
+    "Robb Moreira",
+    "Danny Gavigan"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Empyrean",
+     "SeriesNumber": "3",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 166,
+   "series": "Talisman",
+   "seriesNumber": "3",
+   "narrators": [
+    "Patton Oswalt"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Talisman",
+     "SeriesNumber": "3",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 167,
+   "series": "Alvin Maker",
+   "seriesNumber": "7",
+   "narrators": [
+    "Gabrielle de Cuir",
+    "Kirby Heyborne",
+    "Mirron Willis",
+    "Nan McNamara",
+    "Scott Brick",
+    "Stefan Rudnicki"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Alvin Maker",
+     "SeriesNumber": "7",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 168,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 169,
+   "series": "Owen Taylor",
+   "seriesNumber": "2",
+   "narrators": [
+    "Kyf Brewer"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Owen Taylor",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 170,
+   "series": "Holmes, Margaret & Poe",
+   "seriesNumber": "3",
+   "narrators": [
+    "Christine Lakin"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Holmes, Margaret & Poe",
+     "SeriesNumber": "3",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 171,
+   "series": "Galaxy's Edge",
+   "seriesNumber": "10",
+   "narrators": [
+    "Mark Boyett"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Galaxy's Edge",
+     "SeriesNumber": "10",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 172,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Will Collyer"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 173,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Ray Porter"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 174,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "full cast"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 175,
+   "series": "Jack Reacher",
+   "seriesNumber": "3",
+   "narrators": [
+    "Johnathan McClain"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Jack Reacher",
+     "SeriesNumber": "3",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 176,
+   "series": "Jack Reacher",
+   "seriesNumber": "4",
+   "narrators": [
+    "Johnathan McClain"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Jack Reacher",
+     "SeriesNumber": "4",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 177,
+   "series": "Jack Reacher",
+   "seriesNumber": "5",
+   "narrators": [
+    "Jeff Harding"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Jack Reacher",
+     "SeriesNumber": "5",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 178,
+   "series": "Jack Reacher",
+   "seriesNumber": "6",
+   "narrators": [
+    "Jeff Harding"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Jack Reacher",
+     "SeriesNumber": "6",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 179,
+   "series": "The Dresden Files",
+   "seriesNumber": "7",
+   "narrators": [
+    "James Marsters"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Dresden Files",
+     "SeriesNumber": "7",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 180,
+   "series": "Jack Reacher",
+   "seriesNumber": "8",
+   "narrators": [
+    "Dick Hill"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Jack Reacher",
+     "SeriesNumber": "8",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 182,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Craig Wasson"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 183,
+   "series": "Women's Murder Club",
+   "seriesNumber": "11",
+   "narrators": [
+    "January LaVoy"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Women's Murder Club",
+     "SeriesNumber": "11",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 184,
+   "series": "Jack Reacher",
+   "seriesNumber": "12",
+   "narrators": [
+    "Dick Hill"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Jack Reacher",
+     "SeriesNumber": "12",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 185,
+   "series": "Jack Reacher",
+   "seriesNumber": "13",
+   "narrators": [
+    "Dick Hill"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Jack Reacher",
+     "SeriesNumber": "13",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 186,
+   "series": "Women's Murder Club",
+   "seriesNumber": "3",
+   "narrators": [
+    "Carolyn McCormick"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Women's Murder Club",
+     "SeriesNumber": "3",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 188,
+   "series": "Voyages Extraordinaires",
+   "seriesNumber": "21",
+   "narrators": [
+    "John Bolen"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Voyages Extraordinaires",
+     "SeriesNumber": "21",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 189,
+   "series": "A Michael Bennett Thriller",
+   "seriesNumber": "2",
+   "narrators": [
+    "Bobby Cannavale",
+    "Dallas Roberts"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "A Michael Bennett Thriller",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 190,
+   "series": "A Michael Bennett Thriller",
+   "seriesNumber": "2",
+   "narrators": [
+    "Bobby Cannavale"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "A Michael Bennett Thriller",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 191,
+   "series": "Nameless: Season Two",
+   "seriesNumber": "1",
+   "narrators": [
+    "Edoardo Ballerini"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Nameless: Season Two",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 192,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Robin Miles",
+    "Erica Armstrong Dunbar"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 193,
+   "series": "Akashic Books: Noir",
+   "seriesNumber": null,
+   "narrators": [
+    "Jonathan Davis"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Akashic Books: Noir",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 194,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Brandon Williams"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 195,
+   "series": "Honor Harrington",
+   "seriesNumber": "13",
+   "narrators": [
+    "Allyson Johnson"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Honor Harrington",
+     "SeriesNumber": "13",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 197,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "AI Voice Charles Owen"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 198,
+   "series": "Twain's Tom and Huck",
+   "seriesNumber": "2",
+   "narrators": [
+    "Elijah Wood"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Twain's Tom and Huck",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 199,
+   "series": "Twain's Tom and Huck",
+   "seriesNumber": "2",
+   "narrators": [
+    "Elijah Wood"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Twain's Tom and Huck",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 200,
+   "series": "Twain's Tom and Huck",
+   "seriesNumber": "2",
+   "narrators": [
+    "Elijah Wood"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Twain's Tom and Huck",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 201,
+   "series": "Xanth",
+   "seriesNumber": "31",
+   "narrators": [],
+   "memberships": [
+    {
+     "SeriesName": "Xanth",
+     "SeriesNumber": "31",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 202,
+   "series": "A Sea Haven Novel",
+   "seriesNumber": "3",
+   "narrators": [
+    "Phil Gigante"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "A Sea Haven Novel",
+     "SeriesNumber": "3",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 203,
+   "series": "Alice in Wonderland",
+   "seriesNumber": "1",
+   "narrators": [
+    "Stephanie Lundberg"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Alice in Wonderland",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 204,
+   "series": "DI Fawley",
+   "seriesNumber": "4",
+   "narrators": [
+    "Lee Ingleby",
+    "Emma Cunniffe"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "DI Fawley",
+     "SeriesNumber": "4",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 205,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Ray Porter"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 206,
+   "series": "Tracking Trouble",
+   "seriesNumber": "2",
+   "narrators": [
+    "Vivienne Leheny"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Tracking Trouble",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 207,
+   "series": "Sector 64",
+   "seriesNumber": "1",
+   "narrators": [
+    "R.C. Bray"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Sector 64",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 208,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "AI Voice Charles Owen"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 210,
+   "series": "The Tower and Hive",
+   "seriesNumber": "4",
+   "narrators": [
+    "Jean Reed Bahle"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Tower and Hive",
+     "SeriesNumber": "4",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 211,
+   "series": "Torpedo Ink",
+   "seriesNumber": "6",
+   "narrators": [
+    "Ryan West"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Torpedo Ink",
+     "SeriesNumber": "6",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 212,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Mark Bramhall"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 213,
+   "series": "Assignment in Eternity",
+   "seriesNumber": "1-2",
+   "narrators": [
+    "Bronson Pinchot"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Assignment in Eternity",
+     "SeriesNumber": "1-2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 214,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "George Guidall"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 215,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Stephen King",
+    "Dylan Baker",
+    "Kyle Beltran",
+    "Matthew Broderick",
+    "Norbert Leo Butz",
+    "Michael C. Hall",
+    "Paul Giamatti",
+    "Dana Ivey",
+    "Will Patton",
+    "Robert Petkoff",
+    "David Morse",
+    "Lois Smith",
+    "Frances Sternhagen"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 217,
+   "series": "DI Fawley",
+   "seriesNumber": "4",
+   "narrators": [
+    "Lee Ingleby",
+    "Emma Cunniffe"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "DI Fawley",
+     "SeriesNumber": "4",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 218,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Mark Sanderlin"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 219,
+   "series": "Torpedo Ink",
+   "seriesNumber": "9",
+   "narrators": [
+    "Ryan West"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Torpedo Ink",
+     "SeriesNumber": "9",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 220,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Rachel L. Jacobs"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 221,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Robin Miles",
+    "Erica Armstrong Dunbar"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 222,
+   "series": "Alex Cross Adventures",
+   "seriesNumber": "4",
+   "narrators": [
+    "Jeff Harding",
+    "Raj Ghatak"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Alex Cross Adventures",
+     "SeriesNumber": "4",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 223,
+   "series": "Alex Cross Adventures",
+   "seriesNumber": "4",
+   "narrators": [
+    "Jeff Harding",
+    "Raj Ghatak"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Alex Cross Adventures",
+     "SeriesNumber": "4",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 224,
+   "series": "Alex Cross Adventures",
+   "seriesNumber": "4",
+   "narrators": [
+    "Jeff Harding",
+    "Raj Ghatak"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Alex Cross Adventures",
+     "SeriesNumber": "4",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 225,
+   "series": "Jack Reacher",
+   "seriesNumber": "31",
+   "narrators": [
+    "Scott Brick"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Jack Reacher",
+     "SeriesNumber": "31",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 228,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Michael Pennington"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 229,
+   "series": "Realms of the Elderlings",
+   "seriesNumber": "12",
+   "narrators": [
+    "Saskia Butler"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Realms of the Elderlings",
+     "SeriesNumber": "12",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 230,
+   "series": "The Divine Cities",
+   "seriesNumber": "1",
+   "narrators": [
+    "Alma Cuervo"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Divine Cities",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 231,
+   "series": "Men at War",
+   "seriesNumber": "1",
+   "narrators": [],
+   "memberships": [
+    {
+     "SeriesName": "Men at War",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 232,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Rebecca Gallagher"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 233,
+   "series": "Slip Runner",
+   "seriesNumber": "1",
+   "narrators": [
+    "Neill Thorne"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Slip Runner",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "series_position_conflict"
+   }
+  },
+  {
+   "index": 234,
+   "series": "Alex Cross Adventures",
+   "seriesNumber": "17",
+   "narrators": [
+    "Andre Braugher",
+    "Jay O. Sanders"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Alex Cross Adventures",
+     "SeriesNumber": "17",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 237,
+   "series": "Alex Cross Adventures",
+   "seriesNumber": "23",
+   "narrators": [
+    "Ruben Santiago-Hudson",
+    "Jefferson Mays"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Alex Cross Adventures",
+     "SeriesNumber": "23",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 238,
+   "series": "Alex Cross Adventures",
+   "seriesNumber": "23",
+   "narrators": [
+    "Ruben Santiago-Hudson",
+    "Jefferson Mays"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Alex Cross Adventures",
+     "SeriesNumber": "23",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 241,
+   "series": "Liaden Universe",
+   "seriesNumber": "2",
+   "narrators": [
+    "Kevin T. Collins"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Liaden Universe",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 242,
+   "series": "Crystal Singer Series",
+   "seriesNumber": "3",
+   "narrators": [
+    "Adrienne Barbeau"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Crystal Singer Series",
+     "SeriesNumber": "3",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 243,
+   "series": "Liaden Universe",
+   "seriesNumber": "1",
+   "narrators": [
+    "Kevin T. Collins"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Liaden Universe",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 244,
+   "series": "Drake Sisters",
+   "seriesNumber": "4",
+   "narrators": [
+    "Alyssa Bresnahan"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Drake Sisters",
+     "SeriesNumber": "4",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 246,
+   "series": "The Dresden Files",
+   "seriesNumber": "7",
+   "narrators": [
+    "James Marsters"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Dresden Files",
+     "SeriesNumber": "7",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "ExactTitleOnly",
+    "Reason": "exact_title_without_corroboration"
+   }
+  },
+  {
+   "index": 247,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Glenn Hascall"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 248,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Chloe Pfeiffer"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 249,
+   "series": "Frankenstein",
+   "seriesNumber": "4",
+   "narrators": [
+    "Christopher Lane"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Frankenstein",
+     "SeriesNumber": "4",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 250,
+   "series": "Frankenstein",
+   "seriesNumber": "4",
+   "narrators": [
+    "Christopher Lane"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Frankenstein",
+     "SeriesNumber": "4",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 251,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "January LaVoy"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 252,
+   "series": "Dean Koontz: From the Vault",
+   "seriesNumber": null,
+   "narrators": [
+    "Jane Oppenheimer"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Dean Koontz: From the Vault",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 253,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Kirsten Kairos"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 254,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Richard Ferrone"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 255,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Richard Ferrone"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 256,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Natalie Ross"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 257,
+   "series": "Torpedo Ink",
+   "seriesNumber": "4",
+   "narrators": [
+    "Jim Frangione"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Torpedo Ink",
+     "SeriesNumber": "4",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 260,
+   "series": "The Dresden Files",
+   "seriesNumber": "7",
+   "narrators": [
+    "James Marsters"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Dresden Files",
+     "SeriesNumber": "7",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 261,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "John Slattery"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 263,
+   "series": "1001 Dark Nights",
+   "seriesNumber": null,
+   "narrators": [
+    "Jennifer Mack"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "1001 Dark Nights",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 264,
+   "series": "Jack Reacher",
+   "seriesNumber": "5",
+   "narrators": [
+    "Dick Hill"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Jack Reacher",
+     "SeriesNumber": "5",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 265,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Stefan Rudnicki",
+    "Carrington Macduffie"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 266,
+   "series": "Agents of the Crown",
+   "seriesNumber": "1",
+   "narrators": [
+    "Vivienne Leheny"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Agents of the Crown",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 267,
+   "series": "DI Fawley",
+   "seriesNumber": "4",
+   "narrators": [
+    "Lee Ingleby",
+    "Emma Cunniffe"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "DI Fawley",
+     "SeriesNumber": "4",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 269,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Scott Brick"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 272,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Glenn Hascall"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 273,
+   "series": "Detective Luc Moncrief",
+   "seriesNumber": "3",
+   "narrators": [
+    "Jean Brassard"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Detective Luc Moncrief",
+     "SeriesNumber": "3",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 274,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Malcolm Hillgartner"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "ExactTitleOnly",
+    "Reason": "exact_title_without_corroboration"
+   }
+  },
+  {
+   "index": 276,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Bernard Mayes"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 277,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Bernard Mayes"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 278,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Bernard Mayes"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 279,
+   "series": "Men at War",
+   "seriesNumber": "1",
+   "narrators": [],
+   "memberships": [
+    {
+     "SeriesName": "Men at War",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 281,
+   "series": "Leviathan",
+   "seriesNumber": "1",
+   "narrators": [
+    "Alan Cumming"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Leviathan",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 282,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Dion Graham"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 284,
+   "series": "Men at War",
+   "seriesNumber": "4",
+   "narrators": [
+    "Scott Brick"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Men at War",
+     "SeriesNumber": "4",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 286,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "January LaVoy"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 287,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "January LaVoy"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 290,
+   "series": "Drake Sisters",
+   "seriesNumber": "7",
+   "narrators": [
+    "Alyssa Bresnahan"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Drake Sisters",
+     "SeriesNumber": "7",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 291,
+   "series": "1001 Dark Nights",
+   "seriesNumber": null,
+   "narrators": [
+    "Gregory Salinas"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "1001 Dark Nights",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 292,
+   "series": "1001 Dark Nights",
+   "seriesNumber": null,
+   "narrators": [],
+   "memberships": [
+    {
+     "SeriesName": "1001 Dark Nights",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 293,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Lauren Fortgang"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 294,
+   "series": "Death Before Dragons",
+   "seriesNumber": "0.5",
+   "narrators": [
+    "Vivienne Leheny"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Death Before Dragons",
+     "SeriesNumber": "0.5",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 295,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Tara Sands"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 296,
+   "series": "I Funny",
+   "seriesNumber": "2",
+   "narrators": [
+    "Frankie Seratch"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "I Funny",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 297,
+   "series": "I Funny",
+   "seriesNumber": "2",
+   "narrators": [
+    "Frankie Seratch"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "I Funny",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 298,
+   "series": "I Funny",
+   "seriesNumber": "1",
+   "narrators": [
+    "Frankie Seratch"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "I Funny",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 299,
+   "series": "I Funny",
+   "seriesNumber": "1",
+   "narrators": [
+    "Frankie Seratch"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "I Funny",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 300,
+   "series": "Christian Heroes: Then & Now",
+   "seriesNumber": null,
+   "narrators": [
+    "Tim Gregory"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Christian Heroes: Then & Now",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 301,
+   "series": "The Lord of the Rings",
+   "seriesNumber": "3",
+   "narrators": [
+    "Rob Inglis"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Lord of the Rings",
+     "SeriesNumber": "3",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 302,
+   "series": "Jacky Ha-Ha",
+   "seriesNumber": "1",
+   "narrators": [
+    "Tara Sands"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Jacky Ha-Ha",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 304,
+   "series": "Tom Moon",
+   "seriesNumber": "1",
+   "narrators": [
+    "Corey Carthew"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Tom Moon",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 305,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Lauren Fortgang"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 306,
+   "series": "Maximum Ride",
+   "seriesNumber": "7",
+   "narrators": [
+    "Rebecca Soler"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Maximum Ride",
+     "SeriesNumber": "7",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "series_position_conflict"
+   }
+  },
+  {
+   "index": 307,
+   "series": "Maximum Ride",
+   "seriesNumber": "6",
+   "narrators": [
+    "Jill Apple"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Maximum Ride",
+     "SeriesNumber": "6",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 308,
+   "series": "Maximum Ride",
+   "seriesNumber": "7",
+   "narrators": [
+    "Rebecca Soler"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Maximum Ride",
+     "SeriesNumber": "7",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 309,
+   "series": "Maximum Ride",
+   "seriesNumber": "8",
+   "narrators": [
+    "Rebecca Soler"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Maximum Ride",
+     "SeriesNumber": "8",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 310,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Kevin T. Collins"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 311,
+   "series": "Private",
+   "seriesNumber": "8",
+   "narrators": [
+    "Amerjit Deu",
+    "Raj Ghatak"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Private",
+     "SeriesNumber": "8",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 312,
+   "series": "Private India",
+   "seriesNumber": "1",
+   "narrators": [
+    "Amerjit Deu",
+    "Raj Ghatak"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Private India",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 313,
+   "series": "Women's Murder Club",
+   "seriesNumber": "13",
+   "narrators": [
+    "January LaVoy"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Women's Murder Club",
+     "SeriesNumber": "13",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 314,
+   "series": "Private",
+   "seriesNumber": "8",
+   "narrators": [
+    "Amerjit Deu",
+    "Raj Ghatak"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Private",
+     "SeriesNumber": "8",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 315,
+   "series": "Women's Murder Club",
+   "seriesNumber": "13",
+   "narrators": [
+    "January LaVoy"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Women's Murder Club",
+     "SeriesNumber": "13",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 316,
+   "series": "Women's Murder Club",
+   "seriesNumber": "13",
+   "narrators": [
+    "January LaVoy"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Women's Murder Club",
+     "SeriesNumber": "13",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 317,
+   "series": "Women's Murder Club",
+   "seriesNumber": "13",
+   "narrators": [
+    "January LaVoy"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Women's Murder Club",
+     "SeriesNumber": "13",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 318,
+   "series": "Women's Murder Club",
+   "seriesNumber": "15",
+   "narrators": [],
+   "memberships": [
+    {
+     "SeriesName": "Women's Murder Club",
+     "SeriesNumber": "15",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 319,
+   "series": "Alex Cross Adventures",
+   "seriesNumber": "8",
+   "narrators": [
+    "Peter Jay Fernandez",
+    "Michael Emerson"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Alex Cross Adventures",
+     "SeriesNumber": "8",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 320,
+   "series": "1001 Dark Nights",
+   "seriesNumber": null,
+   "narrators": [],
+   "memberships": [
+    {
+     "SeriesName": "1001 Dark Nights",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 321,
+   "series": "Alex Cross Adventures",
+   "seriesNumber": "11",
+   "narrators": [
+    "Peter Jay Fernandez",
+    "Melissa Leo",
+    "Michael Louis Wells"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Alex Cross Adventures",
+     "SeriesNumber": "11",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 322,
+   "series": "Middle School",
+   "seriesNumber": "4",
+   "narrators": [
+    "Bryan Kennedy"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Middle School",
+     "SeriesNumber": "4",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 323,
+   "series": "Private Europe",
+   "seriesNumber": "3",
+   "narrators": [
+    "January LaVoy",
+    "Ari Fliakos"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Private Europe",
+     "SeriesNumber": "3",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 325,
+   "series": "Women's Murder Club",
+   "seriesNumber": "5",
+   "narrators": [
+    "Carolyn McCormick"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Women's Murder Club",
+     "SeriesNumber": "5",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 326,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Will Patton"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 327,
+   "series": "Alex Cross Adventures",
+   "seriesNumber": "12",
+   "narrators": [
+    "Peter Jay Fernandez",
+    "Jay O. Sanders"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Alex Cross Adventures",
+     "SeriesNumber": "12",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 328,
+   "series": "Private",
+   "seriesNumber": "3",
+   "narrators": [
+    "Paul Panting"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Private",
+     "SeriesNumber": "3",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 330,
+   "series": "Private",
+   "seriesNumber": "1",
+   "narrators": [
+    "Peter Hermann"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Private",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 331,
+   "series": "Private",
+   "seriesNumber": "9",
+   "narrators": [
+    "Jay Snyder"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Private",
+     "SeriesNumber": "9",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 332,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Christian Rummel"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 333,
+   "series": "Women's Murder Club",
+   "seriesNumber": "16",
+   "narrators": [],
+   "memberships": [
+    {
+     "SeriesName": "Women's Murder Club",
+     "SeriesNumber": "16",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 334,
+   "series": "Women's Murder Club",
+   "seriesNumber": "2",
+   "narrators": [
+    "Melissa Leo",
+    "Jeremy Piven"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Women's Murder Club",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 335,
+   "series": "Alex Cross Adventures",
+   "seriesNumber": "23",
+   "narrators": [
+    "Ruben Santiago-Hudson",
+    "Jefferson Mays"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Alex Cross Adventures",
+     "SeriesNumber": "23",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 336,
+   "series": "Alex Cross BookShots",
+   "seriesNumber": "1",
+   "narrators": [
+    "Ruben Santiago-Hudson"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Alex Cross BookShots",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 337,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "January LaVoy"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 338,
+   "series": "Alex Cross Adventures",
+   "seriesNumber": "18",
+   "narrators": [
+    "Andre Braugher",
+    "Zach Grenier"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Alex Cross Adventures",
+     "SeriesNumber": "18",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 339,
+   "series": "Alex Cross BookShots",
+   "seriesNumber": "1",
+   "narrators": [
+    "Ruben Santiago-Hudson"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Alex Cross BookShots",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 340,
+   "series": "Zoo",
+   "seriesNumber": "1",
+   "narrators": [
+    "Jay Snyder"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Zoo",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 341,
+   "series": "Zoo",
+   "seriesNumber": "2",
+   "narrators": [
+    "Jay Snyder"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Zoo",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 343,
+   "series": "Lindsay Buroker",
+   "seriesNumber": "1",
+   "narrators": [
+    "Vivienne Leheny"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Lindsay Buroker",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 344,
+   "series": "Death Before Dragons",
+   "seriesNumber": "8",
+   "narrators": [
+    "Vivienne Leheny"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Death Before Dragons",
+     "SeriesNumber": "8",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 345,
+   "series": "Fuzzy Sapiens",
+   "seriesNumber": "7",
+   "narrators": [
+    "Wil Wheaton",
+    "John Scalzi - introduction"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Fuzzy Sapiens",
+     "SeriesNumber": "7",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 346,
+   "series": "Daniel Codex",
+   "seriesNumber": "1",
+   "narrators": [
+    "Seth Podowitz"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Daniel Codex",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 347,
+   "series": "Private India",
+   "seriesNumber": "2",
+   "narrators": [
+    "Sartaj Garewal"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Private India",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 348,
+   "series": "Alex Cross Adventures",
+   "seriesNumber": "17",
+   "narrators": [
+    "Andre Braugher",
+    "Jay O. Sanders"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Alex Cross Adventures",
+     "SeriesNumber": "17",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 349,
+   "series": "Alex Cross Adventures",
+   "seriesNumber": "18",
+   "narrators": [
+    "Andre Braugher",
+    "Zach Grenier"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Alex Cross Adventures",
+     "SeriesNumber": "18",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 350,
+   "series": "Alex Cross BookShots",
+   "seriesNumber": "1",
+   "narrators": [
+    "Ruben Santiago-Hudson"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Alex Cross BookShots",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 351,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Jeff Woodman",
+    "Jason Culp"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 352,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Abby Craden"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 353,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Abby Craden"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 354,
+   "series": "Men at War",
+   "seriesNumber": "1",
+   "narrators": [],
+   "memberships": [
+    {
+     "SeriesName": "Men at War",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 355,
+   "series": "Jack Reacher",
+   "seriesNumber": "12",
+   "narrators": [
+    "Dick Hill"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Jack Reacher",
+     "SeriesNumber": "12",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 356,
+   "series": "Jack Reacher",
+   "seriesNumber": "19.5",
+   "narrators": [
+    "Kerry Shale"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Jack Reacher",
+     "SeriesNumber": "19.5",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 358,
+   "series": "Alice in Wonderland",
+   "seriesNumber": "1",
+   "narrators": [
+    "Stephanie Lundberg"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Alice in Wonderland",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 359,
+   "series": "Tom Moon",
+   "seriesNumber": "1",
+   "narrators": [
+    "Corey Carthew"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Tom Moon",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 360,
+   "series": "Alex Cross Adventures",
+   "seriesNumber": "11",
+   "narrators": [
+    "Peter Jay Fernandez",
+    "Melissa Leo",
+    "Michael Louis Wells"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Alex Cross Adventures",
+     "SeriesNumber": "11",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 361,
+   "series": "Drake Sisters",
+   "seriesNumber": "1",
+   "narrators": [
+    "Karina Galt"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Drake Sisters",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 362,
+   "series": "Drake Sisters",
+   "seriesNumber": "1",
+   "narrators": [
+    "Karina Galt"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Drake Sisters",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "ExactTitleOnly",
+    "Reason": "exact_title_without_corroboration"
+   }
+  },
+  {
+   "index": 363,
+   "series": "Classic Starts",
+   "seriesNumber": null,
+   "narrators": [
+    "Rebecca K. Reynolds"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Classic Starts",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 365,
+   "series": "Twain's Tom and Huck",
+   "seriesNumber": "2",
+   "narrators": [
+    "Elijah Wood"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Twain's Tom and Huck",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 366,
+   "series": "Twain's Tom and Huck",
+   "seriesNumber": "2",
+   "narrators": [
+    "Elijah Wood"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Twain's Tom and Huck",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 367,
+   "series": "Alex Cross Adventures",
+   "seriesNumber": "2",
+   "narrators": [
+    "Michael Kramer"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Alex Cross Adventures",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 368,
+   "series": "Alex Cross Adventures",
+   "seriesNumber": "11",
+   "narrators": [
+    "Peter Jay Fernandez",
+    "Melissa Leo",
+    "Michael Louis Wells"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Alex Cross Adventures",
+     "SeriesNumber": "11",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 369,
+   "series": "The Mad Mick Series",
+   "seriesNumber": "2",
+   "narrators": [
+    "Kevin Pierce"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Mad Mick Series",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 370,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Frank Muller"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 371,
+   "series": "Arisen",
+   "seriesNumber": "12",
+   "narrators": [
+    "R.C. Bray"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Arisen",
+     "SeriesNumber": "12",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 372,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Kevin T. Collins"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 373,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Mark Nelson"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 374,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "D. Michaels"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 375,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "T. Ryder Smith"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 376,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "T. Ryder Smith"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 379,
+   "series": "Drake Sisters",
+   "seriesNumber": "3",
+   "narrators": [
+    "Alyssa Bresnahan"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Drake Sisters",
+     "SeriesNumber": "3",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 381,
+   "series": "Jack Reacher",
+   "seriesNumber": "7",
+   "narrators": [
+    "Jeff Harding"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Jack Reacher",
+     "SeriesNumber": "7",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 383,
+   "series": "The Demon Cycle",
+   "seriesNumber": "2",
+   "narrators": [
+    "Pete Bradbury"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Demon Cycle",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 384,
+   "series": "Apprentice Adept",
+   "seriesNumber": "1",
+   "narrators": [
+    "Traber Burns"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Apprentice Adept",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 385,
+   "series": "Apprentice Adept",
+   "seriesNumber": "2",
+   "narrators": [
+    "Traber Burns"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Apprentice Adept",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 386,
+   "series": "Mode",
+   "seriesNumber": "3",
+   "narrators": [
+    "Mark Winston"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Mode",
+     "SeriesNumber": "3",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 387,
+   "series": "1001 Dark Nights",
+   "seriesNumber": null,
+   "narrators": [
+    "Sofia Willingham"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "1001 Dark Nights",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 389,
+   "series": "Private",
+   "seriesNumber": "10",
+   "narrators": [
+    "Daniel Lapaine"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Private",
+     "SeriesNumber": "10",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 390,
+   "series": "Private",
+   "seriesNumber": "16",
+   "narrators": [
+    "Trevor White",
+    "Kate Handford"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Private",
+     "SeriesNumber": "16",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 391,
+   "series": "Private India",
+   "seriesNumber": "1",
+   "narrators": [
+    "Amerjit Deu",
+    "Raj Ghatak"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Private India",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 392,
+   "series": "Private",
+   "seriesNumber": "8",
+   "narrators": [
+    "Amerjit Deu",
+    "Raj Ghatak"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Private",
+     "SeriesNumber": "8",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 393,
+   "series": "Private",
+   "seriesNumber": "1",
+   "narrators": [
+    "Peter Hermann"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Private",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 394,
+   "series": "Private",
+   "seriesNumber": "16",
+   "narrators": [
+    "Trevor White",
+    "Kate Handford"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Private",
+     "SeriesNumber": "16",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 395,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Eric Roberts"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 396,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Scott Brick"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 397,
+   "series": "The Lord of the Rings",
+   "seriesNumber": "3",
+   "narrators": [
+    "Rob Inglis"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Lord of the Rings",
+     "SeriesNumber": "3",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 398,
+   "series": "1001 Dark Nights",
+   "seriesNumber": null,
+   "narrators": [
+    "Abby Craden"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "1001 Dark Nights",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 399,
+   "series": "The Scot Harvath Series",
+   "seriesNumber": "21",
+   "narrators": [
+    "Armand Schultz"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Scot Harvath Series",
+     "SeriesNumber": "21",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 400,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Tom Weiner"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 401,
+   "series": "Drake Sisters",
+   "seriesNumber": "5",
+   "narrators": [
+    "Alyssa Bresnahan"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Drake Sisters",
+     "SeriesNumber": "5",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 402,
+   "series": "Torpedo Ink",
+   "seriesNumber": "7",
+   "narrators": [
+    "Ryan West"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Torpedo Ink",
+     "SeriesNumber": "7",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 403,
+   "series": "Leviathan",
+   "seriesNumber": "1",
+   "narrators": [
+    "Alan Cumming"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Leviathan",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 404,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Kathleen McInerney"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 406,
+   "series": "Shadow Riders",
+   "seriesNumber": "8",
+   "narrators": [
+    "Jim Frangione"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Shadow Riders",
+     "SeriesNumber": "8",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 407,
+   "series": "Shadow Riders",
+   "seriesNumber": "7",
+   "narrators": [
+    "Jim Frangione"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Shadow Riders",
+     "SeriesNumber": "7",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 408,
+   "series": "Shadow Riders",
+   "seriesNumber": "6",
+   "narrators": [
+    "Jim Frangione"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Shadow Riders",
+     "SeriesNumber": "6",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 409,
+   "series": "Shadow Riders",
+   "seriesNumber": "4",
+   "narrators": [
+    "Jim Frangione"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Shadow Riders",
+     "SeriesNumber": "4",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 410,
+   "series": "Vorkosigan Saga (chronological)",
+   "seriesNumber": "2",
+   "narrators": [
+    "Grover Gardner"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Vorkosigan Saga (chronological)",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "ExactTitleOnly",
+    "Reason": "exact_title_without_corroboration"
+   }
+  },
+  {
+   "index": 411,
+   "series": "Detective Luc Moncrief",
+   "seriesNumber": "3",
+   "narrators": [
+    "Jean Brassard"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Detective Luc Moncrief",
+     "SeriesNumber": "3",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 414,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Ron McLarty"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 415,
+   "series": "Time Odyssey",
+   "seriesNumber": "2",
+   "narrators": [
+    "John Lee"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Time Odyssey",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 416,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Sissy Spacek",
+    "Margaret Atwood"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 417,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Raul Esparza"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 418,
+   "series": "The Dark Tower",
+   "seriesNumber": "4",
+   "narrators": [
+    "Frank Muller"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Dark Tower",
+     "SeriesNumber": "4",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 419,
+   "series": "The Shining",
+   "seriesNumber": "2",
+   "narrators": [
+    "Will Patton"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Shining",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 420,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Jeffrey DeMunn"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 421,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Ron McLarty",
+    "Joe Hill"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 422,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "John Glover"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 423,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Wil Wheaton"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 424,
+   "series": "The Twilight Saga",
+   "seriesNumber": "3.5",
+   "narrators": [
+    "Emma Galvin"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Twilight Saga",
+     "SeriesNumber": "3.5",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 425,
+   "series": "The Twilight Saga",
+   "seriesNumber": "3.5",
+   "narrators": [
+    "Emma Galvin"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Twilight Saga",
+     "SeriesNumber": "3.5",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 426,
+   "series": "1001 Dark Nights",
+   "seriesNumber": null,
+   "narrators": [
+    "Scarlet Chase"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "1001 Dark Nights",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 427,
+   "series": "Survivalist Series",
+   "seriesNumber": "2",
+   "narrators": [
+    "Duke Fontaine"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Survivalist Series",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 428,
+   "series": "Zeroes",
+   "seriesNumber": "2",
+   "narrators": [
+    "Amber Benson"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Zeroes",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 429,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Christian Rummel"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 430,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Ray Porter"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 431,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Nicola Barber"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 433,
+   "series": "Richard and Kahlan",
+   "seriesNumber": "2",
+   "narrators": [
+    "Sam Tsoutsouvas"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Richard and Kahlan",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 434,
+   "series": "Women's Murder Club",
+   "seriesNumber": "24",
+   "narrators": [
+    "January LaVoy"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Women's Murder Club",
+     "SeriesNumber": "24",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 435,
+   "series": "Women's Murder Club",
+   "seriesNumber": "5",
+   "narrators": [
+    "Carolyn McCormick"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Women's Murder Club",
+     "SeriesNumber": "5",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 436,
+   "series": "Women's Murder Club",
+   "seriesNumber": "6",
+   "narrators": [
+    "Carolyn McCormick"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Women's Murder Club",
+     "SeriesNumber": "6",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 437,
+   "series": "Women's Murder Club",
+   "seriesNumber": "9",
+   "narrators": [
+    "Carolyn McCormick"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Women's Murder Club",
+     "SeriesNumber": "9",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 438,
+   "series": "Classic Starts",
+   "seriesNumber": null,
+   "narrators": [
+    "Rebecca K. Reynolds"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Classic Starts",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "ExactTitleOnly",
+    "Reason": "exact_title_without_corroboration"
+   }
+  },
+  {
+   "index": 439,
+   "series": "Classic Starts",
+   "seriesNumber": null,
+   "narrators": [
+    "Rebecca K. Reynolds"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Classic Starts",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 441,
+   "series": "Twain's Tom and Huck",
+   "seriesNumber": "2",
+   "narrators": [
+    "Elijah Wood"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Twain's Tom and Huck",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 442,
+   "series": "Twain's Tom and Huck",
+   "seriesNumber": "2",
+   "narrators": [
+    "Elijah Wood"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Twain's Tom and Huck",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 443,
+   "series": "Classic Starts",
+   "seriesNumber": null,
+   "narrators": [
+    "Rebecca K. Reynolds"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Classic Starts",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 445,
+   "series": "Twain's Tom and Huck",
+   "seriesNumber": "1",
+   "narrators": [
+    "Robin Field"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Twain's Tom and Huck",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 446,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Tom Weiner"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 447,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 448,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "James Franco"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 449,
+   "series": "The Demon Cycle",
+   "seriesNumber": "2",
+   "narrators": [
+    "Pete Bradbury"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Demon Cycle",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 451,
+   "series": "Pern Novels [publication order]",
+   "seriesNumber": "12",
+   "narrators": [
+    "Louis Hill"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Pern Novels [publication order]",
+     "SeriesNumber": "12",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 452,
+   "series": "Jane Hawk",
+   "seriesNumber": "4",
+   "narrators": [
+    "Elisabeth Rodgers"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Jane Hawk",
+     "SeriesNumber": "4",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 453,
+   "series": "The Godling Chronicles",
+   "seriesNumber": "4",
+   "narrators": [
+    "Derek Perkins"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Godling Chronicles",
+     "SeriesNumber": "4",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "ExactTitleOnly",
+    "Reason": "exact_title_without_corroboration"
+   }
+  },
+  {
+   "index": 454,
+   "series": "The Godling Chronicles",
+   "seriesNumber": "4",
+   "narrators": [
+    "Derek Perkins"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Godling Chronicles",
+     "SeriesNumber": "4",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 455,
+   "series": "The Godling Chronicles",
+   "seriesNumber": "2",
+   "narrators": [
+    "Derek Perkins"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Godling Chronicles",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 456,
+   "series": "The Godling Chronicles",
+   "seriesNumber": "3",
+   "narrators": [
+    "Derek Perkins"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Godling Chronicles",
+     "SeriesNumber": "3",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "ExactTitleOnly",
+    "Reason": "exact_title_without_corroboration"
+   }
+  },
+  {
+   "index": 457,
+   "series": "The Godling Chronicles",
+   "seriesNumber": "3",
+   "narrators": [
+    "Derek Perkins"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Godling Chronicles",
+     "SeriesNumber": "3",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 458,
+   "series": "The Godling Chronicles",
+   "seriesNumber": "1",
+   "narrators": [
+    "Derek Perkins"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Godling Chronicles",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "ExactTitleOnly",
+    "Reason": "exact_title_without_corroboration"
+   }
+  },
+  {
+   "index": 459,
+   "series": "The Godling Chronicles",
+   "seriesNumber": "1",
+   "narrators": [
+    "Derek Perkins"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Godling Chronicles",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 460,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Richard Ferrone"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 461,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Tom Weiner"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 463,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Jonathan Davis"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 464,
+   "series": "Peeps",
+   "seriesNumber": "1",
+   "narrators": [
+    "Joshua Swanson"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Peeps",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 466,
+   "series": "The Audible Dickens Collection",
+   "seriesNumber": null,
+   "narrators": [
+    "Jessie Buckley"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Audible Dickens Collection",
+     "SeriesNumber": null,
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 467,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Simon Vance"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 470,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Joseph Morton"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 471,
+   "series": "Men at War",
+   "seriesNumber": "1",
+   "narrators": [
+    "Michael Russotto"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Men at War",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 472,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Glenn Hascall"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 473,
+   "series": "The Portal Wars Saga",
+   "seriesNumber": "3",
+   "narrators": [
+    "Joe Hempel"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Portal Wars Saga",
+     "SeriesNumber": "3",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 474,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Mary Stuart Masterson"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 475,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Nicol Zanzarella"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 476,
+   "series": "The Twilight Saga",
+   "seriesNumber": "3.5",
+   "narrators": [
+    "Emma Galvin"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Twilight Saga",
+     "SeriesNumber": "3.5",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "ExactTitleOnly",
+    "Reason": "exact_title_without_corroboration"
+   }
+  },
+  {
+   "index": 477,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 478,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Luis Moreno"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 479,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Glenn Hascall"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 480,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Martin Jarvis"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 481,
+   "series": "The Talents (abridged)",
+   "seriesNumber": "1",
+   "narrators": [
+    "Adrienne Barbeau"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Talents (abridged)",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 482,
+   "series": "Rust & Relics",
+   "seriesNumber": "1",
+   "narrators": [
+    "Nola Zandry"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Rust & Relics",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 483,
+   "series": "A GhostWalker Novel",
+   "seriesNumber": "15",
+   "narrators": [
+    "Jim Frangione"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "A GhostWalker Novel",
+     "SeriesNumber": "15",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 484,
+   "series": "Treasure Hunters",
+   "seriesNumber": "4",
+   "narrators": [],
+   "memberships": [
+    {
+     "SeriesName": "Treasure Hunters",
+     "SeriesNumber": "4",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 485,
+   "series": "Treasure Hunters",
+   "seriesNumber": "1",
+   "narrators": [
+    "Bryan Kennedy"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Treasure Hunters",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 486,
+   "series": "Drake Sisters",
+   "seriesNumber": "6",
+   "narrators": [
+    "Alyssa Bresnahan"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Drake Sisters",
+     "SeriesNumber": "6",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 487,
+   "series": "Craft Sequence Series",
+   "seriesNumber": "2",
+   "narrators": [
+    "Chris Andrew Ciulla"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Craft Sequence Series",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 488,
+   "series": "The Walsh Series",
+   "seriesNumber": "1",
+   "narrators": [
+    "Christian Fox",
+    "Lucy Rivers"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "The Walsh Series",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 489,
+   "series": "Dragonblood Assassin",
+   "seriesNumber": "2",
+   "narrators": [
+    "Kate Reading",
+    "Michael Kramer"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Dragonblood Assassin",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  },
+  {
+   "index": 490,
+   "series": "Torpedo Ink",
+   "seriesNumber": "2",
+   "narrators": [
+    "Jim Frangione"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Torpedo Ink",
+     "SeriesNumber": "2",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 491,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Mark Boyett"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 492,
+   "series": "Corps",
+   "seriesNumber": "4",
+   "narrators": [
+    "Dick Hill"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Corps",
+     "SeriesNumber": "4",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 493,
+   "series": "Presidential Agent",
+   "seriesNumber": "5",
+   "narrators": [],
+   "memberships": [
+    {
+     "SeriesName": "Presidential Agent",
+     "SeriesNumber": "5",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "UnresolvedTitle",
+    "Reason": "unexplained_release_text"
+   }
+  },
+  {
+   "index": 494,
+   "series": "Presidential Agent",
+   "seriesNumber": "6",
+   "narrators": [],
+   "memberships": [
+    {
+     "SeriesName": "Presidential Agent",
+     "SeriesNumber": "6",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 495,
+   "series": "What the Night Knows",
+   "seriesNumber": "1",
+   "narrators": [
+    "Steven Weber"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "What the Night Knows",
+     "SeriesNumber": "1",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 496,
+   "series": "Jack Reacher",
+   "seriesNumber": "6",
+   "narrators": [
+    "Jeff Harding"
+   ],
+   "memberships": [
+    {
+     "SeriesName": "Jack Reacher",
+     "SeriesNumber": "6",
+     "IsPrimary": 1
+    }
+   ],
+   "fullMetadataVerdict": {
+    "IsConfirmed": true,
+    "Status": "CorroboratedTitle",
+    "Reason": "complete_title_and_credit"
+   }
+  },
+  {
+   "index": 497,
+   "series": null,
+   "seriesNumber": null,
+   "narrators": [
+    "Ralph Lister"
+   ],
+   "memberships": [],
+   "fullMetadataVerdict": {
+    "IsConfirmed": false,
+    "Status": "DifferentWork",
+    "Reason": "complete_title_not_found"
+   }
+  }
+ ]
+}
