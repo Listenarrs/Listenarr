@@ -44,7 +44,7 @@ namespace Listenarr.Infrastructure.Configuration.Paths
         private static readonly TimeSpan ClientCacheLifetime = TimeSpan.FromSeconds(10);
         private static readonly AsyncKeyedLocker<string> ClientCacheLocks = new();
 
-        // Update and delete read the mapping's current owner, write, then clear the owners they saw.
+        // Create, update and delete read the mapping's current owner, write, then clear the owners they saw.
         // Two writers that both read the same owner before either saves would each miss the client the
         // other moved the mapping to, so the read, write and clears run as one step across writers.
         // Static because the service is scoped, so an instance lock would serialise nothing.
@@ -88,10 +88,27 @@ namespace Listenarr.Infrastructure.Configuration.Paths
 
         public async Task<RemotePathMapping> CreateAsync(RemotePathMapping mapping)
         {
+            await WriterLock.WaitAsync();
+            try
+            {
+                return await CreateUnderWriterLockAsync(mapping);
+            }
+            finally
+            {
+                WriterLock.Release();
+            }
+        }
+
+        private async Task<RemotePathMapping> CreateUnderWriterLockAsync(RemotePathMapping mapping)
+        {
             mapping.NormalizePaths();
             RequireUsableRemotePath(mapping.RemotePath);
             mapping.CreatedAt = DateTime.UtcNow;
             mapping.UpdatedAt = DateTime.UtcNow;
+
+            // The repository upserts, so a body carrying an existing ID overwrites that row, and the
+            // row may belong to another client whose cached entry would then be stale.
+            var previous = mapping.Id == 0 ? null : await remotePathMappingRepository.GetByIdAsync(mapping.Id);
 
             var saved = await remotePathMappingRepository.SaveAsync(mapping);
 
@@ -99,6 +116,10 @@ namespace Listenarr.Infrastructure.Configuration.Paths
 
             try
             {
+                if (previous != null)
+                {
+                    await InvalidateClientCacheAsync(previous.DownloadClientId);
+                }
                 await InvalidateClientCacheAsync(saved.DownloadClientId);
             }
             catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException or StackOverflowException))
