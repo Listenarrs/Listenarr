@@ -253,6 +253,44 @@
                     naming patterns.
                   </p>
                 </div>
+                <div class="metadata-field">
+                  <label class="field-label" for="required-narrator">Required Narrator</label>
+                  <div class="required-narrator-row">
+                    <input
+                      id="required-narrator"
+                      v-model="formData.requiredNarrator"
+                      type="text"
+                      class="form-input"
+                      placeholder="e.g. R.C. Bray"
+                    />
+                    <button
+                      v-if="audiobook?.asin"
+                      type="button"
+                      class="btn btn-secondary btn-sm"
+                      :disabled="loadingEditions"
+                      @click="browseEditions"
+                    >
+                      {{ loadingEditions ? 'Loading...' : 'Browse editions' }}
+                    </button>
+                  </div>
+                  <p class="help-text">
+                    When set, only releases narrated by this person will be searched for and
+                    accepted for this book - useful when multiple distinct narrated editions
+                    exist and you want a specific one.
+                  </p>
+                  <ul v-if="editionOptions.length > 0" class="edition-options">
+                    <li v-for="release in editionOptions" :key="release.id">
+                      <button type="button" class="edition-option-btn" @click="selectEdition(release)">
+                        <strong>{{ release.narrators.join(', ') || 'Unknown narrator' }}</strong>
+                        <span v-if="release.publisherName"> &mdash; {{ release.publisherName }}</span>
+                        <span v-if="release.releaseDate"> ({{ release.releaseDate.slice(0, 4) }})</span>
+                      </button>
+                    </li>
+                  </ul>
+                  <p v-if="editionsLoaded && editionOptions.length === 0" class="help-text">
+                    No alternate editions found on AudiobookDB for this book.
+                  </p>
+                </div>
                 <div class="metadata-field metadata-field--full">
                   <label class="field-label">Series Memberships</label>
                   <div class="series-memberships-editor">
@@ -843,6 +881,7 @@ interface FormData {
   publishYear: string
   runtime: string
   edition: string
+  requiredNarrator: string
   seriesMemberships: EditableSeriesMembership[]
   genres: string[]
   imageUrl: string
@@ -894,6 +933,35 @@ const newAuthor = ref('')
 const newNarrator = ref('')
 const newTag = ref('')
 const newGenre = ref('')
+const loadingEditions = ref(false)
+const editionsLoaded = ref(false)
+interface AudiobookDbReleaseOption {
+  id: string
+  narrators: string[]
+  publisherName?: string
+  releaseDate?: string
+}
+const editionOptions = ref<AudiobookDbReleaseOption[]>([])
+
+const browseEditions = async () => {
+  if (!props.audiobook?.asin) return
+  loadingEditions.value = true
+  editionsLoaded.value = false
+  try {
+    const result = await apiService.getAudiobookDbReleases(props.audiobook.asin)
+    editionOptions.value = (result.releases || []).filter((r) => r.narrators.length > 0)
+  } catch (error) {
+    logger.error('Failed to fetch AudiobookDB releases', error)
+    editionOptions.value = []
+  } finally {
+    loadingEditions.value = false
+    editionsLoaded.value = true
+  }
+}
+
+const selectEdition = (release: AudiobookDbReleaseOption) => {
+  formData.value.requiredNarrator = release.narrators.join(', ')
+}
 const editingDestination = ref(false)
 const toast = useToast()
 const originalIdentifierRows = ref<EditableIdentifierRow[]>([])
@@ -916,6 +984,7 @@ const formData = ref<FormData>({
   publishYear: '',
   runtime: '',
   edition: '',
+  requiredNarrator: '',
   seriesMemberships: [],
   genres: [],
   imageUrl: '',
@@ -1083,6 +1152,7 @@ function hydrateFormFromAudiobook(audiobook: Audiobook) {
     publishYear: audiobook.publishYear || '',
     runtime: audiobook.runtime != null ? String(audiobook.runtime) : '',
     edition: audiobook.edition || '',
+    requiredNarrator: audiobook.requiredNarrator || '',
     seriesMemberships: normalizeSeriesMembershipRows(
       audiobook.seriesMemberships,
       audiobook.series,
@@ -1300,6 +1370,8 @@ const hasChanges = computed(() => {
       normalizeOptionalText(audiobook.publishYear) ||
     runtimeChanged ||
     normalizeOptionalText(formData.value.edition) !== normalizeOptionalText(audiobook.edition) ||
+    normalizeOptionalText(formData.value.requiredNarrator) !==
+      normalizeOptionalText(audiobook.requiredNarrator) ||
     seriesMembershipsChanged ||
     serializeStringList(formData.value.genres) !== serializeStringList(audiobook.genres) ||
     normalizeOptionalText(formData.value.imageUrl) !== normalizeOptionalText(audiobook.imageUrl) ||
@@ -1740,6 +1812,7 @@ async function handleSave() {
     const normalizedPublishedDate = normalizeOptionalText(formData.value.publishedDate)
     const normalizedPublishYear = normalizeOptionalText(formData.value.publishYear)
     const normalizedEdition = normalizeOptionalText(formData.value.edition)
+    const normalizedRequiredNarrator = normalizeOptionalText(formData.value.requiredNarrator)
     const normalizedGenres = normalizeStringList(formData.value.genres)
     const normalizedImageUrl = normalizeOptionalText(formData.value.imageUrl)
     const normalizedTags = [...formData.value.tags].sort()
@@ -1801,6 +1874,10 @@ async function handleSave() {
 
     if (normalizedEdition !== normalizeOptionalText(audiobook.edition)) {
       updates.edition = normalizedEdition
+    }
+
+    if (normalizedRequiredNarrator !== normalizeOptionalText(audiobook.requiredNarrator)) {
+      updates.requiredNarrator = normalizedRequiredNarrator
     }
 
     if (
@@ -2696,6 +2773,40 @@ function close() {
 }
 
 /* Use centralized .help-text spacing from src/assets/modals.css */
+
+.required-narrator-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.required-narrator-row .form-input {
+  flex: 1;
+}
+
+.edition-options {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.edition-option-btn {
+  width: 100%;
+  text-align: left;
+  background: var(--surface-secondary, rgba(128, 128, 128, 0.08));
+  border: 1px solid var(--border-color, rgba(128, 128, 128, 0.2));
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.edition-option-btn:hover {
+  border-color: var(--brand-focus);
+}
 
 /* modal-footer centralized; keep this modal's layout preferences only */
 .modal-footer {

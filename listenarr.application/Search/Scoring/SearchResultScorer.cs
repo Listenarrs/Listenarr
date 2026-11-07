@@ -86,6 +86,19 @@ namespace Listenarr.Application.Search.Scoring
                 return score;
             }
 
+            // Excluded narrators: reject if one of the profile's excluded names appears in the
+            // release's structured narrator metadata and/or its title text (both are searched).
+            var narratorHaystack = $"{searchResult.Narrator} {searchResult.Title}";
+            var excludedNarrator = profile.ExcludedNarrators.FirstOrDefault(name =>
+                !string.IsNullOrWhiteSpace(name) &&
+                narratorHaystack.Contains(name, StringComparison.OrdinalIgnoreCase));
+            if (excludedNarrator != null)
+            {
+                score.RejectionReasons.Add($"Excluded narrator: '{excludedNarrator}'");
+                score.TotalScore = -1;
+                return score;
+            }
+
             // Detect NZB/Usenet more broadly
             var isNzb = IsNzbResult(searchResult);
 
@@ -317,6 +330,20 @@ namespace Listenarr.Application.Search.Scoring
                 {
                     score.TotalScore += bonus;
                     score.ScoreBreakdown["PreferredWords"] = bonus;
+                }
+            }
+
+            // Preferred narrators bonus: searches both the structured narrator metadata and the
+            // title text, since many indexers only name the narrator in the release title.
+            if (profile.PreferredNarrators.Count > 0)
+            {
+                var narratorBonus = profile.PreferredNarrators
+                    .Where(name => !string.IsNullOrWhiteSpace(name))
+                    .Count(name => narratorHaystack.Contains(name, StringComparison.OrdinalIgnoreCase)) * 5;
+                if (narratorBonus != 0)
+                {
+                    score.TotalScore += narratorBonus;
+                    score.ScoreBreakdown["PreferredNarrators"] = narratorBonus;
                 }
             }
 

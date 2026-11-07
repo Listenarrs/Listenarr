@@ -1229,6 +1229,30 @@ class ApiService {
     return this.request<Audiobook>(`/library/${id}`)
   }
 
+  async syncAudiobookshelf(): Promise<{
+    shelfItemsFound: number
+    audiobooksChecked: number
+    audiobooksUpdated: number
+  }> {
+    return this.request('/audiobookshelf/sync', { method: 'POST' })
+  }
+
+  async getAudiobookDbReleases(asin: string): Promise<{
+    id: string
+    title?: string
+    releases: {
+      id: string
+      title?: string
+      releaseDate?: string
+      duration?: string
+      disambiguation?: string
+      publisherName?: string
+      narrators: string[]
+    }[]
+  }> {
+    return this.request(`/audiobookdb/releases/${encodeURIComponent(asin)}`)
+  }
+
   async getAudiobookIdentifiers(
     id: number,
   ): Promise<{ audiobookId: number; identifiers: AudiobookExternalIdentifier[] }> {

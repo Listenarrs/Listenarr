@@ -93,7 +93,7 @@ public sealed class ReleasedJournalRecoveryUpgradeTests : BaseTests
         {
             await File.WriteAllBytesAsync(source, content);
             await File.WriteAllBytesAsync(target, content);
-            await using (var legacy = await factory.CreateDbContextAsync())
+            await using (var legacy = Released134SchemaSeedContext.Create(options))
             {
                 var migrator = legacy.GetService<IMigrator>();
                 await migrator.MigrateAsync("20260825021432_AddWeakStorageVerifiedCleanup");
