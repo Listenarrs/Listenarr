@@ -46,6 +46,8 @@ public class SqliteMigrationSchemaTests : BaseTests
         "20261002210137_AddOperationEvidencePublications";
     private const string AutomaticSearchTimingMigrationId =
         "20261021212418_AddAutomaticSearchTiming";
+    private const string QualityProfileUpgradeAllowedMigrationId =
+        "20261029020317_AddQualityProfileUpgradeAllowed";
 
     private static (SqliteConnection Connection, ListenArrDbContext Context)
         CreateMigratedSqliteContext()
@@ -229,7 +231,8 @@ public class SqliteMigrationSchemaTests : BaseTests
                 CompatibilityFilePublicationMigrationId,
                 WeakStorageVerifiedCleanupMigrationId,
                 OperationEvidencePublicationsMigrationId,
-                AutomaticSearchTimingMigrationId
+                AutomaticSearchTimingMigrationId,
+                QualityProfileUpgradeAllowedMigrationId
             ],
             postCanary);
         Assert.Contains("20251124102000_AddMoveJobSourcePath", applied);

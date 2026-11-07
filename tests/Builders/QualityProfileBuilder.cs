@@ -22,6 +22,17 @@ namespace Listenarr.Tests.Builders
             return this;
         }
 
+        /// <summary>
+        /// Turns quality upgrades off, the way the modal's "Enable Quality Upgrades" checkbox
+        /// does. Unlike the old encoding this leaves the cutoff alone, so a profile can be
+        /// upgrades-off and still name the cutoff it had picked.
+        /// </summary>
+        public QualityProfileBuilder WithUpgradesDisabled()
+        {
+            _qualityProfile.UpgradeAllowed = false;
+            return this;
+        }
+
         public QualityProfileBuilder WithPreferredFormats(params string[] values)
         {
             _qualityProfile.PreferredFormats = values.ToList();
