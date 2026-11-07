@@ -33,6 +33,7 @@ import { createPinia } from 'pinia'
 
 import App from './App.vue'
 import { createAppRouter, preloadRoute } from './router'
+import { installPluginSdk, loadInstalledPlugins } from './plugins/runtime'
 import { useToast } from './services/toastService'
 import { errorTracking } from './services/errorTracking'
 import { apiService } from '@/services/api'
@@ -81,6 +82,9 @@ window.addEventListener('unhandledrejection', (event) => {
 app.use(createPinia())
 const router = createAppRouter()
 app.use(router)
+
+// Expose the host SDK (window.LISTENARR) so runtime-loaded plugin bundles can register.
+installPluginSdk()
 
 // Prefetch lazy route chunks when a user hovers or presses a link.
 // This reduces perceived navigation latency by warming the dynamic import.
@@ -146,6 +150,9 @@ getStartupConfigCached(2000)
   .catch(() => {})
 
 app.mount('#app')
+
+// Discover and load installed plugins (manifest → inject bundles). Best-effort, non-blocking.
+void loadInstalledPlugins()
 
 // Web Vitals - Performance monitoring (production only)
 // NOTE: Analytics integration point - when adding analytics service (Google Analytics, Plausible, etc.),
