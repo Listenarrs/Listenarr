@@ -81,6 +81,31 @@ public sealed class BlockedReleaseFilterTests : BaseTests
         Assert.Empty(kept);
     }
 
+    [Theory]
+    [InlineData("ABCDEF1234567890ABCDEF1234567890ABCDEF12", "%41BCDEF1234567890ABCDEF1234567890ABCDEF12")]
+    [InlineData("%41BCDEF1234567890ABCDEF1234567890ABCDEF12", "ABCDEF1234567890ABCDEF1234567890ABCDEF12")]
+    [InlineData("ABCDEF1234567890ABCDEF1234567890ABCDEF12", "%56PG66ERUKZ4JBK6N54JDIVTYSCV433YS")]
+    [InlineData("%56PG66ERUKZ4JBK6N54JDIVTYSCV433YS", "ABCDEF1234567890ABCDEF1234567890ABCDEF12")]
+    public async Task ExcludeAsync_MatchesATorrentWhoseInfoHashIsPercentEncoded(
+        string blockedHash,
+        string candidateHash)
+    {
+        // The submission path URI-decodes the magnet's hash before it reaches the client, so an
+        // escaped hash is the same torrent as its plain spelling. The blocked side is derived from
+        // a magnet here, the way the grab stamps it, so an escaped hash is covered on both sides.
+        var blocklist = new Mock<IBlocklistService>();
+        blocklist.Setup(service => service.GetBlockedIdentifiersAsync(7))
+            .ReturnsAsync([ReleaseIdentity.For(Scored($"magnet:?xt=urn:btih:{blockedHash}&dn=book").SearchResult)!]);
+
+        var kept = await BlockedReleaseFilter.ExcludeAsync(
+            blocklist.Object,
+            7,
+            [Scored($"magnet:?xt=urn:btih:{candidateHash}&dn=book")],
+            NullLogger.Instance);
+
+        Assert.Empty(kept);
+    }
+
     [Fact]
     public async Task ExcludeAsync_WithNothingBlocked_DoesNotQueryPerResult()
     {
