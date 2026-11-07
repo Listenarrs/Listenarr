@@ -30,6 +30,26 @@ public sealed class DirectDownloadBlocklistTests : BaseTests
     private const string ListingTitle = "The Failing Listing";
     private const long ListingSize = 734_003_200;
 
+    // Held for the test's lifetime: the processor resolves the client when it runs, after the
+    // arrange step has returned, and a disposed client would fail the transfer without a request.
+    private readonly HttpClient _httpClient;
+    private int _transferRequests;
+
+    public DirectDownloadBlocklistTests()
+    {
+        _httpClient = new HttpClient(new DelegatingHandlerMock((_, _) =>
+        {
+            Interlocked.Increment(ref _transferRequests);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        }));
+    }
+
+    public override async Task DisposeAsync()
+    {
+        _httpClient.Dispose();
+        await base.DisposeAsync();
+    }
+
     [Fact]
     public async Task ProcessDownloadAsync_WhenTheTransferFails_BlocksTheReleaseForTheNextSearch()
     {
@@ -38,7 +58,7 @@ public sealed class DirectDownloadBlocklistTests : BaseTests
         await _provider.GetRequiredService<IDirectDownloadProcessor>()
             .ProcessDownloadAsync(download, CancellationToken.None);
 
-        Assert.Equal(DownloadStatus.Failed, download.Status);
+        AssertFailedOnTheNotFoundResponse(download);
         var entry = Assert.Single(await _provider.GetRequiredService<IBlocklistService>()
             .GetForAudiobookAsync(audiobook.Id));
         Assert.Equal(download.GetMetadataString(ReleaseIdentity.MetadataKey), entry.ReleaseIdentifier);
@@ -60,7 +80,7 @@ public sealed class DirectDownloadBlocklistTests : BaseTests
         await _provider.GetRequiredService<IDirectDownloadProcessor>()
             .ProcessDownloadAsync(download, CancellationToken.None);
 
-        Assert.Equal(DownloadStatus.Failed, download.Status);
+        AssertFailedOnTheNotFoundResponse(download);
         Assert.Empty(await _provider.GetRequiredService<IBlocklistService>()
             .GetForAudiobookAsync(audiobook.Id));
 
@@ -75,11 +95,9 @@ public sealed class DirectDownloadBlocklistTests : BaseTests
     private async Task<(Audiobook Audiobook, Download Download)> ArrangeFailingDownloadAsync(
         bool failedDownloadHandlingEnabled)
     {
-        using var httpClient = new HttpClient(new DelegatingHandlerMock((_, _) =>
-            Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound))));
         var httpFactory = new Mock<IHttpClientFactory>();
         httpFactory.Setup(factory => factory.CreateClient("DirectDownload"))
-            .Returns(httpClient);
+            .Returns(_httpClient);
         Init(services => services
             .WithSingleton<IHttpClientFactory>(httpFactory.Object)
             .WithSingleton<IDownloadProcessingJobService>(new Mock<IDownloadProcessingJobService>().Object)
@@ -110,6 +128,13 @@ public sealed class DirectDownloadBlocklistTests : BaseTests
             }
         });
         return (audiobook, download);
+    }
+
+    private void AssertFailedOnTheNotFoundResponse(Download download)
+    {
+        Assert.Equal(1, Volatile.Read(ref _transferRequests));
+        Assert.Equal(DownloadStatus.Failed, download.Status);
+        Assert.Contains("404", download.ErrorMessage);
     }
 
     private static string ListingUrl(string token) => $"https://indexer.example.com/getnzb?id=abc&apikey={token}";
