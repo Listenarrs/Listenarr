@@ -43,6 +43,59 @@ namespace Listenarr.Api.Features.Prowlarr
             return $"{root}/{indexerId}/api";
         }
 
+        /// <summary>
+        /// Return the base URL the Prowlarr API actually answered on. A Prowlarr instance running under a
+        /// URL base redirects the discovery request onto that base, so the URL the user supplied can be
+        /// missing a path segment that every proxied indexer URL needs.
+        /// </summary>
+        public static string ResolveBaseUrlFromDiscovery(string requestedBaseUrl, Uri? discoveryUri, string discoveryPath)
+        {
+            if (discoveryUri == null || !discoveryUri.IsAbsoluteUri)
+            {
+                return requestedBaseUrl;
+            }
+
+            // A URL base is a path on the instance the user named. A redirect that leaves that origin
+            // is a different service, and adopting it here would write an address of the remote end's
+            // choosing into every imported indexer, next to the Prowlarr API key.
+            if (!Uri.TryCreate(requestedBaseUrl, UriKind.Absolute, out var requestedUri)
+                || !IsSameProwlarrOrigin(requestedUri, discoveryUri))
+            {
+                return requestedBaseUrl;
+            }
+
+            var answered = discoveryUri.GetLeftPart(UriPartial.Path).TrimEnd('/');
+            if (!answered.EndsWith(discoveryPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return requestedBaseUrl;
+            }
+
+            var resolved = answered.Substring(0, answered.Length - discoveryPath.Length).TrimEnd('/');
+            return string.IsNullOrEmpty(resolved) ? requestedBaseUrl : resolved;
+        }
+
+        /// <summary>
+        /// True when the discovery request finished on the same Prowlarr instance it was sent to.
+        /// Host and port must match; the scheme may only change by upgrading http to https, which is
+        /// what a proxy that redirects to TLS does.
+        /// </summary>
+        private static bool IsSameProwlarrOrigin(Uri requested, Uri answered)
+        {
+            if (!string.Equals(requested.Host, answered.Host, StringComparison.OrdinalIgnoreCase)
+                || requested.Port != answered.Port)
+            {
+                return false;
+            }
+
+            if (string.Equals(requested.Scheme, answered.Scheme, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return string.Equals(requested.Scheme, "http", StringComparison.OrdinalIgnoreCase)
+                   && string.Equals(answered.Scheme, "https", StringComparison.OrdinalIgnoreCase);
+        }
+
         public static string NormalizeProxyUrl(string? rawUrl)
         {
             if (string.IsNullOrWhiteSpace(rawUrl)) return rawUrl ?? string.Empty;
