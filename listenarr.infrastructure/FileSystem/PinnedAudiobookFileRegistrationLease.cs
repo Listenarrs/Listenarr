@@ -69,7 +69,9 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
                 "This pinned registration lease does not authorize metadata writes.");
         }
 
-        return _file.OpenIndependentWriteStream(
+        // Read+write, because the only consumer is a tag library that parses the container it
+        // is about to rewrite through this same stream.
+        return _file.OpenIndependentReadWriteStream(
             bufferSize: 128 * 1024,
             asynchronous: false);
     }
@@ -80,7 +82,8 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
         string? sourcePhysicalObjectIdentity = null,
         Func<int, bool>? prepareCleanupRecovery = null,
         Func<bool>? completePublication = null,
-        Func<int, bool>? commitRegistration = null)
+        Func<int, bool>? commitRegistration = null,
+        bool supportsMetadataWrite = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(publicPath);
         var canonicalPath = Path.GetFullPath(publicPath);
@@ -91,7 +94,8 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
             parentPath,
             createMissing: false);
         var file = parent.OpenExistingFileForStableRead(
-            Path.GetFileName(canonicalPath));
+            Path.GetFileName(canonicalPath),
+            allowMetadataWrite: supportsMetadataWrite);
         return Create(
             file,
             canonicalPath,
@@ -99,7 +103,8 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
             sourcePhysicalObjectIdentity,
             prepareCleanupRecovery,
             completePublication,
-            commitRegistration);
+            commitRegistration,
+            supportsMetadataWrite);
     }
 
     internal static PinnedAudiobookFileRegistrationLease OpenForMetadataRead(
@@ -141,7 +146,8 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
         string? sourcePhysicalObjectIdentity = null,
         Func<int, bool>? prepareCleanupRecovery = null,
         Func<bool>? completePublication = null,
-        Func<int, bool>? commitRegistration = null)
+        Func<int, bool>? commitRegistration = null,
+        bool supportsMetadataWrite = false)
     {
         ArgumentNullException.ThrowIfNull(file);
         ArgumentException.ThrowIfNullOrWhiteSpace(publicPath);
@@ -174,7 +180,7 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
                     canonicalPath,
                     physicalObjectIdentity,
                     hasDurablePhysicalObjectIdentity: true,
-                    supportsMetadataWrite: true,
+                    supportsMetadataWrite,
                     sourcePhysicalObjectIdentity,
                     prepareCleanupRecovery,
                     completePublication,
@@ -202,7 +208,7 @@ internal sealed class PinnedAudiobookFileRegistrationLease :
                     metadataPath,
                     physicalObjectIdentity,
                     hasDurablePhysicalObjectIdentity: true,
-                    supportsMetadataWrite: true,
+                    supportsMetadataWrite,
                     sourcePhysicalObjectIdentity,
                     prepareCleanupRecovery,
                     completePublication,
