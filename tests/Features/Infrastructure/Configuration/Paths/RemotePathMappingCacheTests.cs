@@ -269,6 +269,34 @@ namespace Listenarr.Tests.Features.Infrastructure.Configuration.Paths
             Assert.Empty(await _service.GetPathMappingByClientAsync(_client));
         }
 
+        // The create endpoint accepts a body with an ID, and the repository upserts it, so a caller
+        // that posts an existing mapping back with another client moves it like an update does.
+        [Fact]
+        public async Task CreateAsync_WithAnExistingIdForAnotherClient_ClearsThePreviousOwner()
+        {
+            var otherClient = await CreateDownloadClientConfiguration();
+            var mapping = await CreateMapping("downloads", "library");
+            Assert.Single(await _service.GetPathMappingByClientAsync(_client));
+
+            await _service.CreateAsync(MovedTo(mapping, otherClient));
+
+            Assert.Single(await _service.GetPathMappingByClientAsync(otherClient));
+            Assert.Empty(await _service.GetPathMappingByClientAsync(_client));
+        }
+
+        [Fact]
+        public async Task CreateAsync_WithAnExistingIdOverlappingAMove_ClearsTheClientItMovedTo()
+        {
+            var last = await CreateDownloadClientConfiguration();
+            var mapping = await CreateMapping("downloads", "library");
+
+            var middle = await RaceAWriterAgainstAMove(mapping, () => _service.CreateAsync(MovedTo(mapping, last)));
+
+            Assert.Empty(await _service.GetPathMappingByClientAsync(middle));
+            Assert.Single(await _service.GetPathMappingByClientAsync(last));
+            Assert.Empty(await _service.GetPathMappingByClientAsync(_client));
+        }
+
         [Fact]
         public async Task GetPathMappingByClientAsync_HandsEachCallerItsOwnListInTheRepositoryOrder()
         {
