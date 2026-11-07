@@ -462,6 +462,134 @@ public sealed class AudiobookScanServiceTests : BaseTests
             diagnostic => diagnostic.Code == "TrackedFileGenerationReplaced");
     }
 
+    [Fact]
+    public async Task ScanAsync_TrackedFileSizeChanged_RefreshesStaleMetadata()
+    {
+        var root = FileService.GetTempDirectory("scan-service-stale-metadata-refresh");
+        var candidate = await FileService.GetFileAsync(
+            root,
+            "Requested Book.m4b",
+            "original");
+        var metadata = new Mock<IMetadataService>();
+        metadata.Setup(service => service.ExtractFileMetadataAsync(
+                It.IsAny<MetadataFileSource>()))
+            .ReturnsAsync(new AudioMetadata
+            {
+                Duration = TimeSpan.FromSeconds(1),
+                Format = "m4b"
+            });
+        Init(services => services.WithSingleton<IMetadataService>(metadata.Object));
+        var audiobook = await _audiobookRepository.AddAsync(
+            new AudiobookBuilder()
+                .WithTitle("Requested Book")
+                .WithBasePath(root)
+                .Build());
+
+        await ScanAsync(audiobook, root);
+        var original = Assert.Single(
+            await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id));
+        var originalSize = original.Size;
+
+        // Replace the tracked file's content under the same name with a different size.
+        await File.WriteAllTextAsync(candidate, "a-much-longer-replacement-body");
+        var newLength = new FileInfo(candidate).Length;
+        Assert.NotEqual(originalSize, newLength);
+
+        var result = await ScanAsync(audiobook, root);
+
+        var refreshed = Assert.Single(
+            await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id));
+        Assert.Equal(original.Id, refreshed.Id);
+        Assert.Equal(candidate, refreshed.Path);
+        Assert.Equal(newLength, refreshed.Size);
+        Assert.Equal(0, result.CreatedCount);
+        Assert.Empty(result.RemovedFiles);
+        Assert.Contains(
+            result.Diagnostics,
+            diagnostic => diagnostic.Code == "FileMetadataRefreshed"
+                && diagnostic.Path == candidate);
+    }
+
+    [Fact]
+    public async Task ScanAsync_TrackedFileUnchanged_DoesNotRefreshMetadata()
+    {
+        var root = FileService.GetTempDirectory("scan-service-unchanged-no-refresh");
+        _ = await FileService.GetFileAsync(
+            root,
+            "Requested Book.m4b",
+            "stable-content");
+        var metadata = new Mock<IMetadataService>();
+        metadata.Setup(service => service.ExtractFileMetadataAsync(
+                It.IsAny<MetadataFileSource>()))
+            .ReturnsAsync(new AudioMetadata
+            {
+                Duration = TimeSpan.FromSeconds(1),
+                Format = "m4b"
+            });
+        Init(services => services.WithSingleton<IMetadataService>(metadata.Object));
+        var audiobook = await _audiobookRepository.AddAsync(
+            new AudiobookBuilder()
+                .WithTitle("Requested Book")
+                .WithBasePath(root)
+                .Build());
+
+        await ScanAsync(audiobook, root);
+
+        // No content change between scans: the cheap size gate must skip the re-extract.
+        var result = await ScanAsync(audiobook, root);
+
+        Assert.DoesNotContain(
+            result.Diagnostics,
+            diagnostic => diagnostic.Code == "FileMetadataRefreshed");
+    }
+
+    [Fact]
+    public async Task ScanAsync_MetadataExtractionFails_StaysEligibleUntilItSucceeds()
+    {
+        // If ffprobe fails, extraction falls back to filename-only metadata. Recording the new
+        // size for that fallback would advance the size gate and skip the file forever, even after
+        // ffprobe recovers (#1084 review). The size must stay unrecorded until a real extraction,
+        // so an unchanged file is re-probed on the next scan.
+        var root = FileService.GetTempDirectory("scan-service-refresh-retry");
+        var candidate = await FileService.GetFileAsync(
+            root,
+            "Requested Book.m4b",
+            "the-real-audio-bytes");
+        var probeSucceeds = false;
+        var metadata = new Mock<IMetadataService>();
+        metadata.Setup(service => service.ExtractFileMetadataAsync(
+                It.IsAny<MetadataFileSource>()))
+            .ReturnsAsync(() => probeSucceeds
+                ? new AudioMetadata { Duration = TimeSpan.FromSeconds(1), Format = "m4b" }
+                : new AudioMetadata()); // ffprobe failed: filename-only fallback, no audio metadata
+        Init(services => services.WithSingleton<IMetadataService>(metadata.Object));
+        var audiobook = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+            .WithTitle("Requested Book")
+            .WithBasePath(root)
+            .Build());
+        // Pre-seed the tracked file with no recorded size/metadata so the refresh pass runs.
+        var tracked = await _audiobookFileRepository.AddAsync(new AudiobookFileBuilder()
+            .WithAudiobook(audiobook)
+            .WithPath(candidate)
+            .Build());
+        Assert.Null(tracked.Size);
+
+        await ScanAsync(audiobook, root);
+        var afterFailure = Assert.Single(
+            await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id));
+        Assert.Null(afterFailure.Format);
+        Assert.Null(afterFailure.Size); // the failed probe did not advance the size gate
+
+        // The file is not touched between scans; only ffprobe recovers.
+        probeSucceeds = true;
+        await ScanAsync(audiobook, root);
+
+        var afterSuccess = Assert.Single(
+            await _audiobookFileRepository.GetByAudiobookIdAsync(audiobook.Id));
+        Assert.Equal("m4b", afterSuccess.Format);
+        Assert.Equal(new FileInfo(candidate).Length, afterSuccess.Size);
+    }
+
     [LinuxFact]
     public async Task ScanAsync_CompatibleMergedV1PhysicalToken_DoesNotReportReplacement()
     {
