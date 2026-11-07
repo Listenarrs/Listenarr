@@ -78,10 +78,13 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
         [Fact]
         public async Task TestDraft_Newznab_ValidApiKey_ReturnsOkAndMarksSuccess()
         {
-            // Arrange - server responds with 200 OK and some valid payload
+            // Arrange - server responds with 200 OK and valid Newznab XML
             var resp = new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent("{ \"result\": true }")
+                Content = new StringContent("""
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <rss version="2.0"><channel><title>althub</title></channel></rss>
+                    """, System.Text.Encoding.UTF8, "application/xml")
             };
             var handler = new CaptureHandler(resp);
             var controller = MockUtils.CreateIndexersController(_provider, handler);

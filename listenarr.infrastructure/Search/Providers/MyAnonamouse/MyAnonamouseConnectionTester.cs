@@ -8,12 +8,13 @@
  * (at your option) any later version.
  */
 
+using System.Net;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Search.Providers.MyAnonamouse;
 
-public sealed class MyAnonamouseConnectionTester : IMyAnonamouseConnectionTester
+public sealed class MyAnonamouseConnectionTester : IIndexerConnectionTester
 {
     private readonly HttpClient _httpClient;
     private readonly ILogger<MyAnonamouseConnectionTester> _logger;
@@ -26,11 +27,20 @@ public sealed class MyAnonamouseConnectionTester : IMyAnonamouseConnectionTester
         _logger = logger;
     }
 
-    public async Task<MyAnonamouseConnectionTestResult> TestAsync(
+    public string IndexerType => "MyAnonamouse";
+
+    public async Task<IndexerConnectionTestResult> TestAsync(
         Indexer indexer,
-        string mamId,
         CancellationToken cancellationToken = default)
     {
+        var mamId = MyAnonamouseHelper.TryGetMamId(indexer.AdditionalSettings);
+        if (string.IsNullOrWhiteSpace(mamId))
+        {
+            return IndexerConnectionTestResult.Failure(
+                "MyAnonamouse test failed.",
+                "MAM ID is required for MyAnonamouse.");
+        }
+
         try
         {
             var searchUri = MyAnonamouseRequestFactory.BuildSearchUri(indexer, "test", perPage: 1);
@@ -47,18 +57,21 @@ public sealed class MyAnonamouseConnectionTester : IMyAnonamouseConnectionTester
                 _logger,
                 allowPrivateTargets: true,
                 cancellationToken: cancellationToken);
+
             using (response)
             {
-                if (response.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+                if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
                 {
-                    return MyAnonamouseConnectionTestResult.Failure(
+                    return IndexerConnectionTestResult.Failure(
                         "MyAnonamouse authentication failed.",
+                        $"MyAnonamouse returned HTTP {(int)response.StatusCode}.",
                         (int)response.StatusCode);
                 }
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    return MyAnonamouseConnectionTestResult.Failure(
+                    return IndexerConnectionTestResult.Failure(
+                        "MyAnonamouse test failed.",
                         $"MyAnonamouse returned HTTP {(int)response.StatusCode}.",
                         (int)response.StatusCode);
                 }
@@ -69,34 +82,58 @@ public sealed class MyAnonamouseConnectionTester : IMyAnonamouseConnectionTester
                     !document.RootElement.TryGetProperty("data", out var data) ||
                     data.ValueKind != JsonValueKind.Array)
                 {
-                    return MyAnonamouseConnectionTestResult.Failure(
+                    return IndexerConnectionTestResult.Failure(
+                        "MyAnonamouse test failed.",
                         "MyAnonamouse returned an invalid JSON response.");
                 }
 
-                return MyAnonamouseConnectionTestResult.Success(
-                    MyAnonamouseHelper.TryExtractMamIdFromResponse(response));
+                var refreshedMamId = MyAnonamouseHelper.TryExtractMamIdFromResponse(response);
+                return IndexerConnectionTestResult.Success(
+                    "MyAnonamouse authentication successful.",
+                    mamId: refreshedMamId);
             }
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (HttpRequestException ex)
         {
-            return MyAnonamouseConnectionTestResult.Failure(
-                "The MyAnonamouse connection test was cancelled.");
-        }
-        catch (OperationCanceledException)
-        {
-            return MyAnonamouseConnectionTestResult.Failure(
-                "The MyAnonamouse connection test timed out.");
-        }
-        catch (JsonException)
-        {
-            return MyAnonamouseConnectionTestResult.Failure(
-                "MyAnonamouse returned an invalid JSON response.");
-        }
-        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or UriFormatException)
-        {
-            _logger.LogWarning(ex, "MyAnonamouse connection test request failed");
-            return MyAnonamouseConnectionTestResult.Failure(
+            _logger.LogWarning(
+                "MAM connection test request failed with {ExceptionType}",
+                ex.GetType().Name);
+            return IndexerConnectionTestResult.Failure(
+                "MyAnonamouse test failed.",
                 "The MyAnonamouse connection request failed.");
+        }
+        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "MyAnonamouse connection test timed out");
+            return IndexerConnectionTestResult.Failure("MyAnonamouse test failed.", "The MyAnonamouse connection test timed out.");
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "MyAnonamouse connection test returned invalid JSON");
+            return IndexerConnectionTestResult.Failure("MyAnonamouse test failed.", "MyAnonamouse returned an invalid JSON response.");
+        }
+        catch (CookieException ex)
+        {
+            _logger.LogWarning(
+                "MAM connection test cookie was invalid with {ExceptionType}",
+                ex.GetType().Name);
+            return IndexerConnectionTestResult.Failure("MyAnonamouse test failed.", "The configured MAM ID cookie is invalid.");
+        }
+        catch (UriFormatException ex)
+        {
+            _logger.LogWarning(
+                "MAM connection test URL was invalid with {ExceptionType}",
+                ex.GetType().Name);
+            return IndexerConnectionTestResult.Failure(
+                "MyAnonamouse test failed.",
+                "The configured MyAnonamouse indexer URL is invalid.");
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(
+                "MAM connection test could not be completed with {ExceptionType}",
+                ex.GetType().Name);
+            return IndexerConnectionTestResult.Failure("MyAnonamouse test failed.", ex.Message);
         }
     }
 }
