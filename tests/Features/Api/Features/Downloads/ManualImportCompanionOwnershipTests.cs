@@ -159,4 +159,69 @@ public sealed class ManualImportCompanionOwnershipTests : BaseTests
                 It.IsAny<int?>()),
             Times.Never);
     }
+
+    // A manual import with companion files used to drop every companion while reporting
+    // success: the companion pass handed the ownership store the book folder, and the
+    // authorizer only accepts a configured root folder. The controller now supplies the
+    // root as BoundaryPath on the destination resolution the companion pass reads. This
+    // drives that through the real controller, ownership store and authorizer, with the
+    // book folder two levels inside the root, which is the shape that was refused.
+    [Fact]
+    public async Task Start_CompanionBesideAudioInABookFolderUnderARoot_IsAuthorizedAndPublished()
+    {
+        var metadata = new Mock<IMetadataService>();
+        metadata
+            .Setup(service => service.ExtractFileMetadataAsync(It.IsAny<string>()))
+            .ReturnsAsync(new AudioMetadata
+            {
+                Title = "A Princess of Mars",
+                Format = "m4b",
+                BitRate = 128000
+            });
+        metadata
+            .Setup(service => service.ExtractFileMetadataAsync(It.IsAny<MetadataFileSource>()))
+            .ReturnsAsync(new AudioMetadata { Format = "m4b", Duration = TimeSpan.FromSeconds(1) });
+        Init(builder => builder.WithSingleton(metadata.Object));
+        var testRoot = FileService.GetTempDirectory(
+            $"manual-import-companion-root-boundary-{Guid.NewGuid():N}");
+        var libraryRoot = Path.Join(testRoot, "library");
+        var sourceDirectory = Path.Join(testRoot, "source");
+        var bookFolder = Path.Join(libraryRoot, "Edgar Rice Burroughs", "A Princess of Mars");
+        Directory.CreateDirectory(sourceDirectory);
+        Directory.CreateDirectory(bookFolder);
+        await AddAuthorizedRootAsync(libraryRoot);
+        var settings = await _applicationSettingsRepository.GetAsync() ?? new ApplicationSettings();
+        settings.OutputPath = libraryRoot;
+        settings.FolderNamingPattern = "";
+        settings.FileNamingPattern = "{Title}";
+        settings.EnableMetadataProcessing = false;
+        await _applicationSettingsRepository.SaveAsync(settings);
+        var audioSource = await FileService.GetFileAsync(sourceDirectory, "book.m4b", "audio");
+        var companionSource = await FileService.GetFileAsync(sourceDirectory, "cover.jpg", "cover");
+        var audiobook = await _audiobookRepository.AddAsync(
+            new AudiobookBuilder()
+                .WithTitle("A Princess of Mars")
+                .WithAuthor("Edgar Rice Burroughs")
+                .WithBasePath(bookFolder)
+                .Build());
+        var controller = ActivatorUtilities.CreateInstance<ManualImportController>(_provider);
+
+        var action = await controller.Start(new ManualImportRequestDto
+        {
+            Path = sourceDirectory,
+            Mode = "interactive",
+            Action = FileAction.Copy,
+            IncludeCompanionFiles = true,
+            Items = [new ManualImportItemDto { FullPath = audioSource, MatchedAudiobookId = audiobook.Id }]
+        });
+
+        var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(action.Result);
+        Assert.Equal(1, System.Text.Json.JsonSerializer.SerializeToElement(ok.Value)
+            .GetProperty("importedCount").GetInt32());
+        Assert.True(File.Exists(Path.Join(bookFolder, "A Princess of Mars.m4b")));
+        var companionDestination = Path.Join(bookFolder, "cover.jpg");
+        Assert.True(File.Exists(companionDestination));
+        Assert.Equal("cover", await File.ReadAllTextAsync(companionDestination));
+        Assert.True(File.Exists(companionSource));
+    }
 }
