@@ -76,7 +76,14 @@ namespace Listenarr.Infrastructure.Metadata.Providers.OpenLibrary
                 }
 
                 var searchParams = new List<string>();
-                var q = qParts.Any() ? string.Join("+", qParts) : string.Empty;
+                // Join with a space, not "+". Uri.EscapeDataString encodes "+" as %2B, so a
+                // plus-joined query reaches OpenLibrary as literal plus characters and matches
+                // nothing ("radicalized%2Bcory%2Bdoctorow" -> 0 results, "radicalized cory
+                // doctorow" -> 6). NormalizeForOpenLibrary also joins its tokens with "+", so
+                // undo that here as well.
+                var q = qParts.Any()
+                    ? string.Join(" ", qParts).Replace("+", " ")
+                    : string.Empty;
                 if (!string.IsNullOrEmpty(q))
                 {
                     searchParams.Add($"q={Uri.EscapeDataString(q)}");
