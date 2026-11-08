@@ -29,6 +29,7 @@ public sealed record AudiobookUpdateRequest
     public List<string>? Genres { get; init; }
     public List<string>? Tags { get; init; }
     public List<string>? Narrators { get; init; }
+    public string? RequiredNarrator { get; init; }
     public List<string>? Isbn { get; init; }
     public string? Asin { get; init; }
     public string? OpenLibraryId { get; init; }

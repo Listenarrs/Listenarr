@@ -71,6 +71,7 @@ public sealed class LibraryQueryWorkflow(
         runtime = audiobook.Runtime,
         edition = audiobook.Edition,
         version = audiobook.Version,
+        requiredNarrator = audiobook.RequiredNarrator,
         @explicit = audiobook.Explicit,
         abridged = audiobook.Abridged,
         monitored = audiobook.Monitored,

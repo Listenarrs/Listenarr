@@ -39,7 +39,7 @@ public sealed class ReleasedRootRelocationUpgradeTests : BaseTests
         {
             await File.WriteAllTextAsync(source, "audio");
             await File.WriteAllTextAsync(target, "audio");
-            await using (var legacy = await factory.CreateDbContextAsync())
+            await using (var legacy = Released134SchemaSeedContext.Create(options))
             {
                 var migrator = legacy.GetService<IMigrator>();
                 await migrator.MigrateAsync("20260825021432_AddWeakStorageVerifiedCleanup");

@@ -481,6 +481,8 @@ export interface ApplicationSettings {
   // Search behavior settings
   // Enable OpenLibrary augmentation/search
   enableOpenLibrarySearch?: boolean
+  audiobookshelfBaseUrl?: string
+  audiobookshelfApiKey?: string
   defaultSearchRegion?: string
   defaultSearchLanguage?: string
 }
@@ -750,6 +752,7 @@ export interface Audiobook {
   runtime?: number
   edition?: string
   version?: string
+  requiredNarrator?: string
   imageUrl?: string
   explicit?: boolean
   abridged?: boolean
@@ -807,6 +810,7 @@ export interface AudiobookUpdateRequest {
   runtime?: number
   edition?: string
   version?: string
+  requiredNarrator?: string
   explicit?: boolean
   abridged?: boolean
   monitored?: boolean
@@ -975,6 +979,8 @@ export interface QualityProfile {
   preferredWords?: string[] // Words that increase score
   mustNotContain?: string[] // Instant rejection
   mustContain?: string[] // Must be present
+  preferredNarrators?: string[] // Narrator names that increase score
+  excludedNarrators?: string[] // Narrator names that cause instant rejection
   preferredLanguages?: string[] // e.g., ["English", "Spanish"]
   minimumSeeders?: number
   minimumScore?: number // Minimum score threshold for automatic downloads
