@@ -588,6 +588,125 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Quality
             Assert.False(score.IsRejected, "Result should not be rejected when MinimumScore = 0 and score > 0");
             Assert.True(score.TotalScore > 0, "Score should be positive");
         }
+
+        [Fact]
+        public async Task PreferredNarrator_MatchedViaStructuredField_ShouldGetBonus()
+        {
+            var service = CreateService();
+            var profileWithout = new QualityProfile
+            {
+                PreferredFormats = new System.Collections.Generic.List<string>(),
+                PreferredWords = new System.Collections.Generic.List<string>(),
+                MustNotContain = new System.Collections.Generic.List<string>(),
+                MustContain = new System.Collections.Generic.List<string>(),
+                PreferredNarrators = new System.Collections.Generic.List<string>(),
+                ExcludedNarrators = new System.Collections.Generic.List<string>(),
+                PreferredLanguages = new System.Collections.Generic.List<string>(),
+                MinimumSeeders = 0,
+                MaximumAge = 3650
+            };
+            var profileWith = new QualityProfile
+            {
+                PreferredFormats = new System.Collections.Generic.List<string>(),
+                PreferredWords = new System.Collections.Generic.List<string>(),
+                MustNotContain = new System.Collections.Generic.List<string>(),
+                MustContain = new System.Collections.Generic.List<string>(),
+                PreferredNarrators = new System.Collections.Generic.List<string> { "Scott Brick" },
+                ExcludedNarrators = new System.Collections.Generic.List<string>(),
+                PreferredLanguages = new System.Collections.Generic.List<string>(),
+                MinimumSeeders = 0,
+                MaximumAge = 3650
+            };
+
+            var result = new SearchResult
+            {
+                Title = "Author - Great Book",
+                Narrator = "Scott Brick",
+                Size = 150 * 1024 * 1024,
+                Format = "mp3",
+                Quality = "320",
+                DownloadType = "torrent",
+                Seeders = 5,
+                PublishedDate = DateTime.UtcNow.ToString("o")
+            };
+
+            var scoreWithout = await service.ScoreSearchResult(result, profileWithout);
+            var scoreWith = await service.ScoreSearchResult(result, profileWith);
+
+            Assert.True(scoreWith.TotalScore > scoreWithout.TotalScore,
+                $"Expected preferred-narrator bonus to raise score (without={scoreWithout.TotalScore}, with={scoreWith.TotalScore})");
+            Assert.True(scoreWith.ScoreBreakdown.ContainsKey("PreferredNarrators"));
+        }
+
+        [Fact]
+        public async Task PreferredNarrator_MatchedViaTitleOnly_ShouldGetBonus()
+        {
+            // Many indexers only name the narrator in the release title, not in structured metadata.
+            var service = CreateService();
+            var profile = new QualityProfile
+            {
+                PreferredFormats = new System.Collections.Generic.List<string>(),
+                PreferredWords = new System.Collections.Generic.List<string>(),
+                MustNotContain = new System.Collections.Generic.List<string>(),
+                MustContain = new System.Collections.Generic.List<string>(),
+                PreferredNarrators = new System.Collections.Generic.List<string> { "Stephen Fry" },
+                ExcludedNarrators = new System.Collections.Generic.List<string>(),
+                PreferredLanguages = new System.Collections.Generic.List<string>(),
+                MinimumSeeders = 0,
+                MaximumAge = 3650
+            };
+
+            var result = new SearchResult
+            {
+                Title = "Great Expectations [Stephen Fry]",
+                Size = 150 * 1024 * 1024,
+                Format = "m4b",
+                Quality = "m4b",
+                DownloadType = "torrent",
+                Seeders = 5,
+                PublishedDate = DateTime.UtcNow.ToString("o")
+            };
+
+            var score = await service.ScoreSearchResult(result, profile);
+
+            Assert.True(score.ScoreBreakdown.TryGetValue("PreferredNarrators", out var bonus) && bonus > 0,
+                "Expected a PreferredNarrators bonus from a title-only narrator match");
+        }
+
+        [Fact]
+        public async Task ExcludedNarrator_ShouldBeRejected()
+        {
+            var service = CreateService();
+            var profile = new QualityProfile
+            {
+                PreferredFormats = new System.Collections.Generic.List<string>(),
+                PreferredWords = new System.Collections.Generic.List<string>(),
+                MustNotContain = new System.Collections.Generic.List<string>(),
+                MustContain = new System.Collections.Generic.List<string>(),
+                PreferredNarrators = new System.Collections.Generic.List<string>(),
+                ExcludedNarrators = new System.Collections.Generic.List<string> { "Bad Narrator" },
+                PreferredLanguages = new System.Collections.Generic.List<string>(),
+                MinimumSeeders = 0,
+                MaximumAge = 3650
+            };
+
+            var result = new SearchResult
+            {
+                Title = "Author - Great Book",
+                Narrator = "Bad Narrator",
+                Size = 150 * 1024 * 1024,
+                Format = "mp3",
+                Quality = "320",
+                DownloadType = "torrent",
+                Seeders = 5,
+                PublishedDate = DateTime.UtcNow.ToString("o")
+            };
+
+            var score = await service.ScoreSearchResult(result, profile);
+
+            Assert.True(score.IsRejected, "Expected release narrated by an excluded narrator to be rejected");
+            Assert.Contains(score.RejectionReasons, r => r.Contains("Excluded narrator"));
+        }
     }
 }
 
