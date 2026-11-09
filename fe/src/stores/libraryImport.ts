@@ -656,14 +656,21 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
             const body = typeof err.body === 'string' ? JSON.parse(err.body) : err.body
             if (body?.audiobook?.id) {
               audiobookId = body.audiobook.id
-              // Mutation imports may compatibility-route an existing audiobook to the
-              // selected destination. In-place registration must never rewrite BasePath:
-              // the existing file has to belong to the audiobook's current managed folder.
+              // A 409's book omits file details. Read them before routing an empty wanted
+              // book: rewriting a populated book's BasePath can leave its registered files
+              // pointing at paths where the physical files were never moved.
               if (action.value !== 'none' && rootFolderPath) {
-                try {
-                  await apiService.updateAudiobook(audiobookId, { basePath: rootFolderPath })
-                } catch {
-                  // Non-critical — import continues, file may go to OutputPath fallback
+                const existing = await apiService.getAudiobook(audiobookId)
+                const hasFiles =
+                  !!existing.files?.length ||
+                  (existing.fileCount ?? 0) > 0 ||
+                  !!existing.filePath?.trim()
+                if (!hasFiles) {
+                  try {
+                    await apiService.updateAudiobook(audiobookId, { basePath: rootFolderPath })
+                  } catch {
+                    // Non-critical — import continues using the existing managed folder.
+                  }
                 }
               }
             } else {
