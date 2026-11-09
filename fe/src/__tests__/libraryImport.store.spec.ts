@@ -18,6 +18,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { SearchResult } from '@/types'
+import type { LibraryImportItem } from '@/stores/libraryImport'
 
 const startManualImport = vi.fn()
 const addToLibrary = vi.fn()
@@ -199,6 +200,52 @@ describe('library import store', () => {
     expect(result.warnings).toEqual([
       'The source file was retained because source cleanup could not be proven safe.',
     ])
+  })
+
+  it('imports grouped chapters and a separately matched chapter into the same audiobook', async () => {
+    const { useLibraryImportStore } = await import('@/stores/libraryImport')
+    const store = useLibraryImportStore()
+    const match = { asin: 'B000APXZHK', title: 'Book', region: 'us' } as SearchResult
+    const row = (files: string[]): LibraryImportItem => ({
+      id: files[0]!,
+      fullPath: files[0]!,
+      sourceFiles: files,
+      folderPath: '/incoming/Book',
+      relativePath: 'Book',
+      folderName: 'Book',
+      format: 'MP3',
+      fileCount: files.length,
+      selectedMatch: null,
+      hasSearched: false,
+      isSearching: false,
+      selected: false,
+    })
+    store.items = {
+      grouped: { ...row(['/incoming/Book/01.mp3', '/incoming/Book/02.mp3']), id: 'grouped' },
+      separate: { ...row(['/incoming/Book/03.mp3']), id: 'separate' },
+    }
+    store.selectMatch('grouped', match)
+    store.selectMatch('separate', match)
+    store.action = 'move'
+    addToLibrary
+      .mockResolvedValueOnce({ audiobook: { id: 42 } })
+      .mockRejectedValueOnce({ status: 409, body: { audiobook: { id: 42 } } })
+    startManualImport
+      .mockResolvedValueOnce({ importedCount: 2, results: [{ success: true }, { success: true }] })
+      .mockResolvedValueOnce({ importedCount: 1, results: [{ success: true }] })
+
+    const result = await store.importSelected('/library')
+
+    expect(result.imported).toBe(2)
+    expect(result.errors).toEqual([])
+    expect(startManualImport.mock.calls.map(([request]) => request.items)).toEqual([
+      [
+        { fullPath: '/incoming/Book/01.mp3', matchedAudiobookId: 42 },
+        { fullPath: '/incoming/Book/02.mp3', matchedAudiobookId: 42 },
+      ],
+      [{ fullPath: '/incoming/Book/03.mp3', matchedAudiobookId: 42 }],
+    ])
+    expect(store.itemList).toEqual([])
   })
 
   it('registers files in place using the discovered book folder and backend success result', async () => {
