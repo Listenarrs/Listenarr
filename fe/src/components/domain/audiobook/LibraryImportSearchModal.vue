@@ -260,5 +260,6 @@ onBeforeUnmount(() => onSearching(false))
 
 .previous-match {
   margin-bottom: 1rem;
+  color: #ccc;
 }
 </style>
