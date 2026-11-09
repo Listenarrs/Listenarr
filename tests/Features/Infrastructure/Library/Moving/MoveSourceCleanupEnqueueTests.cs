@@ -42,6 +42,29 @@ public sealed class MoveSourceCleanupEnqueueTests : BaseTests
     }
 
     [Fact]
+    public async Task EnqueueMoveAsync_DeleteAuthorizationMissingTargetStorageRevision_IsRejected()
+    {
+        var (_, command) = await ResolveAndBuildCommandAsync(
+            "enqueue-missing-target-contract", targetInsideRoot: true);
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => _provider.GetRequiredService<IMoveQueueService>()
+                .EnqueueMoveAsync(command with { TargetStorageContractRevision = null }));
+    }
+
+    [Fact]
+    public async Task EnqueueMoveAsync_DeleteAuthorizationMissingSourceStorageRevision_IsRejected()
+    {
+        var (authorization, command) = await ResolveAndBuildCommandAsync(
+            "enqueue-missing-source-contract", targetInsideRoot: true);
+        Assert.NotNull(authorization.SourceRootFolderId);
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => _provider.GetRequiredService<IMoveQueueService>()
+                .EnqueueMoveAsync(command with { SourceStorageContractRevision = null }));
+    }
+
+    [Fact]
     public async Task EnqueueMoveAsync_ResolverRetainAuthorization_Succeeds()
     {
         var (authorization, command) = await ResolveAndBuildCommandAsync(
