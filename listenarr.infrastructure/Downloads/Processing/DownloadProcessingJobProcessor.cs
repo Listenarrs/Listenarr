@@ -15,6 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using Listenarr.Application.Common.Exceptions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
 using System.Security.Cryptography;
@@ -307,6 +308,17 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                 }
                 catch (InvalidOperationException exception)
                 {
+                    await FailImportAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
+                        correlationId, exception.Message, cancellationToken);
+                    return;
+                }
+                catch (ApplicationConflictException exception)
+                {
+                    // The import refused because an earlier file operation on this audiobook is unresolved,
+                    // such as a registration journal that needs repair. Uncaught, this left the job Processing
+                    // until a restart, which retried into the same refusal. Keep the reason on the download.
+                    download.AddBlockMessage(exception.Message);
+                    await downloadService.UpdateAsync(download);
                     await FailImportAsync(job, downloadProcessingJobService, historyRepository, download, audiobook,
                         correlationId, exception.Message, cancellationToken);
                     return;
