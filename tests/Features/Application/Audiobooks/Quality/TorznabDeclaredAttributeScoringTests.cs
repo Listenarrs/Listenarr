@@ -18,7 +18,6 @@
 using System.Net;
 using System.Text;
 using Listenarr.Application.Search.Indexers.Torznab;
-using Listenarr.Infrastructure.Search.Providers.Torznab;
 using Listenarr.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 
