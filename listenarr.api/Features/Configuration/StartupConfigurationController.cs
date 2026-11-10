@@ -88,6 +88,7 @@ namespace Listenarr.Api.Features.Configuration
         [Tags("Settings")]
         [HttpPost("startupconfig")]
         [ProducesResponseType(typeof(StartupConfig), 200)]
+        [ProducesResponseType(400)]
         [ProducesResponseType(401)]
         [ProducesResponseType(403)]
         [ProducesResponseType(500)]
