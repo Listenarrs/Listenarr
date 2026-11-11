@@ -62,12 +62,27 @@ public sealed record FileRegistrationRecoveryStatus(
     bool CanAbandon,
     string PublicReason);
 
+public sealed record RegistrationFileObservation(string Status, long? Length, string? Sha256,
+    string? ObjectIdentity = null, DateTime? LastWriteTimeUtc = null);
+public sealed record RegistrationTrackedFile(int Id, int AudiobookId, string? Path);
+public sealed record FileRegistrationReview(
+    Guid OperationId, int? AudiobookId, string Action, int ProtocolVersion, string State,
+    string? Error, string SourcePath, string DestinationPath,
+    RegistrationFileObservation Source, RegistrationFileObservation Destination,
+    IReadOnlyList<RegistrationTrackedFile> Registrations, string ContentEvidence,
+    bool CanResolve, string ReviewToken, string? ResolutionNote, string? ResolvedBy,
+    DateTime? ResolvedAtUtc);
+
 /// <summary>
 /// Reconciles committed file-registration moves whose published destination is already
 /// owned by an audiobook but whose original source retirement is still incomplete.
 /// </summary>
 public interface IFileRegistrationRecoveryService
 {
+    Task<IReadOnlyList<FileRegistrationReview>> ListReviewsAsync(CancellationToken cancellationToken = default);
+    Task<FileRegistrationReview> InspectAsync(Guid operationId, CancellationToken cancellationToken = default);
+    Task<FileRegistrationReview> ResolveAsync(Guid operationId, string reviewToken, string note,
+        bool acknowledgeIncompleteContent, string actor, CancellationToken cancellationToken = default);
     Task AdoptCommittedAnonymousAsync(
         CancellationToken cancellationToken = default);
 

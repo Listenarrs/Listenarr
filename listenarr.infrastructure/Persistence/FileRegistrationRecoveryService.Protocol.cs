@@ -19,6 +19,7 @@ public sealed partial class FileRegistrationRecoveryService
                 && journal.State
                     != FileMutationJournalState.CompletedSourceRetained
                 && journal.State != FileMutationJournalState.RolledBack
+                && journal.State != FileMutationJournalState.OperatorResolved
                 && journal.State != FileMutationJournalState.OwnerMetadataReconciled
                 && journal.State != FileMutationJournalState.NeedsAttention);
         if (operationId is Guid scopedOperationId)
@@ -54,6 +55,7 @@ public sealed partial class FileRegistrationRecoveryService
                     && journal.State
                         != FileMutationJournalState.CompletedSourceRetained
                     && journal.State != FileMutationJournalState.RolledBack
+                && journal.State != FileMutationJournalState.OperatorResolved
                     && journal.State != FileMutationJournalState.OwnerMetadataReconciled
                     && journal.State != FileMutationJournalState.NeedsAttention);
             if (operationId is Guid trackedOperationId)
@@ -87,6 +89,7 @@ public sealed partial class FileRegistrationRecoveryService
                     && journal.State
                         != FileMutationJournalState.CompletedSourceRetained
                     && journal.State != FileMutationJournalState.RolledBack
+                && journal.State != FileMutationJournalState.OperatorResolved
                     && journal.State != FileMutationJournalState.OwnerMetadataReconciled
                     && journal.State != FileMutationJournalState.NeedsAttention);
             if (operationId is Guid relationalOperationId)

@@ -37,6 +37,7 @@ public sealed partial class FileRegistrationRecoveryService
             .AsNoTracking()
             .Where(RegistrationPublicationPredicate)
             .Where(journal => journal.State != FileMutationJournalState.RolledBack
+                && journal.State != FileMutationJournalState.OperatorResolved
                 && journal.State != FileMutationJournalState.Completed
                 && journal.State != FileMutationJournalState.CompletedSourceRetained)
             .ToListAsync(cancellationToken);
@@ -192,6 +193,7 @@ public sealed partial class FileRegistrationRecoveryService
                 && journal.State != FileMutationJournalState.Completed
                 && journal.State != FileMutationJournalState.CompletedSourceRetained
                 && journal.State != FileMutationJournalState.RolledBack
+                && journal.State != FileMutationJournalState.OperatorResolved
                 && journal.State != FileMutationJournalState.NeedsAttention);
         if (operationId is Guid scopedOperationId)
         {
@@ -210,6 +212,7 @@ public sealed partial class FileRegistrationRecoveryService
             .AsNoTracking()
             .Where(RegistrationPublicationPredicate)
             .Where(journal => journal.State != FileMutationJournalState.RolledBack
+                && journal.State != FileMutationJournalState.OperatorResolved
                 && journal.State != FileMutationJournalState.Completed
                 && journal.State != FileMutationJournalState.CompletedSourceRetained)
             .ToListAsync(cancellationToken);

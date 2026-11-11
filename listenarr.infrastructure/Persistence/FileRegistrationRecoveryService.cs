@@ -92,7 +92,8 @@ public sealed partial class FileRegistrationRecoveryService(
             .Where(journal => journal.AudiobookId == audiobookId
                 && journal.State != FileMutationJournalState.Completed
                 && journal.State != FileMutationJournalState.CompletedSourceRetained
-                && journal.State != FileMutationJournalState.RolledBack)
+                && journal.State != FileMutationJournalState.RolledBack
+                && journal.State != FileMutationJournalState.OperatorResolved)
             .OrderBy(journal => journal.CreatedAt)
             .ThenBy(journal => journal.OperationId)
             .Select(journal => journal.OperationId)
@@ -225,8 +226,10 @@ public sealed partial class FileRegistrationRecoveryService(
                         ? FileRegistrationRecoveryDisposition.WaitingForOwnerRetry
                         : FileRegistrationRecoveryDisposition.AutomaticRecovery,
             CanRetry: recoverable,
-            CanAbandon: false,
-            sourceRetained
+            CanAbandon: needsAttention,
+            journal.State == FileMutationJournalState.OperatorResolved
+                ? "The operator released this recovery block. Import success and content completeness were not established; all files were preserved."
+                : sourceRetained
                 ? "The publication completed successfully, but the source was retained because delete authority does not survive a restart."
                 : cleared
                     ? "The file-registration recovery boundary is clear."

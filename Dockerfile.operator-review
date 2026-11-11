@@ -1,0 +1,6 @@
+FROM mcr.microsoft.com/dotnet/aspnet:10.0
+WORKDIR /app
+COPY live-publish/ ./
+ENV ASPNETCORE_URLS=http://+:4545
+ENV DOCKER_ENV=true
+ENTRYPOINT ["dotnet", "Listenarr.Api.dll"]

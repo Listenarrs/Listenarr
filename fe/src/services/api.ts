@@ -101,6 +101,27 @@ const buildApiRequestUrl = (endpoint: string): string => {
 type ErrorWithStatus = Error & { status?: number; body?: string; retryAfter?: number }
 
 class ApiService {
+  getRegistrationReviews() {
+    return this.request<import('@/types/registrationRecovery').RegistrationReview[]>(
+      '/file-registration-recovery',
+    )
+  }
+
+  inspectRegistration(operationId: string) {
+    return this.request<import('@/types/registrationRecovery').RegistrationReview>(
+      `/file-registration-recovery/${encodeURIComponent(operationId)}`,
+    )
+  }
+
+  resolveRegistration(operationId: string, reviewToken: string, note: string) {
+    return this.request<import('@/types/registrationRecovery').RegistrationReview>(
+      `/file-registration-recovery/${encodeURIComponent(operationId)}/resolve`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ reviewToken, note, acknowledgeIncompleteContent: true }),
+      },
+    )
+  }
   private antiforgeryToken: string | null = null
   private antiforgeryTokenSession: string | null = null
   private tokenReadyPromise: Promise<void> | null = null

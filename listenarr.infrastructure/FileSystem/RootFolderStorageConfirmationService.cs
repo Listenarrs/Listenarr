@@ -311,9 +311,11 @@ internal sealed class RootFolderStorageConfirmationService(
                             && journal.State
                                 != FileMutationJournalState.CompletedSourceRetained
                             && journal.State != FileMutationJournalState.RolledBack
+                && journal.State != FileMutationJournalState.OperatorResolved
                         : journal.State
                                 != FileMutationJournalState.OwnerMetadataReconciled
-                            && journal.State != FileMutationJournalState.RolledBack))
+                            && journal.State != FileMutationJournalState.RolledBack
+                && journal.State != FileMutationJournalState.OperatorResolved))
             .ToListAsync(cancellationToken);
         if (activeMutationJournals.Any(journal =>
                 (journal.AudiobookId.HasValue

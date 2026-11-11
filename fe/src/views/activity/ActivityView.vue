@@ -42,6 +42,7 @@
       </div>
     </div>
 
+    <RegistrationRecoveryPanel />
     <div v-if="queueHealthClients.length > 0" class="queue-health-banner">
       <PhWarningCircle />
       <div class="queue-health-copy">
@@ -235,6 +236,7 @@
 </template>
 
 <script setup lang="ts">
+import RegistrationRecoveryPanel from '@/components/activity/RegistrationRecoveryPanel.vue'
 import { ref, computed, onMounted, onUnmounted, nextTick, unref } from 'vue'
 import {
   PhActivity,

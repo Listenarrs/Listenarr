@@ -158,7 +158,8 @@ public sealed partial class RootFolderRelocationService
                         || journal.Action == FileAction.HardlinkCopy)
                     && journal.State != FileMutationJournalState.Completed
                     && journal.State != FileMutationJournalState.CompletedSourceRetained
-                    && journal.State != FileMutationJournalState.RolledBack,
+                    && journal.State != FileMutationJournalState.RolledBack
+                && journal.State != FileMutationJournalState.OperatorResolved,
                 cancellationToken))
         {
             throw new ApplicationConflictException(
@@ -177,8 +178,10 @@ public sealed partial class RootFolderRelocationService
                         ? journal.State != FileMutationJournalState.Completed
                             && journal.State != FileMutationJournalState.CompletedSourceRetained
                             && journal.State != FileMutationJournalState.RolledBack
+                && journal.State != FileMutationJournalState.OperatorResolved
                         : journal.State != FileMutationJournalState.OwnerMetadataReconciled
-                            && journal.State != FileMutationJournalState.RolledBack),
+                            && journal.State != FileMutationJournalState.RolledBack
+                && journal.State != FileMutationJournalState.OperatorResolved),
                 cancellationToken))
         {
             throw new ApplicationConflictException(

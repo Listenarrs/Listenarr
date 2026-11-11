@@ -41,7 +41,8 @@ public enum FileMutationJournalState
     NeedsAttention,
     RollbackAuthorized,
     RolledBack,
-    CompletedSourceRetained
+    CompletedSourceRetained,
+    OperatorResolved
 }
 
 public static class FileMutationJournalLifecycle
@@ -51,7 +52,8 @@ public static class FileMutationJournalLifecycle
         state is FileMutationJournalState.Completed
             or FileMutationJournalState.CompletedSourceRetained
             or FileMutationJournalState.RolledBack
-            or FileMutationJournalState.NeedsAttention;
+            or FileMutationJournalState.NeedsAttention
+            or FileMutationJournalState.OperatorResolved;
 
     public static bool IsRegistrationPublicationRecoverable(
         FileMutationJournalState state) =>
@@ -77,7 +79,8 @@ public static class FileMutationJournalLifecycle
         FileMutationJournalState state) =>
         state is FileMutationJournalState.Completed
             or FileMutationJournalState.CompletedSourceRetained
-            or FileMutationJournalState.RolledBack;
+            or FileMutationJournalState.RolledBack
+            or FileMutationJournalState.OperatorResolved;
 }
 
 /// <summary>
@@ -117,4 +120,10 @@ public sealed class FileMutationJournal
     public string? Error { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    [MaxLength(2000)]
+    public string? ResolutionNote { get; set; }
+    [MaxLength(256)]
+    public string? ResolvedBy { get; set; }
+    public DateTime? ResolvedAtUtc { get; set; }
+    public string? ResolutionReviewJson { get; set; }
 }

@@ -141,6 +141,8 @@ internal sealed partial class EfFileMutationJournalStore
         string? targetPhysicalObjectIdentity,
         int? audiobookId)
     {
+        if (state == FileMutationJournalState.OperatorResolved)
+            throw new InvalidOperationException("Operator resolution requires a reviewed recovery request.");
         if (operationId == Guid.Empty)
         {
             throw new ArgumentException(
@@ -165,6 +167,8 @@ internal sealed partial class EfFileMutationJournalStore
         int? audiobookId,
         string? error)
     {
+        if (journal.State == FileMutationJournalState.OperatorResolved)
+            throw new InvalidOperationException("An operator-resolved publication cannot be advanced.");
         if (journal.ProtocolVersion != FileMutationProtocol.Current)
         {
             throw new InvalidOperationException(

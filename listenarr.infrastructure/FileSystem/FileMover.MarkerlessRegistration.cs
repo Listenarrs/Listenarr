@@ -149,7 +149,8 @@ public partial class FileMover
 
             if (journal.State == FileMutationJournalState.NeedsAttention
                 || journal.State == FileMutationJournalState.RollbackAuthorized
-                || journal.State == FileMutationJournalState.RolledBack)
+                || journal.State == FileMutationJournalState.RolledBack
+                || journal.State == FileMutationJournalState.OperatorResolved)
             {
                 return new MarkerlessRegistrationPreparation(true, null);
             }
