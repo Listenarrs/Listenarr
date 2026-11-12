@@ -19,7 +19,7 @@ const [{ api, browser: launchBrowser, page: openPage, BASE }, { hasSnapshot, res
     import(pathToFileURL(join(e2e, 'helpers.mjs'))),
   ])
 
-const { matchCard, repairsOver, resultStates, startRepair, testId } = helpers
+const { field, repairsOver, resultStates, settled, testId } = helpers
 
 if (!hasSnapshot('seeded')) throw new Error('CT 105 needs its seeded E2E snapshot.')
 
@@ -104,6 +104,34 @@ async function addVisibleCursor(page) {
   })
 }
 
+let cursorPosition = { x: 0, y: 0 }
+
+async function moveCursorTo(page, locator) {
+  await locator.scrollIntoViewIfNeeded()
+  const bounds = await locator.boundingBox()
+  if (!bounds) throw new Error('Cannot move the demo cursor to an invisible element.')
+
+  const target = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }
+  const start = cursorPosition
+  const frames = 17
+  for (let frame = 1; frame <= frames; frame += 1) {
+    const progress = frame / frames
+    const eased = progress * progress * (3 - 2 * progress)
+    cursorPosition = {
+      x: start.x + (target.x - start.x) * eased,
+      y: start.y + (target.y - start.y) * eased,
+    }
+    await page.mouse.move(cursorPosition.x, cursorPosition.y)
+    await recordFrames(page, 83)
+  }
+  cursorPosition = target
+}
+
+async function clickWithCursor(page, locator) {
+  await moveCursorTo(page, locator)
+  await locator.click()
+}
+
 try {
   await restore('seeded')
   await replaceRegionWithMissing(targetId)
@@ -123,10 +151,10 @@ try {
   const ffmpegError = once(ffmpeg, 'error')
   ffmpegError.catch(() => {})
   await recordFrames(page, 1200)
-  await page.locator('.group-btn').click()
+  await clickWithCursor(page, page.locator('.group-btn'))
   await page.locator('.group-menu').waitFor({ state: 'visible' })
   await recordFrames(page, 900)
-  await testId(page, 'group-broken').click()
+  await clickWithCursor(page, testId(page, 'group-broken'))
   await page.getByRole('button', { name: 'Broken books' }).waitFor({ state: 'visible' })
   await page.locator('.audiobook-poster-container').nth(1).waitFor({ state: 'visible' })
   if (await page.locator('.audiobook-poster-container').count() !== 2) {
@@ -138,18 +166,42 @@ try {
   await recordFrames(page, 1700)
 
   const targetCard = page.locator('.audiobook-item').filter({ hasText: targetTitle })
-  await targetCard.locator('.selection-checkbox').click()
+  await clickWithCursor(page, targetCard.locator('.selection-checkbox'))
   const repairSelected = page.getByRole('button', { name: 'Repair Selected (1)' })
   await repairSelected.waitFor({ state: 'visible' })
   await recordFrames(page, 800)
-  await repairSelected.click()
+  await clickWithCursor(page, repairSelected)
   await testId(page, `repair-row-${targetId}`).waitFor({ state: 'visible' })
   await recordFrames(page, 1000)
 
-  await matchCard(page, targetId, rightRecord)
+  const asinField = field(page, targetId, 'asin')
+  await moveCursorTo(page, asinField)
+  await asinField.fill('')
+  const titleField = field(page, targetId, 'title')
+  await moveCursorTo(page, titleField)
+  await titleField.fill(rightRecord.title)
+  const authorField = field(page, targetId, 'author')
+  await moveCursorTo(page, authorField)
+  await authorField.fill(rightRecord.author)
+  const regionField = field(page, targetId, 'region')
+  await moveCursorTo(page, regionField)
+  await regionField.selectOption(rightRecord.region)
+  await settled(page)
+  const matchResult = page
+    .locator(`[data-testid="repair-row-${targetId}"] [data-testid="find-match-result"]`)
+    .filter({ hasText: rightRecord.pick })
+    .first()
+  await matchResult.waitFor({ timeout: 10000 })
+  await clickWithCursor(page, matchResult)
   await testId(page, 'repair-confirm').filter({ hasText: 'Repair 1' }).waitFor()
   await recordFrames(page, 1000)
-  await startRepair(page)
+
+  const repairConfirm = testId(page, 'repair-confirm')
+  await clickWithCursor(page, repairConfirm)
+  const repairQuestion = page.locator('.modal-content', { hasText: /Repair \d+ books?\?/ })
+  await repairQuestion.waitFor({ timeout: 10000 })
+  await clickWithCursor(page, repairQuestion.locator('.btn.confirm'))
+  await repairQuestion.waitFor({ state: 'detached', timeout: 10000 })
   await repairsOver(page)
   if (JSON.stringify(await resultStates(page, [targetId])) !== JSON.stringify(['done'])) {
     throw new Error('The selected book did not finish its repair successfully.')
@@ -164,9 +216,9 @@ try {
     throw new Error('Expected only the unselected book to remain broken after repair.')
   }
 
-  await testId(page, 'repair-cancel').click()
+  await clickWithCursor(page, testId(page, 'repair-cancel'))
   await testId(page, 'repair-confirm').waitFor({ state: 'visible' })
-  await testId(page, 'repair-cancel').click()
+  await clickWithCursor(page, testId(page, 'repair-cancel'))
   await page.locator('.modal-overlay').waitFor({ state: 'detached' })
   await page.goto(`${BASE}/audiobooks?group=broken`, { waitUntil: 'networkidle' })
   await page.locator('.audiobook-poster-container').first().waitFor({ state: 'visible' })
