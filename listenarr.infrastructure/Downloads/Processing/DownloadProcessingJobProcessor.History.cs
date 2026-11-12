@@ -115,5 +115,50 @@ namespace Listenarr.Infrastructure.Downloads.Processing
                 CorrelationId = correlationId,
                 Data = JsonSerializer.Serialize(details)
             }, ct);
+
+        private static async Task RecordFileResultHistoryAsync(
+            IHistoryRepository historyRepository,
+            Download download,
+            Audiobook audiobook,
+            string jobId,
+            ImportResult result,
+            string correlationId,
+            CancellationToken ct)
+        {
+            var outcome = string.IsNullOrWhiteSpace(result.SourcePath) || string.IsNullOrWhiteSpace(result.FinalPath)
+                ? HistoryOutcome.Skipped
+                : HistoryOutcome.Succeeded;
+            var eventType = outcome == HistoryOutcome.Skipped
+                ? HistoryEvents.FileSkipped
+                : result.Action == Listenarr.Domain.Audiobooks.Enumerations.FileAction.Move
+                    ? HistoryEvents.FileMoved
+                    : HistoryEvents.FileCopied;
+            await historyRepository.AddAsync(new History
+            {
+                AudiobookId = audiobook.Id,
+                AudiobookTitle = audiobook.Title,
+                SourceTitle = Path.GetFileName(result.FinalPath ?? result.SourcePath ?? download.Title),
+                DownloadId = download.Id.ToUpperInvariant(),
+                DownloadClientId = download.DownloadClientId,
+                EventType = eventType,
+                Outcome = outcome,
+                Source = "DownloadImport",
+                Message = result.Message ?? $"{result.Action} completed",
+                Timestamp = DateTime.UtcNow,
+                CorrelationId = correlationId,
+                Data = JsonSerializer.Serialize(new
+                {
+                    JobId = jobId,
+                    result.Action,
+                    result.RequestedAction,
+                    result.EffectiveAction,
+                    result.SourceDisposition,
+                    result.WarningCode,
+                    result.SourcePath,
+                    result.FinalPath,
+                    result.WasRegisteredToAudiobook
+                })
+            }, ct);
+        }
     }
 }
