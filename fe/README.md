@@ -47,21 +47,25 @@ npm run build
 npm run test:unit
 ```
 
-### Run End-to-End Tests with [Cypress](https://www.cypress.io/)
+### Run API-stub Integration Tests with [Cypress](https://www.cypress.io/)
 
 ```sh
-npm run test:e2e:dev
+npm run test:integration:cypress
 ```
 
-This runs the end-to-end tests against the Vite development server.
-It is much faster than the production build.
+These browser tests stub the HTTP API, so they are classified as integration tests rather than full-stack E2E tests. They run against Vite without starting the C# API.
+Their specs live under `cypress/integration/` and use integration-only support/configuration.
 
-But it's still recommended to test the production build with `test:e2e` before deploying (e.g. in CI environments):
+### Run Full-stack E2E Tests
 
 ```sh
-npm run build
 npm run test:e2e
 ```
+
+This starts the real API and Vite frontend, runs the read-only library check first, then runs write tests. The write suite stops the API and restores its generated SQLite/config seed before every test. All data, including the app's content root, lives under a temporary directory that is removed on exit; the runner does not use a developer database or instance.
+Read-only specs live under `cypress/e2e/read-only/`; database-mutating specs live under `cypress/e2e/write/` and use a separate Cypress config and reset hook.
+
+The ordered full suite is the CI command. For local debugging, `npm run test:e2e:read-only` runs only the read-only suite and `npm run test:e2e:write` runs only the reset-before-each-test write suite.
 
 ### Lint with [ESLint](https://eslint.org/)
 

@@ -128,6 +128,18 @@ jobs:
             exit 1
           fi
 
+      - name: Run Cypress API-stub integration tests
+        working-directory: fe
+        run: npm run test:integration:cypress
+
+      - name: Run Cypress read-only happy-path E2E
+        working-directory: fe
+        run: npm run test:e2e:read-only
+
+      - name: Run Cypress write happy-path E2E
+        working-directory: fe
+        run: npm run test:e2e:write
+
       - name: Publish API (linux-x64)
         run: dotnet publish ${{ env.API_PROJECT }} -c Release -r linux-x64 --no-restore --self-contained true /p:PublishSingleFile=true -o listenarr.api/publish/linux-x64
 
