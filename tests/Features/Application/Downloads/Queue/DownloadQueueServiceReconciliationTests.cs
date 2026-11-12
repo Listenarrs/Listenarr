@@ -1279,8 +1279,8 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
             processingJobRepoMock.Setup(r => r.GetAllJobDownloadIdsAsync(It.IsAny<IEnumerable<string>>())).ReturnsAsync(new List<string>());
 
             var gatewayMock = new Mock<IDownloadClientGateway>();
-            gatewayMock.Setup(g => g.GetQueueAsync(client, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new List<QueueItem>
+            gatewayMock.Setup(g => g.GetQueueSnapshotAsync(client, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(DownloadClientQueueSnapshot.Complete(new List<QueueItem>
                 {
                     new QueueItem
                     {
@@ -1292,7 +1292,7 @@ namespace Listenarr.Tests.Features.Application.Downloads.Queue
                         DownloadClientType = "transmission",
                         AddedAt = DateTime.UtcNow
                     }
-                });
+                }));
 
             var metricsMock = new Mock<IAppMetricsService>();
 
