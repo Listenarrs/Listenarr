@@ -11,7 +11,7 @@ internal static class ListenarrDatabaseMigrationPreflight
     internal const string AudiobookAddedDateMigrationId =
         "20261119022628_AddAudiobookAddedDate";
     internal const string QualityProfileUpgradeAllowedMigrationId =
-        "20261029020317_AddQualityProfileUpgradeAllowed";
+        "20261112054132_AddQualityProfileUpgradeAllowed";
 
     public static ListenarrDatabaseMigrationPreflightResult RepairLegacyData(
         ListenArrDbContext context)
