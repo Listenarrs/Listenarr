@@ -1,16 +1,16 @@
 /* eslint-disable cypress/unsafe-to-chain-command */
-describe('Hardlink/Copy Move Flow (E2E)', () => {
+describe('Hardlink/Copy move integration', () => {
   beforeEach(() => {
     // Stub startup config and account checks (no auth)
-    cy.intercept('GET', '/api/configuration/startupconfig', {
+    cy.intercept('GET', '**/api/v1/configuration/bootstrap', {
       statusCode: 200,
       body: { authenticationRequired: false, apiKey: null, baseUrl: '/' }
     }).as('getStartupConfig')
 
-    cy.intercept('GET', '/api/account/me', { statusCode: 200, body: { authenticated: false } }).as('getCurrentUser')
+    cy.intercept('GET', '**/api/v1/account/me', { statusCode: 200, body: { authenticated: false } }).as('getCurrentUser')
 
     // App settings with outputPath and default file handling mode (Hardlink/Copy)
-    cy.intercept('GET', '/api/configuration/settings', {
+    cy.intercept('GET', '**/api/v1/configuration/settings', {
       statusCode: 200,
       body: {
         outputPath: '/mnt/audiobooks',
@@ -22,7 +22,7 @@ describe('Hardlink/Copy Move Flow (E2E)', () => {
     }).as('getSettings')
 
     // Stub library endpoint to return a single audiobook
-    cy.intercept('GET', '/api/library', {
+    cy.intercept('GET', '**/api/v1/library', {
       statusCode: 200,
       body: [
         {
@@ -30,6 +30,7 @@ describe('Hardlink/Copy Move Flow (E2E)', () => {
           title: 'Test Book',
           author: 'Test Author',
           basePath: '/mnt/audiobooks/Test Author/Test Book',
+          rootFolderId: 1,
           monitored: true,
           qualityProfileId: null,
           tags: [],
@@ -39,26 +40,35 @@ describe('Hardlink/Copy Move Flow (E2E)', () => {
       ]
     }).as('getLibrary')
 
+    cy.intercept('GET', '**/api/v1/rootfolders', {
+      statusCode: 200,
+      body: [
+        {
+          id: 1,
+          name: 'Audiobooks',
+          path: '/mnt/audiobooks',
+          isDefault: true,
+          storageState: 'Healthy',
+          canChangePath: true,
+        },
+      ],
+    })
+
     // Stub other endpoints
-    cy.intercept('GET', '/api/qualityprofile', { statusCode: 200, body: [] }).as('getProfiles')
-    cy.intercept('GET', '/api/configuration/apis', { statusCode: 200, body: [] }).as('getApis')
-    cy.intercept('GET', '/api/download-clients', { statusCode: 200, body: [] }).as('getDownloadClients')
+    cy.intercept('GET', '**/api/v1/qualityprofile', { statusCode: 200, body: [] }).as('getProfiles')
+    cy.intercept('GET', '**/api/v1/configuration/apis', { statusCode: 200, body: [] }).as('getApis')
+    cy.intercept('GET', '**/api/v1/download-clients', { statusCode: 200, body: [] }).as('getDownloadClients')
 
-    // Capture the PUT update request for assertions
-    cy.intercept('PUT', '/api/library/1', (req) => {
-      req.reply((res) => {
-        const updated = Object.assign({ id: 1, title: 'Test Book', author: 'Test Author' }, req.body)
-        res.send({ statusCode: 200, body: { message: 'ok', audiobook: updated } })
-      })
-    }).as('updateAudiobook')
-
-    // Capture move request with fileHandling mode
-    cy.intercept('POST', '/api/library/1/move', (req) => {
-      req.reply({ statusCode: 200, body: { message: 'queued', jobId: 'job-test-1' } })
+    // Capture move requests with the chosen file handling mode.
+    cy.intercept('POST', '**/api/v1/library/1/move', (req) => {
+      const body = req.body.moveFiles
+        ? { message: 'queued', jobId: 'job-test-1', target: req.body.destinationPath }
+        : { message: 'Destination updated' }
+      req.reply({ statusCode: 200, body })
     }).as('moveAudiobook')
 
     // Stub volume check endpoint
-    cy.intercept('GET', '/api/filesystem/check-volume*', {
+    cy.intercept('GET', '**/api/v1/filesystem/check-volume*', {
       statusCode: 200,
       body: {
         sameVolume: true,
@@ -79,18 +89,20 @@ describe('Hardlink/Copy Move Flow (E2E)', () => {
     cy.wait('@getLibrary')
 
     // Open edit modal for the single audiobook
-    cy.get('button[title="Edit"]').first().should('be.visible').click()
+    cy.get('button[title="Edit"]').first().click({ force: true })
 
     // Ensure modal and destination input are visible
-    cy.get('.modal-container', { timeout: 10000 }).should('exist')
+    cy.contains('Edit Audiobook: Test Book', { timeout: 10000 }).should('be.visible')
+    cy.get('button[aria-label="Edit destination"]').click()
     cy.get('input.relative-input').should('exist').clear().type('New Author/New Book')
+    cy.get('button[aria-label="Save destination"]').click()
 
     // Click Save Changes to trigger confirm dialog
-    cy.contains('Save Changes').click()
+    cy.contains('button', 'Save').click()
 
     // Move confirmation dialog should appear
-    cy.get('.confirm-dialog').should('exist')
-    cy.get('.confirm-dialog').contains('Move').should('be.visible')
+    cy.get('input[aria-label="Move files now"]').should('be.checked')
+    cy.contains('button', 'Move Files').should('be.visible')
   })
 
   it('calls move API when confirming move', () => {
@@ -102,18 +114,20 @@ describe('Hardlink/Copy Move Flow (E2E)', () => {
     cy.wait('@getLibrary')
 
     // Open edit modal for the single audiobook
-    cy.get('button[title="Edit"]').first().should('be.visible').click()
+    cy.get('button[title="Edit"]').first().click({ force: true })
 
     // Ensure modal and destination input are visible
-    cy.get('.modal-container', { timeout: 10000 }).should('exist')
+    cy.contains('Edit Audiobook: Test Book', { timeout: 10000 }).should('be.visible')
+    cy.get('button[aria-label="Edit destination"]').click()
     cy.get('input.relative-input').should('exist').clear().type('New Author/New Book')
+    cy.get('button[aria-label="Save destination"]').click()
 
     // Click Save Changes to trigger confirm dialog
-    cy.contains('Save Changes').click()
+    cy.contains('button', 'Save').click()
 
     // Confirm move
-    cy.get('.confirm-dialog').should('exist')
-    cy.get('.confirm-dialog .btn.confirm').contains('Move').click()
+    cy.get('input[aria-label="Move files now"]').should('be.checked')
+    cy.contains('button', 'Move Files').click()
 
     // Verify move API was called
     cy.wait('@moveAudiobook')
@@ -129,21 +143,23 @@ describe('Hardlink/Copy Move Flow (E2E)', () => {
     cy.wait('@getLibrary')
 
     // Open edit modal for the single audiobook
-    cy.get('button[title="Edit"]').first().should('be.visible').click()
+    cy.get('button[title="Edit"]').first().click({ force: true })
 
     // Ensure modal and destination input are visible
-    cy.get('.modal-container', { timeout: 10000 }).should('exist')
+    cy.contains('Edit Audiobook: Test Book', { timeout: 10000 }).should('be.visible')
+    cy.get('button[aria-label="Edit destination"]').click()
     cy.get('input.relative-input').should('exist').clear().type('New Author/New Book')
+    cy.get('button[aria-label="Save destination"]').click()
 
     // Click Save Changes to trigger confirm dialog
-    cy.contains('Save Changes').click()
+    cy.contains('button', 'Save').click()
 
     // Choose "Change without moving"
-    cy.get('.confirm-dialog').should('exist')
-    cy.get('.confirm-dialog .btn.cancel').contains('Change without moving').click()
+    cy.contains('label.checkbox-label', 'Move files now').click()
+    cy.get('input[aria-label="Move files now"]').should('not.be.checked')
+    cy.contains('button', 'Update Path').click()
 
-    // Verify update was called
-    cy.wait('@updateAudiobook')
+    cy.wait('@moveAudiobook').its('request.body.moveFiles').should('equal', false)
     cy.contains('Destination updated', { timeout: 5000 }).should('exist')
   })
 
@@ -156,17 +172,19 @@ describe('Hardlink/Copy Move Flow (E2E)', () => {
     cy.wait('@getLibrary')
 
     // Open edit modal for the single audiobook
-    cy.get('button[title="Edit"]').first().should('be.visible').click()
+    cy.get('button[title="Edit"]').first().click({ force: true })
 
     // Ensure modal and destination input are visible
-    cy.get('.modal-container', { timeout: 10000 }).should('exist')
+    cy.contains('Edit Audiobook: Test Book', { timeout: 10000 }).should('be.visible')
+    cy.get('button[aria-label="Edit destination"]').click()
     cy.get('input.relative-input').should('exist').clear().type('New Author/New Book')
+    cy.get('button[aria-label="Save destination"]').click()
 
     // Click Save Changes to trigger confirm dialog
-    cy.contains('Save Changes').click()
+    cy.contains('button', 'Save').click()
 
     // Move confirmation dialog should appear
-    cy.get('.confirm-dialog').should('exist')
+    cy.get('input[aria-label="Move files now"]').should('be.checked')
 
     // The volume check API should have been called
     cy.wait('@checkVolume')
