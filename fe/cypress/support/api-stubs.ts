@@ -51,6 +51,7 @@ type LibraryImportSearchResult = {
   title: string
   authors: { name: string }[]
   region: string
+  series?: { name: string; sequence?: number | null }[]
 }
 
 type RepairIdentifier = {
@@ -242,6 +243,15 @@ export const stubAudiobook = (id: number, audiobook: AudiobookResponse) =>
     })
     .as('getAudiobook')
 
+export const stubAudiobookReplies = (id: number, replies: ApiReply[]) => {
+  let replyIndex = 0
+  cy.intercept('GET', `**/api/v1/library/${id}`, (request) => {
+    const reply = replies[Math.min(replyIndex, replies.length - 1)]!
+    replyIndex += 1
+    request.reply(reply)
+  }).as('getAudiobook')
+}
+
 export const stubLibraryIdentifiers = (id: number, alias = 'identifiers') =>
   stubJson('GET', `**/api/v1/library/${id}/identifiers`, { audiobookId: id, identifiers: [] }, alias)
 
@@ -363,6 +373,12 @@ export const stubManualImport = (
   response: { importedCount: number; totalCount: number; results: unknown[] },
   alias = 'importManualFiles',
 ) => stubJson('POST', '**/api/v1/library/manual-import', response, alias)
+
+export const stubAddLibrary = (audiobook: AudiobookResponse, alias = 'addAudiobookToLibrary') =>
+  cy.intercept('POST', '**/api/v1/library/add', {
+    statusCode: 200,
+    body: { message: 'Audiobook added', audiobook },
+  }).as(alias)
 
 export const stubLibraryImportSavedResults = (
   rootFolderId: number,

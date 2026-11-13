@@ -187,4 +187,13 @@ describe('Repair / Find Match card fields', () => {
     card().find('[data-testid="match-cancel-search"]').should('be.visible').click()
     cy.get('[data-testid="match-cancel-search"]', { timeout: 2000 }).should('not.exist')
   })
+
+  it('trims whitespace around a pasted ASIN before looking it up', () => {
+    openRepair()
+    field('asin').type(' B008DFUGCQ ')
+    submitSearch()
+
+    cy.wait('@metadata').its('request.url').should('include', '/metadata/B008DFUGCQ?region=us')
+    cy.get('@search.all').should('have.length', 0)
+  })
 })
