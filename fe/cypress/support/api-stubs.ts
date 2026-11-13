@@ -32,6 +32,42 @@ type ApiReply = { statusCode?: number; body?: unknown; delay?: number }
 type SearchReply = ApiReply
 type MetadataReply = ApiReply
 
+type LibraryImportUnmatchedFile = {
+  fullPath: string
+  sourceFiles: string[]
+  relativePath: string
+  bookFolder: string
+  size: number
+  fileCount: number
+  title?: string
+  author?: string
+  asin?: string
+  format: string
+}
+
+type LibraryImportSearchResult = {
+  id: string
+  asin: string
+  title: string
+  authors: { name: string }[]
+  region: string
+}
+
+type RepairIdentifier = {
+  type: string
+  value: string
+  region?: string | null
+  isPrimary: boolean
+  source: string
+}
+
+type RepairSearchResult = {
+  asin: string
+  title: string
+  authors: { name: string }[]
+  region: string
+}
+
 type RootFolder = {
   id: number
   name: string
@@ -77,6 +113,40 @@ export const libraryAudiobookFixture = (overrides: Partial<LibraryAudiobook> = {
   id: 1,
   title: 'Test Book',
   authors: ['Test Author'],
+  ...overrides,
+})
+
+export const libraryImportUnmatchedFixture = (
+  overrides: Partial<LibraryImportUnmatchedFile> = {},
+): LibraryImportUnmatchedFile => ({
+  fullPath: '/incoming/Test Author/Test Book/Test Book.m4b',
+  sourceFiles: ['/incoming/Test Author/Test Book/Test Book.m4b'],
+  relativePath: 'Test Author/Test Book',
+  bookFolder: '/incoming/Test Author/Test Book',
+  size: 1024,
+  fileCount: 1,
+  title: 'Test Book',
+  author: 'Test Author',
+  format: 'M4B',
+  ...overrides,
+})
+
+export const libraryImportSearchResultFixture = (
+  overrides: Partial<LibraryImportSearchResult> = {},
+): LibraryImportSearchResult => ({
+  id: 'B000000001',
+  asin: 'B000000001',
+  title: 'Test Book',
+  authors: [{ name: 'Test Author' }],
+  region: 'us',
+  ...overrides,
+})
+
+export const repairSearchResultFixture = (overrides: Partial<RepairSearchResult> = {}): RepairSearchResult => ({
+  asin: 'B008DFUGCQ',
+  title: 'Dune',
+  authors: [{ name: 'Frank Herbert' }],
+  region: 'us',
   ...overrides,
 })
 
@@ -175,8 +245,66 @@ export const stubAudiobook = (id: number, audiobook: AudiobookResponse) =>
 export const stubLibraryIdentifiers = (id: number, alias = 'identifiers') =>
   stubJson('GET', `**/api/v1/library/${id}/identifiers`, { audiobookId: id, identifiers: [] }, alias)
 
+export const stubAudiobookIdentifiers = (
+  id: number,
+  identifiers: RepairIdentifier[],
+  alias = 'identifiers',
+) =>
+  cy.intercept('GET', `**/api/v1/library/${id}/identifiers`, {
+    statusCode: 200,
+    body: { audiobookId: id, identifiers },
+  }).as(alias)
+
 export const stubWeakStorageMissingFiles = (id: number, alias = 'weakStorage') =>
   stubJson('GET', `**/api/v1/library/${id}/weak-storage-missing-files`, { items: [] }, alias)
+
+export const stubRepairPage = (
+  id: number,
+  audiobook: AudiobookResponse,
+  identifiers: RepairIdentifier[],
+) => {
+  stubLibrary([
+    libraryAudiobookFixture({
+      id,
+      title: audiobook.title,
+      authors: audiobook.authors,
+      asin: audiobook.asin,
+    }),
+  ])
+  stubAudiobook(id, audiobook)
+  stubAudiobookIdentifiers(id, identifiers)
+  stubWeakStorageMissingFiles(id)
+  stubQualityProfiles()
+}
+
+export const stubRepairWrites = (id: number, rescanReplies: ApiReply[] = []) => {
+  cy.intercept('PUT', `**/api/v1/library/${id}/identifiers`, (request) =>
+    request.reply({
+      statusCode: 200,
+      body: {
+        message: 'Identifiers updated',
+        audiobook: { id },
+        identifiers: request.body.identifiers,
+      },
+    }),
+  ).as('saveAudiobookIdentifiers')
+  cy.intercept('PUT', `**/api/v1/library/${id}`, (request) =>
+    request.reply({
+      statusCode: 200,
+      body: { message: 'Audiobook updated', audiobook: { id, ...request.body } },
+    }),
+  ).as('clearAudiobookMetadata')
+
+  let rescanIndex = 0
+  const replies = rescanReplies.length
+    ? rescanReplies
+    : [{ statusCode: 200, body: { message: 'Metadata refreshed', audiobookId: id } }]
+  cy.intercept('POST', `**/api/v1/library/${id}/rescan-metadata`, (request) => {
+    const reply = replies[Math.min(rescanIndex, replies.length - 1)]!
+    rescanIndex += 1
+    request.reply(reply)
+  }).as('rescanAudiobookMetadata')
+}
 
 export const stubSearch = (reply: SearchReply = { statusCode: 200, body: { results: [] } }, alias = 'search') =>
   cy.intercept('POST', '**/api/v1/search', reply).as(alias)
@@ -235,6 +363,31 @@ export const stubManualImport = (
   response: { importedCount: number; totalCount: number; results: unknown[] },
   alias = 'importManualFiles',
 ) => stubJson('POST', '**/api/v1/library/manual-import', response, alias)
+
+export const stubLibraryImportSavedResults = (
+  rootFolderId: number,
+  items: LibraryImportUnmatchedFile[],
+  alias = 'savedLibraryImportResults',
+) =>
+  cy.intercept('GET', `**/api/v1/rootfolders/${rootFolderId}/unmatched`, {
+    statusCode: 200,
+    body: { items, lastScannedAt: '2026-01-01T00:00:00Z' },
+  }).as(alias)
+
+export const stubLibraryImportScan = (
+  rootFolderId: number,
+  items: LibraryImportUnmatchedFile[],
+  jobId = 'cypress-library-import-scan',
+) => {
+  stubJson('POST', `**/api/v1/rootfolders/${rootFolderId}/scan-unmatched`, { jobId }, 'startLibraryImportScan')
+  cy.intercept('GET', `**/api/v1/rootfolders/unmatched-results/${jobId}`, {
+    statusCode: 200,
+    body: { jobId, status: 'Completed', items },
+  }).as('getLibraryImportScanResults')
+}
+
+export const stubLibraryImportSearch = (getReply: () => SearchReply, alias = 'libraryImportSearch') =>
+  stubSearchWithReply(getReply, alias)
 
 export const stubIntegrationDefaults = () => {
   cy.intercept({ method: 'GET', url: /\/api\/v1\// }, { statusCode: 200, body: [] })
