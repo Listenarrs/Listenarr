@@ -31,6 +31,11 @@ type DownloadRecord = DownloadsResponse[number]
 type ApiReply = { statusCode?: number; body?: unknown; delay?: number }
 type SearchReply = ApiReply
 type MetadataReply = ApiReply
+type RepairWriteReplies = {
+  identifiers?: ApiReply[]
+  metadata?: ApiReply[]
+  rescan?: ApiReply[]
+}
 
 type LibraryImportUnmatchedFile = {
   fullPath: string
@@ -287,33 +292,93 @@ export const stubRepairPage = (
   stubQualityProfiles()
 }
 
-export const stubRepairWrites = (id: number, rescanReplies: ApiReply[] = []) => {
-  cy.intercept('PUT', `**/api/v1/library/${id}/identifiers`, (request) =>
+export const stubRepairPageWithResults = (
+  id: number,
+  audiobook: AudiobookResponse,
+  identifiers: RepairIdentifier[],
+  rescanAudiobooks: AudiobookResponse[],
+) => {
+  let currentAudiobook = audiobook
+  let currentIdentifiers = identifiers
+  let rescanIndex = 0
+  stubLibrary([
+    libraryAudiobookFixture({
+      id,
+      title: audiobook.title,
+      authors: audiobook.authors,
+      asin: audiobook.asin,
+    }),
+  ])
+  cy.intercept('GET', `**/api/v1/library/${id}`, (request) =>
+    request.reply({ statusCode: 200, body: currentAudiobook }),
+  ).as('getAudiobook')
+  cy.intercept('GET', `**/api/v1/library/${id}/identifiers`, (request) =>
+    request.reply({ statusCode: 200, body: { audiobookId: id, identifiers: currentIdentifiers } }),
+  ).as('identifiers')
+  stubWeakStorageMissingFiles(id)
+  stubQualityProfiles()
+  cy.intercept('PUT', `**/api/v1/library/${id}/identifiers`, (request) => {
+    currentIdentifiers = request.body.identifiers
+    request.reply({
+      statusCode: 200,
+      body: { message: 'Identifiers updated', audiobook: { id }, identifiers: currentIdentifiers },
+    })
+  }).as('saveAudiobookIdentifiers')
+  cy.intercept('PUT', `**/api/v1/library/${id}`, (request) => {
+    currentAudiobook = { ...currentAudiobook, ...request.body }
+    request.reply({ statusCode: 200, body: { message: 'Audiobook updated', audiobook: currentAudiobook } })
+  }).as('clearAudiobookMetadata')
+  cy.intercept('POST', `**/api/v1/library/${id}/rescan-metadata`, (request) => {
+    currentAudiobook = rescanAudiobooks[Math.min(rescanIndex, rescanAudiobooks.length - 1)]!
+    rescanIndex += 1
+    const primaryAsin = currentIdentifiers.find((identifier) => identifier.type === 'Asin' && identifier.isPrimary)
     request.reply({
       statusCode: 200,
       body: {
-        message: 'Identifiers updated',
-        audiobook: { id },
-        identifiers: request.body.identifiers,
+        message: 'Metadata refreshed',
+        audiobookId: id,
+        asin: primaryAsin?.value,
+        region: primaryAsin?.region,
+        audiobook: currentAudiobook,
       },
-    }),
+    })
+  }).as('rescanAudiobookMetadata')
+}
+
+export const stubRepairWrites = (id: number, replies: ApiReply[] | RepairWriteReplies = []) => {
+  const stages: RepairWriteReplies = Array.isArray(replies) ? { rescan: replies } : replies
+  const replyInSequence = (
+    stageReplies: ApiReply[] | undefined,
+    fallbackBody: () => unknown,
+  ): ApiReply => {
+    const sequence = stageReplies?.length ? stageReplies : [{}]
+    const index = replyIndexes.get(stageReplies ?? sequence) ?? 0
+    replyIndexes.set(stageReplies ?? sequence, index + 1)
+    const reply = sequence[Math.min(index, sequence.length - 1)]!
+    return {
+      statusCode: reply.statusCode ?? 200,
+      body: reply.body ?? fallbackBody(),
+      ...(reply.delay === undefined ? {} : { delay: reply.delay }),
+    }
+  }
+  const replyIndexes = new Map<ApiReply[], number>()
+
+  cy.intercept('PUT', `**/api/v1/library/${id}/identifiers`, (request) =>
+    request.reply(replyInSequence(stages.identifiers, () => ({
+      message: 'Identifiers updated',
+      audiobook: { id },
+      identifiers: request.body.identifiers,
+    }))),
   ).as('saveAudiobookIdentifiers')
   cy.intercept('PUT', `**/api/v1/library/${id}`, (request) =>
-    request.reply({
-      statusCode: 200,
-      body: { message: 'Audiobook updated', audiobook: { id, ...request.body } },
-    }),
+    request.reply(replyInSequence(stages.metadata, () => ({
+      message: 'Audiobook updated',
+      audiobook: { id, ...request.body },
+    }))),
   ).as('clearAudiobookMetadata')
-
-  let rescanIndex = 0
-  const replies = rescanReplies.length
-    ? rescanReplies
-    : [{ statusCode: 200, body: { message: 'Metadata refreshed', audiobookId: id } }]
-  cy.intercept('POST', `**/api/v1/library/${id}/rescan-metadata`, (request) => {
-    const reply = replies[Math.min(rescanIndex, replies.length - 1)]!
-    rescanIndex += 1
-    request.reply(reply)
-  }).as('rescanAudiobookMetadata')
+  cy.intercept('POST', `**/api/v1/library/${id}/rescan-metadata`, (request) =>
+    request.reply(replyInSequence(stages.rescan, () => ({ message: 'Metadata refreshed', audiobookId: id }))),
+  ).as('rescanAudiobookMetadata')
 }
 
 export const stubSearch = (reply: SearchReply = { statusCode: 200, body: { results: [] } }, alias = 'search') =>
@@ -378,6 +443,17 @@ export const stubAddLibrary = (audiobook: AudiobookResponse, alias = 'addAudiobo
   cy.intercept('POST', '**/api/v1/library/add', {
     statusCode: 200,
     body: { message: 'Audiobook added', audiobook },
+  }).as(alias)
+
+export const stubLibraryPathPreview = (
+  fullPath: string,
+  relativePath: string,
+  root: string,
+  alias = 'previewLibraryPath',
+) =>
+  cy.intercept('POST', '**/api/v1/library/preview-path', {
+    statusCode: 200,
+    body: { fullPath, relativePath, root },
   }).as(alias)
 
 export const stubLibraryImportSavedResults = (
