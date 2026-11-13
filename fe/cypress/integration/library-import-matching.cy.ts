@@ -6,6 +6,7 @@ import {
   stubLibraryImportSavedResults,
   stubLibraryImportScan,
   stubLibraryImportSearch,
+  stubMetadata,
   stubRootFolders,
 } from '../support/api-stubs'
 
@@ -100,8 +101,8 @@ describe('Library Import browser behavior (API-stubbed)', () => {
         cap: 5,
       })
 
-    cy.contains('.import-row', 'First Book').contains('No match found').should('be.visible')
-    cy.contains('.import-row', 'Second Book').contains('Second Book Audible Edition').should('be.visible')
+    cy.get('.import-row').eq(0).should('contain.text', 'No match found')
+    cy.contains('.import-row', 'Second Book').should('contain.text', 'Second Book Audible Edition')
     cy.get('.import-row').eq(1).find('input[type="checkbox"]').should('be.checked')
     cy.get('.import-row').eq(0).find('input[type="checkbox"]').should('be.disabled')
   })
@@ -166,14 +167,13 @@ describe('Library Import browser behavior (API-stubbed)', () => {
     cy.contains('.footer-center button', 'Start Matching').click()
     cy.get('.footer-center').contains('button', 'Cancel').click()
     cy.wait('@libraryImportSearch')
-    cy.get('.import-row .match-status.unsearched').should('have.length', 3)
+    cy.get('.import-row .match-status.unsearched').should('have.length', 2)
     cy.wrap(null).should(() => expect(searchCount).to.equal(1))
 
     cy.contains('.footer-center button', 'Start Matching').click()
     cy.wait('@libraryImportSearch')
     cy.wait('@libraryImportSearch')
-    cy.wait('@libraryImportSearch')
-    cy.wrap(null).should(() => expect(searchCount).to.equal(4))
+    cy.wrap(null).should(() => expect(searchCount).to.equal(3))
     cy.get('.import-row .match-title').should('have.length', 3).and('contain', 'Matched Book')
   })
 
@@ -192,7 +192,19 @@ describe('Library Import browser behavior (API-stubbed)', () => {
       title: 'Selected Audible Title',
       authors: [{ name: 'Selected Author' }],
     })
-    stubLibraryImportSearch(() => ({ statusCode: 200, body: [match] }))
+    stubMetadata(
+      {
+        statusCode: 200,
+        body: {
+          metadata: {
+            asin: match.asin,
+            title: match.title,
+            authors: match.authors,
+          },
+        },
+      },
+      'findMatchAsinMetadata',
+    )
     openLibraryImport([item])
 
     cy.get('.import-row').find('button[title="Search for a match"]').click()
@@ -200,15 +212,7 @@ describe('Library Import browser behavior (API-stubbed)', () => {
     cy.get('[data-testid="match-author"]').should('have.value', 'Scanned Author')
     cy.get('[data-testid="match-asin"]').should('have.value', 'B000000101')
     cy.get('[data-testid="match-region"]').should('have.value', 'us')
-
-    cy.wait('@libraryImportSearch')
-      .its('request.body')
-      .should('deep.equal', {
-        mode: 'Advanced',
-        asin: 'B000000101',
-        region: 'us',
-        cap: 5,
-      })
+    cy.wait('@findMatchAsinMetadata').its('request.url').should('include', '/metadata/B000000101?region=us')
     cy.contains('[data-testid="find-match-result"]', 'Selected Audible Title').click()
     cy.get('[data-testid="find-match-confirm"]').should('be.enabled').click()
 
