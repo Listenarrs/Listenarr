@@ -8,7 +8,9 @@
  * (at your option) any later version.
  */
 using Listenarr.Infrastructure.Persistence.Repositories;
+using Listenarr.Infrastructure.Search.Matching;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.DependencyInjection.Search;
 
@@ -31,6 +33,13 @@ internal static class SearchRegistrationExtensions
     public static IServiceCollection AddSearchInfrastructure(this IServiceCollection services)
     {
         services.AddScoped<IIndexerRepository, EfIndexerRepository>();
+        services.AddSingleton(provider =>
+        {
+            var catalog = ReleaseAnnotationCatalogLoader.LoadDefault();
+            if (!catalog.IsAvailable) provider.GetRequiredService<ILoggerFactory>().CreateLogger("ReleaseAnnotationCatalog")
+                .LogError("Release annotation catalog is unavailable; automatic identity confirmation is deferred");
+            return catalog;
+        });
         return services;
     }
 }
