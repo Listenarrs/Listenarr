@@ -1,3 +1,16 @@
+import {
+  downloadFixture,
+  settingsFixture,
+  stubDownloads,
+  stubFileSystemValidate,
+  stubManualImport,
+  stubManualImportPreview,
+  stubLibrary,
+  stubSettingsPage,
+  stubSettingsUpdate,
+  stubSystemReadiness,
+} from '../support/api-stubs'
+
 /**
  * E2E tests for dual file naming pattern feature
  * Tests single-file vs multi-file pattern selection during imports
@@ -5,50 +18,16 @@
 
 describe('File Naming Patterns integration', () => {
   beforeEach(() => {
-    // Stub startup config to bypass authentication
-    cy.intercept('GET', '**/api/v1/configuration/bootstrap', {
-      statusCode: 200,
-      body: {
-        authenticationRequired: false,
-        apiKey: null,
-        baseUrl: '/',
-      }
-    }).as('getStartupConfig')
+    stubSettingsPage(settingsFixture({
+      outputPath: '/audiobooks',
+      fileNamingPattern: '{Title}',
+      enableMetadataProcessing: true,
+      enableCoverArtDownload: true,
+    }))
 
-    cy.intercept('GET', '**/api/v1/account/me', {
-      statusCode: 200,
-      body: { authenticated: false }
-    }).as('getCurrentUser')
-
-    // Stub application settings with both patterns configured
-    cy.intercept('GET', '**/api/v1/configuration/settings', {
-      statusCode: 200,
-      body: {
-        outputPath: '/audiobooks',
-        folderNamingPattern: '{Author}/{Series}/{Title}',
-        fileNamingPattern: '{Title}',
-        multiFileNamingPattern: '{Title}-{DiskNumber:00}',
-        completedFileAction: 'Move',
-        maxConcurrentDownloads: 2,
-        pollingIntervalSeconds: 30,
-        enableMetadataProcessing: true,
-        enableCoverArtDownload: true,
-      }
-    }).as('getSettings')
-
-    // Stub other required endpoints
-    cy.intercept('GET', '**/api/v1/configuration/apis', { statusCode: 200, body: [] }).as('getApis')
-    cy.intercept('GET', '**/api/v1/download-clients', { statusCode: 200, body: [] }).as('getDownloadClients')
-    cy.intercept('GET', '**/api/v1/remotepath', { statusCode: 200, body: [] }).as('getRemotePathMappings')
-    cy.intercept('GET', '**/api/v1/indexers', { statusCode: 200, body: [] }).as('getIndexers')
-    cy.intercept('GET', '**/api/v1/qualityprofile', { statusCode: 200, body: [] }).as('getQualityProfiles')
-    cy.intercept('GET', '**/api/v1/account/admins', { statusCode: 200, body: [] }).as('getAdminUsers')
-    cy.intercept('GET', '**/api/v1/library', { statusCode: 200, body: [] }).as('getLibrary')
-    cy.intercept('GET', '**/api/v1/downloads', { statusCode: 200, body: [] }).as('getDownloads')
-    cy.intercept('GET', '**/api/v1/system/ready', {
-      statusCode: 200,
-      body: { filesystemReady: true, filesystemStatus: 'Ready' }
-    }).as('getSystemReadiness')
+    stubLibrary([])
+    stubDownloads()
+    stubSystemReadiness()
   })
 
   describe('Settings UI - Pattern Configuration', () => {
@@ -99,11 +78,7 @@ describe('File Naming Patterns integration', () => {
     })
 
     it('should update single-file pattern independently', () => {
-      cy.intercept('POST', '**/api/v1/configuration/settings', (req) => {
-        expect(req.body.fileNamingPattern).to.equal('{Author} - {Title}')
-        expect(req.body.multiFileNamingPattern).to.equal('{Title}-{DiskNumber:00}') // Should remain unchanged
-        req.reply({ statusCode: 200, body: req.body })
-      }).as('saveSettings')
+      stubSettingsUpdate()
 
       cy.visit('/settings#general')
       cy.wait('@getSettings')
@@ -121,15 +96,14 @@ describe('File Naming Patterns integration', () => {
 
       // Save settings
       cy.contains('button', 'Save').click()
-      cy.wait('@saveSettings')
+      cy.wait('@saveSettings').then(({ request }) => {
+        expect(request.body.fileNamingPattern).to.equal('{Author} - {Title}')
+        expect(request.body.multiFileNamingPattern).to.equal('{Title}-{DiskNumber:00}')
+      })
     })
 
     it('should update multi-file pattern independently', () => {
-      cy.intercept('POST', '**/api/v1/configuration/settings', (req) => {
-        expect(req.body.fileNamingPattern).to.equal('{Title}') // Should remain unchanged
-        expect(req.body.multiFileNamingPattern).to.equal('{Title} Part {DiskNumber}')
-        req.reply({ statusCode: 200, body: req.body })
-      }).as('saveSettings')
+      stubSettingsUpdate()
 
       cy.visit('/settings#general')
       cy.wait('@getSettings')
@@ -147,7 +121,10 @@ describe('File Naming Patterns integration', () => {
 
       // Save settings
       cy.contains('button', 'Save').click()
-      cy.wait('@saveSettings')
+      cy.wait('@saveSettings').then(({ request }) => {
+        expect(request.body.fileNamingPattern).to.equal('{Title}')
+        expect(request.body.multiFileNamingPattern).to.equal('{Title} Part {DiskNumber}')
+      })
     })
 
     it('should show help button for both patterns', () => {
@@ -186,28 +163,15 @@ describe('File Naming Patterns integration', () => {
 
   describe('Manual Import - Pattern Selection', () => {
     it('should interactively import one selected audio file without adding disk numbers', () => {
-      cy.intercept('GET', '**/api/v1/filesystem/validate?path=*', {
-        statusCode: 200,
-        body: { isValid: true, exists: true, isWritable: true, message: 'Valid' },
-      }).as('validateManualImportFolder')
-      cy.intercept('GET', '**/api/v1/library/manual-import/preview?path=*', {
-        statusCode: 200,
-        body: {
-          items: [
-            {
-              relativePath: 'The Gunslinger.m4b',
-              fullPath: '/incoming/single/The Gunslinger.m4b',
-              size: '300 MB',
-              quality: 'Lossless',
-              languages: ['English'],
-            },
-          ],
-        }
-      }).as('previewSingleFile')
-      cy.intercept('POST', '**/api/v1/library/manual-import', {
-        statusCode: 200,
-        body: { importedCount: 1, totalCount: 1, results: [] }
-      }).as('importSingleFile')
+      stubFileSystemValidate()
+      stubManualImportPreview([{
+        relativePath: 'The Gunslinger.m4b',
+        fullPath: '/incoming/single/The Gunslinger.m4b',
+        size: '300 MB',
+        quality: 'Lossless',
+        languages: ['English'],
+      }], 'previewSingleFile')
+      stubManualImport({ importedCount: 1, totalCount: 1, results: [] }, 'importSingleFile')
 
       cy.visit('/wanted', {
         onBeforeLoad: (window) =>
@@ -251,25 +215,14 @@ describe('File Naming Patterns integration', () => {
           fullPath: '/incoming/multi/The Way of Kings-03.m4b',
         },
       ]
-      cy.intercept('GET', '**/api/v1/filesystem/validate?path=*', {
-        statusCode: 200,
-        body: { isValid: true, exists: true, isWritable: true, message: 'Valid' },
-      }).as('validateManualImportFolder')
-      cy.intercept('GET', '**/api/v1/library/manual-import/preview?path=*', {
-        statusCode: 200,
-        body: {
-          items: sourceFiles.map((file) => ({
-            ...file,
-            size: '300 MB',
-            quality: 'Lossless',
-            languages: ['English'],
-          })),
-        }
-      }).as('previewMultiFile')
-      cy.intercept('POST', '**/api/v1/library/manual-import', {
-        statusCode: 200,
-        body: { importedCount: 3, totalCount: 3, results: [] }
-      }).as('importMultiFile')
+      stubFileSystemValidate()
+      stubManualImportPreview(sourceFiles.map((file) => ({
+        ...file,
+        size: '300 MB',
+        quality: 'Lossless',
+        languages: ['English'],
+      })), 'previewMultiFile')
+      stubManualImport({ importedCount: 3, totalCount: 3, results: [] }, 'importMultiFile')
 
       cy.visit('/wanted', {
         onBeforeLoad: (window) =>
@@ -305,7 +258,7 @@ describe('File Naming Patterns integration', () => {
   })
 
   describe('Completed download integration', () => {
-    const completedDownload = (id: string, title: string, finalPath: string) => ({
+    const completedDownload = (id: string, title: string, finalPath: string) => downloadFixture({
       id,
       title,
       artist: 'J.R.R. Tolkien',
@@ -323,10 +276,7 @@ describe('File Naming Patterns integration', () => {
     })
 
     it('renders the completed single-file download and its final-folder action', () => {
-      cy.intercept('GET', '**/api/v1/downloads', {
-        statusCode: 200,
-        body: [completedDownload('1', 'The Hobbit', '/audiobooks/J.R.R. Tolkien/The Hobbit.m4b')],
-      }).as('getDownloads')
+      stubDownloads([completedDownload('1', 'The Hobbit', '/audiobooks/J.R.R. Tolkien/The Hobbit.m4b')])
 
       cy.visit('/downloads')
       cy.wait('@getDownloads')
@@ -338,16 +288,13 @@ describe('File Naming Patterns integration', () => {
     })
 
     it('renders the completed multi-file download and its final-folder action', () => {
-      cy.intercept('GET', '**/api/v1/downloads', {
-        statusCode: 200,
-        body: [
-          completedDownload(
-            '2',
-            'The Lord of the Rings',
-            '/audiobooks/J.R.R. Tolkien/The Lord of the Rings-01.m4b',
-          ),
-        ],
-      }).as('getDownloads')
+      stubDownloads([
+        completedDownload(
+          '2',
+          'The Lord of the Rings',
+          '/audiobooks/J.R.R. Tolkien/The Lord of the Rings-01.m4b',
+        ),
+      ])
 
       cy.visit('/downloads')
       cy.wait('@getDownloads')
@@ -407,18 +354,9 @@ describe('File Naming Patterns integration', () => {
 
   describe('Integration - Full Import Workflow', () => {
     it('should start automatic import for a single-file source folder without requesting a preview', () => {
-      cy.intercept('GET', '**/api/v1/filesystem/validate?path=*', {
-        statusCode: 200,
-        body: { isValid: true, exists: true, isWritable: true, message: 'Valid' },
-      }).as('validateAutomaticSingleFolder')
-      cy.intercept('GET', '**/api/v1/library/manual-import/preview*', {
-        statusCode: 200,
-        body: { items: [] }
-      }).as('unexpectedSingleFilePreview')
-      cy.intercept('POST', '**/api/v1/library/manual-import', {
-        statusCode: 200,
-        body: { importedCount: 1, totalCount: 1, results: [] }
-      }).as('startAutomaticSingleImport')
+      stubFileSystemValidate('validateAutomaticSingleFolder')
+      stubManualImportPreview([], 'unexpectedSingleFilePreview', '**/api/v1/library/manual-import/preview*')
+      stubManualImport({ importedCount: 1, totalCount: 1, results: [] }, 'startAutomaticSingleImport')
 
       cy.visit('/wanted', {
         onBeforeLoad: (window) =>
@@ -441,18 +379,9 @@ describe('File Naming Patterns integration', () => {
     })
 
     it('should start automatic import for a multi-file source folder as one folder-level request', () => {
-      cy.intercept('GET', '**/api/v1/filesystem/validate?path=*', {
-        statusCode: 200,
-        body: { isValid: true, exists: true, isWritable: true, message: 'Valid' },
-      }).as('validateAutomaticMultiFolder')
-      cy.intercept('GET', '**/api/v1/library/manual-import/preview*', {
-        statusCode: 200,
-        body: { items: [] }
-      }).as('unexpectedMultiFilePreview')
-      cy.intercept('POST', '**/api/v1/library/manual-import', {
-        statusCode: 200,
-        body: { importedCount: 3, totalCount: 3, results: [] }
-      }).as('startAutomaticMultiImport')
+      stubFileSystemValidate('validateAutomaticMultiFolder')
+      stubManualImportPreview([], 'unexpectedMultiFilePreview', '**/api/v1/library/manual-import/preview*')
+      stubManualImport({ importedCount: 3, totalCount: 3, results: [] }, 'startAutomaticMultiImport')
 
       cy.visit('/wanted', {
         onBeforeLoad: (window) =>
