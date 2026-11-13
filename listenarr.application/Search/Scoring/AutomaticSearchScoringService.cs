@@ -22,7 +22,7 @@ namespace Listenarr.Application.Search.Scoring;
 
 public sealed class AutomaticSearchScoringService(
     IQualityProfileService qualityService, IAudiobookRepository books,
-    ILogger<AutomaticSearchScoringService> logger, ReleaseAnnotationCatalog catalog) : IAutomaticSearchScoringService
+    ILogger<AutomaticSearchScoringService> logger, ReleaseAnnotationCatalogProvider catalogs) : IAutomaticSearchScoringService
 {
     private readonly BookIdentityMatcher _matcher = new();
 
@@ -30,6 +30,7 @@ public sealed class AutomaticSearchScoringService(
         QualityProfile profile, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var catalog = catalogs.GetSnapshot();
         BookMatchContext context;
         try { context = BookMatchContext.From(book, profile, catalog); }
         catch (ArgumentException) { context = new([], [], null, "invalid_reference"); }
@@ -83,7 +84,7 @@ public sealed class AutomaticSearchScoringService(
         var current = await books.GetByIdSnapshotAsync(bookId, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         if (current == null || current.QualityProfile == null || assessment.TargetFingerprint == "invalid_reference") return false;
-        try { return BookMatchContext.From(current, current.QualityProfile, catalog).Fingerprint == assessment.TargetFingerprint; }
+        try { return BookMatchContext.From(current, current.QualityProfile, catalogs.GetSnapshot()).Fingerprint == assessment.TargetFingerprint; }
         catch (ArgumentException) { return false; }
     }
 }

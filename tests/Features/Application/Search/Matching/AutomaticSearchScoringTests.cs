@@ -106,7 +106,7 @@ public sealed class AutomaticSearchScoringTests : BaseTests
         var books = new Mock<IAudiobookRepository>();
         books.Setup(b => b.GetByIdSnapshotAsync(9, It.IsAny<CancellationToken>())).ReturnsAsync(book);
         var scorer = new AutomaticSearchScoringService(quality.Object, books.Object,
-            NullLogger<AutomaticSearchScoringService>.Instance, TestAnnotationCatalog.Current);
+            NullLogger<AutomaticSearchScoringService>.Instance, TestAnnotationCatalog.CreateProvider());
         var batch = await scorer.ScoreAsync(book, [candidate], book.QualityProfile);
         Assert.True(await scorer.IsCurrentAsync(batch, 9));
         book.Title = "Another Work";
@@ -134,7 +134,7 @@ public sealed class AutomaticSearchScoringTests : BaseTests
         var books = new Mock<IAudiobookRepository>();
         books.Setup(b => b.GetByIdSnapshotAsync(9, It.IsAny<CancellationToken>())).ReturnsAsync(book);
         var scorer = new AutomaticSearchScoringService(quality.Object, books.Object,
-            NullLogger<AutomaticSearchScoringService>.Instance, TestAnnotationCatalog.Current);
+            NullLogger<AutomaticSearchScoringService>.Instance, TestAnnotationCatalog.CreateProvider());
         var batch = await scorer.ScoreAsync(book, [candidate], book.QualityProfile);
         Assert.True(await scorer.IsCurrentAsync(batch, 9));
         if (narrator) book.Narrators = ["Second Reader"];
@@ -189,5 +189,5 @@ public sealed class AutomaticSearchScoringTests : BaseTests
     }
 
     private static AutomaticSearchScoringService New(Mock<IQualityProfileService> quality) =>
-        new(quality.Object, Mock.Of<IAudiobookRepository>(), NullLogger<AutomaticSearchScoringService>.Instance, TestAnnotationCatalog.Current);
+        new(quality.Object, Mock.Of<IAudiobookRepository>(), NullLogger<AutomaticSearchScoringService>.Instance, TestAnnotationCatalog.CreateProvider());
 }

@@ -5,6 +5,14 @@ Infrastructure loads the bounded embedded resource once; the application receive
 an immutable validated snapshot. Tests load the same resource. There is no remote
 catalog refresh, runtime regex configuration, or learning from search results.
 
+Workflow registration keeps `ReleaseAnnotationCatalogProvider` and the automatic
+scorer scoped. The provider reads through the application contract
+`IReleaseAnnotationCatalogSource`; infrastructure implements that contract and
+retains the shared immutable snapshot. The snapshot itself is not a DI service.
+Scoring captures one snapshot per assessment, and freshness checks ask the
+provider for the current snapshot again. API registration does not call the
+embedded-resource loader or contain an infrastructure factory.
+
 Group/source entries have stable IDs, exact names, kinds and permitted placements.
 The supported flags are Suffix (existing legacy groups), TechnicalSuffix,
 BracketedSuffix, and DelimitedPrefix. Source annotations are bracketed suffixes
