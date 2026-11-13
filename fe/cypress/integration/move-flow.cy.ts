@@ -1,65 +1,26 @@
-/* eslint-disable cypress/unsafe-to-chain-command */
+import {
+  libraryAudiobookFixture,
+  rootFolderFixture,
+  settingsFixture,
+  stubAudiobookMove,
+  stubLibrary,
+  stubRootFolders,
+  stubSettingsPage,
+} from '../support/api-stubs'
+
 describe('Edit -> Move integration', () => {
   beforeEach(() => {
-    // Stub startup config and account checks (no auth)
-    cy.intercept('GET', '**/api/v1/configuration/bootstrap', {
-      statusCode: 200,
-      body: { authenticationRequired: false, apiKey: null, baseUrl: '/' }
-    }).as('getStartupConfig')
-
-    cy.intercept('GET', '**/api/v1/account/me', { statusCode: 200, body: { authenticated: false } }).as('getCurrentUser')
-
-    // App settings with outputPath configured
-    cy.intercept('GET', '**/api/v1/configuration/settings', {
-      statusCode: 200,
-      body: {
-        outputPath: '/mnt/audiobooks'
-      }
-    }).as('getSettings')
+    stubSettingsPage(settingsFixture({ outputPath: '/mnt/audiobooks' }))
 
     // Stub library endpoint to return a single audiobook
-    cy.intercept('GET', '**/api/v1/library', {
-      statusCode: 200,
-      body: [
-        {
-          id: 1,
-          title: 'Test Book',
-          author: 'Test Author',
-          basePath: '/mnt/audiobooks/Test Author/Test Book',
-          rootFolderId: 1,
-          monitored: true,
-          qualityProfileId: null,
-          tags: [],
-          abridged: false,
-          explicit: false
-        }
-      ]
-    }).as('getLibrary')
+    stubLibrary([libraryAudiobookFixture({
+      basePath: '/mnt/audiobooks/Test Author/Test Book',
+      monitored: true,
+    })])
 
-    cy.intercept('GET', '**/api/v1/rootfolders', {
-      statusCode: 200,
-      body: [
-        {
-          id: 1,
-          name: 'Audiobooks',
-          path: '/mnt/audiobooks',
-          isDefault: true,
-          storageState: 'Healthy',
-          canChangePath: true,
-        },
-      ],
-    })
+    stubRootFolders([rootFolderFixture({ path: '/mnt/audiobooks' })])
 
-    // Stub quality profiles / other endpoints minimally
-    cy.intercept('GET', '**/api/v1/qualityprofile', { statusCode: 200, body: [] }).as('getProfiles')
-
-    // Capture both filesystem moves and metadata-only destination changes.
-    cy.intercept('POST', '**/api/v1/library/1/move', (req) => {
-      const body = req.body.moveFiles
-        ? { message: 'queued', jobId: 'job-test-1', target: req.body.destinationPath }
-        : { message: 'Destination updated' }
-      req.reply({ statusCode: 200, body })
-    }).as('moveAudiobook')
+    stubAudiobookMove(1)
   })
 
   it('edits destination, confirms move, enqueues job, and shows toast', () => {

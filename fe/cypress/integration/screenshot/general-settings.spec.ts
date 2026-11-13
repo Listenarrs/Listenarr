@@ -1,35 +1,21 @@
+import {
+  settingsFixture,
+  stubLegacyStartupConfig,
+  stubSettings,
+  stubSettingsDependencies,
+} from '../../support/api-stubs'
+
 describe('General Settings visual check', () => {
   beforeEach(() => {
-    cy.intercept('GET', '**/api/v1/configuration/startupconfig', {
-      statusCode: 200,
-      body: { authenticationRequired: false, apiKey: null, baseUrl: '/' }
-    })
-    cy.intercept('GET', '**/api/v1/account/me', {
-      statusCode: 200,
-      body: { authenticated: false }
-    })
-    cy.intercept('GET', '**/api/v1/configuration/settings', {
-      statusCode: 200,
-      body: {
-        preferUsDomain: false,
-        useUsProxy: false,
-        usProxyHost: '',
-        usProxyPort: 0,
-        usProxyUsername: '',
-        usProxyPassword: '',
-        outputPath: '',
-        fileNamingPattern: '{Author}/{Title}',
-        completedFileAction: 'Move',
-        maxConcurrentDownloads: 2,
-        pollingIntervalSeconds: 30
-      }
-    })
-    cy.intercept('GET', '**/api/v1/configuration/apis', { statusCode: 200, body: [] })
-    cy.intercept('GET', '**/api/v1/download-clients', { statusCode: 200, body: [] })
-    cy.intercept('GET', '**/api/v1/remotepath', { statusCode: 200, body: [] })
-    cy.intercept('GET', '**/api/v1/indexers', { statusCode: 200, body: [] })
-    cy.intercept('GET', '**/api/v1/qualityprofile', { statusCode: 200, body: [] })
-    cy.intercept('GET', '**/api/v1/account/admins', { statusCode: 200, body: [] })
+    stubLegacyStartupConfig()
+    stubSettings(settingsFixture({
+      outputPath: '',
+      fileNamingPattern: '{Author}/{Title}',
+      completedFileAction: 'move',
+      maxConcurrentDownloads: 2,
+      pollingIntervalSeconds: 30,
+    }))
+    stubSettingsDependencies()
   })
 
   it('captures the General Settings tab (desktop)', () => {

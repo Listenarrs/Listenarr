@@ -1,3 +1,5 @@
+import { stubMetadataWithReply, stubSearchWithReply } from '../support/api-stubs'
+
 type SearchCase = {
   name: string
   query: string
@@ -69,10 +71,8 @@ beforeEach(() => {
   searchResponse = { statusCode: 200, body: [] }
   metadataStatusCode = 404
 
-  cy.intercept('POST', '**/api/v1/search', (request) => request.reply(searchResponse)).as('search')
-  cy.intercept('**/api/v1/metadata/**', (request) =>
-    request.reply({ statusCode: metadataStatusCode, body: { message: 'not found' } }),
-  ).as('metadata')
+  stubSearchWithReply(() => searchResponse)
+  stubMetadataWithReply(() => ({ statusCode: metadataStatusCode, body: { message: 'not found' } }))
   cy.visit('/add-new')
   cy.contains('h1', 'Add New Audiobook').should('be.visible')
 })
