@@ -66,8 +66,7 @@ The generated types in `cypress/support/generated-api/` come from the backend Op
 npm run test:e2e
 ```
 
-This starts the real API and Vite frontend, runs the read-only library check first, then runs write tests. The write suite stops the API and restores its generated SQLite/config seed before every test. All data, including the app's content root, lives under a temporary directory that is removed on exit; the runner does not use a developer database or instance.
-The temporary database is initialized with the small offline audiobook fixture in `scripts/e2e/seed-library.json` before the runner snapshots it.
+This builds and starts the production Docker image, which serves both the real API and frontend. Cypress runs against that container; it does not start a host API or Vite server. The runner mounts a unique temporary config directory, seeds it with the small offline audiobook fixture in `scripts/e2e/seed-library.json`, and restores that snapshot before every write test. The container and temporary data are removed on exit, so the runner does not use a developer database or instance. Docker Compose is required.
 Read-only specs live under `cypress/e2e/read-only/`; database-mutating specs live under `cypress/e2e/write/` and use a separate Cypress config and reset hook.
 
 The ordered full suite is the CI command. For local debugging, `npm run test:e2e:read-only` runs only the read-only suite and `npm run test:e2e:write` runs only the reset-before-each-test write suite.

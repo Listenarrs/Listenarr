@@ -138,13 +138,9 @@ jobs:
         working-directory: fe
         run: npm run test:integration:cypress
 
-      - name: Run Cypress read-only E2E
+      - name: Run Cypress full-stack E2E in Docker
         working-directory: fe
-        run: npm run test:e2e:read-only
-
-      - name: Run Cypress write E2E
-        working-directory: fe
-        run: npm run test:e2e:write
+        run: npm run test:e2e
 
       - name: Publish API (linux-x64)
         run: dotnet publish ${{ env.API_PROJECT }} -c Release -r linux-x64 --no-restore --self-contained true /p:PublishSingleFile=true -o listenarr.api/publish/linux-x64

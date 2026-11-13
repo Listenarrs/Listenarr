@@ -4,7 +4,7 @@ export default defineConfig({
   allowCypressEnv: false,
   e2e: {
     specPattern: 'cypress/e2e/read-only/**/*.{cy,spec}.{js,jsx,ts,tsx}',
-    baseUrl: 'http://localhost:5173',
+    baseUrl: process.env.LISTENARR_E2E_BASE_URL ?? 'http://localhost:4545',
     supportFile: 'cypress/support/e2e.ts',
   },
 })
