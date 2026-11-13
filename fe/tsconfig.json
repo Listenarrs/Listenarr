@@ -9,6 +9,9 @@
     },
     {
       "path": "./tsconfig.vitest.json"
+    },
+    {
+      "path": "./cypress/tsconfig.json"
     }
   ],
   "compilerOptions": {

@@ -112,6 +112,12 @@ jobs:
       - name: Build solution
         run: dotnet build listenarr.slnx --no-restore --configuration Release
 
+      - name: Check generated API types
+        working-directory: fe
+        run: |
+          npm run api-types:check
+          npm run type-check:cypress
+
       - name: Run native backend tests
         env:
           ASPNETCORE_ENVIRONMENT: Test
@@ -127,6 +133,17 @@ jobs:
             echo "Frontend tests failed." >&2
             exit 1
           fi
+
+      - name: Run Cypress API-stub integration tests
+        working-directory: fe
+        run: npm run test:integration:cypress
+
+      - name: Install synthetic audiobook generator dependencies
+        run: sudo apt-get update && sudo apt-get install --yes ffmpeg python3-venv
+
+      - name: Run Cypress full-stack E2E in Docker
+        working-directory: fe
+        run: npm run test:e2e
 
       - name: Publish API (linux-x64)
         run: dotnet publish ${{ env.API_PROJECT }} -c Release -r linux-x64 --no-restore --self-contained true /p:PublishSingleFile=true -o listenarr.api/publish/linux-x64

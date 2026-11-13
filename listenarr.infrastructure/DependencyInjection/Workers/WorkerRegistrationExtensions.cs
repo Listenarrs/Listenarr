@@ -15,13 +15,25 @@ namespace Listenarr.Infrastructure.DependencyInjection.Workers;
 
 internal static class WorkerRegistrationExtensions
 {
+    public static IServiceCollection AddScanQueueService(this IServiceCollection services)
+    {
+        services.AddSingleton<IScanQueueService, ScanQueueService>();
+        return services;
+    }
+
+    public static IServiceCollection AddUnmatchedScanWorker(this IServiceCollection services)
+    {
+        AddHostedProcessor<UnmatchedScanProcessor, IUnmatchedScanProcessor, UnmatchedScanBackgroundService>(services);
+        return services;
+    }
+
     public static IServiceCollection AddFeatureWorkers(
         this IServiceCollection services,
         IConfiguration configuration)
     {
         services.AddSingleton<IWorkerCycleRunner, WorkerCycleRunner>();
 
-        services.AddSingleton<IScanQueueService, ScanQueueService>();
+        services.AddScanQueueService();
         services.AddSingleton<MoveScanHandoffRecoveryService>();
         AddProcessor<ScanJobProcessor, IScanJobProcessor>(services);
         services.AddHostedService<ScanBackgroundService>();
@@ -56,7 +68,7 @@ internal static class WorkerRegistrationExtensions
             IDownloadProcessingJobCleanupProcessor,
             DownloadProcessingJobCleanupService>(services);
 
-        AddHostedProcessor<UnmatchedScanProcessor, IUnmatchedScanProcessor, UnmatchedScanBackgroundService>(services);
+        services.AddUnmatchedScanWorker();
         return services;
     }
 
