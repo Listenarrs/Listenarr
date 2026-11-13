@@ -93,14 +93,39 @@ public sealed class ReleaseRecallAdversarialTests : BaseTests
         var repository = new Mock<IAudiobookRepository>();
         repository.Setup(r => r.GetByIdSnapshotAsync(book.Id, It.IsAny<CancellationToken>())).ReturnsAsync(book);
         var original = new AutomaticSearchScoringService(quality.Object, repository.Object,
-            NullLogger<AutomaticSearchScoringService>.Instance, TestAnnotationCatalog.Current);
+            NullLogger<AutomaticSearchScoringService>.Instance, TestAnnotationCatalog.CreateProvider());
         var different = new ReleaseAnnotationCatalog(1, [], [], [], [], [], [], []);
         var changed = new AutomaticSearchScoringService(quality.Object, repository.Object,
-            NullLogger<AutomaticSearchScoringService>.Instance, different);
+            NullLogger<AutomaticSearchScoringService>.Instance, TestAnnotationCatalog.CreateProvider(different));
         var batch = await original.ScoreAsync(book, [candidate], book.QualityProfile!);
         Assert.NotNull(original.SelectBest(batch));
         Assert.True(await original.IsCurrentAsync(batch, book.Id));
         Assert.False(await changed.IsCurrentAsync(batch, book.Id));
+    }
+
+    [Fact]
+    public async Task AssessmentCapturesOneSnapshotAndFreshnessChecksTheCurrentSource()
+    {
+        var book = Book();
+        var candidate = new SearchResult { Id = "one", Title = "Marisol Vega - The Quiet Orchard" };
+        var snapshot = TestAnnotationCatalog.Current;
+        var source = new Mock<IReleaseAnnotationCatalogSource>();
+        source.Setup(s => s.GetSnapshot()).Returns(() => snapshot);
+        var quality = new Mock<IQualityProfileService>();
+        quality.Setup(q => q.ScoreSearchResults(It.IsAny<List<SearchResult>>(), It.IsAny<QualityProfile>()))
+            .Callback(() => snapshot = new ReleaseAnnotationCatalog(1, [], [], [], [], [], [], []))
+            .ReturnsAsync([new() { SearchResult = candidate, TotalScore = 100000 }]);
+        var books = new Mock<IAudiobookRepository>();
+        books.Setup(r => r.GetByIdSnapshotAsync(book.Id, It.IsAny<CancellationToken>())).ReturnsAsync(book);
+        var scorer = new AutomaticSearchScoringService(quality.Object, books.Object,
+            NullLogger<AutomaticSearchScoringService>.Instance, new ReleaseAnnotationCatalogProvider(source.Object));
+
+        var batch = await scorer.ScoreAsync(book, [candidate], book.QualityProfile!);
+
+        Assert.True(Assert.Single(batch.Candidates).Identity.IsConfirmed);
+        source.Verify(s => s.GetSnapshot(), Times.Once);
+        Assert.False(await scorer.IsCurrentAsync(batch, book.Id));
+        source.Verify(s => s.GetSnapshot(), Times.Exactly(2));
     }
 
     [Fact]
@@ -118,7 +143,7 @@ public sealed class ReleaseRecallAdversarialTests : BaseTests
         quality.Setup(q => q.ScoreSearchResults(It.IsAny<List<SearchResult>>(), It.IsAny<QualityProfile>()))
             .ReturnsAsync([new() { SearchResult = candidate, TotalScore = 100000 }]);
         var scorer = new AutomaticSearchScoringService(quality.Object, Mock.Of<IAudiobookRepository>(),
-            NullLogger<AutomaticSearchScoringService>.Instance, ReleaseAnnotationCatalog.Unavailable);
+            NullLogger<AutomaticSearchScoringService>.Instance, TestAnnotationCatalog.CreateProvider(ReleaseAnnotationCatalog.Unavailable));
         var batch = await scorer.ScoreAsync(book, [candidate], book.QualityProfile!);
         quality.Verify(q => q.ScoreSearchResults(It.IsAny<List<SearchResult>>(), It.IsAny<QualityProfile>()), Times.Once);
         Assert.Null(scorer.SelectBest(batch));

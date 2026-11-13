@@ -18,6 +18,7 @@
 
 using Listenarr.Application.Common;
 using Listenarr.Application.Search.Filters;
+using Listenarr.Application.Search.Matching;
 using Listenarr.Application.Search.Strategies;
 
 namespace Listenarr.Api.Startup;
@@ -63,6 +64,7 @@ public static class ListenarrWorkflowRegistration
         services.AddScoped<ISearchResultFilter, ProductLikeTitleFilter>();
         services.AddScoped<ISearchResultFilter, MissingInformationFilter>();
         services.AddScoped<SearchResultFilterPipeline>();
+        services.AddScoped<ReleaseAnnotationCatalogProvider>();
         services.AddScoped<IAutomaticSearchScoringService, AutomaticSearchScoringService>();
         services.AddScoped<AsinCandidateCollector>();
         services.AddScoped<AsinEnricher>();

@@ -46,7 +46,7 @@ public sealed class InternetArchiveSearchProviderTests : BaseTests
         var results = await provider.SearchAsync(CreateIndexer(), "Alice in Wonderland");
         Assert.Equal(2, results.Count);
         var quality = new QualityProfileService(Mock.Of<IQualityProfileRepository>(), NullLogger<QualityProfileService>.Instance);
-        var scorer = new AutomaticSearchScoringService(quality, Mock.Of<IAudiobookRepository>(), NullLogger<AutomaticSearchScoringService>.Instance, TestAnnotationCatalog.Current);
+        var scorer = new AutomaticSearchScoringService(quality, Mock.Of<IAudiobookRepository>(), NullLogger<AutomaticSearchScoringService>.Instance, TestAnnotationCatalog.CreateProvider());
         var profile = new QualityProfile
         {
             Name = "Review",

@@ -26,7 +26,7 @@ public sealed class AutomaticCompatibilityTests : BaseTests
             .ReturnsAsync((List<SearchResult> candidates, QualityProfile _) => candidates.Select(r =>
                 new QualityScore { SearchResult = r, TotalScore = 100000 }).ToList());
         var scorer = new AutomaticSearchScoringService(quality.Object, Mock.Of<IAudiobookRepository>(),
-            NullLogger<AutomaticSearchScoringService>.Instance, TestAnnotationCatalog.Current);
+            NullLogger<AutomaticSearchScoringService>.Instance, TestAnnotationCatalog.CreateProvider());
         var assessment = await scorer.ScoreAsync(book, [result], profile ?? Profile());
         var score = Assert.Single(assessment.Candidates);
         quality.Verify(q => q.ScoreSearchResults(It.IsAny<List<SearchResult>>(), It.IsAny<QualityProfile>()), Times.Once);
@@ -229,7 +229,7 @@ public sealed class AutomaticCompatibilityTests : BaseTests
             .Callback(() => candidate.Language = "Swedish")
             .ReturnsAsync([new() { SearchResult = candidate, TotalScore = 10000 }]);
         var scorer = new AutomaticSearchScoringService(quality.Object, Mock.Of<IAudiobookRepository>(),
-            NullLogger<AutomaticSearchScoringService>.Instance, TestAnnotationCatalog.Current);
+            NullLogger<AutomaticSearchScoringService>.Instance, TestAnnotationCatalog.CreateProvider());
         var batch = await scorer.ScoreAsync(Book(), [candidate], Profile("English"));
         Assert.Null(scorer.SelectBest(batch));
         Assert.Contains("candidate_changed", batch.Candidates[0].RejectionReasons);
@@ -246,7 +246,7 @@ public sealed class AutomaticCompatibilityTests : BaseTests
         quality.Setup(q => q.ScoreSearchResults(It.IsAny<List<SearchResult>>(), It.IsAny<QualityProfile>()))
             .ReturnsAsync([new() { SearchResult = candidate, TotalScore = 100 }]);
         var scorer = new AutomaticSearchScoringService(quality.Object, books.Object,
-            NullLogger<AutomaticSearchScoringService>.Instance, TestAnnotationCatalog.Current);
+            NullLogger<AutomaticSearchScoringService>.Instance, TestAnnotationCatalog.CreateProvider());
         var batch = await scorer.ScoreAsync(book, [candidate], book.QualityProfile);
         Assert.True(await scorer.IsCurrentAsync(batch, 42));
         book.Language = "Swedish";
