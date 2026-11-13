@@ -295,7 +295,7 @@ try {
   }
 
   if (e2eMode !== 'write') {
-    await runCypressSpec('cypress/e2e/read-only/full-stack-smoke.cy.ts', 'cypress.config.ts')
+    await runCypressSpec('cypress/e2e/read-only/loads-seeded-library-from-live-api.cy.ts', 'cypress.config.ts')
     await stop(api)
     api = undefined
     if (databaseSnapshot(databasePath) !== seedHash) {
