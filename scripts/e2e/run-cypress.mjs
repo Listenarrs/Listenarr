@@ -305,6 +305,7 @@ try {
 
   if (e2eMode !== 'read-only') {
     await runCypressSpec('cypress/e2e/write/write-settings.cy.ts', 'cypress.e2e.write.config.ts')
+    await runCypressSpec('cypress/e2e/write/write-library-persistence.cy.ts', 'cypress.e2e.write.config.ts')
   }
   exitCode = 0
 } finally {
