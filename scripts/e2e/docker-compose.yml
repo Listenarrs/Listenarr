@@ -1,0 +1,16 @@
+services:
+  listenarr:
+    image: listenarr-cypress-e2e:${LISTENARR_E2E_IMAGE_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    environment:
+      PUID: "${LISTENARR_E2E_UID:-0}"
+      PGID: "${LISTENARR_E2E_GID:-0}"
+      UMASK: "000"
+      LISTENARR_DISABLE_HOSTED_SERVICES: "true"
+      LISTENARR_LOG_LEVEL: Warning
+    ports:
+      - "127.0.0.1:${LISTENARR_E2E_PORT:-4545}:4545"
+    volumes:
+      - ${LISTENARR_E2E_CONFIG_DIR:?LISTENARR_E2E_CONFIG_DIR is required}:/app/config

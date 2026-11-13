@@ -1,21 +1,58 @@
 import { defineConfig } from 'cypress'
+import { execFileSync } from 'node:child_process'
+import { cp, rm } from 'node:fs/promises'
+
+const composeFile = process.env.LISTENARR_E2E_COMPOSE_FILE
+const composeProject = process.env.LISTENARR_E2E_COMPOSE_PROJECT
+const configDirectory = process.env.LISTENARR_E2E_CONFIG_DIR
+const seedConfigDirectory = process.env.LISTENARR_E2E_SEED_CONFIG_DIR
+const baseUrl = process.env.LISTENARR_E2E_BASE_URL ?? 'http://localhost:4545'
+
+function runCompose(...args: string[]) {
+  if (!composeFile || !composeProject) {
+    throw new Error('The Docker-backed E2E stack is not configured.')
+  }
+
+  execFileSync('docker', ['compose', '--file', composeFile, '--project-name', composeProject, ...args], {
+    stdio: 'inherit',
+    env: process.env,
+  })
+}
+
+async function waitForApi() {
+  const readyUrl = new URL('/api/v1/system/ready', baseUrl)
+  const deadline = Date.now() + 120_000
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(readyUrl, { signal: AbortSignal.timeout(2_000) })
+      if (response.ok) return
+    } catch {
+      // The container is still starting.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500))
+  }
+
+  throw new Error(`Listenarr did not become ready at ${readyUrl}.`)
+}
 
 export default defineConfig({
   allowCypressEnv: false,
   e2e: {
     specPattern: 'cypress/e2e/write/**/*.{cy,spec}.{js,jsx,ts,tsx}',
-    baseUrl: 'http://localhost:5173',
+    baseUrl,
     supportFile: 'cypress/support/write.ts',
     setupNodeEvents(on) {
       on('task', {
         async resetWriteDatabase() {
-          const controlUrl = process.env.LISTENARR_E2E_CONTROL_URL
-          if (!controlUrl) throw new Error('The E2E database reset service is not available.')
-
-          const response = await fetch(`${controlUrl}/reset-write-database`, { method: 'POST' })
-          if (!response.ok) {
-            throw new Error(`Could not reset the E2E database: ${await response.text()}`)
+          if (!configDirectory || !seedConfigDirectory) {
+            throw new Error('The Docker-backed E2E database snapshot is not available.')
           }
+
+          runCompose('stop', 'listenarr')
+          await rm(configDirectory, { recursive: true, force: true })
+          await cp(seedConfigDirectory, configDirectory, { recursive: true })
+          runCompose('start', 'listenarr')
+          await waitForApi()
 
           return null
         },
