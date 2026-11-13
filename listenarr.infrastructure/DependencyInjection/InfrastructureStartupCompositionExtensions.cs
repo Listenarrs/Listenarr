@@ -18,6 +18,7 @@
 
 using Listenarr.Domain.Common;
 using Listenarr.Infrastructure.Downloads.Blocklist;
+using Listenarr.Infrastructure.DependencyInjection.Workers;
 using Listenarr.Infrastructure.Persistence;
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Listenarr.Infrastructure.Configuration;
@@ -96,6 +97,9 @@ public static class InfrastructureStartupCompositionExtensions
         var disableHostedServices =
             configuration.GetValue<bool>("Listenarr:DisableHostedServices") ||
             string.Equals(Environment.GetEnvironmentVariable("LISTENARR_DISABLE_HOSTED_SERVICES"), "true", StringComparison.OrdinalIgnoreCase);
+        var enableUnmatchedScanWorker =
+            configuration.GetValue<bool>("Listenarr:EnableUnmatchedScanWorker") ||
+            string.Equals(Environment.GetEnvironmentVariable("LISTENARR_ENABLE_UNMATCHED_SCAN_WORKER"), "true", StringComparison.OrdinalIgnoreCase);
 
         if (disableHostedServices)
         {
@@ -112,6 +116,14 @@ public static class InfrastructureStartupCompositionExtensions
         if (!disableHostedServices)
         {
             services.AddListenarrHostedServices(configuration);
+        }
+        else
+        {
+            services.AddScanQueueService();
+            if (enableUnmatchedScanWorker)
+            {
+                services.AddUnmatchedScanWorker();
+            }
         }
 
         services.AddHostedService<StartupDbNormalizer>();
