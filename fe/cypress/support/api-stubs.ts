@@ -387,6 +387,15 @@ export const stubSearch = (reply: SearchReply = { statusCode: 200, body: { resul
 export const stubSearchWithReply = (getReply: () => SearchReply, alias = 'search') =>
   cy.intercept('POST', '**/api/v1/search', (request) => request.reply(getReply())).as(alias)
 
+export const stubRepairRescan = (id: number, reply: ApiReply = {}) =>
+  cy
+    .intercept('POST', `**/api/v1/library/${id}/rescan-metadata`, {
+      statusCode: reply.statusCode ?? 200,
+      body: reply.body ?? { message: 'Metadata refreshed', audiobookId: id },
+      ...(reply.delay === undefined ? {} : { delay: reply.delay }),
+    })
+    .as('rescanAudiobookMetadata')
+
 export const stubMetadata = (
   reply: MetadataReply = { statusCode: 200, body: { metadata: { asin: 'B008DFUGCQ', title: 'Dune' } } },
   alias = 'metadata',

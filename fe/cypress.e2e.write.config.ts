@@ -21,18 +21,40 @@ function runCompose(...args: string[]) {
 
 async function waitForApi() {
   const readyUrl = new URL('/api/v1/system/ready', baseUrl)
+  const appUrl = new URL('/', baseUrl)
   const deadline = Date.now() + 120_000
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(readyUrl, { signal: AbortSignal.timeout(2_000) })
-      if (response.ok) return
+      const [apiResponse, appResponse] = await Promise.all([
+        fetch(readyUrl, { signal: AbortSignal.timeout(2_000) }),
+        fetch(appUrl, { signal: AbortSignal.timeout(2_000) }),
+      ])
+      if (apiResponse.ok && appResponse.ok) {
+        const html = await appResponse.text()
+        const scriptPath = html.match(/<script[^>]+src=["']([^"']+\.js)["']/i)?.[1]
+        if (scriptPath) {
+          const bundleResponse = await fetch(new URL(scriptPath, baseUrl), {
+            signal: AbortSignal.timeout(2_000),
+          })
+          if (bundleResponse.ok) {
+            const bundle = await bundleResponse.text()
+            const settingsChunk = bundle.match(/(?:\/assets\/|\.\/)?(SettingsView-[\w-]+\.js)/)?.[1]
+            if (settingsChunk) {
+              const settingsResponse = await fetch(new URL(`/assets/${settingsChunk}`, baseUrl), {
+                signal: AbortSignal.timeout(2_000),
+              })
+              if (settingsResponse.ok) return
+            }
+          }
+        }
+      }
     } catch {
       // The container is still starting.
     }
     await new Promise((resolve) => setTimeout(resolve, 500))
   }
 
-  throw new Error(`Listenarr did not become ready at ${readyUrl}.`)
+  throw new Error(`Listenarr did not become ready at ${readyUrl} and ${appUrl}.`)
 }
 
 export default defineConfig({
