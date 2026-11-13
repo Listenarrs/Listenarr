@@ -112,6 +112,12 @@ jobs:
       - name: Build solution
         run: dotnet build listenarr.slnx --no-restore --configuration Release
 
+      - name: Check generated API types
+        working-directory: fe
+        run: |
+          npm run api-types:check
+          npm run type-check:cypress
+
       - name: Run native backend tests
         env:
           ASPNETCORE_ENVIRONMENT: Test
@@ -132,11 +138,11 @@ jobs:
         working-directory: fe
         run: npm run test:integration:cypress
 
-      - name: Run Cypress read-only happy-path E2E
+      - name: Run Cypress read-only E2E
         working-directory: fe
         run: npm run test:e2e:read-only
 
-      - name: Run Cypress write happy-path E2E
+      - name: Run Cypress write E2E
         working-directory: fe
         run: npm run test:e2e:write
 

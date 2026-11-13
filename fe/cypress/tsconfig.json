@@ -1,6 +1,6 @@
 {
   "extends": "@vue/tsconfig/tsconfig.dom.json",
-  "include": ["./e2e/**/*", "./support/**/*"],
+  "include": ["./e2e/**/*", "./integration/**/*", "./support/**/*"],
   "exclude": ["./support/component.*"],
   "compilerOptions": {
     "isolatedModules": false,
