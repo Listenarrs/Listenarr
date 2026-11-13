@@ -41,6 +41,13 @@ RUN dotnet build "Listenarr.Api.csproj" -c Release -o /app/build \
 
 FROM base AS final
 WORKDIR /app
+ARG INSTALL_E2E_FFMPEG=false
+RUN if [ "$INSTALL_E2E_FFMPEG" = "true" ]; then \
+	apt-get update \
+	&& apt-get install -y --no-install-recommends ffmpeg \
+	&& apt-get clean \
+	&& rm -rf /var/lib/apt/lists/*; \
+fi
 COPY docker/runtime/ /tmp/listenarr-runtime/
 
 # Use the gosu binary built above instead of the apt package.

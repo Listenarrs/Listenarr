@@ -118,6 +118,20 @@ async function seedLibrary(apiUrl) {
       throw new Error(`Could not set authors for E2E seed book '${metadata.title}': ${await updateResponse.text()}`)
     }
   }
+
+  for (const rootFolder of [
+    { name: 'Cypress Import', path: '/e2e/import' },
+    { name: 'Cypress Library', path: '/e2e/library' },
+  ]) {
+    const response = await fetch(`${apiUrl}/api/v1/rootfolders`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ ...rootFolder, isDefault: false, caseSensitivityMode: 0 }),
+    })
+    if (!response.ok) {
+      throw new Error(`Could not create E2E root folder '${rootFolder.name}': ${await response.text()}`)
+    }
+  }
 }
 
 if (!existsSync(cypressCli)) {
@@ -127,6 +141,8 @@ if (!existsSync(cypressCli)) {
 const contentRoot = await mkdtemp(join(tmpdir(), 'listenarr-cypress-e2e-'))
 const configDirectory = join(contentRoot, 'config')
 const seedConfigDirectory = join(contentRoot, 'seed-config')
+const filesystemDirectory = join(contentRoot, 'filesystem')
+const seedFilesystemDirectory = join(contentRoot, 'seed-filesystem')
 const databasePath = join(configDirectory, 'database', 'listenarr.db')
 const projectName = `listenarr-cypress-${process.pid}-${Date.now().toString(36)}`
 const apiPort = await availablePort()
@@ -134,6 +150,7 @@ const apiUrl = `http://127.0.0.1:${apiPort}`
 const composeEnvironment = {
   ...process.env,
   LISTENARR_E2E_CONFIG_DIR: configDirectory,
+  LISTENARR_E2E_FILESYSTEM_DIR: filesystemDirectory,
   LISTENARR_E2E_PORT: String(apiPort),
   LISTENARR_E2E_IMAGE_TAG: `${process.pid}-${Date.now().toString(36)}`,
   LISTENARR_E2E_UID: String(process.getuid?.() ?? 0),
@@ -148,9 +165,31 @@ let exitCode = 1
 let composeStarted = false
 try {
   await mkdir(configDirectory, { recursive: true })
+  await mkdir(join(seedFilesystemDirectory, 'import'), { recursive: true })
+  await mkdir(join(seedFilesystemDirectory, 'library'), { recursive: true })
+  const audioFixtureGenerator = start(
+    'bash',
+    [join(repositoryRoot, 'scripts', 'e2e', 'generate-audio-fixtures.sh'), join(seedFilesystemDirectory, 'import')],
+    { cwd: repositoryRoot, env: composeEnvironment },
+  )
+  await waitForExit(audioFixtureGenerator, 'Synthetic audiobook fixture generation')
+  await cp(seedFilesystemDirectory, filesystemDirectory, { recursive: true })
+
   composeStarted = true
   await runCompose(['up', '--build', '--detach'], 'Docker Compose E2E stack startup')
   await waitFor(`${apiUrl}/api/v1/system/ready`, 'Listenarr Docker container')
+  await runCompose(
+    [
+      'exec',
+      '--user',
+      '0',
+      'listenarr',
+      'sh',
+      '-c',
+      'mkdir -p /app/config/ffmpeg && cp /usr/bin/ffprobe /app/config/ffmpeg/ffprobe && chmod 755 /app/config/ffmpeg/ffprobe',
+    ],
+    'E2E ffprobe setup',
+  )
 
   const settingsResponse = await fetch(`${apiUrl}/api/v1/configuration/settings`)
   if (!settingsResponse.ok) throw new Error('Could not initialize the E2E seed database.')
@@ -172,11 +211,18 @@ try {
           LISTENARR_E2E_BASE_URL: apiUrl,
           LISTENARR_E2E_COMPOSE_FILE: composeFile,
           LISTENARR_E2E_COMPOSE_PROJECT: projectName,
+          LISTENARR_E2E_FILESYSTEM_DIR: filesystemDirectory,
+          LISTENARR_E2E_SEED_FILESYSTEM_DIR: seedFilesystemDirectory,
           LISTENARR_E2E_SEED_CONFIG_DIR: seedConfigDirectory,
         },
       },
     )
-    await waitForExit(cypress, `Cypress spec ${spec}`)
+    try {
+      await waitForExit(cypress, `Cypress spec ${spec}`)
+    } catch (error) {
+      await runCompose(['logs', '--no-color', 'listenarr'], `Docker Compose logs after ${spec} failure`)
+      throw error
+    }
   }
 
   if (e2eMode !== 'write') {
@@ -193,6 +239,7 @@ try {
     await runCypressSpec('cypress/e2e/write/write-settings.cy.ts', 'cypress.e2e.write.config.ts')
     await runCypressSpec('cypress/e2e/write/write-library-persistence.cy.ts', 'cypress.e2e.write.config.ts')
     await runCypressSpec('cypress/e2e/write/write-repair-persistence.cy.ts', 'cypress.e2e.write.config.ts')
+    await runCypressSpec('cypress/e2e/write/write-audio-import.cy.ts', 'cypress.e2e.write.config.ts')
   }
   exitCode = 0
 } finally {

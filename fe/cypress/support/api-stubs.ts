@@ -448,6 +448,9 @@ export const stubManualImport = (
   alias = 'importManualFiles',
 ) => stubJson('POST', '**/api/v1/library/manual-import', response, alias)
 
+export const spyManualImport = (alias = 'importManualFiles') =>
+  cy.intercept('POST', '**/api/v1/library/manual-import').as(alias)
+
 export const stubAddLibrary = (audiobook: AudiobookResponse, alias = 'addAudiobookToLibrary') =>
   cy.intercept('POST', '**/api/v1/library/add', {
     statusCode: 200,
