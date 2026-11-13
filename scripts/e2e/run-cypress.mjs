@@ -1,7 +1,7 @@
 import { once } from 'node:events'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { copyFile, cp, mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { copyFile, cp, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
@@ -119,6 +119,42 @@ async function availablePort() {
   return port
 }
 
+async function seedLibrary(apiUrl) {
+  const books = JSON.parse(await readFile(join(repositoryRoot, 'scripts', 'e2e', 'seed-library.json'), 'utf8'))
+  const tokenResponse = await fetch(`${apiUrl}/api/v1/antiforgery/token`)
+  if (!tokenResponse.ok) throw new Error('Could not obtain an antiforgery token for the E2E seed.')
+  const { token } = await tokenResponse.json()
+  const cookies = tokenResponse.headers.getSetCookie().map((cookie) => cookie.split(';', 1)[0])
+  if (!token || cookies.length === 0) throw new Error('The API did not issue an antiforgery token and cookie for the E2E seed.')
+  const headers = {
+    'Content-Type': 'application/json',
+    Cookie: cookies.join('; '),
+    'X-XSRF-TOKEN': token,
+  }
+
+  for (const { authors, ...metadata } of books) {
+    const addResponse = await fetch(`${apiUrl}/api/v1/library/add`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ metadata: { ...metadata, authors: [] }, monitored: true, autoSearch: false }),
+    })
+    const addResult = await addResponse.json()
+    if (!addResponse.ok || !addResult.audiobook?.id) {
+      throw new Error(`Could not add E2E seed book '${metadata.title}': ${JSON.stringify(addResult)}`)
+    }
+
+    // Adding authors invokes live author enrichment; set them afterward to keep the seed offline.
+    const updateResponse = await fetch(`${apiUrl}/api/v1/library/${addResult.audiobook.id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ authors }),
+    })
+    if (!updateResponse.ok) {
+      throw new Error(`Could not set authors for E2E seed book '${metadata.title}': ${await updateResponse.text()}`)
+    }
+  }
+}
+
 if (!existsSync(cypressCli) || !existsSync(viteCli)) {
   throw new Error('Install frontend dependencies first with `npm ci --prefix fe --engine-strict`.')
 }
@@ -174,6 +210,7 @@ try {
   await waitFor(`${apiUrl}/api/v1/system/ready`, api, 'Listenarr API')
   const settingsResponse = await fetch(`${apiUrl}/api/v1/configuration/settings`)
   if (!settingsResponse.ok) throw new Error('Could not initialize the E2E seed database.')
+  await seedLibrary(apiUrl)
   await stop(api)
   api = undefined
 

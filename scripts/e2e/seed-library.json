@@ -1,0 +1,54 @@
+[
+  {
+    "title": "Twenty Thousand Leagues Under the Sea",
+    "authors": ["Jules Verne"],
+    "asin": "B01FKWL15A",
+    "region": "us",
+    "source": "Audible",
+    "publishYear": "1870",
+    "publishedDate": "1870-06-20",
+    "description": "A voyage beneath the sea aboard the Nautilus.",
+    "genres": ["Classics", "Science Fiction"],
+    "language": "english",
+    "runtime": 600
+  },
+  {
+    "title": "Robinson Crusoe",
+    "authors": ["Daniel Defoe"],
+    "asin": "B002V5CW08",
+    "region": "us",
+    "source": "Audible",
+    "publishYear": "1719",
+    "publishedDate": "1719-04-25",
+    "description": "A castaway survives on a remote island.",
+    "genres": ["Classics", "Adventure"],
+    "language": "english",
+    "runtime": 720
+  },
+  {
+    "title": "The Strange Case of Dr Jekyll and Mr Hyde",
+    "authors": ["Robert Louis Stevenson"],
+    "asin": "B076FF3QGP",
+    "region": "us",
+    "source": "Audible",
+    "publishYear": "1886",
+    "publishedDate": "1886-01-05",
+    "description": "A London doctor's experiment reveals a darker self.",
+    "genres": ["Classics", "Horror"],
+    "language": "english",
+    "runtime": 240
+  },
+  {
+    "title": "Pride and Prejudice",
+    "authors": ["Jane Austen"],
+    "asin": "B071S17YLK",
+    "region": "us",
+    "source": "Audible",
+    "publishYear": "1813",
+    "publishedDate": "1813-01-28",
+    "description": "Elizabeth Bennet navigates family, manners, and first impressions.",
+    "genres": ["Classics", "Romance"],
+    "language": "english",
+    "runtime": 660
+  }
+]

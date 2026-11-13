@@ -1,6 +1,8 @@
+import { spySettingsUpdate } from '../../support/api-stubs'
+
 describe('Full-stack E2E write path', () => {
   it('saves a settings change and reads it back', () => {
-    cy.intercept('POST', '**/api/v1/configuration/settings').as('saveSettings')
+    spySettingsUpdate()
     cy.visit('/settings#general')
     cy.contains('h3', 'General Settings').should('be.visible')
 
@@ -19,12 +21,14 @@ describe('Full-stack E2E write path', () => {
       .should('be.checked')
   })
 
-  it('restores seeded settings before the next write test', () => {
+  it('restores seeded settings and books before the next write test', () => {
     cy.visit('/settings#general')
     cy.contains('h3', 'General Settings').should('be.visible')
     cy.contains('strong', 'Enable Notifications')
       .closest('label.input-checkbox')
       .find('input[type="checkbox"]')
       .should('not.be.checked')
+
+    cy.request('/api/v1/library').its('body').should('have.length', 4)
   })
 })
