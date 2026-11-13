@@ -1,12 +1,20 @@
+import {
+  audiobookFixture,
+  libraryAudiobookFixture,
+  settingsFixture,
+  stubAudiobook,
+  stubLibrary,
+  stubLibraryIdentifiers,
+  stubMetadata,
+  stubQualityProfiles,
+  stubSearch,
+  stubSettings,
+  stubWeakStorageMissingFiles,
+} from '../support/api-stubs'
+
 const audiobookId = '1'
 const bookPage = `/audiobooks/${audiobookId}`
-const audiobook = {
-  id: Number(audiobookId),
-  title: 'Dune',
-  authors: ['Frank Herbert'],
-  files: [],
-  identifiers: [],
-}
+const audiobook = audiobookFixture({ id: Number(audiobookId), title: 'Dune', authors: ['Frank Herbert'] })
 
 type SearchFields = {
   asin?: string
@@ -77,32 +85,14 @@ const searchCases: Array<{
 
 describe('Repair / Find Match card fields', () => {
   beforeEach(() => {
-    cy.intercept('GET', '**/api/v1/library', { statusCode: 200, body: [audiobook] }).as('library')
-    cy.intercept('GET', `**/api/v1/library/${audiobookId}`, {
-      statusCode: 200,
-      body: audiobook,
-    }).as('audiobook')
-    cy.intercept('GET', `**/api/v1/library/${audiobookId}/identifiers`, {
-      statusCode: 200,
-      body: { audiobookId: Number(audiobookId), identifiers: [] },
-    }).as('identifiers')
-    cy.intercept('GET', `**/api/v1/library/${audiobookId}/weak-storage-missing-files`, {
-      statusCode: 200,
-      body: { items: [] },
-    }).as('weakStorage')
-    cy.intercept('GET', '**/api/v1/qualityprofile', { statusCode: 200, body: [] }).as('qualityProfiles')
-    cy.intercept('GET', '**/api/v1/configuration/settings', {
-      statusCode: 200,
-      body: { defaultSearchRegion: 'us' },
-    }).as('settings')
-    cy.intercept('POST', '**/api/v1/search', {
-      statusCode: 200,
-      body: { results: [] },
-    }).as('search')
-    cy.intercept('**/api/v1/metadata/*', {
-      statusCode: 200,
-      body: { metadata: { asin: 'B008DFUGCQ', title: 'Dune' } },
-    }).as('metadata')
+    stubLibrary([libraryAudiobookFixture({ id: Number(audiobookId), title: 'Dune', authors: ['Frank Herbert'] })])
+    stubAudiobook(Number(audiobookId), audiobook)
+    stubLibraryIdentifiers(Number(audiobookId))
+    stubWeakStorageMissingFiles(Number(audiobookId))
+    stubQualityProfiles()
+    stubSettings(settingsFixture({ defaultSearchRegion: 'us' }))
+    stubSearch()
+    stubMetadata()
   })
 
   for (const testCase of searchCases) {
@@ -161,10 +151,7 @@ describe('Repair / Find Match card fields', () => {
   })
 
   it('shows no record for a 404 metadata lookup', () => {
-    cy.intercept('**/api/v1/metadata/*', {
-      statusCode: 404,
-      body: { message: 'none' },
-    }).as('missingMetadata')
+    stubMetadata({ statusCode: 404, body: { message: 'none' } }, 'missingMetadata')
     openRepair()
     fillSearch({ asin: 'B008DFUGCQ' })
     submitSearch()
@@ -173,10 +160,7 @@ describe('Repair / Find Match card fields', () => {
   })
 
   it('treats an empty metadata record as no result', () => {
-    cy.intercept('**/api/v1/metadata/*', {
-      statusCode: 200,
-      body: { metadata: { asin: 'B008DFUGCQ', title: '' } },
-    }).as('emptyMetadata')
+    stubMetadata({ statusCode: 200, body: { metadata: { asin: 'B008DFUGCQ', title: '' } } }, 'emptyMetadata')
     openRepair()
     fillSearch({ asin: 'B008DFUGCQ' })
     submitSearch()
@@ -185,10 +169,7 @@ describe('Repair / Find Match card fields', () => {
   })
 
   it('reports a failing search', () => {
-    cy.intercept('POST', '**/api/v1/search', {
-      statusCode: 500,
-      body: { message: 'boom' },
-    }).as('failedSearch')
+    stubSearch({ statusCode: 500, body: { message: 'boom' } }, 'failedSearch')
     openRepair()
     fillSearch({ title: 'Dune' })
     submitSearch()
@@ -199,9 +180,7 @@ describe('Repair / Find Match card fields', () => {
   })
 
   it('cancels a pending search promptly', () => {
-    cy.intercept('POST', '**/api/v1/search', (request) => {
-      request.reply({ delay: 4000, statusCode: 200, body: { results: [] } })
-    }).as('slowSearch')
+    stubSearch({ delay: 4000, statusCode: 200, body: { results: [] } }, 'slowSearch')
     openRepair()
     fillSearch({ title: 'Dune' })
     field('title').type('{enter}')

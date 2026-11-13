@@ -1,83 +1,32 @@
-/* eslint-disable cypress/unsafe-to-chain-command */
+import {
+  libraryAudiobookFixture,
+  rootFolderFixture,
+  settingsFixture,
+  stubAudiobookMove,
+  stubFileSystemCheckVolume,
+  stubLibrary,
+  stubRootFolders,
+  stubSettingsPage,
+} from '../support/api-stubs'
+
 describe('Hardlink/Copy move integration', () => {
   beforeEach(() => {
-    // Stub startup config and account checks (no auth)
-    cy.intercept('GET', '**/api/v1/configuration/bootstrap', {
-      statusCode: 200,
-      body: { authenticationRequired: false, apiKey: null, baseUrl: '/' }
-    }).as('getStartupConfig')
-
-    cy.intercept('GET', '**/api/v1/account/me', { statusCode: 200, body: { authenticated: false } }).as('getCurrentUser')
-
-    // App settings with outputPath and default file handling mode (Hardlink/Copy)
-    cy.intercept('GET', '**/api/v1/configuration/settings', {
-      statusCode: 200,
-      body: {
-        outputPath: '/mnt/audiobooks',
-        fileNamingPattern: '{Author}/{Title}',
-        completedFileAction: 'Hardlink/Copy',
-        maxConcurrentDownloads: 2,
-        pollingIntervalSeconds: 30
-      }
-    }).as('getSettings')
+    stubSettingsPage(settingsFixture({
+      outputPath: '/mnt/audiobooks',
+      fileNamingPattern: '{Author}/{Title}',
+      completedFileAction: 'hardlink/copy',
+    }))
 
     // Stub library endpoint to return a single audiobook
-    cy.intercept('GET', '**/api/v1/library', {
-      statusCode: 200,
-      body: [
-        {
-          id: 1,
-          title: 'Test Book',
-          author: 'Test Author',
-          basePath: '/mnt/audiobooks/Test Author/Test Book',
-          rootFolderId: 1,
-          monitored: true,
-          qualityProfileId: null,
-          tags: [],
-          abridged: false,
-          explicit: false
-        }
-      ]
-    }).as('getLibrary')
+    stubLibrary([libraryAudiobookFixture({
+      basePath: '/mnt/audiobooks/Test Author/Test Book',
+      monitored: true,
+    })])
 
-    cy.intercept('GET', '**/api/v1/rootfolders', {
-      statusCode: 200,
-      body: [
-        {
-          id: 1,
-          name: 'Audiobooks',
-          path: '/mnt/audiobooks',
-          isDefault: true,
-          storageState: 'Healthy',
-          canChangePath: true,
-        },
-      ],
-    })
+    stubRootFolders([rootFolderFixture({ path: '/mnt/audiobooks' })])
 
-    // Stub other endpoints
-    cy.intercept('GET', '**/api/v1/qualityprofile', { statusCode: 200, body: [] }).as('getProfiles')
-    cy.intercept('GET', '**/api/v1/configuration/apis', { statusCode: 200, body: [] }).as('getApis')
-    cy.intercept('GET', '**/api/v1/download-clients', { statusCode: 200, body: [] }).as('getDownloadClients')
-
-    // Capture move requests with the chosen file handling mode.
-    cy.intercept('POST', '**/api/v1/library/1/move', (req) => {
-      const body = req.body.moveFiles
-        ? { message: 'queued', jobId: 'job-test-1', target: req.body.destinationPath }
-        : { message: 'Destination updated' }
-      req.reply({ statusCode: 200, body })
-    }).as('moveAudiobook')
-
-    // Stub volume check endpoint
-    cy.intercept('GET', '**/api/v1/filesystem/check-volume*', {
-      statusCode: 200,
-      body: {
-        sameVolume: true,
-        willBreakHardlinks: false,
-        sourceVolume: '/mnt',
-        destVolume: '/mnt',
-        message: 'Same volume'
-      }
-    }).as('checkVolume')
+    stubAudiobookMove(1)
+    stubFileSystemCheckVolume()
   })
 
   it('displays move confirmation dialog when editing audiobook', () => {

@@ -1,31 +1,25 @@
-/* eslint-disable cypress/unsafe-to-chain-command */
+import {
+  rootFolderFixture,
+  stubRootFolderPathChange,
+  stubRootFolders,
+  stubSystemReadiness,
+} from '../support/api-stubs'
+
 describe('Root Folders Settings', () => {
   beforeEach(() => {
-    cy.intercept('GET', '**/api/v1/rootfolders', {
-      body: [
-        {
-          id: 1,
-          name: 'Root1',
-          path: 'C:\\root',
-          isDefault: true,
-          storageState: 'Healthy',
-          canChangePath: true,
-          canMutateFilesystem: true,
-          canScanFilesystem: true,
-        },
-      ],
-    }).as('getRoots')
-    cy.intercept('GET', '**/api/v1/system/ready', {
-      body: { filesystemReady: true, filesystemStatus: 'Ready' },
-    })
+    stubRootFolders([rootFolderFixture({
+      name: 'Root1',
+      path: 'C:\\root',
+      canMutateFilesystem: true,
+      canScanFilesystem: true,
+    })])
+    stubSystemReadiness()
     cy.visit('/settings#rootfolders')
-    cy.wait('@getRoots')
+    cy.wait('@getRootFolders')
   })
 
   it('requests a metadata-only root path change when moving is disabled', () => {
-    cy.intercept('POST', '**/api/v1/rootfolders/1/path-changes', (request) => {
-      request.reply({ statusCode: 200, body: { status: 'Completed' } })
-    }).as('putRoot')
+    stubRootFolderPathChange(1)
 
     cy.contains('.folder-card', 'Root1').within(() => {
       cy.get('[data-cy="edit-root-folder"]').click()
@@ -51,9 +45,7 @@ describe('Root Folders Settings', () => {
   })
 
   it('requests root relocation when Move files now is selected', () => {
-    cy.intercept('POST', '**/api/v1/rootfolders/1/path-changes', (request) => {
-      request.reply({ statusCode: 200, body: { status: 'Completed' } })
-    }).as('putRootMove')
+    stubRootFolderPathChange(1, 'putRootMove')
 
     cy.contains('.folder-card', 'Root1').within(() => {
       cy.get('[data-cy="edit-root-folder"]').click()
