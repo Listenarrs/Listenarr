@@ -76,6 +76,20 @@ public interface IMoveQueuePersistence
         DateTimeOffset updatedAt,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Retire every earlier NeedsAttention/Failed job for <paramref name="audiobookId"/>
+    /// once a later job (<paramref name="completedJobId"/>) has completed durably:
+    /// the completed move validated the record's live source manifest, so the
+    /// older failures no longer describe the world and must stop blocking new
+    /// mutations or lingering as "needs attention". Returns the retired ids.
+    /// </summary>
+    Task<IReadOnlyList<Guid>> SupersedeStaleFailuresAsync(
+        int audiobookId,
+        Guid completedJobId,
+        string error,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default);
+
     Task<bool> UpdateStatusAsync(
         Guid id,
         string leaseOwner,
