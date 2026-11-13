@@ -47,7 +47,8 @@ namespace Listenarr.Api.Features.Library
                     await using var scope = _scopeFactory.CreateAsyncScope();
                     var downloadService = scope.ServiceProvider.GetRequiredService<IDownloadService>();
                     _logger.LogInformation("Searching for downloads right after adding '{Title}' (id {AudiobookId})", title, audiobookId);
-                    var result = await downloadService.SearchAndDownloadAsync(audiobookId);
+                    // The person adding the book asked for this search, so it may use the reserve.
+                    var result = await downloadService.SearchAndDownloadAsync(audiobookId, SearchOrigin.Interactive);
                     _logger.LogInformation(
                         "Search after adding '{Title}' (id {AudiobookId}): success={Success}, {Message}",
                         title, audiobookId, result.Success, LogRedaction.SanitizeText(result.Message));

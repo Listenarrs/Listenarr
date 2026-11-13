@@ -432,7 +432,7 @@ namespace Listenarr.Infrastructure.Downloads.Monitoring
                     var audiobook = await audiobookRepository.GetByIdAsync(download.AudiobookId!.Value);
                     if (audiobook != null && audiobook.Monitored)
                     {
-                        await downloadService.SearchAndDownloadAsync(download.AudiobookId.Value);
+                        await downloadService.SearchAndDownloadAsync(download.AudiobookId.Value, SearchOrigin.Retry);
                     }
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)

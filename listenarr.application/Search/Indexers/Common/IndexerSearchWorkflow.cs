@@ -28,6 +28,7 @@ public class IndexerSearchWorkflow
     private readonly IEnumerable<IIndexerSearchProvider> _searchProviders;
     private readonly IndexerAdditionalSettingsParser _additionalSettingsParser;
     private readonly TorznabResponseParser _torznabResponseParser;
+    private readonly IIndexerRequestBudget? _requestBudget;
     private readonly ILogger<IndexerSearchWorkflow> _logger;
 
     public IndexerSearchWorkflow(
@@ -37,13 +38,15 @@ public class IndexerSearchWorkflow
         IEnumerable<IIndexerSearchProvider> searchProviders,
         IndexerAdditionalSettingsParser additionalSettingsParser,
         ILogger<IndexerSearchWorkflow> logger,
-        IHtmlTextExtractor? htmlTextExtractor = null)
+        IHtmlTextExtractor? htmlTextExtractor = null,
+        IIndexerRequestBudget? requestBudget = null)
     {
         _httpClient = httpClient;
         _configurationService = configurationService;
         _indexerRepository = indexerRepository;
         _searchProviders = searchProviders;
         _additionalSettingsParser = additionalSettingsParser;
+        _requestBudget = requestBudget;
         _logger = logger;
         _torznabResponseParser = new TorznabResponseParser(httpClient, logger, htmlTextExtractor);
     }
@@ -54,7 +57,8 @@ public class IndexerSearchWorkflow
         SearchSortBy sortBy = SearchSortBy.Seeders,
         SearchSortDirection sortDirection = SearchSortDirection.Descending,
         bool isAutomaticSearch = false,
-        SearchRequest? request = null)
+        SearchRequest? request = null,
+        SearchOrigin origin = SearchOrigin.Interactive)
     {
         var results = new List<IndexerSearchResult>();
         var indexers = await _indexerRepository.GetEnabledAsync(isAutomaticSearch);
@@ -74,7 +78,7 @@ public class IndexerSearchWorkflow
                 _logger.LogInformation("Searching indexer {Name} ({Type}) for query: {Query}", indexer.Name, indexer.Type, query);
                 var perIndexerRequest = ApplyIndexerMamOptions(indexer, request);
 
-                var indexerResults = await SearchIndexerAsync(indexer, query, category, perIndexerRequest);
+                var indexerResults = await SearchIndexerAsync(indexer, query, origin, category, perIndexerRequest);
                 _logger.LogInformation("Found {Count} results from indexer {Name}", indexerResults.Count, indexer.Name);
                 return indexerResults;
             }
@@ -127,7 +131,7 @@ public class IndexerSearchWorkflow
             var mamOpts = _additionalSettingsParser.ParseMamOptions(indexer.AdditionalSettings);
             if (mamOpts != null) req.MyAnonamouse = mamOpts;
 
-            var idxResults = await SearchIndexerAsync(indexer, query, category, req);
+            var idxResults = await SearchIndexerAsync(indexer, query, SearchOrigin.Interactive, category, req);
             return idxResults.Select(SearchResultConverters.ToSearchResult).ToList();
         }
         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
@@ -154,7 +158,7 @@ public class IndexerSearchWorkflow
             }
 
             request = ApplyIndexerMamOptions(indexer, request);
-            return await SearchIndexerAsync(indexer, query, category, request);
+            return await SearchIndexerAsync(indexer, query, SearchOrigin.Interactive, category, request);
         }
         catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
         {
@@ -209,6 +213,7 @@ public class IndexerSearchWorkflow
     private async Task<List<IndexerSearchResult>> SearchIndexerAsync(
         Indexer indexer,
         string query,
+        SearchOrigin origin,
         string? category = null,
         SearchRequest? request = null)
     {
@@ -239,6 +244,13 @@ public class IndexerSearchWorkflow
                 return new List<IndexerSearchResult>();
             }
 
+            // Charged only once the request is certain to be sent, so the fail-closed returns
+            // above never spend budget.
+            if (!await TryAcquireRequestBudgetAsync(indexer, origin))
+            {
+                return new List<IndexerSearchResult>();
+            }
+
             var providerResults = await provider.SearchAsync(indexer, query, category, request);
             foreach (var r in providerResults.Where(r => string.IsNullOrWhiteSpace(r.Source)))
             {
@@ -252,6 +264,15 @@ public class IndexerSearchWorkflow
             _logger.LogError(ex, "Error searching indexer {Name}", indexer.Name);
             return new List<IndexerSearchResult>();
         }
+    }
+
+    private async Task<bool> TryAcquireRequestBudgetAsync(Indexer indexer, SearchOrigin origin)
+    {
+        if (_requestBudget == null || indexer.DailyRequestLimit is not > 0)
+            return true;
+
+        var settings = await _configurationService.GetApplicationSettingsAsync();
+        return await _requestBudget.TryAcquireAsync(indexer, origin, settings.IndexerInteractiveReservePercent);
     }
 
     private static string GetFallbackIndexerName(Indexer indexer)

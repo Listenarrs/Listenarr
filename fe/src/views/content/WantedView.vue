@@ -586,7 +586,7 @@ const searchMissing = async () => {
       const audiobook = targetBooks[i]
       if (hasActiveDownload(audiobook) || searching.value[audiobook.id]) continue
 
-      await searchAudiobook(audiobook)
+      await searchAudiobook(audiobook, true)
 
       if (i < targetBooks.length - 1 && !isCancelled.value) {
         await sleep(1000)
@@ -690,14 +690,15 @@ function handleDownloaded(result: SearchResult) {
   }, 2000)
 }
 
-const searchAudiobook = async (item: Audiobook) => {
+// bulk marks a search started by "search all", which stays out of the indexers' interactive reserve.
+const searchAudiobook = async (item: Audiobook, bulk = false) => {
   logger.debug('Searching audiobook:', item.title)
 
   searching.value[item.id] = true
   searchResults.value[item.id] = 'Searching...'
 
   try {
-    const result = await apiService.searchAndDownload(item.id)
+    const result = await apiService.searchAndDownload(item.id, bulk ? { bulk: true } : {})
 
     if (result.success) {
       searchResults.value[item.id] = `Found on ${result.indexerUsed}, downloading...`

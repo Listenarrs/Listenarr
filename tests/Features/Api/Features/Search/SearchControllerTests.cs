@@ -640,7 +640,7 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             _results = results;
         }
 
-        public Task<List<SearchResult>> SearchAsync(string query, string? category = null, List<string>? apiIds = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false)
+        public Task<List<SearchResult>> SearchAsync(string query, string? category = null, List<string>? apiIds = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false, SearchOrigin origin = SearchOrigin.Interactive)
         {
             return Task.FromResult(new List<SearchResult>());
         }
@@ -665,7 +665,7 @@ namespace Listenarr.Tests.Features.Api.Features.Search
             return Task.FromResult(true);
         }
 
-        public Task<List<IndexerSearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false, SearchRequest? request = null)
+        public Task<List<IndexerSearchResult>> SearchIndexersAsync(string query, string? category = null, SearchSortBy sortBy = SearchSortBy.Seeders, SearchSortDirection sortDirection = SearchSortDirection.Descending, bool isAutomaticSearch = false, SearchRequest? request = null, SearchOrigin origin = SearchOrigin.Interactive)
         {
             return Task.FromResult(new List<IndexerSearchResult>());
         }

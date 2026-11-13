@@ -19,8 +19,9 @@ namespace Listenarr.Application.Downloads.Contracts
         /// Searches for an audiobook and automatically downloads the best result
         /// </summary>
         /// <param name="audiobookId">The audiobook ID to search and download</param>
+        /// <param name="origin">Who caused the search; decides how much of each indexer's daily request limit it may spend</param>
         /// <returns>Search and download result details</returns>
-        Task<SearchAndDownloadResult> SearchAndDownloadAsync(int audiobookId);
+        Task<SearchAndDownloadResult> SearchAndDownloadAsync(int audiobookId, SearchOrigin origin = SearchOrigin.Interactive);
 
         /// <summary>
         /// Sends a search result to a download client

@@ -36,6 +36,7 @@ namespace Listenarr.Infrastructure.Persistence
         public DbSet<ApplicationSettings> ApplicationSettings { get; set; } = null!;
         public DbSet<History> History { get; set; } = null!;
         public DbSet<Indexer> Indexers { get; set; } = null!;
+        public DbSet<IndexerRequestUsage> IndexerRequestUsages { get; set; } = null!;
         public DbSet<ApiConfiguration> ApiConfigurations { get; set; } = null!;
         public DbSet<DownloadClientConfiguration> DownloadClientConfigurations { get; set; } = null!;
         public DbSet<User> Users { get; set; } = null!;

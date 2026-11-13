@@ -280,6 +280,36 @@ public class MigrationMetadataTests : BaseTests
         Assert.NotNull(applicationSettings.FindProperty("AutomaticSearchBookDelaySeconds"));
     }
 
+    [Fact]
+    public void AddIndexerRequestBudget_IsDiscoverableAndKeepsExistingInstallsUnbudgeted()
+    {
+        AssertMigrationId<AddIndexerRequestBudget>(
+            "20261105075017_AddIndexerRequestBudget");
+
+        var migration = new AddIndexerRequestBudget();
+        var up = BuildOperations(migration, "Up");
+        var down = BuildOperations(migration, "Down");
+
+        var columns = up.Operations.OfType<AddColumnOperation>().ToList();
+        Assert.Equal(3, columns.Count);
+        var limit = columns.Single(column => column.Name == "DailyRequestLimit");
+        Assert.Equal("Indexers", limit.Table);
+        Assert.True(limit.IsNullable);
+        Assert.Null(limit.DefaultValue);
+        Assert.Equal(0, columns.Single(column => column.Name == "AutomaticSearchMaxBooksPerCycle").DefaultValue);
+        Assert.Equal(25, columns.Single(column => column.Name == "IndexerInteractiveReservePercent").DefaultValue);
+        Assert.Equal(new ApplicationSettings().IndexerInteractiveReservePercent,
+            columns.Single(column => column.Name == "IndexerInteractiveReservePercent").DefaultValue);
+        var table = Assert.Single(up.Operations.OfType<CreateTableOperation>());
+        Assert.Equal("IndexerRequestUsages", table.Name);
+        Assert.Equal(ReferentialAction.Cascade, Assert.Single(table.ForeignKeys).OnDelete);
+        Assert.Single(down.Operations.OfType<DropTableOperation>());
+        Assert.Equal(3, down.Operations.OfType<DropColumnOperation>().Count());
+
+        var usage = AssertEntity(migration.TargetModel, "Listenarr.Domain.Search.IndexerRequestUsage");
+        Assert.Equal(new[] { "IndexerId", "HourStartUtc" }, usage.FindPrimaryKey()!.Properties.Select(property => property.Name));
+    }
+
     private static MigrationBuilder BuildOperations(Migration migration, string methodName)
     {
         var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.Sqlite");
