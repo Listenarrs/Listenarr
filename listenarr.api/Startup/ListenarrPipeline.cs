@@ -38,7 +38,13 @@ public static class ListenarrPipeline
         app.UseAuthorization();
         app.MapControllers();
         mapRealtimeHubs(app);
-        app.MapFallbackToFile("index.html");
+        app.MapFallbackToFile("index.html", new StaticFileOptions
+        {
+            // SPA-route requests (/dashboard, /audiobooks/…) serve index.html;
+            // it must revalidate every load (cheap 304 via ETag) or a deploy
+            // can strand browsers on a stale shell referencing purged assets.
+            OnPrepareResponse = ctx => ctx.Context.Response.Headers.CacheControl = "no-cache"
+        });
 
         return app;
     }
