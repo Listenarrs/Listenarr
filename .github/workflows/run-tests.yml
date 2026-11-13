@@ -138,6 +138,9 @@ jobs:
         working-directory: fe
         run: npm run test:integration:cypress
 
+      - name: Install synthetic audiobook generator dependencies
+        run: sudo apt-get update && sudo apt-get install --yes ffmpeg python3-venv
+
       - name: Run Cypress full-stack E2E in Docker
         working-directory: fe
         run: npm run test:e2e
