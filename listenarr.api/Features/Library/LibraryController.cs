@@ -18,6 +18,7 @@
 
 using Microsoft.AspNetCore.Mvc;
 using Listenarr.Api.Attributes;
+using Listenarr.Application.Audiobooks.Catalog;
 
 namespace Listenarr.Api.Features.Library
 {
@@ -102,6 +103,7 @@ namespace Listenarr.Api.Features.Library
         /// Get all audiobooks in the library using a slim list payload.
         /// </summary>
         [HttpGet]
+        [ProducesResponseType(typeof(IReadOnlyList<LibraryAudiobookListItem>), StatusCodes.Status200OK)]
         public async Task<IActionResult> GetAll()
         {
             return Ok(await _libraryListService.GetAllAsync());
