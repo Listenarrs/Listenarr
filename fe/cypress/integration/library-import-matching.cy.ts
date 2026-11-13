@@ -2,12 +2,14 @@ import {
   libraryImportSearchResultFixture,
   libraryImportUnmatchedFixture,
   rootFolderFixture,
+  settingsFixture,
   stubLibrary,
   stubLibraryImportSavedResults,
   stubLibraryImportScan,
   stubLibraryImportSearch,
   stubMetadata,
   stubRootFolders,
+  stubSettings,
 } from '../support/api-stubs'
 
 const rootFolderId = 1
@@ -218,5 +220,27 @@ describe('Library Import browser behavior (API-stubbed)', () => {
 
     cy.contains('.import-row', 'Selected Audible Title').should('be.visible')
     cy.get('.import-row input[type="checkbox"]').should('be.checked')
+  })
+
+  it('keeps scan tags ready when the scanned ASIN has no record in the configured region', () => {
+    const item = libraryImportUnmatchedFixture({
+      fullPath: '/incoming/Scanned Author/Scanned Folder/Scanned Title.m4b',
+      relativePath: 'Scanned Author/Scanned Folder',
+      bookFolder: '/incoming/Scanned Author/Scanned Folder',
+      title: 'Scanned Title',
+      author: 'Scanned Author',
+      asin: 'B000000101',
+    })
+    stubSettings(settingsFixture({ defaultSearchRegion: 'fr' }))
+    stubMetadata({ statusCode: 404, body: { message: 'No record for ASIN' } }, 'missingFrenchAsin')
+    openLibraryImport([item])
+
+    cy.get('.import-row').find('button[title="Search for a match"]').click()
+    cy.get('[data-testid="match-title"]').should('have.value', 'Scanned Title')
+    cy.get('[data-testid="match-author"]').should('have.value', 'Scanned Author')
+    cy.get('[data-testid="match-asin"]').should('have.value', 'B000000101')
+    cy.get('[data-testid="match-region"]').should('have.value', 'fr')
+    cy.wait('@missingFrenchAsin').its('request.url').should('include', '?region=fr')
+    cy.contains('No record for B000000101 in Audible France').should('be.visible')
   })
 })
