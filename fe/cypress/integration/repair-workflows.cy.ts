@@ -24,6 +24,7 @@ const audiobook = audiobookFixture({
 })
 const oldIdentifiers = [
   { type: 'Asin', value: oldAsin, region: 'us', isPrimary: true, source: 'Imported' },
+  { type: 'Asin', value: selectedMatch.asin, region: 'uk', isPrimary: false, source: 'Manual' },
   { type: 'Isbn', value: '9780000000001', region: null, isPrimary: true, source: 'Imported' },
   { type: 'Isbn', value: '9780000000002', region: null, isPrimary: false, source: 'Manual' },
 ]
@@ -63,7 +64,9 @@ const successfulRescanReply = () => ({
   },
 })
 
-function prepareRepair(rescanReplies: Parameters<typeof stubRepairWrites>[1] = [successfulRescanReply()]) {
+function prepareRepair(
+  rescanReplies: Parameters<typeof stubRepairWrites>[1] = [successfulRescanReply()],
+) {
   stubRepairPage(audiobookId, audiobook, oldIdentifiers)
   stubSettings(settingsFixture({ defaultSearchRegion: 'us' }))
   stubMetadata({
@@ -122,6 +125,13 @@ describe('Repair Books workflows (API-stubbed)', () => {
           value: selectedMatch.asin,
           region: selectedMatch.region,
           isPrimary: true,
+          source: 'Manual',
+        },
+        {
+          type: 'Asin',
+          value: selectedMatch.asin,
+          region: 'uk',
+          isPrimary: false,
           source: 'Manual',
         },
         {
@@ -192,5 +202,24 @@ describe('Repair Books workflows (API-stubbed)', () => {
     repairResult().find('[data-testid="repair-result-include"]').should('be.enabled').and('be.checked')
     cy.get('[data-testid="repair-organize"]').should('be.enabled').and('contain.text', 'Organize 1')
     cy.get('@rescanAudiobookMetadata.all').should('have.length', 2)
+  })
+
+  it('blocks leaving during an active repair and allows navigation after Stay', () => {
+    prepareRepair([{ ...successfulRescanReply(), delay: 1000 }])
+    chooseDifferentMatch()
+    askToRepair()
+    cy.get('.confirm-dialog').contains('button', 'Repair 1').click()
+    repairResult().find('[data-testid="repair-result-message"]').should('contain.text', 'Repairing')
+
+    cy.contains('a', 'Settings').click({ force: true })
+    cy.get('.confirm-dialog').should('contain.text', 'Leave while books are repaired?')
+    cy.get('.confirm-dialog').contains('button', 'Stay').click()
+    cy.location('pathname').should('include', `/audiobooks/${audiobookId}`)
+
+    cy.wait('@rescanAudiobookMetadata')
+    repairResult().should('have.attr', 'data-result-state', 'done')
+    cy.contains('a', 'Settings').click({ force: true })
+    cy.location('pathname').should('eq', '/settings')
+    cy.get('.confirm-dialog').should('not.exist')
   })
 })
