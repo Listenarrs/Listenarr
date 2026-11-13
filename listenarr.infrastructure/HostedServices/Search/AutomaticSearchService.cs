@@ -259,6 +259,18 @@ namespace Listenarr.Infrastructure.HostedServices.Search
                 return 0;
             }
 
+            // Drop releases already blocked for this book before they are assessed.
+            //
+            // This is the path that actually re-grabs: it selects here and calls StartDownloadAsync
+            // directly rather than going through SearchAndDownloadAsync, so without this a release
+            // could fail, be blocked, and be grabbed again by the next automatic pass.
+            using (var blocklistScope = _serviceScopeFactory.CreateScope())
+            {
+                var blocklistService = blocklistScope.ServiceProvider.GetRequiredService<IBlocklistService>();
+                searchResults = await BlockedReleaseFilter.ExcludeAsync(
+                    blocklistService, audiobook.Id, searchResults, _logger);
+            }
+
             var assessment = await automaticScoring.ScoreAsync(audiobook, searchResults, audiobook.QualityProfile, stoppingToken);
             var scoredResults = assessment.Candidates;
 

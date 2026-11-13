@@ -22,29 +22,48 @@ namespace Listenarr.Application.Downloads.Submission
     /// </summary>
     public static class BlockedReleaseFilter
     {
-        public static async Task<List<QualityScore>> ExcludeAsync(
+        public static Task<List<QualityScore>> ExcludeAsync(
             IBlocklistService blocklistService,
             int audiobookId,
             List<QualityScore> scoredResults,
+            ILogger logger) =>
+            ExcludeAsync(blocklistService, audiobookId, scoredResults, scored => scored.SearchResult, logger);
+
+        /// <summary>
+        /// The same filter for raw search results, for callers that assess and select in one
+        /// step and so have to drop blocked releases before the assessment rather than after it.
+        /// </summary>
+        public static Task<List<SearchResult>> ExcludeAsync(
+            IBlocklistService blocklistService,
+            int audiobookId,
+            List<SearchResult> searchResults,
+            ILogger logger) =>
+            ExcludeAsync(blocklistService, audiobookId, searchResults, result => result, logger);
+
+        private static async Task<List<T>> ExcludeAsync<T>(
+            IBlocklistService blocklistService,
+            int audiobookId,
+            List<T> candidates,
+            Func<T, SearchResult> searchResultOf,
             ILogger logger)
         {
-            if (scoredResults.Count == 0)
+            if (candidates.Count == 0)
             {
-                return scoredResults;
+                return candidates;
             }
 
             var blocked = await blocklistService.GetBlockedIdentifiersAsync(audiobookId);
             if (blocked.Count == 0)
             {
-                return scoredResults;
+                return candidates;
             }
 
             var blockedSet = new HashSet<string>(blocked, StringComparer.OrdinalIgnoreCase);
-            var kept = scoredResults
-                .Where(scored => !IsBlocked(scored.SearchResult, blockedSet))
+            var kept = candidates
+                .Where(candidate => !IsBlocked(searchResultOf(candidate), blockedSet))
                 .ToList();
 
-            var dropped = scoredResults.Count - kept.Count;
+            var dropped = candidates.Count - kept.Count;
             if (dropped > 0)
             {
                 logger.LogInformation(
