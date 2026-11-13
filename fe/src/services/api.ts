@@ -41,6 +41,7 @@ import type {
   SearchSortBy,
   SearchSortDirection,
   AudibleSearchResponse,
+  AudibleSearchResult,
   AudibleBookMetadata,
   AuthorCatalogResponse,
   AuthorLookupResponse,
@@ -393,11 +394,17 @@ class ApiService {
     // Use unified POST /search in Advanced mode to route author/title flows to Audible
     const body: Record<string, unknown> = { mode: 'Advanced', title, author, page, limit, region }
     if (language) (body as Record<string, unknown>).language = language
-    const resp = await this.request<AudibleSearchResponse | null>('/search', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    })
-    return resp ?? { totalResults: 0, results: [] }
+    const resp = await this.request<AudibleSearchResult[] | AudibleSearchResponse | null>(
+      '/search',
+      { method: 'POST', body: JSON.stringify(body) },
+    )
+    // The backend's Advanced-search branch returns a bare JSON array, not
+    // {results, totalResults} — every other caller of this same endpoint
+    // (getAuthorLookup, advancedSearch) already handles both shapes; this one
+    // didn't, so `resp.results` was always undefined and every search here
+    // silently came back empty regardless of what the backend actually found.
+    const results = Array.isArray(resp) ? resp : (resp?.results ?? [])
+    return { totalResults: results.length, results }
   }
 
   async getAuthorLookup(
