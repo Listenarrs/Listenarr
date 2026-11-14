@@ -20,15 +20,19 @@ fi
 if [ "$(id -u)" = "0" ] && { [ "$PUID" != "0" ] || [ "$PGID" != "0" ]; }; then
     echo "Starting Listenarr with UID=$PUID GID=$PGID UMASK=$UMASK"
 
+    # /app/plugins must be writable by the service user so the plugin manager can
+    # install/uninstall plugins at runtime.
+    mkdir -p /app/plugins
+
     if [ "$PUID" != "0" ] && [ "$PGID" != "0" ]; then
         groupmod -o -g "$PGID" listenarr
         usermod -o -u "$PUID" listenarr
-        chown -R "$PUID:$PGID" /app/config
+        chown -R "$PUID:$PGID" /app/config /app/plugins
 
         exec gosu listenarr dotnet Listenarr.Api.dll "$@"
     fi
 
-    chown -R "$PUID:$PGID" /app/config
+    chown -R "$PUID:$PGID" /app/config /app/plugins
     exec gosu "$PUID:$PGID" dotnet Listenarr.Api.dll "$@"
 fi
 

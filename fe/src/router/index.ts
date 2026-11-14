@@ -20,6 +20,7 @@ import { useAuthStore } from '@/stores/auth'
 import { getStartupConfigCached } from '@/services/startupConfigCache'
 import { logger } from '@/utils/logger'
 import { setRouter } from '@/services/routerInstance'
+import { setPluginRouter } from '@/plugins'
 import type { StartupConfig } from '@/types'
 
 // Module-level cache/promise for startup config to avoid repeated requests during rapid navigation
@@ -160,6 +161,9 @@ export function createAppRouter() {
     history: createWebHistory(import.meta.env.BASE_URL),
     routes,
   })
+
+  // Let runtime-loaded plugins add their routes to this live router.
+  setPluginRouter(router)
 
   // Navigation guard: protect routes requiring auth and preserve redirectTo
   router.beforeEach(async (to, from) => {
