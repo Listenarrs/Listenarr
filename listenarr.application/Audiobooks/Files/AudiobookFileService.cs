@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Microsoft.Extensions.Caching.Memory;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Listenarr.Application.Common;
 using Listenarr.Domain.Common;
@@ -30,6 +31,7 @@ namespace Listenarr.Application.Audiobooks.Files
         IAudiobookFileRepository audiobookFileRepository,
         IHistoryRepository historyRepository,
         IMetadataService metadataService,
+        IAudiobookMetadataRefreshService metadataRefreshService,
         IToastService toastService,
         IFfmpegService ffmpegService,
         IFileSystem fileSystem,
@@ -100,7 +102,7 @@ namespace Listenarr.Application.Audiobooks.Files
                 success ? context.Mutation : null);
         }
 
-        private Task<bool> EnsureAudiobookFileAsync(
+        private async Task<bool> EnsureAudiobookFileAsync(
             Audiobook audiobook,
             string filePath,
             IAudiobookFileRegistrationLease? registrationLease,
@@ -110,7 +112,12 @@ namespace Listenarr.Application.Audiobooks.Files
             CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(audiobook);
-            return filesystemMutationCoordinator.ExecuteExclusiveAsync(
+
+            // Set true (inside the lock) when a scan just adopted a brand-new identifier onto a
+            // previously bare book, so the upstream metadata lookup can run AFTER the lock releases.
+            var adoptedIdentifier = new StrongBox<bool>(false);
+
+            var result = await filesystemMutationCoordinator.ExecuteExclusiveAsync(
                 globalToken => audiobookOperationCoordinator.ExecuteExclusiveAsync(
                     audiobook.Id,
                     async token =>
@@ -144,10 +151,20 @@ namespace Listenarr.Application.Audiobooks.Files
                             registrationLease,
                             basePathMutation,
                             source,
+                            adoptedIdentifier,
                             token);
                     },
                     globalToken),
                 cancellationToken);
+
+            // The upstream metadata lookup must not run while the global filesystem lock is held,
+            // so it happens here, after the lock is released. Fills empty fields only.
+            if (result && adoptedIdentifier.Value)
+            {
+                await RefreshMetadataAfterAdoptionAsync(audiobook.Id, cancellationToken);
+            }
+
+            return result;
         }
 
         private async Task<bool> EnsureAudiobookFileCoreAsync(
@@ -156,6 +173,7 @@ namespace Listenarr.Application.Audiobooks.Files
             IAudiobookFileRegistrationLease? registrationLease,
             AudiobookBasePathMutation? basePathMutation,
             string? source,
+            StrongBox<bool> adoptedIdentifierSignal,
             CancellationToken cancellationToken)
         {
             try
@@ -415,6 +433,16 @@ namespace Listenarr.Application.Audiobooks.Files
                         {
                             logger.LogDebug(hx, "Failed to create history entry for added audiobook file {Path}", LogRedaction.SanitizeFilePath(filePath));
                         }
+
+                        // Adopt an ASIN/ISBN embedded in the just-registered file onto a bare book,
+                        // inside the operation lock; signals a post-lock metadata refresh. See the
+                        // IdentifierAdoption partial. Best-effort: never fails the registration.
+                        await TryAdoptFileIdentifiersAsync(
+                            audiobook,
+                            meta,
+                            filePath,
+                            adoptedIdentifierSignal,
+                            cancellationToken);
 
                         return true;
                     }
