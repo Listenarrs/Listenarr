@@ -177,7 +177,7 @@ namespace Listenarr.Application.Audiobooks.Files
                     return false;
                 }
 
-                if (!FileUtils.IsAudioFile(filePath))
+                if (!FileUtils.MayBeAudioPendingProbe(filePath))
                 {
                     logger.LogInformation("Skipping non-audio audiobook file registration for audiobook {AudiobookId}: {Path}", audiobook.Id, LogRedaction.SanitizeFilePath(filePath));
                     return false;
@@ -327,6 +327,11 @@ namespace Listenarr.Application.Audiobooks.Files
                     cacheIdentity,
                     filePath);
 
+                if (!QualifiesAsAudioContent(filePath, meta, audiobook.Id))
+                {
+                    return false;
+                }
+
                 var fileRecord = AudiobookFile.CreateUnresolved(filePath);
                 fileRecord.AudiobookId = audiobook.Id;
                 fileRecord.Size = TryGetRegisteredFileLength(metadataPath);
@@ -446,32 +451,6 @@ namespace Listenarr.Application.Audiobooks.Files
             string.IsNullOrWhiteSpace(path)
                 ? string.Empty
                 : FileSystemPathIdentity.ResolveNativeAbsolutePath(path);
-
-        /// <summary>
-        /// Read the byte length of the file behind a registration metadata path.
-        /// The pinned lease's metadata path is a /proc/self/fd magic link on
-        /// Linux, and FileSystemInfo reads the link inode itself, whose reported
-        /// size is a constant 64 — not the file's length. Opening the path
-        /// follows the link to the pinned file, so the stream length is the real
-        /// size of the exact object the lease holds open.
-        /// </summary>
-        private static long? TryGetRegisteredFileLength(string metadataPath)
-        {
-            try
-            {
-                using var stream = new FileStream(
-                    metadataPath,
-                    FileMode.Open,
-                    FileAccess.Read,
-                    FileShare.ReadWrite | FileShare.Delete);
-                return stream.Length;
-            }
-            catch (Exception exception) when (exception is IOException
-                or UnauthorizedAccessException or NotSupportedException)
-            {
-                return null;
-            }
-        }
 
         private void LogClaimRejection(
             int audiobookId,
