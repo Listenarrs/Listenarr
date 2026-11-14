@@ -426,7 +426,7 @@ export interface ApplicationSettings {
   fileNamingPattern: string
   multiFileNamingPattern: string
   enableMetadataProcessing: boolean
-  enableCoverArtDownload: boolean
+  embedCoverArtInAudioFiles: boolean
   audnexusApiUrl: string
   maxConcurrentDownloads: number
   unmatchedScanConcurrency?: number

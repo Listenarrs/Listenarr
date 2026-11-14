@@ -173,6 +173,112 @@ namespace Listenarr.Tests.Features.Application.Metadata.Extraction
             Assert.Equal(1, metadata.DiscNumber);
         }
 
+        [Fact]
+        public async Task WriteImportTagsAsync_WhenCoverArtIsDisabled_WritesTheAsinAndNoArtwork()
+        {
+            var writer = new Mock<IAudioTagWriter>();
+            var handler = new CountingImageHandler();
+            var service = CreateTagWritingService(writer.Object, handler, enableCoverArt: false);
+
+            await service.WriteImportTagsAsync(
+                Mock.Of<IAudiobookFileRegistrationLease>(),
+                "B0TESTASIN",
+                "https://images.example.com/cover.jpg");
+
+            writer.Verify(
+                w => w.WriteTagsAsync(
+                    It.IsAny<IAudiobookFileRegistrationLease>(),
+                    "B0TESTASIN",
+                    null),
+                Times.Once);
+
+            // The setting is checked before the request, so a disabled instance does not pay
+            // for a fetch whose result it would throw away.
+            Assert.Equal(0, handler.Requests);
+        }
+
+        [Fact]
+        public async Task WriteImportTagsAsync_WhenCoverArtIsEnabled_EmbedsTheFetchedArtwork()
+        {
+            var writer = new Mock<IAudioTagWriter>();
+            var handler = new CountingImageHandler();
+            var service = CreateTagWritingService(writer.Object, handler, enableCoverArt: true);
+
+            await service.WriteImportTagsAsync(
+                Mock.Of<IAudiobookFileRegistrationLease>(),
+                "B0TESTASIN",
+                "https://images.example.com/cover.jpg");
+
+            writer.Verify(
+                w => w.WriteTagsAsync(
+                    It.IsAny<IAudiobookFileRegistrationLease>(),
+                    "B0TESTASIN",
+                    It.Is<AudioCoverArt>(art => art.MimeType == "image/jpeg")),
+                Times.Once);
+            Assert.Equal(1, handler.Requests);
+        }
+
+        [Fact]
+        public async Task WriteImportTagsAsync_WhenTheResponseIsNotAnImage_StillWritesTheAsin()
+        {
+            // An image host answering with an error page must not cost the import its ASIN
+            // tag, and must not embed the error page as a cover.
+            var writer = new Mock<IAudioTagWriter>();
+            var handler = new CountingImageHandler(body: "<html>nope</html>"u8.ToArray());
+            var service = CreateTagWritingService(writer.Object, handler, enableCoverArt: true);
+
+            await service.WriteImportTagsAsync(
+                Mock.Of<IAudiobookFileRegistrationLease>(),
+                "B0TESTASIN",
+                "https://images.example.com/cover.jpg");
+
+            writer.Verify(
+                w => w.WriteTagsAsync(
+                    It.IsAny<IAudiobookFileRegistrationLease>(),
+                    "B0TESTASIN",
+                    null),
+                Times.Once);
+        }
+
+        private sealed class CountingImageHandler(byte[]? body = null) : HttpMessageHandler
+        {
+            private readonly byte[] _body = body ?? [0xFF, 0xD8, 0xFF, 0xE0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+            public int Requests { get; private set; }
+
+            protected override Task<HttpResponseMessage> SendAsync(
+                HttpRequestMessage request,
+                CancellationToken cancellationToken)
+            {
+                Requests++;
+                return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent(_body)
+                });
+            }
+        }
+
+        private static MetadataService CreateTagWritingService(
+            IAudioTagWriter writer,
+            HttpMessageHandler handler,
+            bool enableCoverArt)
+        {
+            var configuration = new Mock<IConfigurationService>();
+            configuration.Setup(service => service.GetApplicationSettingsAsync())
+                .ReturnsAsync(new ApplicationSettings
+                {
+                    EmbedCoverArtInAudioFiles = enableCoverArt
+                });
+
+            return new MetadataService(
+                new HttpClient(handler),
+                configuration.Object,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<MetadataService>.Instance,
+                Mock.Of<IFfmpegService>(),
+                writer,
+                Mock.Of<IFileSystem>());
+        }
+
         private static MetadataService CreateMetadataService(
             IFfmpegService ffmpegService)
         {
