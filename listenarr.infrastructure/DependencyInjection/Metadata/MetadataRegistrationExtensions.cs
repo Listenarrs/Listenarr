@@ -56,6 +56,7 @@ internal static class MetadataRegistrationExtensions
         services.AddSingleton<IHtmlTextExtractor, HtmlAgilityPackTextExtractor>();
         services.AddSingleton<IAudibleAuthorPageParser, HtmlAgilityPackAudibleAuthorPageParser>();
         services.AddScoped<IAudioTagWriter, TagLibAudioTagWriter>();
+        services.AddScoped<MetadataRescanSelection>();
         services.AddHttpClient<ICoverImageProbe, ImageSharpCoverImageProbe>();
         services.AddHttpClient<ImageCacheService>()
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
