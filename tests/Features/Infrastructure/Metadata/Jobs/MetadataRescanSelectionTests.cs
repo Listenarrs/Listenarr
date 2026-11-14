@@ -70,6 +70,13 @@ public sealed class MetadataRescanSelectionTests : BaseTests
                 + $"probes {harness.CycleProbedPaths.Count}, due foreign {dueForeignBefore} -> {dueForeignAfter}, "
                 + $"host row selected {result.Batch.Any(candidate => candidate.File.Id == hostRowId)}");
             Assert.InRange(harness.CycleRowsRead, 1, MetadataRescanSchedulePolicy.PageSize * MetadataRescanSchedulePolicy.MaxPages);
+            if (variant == LargeLibraryVariant.ForeignBaseOldest && cycle == 0)
+            {
+                // The foreign-base rows hold the oldest due times and still pass the page filter,
+                // so the first cycle must walk past them; one page means the variant setup was lost.
+                Assert.True(result.PagesRead > 1, $"cycle 1 read {result.PagesRead} page(s); the foreign-base rows are not the oldest");
+            }
+
             Assert.Equal(Math.Min(MetadataRescanSchedulePolicy.MaxForeignRows, dueForeignBefore), dueForeignBefore - dueForeignAfter);
             Assert.Equal(dueForeignBefore - dueForeignAfter, result.ForeignRowsDeferred);
             selected.AddRange(result.Batch.Select(candidate => candidate.File.Id));
