@@ -64,6 +64,7 @@ public partial class EfAudiobookFileRepository
     {
         ArgumentNullException.ThrowIfNull(replacement);
 
+        var rescanDueUtc = RescanResetDueUtc();
         var query = _db.AudiobookFiles.Where(candidate =>
             candidate.Id == fileId
             && candidate.AudiobookId == audiobookId
@@ -94,7 +95,11 @@ public partial class EfAudiobookFileRepository
                         replacement.PhysicalIdentityVersion)
                     .SetProperty(
                         candidate => candidate.PhysicalIdentityObservedAtUtc,
-                        replacement.PhysicalIdentityObservedAtUtc),
+                        replacement.PhysicalIdentityObservedAtUtc)
+                    .SetProperty(candidate => candidate.MetadataRescanDueUtc, rescanDueUtc)
+                    .SetProperty(candidate => candidate.MetadataRescanFailureCount, 0)
+                    .SetProperty(candidate => candidate.MetadataRescanUnavailableCount, 0)
+                    .SetProperty(candidate => candidate.MetadataRescanBlockedCount, 0),
                 completionToken);
             if (updated != 1)
             {
@@ -102,6 +107,7 @@ public partial class EfAudiobookFileRepository
             }
 
             SynchronizeTrackedPhysicalGeneration(fileId, replacement);
+            SynchronizeTrackedRescanScheduleReset(fileId, rescanDueUtc);
             return true;
         }
 
@@ -112,6 +118,7 @@ public partial class EfAudiobookFileRepository
         }
 
         ApplyPhysicalGeneration(existing, replacement);
+        ResetRescanSchedule(existing, rescanDueUtc);
         var nonRelationalCompletionToken =
             RequestCancellationBoundary.EnterNonCancelablePhase(ct);
         await _db.SaveChangesAsync(nonRelationalCompletionToken);

@@ -26,13 +26,16 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
     {
         private readonly ListenArrDbContext _db;
         private readonly ILogger<EfAudiobookFileRepository> _logger;
+        private readonly TimeProvider _timeProvider;
 
         public EfAudiobookFileRepository(
             ListenArrDbContext db,
-            ILogger<EfAudiobookFileRepository>? logger = null)
+            ILogger<EfAudiobookFileRepository>? logger = null,
+            TimeProvider? timeProvider = null)
         {
             _db = db ?? throw new ArgumentNullException(nameof(db));
             _logger = logger ?? NullLogger<EfAudiobookFileRepository>.Instance;
+            _timeProvider = timeProvider ?? TimeProvider.System;
         }
 
         public async Task<AudiobookFile?> GetByIdAsync(int id, CancellationToken ct = default)
