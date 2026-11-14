@@ -15,6 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using Listenarr.Domain.Common;
 using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Application.Search.Scoring
@@ -265,6 +266,28 @@ namespace Listenarr.Application.Search.Scoring
             {
                 if (!isNzb)
                 {
+                    // A release with no quality label has still made a claim if it declared a
+                    // format, and the profile gates that claim the same way it gates a quality.
+                    // Only the release that declared neither is genuinely unclassified, and that
+                    // one stays in the pool carrying the missing-quality penalty below.
+                    //
+                    // Both gates are only as good as whatever classified the release. For Torznab
+                    // that is the Torznab parsers. Neither Quality nor Format comes from a bare
+                    // text scan any more where the indexer declared an attribute: the scan only
+                    // fills what the attributes left empty. Neither gate reads a title itself, and
+                    // neither can tell a parsed title apart from a declared attribute, so that
+                    // precedence has to hold in the parser.
+                    //
+                    // DetectFormatFromTitle can also write into normalizedFormat, but only under
+                    // isNzb, and this branch is torrent-only. Anyone hoisting these gates out of
+                    // the isNzb branch inherits that second title-to-veto path.
+                    if (!string.IsNullOrEmpty(normalizedFormat) && QualityGate.Refuses(normalizedFormat, profile))
+                    {
+                        score.TotalScore += QualityNotAllowedPenalty;
+                        score.ScoreBreakdown["QualityNotAllowed"] = QualityNotAllowedPenalty;
+                        score.RejectionReasons.Add($"Format '{normalizedFormat}' not allowed by profile");
+                    }
+
                     var formatDetected = !string.IsNullOrEmpty(normalizedFormat) || !string.IsNullOrEmpty(DetectFormatFromTitle(titleLower, profile.PreferredFormats)) || (!string.IsNullOrEmpty(searchResult.TorrentUrl) && (searchResult.TorrentUrl.ToLowerInvariant().Contains(".m4b") || searchResult.TorrentUrl.ToLowerInvariant().Contains(".mp3") || searchResult.TorrentUrl.ToLowerInvariant().Contains(".m4a")));
                     if (!formatDetected)
                     {
@@ -282,27 +305,16 @@ namespace Listenarr.Application.Search.Scoring
                     score.TotalScore -= qualityDeduction;
                     score.ScoreBreakdown["Quality"] = qualityScore;
 
-                    if (profile.Qualities != null && profile.Qualities.Count > 0)
+                    // The profile's Allowed flags are the gate. PreferredFormats is a preference
+                    // and was already applied above as a score adjustment; letting it also widen
+                    // the allowed set made the flag inert for any label containing a default
+                    // preferred token: every MP3 rung, FLAC and M4B. Only the seeded "AAC ...kbps"
+                    // rungs escaped it.
+                    if (QualityGate.Refuses(normalizedQuality, profile))
                     {
-                        var allowed = profile.Qualities.Where(q => q.Allowed).Select(q => (q.Quality ?? string.Empty).ToLower()).ToList();
-                        if (profile.PreferredFormats != null && profile.PreferredFormats.Count > 0)
-                        {
-                            foreach (var f in profile.PreferredFormats
-                                .Where(format => !string.IsNullOrWhiteSpace(format))
-                                .Select(format => format.Trim().ToLower())
-                                .Where(format => !allowed.Contains(format)))
-                            {
-                                allowed.Add(f);
-                            }
-                        }
-
-                        var detectedQualityLower = normalizedQuality.ToLower();
-                        if (!allowed.Any(q => detectedQualityLower.Contains(q) || q.Contains(detectedQualityLower)))
-                        {
-                            score.TotalScore += QualityNotAllowedPenalty;
-                            score.ScoreBreakdown["QualityNotAllowed"] = QualityNotAllowedPenalty;
-                            score.RejectionReasons.Add($"Quality '{normalizedQuality}' not allowed by profile");
-                        }
+                        score.TotalScore += QualityNotAllowedPenalty;
+                        score.ScoreBreakdown["QualityNotAllowed"] = QualityNotAllowedPenalty;
+                        score.RejectionReasons.Add($"Quality '{normalizedQuality}' not allowed by profile");
                     }
                 }
             }
