@@ -21,6 +21,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import CollectionView from '@/views/library/CollectionView.vue'
 import { useLibraryStore } from '@/stores/library'
+import { useConfigurationStore } from '@/stores/configuration'
 
 const {
   mockGetLibrary,
@@ -1609,5 +1610,185 @@ describe('CollectionView', () => {
     // Shows the Mistborn position (#2 from the membership), not the primary 'Other Series' #5.
     expect(card.text()).toContain('#2')
     expect(card.text()).not.toContain('#5')
+  })
+
+  const mountAuthorPageForLanguage = async (
+    books: unknown[],
+    defaultSearchLanguage = 'english',
+  ) => {
+    if (
+      typeof (globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver === 'undefined'
+    ) {
+      ;(globalThis as unknown as Record<string, unknown>).ResizeObserver = class {
+        observe() {}
+        disconnect() {}
+      }
+    }
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: { template: '<div />' } },
+        { path: '/collection/:type/:name', name: 'collection', component: CollectionView },
+      ],
+    })
+    await router.push('/collection/author/Author%20A')
+    await router.isReady().catch(() => {})
+
+    const configStore = useConfigurationStore()
+    configStore.applicationSettings = { defaultSearchLanguage } as never
+
+    const store = useLibraryStore()
+    store.audiobooks = books as never
+    store.fetchLibrary = vi.fn(async () => undefined)
+
+    const wrapper = mount(CollectionView, {
+      global: {
+        plugins: [pinia, router],
+        stubs: ['EditAudiobookModal', 'CustomSelect', 'AddLibraryModal'],
+      },
+    })
+    await new Promise((r) => setTimeout(r, 0))
+    return wrapper
+  }
+
+  it('hides an unmonitored library book that is not in the preferred language', async () => {
+    // The reported case: an author page states English in its header and then lists the German
+    // editions of the same series underneath, all owned but unmonitored.
+    const wrapper = await mountAuthorPageForLanguage([
+      {
+        id: 1,
+        title: 'English One',
+        authors: ['Author A'],
+        language: 'english',
+        monitored: true,
+        files: [],
+      },
+      {
+        id: 2,
+        title: 'German One',
+        authors: ['Author A'],
+        language: 'german',
+        monitored: false,
+        files: [],
+      },
+    ])
+
+    const vm = wrapper.vm as unknown as { audiobooks: { id: number }[] }
+    expect(vm.audiobooks.map((book) => book.id)).toEqual([1])
+  })
+
+  it('keeps a monitored book whatever its language', async () => {
+    // Monitoring is an explicit statement of intent and outranks the language preference.
+    const wrapper = await mountAuthorPageForLanguage([
+      {
+        id: 3,
+        title: 'German Monitored',
+        authors: ['Author A'],
+        language: 'german',
+        monitored: true,
+        files: [],
+      },
+    ])
+
+    const vm = wrapper.vm as unknown as { audiobooks: { id: number }[] }
+    expect(vm.audiobooks.map((book) => book.id)).toEqual([3])
+  })
+
+  it('keeps a library book whose language is unknown', async () => {
+    // Opposite polarity to the catalog rule on purpose. A missing language field is not evidence
+    // that a book the user owns is unwanted.
+    const wrapper = await mountAuthorPageForLanguage([
+      { id: 4, title: 'No Language', authors: ['Author A'], monitored: false, files: [] },
+    ])
+
+    const vm = wrapper.vm as unknown as { audiobooks: { id: number }[] }
+    expect(vm.audiobooks.map((book) => book.id)).toEqual([4])
+  })
+
+  it('hides nothing when the preference is All', async () => {
+    const wrapper = await mountAuthorPageForLanguage(
+      [
+        {
+          id: 5,
+          title: 'German',
+          authors: ['Author A'],
+          language: 'german',
+          monitored: false,
+          files: [],
+        },
+        {
+          id: 6,
+          title: 'English',
+          authors: ['Author A'],
+          language: 'english',
+          monitored: false,
+          files: [],
+        },
+      ],
+      'all',
+    )
+
+    const vm = wrapper.vm as unknown as { audiobooks: { id: number }[] }
+    expect(vm.audiobooks.map((book) => book.id).sort()).toEqual([5, 6])
+  })
+  it('hides a matched library book that the preference excludes, and does not offer it again', async () => {
+    // Audible lists an author's foreign-language editions in the same catalog as the English
+    // ones, so an owned foreign edition matches its own catalog entry by ASIN and arrived
+    // through the matched path, which carried no language check of its own.
+    mockGetAuthorCatalog.mockResolvedValue({
+      author: { asin: 'AUTHORA', name: 'Author A', image: 'author-a.jpg' },
+      totalBooks: 2,
+      books: [
+        {
+          asin: 'B000ENGLISH',
+          title: 'English Edition',
+          authors: ['Author A'],
+          language: 'english',
+          metadataSource: 'Audible',
+        },
+        {
+          asin: 'B000GERMAN0',
+          title: 'German Edition',
+          authors: ['Author A'],
+          language: 'german',
+          metadataSource: 'Audible',
+        },
+      ],
+    })
+
+    const wrapper = await mountAuthorPageForLanguage([
+      {
+        id: 7,
+        title: 'English Edition',
+        authors: ['Author A'],
+        asin: 'B000ENGLISH',
+        language: 'english',
+        monitored: false,
+        files: [],
+      },
+      {
+        id: 8,
+        title: 'German Edition',
+        authors: ['Author A'],
+        asin: 'B000GERMAN0',
+        language: 'german',
+        monitored: false,
+        files: [],
+      },
+    ])
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      audiobooks: { id: number; title: string; inLibrary: boolean }[]
+    }
+    expect(vm.audiobooks.map((book) => book.id)).toEqual([7])
+    // The library row is consumed, not just skipped, so its catalog twin cannot reappear below
+    // as a Not Added suggestion.
+    expect(vm.audiobooks.some((book) => book.title === 'German Edition')).toBe(false)
+    expect(vm.audiobooks.every((book) => book.inLibrary)).toBe(true)
   })
 })
