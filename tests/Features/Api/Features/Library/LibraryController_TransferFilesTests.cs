@@ -15,6 +15,8 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using System.Reflection;
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Listenarr.Tests.Builders;
@@ -94,6 +96,40 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             var claim = await _audiobookFileRepository.ClaimAsync(file);
             Assert.Equal(AudiobookFileClaimOutcome.Created, claim.Outcome);
             return claim.File!;
+        }
+
+        /// <summary>
+        /// The production service over the real repository, with a callback before each
+        /// repository call so a test can cancel or fail the transfer at an exact point.
+        /// </summary>
+        private AudiobookFileTransferService CreateServiceWithRepositoryHook(Action<string> beforeCall)
+        {
+            var repository = DispatchProxy.Create<IAudiobookFileRepository, HookedRepositoryProxy>();
+            var proxy = (HookedRepositoryProxy)(object)repository;
+            proxy.Inner = _audiobookFileRepository;
+            proxy.BeforeCall = beforeCall;
+            return ActivatorUtilities.CreateInstance<AudiobookFileTransferService>(_provider, repository);
+        }
+
+        public class HookedRepositoryProxy : DispatchProxy
+        {
+            public IAudiobookFileRepository Inner { get; set; } = null!;
+
+            public Action<string> BeforeCall { get; set; } = _ => { };
+
+            protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+            {
+                BeforeCall(targetMethod!.Name);
+                try
+                {
+                    return targetMethod.Invoke(Inner, args);
+                }
+                catch (TargetInvocationException exception) when (exception.InnerException != null)
+                {
+                    ExceptionDispatchInfo.Capture(exception.InnerException).Throw();
+                    throw;
+                }
+            }
         }
 
         private async Task<LibraryController.TransferFilesRequest> AllFilesTo(Audiobook target) =>
@@ -312,8 +348,8 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
         [Fact]
         [Trait("Method", "TransferFiles")]
-        [Trait("Scenario", "FileMissingOnDisk_TransfersOwnershipInPlace_WithWarning")]
-        public async Task TransferFiles_FileMissingOnDisk_TransfersOwnershipInPlace_WithWarning()
+        [Trait("Scenario", "FileMissingOnDisk_IsRefused_AndStaysWithSource")]
+        public async Task TransferFiles_FileMissingOnDisk_IsRefused_AndStaysWithSource()
         {
             var controller = _provider.GetRequiredService<LibraryController>();
             var (source, target, _) = await CreateSourceAndTargetAsync();
@@ -326,29 +362,28 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
             var ok = Assert.IsType<OkObjectResult>(result);
             var payload = ToJson(ok.Value);
-            Assert.Equal(1, payload.GetProperty("transferred").GetInt32());
+            Assert.Equal(0, payload.GetProperty("transferred").GetInt32());
             Assert.Equal(0, payload.GetProperty("physicallyMoved").GetInt32());
             Assert.Contains(Warnings(payload), w => w.Contains("missing on disk"));
 
-            // Ownership re-homed with the identity intact; the path is unchanged.
-            var moved = Assert.Single(await _audiobookFileRepository.GetByAudiobookIdAsync(target.Id));
-            Assert.Equal(ghost.Id, moved.Id);
-            Assert.Equal(ghost.Path, moved.Path);
-            Assert.Equal(ghost.PathOwnershipKey, moved.PathOwnershipKey);
-            Assert.Empty(await _audiobookFileRepository.GetByAudiobookIdAsync(source.Id));
+            // A row that cannot follow its file into the destination folder is not re-homed.
+            var kept = Assert.Single(await _audiobookFileRepository.GetByAudiobookIdAsync(source.Id));
+            Assert.Equal(ghost.Id, kept.Id);
+            Assert.Equal(ghost.Path, kept.Path);
+            Assert.Empty(await _audiobookFileRepository.GetByAudiobookIdAsync(target.Id));
         }
 
         [Fact]
         [Trait("Method", "TransferFiles")]
-        [Trait("Scenario", "DestinationNameTaken_TransfersOwnership_LeavesFileInPlace")]
-        public async Task TransferFiles_DestinationNameTaken_TransfersOwnership_LeavesFileInPlace()
+        [Trait("Scenario", "DestinationNameTaken_IsRefused_AndStaysWithSource")]
+        public async Task TransferFiles_DestinationNameTaken_IsRefused_AndStaysWithSource()
         {
             var controller = _provider.GetRequiredService<LibraryController>();
             var (source, target, _) = await CreateSourceAndTargetAsync();
             var sourceFile = await ClaimFileAsync(source, "part1.m4b");
 
-            // A same-named file already sits in the destination folder: the row still
-            // changes owner, but nothing on disk is overwritten.
+            // A same-named file already sits in the destination folder: nothing on disk is
+            // overwritten and the row stays with the source.
             Directory.CreateDirectory(target.BasePath!);
             await File.WriteAllTextAsync(Path.Join(target.BasePath, "part1.m4b"), "other audio");
 
@@ -359,14 +394,265 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
             var ok = Assert.IsType<OkObjectResult>(result);
             var payload = ToJson(ok.Value);
-            Assert.Equal(1, payload.GetProperty("transferred").GetInt32());
+            Assert.Equal(0, payload.GetProperty("transferred").GetInt32());
             Assert.Equal(0, payload.GetProperty("physicallyMoved").GetInt32());
             Assert.Contains(Warnings(payload), w => w.Contains("already exists"));
 
-            var moved = Assert.Single(await _audiobookFileRepository.GetByAudiobookIdAsync(target.Id));
-            Assert.Equal(sourceFile.Path, moved.Path);
+            var kept = Assert.Single(await _audiobookFileRepository.GetByAudiobookIdAsync(source.Id));
+            Assert.Equal(sourceFile.Id, kept.Id);
+            Assert.Equal(sourceFile.Path, kept.Path);
+            Assert.Empty(await _audiobookFileRepository.GetByAudiobookIdAsync(target.Id));
             Assert.True(File.Exists(sourceFile.Path!));
             Assert.Equal("other audio", await File.ReadAllTextAsync(Path.Join(target.BasePath, "part1.m4b")));
+        }
+
+        [Fact]
+        [Trait("Method", "TransferFiles")]
+        [Trait("Scenario", "PartialMove_KeepsDestinationFolder")]
+        public async Task TransferFiles_PartialMove_KeepsDestinationFolder()
+        {
+            var controller = _provider.GetRequiredService<LibraryController>();
+            var (source, target, _) = await CreateSourceAndTargetAsync();
+            var colliding = await ClaimFileAsync(source, "part1.m4b");
+            var movable = await ClaimFileAsync(source, "part2.m4b");
+            var later = await ClaimFileAsync(source, "part3.m4b");
+            Directory.CreateDirectory(target.BasePath!);
+            await File.WriteAllTextAsync(Path.Join(target.BasePath, "part1.m4b"), "other audio");
+
+            var result = await controller.TransferFiles(
+                source.Id,
+                new LibraryController.TransferFilesRequest
+                {
+                    TargetAudiobookId = target.Id,
+                    FileIds = [colliding.Id, movable.Id]
+                },
+                CancellationToken.None);
+
+            var payload = ToJson(Assert.IsType<OkObjectResult>(result).Value);
+            Assert.Equal(1, payload.GetProperty("transferred").GetInt32());
+            Assert.Equal(1, payload.GetProperty("physicallyMoved").GetInt32());
+            Assert.Contains(Warnings(payload), w => w.Contains("part1.m4b") && w.Contains("already exists"));
+
+            // The destination keeps its own folder: it must not widen to the shared author
+            // folder because one file could not be placed.
+            var reloadedTarget = await _audiobookRepository.GetByIdAsync(target.Id);
+            Assert.Equal(target.BasePath, reloadedTarget!.BasePath);
+            var moved = Assert.Single(await _audiobookFileRepository.GetByAudiobookIdAsync(target.Id));
+            Assert.Equal(movable.Id, moved.Id);
+            Assert.Equal(Path.Join(target.BasePath, "part2.m4b"), moved.Path);
+            Assert.Equal(
+                new[] { colliding.Id, later.Id }.Order(),
+                (await _audiobookFileRepository.GetByAudiobookIdAsync(source.Id)).Select(f => f.Id).Order());
+
+            // The next transfer still lands in the book folder, not the author folder.
+            var second = await controller.TransferFiles(
+                source.Id,
+                new LibraryController.TransferFilesRequest
+                {
+                    TargetAudiobookId = target.Id,
+                    FileIds = [later.Id]
+                },
+                CancellationToken.None);
+
+            var secondPayload = ToJson(Assert.IsType<OkObjectResult>(second).Value);
+            Assert.Equal(1, secondPayload.GetProperty("physicallyMoved").GetInt32());
+            Assert.Empty(Warnings(secondPayload));
+            Assert.True(File.Exists(Path.Join(target.BasePath, "part3.m4b")));
+            Assert.False(File.Exists(Path.Join(Path.GetDirectoryName(target.BasePath)!, "part3.m4b")));
+            reloadedTarget = await _audiobookRepository.GetByIdAsync(target.Id);
+            Assert.Equal(target.BasePath, reloadedTarget!.BasePath);
+        }
+
+        [Fact]
+        [Trait("Method", "TransferFiles")]
+        [Trait("Scenario", "SubsetTransfer_OfSummaryFile_RepointsSourceLegacyColumns")]
+        public async Task TransferFiles_SubsetTransfer_OfSummaryFile_RepointsSourceLegacyColumns()
+        {
+            var controller = _provider.GetRequiredService<LibraryController>();
+            var (source, target, _) = await CreateSourceAndTargetAsync();
+            var primary = await ClaimFileAsync(source, "primary.m4b");
+            var remaining = await ClaimFileAsync(source, "remaining.m4b");
+
+            var trackedSource = (await _audiobookRepository.GetByIdAsync(source.Id))!;
+            trackedSource.FilePath = primary.Path;
+            trackedSource.FileSize = 999;
+            await _audiobookRepository.UpdateAsync(trackedSource);
+
+            var result = await controller.TransferFiles(
+                source.Id,
+                new LibraryController.TransferFilesRequest
+                {
+                    TargetAudiobookId = target.Id,
+                    FileIds = [primary.Id]
+                },
+                CancellationToken.None);
+
+            var payload = ToJson(Assert.IsType<OkObjectResult>(result).Value);
+            Assert.Equal(1, payload.GetProperty("physicallyMoved").GetInt32());
+
+            // The summary described the file that left; it now describes one that stayed.
+            var reloadedSource = await _audiobookRepository.GetByIdAsync(source.Id);
+            Assert.Equal(remaining.Path, reloadedSource!.FilePath);
+            Assert.NotEqual(999, reloadedSource.FileSize);
+            Assert.Equal(remaining.Size > 0 ? remaining.Size : null, reloadedSource.FileSize);
+        }
+
+        [Fact]
+        [Trait("Method", "TransferFiles")]
+        [Trait("Scenario", "SourceUnderAnotherRoot_IsRefused_BeforeOwnershipChanges")]
+        public async Task TransferFiles_SourceUnderAnotherRoot_IsRefused_BeforeOwnershipChanges()
+        {
+            var controller = _provider.GetRequiredService<LibraryController>();
+            var (_, target, _) = await CreateSourceAndTargetAsync();
+            var otherRoot = FileService.GetTempDirectory("transfer-other-root");
+            await AddAuthorizedRootAsync(otherRoot, "Second Library Root");
+            var source = await _audiobookRepository.AddAsync(new AudiobookBuilder()
+                .WithTitle("Elantris")
+                .WithAuthor("Brandon Sanderson")
+                .WithBasePath(Path.Join(otherRoot, "Brandon Sanderson", "Elantris"))
+                .Build());
+            var file = await ClaimFileAsync(source, "part1.m4b");
+
+            var result = await controller.TransferFiles(
+                source.Id,
+                await AllFilesTo(target),
+                CancellationToken.None);
+
+            var payload = ToJson(Assert.IsType<OkObjectResult>(result).Value);
+            Assert.Equal(0, payload.GetProperty("transferred").GetInt32());
+            Assert.Contains(Warnings(payload), w => w.Contains("different library root"));
+
+            // Organize confines the destination to its own root, so the file could never be
+            // moved or organized there: ownership must not change at all.
+            var kept = Assert.Single(await _audiobookFileRepository.GetByAudiobookIdAsync(source.Id));
+            Assert.Equal(file.Id, kept.Id);
+            Assert.Equal(file.Path, kept.Path);
+            Assert.Equal(file.PathOwnershipKey, kept.PathOwnershipKey);
+            Assert.Empty(await _audiobookFileRepository.GetByAudiobookIdAsync(target.Id));
+            Assert.True(File.Exists(file.Path!));
+            Assert.Empty(await _historyRepository.GetByAudiobookIdAsync(target.Id));
+        }
+
+        [Fact]
+        [Trait("Method", "TransferFiles")]
+        [Trait("Scenario", "CancelledBeforeOwnershipChanges_ChangesNothing")]
+        public async Task TransferFiles_CancelledBeforeOwnershipChanges_ChangesNothing()
+        {
+            var (source, target, _) = await CreateSourceAndTargetAsync();
+            var file1 = await ClaimFileAsync(source, "part1.m4b");
+            var file2 = await ClaimFileAsync(source, "part2.m4b");
+            using var cancellation = new CancellationTokenSource();
+            // The request goes away while the second file is still being checked.
+            var service = CreateServiceWithRepositoryHook(method =>
+            {
+                if (method == nameof(IAudiobookFileRepository.CheckOwnershipAsync))
+                {
+                    cancellation.Cancel();
+                }
+            });
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                service.TransferAsync(
+                    new AudiobookFileTransferRequest(source.Id, target.Id),
+                    cancellation.Token));
+
+            Assert.Equal(
+                new[] { file1.Id, file2.Id }.Order(),
+                (await _audiobookFileRepository.GetByAudiobookIdAsync(source.Id)).Select(f => f.Id).Order());
+            Assert.Empty(await _audiobookFileRepository.GetByAudiobookIdAsync(target.Id));
+            Assert.True(File.Exists(file1.Path!));
+            Assert.True(File.Exists(file2.Path!));
+            Assert.Empty(await _historyRepository.GetByAudiobookIdAsync(source.Id));
+        }
+
+        [Fact]
+        [Trait("Method", "TransferFiles")]
+        [Trait("Scenario", "CancelledAfterFirstOwnershipChange_RunsToCompletion")]
+        public async Task TransferFiles_CancelledAfterFirstOwnershipChange_RunsToCompletion()
+        {
+            var (source, target, _) = await CreateSourceAndTargetAsync();
+            var files = new[]
+            {
+                await ClaimFileAsync(source, "part1.m4b"),
+                await ClaimFileAsync(source, "part2.m4b"),
+                await ClaimFileAsync(source, "part3.m4b")
+            };
+            var trackedSource = (await _audiobookRepository.GetByIdAsync(source.Id))!;
+            trackedSource.FilePath = files[0].Path;
+            trackedSource.FileSize = 5;
+            await _audiobookRepository.UpdateAsync(trackedSource);
+            using var cancellation = new CancellationTokenSource();
+            // The client disconnects as the first row changes owner.
+            var service = CreateServiceWithRepositoryHook(method =>
+            {
+                if (method == nameof(IAudiobookFileRepository.TransferOwnershipAsync))
+                {
+                    cancellation.Cancel();
+                }
+            });
+
+            var result = await service.TransferAsync(
+                new AudiobookFileTransferRequest(source.Id, target.Id),
+                cancellation.Token);
+
+            // Past the first owner change there is no half-finished state: every row is
+            // re-homed, every file moved, and the bookkeeping is done.
+            Assert.Equal(3, result.TransferredCount);
+            Assert.Equal(3, result.RelocatedCount);
+            Assert.Null(result.RelocationError);
+            Assert.Empty(await _audiobookFileRepository.GetByAudiobookIdAsync(source.Id));
+            var targetFiles = await _audiobookFileRepository.GetByAudiobookIdAsync(target.Id);
+            Assert.Equal(files.Select(f => f.Id).Order(), targetFiles.Select(f => f.Id).Order());
+            Assert.All(files, f => Assert.True(File.Exists(Path.Join(target.BasePath, Path.GetFileName(f.Path)))));
+            var reloadedSource = await _audiobookRepository.GetByIdAsync(source.Id);
+            Assert.Null(reloadedSource!.FilePath);
+            Assert.Null(reloadedSource.FileSize);
+            Assert.Contains(
+                await _historyRepository.GetByAudiobookIdAsync(source.Id),
+                h => h.EventType == "Files Transferred");
+            Assert.Contains(
+                await _historyRepository.GetByAudiobookIdAsync(target.Id),
+                h => h.EventType == "Files Received");
+        }
+
+        [Fact]
+        [Trait("Method", "TransferFiles")]
+        [Trait("Scenario", "OwnershipChangeFailsMidway_FinishesBookkeepingForTransferredFiles")]
+        public async Task TransferFiles_OwnershipChangeFailsMidway_FinishesBookkeepingForTransferredFiles()
+        {
+            var (source, target, _) = await CreateSourceAndTargetAsync();
+            var first = await ClaimFileAsync(source, "part1.m4b");
+            var second = await ClaimFileAsync(source, "part2.m4b");
+            var trackedSource = (await _audiobookRepository.GetByIdAsync(source.Id))!;
+            trackedSource.FilePath = first.Path;
+            trackedSource.FileSize = 5;
+            await _audiobookRepository.UpdateAsync(trackedSource);
+            var ownershipChanges = 0;
+            var service = CreateServiceWithRepositoryHook(method =>
+            {
+                if (method == nameof(IAudiobookFileRepository.TransferOwnershipAsync)
+                    && ++ownershipChanges == 2)
+                {
+                    throw new InvalidOperationException("database unavailable");
+                }
+            });
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.TransferAsync(new AudiobookFileTransferRequest(source.Id, target.Id)));
+
+            Assert.Equal("database unavailable", exception.Message);
+            // The file that changed owner before the failure is not left stranded.
+            var moved = Assert.Single(await _audiobookFileRepository.GetByAudiobookIdAsync(target.Id));
+            Assert.Equal(first.Id, moved.Id);
+            Assert.Equal(Path.Join(target.BasePath, "part1.m4b"), moved.Path);
+            Assert.True(File.Exists(moved.Path!));
+            var kept = Assert.Single(await _audiobookFileRepository.GetByAudiobookIdAsync(source.Id));
+            Assert.Equal(second.Id, kept.Id);
+            var reloadedSource = await _audiobookRepository.GetByIdAsync(source.Id);
+            Assert.Equal(second.Path, reloadedSource!.FilePath);
+            Assert.Contains(
+                await _historyRepository.GetByAudiobookIdAsync(target.Id),
+                h => h.EventType == "Files Received");
         }
 
         [Fact]

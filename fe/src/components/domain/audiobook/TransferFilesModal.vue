@@ -105,6 +105,7 @@ import { apiService } from '@/services/api'
 import { useToast } from '@/services/toastService'
 import { showConfirm } from '@/composables/useConfirm'
 import { useLibraryStore } from '@/stores/library'
+import { transferMatchScore } from '@/utils/transferSearch'
 import type { Audiobook } from '@/types'
 
 type SourceFile = { id: number; path?: string | null }
@@ -165,32 +166,18 @@ watch(
   },
 )
 
-// Token-overlap ranking so a filename-ish query ("Warbreaker 2 of 3 Dramatized")
+// Word-overlap ranking so a filename-ish query ("Warbreaker 2 of 3 Dramatized")
 // surfaces the matching record even when it isn't a substring of the title.
 const candidates = computed(() => {
   const sourceId = props.audiobook?.id
-  const tokens = tokenize(query.value)
-  if (tokens.length === 0) return []
   return libraryStore.audiobooks
     .filter((b) => b.id !== sourceId)
-    .map((b) => ({ book: b, score: overlapScore(tokens, tokenize(b.title || '')) }))
+    .map((b) => ({ book: b, score: transferMatchScore(query.value, b.title || '') }))
     .filter((x) => x.score > 0)
     .sort((a, b) => b.score - a.score || (a.book.title || '').localeCompare(b.book.title || ''))
     .slice(0, 12)
     .map((x) => x.book)
 })
-
-function tokenize(text: string): string[] {
-  return (text || '')
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((t) => t.length > 1)
-}
-
-function overlapScore(queryTokens: string[], titleTokens: string[]): number {
-  const titleSet = new Set(titleTokens)
-  return queryTokens.reduce((score, t) => score + (titleSet.has(t) ? 1 : 0), 0)
-}
 
 function toggleFile(id: number) {
   const next = new Set(selectedFileIds.value)

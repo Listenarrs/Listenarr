@@ -8,9 +8,11 @@ public sealed partial class AudiobookFileTransferService
 {
     /// <summary>
     /// Moves the re-homed files into the destination's folder as one organize
-    /// batch of the destination audiobook. File names are preserved; a file whose
-    /// destination is already taken, or that is missing on disk, keeps its new
-    /// owner and stays in place with a reason.
+    /// batch of the destination audiobook. File names are preserved. The move is
+    /// all or nothing: organize recomputes the destination's folder from every file
+    /// it owns, so moving some files while others stay behind would widen that
+    /// folder to their common parent. The preflight normally rules such files out;
+    /// this covers a destination whose folder is only known once it owns the files.
     /// </summary>
     private async Task<(List<AudiobookFileTransferItem> Items, string? Error)> RelocateAsync(
         Audiobook target,
@@ -56,6 +58,7 @@ public sealed partial class AudiobookFileTransferService
         var renames = new List<FileRenameOperation>();
         var plannedDestinations = new List<string>();
         var planned = new List<AudiobookFileTransferItem>(items.Count);
+        var blocked = false;
         foreach (var item in items)
         {
             if (!item.Transferred || string.IsNullOrWhiteSpace(item.Path))
@@ -74,6 +77,7 @@ public sealed partial class AudiobookFileTransferService
 
             if (!fileSystem.FileExists(item.Path))
             {
+                blocked = true;
                 planned.Add(item with
                 {
                     Reason = "The file is missing on disk, so it was left in place."
@@ -88,6 +92,7 @@ public sealed partial class AudiobookFileTransferService
                     && PathsEqual(file.Path, destination, semantics));
             if (destinationTaken)
             {
+                blocked = true;
                 planned.Add(item with
                 {
                     Reason = "A file with the same name already exists in the destination folder; the file was left in place (delete the redundant copy if it is a duplicate)."
@@ -103,6 +108,11 @@ public sealed partial class AudiobookFileTransferService
                 NewPath = destination
             });
             planned.Add(item);
+        }
+
+        if (blocked)
+        {
+            return (planned, "Not every transferred file can be placed in the destination folder, so none were moved.");
         }
 
         if (renames.Count == 0)

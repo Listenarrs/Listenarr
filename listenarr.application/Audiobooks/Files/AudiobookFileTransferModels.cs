@@ -27,7 +27,13 @@ public enum AudiobookFileTransferOutcome
     /// <summary>The destination may not own this identity (conflicting or unresolved ownership).</summary>
     OwnershipConflict,
     /// <summary>The row changed between the ownership check and the re-home.</summary>
-    Changed
+    Changed,
+    /// <summary>The file is not on disk, so it could not follow its row into the destination folder.</summary>
+    MissingOnDisk,
+    /// <summary>The destination folder already holds a file with this name.</summary>
+    DestinationOccupied,
+    /// <summary>The file is under a different library root than the destination audiobook.</summary>
+    OutsideDestinationRoot
 }
 
 public sealed record AudiobookFileTransferItem(
