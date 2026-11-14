@@ -81,7 +81,10 @@ namespace Listenarr.Tests.Features.Api.Services
             };
             var fileRepository = new Mock<IAudiobookFileRepository>();
             fileRepository
-                .Setup(r => r.GetMissingMetadataAsync(20, It.IsAny<CancellationToken>()))
+                .Setup(r => r.GetMissingMetadataAsync(
+                    20,
+                    It.IsAny<Func<AudiobookFile, bool>?>(),
+                    It.IsAny<CancellationToken>()))
                 .ReturnsAsync([file]);
             fileRepository
                 .Setup(r => r.GetByIdAsync(file.Id, It.IsAny<CancellationToken>()))

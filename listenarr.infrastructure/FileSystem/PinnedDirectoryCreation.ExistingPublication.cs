@@ -35,7 +35,10 @@ internal sealed partial class PinnedDirectoryCreation
                     childName,
                     childPath,
                     requireDeleteAccess: true)
-                : OpenDirectoryAtUnix(_handle, childName);
+                : OpenDirectoryAtUnix(
+                    _handle,
+                    childName,
+                    "Could not open an existing pinned directory for publication.");
             var publication = new PinnedDirectoryCreation(
                 DuplicateSafeHandle(_handle),
                 directoryHandle,

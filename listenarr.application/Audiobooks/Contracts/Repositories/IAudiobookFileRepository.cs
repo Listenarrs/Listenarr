@@ -58,7 +58,12 @@ namespace Listenarr.Application.Audiobooks.Contracts.Repositories
     {
         Task<AudiobookFile?> GetByIdAsync(int id, CancellationToken ct = default);
         Task<List<AudiobookFile>> GetByAudiobookIdAsync(int audiobookId, CancellationToken ct = default);
-        Task<List<AudiobookFile>> GetMissingMetadataAsync(int max, CancellationToken ct = default);
+        // isEligible is applied after the host filter and before the cap, so rows it
+        // rejects are paged past instead of taking a slot in the batch.
+        Task<List<AudiobookFile>> GetMissingMetadataAsync(
+            int max,
+            Func<AudiobookFile, bool>? isEligible = null,
+            CancellationToken ct = default);
         Task<AudiobookFileClaimResult> ClaimAsync(AudiobookFile file, CancellationToken ct = default);
         Task<AudiobookFileClaimResult> ClaimWithBasePathAsync(
             AudiobookFile file,
