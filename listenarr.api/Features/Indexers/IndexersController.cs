@@ -110,6 +110,7 @@ namespace Listenarr.Api.Features.Indexers
                 return impl switch
                 {
                     var s when s == "internetarchive" || s == "internet archive" => await TestInternetArchive(indexer, persist),
+                    var s when s == "audiobookbay" => await TestAudioBookBay(indexer, persist),
                     var s when s == "myanonamouse" => await TestMyAnonamouse(indexer, persist),
                     // For Newznab/Torznab/Custom fall back to a generic connectivity check
                     _ => await TestGenericIndexer(indexer, persist)
@@ -368,6 +369,31 @@ namespace Listenarr.Api.Features.Indexers
                     success = true,
                     message = result.Message,
                     collection = result.Collection,
+                    indexer = RedactIndexerForCaller(indexer)
+                });
+            }
+
+            return BadRequest(new
+            {
+                success = false,
+                message = result.Message,
+                error = result.Error,
+                indexer = RedactIndexerForCaller(indexer)
+            });
+        }
+
+        /// <summary>
+        /// Test AudioBookBay indexer connection
+        /// </summary>
+        private async Task<IActionResult> TestAudioBookBay(Indexer indexer, bool persist)
+        {
+            var result = await _indexerTestWorkflow.TestAudioBookBayAsync(indexer, persist);
+            if (result.Succeeded)
+            {
+                return Ok(new
+                {
+                    success = true,
+                    message = result.Message,
                     indexer = RedactIndexerForCaller(indexer)
                 });
             }
