@@ -29,6 +29,22 @@
         </p>
       </NoticeBox>
 
+      <section v-if="lastSelected" class="previous-match" data-testid="previous-match">
+        <p>Previously selected audiobook:</p>
+        <FindMatchResults :search-results="[lastSelected]" @select="reuseMatch" />
+        <p>For chapters or parts of the same book that appeared in separate rows.</p>
+        <p v-if="!canReuseMatch">This result needs an ASIN to reuse the same audiobook.</p>
+        <button
+          type="button"
+          class="btn btn-secondary"
+          data-testid="reuse-match"
+          :disabled="!canReuseMatch"
+          @click="reuseMatch"
+        >
+          Use the same audiobook
+        </button>
+      </section>
+
       <BookMatchCard
         v-if="bookMatch"
         v-model:book-match="bookMatch"
@@ -76,6 +92,7 @@ import { Modal, ModalBody, ModalFooter, ModalHeader } from '@/components/feedbac
 import { useResultsRoomFit } from '@/composables/useResultsRoomFit'
 import NoticeBox from '@/components/base/NoticeBox.vue'
 import BookMatchCard from '@/components/domain/bookMatch/BookMatchCard.vue'
+import FindMatchResults from '@/components/domain/bookMatch/FindMatchResults.vue'
 import MatchLegend from '@/components/domain/bookMatch/MatchLegend.vue'
 import { useLibraryImportStore, type LibraryImportItem } from '@/stores/libraryImport'
 import {
@@ -101,13 +118,16 @@ import { apiService } from '@/services/api'
 import { logger } from '@/utils/logger'
 import type { SearchResult } from '@/types'
 
-const props = defineProps<{ item: LibraryImportItem }>()
+const props = defineProps<{ item: LibraryImportItem; lastSelected?: SearchResult | null }>()
 const emit = defineEmits<{
   close: []
   select: [result: SearchResult]
 }>()
 
 const store = useLibraryImportStore()
+// This import flow finds an existing book by ASIN. Reusing an unidentified result would
+// create another book instead of attaching the next chapters to the same one.
+const canReuseMatch = computed(() => !!props.lastSelected?.asin?.trim())
 // The searches answered while this dialog is open (it is created each time it opens)
 provide<SearchCache>(SEARCH_CACHE, new Map())
 const configuredRegion = ref('')
@@ -222,11 +242,24 @@ function confirm() {
   emit('close')
 }
 
+function reuseMatch() {
+  if (!props.lastSelected || !canReuseMatch.value) return
+  // Explicit reuse is the exception to the normal result list's one-row-per-record guard.
+  // Keep the chosen edition's region and metadata, independent of this row's search fields.
+  emit('select', props.lastSelected)
+  emit('close')
+}
+
 onBeforeUnmount(() => onSearching(false))
 </script>
 
 <style scoped>
 .find-match-info {
   margin-bottom: 0.75rem;
+}
+
+.previous-match {
+  margin-bottom: 1rem;
+  color: #ccc;
 }
 </style>

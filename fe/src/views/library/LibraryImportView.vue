@@ -236,7 +236,13 @@
           </thead>
 
           <tbody>
-            <LibraryImportRow v-for="item in sortedItems" :key="item.id" :item="item" />
+            <LibraryImportRow
+              v-for="item in sortedItems"
+              :key="item.id"
+              :item="item"
+              :last-selected="lastSelectedResult"
+              @matched="rememberMatch"
+            />
           </tbody>
         </table>
       </div>
@@ -257,7 +263,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   PhSpinner,
@@ -285,7 +291,7 @@ import {
   type LibraryImportSortKey,
 } from '@/utils/libraryImportTable'
 import RootFolderFormModal from '@/components/settings/RootFolderFormModal.vue'
-import type { RootFolder } from '@/types'
+import type { RootFolder, SearchResult } from '@/types'
 
 const COLUMN_WIDTH_STORAGE_KEY = 'listenarr.libraryImport.columnWidths.v1'
 const MAX_COLUMN_WIDTH = 960
@@ -309,6 +315,16 @@ const sortDirection = ref<LibraryImportSortDirection>('asc')
 const columnWidths = ref<LibraryImportColumnWidths>({ ...DEFAULT_LIBRARY_IMPORT_COLUMN_WIDTHS })
 const resizingColumn = ref<LibraryImportResizableColumnKey | null>(null)
 const addRootFolder = ref<boolean>(false)
+const lastSelectedResult = ref<SearchResult | null>(null)
+
+// A previous choice belongs to this scan of this folder, never the next one.
+watch([() => store.rootFolderId, () => store.scanStatus], () => {
+  lastSelectedResult.value = null
+})
+
+function rememberMatch(result: SearchResult) {
+  lastSelectedResult.value = result
+}
 
 const sortOptions: Array<{ value: LibraryImportSortKey; label: string }> = [
   { value: 'folder', label: 'Book' },
