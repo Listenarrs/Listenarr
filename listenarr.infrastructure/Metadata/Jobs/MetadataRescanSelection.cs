@@ -93,32 +93,6 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
                 foreignRowsDeferred);
         }
 
-        // The repository write for an outcome, from the counters the row was read with. Null when
-        // the outcome writes no due time: Completed is recorded through RecordMetadataRescanRefreshedAsync,
-        // and RowGone and Cancelled write nothing.
-        internal static AudiobookFileRescanScheduleWrite? ToScheduleWrite(
-            MetadataRescanOutcome outcome,
-            AudiobookFileRescanCounts current,
-            DateTime nowUtc)
-        {
-            var change = MetadataRescanSchedulePolicy.Apply(
-                outcome,
-                new MetadataRescanCounters(current.Failure, current.Unavailable, current.Blocked),
-                nowUtc);
-            if (change is not { DueUtc: { } dueUtc } scheduled)
-            {
-                return null;
-            }
-
-            return new AudiobookFileRescanScheduleWrite(
-                new AudiobookFileRescanCounts(
-                    scheduled.Counters.Failure,
-                    scheduled.Counters.Unavailable,
-                    scheduled.Counters.Blocked),
-                dueUtc,
-                outcome.ToString());
-        }
-
         internal static AudiobookFileRescanCounts CountsOf(AudiobookFile file) => new(
             file.MetadataRescanFailureCount,
             file.MetadataRescanUnavailableCount,
@@ -244,7 +218,7 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
             CancellationToken cancellationToken)
         {
             var expectedCounts = CountsOf(candidate.File);
-            var write = ToScheduleWrite(outcome, expectedCounts, nowUtc)!;
+            var write = MetadataRescanSchedulePolicy.ToScheduleWrite(outcome, expectedCounts, nowUtc)!;
             await fileRepository.ApplyMetadataRescanScheduleAsync(
                 candidate.File.Id,
                 expectedCounts,

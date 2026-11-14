@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-namespace Listenarr.Infrastructure.Metadata.Jobs
+namespace Listenarr.Application.Audiobooks.Files
 {
     public readonly record struct MetadataRescanCounters(int Failure, int Unavailable, int Blocked);
 
@@ -77,6 +77,32 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
                 default:
                     throw new ArgumentOutOfRangeException(nameof(outcome), outcome, null);
             }
+        }
+
+        // The repository write for an outcome, from the counters the row was read with. Null when
+        // the outcome writes no due time: Completed is recorded through RecordMetadataRescanRefreshedAsync,
+        // and RowGone and Cancelled write nothing.
+        public static AudiobookFileRescanScheduleWrite? ToScheduleWrite(
+            MetadataRescanOutcome outcome,
+            AudiobookFileRescanCounts current,
+            DateTime nowUtc)
+        {
+            var change = Apply(
+                outcome,
+                new MetadataRescanCounters(current.Failure, current.Unavailable, current.Blocked),
+                nowUtc);
+            if (change is not { DueUtc: { } dueUtc } scheduled)
+            {
+                return null;
+            }
+
+            return new AudiobookFileRescanScheduleWrite(
+                new AudiobookFileRescanCounts(
+                    scheduled.Counters.Failure,
+                    scheduled.Counters.Unavailable,
+                    scheduled.Counters.Blocked),
+                dueUtc,
+                outcome.ToString());
         }
 
         // min(baseDelay * 2^(count - 1), maxDelay); the exponent stops growing once the cap is certain, so no count overflows.

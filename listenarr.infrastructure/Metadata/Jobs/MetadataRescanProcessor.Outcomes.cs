@@ -107,7 +107,7 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
                     var record = await fileRepository.RecordMetadataRescanRefreshedAsync(
                         file.Id,
                         expectedCounts,
-                        MetadataRescanSelection.ToScheduleWrite(MetadataRescanOutcome.Incomplete, expectedCounts, nowUtc)!,
+                        MetadataRescanSchedulePolicy.ToScheduleWrite(MetadataRescanOutcome.Incomplete, expectedCounts, nowUtc)!,
                         CancellationToken.None);
                     recorded = record != AudiobookFileRescanRefreshRecord.NotRecorded;
                     if (record == AudiobookFileRescanRefreshRecord.Incomplete)
@@ -120,7 +120,7 @@ namespace Listenarr.Infrastructure.Metadata.Jobs
                     recorded = await fileRepository.ApplyMetadataRescanScheduleAsync(
                         file.Id,
                         expectedCounts,
-                        MetadataRescanSelection.ToScheduleWrite(outcome, expectedCounts, nowUtc)!,
+                        MetadataRescanSchedulePolicy.ToScheduleWrite(outcome, expectedCounts, nowUtc)!,
                         CancellationToken.None);
                 }
             }

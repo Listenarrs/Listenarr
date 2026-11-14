@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-namespace Listenarr.Infrastructure.Metadata.Jobs
+namespace Listenarr.Application.Audiobooks.Files
 {
     // What one rescan attempt on one file concluded. MetadataRescanSchedulePolicy turns each outcome into counter and due-time changes.
     public enum MetadataRescanOutcome
