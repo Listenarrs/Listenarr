@@ -265,7 +265,7 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
 
                 var existingEntry = _db.Entry(existing);
                 var preservedAudiobookId = existing.AudiobookId;
-                var preservedValues = PathIdentityPropertyNames.ToDictionary(
+                var preservedValues = UpdatePreservedPropertyNames.ToDictionary(
                     propertyName => propertyName,
                     propertyName => existingEntry.Property(propertyName).CurrentValue);
                 existingEntry.CurrentValues.SetValues(file);
@@ -281,7 +281,7 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                     .Property(nameof(AudiobookFile.AudiobookId))
                     .OriginalValue;
                 file.AudiobookId = (int)preservedAudiobookId!;
-                foreach (var propertyName in PathIdentityPropertyNames)
+                foreach (var propertyName in UpdatePreservedPropertyNames)
                 {
                     entry.Property(propertyName).CurrentValue =
                         entry.Property(propertyName).OriginalValue;
@@ -380,7 +380,11 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                 .ToDictionaryAsync(r => r.AudiobookId, r => r.Count, ct);
         }
 
-        private static readonly string[] PathIdentityPropertyNames =
+        // UpdateAsync never saves these from the caller's copy. Path identity
+        // changes only through the guarded identity writes, and the rescan
+        // schedule only through its own writes, so a stale or whole-entity
+        // save cannot roll either back.
+        private static readonly string[] UpdatePreservedPropertyNames =
         [
             nameof(AudiobookFile.Path),
             nameof(AudiobookFile.CanonicalPath),
@@ -395,7 +399,12 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             nameof(AudiobookFile.PathIdentityReason),
             nameof(AudiobookFile.PhysicalObjectIdentity),
             nameof(AudiobookFile.PhysicalIdentityVersion),
-            nameof(AudiobookFile.PhysicalIdentityObservedAtUtc)
+            nameof(AudiobookFile.PhysicalIdentityObservedAtUtc),
+            nameof(AudiobookFile.MetadataRescanDueUtc),
+            nameof(AudiobookFile.MetadataRescanFailureCount),
+            nameof(AudiobookFile.MetadataRescanUnavailableCount),
+            nameof(AudiobookFile.MetadataRescanBlockedCount),
+            nameof(AudiobookFile.MetadataRescanLastOutcome)
         ];
 
         private static AudiobookFilePathIdentity ToIdentity(AudiobookFile file) =>
