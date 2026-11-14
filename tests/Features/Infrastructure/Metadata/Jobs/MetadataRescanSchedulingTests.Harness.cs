@@ -141,15 +141,16 @@ public sealed partial class MetadataRescanSchedulingTests
 
     private sealed class ManualClock(DateTimeOffset start) : TimeProvider
     {
+        private readonly DateTimeOffset _start = start;
         private DateTimeOffset _now = start;
 
-        public DateTime Start => start.UtcDateTime;
+        public DateTime Start => _start.UtcDateTime;
 
         public override DateTimeOffset GetUtcNow() => _now;
 
         public void Advance(TimeSpan by) => _now += by;
 
-        public void Reset() => _now = start;
+        public void Reset() => _now = _start;
     }
 
     private sealed class SqliteContextFactory(DbContextOptions<ListenArrDbContext> options)
