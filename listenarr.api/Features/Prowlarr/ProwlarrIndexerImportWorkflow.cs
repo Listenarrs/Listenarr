@@ -16,6 +16,8 @@ namespace Listenarr.Api.Features.Prowlarr
 {
     public sealed class ProwlarrIndexerImportWorkflow
     {
+        private const string IndexerDiscoveryPath = "/api/v1/indexer";
+
         private readonly IIndexerRepository _indexerRepository;
         private readonly IConfigurationService _configurationService;
         private readonly HttpClient _httpClientNoRedirect;
@@ -67,9 +69,10 @@ namespace Listenarr.Api.Features.Prowlarr
 
             HttpResponseMessage response;
             string payload;
+            Uri? discoveryUri;
             try
             {
-                (response, payload) = await FetchProwlarrIndexersAsync(baseUrl, effectiveApiKey.Trim());
+                (response, payload, discoveryUri) = await FetchProwlarrIndexersAsync(baseUrl, effectiveApiKey.Trim());
             }
             catch (HttpRequestException ex)
             {
@@ -103,6 +106,14 @@ namespace Listenarr.Api.Features.Prowlarr
                 return ProwlarrIndexerImportWorkflowResult.UpstreamError("Unexpected Prowlarr API response", StatusCodes.Status502BadGateway);
             }
 
+            var effectiveBaseUrl = ProwlarrImportUrlPlanner.ResolveBaseUrlFromDiscovery(baseUrl, discoveryUri, IndexerDiscoveryPath);
+            if (!string.Equals(effectiveBaseUrl, baseUrl, StringComparison.Ordinal))
+            {
+                _logger.LogInformation(
+                    "Prowlarr answered on {Url} after a redirect; using it as the indexer proxy base",
+                    LogRedaction.SanitizeUrl(effectiveBaseUrl));
+            }
+
             await _configurationService.SaveProwlarrImportSettingsAsync(new ProwlarrImportConnectionSettings
             {
                 Url = effectiveUrl,
@@ -118,7 +129,7 @@ namespace Listenarr.Api.Features.Prowlarr
 
             if (!string.IsNullOrWhiteSpace(effectiveTagFilter))
             {
-                tagMap = await TryFetchProwlarrTagMapAsync(baseUrl, effectiveApiKey.Trim());
+                tagMap = await TryFetchProwlarrTagMapAsync(effectiveBaseUrl, effectiveApiKey.Trim());
                 if ((tagMap == null || tagMap.Count == 0) && ProwlarrIndexerPayloadParser.PayloadRequiresTagMap(doc.RootElement))
                 {
                     _logger.LogWarning(
@@ -162,7 +173,7 @@ namespace Listenarr.Api.Features.Prowlarr
                     : string.Empty;
 
                 var implementation = protocol.Equals("usenet", StringComparison.OrdinalIgnoreCase) ? "Newznab" : "Torznab";
-                var proxyUrl = ProwlarrImportUrlPlanner.BuildProxyUrl(baseUrl, indexerId);
+                var proxyUrl = ProwlarrImportUrlPlanner.BuildProxyUrl(effectiveBaseUrl, indexerId);
                 var normalizedUrl = ProwlarrImportUrlPlanner.NormalizeProxyUrl(proxyUrl);
 
                 var exists = existingIndexers.FirstOrDefault(i =>
@@ -217,15 +228,15 @@ namespace Listenarr.Api.Features.Prowlarr
             return ProwlarrIndexerImportWorkflowResult.UpstreamError("Failed to reach Prowlarr API", StatusCodes.Status502BadGateway);
         }
 
-        private async Task<(HttpResponseMessage Response, string Payload)> FetchProwlarrIndexersAsync(string baseUrl, string apiKey)
+        private async Task<(HttpResponseMessage Response, string Payload, Uri? FinalUri)> FetchProwlarrIndexersAsync(string baseUrl, string apiKey)
         {
             var encodedKey = WebUtility.UrlEncode(apiKey);
             // NOTE: This targets external Prowlarr instances, whose API path is /api/v1.
             // It is intentionally independent from Listenarr's own API version segment.
             var endpoints = new List<string>
             {
-                $"{baseUrl}/api/v1/indexer",
-                $"{baseUrl}/api/v1/indexer?apikey={encodedKey}"
+                $"{baseUrl}{IndexerDiscoveryPath}",
+                $"{baseUrl}{IndexerDiscoveryPath}?apikey={encodedKey}"
             };
 
             HttpResponseMessage? lastResponse = null;
@@ -233,7 +244,7 @@ namespace Listenarr.Api.Features.Prowlarr
 
             foreach (var endpoint in endpoints)
             {
-                var response = await SendValidatedAsync(currentUri =>
+                var (response, finalUri) = await SendValidatedAsync(currentUri =>
                 {
                     var retryRequest = new HttpRequestMessage(HttpMethod.Get, currentUri);
                     retryRequest.Headers.Add("X-Api-Key", apiKey);
@@ -243,7 +254,7 @@ namespace Listenarr.Api.Features.Prowlarr
 
                 if (response.IsSuccessStatusCode)
                 {
-                    return (response, body);
+                    return (response, body, finalUri);
                 }
 
                 lastResponse?.Dispose();
@@ -258,7 +269,7 @@ namespace Listenarr.Api.Features.Prowlarr
                 }
             }
 
-            return (lastResponse ?? new HttpResponseMessage(HttpStatusCode.BadGateway), lastPayload);
+            return (lastResponse ?? new HttpResponseMessage(HttpStatusCode.BadGateway), lastPayload, null);
         }
 
         private async Task<Dictionary<string, string>?> TryFetchProwlarrTagMapAsync(string baseUrl, string apiKey)
@@ -274,13 +285,14 @@ namespace Listenarr.Api.Features.Prowlarr
 
                 foreach (var endpoint in endpoints)
                 {
-                    using var response = await SendValidatedAsync(currentUri =>
+                    var (tagResponse, _) = await SendValidatedAsync(currentUri =>
                     {
                         var retryRequest = new HttpRequestMessage(HttpMethod.Get, currentUri);
                         retryRequest.Headers.Add("X-Api-Key", apiKey);
                         return retryRequest;
                     }, endpoint);
 
+                    using var response = tagResponse;
                     var body = await response.Content.ReadAsStringAsync();
                     if (!response.IsSuccessStatusCode)
                     {
@@ -345,14 +357,14 @@ namespace Listenarr.Api.Features.Prowlarr
             return null;
         }
 
-        private async Task<HttpResponseMessage> SendValidatedAsync(
+        private async Task<(HttpResponseMessage Response, Uri FinalUri)> SendValidatedAsync(
             Func<Uri, HttpRequestMessage> requestFactory,
             string url,
             HttpCompletionOption completionOption = HttpCompletionOption.ResponseContentRead,
             CancellationToken cancellationToken = default)
         {
             var uri = new Uri(url);
-            var (response, _) = await OutboundRequestSecurity.SendWithValidatedRedirectsAsync(
+            return await OutboundRequestSecurity.SendWithValidatedRedirectsAsync(
                 requestFactory,
                 uri,
                 _httpClientNoRedirect,
@@ -360,7 +372,6 @@ namespace Listenarr.Api.Features.Prowlarr
                 allowPrivateTargets: true,
                 completionOption: completionOption,
                 cancellationToken: cancellationToken);
-            return response;
         }
     }
 
