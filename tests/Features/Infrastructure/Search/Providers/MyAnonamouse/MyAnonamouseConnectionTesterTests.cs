@@ -19,7 +19,7 @@ public sealed class MyAnonamouseConnectionTesterTests : BaseTests
         });
         var tester = CreateTester(client);
 
-        var result = await tester.TestAsync(CreateIndexer("https://mam.example"), "secret-cookie");
+        var result = await tester.TestAsync(CreateIndexer("https://mam.example", "secret-cookie"));
 
         Assert.True(result.Succeeded);
         Assert.NotNull(captured);
@@ -43,10 +43,10 @@ public sealed class MyAnonamouseConnectionTesterTests : BaseTests
             return Task.FromResult(response);
         });
 
-        var result = await CreateTester(client).TestAsync(CreateIndexer(), "original");
+        var result = await CreateTester(client).TestAsync(CreateIndexer(mamId: "original"));
 
         Assert.True(result.Succeeded);
-        Assert.Equal("refreshed", result.RefreshedMamId);
+        Assert.Equal("refreshed", result.MamId);
     }
 
     [Theory]
@@ -57,7 +57,7 @@ public sealed class MyAnonamouseConnectionTesterTests : BaseTests
         using var client = CreateClient((_, _) =>
             Task.FromResult(new HttpResponseMessage(statusCode)));
 
-        var result = await CreateTester(client).TestAsync(CreateIndexer(), "secret");
+        var result = await CreateTester(client).TestAsync(CreateIndexer(mamId: "secret"));
 
         Assert.False(result.Succeeded);
         Assert.Equal((int)statusCode, result.StatusCode);
@@ -70,11 +70,11 @@ public sealed class MyAnonamouseConnectionTesterTests : BaseTests
     {
         using var client = CreateClient((_, _) => Task.FromResult(JsonResponse("<html>blocked</html>")));
 
-        var result = await CreateTester(client).TestAsync(CreateIndexer(), "secret");
+        var result = await CreateTester(client).TestAsync(CreateIndexer(mamId: "secret"));
 
         Assert.False(result.Succeeded);
-        Assert.Contains("invalid JSON", result.Message);
-        Assert.DoesNotContain("secret", result.Message);
+        Assert.Contains("invalid JSON", result.Error);
+        Assert.DoesNotContain("secret", result.Error);
     }
 
     [Fact]
@@ -83,12 +83,12 @@ public sealed class MyAnonamouseConnectionTesterTests : BaseTests
         using var client = CreateClient((_, _) =>
             Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)));
 
-        var result = await CreateTester(client).TestAsync(CreateIndexer(), "secret");
+        var result = await CreateTester(client).TestAsync(CreateIndexer(mamId: "secret"));
 
         Assert.False(result.Succeeded);
         Assert.Equal(503, result.StatusCode);
-        Assert.Equal("MyAnonamouse returned HTTP 503.", result.Message);
-        Assert.DoesNotContain("secret", result.Message);
+        Assert.Equal("MyAnonamouse returned HTTP 503.", result.Error);
+        Assert.DoesNotContain("secret", result.Error);
     }
 
     [Fact]
@@ -108,7 +108,7 @@ public sealed class MyAnonamouseConnectionTesterTests : BaseTests
             return Task.FromResult(JsonResponse("""{"data":[]}"""));
         });
 
-        var result = await CreateTester(client).TestAsync(CreateIndexer(), "secret");
+        var result = await CreateTester(client).TestAsync(CreateIndexer(mamId: "secret"));
 
         Assert.True(result.Succeeded);
         Assert.Equal(2, requests.Count);
@@ -117,7 +117,7 @@ public sealed class MyAnonamouseConnectionTesterTests : BaseTests
     }
 
     [Fact]
-    public async Task TestAsync_ReturnsSafeCancellationFailure()
+    public async Task TestAsync_PropagatesCallerCancellation()
     {
         using var client = CreateClient(async (_, cancellationToken) =>
         {
@@ -127,18 +127,22 @@ public sealed class MyAnonamouseConnectionTesterTests : BaseTests
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
 
-        var result = await CreateTester(client).TestAsync(CreateIndexer(), "secret", cancellation.Token);
-
-        Assert.False(result.Succeeded);
-        Assert.Contains("cancelled", result.Message);
-        Assert.DoesNotContain("secret", result.Message);
+        await Assert.ThrowsAsync<TaskCanceledException>(() =>
+            CreateTester(client).TestAsync(CreateIndexer(mamId: "secret"), cancellation.Token));
     }
 
     private static MyAnonamouseConnectionTester CreateTester(HttpClient client)
         => new(client, NullLogger<MyAnonamouseConnectionTester>.Instance);
 
-    private static Indexer CreateIndexer(string url = "https://www.myanonamouse.net")
-        => new() { Name = "MAM", Url = url, Implementation = "MyAnonamouse", Type = "Torrent" };
+    private static Indexer CreateIndexer(string url = "https://www.myanonamouse.net", string mamId = "secret")
+        => new()
+        {
+            Name = "MAM",
+            Url = url,
+            Implementation = "MyAnonamouse",
+            Type = "Torrent",
+            AdditionalSettings = $"{{\"mam_id\":\"{mamId}\"}}"
+        };
 
     private static HttpClient CreateClient(
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handler)

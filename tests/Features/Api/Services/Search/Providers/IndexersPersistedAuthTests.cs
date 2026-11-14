@@ -76,7 +76,10 @@ namespace Listenarr.Tests.Features.Api.Services.Search.Providers
         {
             var resp = new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent("{ \"result\": true }")
+                Content = new StringContent("""
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <rss version="2.0"><channel><title>althub</title></channel></rss>
+                    """, System.Text.Encoding.UTF8, "application/xml")
             };
 
             var persisted = new Indexer
