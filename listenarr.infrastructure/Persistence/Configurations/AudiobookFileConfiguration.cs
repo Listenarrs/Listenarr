@@ -30,10 +30,22 @@ public sealed class AudiobookFileConfiguration : IEntityTypeConfiguration<Audiob
         builder.Property(file => file.PathIdentityVersion).HasDefaultValue(1);
         builder.Property(file => file.PhysicalObjectIdentity).HasMaxLength(512);
         builder.Property(file => file.PhysicalIdentityVersion).HasDefaultValue(1);
+        builder.Property(file => file.MetadataRescanFailureCount).HasDefaultValue(0);
+        builder.Property(file => file.MetadataRescanUnavailableCount).HasDefaultValue(0);
+        builder.Property(file => file.MetadataRescanBlockedCount).HasDefaultValue(0);
+        builder.Property(file => file.MetadataRescanLastOutcome).HasMaxLength(32);
 
         builder.HasIndex(file => file.PathIdentityLookupKey);
         builder.HasIndex(file => file.PathOwnershipKey)
             .IsUnique()
             .HasFilter("\"PathOwnershipKey\" IS NOT NULL");
+        // Only files missing metadata are indexed. The filter is the text EF
+        // emits for the repository's MissingMetadata predicate, in its term
+        // order: SQLite uses a partial index only when the query's WHERE
+        // clause carries the same terms.
+        builder.HasIndex(file => file.MetadataRescanDueUtc)
+            .HasDatabaseName("IX_AudiobookFiles_MetadataRescanDue")
+            .HasFilter(
+                "\"DurationSeconds\" IS NULL OR \"Format\" IS NULL OR \"SampleRate\" IS NULL OR \"Size\" IS NULL OR \"Size\" = 64");
     }
 }
