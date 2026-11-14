@@ -16,24 +16,6 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 namespace Listenarr.Tests.Features.Infrastructure.Persistence.LargeLibrary;
 
 /// <summary>
-/// Which rows of the large library sit at the oldest due times. Rows that
-/// this host can never rescan pile up there in a real database, because
-/// nothing on the old code advanced them.
-/// </summary>
-public enum LargeLibraryVariant
-{
-    // Every due time is spread across the window around the clock.
-    Main,
-
-    // Files whose stored path syntax is foreign hold the oldest due times.
-    ForeignSyntaxOldest,
-
-    // Relative files with no stored syntax under a foreign base path hold
-    // the oldest due times.
-    ForeignBaseOldest
-}
-
-/// <summary>
 /// A book from test-fixtures/large-library-books.json. Every value is an
 /// entry of the shared public-domain test corpus, copied verbatim.
 /// </summary>
@@ -48,9 +30,11 @@ public sealed record LargeLibraryBook(
 /// <summary>
 /// Generates a representative large library into a file-backed SQLite
 /// database migrated by the real migration chain, for query-plan tests.
-/// Generation is deterministic: the same variant and clock give the same rows.
-/// Other areas add their own tables' rows in further partial files of this
-/// class, seeded after <see cref="BuildAsync"/> and off unless a test asks.
+/// Generation is deterministic: the same clock and seed give the same rows.
+/// This file writes only columns of the base schema, so it builds on any
+/// branch. Other areas stamp their own columns and add their own tables' rows
+/// in further partial files of this class, applied after
+/// <see cref="BuildAsync"/> and off unless a test asks.
 /// </summary>
 public sealed partial class LargeLibraryFixtureBuilder
 {
@@ -65,16 +49,13 @@ public sealed partial class LargeLibraryFixtureBuilder
     private const int ForeignBaseAudiobookInterval = 100;
     // One book in 5 (20 percent) is unmonitored.
     private const int UnmonitoredAudiobookInterval = 5;
-    // About 10 percent of host files are missing metadata; half of those
-    // are due in the future.
+    // About 10 percent of host files are missing metadata.
     private const double MissingMetadataShare = 0.10;
-    private static readonly TimeSpan DueWindow = TimeSpan.FromDays(30);
 
     private readonly int _seed;
 
     public LargeLibraryFixtureBuilder(
         DateTime clockUtc,
-        LargeLibraryVariant variant = LargeLibraryVariant.Main,
         int seed = 1151)
     {
         if (clockUtc.Kind != DateTimeKind.Utc)
@@ -83,13 +64,10 @@ public sealed partial class LargeLibraryFixtureBuilder
         }
 
         ClockUtc = clockUtc;
-        Variant = variant;
         _seed = seed;
     }
 
     public DateTime ClockUtc { get; }
-
-    public LargeLibraryVariant Variant { get; }
 
     public static FileSystemPathSyntax HostSyntax => OperatingSystem.IsWindows()
         ? FileSystemPathSyntax.Windows
@@ -124,7 +102,7 @@ public sealed partial class LargeLibraryFixtureBuilder
         var databasePath = Path.Combine(
             Path.GetTempPath(),
             $"listenarr-large-library-{Guid.NewGuid():N}.db");
-        var fixture = new LargeLibraryFixture(databasePath, ClockUtc, Variant);
+        var fixture = new LargeLibraryFixture(databasePath, ClockUtc);
         try
         {
             await using (var context = new ListenArrDbContext(fixture.CreateOptions()))
@@ -201,9 +179,9 @@ public sealed partial class LargeLibraryFixtureBuilder
         command.CommandText = """
             INSERT INTO "AudiobookFiles"
                 ("Id", "AudiobookId", "Path", "PathSyntax", "Size", "DurationSeconds",
-                 "Format", "SampleRate", "CreatedAt", "MetadataRescanDueUtc")
+                 "Format", "SampleRate", "CreatedAt")
             VALUES ($id, $audiobookId, $path, $pathSyntax, $size, $duration,
-                 $format, $sampleRate, $createdAt, $due);
+                 $format, $sampleRate, $createdAt);
             """;
         var id = command.Parameters.Add("$id", SqliteType.Integer);
         var audiobookId = command.Parameters.Add("$audiobookId", SqliteType.Integer);
@@ -214,55 +192,50 @@ public sealed partial class LargeLibraryFixtureBuilder
         var format = command.Parameters.Add("$format", SqliteType.Text);
         var sampleRate = command.Parameters.Add("$sampleRate", SqliteType.Integer);
         var createdAt = command.Parameters.Add("$createdAt", SqliteType.Text);
-        var due = command.Parameters.Add("$due", SqliteType.Text);
         await command.PrepareAsync(cancellationToken);
 
-        var random = new Random(_seed);
         var counts = new LargeLibraryCounts();
-        var oldestDue = ClockUtc - DueWindow - DueWindow;
+        foreach (var file in GenerateFiles())
+        {
+            id.Value = FileId(file.Index);
+            audiobookId.Value = AudiobookId(file.AudiobookIndex);
+            if (file.ForeignSyntax)
+            {
+                path.Value = AbsolutePath(ForeignSyntax, $"file-{file.Index:D6}.m4b");
+                pathSyntax.Value = ForeignSyntax.ToString();
+            }
+            else
+            {
+                path.Value = $"file-{file.Index:D6}.m4b";
+                pathSyntax.Value = file.ForeignBase ? DBNull.Value : HostSyntax.ToString();
+            }
+
+            WriteMetadata(file.MissingMetadata ? file.Index : -1, size, duration, format, sampleRate);
+            // Files were added one second apart in id order, the last one
+            // just before the clock.
+            createdAt.Value = ClockUtc.AddSeconds(file.Index - FileCount);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+            counts.Record(file.MissingMetadata);
+        }
+
+        return counts;
+    }
+
+    // Every file row in id order. Each call replays the same draws, so a
+    // partial file that stamps its own columns sees the rows BuildAsync wrote.
+    private IEnumerable<GeneratedFile> GenerateFiles()
+    {
+        var random = new Random(_seed);
         for (var fileIndex = 0; fileIndex < FileCount; fileIndex++)
         {
             var audiobookIndex = fileIndex / FilesPerAudiobook;
             var foreignSyntax = fileIndex % ForeignSyntaxFileInterval == 0;
             var foreignBase = !foreignSyntax && IsForeignBaseAudiobook(audiobookIndex);
-            // Rows this host cannot rescan are never repaired, so they stay
+            // Rows this host cannot read are never repaired, so they stay
             // missing metadata; host rows are missing at the stated share.
             var missing = foreignSyntax || foreignBase || random.NextDouble() < MissingMetadataShare;
-            var offset = TimeSpan.FromSeconds(random.NextDouble() * DueWindow.TotalSeconds);
-            DateTime dueUtc;
-            if ((foreignSyntax && Variant == LargeLibraryVariant.ForeignSyntaxOldest)
-                || (foreignBase && Variant == LargeLibraryVariant.ForeignBaseOldest))
-            {
-                dueUtc = oldestDue.AddSeconds(fileIndex);
-            }
-            else
-            {
-                // Half of the rows, so half of those missing metadata, are
-                // due in the future.
-                dueUtc = random.Next(2) == 0 ? ClockUtc - offset : ClockUtc + offset;
-            }
-
-            id.Value = fileIndex + 1;
-            audiobookId.Value = AudiobookId(audiobookIndex);
-            if (foreignSyntax)
-            {
-                path.Value = AbsolutePath(ForeignSyntax, $"file-{fileIndex:D6}.m4b");
-                pathSyntax.Value = ForeignSyntax.ToString();
-            }
-            else
-            {
-                path.Value = $"file-{fileIndex:D6}.m4b";
-                pathSyntax.Value = foreignBase ? DBNull.Value : HostSyntax.ToString();
-            }
-
-            WriteMetadata(missing ? fileIndex : -1, size, duration, format, sampleRate);
-            createdAt.Value = dueUtc;
-            due.Value = dueUtc;
-            await command.ExecuteNonQueryAsync(cancellationToken);
-            counts.Record(missing, foreignSyntax, foreignBase, dueUtc <= ClockUtc);
+            yield return new GeneratedFile(fileIndex, audiobookIndex, foreignSyntax, foreignBase, missing);
         }
-
-        return counts;
     }
 
     // A file missing metadata lacks one field, chosen by its index so every
@@ -288,6 +261,8 @@ public sealed partial class LargeLibraryFixtureBuilder
 
     private static int AudiobookId(int audiobookIndex) => audiobookIndex + 1;
 
+    private static int FileId(int fileIndex) => fileIndex + 1;
+
     private static bool IsForeignBaseAudiobook(int audiobookIndex) =>
         audiobookIndex % ForeignBaseAudiobookInterval == 1;
 
@@ -302,37 +277,25 @@ public sealed partial class LargeLibraryFixtureBuilder
 
     private static IReadOnlyList<string> ReadStrings(JsonElement array) =>
         array.EnumerateArray().Select(value => value.GetString()!).ToList();
+
+    private readonly record struct GeneratedFile(
+        int Index,
+        int AudiobookIndex,
+        bool ForeignSyntax,
+        bool ForeignBase,
+        bool MissingMetadata);
 }
 
 /// <summary>Row counts of a generated large library, for test assertions.</summary>
 public sealed class LargeLibraryCounts
 {
     public int MissingMetadata { get; private set; }
-    public int DueMissingMetadata { get; private set; }
-    public int DueMissingForeignSyntax { get; private set; }
-    public int DueMissingForeignBase { get; private set; }
 
-    internal void Record(bool missing, bool foreignSyntax, bool foreignBase, bool due)
+    internal void Record(bool missingMetadata)
     {
-        if (!missing)
+        if (missingMetadata)
         {
-            return;
-        }
-
-        MissingMetadata++;
-        if (!due)
-        {
-            return;
-        }
-
-        DueMissingMetadata++;
-        if (foreignSyntax)
-        {
-            DueMissingForeignSyntax++;
-        }
-        else if (foreignBase)
-        {
-            DueMissingForeignBase++;
+            MissingMetadata++;
         }
     }
 }
@@ -340,11 +303,10 @@ public sealed class LargeLibraryCounts
 /// <summary>A generated large-library database; disposing deletes it.</summary>
 public sealed class LargeLibraryFixture : IAsyncDisposable
 {
-    internal LargeLibraryFixture(string databasePath, DateTime clockUtc, LargeLibraryVariant variant)
+    internal LargeLibraryFixture(string databasePath, DateTime clockUtc)
     {
         DatabasePath = databasePath;
         ClockUtc = clockUtc;
-        Variant = variant;
         ConnectionString = new SqliteConnectionStringBuilder
         {
             DataSource = databasePath,
@@ -358,8 +320,6 @@ public sealed class LargeLibraryFixture : IAsyncDisposable
     public string ConnectionString { get; }
 
     public DateTime ClockUtc { get; }
-
-    public LargeLibraryVariant Variant { get; }
 
     public LargeLibraryCounts Counts { get; internal set; } = new();
 

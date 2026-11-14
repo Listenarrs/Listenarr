@@ -47,7 +47,9 @@ public sealed class MetadataRescanSelectionTests : BaseTests
     [InlineData(LargeLibraryVariant.ForeignBaseOldest)]
     public async Task SelectAsync_ForeignRowsAtTheOldestDueTimes_AreBoundedAndTheHostRowIsReached(LargeLibraryVariant variant)
     {
-        await using var fixture = await new LargeLibraryFixtureBuilder(ClockUtc, variant).BuildAsync();
+        var builder = new LargeLibraryFixtureBuilder(ClockUtc);
+        await using var fixture = await builder.BuildAsync();
+        await builder.StampRescanScheduleAsync(fixture, variant);
         var harness = new SelectionHarness(() => fixture.CreateOptions());
         var hostRowId = (int)await ScalarAsync(
             fixture,

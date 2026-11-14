@@ -47,7 +47,9 @@ public sealed partial class MetadataRescanQueryPlanTests : BaseTests
     [InlineData(LargeLibraryVariant.ForeignBaseOldest)]
     public async Task CandidatePage_UsesPartialIndex_BeforeAndAfterAnalyze(LargeLibraryVariant variant)
     {
-        await using var fixture = await new LargeLibraryFixtureBuilder(ClockUtc, variant).BuildAsync();
+        var builder = new LargeLibraryFixtureBuilder(ClockUtc);
+        await using var fixture = await builder.BuildAsync();
+        await builder.StampRescanScheduleAsync(fixture, variant);
         var firstPage = await CapturePageAsync(fixture, []);
         Assert.Equal(PageSize, firstPage.Rows);
         int[] excludedIds = [.. firstPage.Ids.Take(ExcludedIdCount)];
@@ -80,7 +82,9 @@ public sealed partial class MetadataRescanQueryPlanTests : BaseTests
     [InlineData(LargeLibraryVariant.ForeignBaseOldest)]
     public async Task LargeLibrary_HasTheStatedMix(LargeLibraryVariant variant)
     {
-        await using var fixture = await new LargeLibraryFixtureBuilder(ClockUtc, variant).BuildAsync();
+        var builder = new LargeLibraryFixtureBuilder(ClockUtc);
+        await using var fixture = await builder.BuildAsync();
+        var schedule = await builder.StampRescanScheduleAsync(fixture, variant);
         var books = LargeLibraryFixtureBuilder.LoadBooks();
         var host = LargeLibraryFixtureBuilder.HostSyntax.ToString();
         var foreign = LargeLibraryFixtureBuilder.ForeignSyntax.ToString();
@@ -102,9 +106,9 @@ public sealed partial class MetadataRescanQueryPlanTests : BaseTests
             8_000);
         // The builder's own tallies agree with what the database holds.
         Assert.Equal(fixture.Counts.MissingMetadata, await ScalarAsync(fixture, $"SELECT COUNT(*) FROM \"AudiobookFiles\" WHERE {missing}"));
-        Assert.Equal(fixture.Counts.DueMissingMetadata, await ScalarAsync(fixture, $"SELECT COUNT(*) FROM \"AudiobookFiles\" WHERE {missing} AND {due}"));
-        Assert.Equal(fixture.Counts.DueMissingForeignSyntax, await ScalarAsync(fixture, $"SELECT COUNT(*) FROM \"AudiobookFiles\" WHERE \"PathSyntax\" = '{foreign}' AND {missing} AND {due}"));
-        Assert.Equal(fixture.Counts.DueMissingForeignBase, await ScalarAsync(fixture, $"SELECT COUNT(*) FROM \"AudiobookFiles\" WHERE \"PathSyntax\" IS NULL AND {missing} AND {due}"));
+        Assert.Equal(schedule.DueMissingMetadata, await ScalarAsync(fixture, $"SELECT COUNT(*) FROM \"AudiobookFiles\" WHERE {missing} AND {due}"));
+        Assert.Equal(schedule.DueMissingForeignSyntax, await ScalarAsync(fixture, $"SELECT COUNT(*) FROM \"AudiobookFiles\" WHERE \"PathSyntax\" = '{foreign}' AND {missing} AND {due}"));
+        Assert.Equal(schedule.DueMissingForeignBase, await ScalarAsync(fixture, $"SELECT COUNT(*) FROM \"AudiobookFiles\" WHERE \"PathSyntax\" IS NULL AND {missing} AND {due}"));
         // The unrescannable rows hold every due time older than any host row.
         var oldestHostDue = $"(SELECT MIN(\"MetadataRescanDueUtc\") FROM \"AudiobookFiles\" WHERE \"PathSyntax\" = '{host}')";
         var oldRows = variant == LargeLibraryVariant.ForeignSyntaxOldest
@@ -120,7 +124,9 @@ public sealed partial class MetadataRescanQueryPlanTests : BaseTests
     {
         // Control for the harness: with the index gone the same captured SQL
         // must be reported as a scan or a sort, or the assertions prove nothing.
-        await using var fixture = await new LargeLibraryFixtureBuilder(ClockUtc).BuildAsync();
+        var builder = new LargeLibraryFixtureBuilder(ClockUtc);
+        await using var fixture = await builder.BuildAsync();
+        await builder.StampRescanScheduleAsync(fixture);
         await ExecuteAsync(fixture, $"DROP INDEX \"{PartialIndexName}\";");
 
         var page = await CapturePageAsync(fixture, []);
@@ -134,7 +140,9 @@ public sealed partial class MetadataRescanQueryPlanTests : BaseTests
     {
         // The id-ordered manual-batch query keeps its own plan; its captured
         // plan is recorded as the "before" side of the comparison.
-        await using var fixture = await new LargeLibraryFixtureBuilder(ClockUtc).BuildAsync();
+        var builder = new LargeLibraryFixtureBuilder(ClockUtc);
+        await using var fixture = await builder.BuildAsync();
+        await builder.StampRescanScheduleAsync(fixture);
         var capture = new CommandCapture();
         await using var context = new ListenArrDbContext(fixture.CreateOptions(capture));
         await context.Database.OpenConnectionAsync();
@@ -152,7 +160,9 @@ public sealed partial class MetadataRescanQueryPlanTests : BaseTests
     {
         // SQLite uses a partial index only when the query repeats its filter,
         // so the configured filter must appear verbatim in EF's WHERE clause.
-        await using var fixture = await new LargeLibraryFixtureBuilder(ClockUtc).BuildAsync();
+        var builder = new LargeLibraryFixtureBuilder(ClockUtc);
+        await using var fixture = await builder.BuildAsync();
+        await builder.StampRescanScheduleAsync(fixture);
         var page = await CapturePageAsync(fixture, []);
         string filter;
         await using (var context = new ListenArrDbContext(fixture.CreateOptions()))
