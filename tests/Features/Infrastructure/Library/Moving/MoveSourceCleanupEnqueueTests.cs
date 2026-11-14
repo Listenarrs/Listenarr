@@ -95,8 +95,10 @@ public sealed class MoveSourceCleanupEnqueueTests : BaseTests
             .ResolveAsync(sourcePath, targetPath);
 
         var semantics = _provider.GetRequiredService<IFileSystemSemanticsResolver>();
-        var sourceResolution = await semantics.ResolveAsync(sourcePath);
-        var targetResolution = await semantics.ResolveAsync(targetPath);
+        var sourceResolution = await semantics.ResolveAsync(
+            sourcePath, FileSystemCaseSensitivityMode.Sensitive);
+        var targetResolution = await semantics.ResolveAsync(
+            targetPath, FileSystemCaseSensitivityMode.Sensitive);
         var audiobook = await CreateAudiobook();
         var command = new MoveEnqueueCommand(
             audiobook.Id,
