@@ -104,7 +104,7 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             return results;
         }
 
-        private static bool CanRescanOnCurrentHost(
+        internal static bool CanRescanOnCurrentHost(
             AudiobookFile file,
             string? audiobookBasePath,
             FileSystemPathSyntax hostSyntax)
