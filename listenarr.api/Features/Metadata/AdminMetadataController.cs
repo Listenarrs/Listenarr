@@ -16,7 +16,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using Listenarr.Domain.Common;
-using Listenarr.Infrastructure.Metadata.Jobs;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Listenarr.Api.Features.Metadata
@@ -173,7 +172,8 @@ namespace Listenarr.Api.Features.Metadata
         {
             try
             {
-                var failureWrite = ToScheduleWrite(MetadataRescanOutcome.Incomplete, counts);
+                var nowUtc = timeProvider.GetUtcNow().UtcDateTime;
+                var failureWrite = MetadataRescanSchedulePolicy.ToScheduleWrite(MetadataRescanOutcome.Incomplete, counts, nowUtc)!;
                 if (outcome == MetadataRescanOutcome.Completed)
                 {
                     await audioFiles.RecordMetadataRescanRefreshedAsync(fileId, counts, failureWrite, CancellationToken.None);
@@ -183,26 +183,13 @@ namespace Listenarr.Api.Features.Metadata
                 await audioFiles.ApplyMetadataRescanScheduleAsync(
                     fileId,
                     counts,
-                    ToScheduleWrite(outcome, counts),
+                    MetadataRescanSchedulePolicy.ToScheduleWrite(outcome, counts, nowUtc)!,
                     CancellationToken.None);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
                 logger.LogWarning(ex, "Could not record manual rescan outcome {Outcome} for file id={Id}", outcome, fileId);
             }
-        }
-
-        private AudiobookFileRescanScheduleWrite ToScheduleWrite(MetadataRescanOutcome outcome, AudiobookFileRescanCounts counts)
-        {
-            var nowUtc = timeProvider.GetUtcNow().UtcDateTime;
-            var change = MetadataRescanSchedulePolicy.Apply(
-                outcome,
-                new MetadataRescanCounters(counts.Failure, counts.Unavailable, counts.Blocked),
-                nowUtc)!.Value;
-            return new AudiobookFileRescanScheduleWrite(
-                new AudiobookFileRescanCounts(change.Counters.Failure, change.Counters.Unavailable, change.Counters.Blocked),
-                change.DueUtc!.Value,
-                outcome.ToString());
         }
     }
 }
