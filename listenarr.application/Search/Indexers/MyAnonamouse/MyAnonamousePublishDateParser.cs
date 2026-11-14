@@ -30,8 +30,7 @@ namespace Listenarr.Application.Search.Indexers.MyAnonamouse
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
                     {
-                        // ignore and fallback to other fields below
-                        System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                        logger.LogDebug(ex, "MyAnonamouse 'added' timestamp {Added} did not parse; falling back to the other date fields", addedStr);
                     }
                 }
             }
