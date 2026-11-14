@@ -15,6 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
+using System.Globalization;
 using System.Text.Json;
 
 namespace Listenarr.Infrastructure.Ffmpeg.Metadata
@@ -47,7 +48,7 @@ namespace Listenarr.Infrastructure.Ffmpeg.Metadata
         {
             if (fmt.TryGetProperty("duration", out var durEl)
                 && durEl.ValueKind == JsonValueKind.String
-                && double.TryParse(durEl.GetString(), out var dur))
+                && double.TryParse(durEl.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var dur))
             {
                 metadata.Duration = TimeSpan.FromSeconds(dur);
             }

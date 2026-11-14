@@ -77,7 +77,10 @@ namespace Listenarr.Api.Features.Library
                 directoryPattern = CleanDirectoryPattern(directoryPattern);
             }
 
-            var variables = new Dictionary<string, object>
+            // OrdinalIgnoreCase: ApplyNamingPattern matches tokens case insensitively, so a
+            // pattern written {author} misses a case-sensitive lookup and the segment is
+            // silently dropped.
+            var variables = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
             {
                 { "Author", SanitizeDirectoryName(audiobook.Authors?.FirstOrDefault() ?? "Unknown Author") },
                 { "Series", SanitizeDirectoryName(!string.IsNullOrWhiteSpace(audiobook.Series) ? audiobook.Series! : string.Empty) },
