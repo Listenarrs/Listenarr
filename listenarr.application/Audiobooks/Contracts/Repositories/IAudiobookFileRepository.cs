@@ -58,6 +58,24 @@ namespace Listenarr.Application.Audiobooks.Contracts.Repositories
         AudiobookFile File,
         string? AudiobookBasePath);
 
+    // The three rescan retry counters of one file, as stored.
+    public readonly record struct AudiobookFileRescanCounts(int Failure, int Unavailable, int Blocked);
+
+    // One persisted rescan outcome: the new counters, the next due time and the outcome name.
+    public sealed record AudiobookFileRescanScheduleWrite(
+        AudiobookFileRescanCounts Counts,
+        DateTime DueUtc,
+        string LastOutcome);
+
+    public sealed record AudiobookFileRescanForeignRow(int Id, int UnavailableCount);
+
+    public enum AudiobookFileRescanRefreshRecord
+    {
+        NotRecorded,
+        Incomplete,
+        Completed
+    }
+
     public interface IAudiobookFileRepository
     {
         Task<AudiobookFile?> GetByIdAsync(int id, CancellationToken ct = default);
@@ -67,6 +85,45 @@ namespace Listenarr.Application.Audiobooks.Contracts.Repositories
             DateTime nowUtc,
             IReadOnlyCollection<int> excludedIds,
             int pageSize,
+            CancellationToken ct = default);
+        /// <summary>
+        /// Write one rescan outcome only if the file's three counters still equal
+        /// <paramref name="expectedCounts"/>. False means another write changed the
+        /// schedule first (or the row is gone) and nothing was written.
+        /// </summary>
+        Task<bool> ApplyMetadataRescanScheduleAsync(
+            int fileId,
+            AudiobookFileRescanCounts expectedCounts,
+            AudiobookFileRescanScheduleWrite write,
+            CancellationToken ct = default);
+        /// <summary>
+        /// Record the outcome of a refresh that updated the row: <paramref name="incompleteWrite"/>
+        /// while the row still misses metadata and its counters equal <paramref name="expectedCounts"/>,
+        /// otherwise Completed (counters zeroed, due time kept) once the row no longer misses metadata.
+        /// </summary>
+        Task<AudiobookFileRescanRefreshRecord> RecordMetadataRescanRefreshedAsync(
+            int fileId,
+            AudiobookFileRescanCounts expectedCounts,
+            AudiobookFileRescanScheduleWrite incompleteWrite,
+            CancellationToken ct = default);
+        /// <summary>
+        /// The oldest due rows that miss metadata and whose stored path syntax is not
+        /// <paramref name="hostSyntax"/>, in due order, at most <paramref name="bound"/>.
+        /// </summary>
+        Task<List<AudiobookFileRescanForeignRow>> GetDueForeignSyntaxRescanRowsAsync(
+            DateTime nowUtc,
+            FileSystemPathSyntax hostSyntax,
+            int bound,
+            CancellationToken ct = default);
+        /// <summary>
+        /// Move the given foreign-syntax rows out on the unavailable ladder as NotOnThisHost,
+        /// skipping any row whose schedule or path syntax changed since it was read.
+        /// Returns the number of rows written.
+        /// </summary>
+        Task<int> DeferForeignSyntaxRescanRowsAsync(
+            IReadOnlyCollection<AudiobookFileRescanForeignRow> rows,
+            DateTime nowUtc,
+            FileSystemPathSyntax hostSyntax,
             CancellationToken ct = default);
         Task<AudiobookFileClaimResult> ClaimAsync(AudiobookFile file, CancellationToken ct = default);
         Task<AudiobookFileClaimResult> ClaimWithBasePathAsync(

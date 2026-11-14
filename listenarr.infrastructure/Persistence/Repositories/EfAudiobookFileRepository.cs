@@ -17,16 +17,22 @@
  */
 using Listenarr.Domain.Common;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Listenarr.Infrastructure.Persistence.Repositories
 {
     public partial class EfAudiobookFileRepository : IAudiobookFileRepository
     {
         private readonly ListenArrDbContext _db;
+        private readonly ILogger<EfAudiobookFileRepository> _logger;
 
-        public EfAudiobookFileRepository(ListenArrDbContext db)
+        public EfAudiobookFileRepository(
+            ListenArrDbContext db,
+            ILogger<EfAudiobookFileRepository>? logger = null)
         {
             _db = db ?? throw new ArgumentNullException(nameof(db));
+            _logger = logger ?? NullLogger<EfAudiobookFileRepository>.Instance;
         }
 
         public async Task<AudiobookFile?> GetByIdAsync(int id, CancellationToken ct = default)
