@@ -443,7 +443,12 @@ public partial class FileMover
                 // The exception object, not just its Message. Without it the log records
                 // that a mutation failed and not what stopped it, so a cross-device link,
                 // a permissions error and a full disk are indistinguishable afterwards.
-                _logger.LogError(exception, template, arguments);
+                // Wrapped so the exception's own messages get the same line-break
+                // sanitizing as the template arguments above.
+                _logger.LogError(
+                    exception is null ? null : new SanitizedLogException(exception),
+                    template,
+                    arguments);
                 break;
             case FileMutationOutcome.Skipped:
                 _logger.LogDebug(template, arguments);
