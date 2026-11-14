@@ -171,6 +171,7 @@ public partial class EfAudiobookFileRepository
         ArgumentNullException.ThrowIfNull(replacement);
         ValidateBasePathMutation(audiobookId, basePathMutation);
 
+        var rescanDueUtc = RescanResetDueUtc();
         if (!_db.Database.IsRelational())
         {
             var audiobook = await _db.Audiobooks
@@ -194,6 +195,7 @@ public partial class EfAudiobookFileRepository
 
             audiobook.BasePath = basePathMutation.ResultingBasePath;
             ApplyPhysicalGeneration(existing, replacement);
+            ResetRescanSchedule(existing, rescanDueUtc);
             var nonRelationalCompletionToken =
                 RequestCancellationBoundary.EnterNonCancelablePhase(ct);
             await _db.SaveChangesAsync(nonRelationalCompletionToken);
@@ -245,7 +247,11 @@ public partial class EfAudiobookFileRepository
                         replacement.PhysicalIdentityVersion)
                     .SetProperty(
                         candidate => candidate.PhysicalIdentityObservedAtUtc,
-                        replacement.PhysicalIdentityObservedAtUtc),
+                        replacement.PhysicalIdentityObservedAtUtc)
+                    .SetProperty(candidate => candidate.MetadataRescanDueUtc, rescanDueUtc)
+                    .SetProperty(candidate => candidate.MetadataRescanFailureCount, 0)
+                    .SetProperty(candidate => candidate.MetadataRescanUnavailableCount, 0)
+                    .SetProperty(candidate => candidate.MetadataRescanBlockedCount, 0),
                 ct);
         if (fileUpdated != 1)
         {
@@ -258,6 +264,7 @@ public partial class EfAudiobookFileRepository
         await transaction.CommitAsync(completionToken);
         SynchronizeTrackedBasePath(basePathMutation);
         SynchronizeTrackedPhysicalGeneration(fileId, replacement);
+        SynchronizeTrackedRescanScheduleReset(fileId, rescanDueUtc);
         return true;
     }
 
