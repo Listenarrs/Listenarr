@@ -54,9 +54,11 @@ namespace Listenarr.Application.Downloads.Contracts
         /// <summary>
         /// Record that a download was grabbed from a source.
         /// Called when we first detect a download in the client.
+        /// The audiobook id is the integer library key, so the resulting history row can be
+        /// found by the per-book history query.
         /// </summary>
         Task RecordGrabbedAsync(string downloadId, string clientId, string title,
-            DownloadProtocol protocol, Guid? audiobookId = null);
+            DownloadProtocol protocol, int? audiobookId = null);
 
         /// <summary>
         /// Record that a download completed successfully.
@@ -73,9 +75,11 @@ namespace Listenarr.Application.Downloads.Contracts
         /// <summary>
         /// Record that a download was imported successfully.
         /// Sets the WasImported flag for idempotency checking.
+        /// The audiobook id is the integer library key, so the resulting history row can be
+        /// found by the per-book history query.
         /// </summary>
         Task RecordImportedAsync(string downloadId, string clientId, string title,
-            Guid? audiobookId = null);
+            int? audiobookId = null);
 
         /// <summary>
         /// Record that an import failed and why.

@@ -139,8 +139,8 @@
                 </button>
 
                 <button
-                  v-if="download.status === 'Failed'"
-                  @click="retryDownload()"
+                  v-if="download.status === 'ImportBlocked'"
+                  @click="retryDownload(download.id)"
                   class="action-button retry btn"
                 >
                   Retry
@@ -335,11 +335,18 @@ const closeInspect = () => {
   inspectState.value.loading = false
 }
 
-const retryDownload = async () => {
-  // For now, just show a message. In a real implementation,
-  // you would restart the download
-  // useToast expects (title, message)
-  toast.info('Coming Soon', 'Retry functionality will be implemented soon')
+const retryDownload = async (downloadId: string) => {
+  try {
+    await downloadsStore.retryBlockedImport(downloadId)
+    toast.success('Retrying', 'The import was queued for another attempt')
+  } catch (error) {
+    errorTracking.captureException(error as Error, {
+      component: 'DownloadsView',
+      operation: 'retryBlockedImport',
+      metadata: { downloadId },
+    })
+    toast.error('Error', 'Failed to queue the import retry')
+  }
 }
 
 const openFolder = (path: string) => {

@@ -133,7 +133,7 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
             historyMock.Verify(
                 h => h.RecordGrabbedAsync(
                     It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
-                    It.IsAny<DownloadProtocol>(), It.IsAny<Guid?>()),
+                    It.IsAny<DownloadProtocol>(), It.IsAny<int?>()),
                 Times.Never);
             notificationMock.VerifyNoOtherCalls();
         }
@@ -324,7 +324,7 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
             historyMock.Verify(
                 h => h.RecordGrabbedAsync(
                     It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
-                    It.IsAny<DownloadProtocol>(), It.IsAny<Guid?>()),
+                    It.IsAny<DownloadProtocol>(), It.IsAny<int?>()),
                 Times.Never);
             // A blank external id leaves nothing to track, so this path records a failure too.
             // Stubbing RecordDownloadFailedAsync without asserting it would let that behaviour
