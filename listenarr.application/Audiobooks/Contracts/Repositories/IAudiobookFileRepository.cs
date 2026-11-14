@@ -54,11 +54,20 @@ namespace Listenarr.Application.Audiobooks.Contracts.Repositories
             new(file.Id, file.AudiobookId, file.CapturePathState(), basePath);
     }
 
+    public sealed record AudiobookFileRescanCandidate(
+        AudiobookFile File,
+        string? AudiobookBasePath);
+
     public interface IAudiobookFileRepository
     {
         Task<AudiobookFile?> GetByIdAsync(int id, CancellationToken ct = default);
         Task<List<AudiobookFile>> GetByAudiobookIdAsync(int audiobookId, CancellationToken ct = default);
         Task<List<AudiobookFile>> GetMissingMetadataAsync(int max, CancellationToken ct = default);
+        Task<List<AudiobookFileRescanCandidate>> GetMetadataRescanDuePageAsync(
+            DateTime nowUtc,
+            IReadOnlyCollection<int> excludedIds,
+            int pageSize,
+            CancellationToken ct = default);
         Task<AudiobookFileClaimResult> ClaimAsync(AudiobookFile file, CancellationToken ct = default);
         Task<AudiobookFileClaimResult> ClaimWithBasePathAsync(
             AudiobookFile file,

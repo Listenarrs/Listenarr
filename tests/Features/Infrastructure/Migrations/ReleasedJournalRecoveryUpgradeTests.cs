@@ -8,6 +8,7 @@
  * (at your option) any later version.
  */
 
+using Listenarr.Infrastructure.Persistence.Migrations;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 using Microsoft.EntityFrameworkCore;
@@ -97,11 +98,12 @@ public sealed class ReleasedJournalRecoveryUpgradeTests : BaseTests
             {
                 var migrator = legacy.GetService<IMigrator>();
                 await migrator.MigrateAsync("20260825021432_AddWeakStorageVerifiedCleanup");
-                await using var legacySeed = new Released134SeedDbContext(options);
                 if (ownerMode != 0)
                 {
-                    legacySeed.Audiobooks.Add(audiobook);
-                    await legacySeed.SaveChangesAsync();
+                    await using var released = ReleasedSchemaWriteContext.Create<AddWeakStorageVerifiedCleanup>(
+                        legacy.Database.GetConnectionString()!);
+                    released.Audiobooks.Add(audiobook);
+                    await released.SaveChangesAsync();
                 }
                 await legacy.Database.ExecuteSqlInterpolatedAsync($"""
                     INSERT INTO "FileMutationJournals" (
