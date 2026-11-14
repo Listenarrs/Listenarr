@@ -128,17 +128,28 @@ describe('AddLibraryModal when the configured region has no record for the ASIN'
     )
   })
 
-  it('keeps a title edited while the regional retry is pending, with the region that found it', async () => {
+  it('shows the error alone, a spinner during the regional retry, then the record found, editable', async () => {
     let answerUs: (record: unknown) => void = () => {}
     apiMocks.getAudibleMetadata
       .mockRejectedValueOnce(notFound)
       .mockImplementationOnce(() => new Promise((resolve) => (answerUs = resolve)))
     const wrapper = mountModal()
     await flushPromises()
+    // The error, not the search's data
+    expect(wrapper.find('[data-testid="metadata-not-found"]').exists()).toBe(true)
+    expect(wrapper.find('.detail-header').exists()).toBe(false)
 
     await wrapper.get('[data-testid="metadata-retry-region"]').setValue('us')
     await wrapper.get('[data-testid="metadata-retry"]').trigger('click')
-    // Editing while the US lookup runs
+    await flushPromises()
+    expect(wrapper.find('[data-testid="metadata-loading"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="metadata-not-found"]').exists()).toBe(false)
+    expect(wrapper.get('button.btn-primary').find('.ph-spin').exists()).toBe(true)
+
+    answerUs(usRecord)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="metadata-loading"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Edgar Rice Burroughs')
     await wrapper.get('button.metadata-toggle-btn').trigger('click')
     await flushPromises()
     const title = wrapper
@@ -146,10 +157,6 @@ describe('AddLibraryModal when the configured region has no record for the ASIN'
       .find((item) => item.text().includes('Title'))!
       .find('input')
     await title.setValue('A Princess of Mars (my edition)')
-    answerUs(usRecord)
-    await flushPromises()
-
-    expect((title.element as HTMLInputElement).value).toBe('A Princess of Mars (my edition)')
     await wrapper.get('button.btn-primary').trigger('click')
     await flushPromises()
     expect(apiMocks.addToLibrary).toHaveBeenCalledWith(
