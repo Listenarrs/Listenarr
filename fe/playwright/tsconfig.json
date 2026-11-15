@@ -1,0 +1,11 @@
+{
+  "extends": "@tsconfig/node26/tsconfig.json",
+  "include": ["./**/*.ts", "../playwright.*.config.ts"],
+  "compilerOptions": {
+    "noEmit": true,
+    "tsBuildInfoFile": "../node_modules/.tmp/tsconfig.playwright.tsbuildinfo",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["node"]
+  }
+}

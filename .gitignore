@@ -101,6 +101,8 @@ jspm_packages/
 dist/
 dist-ssr/
 build/
+fe/playwright-report/
+fe/test-results/
 
 # Package manager files
 # package-lock.json  # Allow for CI caching
