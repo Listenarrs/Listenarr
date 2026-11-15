@@ -1,0 +1,12 @@
+{
+  "products": [
+    {
+      "asin": "BBBBBBBBBB",
+      "title": "Project Hail Mary",
+      "authors": [{ "name": "Andy Weir", "asin": "AAAAAAAAAA" }],
+      "content_type": "Product",
+      "content_delivery_type": "MultiPartBook"
+    }
+  ],
+  "total_results": 1
+}
