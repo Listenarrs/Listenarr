@@ -1,11 +1,21 @@
-# Listenarr as the Cypress full-stack E2E suite runs it: the production image,
-# plus what only the tests need. Built and started by scripts/e2e/run-cypress.mjs:
+# Dedicated full-stack E2E host, built and started by scripts/e2e/run-cypress.mjs:
 #
 #   docker build --tag listenarr-e2e-app .
 #   docker build --tag listenarr-e2e --build-arg LISTENARR_IMAGE=listenarr-e2e-app \
-#     --file .devcontainer/e2e.Dockerfile .devcontainer
+#     --file .devcontainer/e2e.Dockerfile .
 ARG LISTENARR_IMAGE
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS test-host-build
+WORKDIR /src
+COPY . .
+RUN dotnet publish tests/Listenarr.TestHost/Listenarr.TestHost.csproj \
+	--configuration Release \
+	--output /out/testhost \
+	/p:UseAppHost=false
+
 FROM ${LISTENARR_IMAGE}
+
+COPY --from=test-host-build /out/testhost/ /app/testhost/
 
 # ffprobe reads the tags of the generated audiobook the write suite imports.
 RUN apt-get update \
@@ -18,10 +28,10 @@ RUN apt-get update \
 # directories stay removable by the user running the suite.
 ENV UMASK=000 \
 	LISTENARR_DISABLE_HOSTED_SERVICES=true \
-	LISTENARR__STUBAUDIBLEAPI=true \
+	LISTENARR_CONTENT_ROOT=/app \
 	LISTENARR_ENABLE_UNMATCHED_SCAN_WORKER=true \
 	LISTENARR_LOG_LEVEL=Warning
 
 # Listenarr looks for ffprobe in its config directory, which is mounted at run
 # time and restored before each write test: put it there on every start.
-ENTRYPOINT ["/bin/sh", "-c", "mkdir -p /app/config/ffmpeg && cp /usr/bin/ffprobe /app/config/ffmpeg/ffprobe && chmod 755 /app/config/ffmpeg/ffprobe && exec /docker-entrypoint.sh"]
+ENTRYPOINT ["/bin/sh", "-c", "mkdir -p /app/config/ffmpeg && cp /usr/bin/ffprobe /app/config/ffmpeg/ffprobe && chmod 755 /app/config/ffmpeg/ffprobe && exec /docker-entrypoint.sh dotnet /app/testhost/Listenarr.TestHost.dll"]

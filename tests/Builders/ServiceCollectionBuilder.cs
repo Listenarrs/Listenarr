@@ -1,6 +1,7 @@
 using Listenarr.Application.Search.Filters;
 using Listenarr.Application.Search.Strategies;
 using Listenarr.Infrastructure.DependencyInjection;
+using Listenarr.TestHost.Metadata;
 using Listenarr.Infrastructure.DependencyInjection.Metadata;
 using Listenarr.Infrastructure.DependencyInjection.Downloads;
 using Listenarr.Infrastructure.Downloads.Blocklist;
@@ -251,8 +252,7 @@ namespace Listenarr.Tests.Builders
                 FailOnUnexpectedCalls = true
             });
 
-            services.AddHttpClient<AudibleService>()
-                .ConfigurePrimaryHttpMessageHandler(() => new AudibleApiStubHandler());
+            services.AddListenarrAudibleTestStub();
 
             // FIXME: All classes should rely on typed HttpClient instead of named ones
             // TODO: Find a way to test real http client configurations (cookies, retry, security, ...)

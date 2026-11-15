@@ -29,7 +29,7 @@ public static class ServiceRegistrationExtensions
         services.AddPlatformHttpClients(configuration);
         services.AddDownloadClientHttpClients();
         services.AddDownloadHttpClients();
-        services.AddMetadataHttpClients(configuration);
+        services.AddMetadataHttpClients();
         return services;
     }
 

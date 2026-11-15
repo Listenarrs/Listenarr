@@ -751,6 +751,12 @@
           "TagLibSharp": "[2.3.0, )"
         }
       },
+      "listenarr.testhost": {
+        "type": "Project",
+        "dependencies": {
+          "Listenarr.Api": "[1.7.2, )"
+        }
+      },
       "Asp.Versioning.Mvc": {
         "type": "CentralTransitive",
         "requested": "[10.0.0, )",
