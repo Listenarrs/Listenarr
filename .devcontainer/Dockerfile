@@ -1,4 +1,4 @@
-# Listenarr development environment: .NET SDK, Node.js, and what the Cypress
+# Listenarr development environment: .NET SDK, Node.js, and what the Playwright
 # suites need on the machine that runs them. Docker itself comes from the
 # docker-in-docker feature declared in devcontainer.json.
 #
@@ -25,7 +25,7 @@ RUN apt-get update \
 	&& rm -rf /var/lib/apt/lists/*
 
 # - ffmpeg, python3-venv, git: scripts/e2e/generate-audio-fixtures.sh
-# - the libraries and xvfb: the Cypress browser, run headless
+# - the browser libraries: headless Playwright Chromium integration tests
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends \
 		ffmpeg \

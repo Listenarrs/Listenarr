@@ -423,7 +423,7 @@ For complete API documentation, see our [API Reference](https://github.com/Liste
 - Node.js 26.x (26.12.1 or later)
 - npm (comes with Node.js)
 
-Or open the repository in its dev container (`.devcontainer/`), which provides all of the above plus Docker and what the Cypress suites need.
+Or open the repository in its dev container (`.devcontainer/`), which provides all of the above plus Docker and the browser dependencies for Playwright integration tests.
 
 ### Available Commands
 

@@ -18,7 +18,7 @@ export default defineConfig((configEnv) =>
         testTimeout: 30000,
         hookTimeout: 30000,
         // Exclude browser test files from unit test runs
-        exclude: [...configDefaults.exclude, 'e2e/**', 'cypress/**', 'playwright/**'],
+        exclude: [...configDefaults.exclude, 'e2e/**', 'playwright/**'],
         root: fileURLToPath(new URL('./', import.meta.url)),
       },
     },

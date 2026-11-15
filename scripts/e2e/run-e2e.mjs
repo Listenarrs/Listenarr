@@ -1,3 +1,10 @@
+// Runs the full-stack E2E suites (fe/playwright/e2e) against the application in Docker:
+// builds the production image and the E2E host image on top of it, starts one container on a
+// temporary config and filesystem, seeds its library, then runs the read-only suite (which must
+// leave the database untouched) and the write suite (which restores the seed before each test).
+// The container, the images and the temporary data are removed at the end.
+//
+//   node scripts/e2e/run-e2e.mjs [all|read-only|write]
 import { once } from 'node:events'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
@@ -11,12 +18,9 @@ import { DatabaseSync } from 'node:sqlite'
 
 const repositoryRoot = resolve(fileURLToPath(new URL('../..', import.meta.url)))
 const frontendDirectory = join(repositoryRoot, 'fe')
-const cypressCli = join(frontendDirectory, 'node_modules', 'cypress', 'bin', 'cypress')
 const playwrightCli = join(frontendDirectory, 'node_modules', '@playwright', 'test', 'cli.js')
 const e2eDockerfile = join(repositoryRoot, '.devcontainer', 'e2e.Dockerfile')
-const firstArgument = process.argv[2] ?? 'all'
-const usePlaywright = firstArgument === 'playwright'
-const e2eMode = usePlaywright ? process.argv[3] ?? 'all' : firstArgument
+const e2eMode = process.argv[2] ?? 'all'
 
 if (!['all', 'read-only', 'write'].includes(e2eMode)) {
   throw new Error('Use `all`, `read-only`, or `write` as the E2E runner mode.')
@@ -123,8 +127,8 @@ async function seedLibrary(apiUrl) {
   }
 
   for (const rootFolder of [
-    { name: 'Cypress Import', path: '/e2e/import' },
-    { name: 'Cypress Library', path: '/e2e/library' },
+    { name: 'E2E Import', path: '/e2e/import' },
+    { name: 'E2E Library', path: '/e2e/library' },
   ]) {
     const response = await fetch(`${apiUrl}/api/v1/rootfolders`, {
       method: 'POST',
@@ -137,20 +141,20 @@ async function seedLibrary(apiUrl) {
   }
 }
 
-if (!existsSync(usePlaywright ? playwrightCli : cypressCli)) {
+if (!existsSync(playwrightCli)) {
   throw new Error('Install frontend dependencies first with `npm ci --prefix fe --engine-strict`.')
 }
 
-const contentRoot = await mkdtemp(join(tmpdir(), 'listenarr-cypress-e2e-'))
+const contentRoot = await mkdtemp(join(tmpdir(), 'listenarr-fullstack-e2e-'))
 const configDirectory = join(contentRoot, 'config')
 const seedConfigDirectory = join(contentRoot, 'seed-config')
 const filesystemDirectory = join(contentRoot, 'filesystem')
 const seedFilesystemDirectory = join(contentRoot, 'seed-filesystem')
 const databasePath = join(configDirectory, 'database', 'listenarr.db')
 const runId = `${process.pid}-${Date.now().toString(36)}`
-const containerName = `listenarr-cypress-${runId}`
-const appImage = `listenarr-cypress-e2e-app:${runId}`
-const e2eImage = `listenarr-cypress-e2e:${runId}`
+const containerName = `listenarr-fullstack-e2e-${runId}`
+const appImage = `listenarr-fullstack-e2e-app:${runId}`
+const e2eImage = `listenarr-fullstack-e2e-host:${runId}`
 const apiPort = await availablePort()
 const apiUrl = `http://127.0.0.1:${apiPort}`
 const runDocker = async (args, label) => {
@@ -217,13 +221,11 @@ try {
   await runDocker(['start', containerName], 'Listenarr E2E container restart')
   await waitFor(`${apiUrl}/api/v1/system/ready`, 'Listenarr Docker container after seed snapshot')
 
-  const runBrowserSpec = async (spec, configFile) => {
-    const args = usePlaywright
-      ? [playwrightCli, 'test', '--config', 'playwright.e2e.config.ts', spec]
-      : [cypressCli, 'run', '--e2e', '--config-file', configFile, '--spec', spec]
-    const browserTest = start(
+  // One Playwright project per suite (fe/playwright.e2e.config.ts); the tests only send API requests.
+  const runSuite = async (project) => {
+    const suite = start(
       process.execPath,
-      args,
+      [playwrightCli, 'test', '--config', 'playwright.e2e.config.ts', '--project', project],
       {
         cwd: frontendDirectory,
         env: {
@@ -238,20 +240,15 @@ try {
       },
     )
     try {
-      await waitForExit(browserTest, `${usePlaywright ? 'Playwright' : 'Cypress'} spec ${spec}`)
+      await waitForExit(suite, `The ${project} E2E suite`)
     } catch (error) {
-      await runDocker(['logs', containerName], `Listenarr E2E container logs after ${spec} failure`)
+      await runDocker(['logs', containerName], `Listenarr E2E container logs after the ${project} suite failed`)
       throw error
     }
   }
 
   if (e2eMode !== 'write') {
-    await runBrowserSpec(
-      usePlaywright
-        ? 'playwright/e2e/read-only/loads-seeded-library.spec.ts'
-        : 'cypress/e2e/read-only/loads-seeded-library-from-live-api.cy.ts',
-      'cypress.config.ts',
-    )
+    await runSuite('read-only')
     await runDocker(['stop', containerName], 'Listenarr E2E container stop after read-only tests')
     if (databaseSnapshot(databasePath) !== seedHash) {
       throw new Error('The read-only E2E suite modified the seeded database.')
@@ -260,19 +257,7 @@ try {
     await waitFor(`${apiUrl}/api/v1/system/ready`, 'Listenarr Docker container before write tests')
   }
 
-  if (e2eMode !== 'read-only') {
-    const writeSpecs = usePlaywright
-      ? [['playwright/e2e/write/settings.spec.ts', 'playwright.e2e.config.ts']]
-      : [
-          ['cypress/e2e/write/write-settings.cy.ts', 'cypress.e2e.write.config.ts'],
-          ['cypress/e2e/write/write-library-persistence.cy.ts', 'cypress.e2e.write.config.ts'],
-          ['cypress/e2e/write/write-repair-persistence.cy.ts', 'cypress.e2e.write.config.ts'],
-          ['cypress/e2e/write/write-audio-import.cy.ts', 'cypress.e2e.write.config.ts'],
-        ]
-    for (const [spec, configFile] of writeSpecs) {
-      await runBrowserSpec(spec, configFile)
-    }
-  }
+  if (e2eMode !== 'read-only') await runSuite('write')
   exitCode = 0
 } finally {
   if (dockerStarted) {

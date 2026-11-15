@@ -1,4 +1,5 @@
-import { stubMetadataWithReply, stubSearchWithReply } from '../support/api-stubs'
+import type { Page } from '@playwright/test'
+import { expect, test, type ApiStubs } from '../support/test.js'
 
 type SearchCase = {
   name: string
@@ -13,23 +14,22 @@ type SearchCase = {
 let searchResponse: { statusCode: number; body: object | null; delay?: number }
 let metadataStatusCode: number
 
-function prepareSearch(region: string, language: string, advanced = false) {
-  cy.get(advanced ? '#adv-region' : '#region-select').select(region)
-  cy.get(advanced ? '#adv-language' : '#language-select').select(language)
+async function prepareSearch(page: Page, region: string, language: string, advanced = false) {
+  await page.locator(advanced ? '#adv-region' : '#region-select').selectOption(region)
+  await page.locator(advanced ? '#adv-language' : '#language-select').selectOption(language)
 }
 
-function submitSimple(query: string) {
-  cy.get('#unified-search-input').clear()
-  cy.get('#unified-search-input').type(query, { parseSpecialCharSequences: false })
-  cy.get('button[aria-label="Execute search"]').click()
+async function submitSimple(page: Page, query: string) {
+  await page.locator('#unified-search-input').fill(query)
+  await page.locator('button[aria-label="Execute search"]').click()
 }
 
-function openAdvancedSearch() {
-  cy.get('.advanced-btn').click()
-  cy.get('#advanced-search').should('be.visible')
+async function openAdvancedSearch(page: Page) {
+  await page.locator('.advanced-btn').click()
+  await expect(page.locator('#advanced-search')).toBeVisible()
 }
 
-function fillAdvanced(fields: Record<string, string>) {
+async function fillAdvanced(page: Page, fields: Record<string, string>) {
   const selectors: Record<string, string> = {
     title: '#adv-title',
     author: '#adv-author',
@@ -39,45 +39,43 @@ function fillAdvanced(fields: Record<string, string>) {
   }
 
   for (const [name, value] of Object.entries(fields)) {
-    cy.get(selectors[name]).clear()
-    cy.get(selectors[name]).type(value, { parseSpecialCharSequences: false })
+    await page.locator(selectors[name]!).fill(value)
   }
 }
 
-function submitAdvanced() {
-  cy.get('button[aria-label="Execute advanced search"]').click()
+async function submitAdvanced(page: Page) {
+  await page.locator('button[aria-label="Execute advanced search"]').click()
 }
 
-function expectSearchRequest(fields: Record<string, unknown>, absent: string[] = []) {
-  cy.wait('@search').then(({ request }) => {
-    const body = request.body as Record<string, unknown>
-    expect(body).to.include({ mode: 'Advanced' })
-    expect(body.pagination).to.deep.equal({ page: 1, limit: 50 })
-    for (const [key, value] of Object.entries(fields)) {
-      expect(body[key], key).to.deep.equal(value)
-    }
-    for (const key of absent) {
-      expect(body, `${key} should not be sent`).not.to.have.property(key)
-    }
-  })
+async function expectSearchRequest(api: ApiStubs, fields: Record<string, unknown>, absent: string[] = []) {
+  const { request } = await api.wait('search')
+  const body = request.body as Record<string, unknown>
+  expect(body).toMatchObject({ mode: 'Advanced' })
+  expect(body.pagination).toEqual({ page: 1, limit: 50 })
+  for (const [key, value] of Object.entries(fields)) {
+    expect(body[key], key).toEqual(value)
+  }
+  for (const key of absent) {
+    expect(body, `${key} should not be sent`).not.toHaveProperty(key)
+  }
 }
 
-function expectNoRequests() {
-  cy.get('@search.all').should('have.length', 0)
-  cy.get('@metadata.all').should('have.length', 0)
+function expectNoRequests(api: ApiStubs) {
+  expect(api.calls('search')).toHaveLength(0)
+  expect(api.calls('metadata')).toHaveLength(0)
 }
 
-beforeEach(() => {
+test.beforeEach(async ({ page, api }) => {
   searchResponse = { statusCode: 200, body: [] }
   metadataStatusCode = 404
 
-  stubSearchWithReply(() => searchResponse)
-  stubMetadataWithReply(() => ({ statusCode: metadataStatusCode, body: { message: 'not found' } }))
-  cy.visit('/add-new')
-  cy.contains('h1', 'Add New Audiobook').should('be.visible')
+  await api.stubSearchWithReply(() => searchResponse)
+  await api.stubMetadataWithReply(() => ({ statusCode: metadataStatusCode, body: { message: 'not found' } }))
+  await page.goto('/add-new')
+  await expect(page.locator('h1', { hasText: 'Add New Audiobook' })).toBeVisible()
 })
 
-describe('Add New simple search requests', () => {
+test.describe('Add New simple search requests', () => {
   const structuredCases: SearchCase[] = [
     { name: 'plain title', query: 'Dune', fields: { title: 'Dune', region: 'us', language: 'english' } },
     { name: 'several words', query: 'The Way of Kings', fields: { title: 'The Way of Kings' } },
@@ -166,11 +164,11 @@ describe('Add New simple search requests', () => {
   ]
 
   structuredCases.forEach(({ name, query, fields, region = 'us', language = 'english', absent = [] }) => {
-    it(`sends the expected structured request for ${name}`, () => {
-      prepareSearch(region, language)
-      submitSimple(query)
-      expectSearchRequest(fields, absent)
-      cy.get('@metadata.all').should('have.length', 0)
+    test(`sends the expected structured request for ${name}`, async ({ page, api }) => {
+      await prepareSearch(page, region, language)
+      await submitSimple(page, query)
+      await expectSearchRequest(api, fields, absent)
+      expect(api.calls('metadata')).toHaveLength(0)
     })
   })
 
@@ -188,75 +186,74 @@ describe('Add New simple search requests', () => {
   ]
 
   asinCases.forEach(([name, query, asin]) => {
-    it(`looks up ${name} without a structured search`, () => {
-      prepareSearch('us', 'english')
-      submitSimple(query)
-      cy.wait('@metadata').then(({ request }) => {
-        expect(request.url).to.include(`/api/v1/metadata/${asin}`)
-        expect(request.url).to.include('us')
-      })
-      cy.get('@search.all').should('have.length', 0)
+    test(`looks up ${name} without a structured search`, async ({ page, api }) => {
+      await prepareSearch(page, 'us', 'english')
+      await submitSimple(page, query)
+      const { request } = await api.wait('metadata')
+      expect(request.url).toContain(`/api/v1/metadata/${asin}`)
+      expect(request.url).toContain('us')
+      expect(api.calls('search')).toHaveLength(0)
     })
   })
 
-  it('keeps search disabled for an empty query', () => {
-    cy.get('button[aria-label="Execute search"]').should('be.disabled')
-    expectNoRequests()
+  test('keeps search disabled for an empty query', async ({ page, api }) => {
+    await expect(page.locator('button[aria-label="Execute search"]')).toBeDisabled()
+    expectNoRequests(api)
   })
 
-  it('does not request anything when the query contains only spaces', () => {
-    cy.get('#unified-search-input').type('    ')
-    cy.get('button[aria-label="Execute search"]').should('be.disabled')
-    expectNoRequests()
+  test('does not request anything when the query contains only spaces', async ({ page, api }) => {
+    await page.locator('#unified-search-input').pressSequentially('    ')
+    await expect(page.locator('button[aria-label="Execute search"]')).toBeDisabled()
+    expectNoRequests(api)
   })
 
-  it('does not search while typing', () => {
-    cy.get('#unified-search-input').type('B008DFUGCQ')
-    expectNoRequests()
+  test('does not search while typing', async ({ page, api }) => {
+    await page.locator('#unified-search-input').pressSequentially('B008DFUGCQ')
+    expectNoRequests(api)
   })
 
-  it('does not search when the region changes', () => {
-    cy.get('#unified-search-input').type('Dune')
-    cy.get('#region-select').select('fr')
-    expectNoRequests()
+  test('does not search when the region changes', async ({ page, api }) => {
+    await page.locator('#unified-search-input').pressSequentially('Dune')
+    await page.locator('#region-select').selectOption('fr')
+    expectNoRequests(api)
   })
 
-  it('rejects an invalid ASIN without making a request', () => {
-    submitSimple('ASIN:nope')
-    cy.get('.error-message').should('contain.text', 'Invalid ASIN')
-    expectNoRequests()
+  test('rejects an invalid ASIN without making a request', async ({ page, api }) => {
+    await submitSimple(page, 'ASIN:nope')
+    await expect(page.locator('.error-message')).toContainText('Invalid ASIN')
+    expectNoRequests(api)
   })
 
-  it('handles a failed search response without displaying results', () => {
+  test('handles a failed search response without displaying results', async ({ page, api }) => {
     searchResponse = { statusCode: 500, body: { message: 'boom' } }
-    submitSimple('Dune')
-    cy.wait('@search')
-    cy.get('.search-results').should('not.exist')
+    await submitSimple(page, 'Dune')
+    await api.wait('search')
+    await expect(page.locator('.search-results')).toHaveCount(0)
   })
 
-  it('handles a null search response without displaying results', () => {
+  test('handles a null search response without displaying results', async ({ page, api }) => {
     searchResponse = { statusCode: 200, body: null }
-    submitSimple('Dune')
-    expectSearchRequest({ title: 'Dune' })
-    cy.get('.search-results').should('not.exist')
+    await submitSimple(page, 'Dune')
+    await expectSearchRequest(api, { title: 'Dune' })
+    await expect(page.locator('.search-results')).toHaveCount(0)
   })
 
-  it('handles failed and missing ASIN metadata responses', () => {
+  test('handles failed and missing ASIN metadata responses', async ({ page, api }) => {
     metadataStatusCode = 500
-    submitSimple('B008DFUGCQ')
-    cy.wait('@metadata')
-    cy.get('.search-results').should('not.exist')
+    await submitSimple(page, 'B008DFUGCQ')
+    await api.wait('metadata')
+    await expect(page.locator('.search-results')).toHaveCount(0)
   })
 
-  it('handles an ASIN metadata 404 response', () => {
+  test('handles an ASIN metadata 404 response', async ({ page, api }) => {
     metadataStatusCode = 404
-    submitSimple('B008DFUGCQ')
-    cy.wait('@metadata')
-    cy.get('.search-results').should('not.exist')
+    await submitSimple(page, 'B008DFUGCQ')
+    await api.wait('metadata')
+    await expect(page.locator('.search-results')).toHaveCount(0)
   })
 })
 
-describe('Add New advanced search requests', () => {
+test.describe('Add New advanced search requests', () => {
   const advancedCases: SearchCase[] = [
     { name: 'title', query: '', fields: { title: 'Dune', region: 'us', language: 'english' } },
     { name: 'author', query: '', fields: { author: 'Frank Herbert' } },
@@ -356,51 +353,58 @@ describe('Add New advanced search requests', () => {
   ]
 
   advancedCases.forEach(({ name, fields, input, region = 'us', language = 'english', absent = [] }) => {
-    it(`sends the expected request for ${name}`, () => {
-      openAdvancedSearch()
-      prepareSearch(region, language, true)
-      const inputFields = input ?? Object.fromEntries(
-        Object.entries(fields).filter(([key, value]) =>
-          ['title', 'author', 'series', 'isbn', 'asin'].includes(key) && typeof value === 'string',
-        ),
-      ) as Record<string, string>
-      fillAdvanced(inputFields)
-      submitAdvanced()
-      expectSearchRequest(fields, absent)
+    test(`sends the expected request for ${name}`, async ({ page, api }) => {
+      await openAdvancedSearch(page)
+      await prepareSearch(page, region, language, true)
+      const inputFields =
+        input ??
+        (Object.fromEntries(
+          Object.entries(fields).filter(
+            ([key, value]) =>
+              ['title', 'author', 'series', 'isbn', 'asin'].includes(key) && typeof value === 'string',
+          ),
+        ) as Record<string, string>)
+      await fillAdvanced(page, inputFields)
+      await submitAdvanced(page)
+      await expectSearchRequest(api, fields, absent)
     })
   })
 
-  it('refuses an empty form and a form containing only spaces', () => {
-    openAdvancedSearch()
-    cy.get('#adv-title').type('{enter}')
-    cy.get('.advanced-search-section .error-message').should('contain.text', 'Please enter a search term')
-    expectNoRequests()
+  test('refuses an empty form and a form containing only spaces', async ({ page, api }) => {
+    await openAdvancedSearch(page)
+    await page.locator('#adv-title').press('Enter')
+    await expect(page.locator('.advanced-search-section .error-message')).toContainText(
+      'Please enter a search term',
+    )
+    expectNoRequests(api)
 
-    fillAdvanced({ title: '   ', author: ' ', series: '  ', isbn: ' ', asin: '  ' })
-    cy.get('#adv-title').type('{enter}')
-    cy.get('.advanced-search-section .error-message').should('contain.text', 'Please enter a search term')
-    expectNoRequests()
+    await fillAdvanced(page, { title: '   ', author: ' ', series: '  ', isbn: ' ', asin: '  ' })
+    await page.locator('#adv-title').press('Enter')
+    await expect(page.locator('.advanced-search-section .error-message')).toContainText(
+      'Please enter a search term',
+    )
+    expectNoRequests(api)
   })
 
-  it('does not retain results when the search endpoint fails', () => {
+  test('does not retain results when the search endpoint fails', async ({ page, api }) => {
     searchResponse = { statusCode: 500, body: { message: 'boom' } }
-    openAdvancedSearch()
-    fillAdvanced({ title: 'Dune' })
-    submitAdvanced()
-    expectSearchRequest({ title: 'Dune' })
-    cy.get('.search-results').should('not.exist')
+    await openAdvancedSearch(page)
+    await fillAdvanced(page, { title: 'Dune' })
+    await submitAdvanced(page)
+    await expectSearchRequest(api, { title: 'Dune' })
+    await expect(page.locator('.search-results')).toHaveCount(0)
   })
 
-  it('handles a null search response', () => {
+  test('handles a null search response', async ({ page, api }) => {
     searchResponse = { statusCode: 200, body: null }
-    openAdvancedSearch()
-    fillAdvanced({ author: 'Edgar Rice Burroughs', series: 'Barsoom' })
-    submitAdvanced()
-    expectSearchRequest({ author: 'Edgar Rice Burroughs' }, ['series'])
-    cy.get('.search-results').should('not.exist')
+    await openAdvancedSearch(page)
+    await fillAdvanced(page, { author: 'Edgar Rice Burroughs', series: 'Barsoom' })
+    await submitAdvanced(page)
+    await expectSearchRequest(api, { author: 'Edgar Rice Burroughs' }, ['series'])
+    await expect(page.locator('.search-results')).toHaveCount(0)
   })
 
-  it('filters author results by series across supported response shapes', () => {
+  test('filters author results by series across supported response shapes', async ({ page, api }) => {
     searchResponse = {
       statusCode: 200,
       body: [
@@ -413,21 +417,21 @@ describe('Add New advanced search requests', () => {
         { title: 'No series', asin: 'B000000007' },
       ],
     }
-    openAdvancedSearch()
-    prepareSearch('us', 'all', true)
-    fillAdvanced({ author: 'Someone', series: 'barsoom' })
-    submitAdvanced()
-    expectSearchRequest({ author: 'Someone' }, ['series', 'language'])
-    cy.get('.title-result-card').should('have.length', 5)
+    await openAdvancedSearch(page)
+    await prepareSearch(page, 'us', 'all', true)
+    await fillAdvanced(page, { author: 'Someone', series: 'barsoom' })
+    await submitAdvanced(page)
+    await expectSearchRequest(api, { author: 'Someone' }, ['series', 'language'])
+    await expect(page.locator('.title-result-card')).toHaveCount(5)
   })
 
-  it('returns to simple search and submits a title query', () => {
-    openAdvancedSearch()
-    fillAdvanced({ title: 'Dune' })
-    submitAdvanced()
-    cy.wait('@search')
-    cy.get('button[aria-label="Return to simple search"]').click()
-    submitSimple('Foundation')
-    expectSearchRequest({ title: 'Foundation' })
+  test('returns to simple search and submits a title query', async ({ page, api }) => {
+    await openAdvancedSearch(page)
+    await fillAdvanced(page, { title: 'Dune' })
+    await submitAdvanced(page)
+    await api.wait('search')
+    await page.locator('button[aria-label="Return to simple search"]').click()
+    await submitSimple(page, 'Foundation')
+    await expectSearchRequest(api, { title: 'Foundation' })
   })
 })

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const frontendDirectory = path.join(repositoryRoot, 'fe')
 const apiAssembly = path.join(repositoryRoot, 'listenarr.api', 'bin', 'Release', 'net10.0', 'Listenarr.Api.dll')
-const generatedDirectory = path.join(frontendDirectory, 'cypress', 'support', 'generated-api')
+const generatedDirectory = path.join(frontendDirectory, 'playwright', 'support', 'generated-api')
 const contractOperations = {
   '/api/v1/configuration/apis': ['get'],
   '/api/v1/configuration/bootstrap': ['get'],
@@ -129,7 +129,7 @@ try {
     for (const file of files) {
       writeFileSync(path.join(generatedDirectory, file), readFileSync(path.join(outputDirectory, file)))
     }
-    console.log(`Generated ${files.length} API type files in fe/cypress/support/generated-api.`)
+    console.log(`Generated ${files.length} API type files in fe/playwright/support/generated-api.`)
   }
 } finally {
   rmSync(temporaryDirectory, { recursive: true, force: true })
