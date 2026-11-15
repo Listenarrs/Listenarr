@@ -1,0 +1,12 @@
+{
+  "product": {
+    "asin": "0593396960",
+    "title": "Ready Player Two",
+    "language": "english",
+    "authors": [{ "name": "Ernest Cline", "asin": "B004XRR8Z6" }],
+    "sku": "sku2",
+    "merchandising_summary": "desc2",
+    "publisher_name": "Random House Audio",
+    "runtime_length_min": 900
+  }
+}

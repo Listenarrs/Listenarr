@@ -9,7 +9,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="Metadata\Fixtures\B008DFUGCQ.json"
-                      LogicalName="Listenarr.TestHost.AudibleFixtures.B008DFUGCQ.json" />
+    <EmbeddedResource Include="Metadata\Fixtures\*"
+                      LogicalName="Listenarr.TestHost.AudibleFixtures.%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>
