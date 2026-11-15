@@ -6,6 +6,16 @@ on:
   pull_request:
     branches: [ beta, main, canary ]
     types: [ opened, synchronize, reopened ]
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: 'Runner label for the Linux job; default: the CI_RUNNER repository variable, else GitHub-hosted'
+        type: string
+        required: false
+      jobs:
+        description: 'Comma-separated job names to run; default: all'
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -16,12 +26,13 @@ concurrency:
 
 jobs:
   unit-tests:
-    runs-on: ubuntu-24.04
+    if: ${{ !inputs.jobs || contains(inputs.jobs, 'unit-tests') }}
+    # A self-hosted runner when one is named (manual run) or configured (CI_RUNNER), else GitHub's.
+    runs-on: ${{ inputs.runner || vars.CI_RUNNER || 'ubuntu-24.04' }}
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: "1"
       DOTNET_NOLOGO: "1"
       API_PROJECT: listenarr.api/Listenarr.Api.csproj
-      LISTENARR_REQUIRED_NATIVE_TEST_CAPABILITIES: 'DirectorySymbolicLinks,FileSymbolicLinks'
 
     steps:
       - uses: actions/checkout@v4
@@ -118,12 +129,6 @@ jobs:
           npm run api-types:check
           npm run type-check:cypress
 
-      - name: Run native backend tests
-        env:
-          ASPNETCORE_ENVIRONMENT: Test
-          Playwright__Enabled: 'false'
-        run: pwsh -NoProfile -File scripts/run-native-backend-tests.ps1
-
       - name: Run frontend tests
         working-directory: fe
         run: |
@@ -134,9 +139,50 @@ jobs:
             exit 1
           fi
 
+      - name: Publish API (linux-x64)
+        run: dotnet publish ${{ env.API_PROJECT }} -c Release -r linux-x64 --no-restore --self-contained true /p:PublishSingleFile=true -o listenarr.api/publish/linux-x64
+
+  integration-tests:
+    if: ${{ !inputs.jobs || contains(inputs.jobs, 'integration-tests') }}
+    # A self-hosted runner when one is named (manual run) or configured (CI_RUNNER), else GitHub's.
+    runs-on: ${{ inputs.runner || vars.CI_RUNNER || 'ubuntu-24.04' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.node-version'
+          cache: 'npm'
+          cache-dependency-path: fe/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: fe
+        run: npm ci --engine-strict
+
       - name: Run Cypress API-stub integration tests
         working-directory: fe
         run: npm run test:integration:cypress
+
+  e2e-tests:
+    if: ${{ !inputs.jobs || contains(inputs.jobs, 'e2e-tests') }}
+    # A self-hosted runner when one is named (manual run) or configured (CI_RUNNER), else GitHub's.
+    runs-on: ${{ inputs.runner || vars.CI_RUNNER || 'ubuntu-24.04' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.node-version'
+          cache: 'npm'
+          cache-dependency-path: fe/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: fe
+        run: npm ci --engine-strict
 
       - name: Install synthetic audiobook generator dependencies
         run: sudo apt-get update && sudo apt-get install --yes ffmpeg python3-venv
@@ -145,10 +191,37 @@ jobs:
         working-directory: fe
         run: npm run test:e2e
 
-      - name: Publish API (linux-x64)
-        run: dotnet publish ${{ env.API_PROJECT }} -c Release -r linux-x64 --no-restore --self-contained true /p:PublishSingleFile=true -o listenarr.api/publish/linux-x64
+  backend-tests-linux:
+    if: ${{ !inputs.jobs || contains(inputs.jobs, 'backend-tests-linux') }}
+    # A self-hosted runner when one is named (manual run) or configured (CI_RUNNER), else GitHub's.
+    runs-on: ${{ inputs.runner || vars.CI_RUNNER || 'ubuntu-24.04' }}
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+      LISTENARR_REQUIRED_NATIVE_TEST_CAPABILITIES: 'DirectorySymbolicLinks,FileSymbolicLinks'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore listenarr.slnx
+
+      - name: Build backend
+        run: dotnet build listenarr.slnx --no-restore --configuration Release
+
+      - name: Run native backend tests
+        env:
+          ASPNETCORE_ENVIRONMENT: Test
+          Playwright__Enabled: 'false'
+        run: pwsh -NoProfile -File scripts/run-native-backend-tests.ps1
 
   backend-tests-windows:
+    if: ${{ !inputs.jobs || contains(inputs.jobs, 'backend-tests-windows') }}
     runs-on: windows-2025
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: "1"

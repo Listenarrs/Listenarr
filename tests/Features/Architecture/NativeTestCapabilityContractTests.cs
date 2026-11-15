@@ -206,10 +206,13 @@ public sealed class NativeTestWorkflowContractTests : BaseTests
             ".github",
             "workflows",
             "run-tests.yml")));
-        var linuxJob = ExtractJob(workflow, "unit-tests", "backend-tests-windows");
+        var linuxJob = ExtractJob(workflow, "backend-tests-linux", "backend-tests-windows");
         var windowsJob = ExtractJob(workflow, "backend-tests-windows", null);
 
-        AssertNativeJobContract(linuxJob, "ubuntu-24.04");
+        // The Linux job may be sent to a self-hosted runner; GitHub's image stays the default.
+        AssertNativeJobContract(
+            linuxJob,
+            "${{ inputs.runner || vars.CI_RUNNER || 'ubuntu-24.04' }}");
         AssertNativeJobContract(windowsJob, "windows-2025");
     }
 
