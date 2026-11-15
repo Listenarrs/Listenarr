@@ -1,5 +1,6 @@
 using System.Net;
 using Listenarr.Infrastructure.DependencyInjection;
+using Listenarr.TestHost.Metadata;
 using Listenarr.Tests.Common;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -40,15 +41,11 @@ public sealed class AudibleApiIsolationTests : BaseTests
 
     private static ServiceProvider CreateStubbedProvider()
     {
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Listenarr:StubAudibleApi"] = "true"
-            })
-            .Build();
+        var configuration = new ConfigurationBuilder().Build();
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddListenarrHttpClients(configuration);
+        services.AddListenarrAudibleTestStub();
         return services.BuildServiceProvider();
     }
 }

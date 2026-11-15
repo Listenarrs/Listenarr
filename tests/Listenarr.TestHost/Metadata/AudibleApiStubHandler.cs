@@ -19,12 +19,12 @@
 using System.Net;
 using System.Text;
 
-namespace Listenarr.Infrastructure.DependencyInjection.Metadata;
+namespace Listenarr.TestHost.Metadata;
 
 internal sealed class AudibleApiStubHandler : HttpMessageHandler
 {
     private const string StubAsin = "B008DFUGCQ";
-    private const string FixtureResourceName = "Listenarr.Infrastructure.AudibleFixtures.B008DFUGCQ.json";
+    private const string FixtureResourceName = "Listenarr.TestHost.AudibleFixtures.B008DFUGCQ.json";
     private const string ReadyPlayerOneResponse = """
         {
             "product": {

@@ -8,7 +8,6 @@
  * (at your option) any later version.
  */
 using Listenarr.Infrastructure.DependencyInjection.Platform;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Polly;
@@ -18,23 +17,13 @@ namespace Listenarr.Infrastructure.DependencyInjection.Metadata;
 
 internal static class MetadataRegistrationExtensions
 {
-    public static IServiceCollection AddMetadataHttpClients(
-        this IServiceCollection services,
-        IConfiguration configuration)
+    public static IServiceCollection AddMetadataHttpClients(this IServiceCollection services)
     {
         var retryPolicy = HttpPolicyExtensions.HandleTransientHttpError()
             .WaitAndRetryAsync(3, attempt => TimeSpan.FromSeconds(Math.Pow(2, attempt)));
-        var audibleClient = services.AddHttpClient<AudibleService>();
-        if (configuration.GetValue<bool>("Listenarr:StubAudibleApi"))
-        {
-            audibleClient.ConfigurePrimaryHttpMessageHandler(() => new AudibleApiStubHandler());
-        }
-        else
-        {
-            audibleClient.ConfigurePrimaryHttpMessageHandler(PlatformRegistrationExtensions.CreateExternalHandler);
-        }
-
-        audibleClient.AddPolicyHandler(retryPolicy);
+        services.AddHttpClient<AudibleService>()
+            .ConfigurePrimaryHttpMessageHandler(PlatformRegistrationExtensions.CreateExternalHandler)
+            .AddPolicyHandler(retryPolicy);
         services.AddHttpClient<IAudnexusService, AudnexusService>()
             .ConfigurePrimaryHttpMessageHandler(PlatformRegistrationExtensions.CreateExternalHandler)
             .AddPolicyHandler(retryPolicy);

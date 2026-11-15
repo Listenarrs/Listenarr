@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\listenarr.api\Listenarr.Api.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Metadata\Fixtures\B008DFUGCQ.json"
+                      LogicalName="Listenarr.TestHost.AudibleFixtures.B008DFUGCQ.json" />
+  </ItemGroup>
+</Project>

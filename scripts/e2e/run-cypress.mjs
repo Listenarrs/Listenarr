@@ -2,7 +2,7 @@ import { once } from 'node:events'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { cp, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { createServer as createTcpServer } from 'node:net'
@@ -179,7 +179,7 @@ try {
       `LISTENARR_IMAGE=${appImage}`,
       '--file',
       e2eDockerfile,
-      dirname(e2eDockerfile),
+      repositoryRoot,
     ],
     'Listenarr E2E Docker image build',
   )
