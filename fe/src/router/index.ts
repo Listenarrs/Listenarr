@@ -125,28 +125,24 @@ const redactStartupConfigForLog = (
 
 // Preload helper: given a route name or path, trigger the route's lazy component import
 // without navigating. Returns the import promise or a resolved promise when not found.
-export function preloadRoute(nameOrPath: string) {
-  // try by name first
-  const byName = routes.find((r) => r.name === nameOrPath)
-  if (byName && typeof byName.component === 'function') {
-    try {
-      return (byName.component as unknown as () => Promise<unknown>)()
-    } catch {
-      return Promise.resolve()
-    }
+// Warming a route up is best effort: a chunk that cannot be fetched (offline, server restarting,
+// page navigating away) must not surface as an unhandled rejection. The navigation itself
+// reports a real loading failure.
+function warmUp(load: () => Promise<unknown>): Promise<unknown> {
+  try {
+    return load().catch(() => undefined)
+  } catch {
+    return Promise.resolve()
   }
-  // try by path
-  const byPath = routes.find(
-    (r) =>
-      r.path === nameOrPath ||
-      r.path === (nameOrPath.startsWith('/') ? nameOrPath : `/${nameOrPath}`),
-  )
-  if (byPath && typeof byPath.component === 'function') {
-    try {
-      return (byPath.component as unknown as () => Promise<unknown>)()
-    } catch {
-      return Promise.resolve()
-    }
+}
+
+export function preloadRoute(nameOrPath: string) {
+  const path = nameOrPath.startsWith('/') ? nameOrPath : `/${nameOrPath}`
+  const route =
+    routes.find((r) => r.name === nameOrPath) ??
+    routes.find((r) => r.path === nameOrPath || r.path === path)
+  if (route && typeof route.component === 'function') {
+    return warmUp(route.component as unknown as () => Promise<unknown>)
   }
   return Promise.resolve()
 }
