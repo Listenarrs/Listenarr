@@ -1,5 +1,4 @@
 using Listenarr.Application.Metadata.Audible;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Listenarr.TestHost.Metadata;
 
