@@ -454,7 +454,7 @@ public sealed class FileRegistrationRecoveryServiceTests : BaseTests
             clock,
             NullLogger<FileRegistrationRecoveryService>.Instance);
         var recoveryTask = Task.Run(() => recovery.ReconcileAsync());
-        Assert.True(clock.WaitUntilBlocked(TestTimeouts.Signal));
+        Assert.True(clock.WaitUntilBlocked(TimeSpan.FromSeconds(5)));
 
         await using (var concurrent = await factory.CreateDbContextAsync())
         {
@@ -521,7 +521,7 @@ public sealed class FileRegistrationRecoveryServiceTests : BaseTests
                 clock,
                 NullLogger<FileRegistrationRecoveryService>.Instance);
             var recoveryTask = Task.Run(() => recovery.ReconcileAsync());
-            Assert.True(clock.WaitUntilBlocked(TestTimeouts.Signal));
+            Assert.True(clock.WaitUntilBlocked(TimeSpan.FromSeconds(5)));
 
             await using (var concurrent = await factory.CreateDbContextAsync())
             {

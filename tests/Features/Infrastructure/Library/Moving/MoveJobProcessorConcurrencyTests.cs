@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Listenarr.Tests.Common;
 
 namespace Listenarr.Tests.Features.Infrastructure.Library.Moving;
 
@@ -72,7 +71,7 @@ public partial class MoveJobProcessorTests
             blockingToast);
 
         var processing = processor.ProcessJobAsync(job, CancellationToken.None);
-        await blockingToast.Entered.Task.WaitAsync(TestTimeouts.Signal);
+        await blockingToast.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
         var coordinator = _provider.GetRequiredService<IAudiobookOperationCoordinator>();
         var concurrentEntered = new TaskCompletionSource(
@@ -86,7 +85,7 @@ public partial class MoveJobProcessorTests
             },
             CancellationToken.None);
 
-        await concurrentEntered.Task.WaitAsync(TestTimeouts.Signal);
+        await concurrentEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
         blockingToast.Release.TrySetResult();
         await Task.WhenAll(processing, concurrentOperation);
     }

@@ -15,6 +15,10 @@ import {
 
 const repairRow = (page: Page, id: number) => page.locator(`[data-testid="repair-row-${id}"]`)
 const repairResult = (page: Page, id: number) => page.locator(`[data-testid="repair-result-${id}"]`)
+const libraryBook = (page: Page, title: string) =>
+  page
+    .locator('.audiobook-item, .audiobook-list-item')
+    .filter({ has: page.getByText(title, { exact: true }) })
 const confirmRepair = (page: Page, count: number) =>
   page.locator('.confirm-dialog').locator('button', { hasText: `Repair ${count}` }).click()
 
@@ -251,7 +255,10 @@ test.describe('ported coverage scenarios (API-stubbed)', () => {
     await api.stubSearch({ statusCode: 200, body: { results: [sharedMatch] } }, 'crossCardSearch')
 
     await page.goto('/')
-    await page.locator('button', { hasText: 'Select All' }).click()
+    await api.wait('getLibrary')
+    await expect(libraryBook(page, firstTitle)).toBeVisible()
+    await expect(libraryBook(page, secondTitle)).toBeVisible()
+    await page.getByTestId('select-all-audiobooks').click()
     await page.locator('button', { hasText: 'Repair Selected (2)' }).click()
     for (const id of [firstId, secondId]) await expect(repairRow(page, id)).toHaveCount(1)
     await searchForRepairMatch(page, api, firstId, sharedMatch, 'crossCardSearch')
@@ -314,7 +321,10 @@ test.describe('ported coverage scenarios (API-stubbed)', () => {
     )
 
     await page.goto('/')
-    await page.locator('button', { hasText: 'Select All' }).click()
+    await api.wait('getLibrary')
+    await expect(libraryBook(page, 'Unavailable Book')).toBeVisible()
+    await expect(libraryBook(page, 'Available Book')).toBeVisible()
+    await page.getByTestId('select-all-audiobooks').click()
     await page.locator('button', { hasText: 'Repair Selected (2)' }).click()
     await searchForRepairMatch(page, api, unavailableId, unavailableMatch, 'deletedMidRunSearch')
     await searchForRepairMatch(page, api, availableId, availableMatch, 'deletedMidRunSearch')

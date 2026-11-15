@@ -428,7 +428,7 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Jobs
                 .WithTitle("Independent Scan")
                 .Build();
             var otherEnqueue = queue.EnqueueScanAsync(otherAudiobook);
-            var otherJobId = await otherEnqueue.WaitAsync(TestTimeouts.Signal);
+            var otherJobId = await otherEnqueue.WaitAsync(TimeSpan.FromSeconds(2));
             Assert.NotEqual(original, otherJobId);
 
             releasePersistence.TrySetResult();

@@ -82,7 +82,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Scanning
             Task? scan = null;
             try
             {
-                await entered.Task.WaitAsync(TestTimeouts.Signal);
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
                 scan = processor.ProcessJobAsync(job, cancellation.Token);
                 Assert.False(scan.IsCompleted);
                 Assert.Equal("Queued", GetRequiredJob(queue, job.Id).Status);
@@ -97,12 +97,12 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Scanning
             finally
             {
                 release.TrySetResult();
-                await deletion.WaitAsync(TestTimeouts.Signal);
+                await deletion.WaitAsync(TimeSpan.FromSeconds(15));
                 if (scan != null)
                 {
                     try
                     {
-                        await scan.WaitAsync(TestTimeouts.Signal);
+                        await scan.WaitAsync(TimeSpan.FromSeconds(15));
                     }
                     catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
                     {
@@ -188,7 +188,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Scanning
             Task<Microsoft.AspNetCore.Mvc.IActionResult>? deletion = null;
             try
             {
-                await entered.Task.WaitAsync(TestTimeouts.Signal);
+                await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
                 deletion = controller.DeleteAudiobook(deletedBook.Id,
                     deleteFiles: true, deleteFolder: false, cancellation.Token);
                 Assert.False(deletion.IsCompleted);
@@ -207,12 +207,12 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Scanning
             finally
             {
                 release.TrySetResult();
-                await scan.WaitAsync(TestTimeouts.Signal);
+                await scan.WaitAsync(TimeSpan.FromSeconds(15));
                 if (deletion != null)
                 {
                     try
                     {
-                        await deletion.WaitAsync(TestTimeouts.Signal);
+                        await deletion.WaitAsync(TimeSpan.FromSeconds(15));
                     }
                     catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
                     {
@@ -554,7 +554,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Scanning
             var processor = _provider.GetRequiredService<IScanJobProcessor>();
 
             var processing = processor.ProcessJobAsync(job, CancellationToken.None);
-            await broadcastEntered.Task.WaitAsync(TestTimeouts.Signal);
+            await broadcastEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
             var coordinator = _provider.GetRequiredService<IAudiobookOperationCoordinator>();
             var concurrentEntered = new TaskCompletionSource(
@@ -568,7 +568,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Library.Scanning
                 },
                 CancellationToken.None);
 
-            await concurrentEntered.Task.WaitAsync(TestTimeouts.Signal);
+            await concurrentEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
             releaseBroadcast.TrySetResult();
             await Task.WhenAll(processing, concurrentOperation);
         }

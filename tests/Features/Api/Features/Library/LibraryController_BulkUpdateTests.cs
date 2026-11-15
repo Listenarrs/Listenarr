@@ -605,7 +605,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                         DeleteEmptySource = false
                     }
                 });
-            await recoveryEntered.Task.WaitAsync(TestTimeouts.Signal);
+            await recoveryEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
             var contenderEntered = new TaskCompletionSource(
                 TaskCreationOptions.RunContinuationsAsynchronously);
@@ -625,7 +625,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
 
             releaseRecovery.TrySetResult();
             var actionResult = await bulkUpdate;
-            await contender.WaitAsync(TestTimeouts.Signal);
+            await contender.WaitAsync(TimeSpan.FromSeconds(5));
 
             Assert.IsType<OkObjectResult>(actionResult);
             Assert.True(contenderEntered.Task.IsCompletedSuccessfully);
