@@ -9,8 +9,13 @@ async function editDestination(page: Page, api: ApiStubs) {
   await api.wait('getStartupConfig')
   await api.wait('getLibrary')
 
-  // The Edit button only shows while its card is hovered.
-  await page.locator('button[title="Edit"]').first().click({ force: true })
+  const audiobook = page
+    .locator('.audiobook-item, .audiobook-list-item')
+    .filter({ has: page.getByText('Test Book', { exact: true }) })
+    .first()
+  await expect(audiobook).toBeVisible()
+  await audiobook.hover()
+  await audiobook.locator('button[title="Edit"]').click()
 
   await expect(page.getByText('Edit Audiobook: Test Book').first()).toBeVisible({ timeout: 10000 })
   await page.locator('button[aria-label="Edit destination"]').click()
