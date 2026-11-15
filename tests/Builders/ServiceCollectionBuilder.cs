@@ -1,6 +1,7 @@
 using Listenarr.Application.Search.Filters;
 using Listenarr.Application.Search.Strategies;
 using Listenarr.Infrastructure.DependencyInjection;
+using Listenarr.Infrastructure.DependencyInjection.Metadata;
 using Listenarr.Infrastructure.DependencyInjection.Downloads;
 using Listenarr.Infrastructure.Downloads.Blocklist;
 using Listenarr.Infrastructure.Downloads.DirectDownload;
@@ -240,7 +241,6 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton<ImagesController>();
             services.AddSingleton(new EphemeralDataProtectionProvider().CreateProtector("Listenarr.ConfigurationService.ProwlarrImport"));
 
-            services.AddSingleton<AudibleApiMock>();
             services.AddSingleton<AudnexusServiceApiMock>();
             services.AddSingleton<TransmissionApiMock>();
             services.AddSingleton<SabnzbdApiMock>();
@@ -252,7 +252,7 @@ namespace Listenarr.Tests.Builders
             });
 
             services.AddHttpClient<AudibleService>()
-                .ConfigurePrimaryHttpMessageHandler<AudibleApiMock>();
+                .ConfigurePrimaryHttpMessageHandler(() => new AudibleApiStubHandler());
 
             // FIXME: All classes should rely on typed HttpClient instead of named ones
             // TODO: Find a way to test real http client configurations (cookies, retry, security, ...)

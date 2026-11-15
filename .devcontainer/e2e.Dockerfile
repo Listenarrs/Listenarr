@@ -18,6 +18,7 @@ RUN apt-get update \
 # directories stay removable by the user running the suite.
 ENV UMASK=000 \
 	LISTENARR_DISABLE_HOSTED_SERVICES=true \
+	LISTENARR__STUBAUDIBLEAPI=true \
 	LISTENARR_ENABLE_UNMATCHED_SCAN_WORKER=true \
 	LISTENARR_LOG_LEVEL=Warning
 
