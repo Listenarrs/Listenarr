@@ -3,23 +3,19 @@ import { execFileSync } from 'node:child_process'
 import { access, cp, rm } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
-const composeFile = process.env.LISTENARR_E2E_COMPOSE_FILE
-const composeProject = process.env.LISTENARR_E2E_COMPOSE_PROJECT
+const container = process.env.LISTENARR_E2E_CONTAINER
 const configDirectory = process.env.LISTENARR_E2E_CONFIG_DIR
 const seedConfigDirectory = process.env.LISTENARR_E2E_SEED_CONFIG_DIR
 const filesystemDirectory = process.env.LISTENARR_E2E_FILESYSTEM_DIR
 const seedFilesystemDirectory = process.env.LISTENARR_E2E_SEED_FILESYSTEM_DIR
 const baseUrl = process.env.LISTENARR_E2E_BASE_URL ?? 'http://localhost:4545'
 
-function runCompose(...args: string[]) {
-  if (!composeFile || !composeProject) {
-    throw new Error('The Docker-backed E2E stack is not configured.')
+function runDocker(command: 'start' | 'stop') {
+  if (!container) {
+    throw new Error('The Docker-backed E2E container is not configured.')
   }
 
-  execFileSync('docker', ['compose', '--file', composeFile, '--project-name', composeProject, ...args], {
-    stdio: 'inherit',
-    env: process.env,
-  })
+  execFileSync('docker', [command, container], { stdio: 'inherit' })
 }
 
 async function waitForApi() {
@@ -97,12 +93,12 @@ export default defineConfig({
             throw new Error('The Docker-backed E2E database and filesystem snapshots are not available.')
           }
 
-          runCompose('stop', 'listenarr')
+          runDocker('stop')
           await rm(configDirectory, { recursive: true, force: true })
           await cp(seedConfigDirectory, configDirectory, { recursive: true })
           await rm(filesystemDirectory, { recursive: true, force: true })
           await cp(seedFilesystemDirectory, filesystemDirectory, { recursive: true })
-          runCompose('start', 'listenarr')
+          runDocker('start')
           await waitForApi()
 
           return null
