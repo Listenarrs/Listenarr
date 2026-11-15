@@ -4,7 +4,7 @@ import { expect, test } from '../support/write-test.js'
 type LibraryBook = { id: number; title: string }
 type QualityProfile = { id: number; name: string; isDefault: boolean }
 
-test.describe('Full-stack E2E library persistence', () => {
+test.describe('Backend integration library persistence', () => {
   test('removes a deleted book from the database while the other books stay readable', async ({ request }) => {
     const books = (await (await request.get('/api/v1/library')).json()) as LibraryBook[]
     expect(books).toHaveLength(4)
@@ -27,12 +27,12 @@ test.describe('Full-stack E2E library persistence', () => {
   })
 
   test('keeps per-book monitoring and quality profile settings after editing metadata', async ({ request }) => {
-    const updatedSubtitle = 'Persisted E2E subtitle'
+    const updatedSubtitle = 'Persisted backend integration subtitle'
     const book = ((await (await request.get('/api/v1/library')).json()) as LibraryBook[])[0]!
     const headers = await antiforgeryHeaders(request)
 
     const profileResponse = await request.post('/api/v1/qualityprofile', {
-      data: { name: 'E2E Persistence Profile', isDefault: true },
+      data: { name: 'Backend Integration Persistence Profile', isDefault: true },
       headers,
     })
     expect(profileResponse.ok()).toBe(true)

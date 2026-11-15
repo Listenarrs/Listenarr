@@ -6,19 +6,19 @@ type UnmatchedItem = { fullPath: string; sourceFiles?: string[]; bookFolder: str
 type ScanResults = { status: 'Queued' | 'Processing' | 'Completed' | 'Failed'; error?: string; items: UnmatchedItem[] }
 type ImportResult = { success: boolean; error?: string; skipReason?: string }
 
-// The audiobook scripts/e2e/generate-audio-fixtures.sh generates, and the record the E2E host's
-// Audible fixtures serve for its ASIN.
+// The audiobook scripts/backend-integration/generate-audio-fixtures.sh generates, and the record
+// the backend integration host's Audible fixtures serve for its ASIN.
 const asin = 'B008DFUGCQ'
 const title = 'A Princess of Mars'
 const author = 'Edgar Rice Burroughs'
-const sourcePath = '/e2e/import/Edgar Rice Burroughs/A Princess of Mars/A Princess of Mars.m4b'
+const sourcePath = '/backend-integration/import/Edgar Rice Burroughs/A Princess of Mars/A Princess of Mars.m4b'
 
-test.describe('Full-stack E2E generated audio import', () => {
+test.describe('Backend integration generated audio import', () => {
   test('scans, matches, and moves a generated tagged audiobook into the library', async ({ request }) => {
     const rootFolders = (await (await request.get('/api/v1/rootfolders')).json()) as RootFolder[]
-    const importFolder = rootFolders.find((folder) => folder.name === 'E2E Import')
-    const libraryFolder = rootFolders.find((folder) => folder.name === 'E2E Library')
-    if (!importFolder || !libraryFolder) throw new Error('The E2E filesystem root folders are missing.')
+    const importFolder = rootFolders.find((folder) => folder.name === 'Backend Integration Import')
+    const libraryFolder = rootFolders.find((folder) => folder.name === 'Backend Integration Library')
+    if (!importFolder || !libraryFolder) throw new Error('The backend integration filesystem root folders are missing.')
     const headers = await antiforgeryHeaders(request)
 
     // Scan the import folder, as the Library Import page does.
@@ -90,7 +90,7 @@ test.describe('Full-stack E2E generated audio import', () => {
     }
     const storedPath = savedBook.files?.[0]?.path ?? savedBook.filePath ?? ''
     const destinationPath = storedPath.startsWith('/') ? storedPath : `${savedBook.basePath}/${storedPath}`
-    expect(destinationPath).toContain('/e2e/library/')
+    expect(destinationPath).toContain('/backend-integration/library/')
     expect(await fileExists(destinationPath)).toBe(true)
     expect(await fileExists(sourcePath)).toBe(false)
   })

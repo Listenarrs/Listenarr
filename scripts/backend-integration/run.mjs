@@ -1,10 +1,10 @@
-// Runs the full-stack E2E suites (fe/playwright/e2e) against the application in Docker:
-// builds the production image and the E2E host image on top of it, starts one container on a
+// Runs the backend integration suites (fe/playwright/backend-integration) against the application in Docker:
+// builds the production image and the backend integration host image on top of it, starts one container on a
 // temporary config and filesystem, seeds its library, then runs the read-only suite (which must
 // leave the database untouched) and the write suite (which restores the seed before each test).
 // The container, the images and the temporary data are removed at the end.
 //
-//   node scripts/e2e/run-e2e.mjs [all|read-only|write]
+//   node scripts/backend-integration/run.mjs [all|read-only|write]
 import { once } from 'node:events'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
@@ -19,11 +19,11 @@ import { DatabaseSync } from 'node:sqlite'
 const repositoryRoot = resolve(fileURLToPath(new URL('../..', import.meta.url)))
 const frontendDirectory = join(repositoryRoot, 'fe')
 const playwrightCli = join(frontendDirectory, 'node_modules', '@playwright', 'test', 'cli.js')
-const e2eDockerfile = join(repositoryRoot, '.devcontainer', 'e2e.Dockerfile')
-const e2eMode = process.argv[2] ?? 'all'
+const hostDockerfile = join(repositoryRoot, '.devcontainer', 'backend-integration.Dockerfile')
+const suiteMode = process.argv[2] ?? 'all'
 
-if (!['all', 'read-only', 'write'].includes(e2eMode)) {
-  throw new Error('Use `all`, `read-only`, or `write` as the E2E runner mode.')
+if (!['all', 'read-only', 'write'].includes(suiteMode)) {
+  throw new Error('Use `all`, `read-only`, or `write` as the backend integration runner mode.')
 }
 
 function start(command, args, options) {
@@ -92,12 +92,12 @@ async function availablePort() {
 }
 
 async function seedLibrary(apiUrl) {
-  const books = JSON.parse(await readFile(join(repositoryRoot, 'scripts', 'e2e', 'seed-library.json'), 'utf8'))
+  const books = JSON.parse(await readFile(join(repositoryRoot, 'scripts', 'backend-integration', 'seed-library.json'), 'utf8'))
   const tokenResponse = await fetch(`${apiUrl}/api/v1/antiforgery/token`)
-  if (!tokenResponse.ok) throw new Error('Could not obtain an antiforgery token for the E2E seed.')
+  if (!tokenResponse.ok) throw new Error('Could not obtain an antiforgery token for the backend integration seed.')
   const { token } = await tokenResponse.json()
   const cookies = tokenResponse.headers.getSetCookie().map((cookie) => cookie.split(';', 1)[0])
-  if (!token || cookies.length === 0) throw new Error('The API did not issue an antiforgery token and cookie for the E2E seed.')
+  if (!token || cookies.length === 0) throw new Error('The API did not issue an antiforgery token and cookie for the backend integration seed.')
   const headers = {
     'Content-Type': 'application/json',
     Cookie: cookies.join('; '),
@@ -112,7 +112,7 @@ async function seedLibrary(apiUrl) {
     })
     const addResult = await addResponse.json()
     if (!addResponse.ok || !addResult.audiobook?.id) {
-      throw new Error(`Could not add E2E seed book '${metadata.title}': ${JSON.stringify(addResult)}`)
+      throw new Error(`Could not add backend integration seed book '${metadata.title}': ${JSON.stringify(addResult)}`)
     }
 
     // Adding authors invokes live author enrichment; set them afterward to keep the seed offline.
@@ -122,13 +122,13 @@ async function seedLibrary(apiUrl) {
       body: JSON.stringify({ authors }),
     })
     if (!updateResponse.ok) {
-      throw new Error(`Could not set authors for E2E seed book '${metadata.title}': ${await updateResponse.text()}`)
+      throw new Error(`Could not set authors for backend integration seed book '${metadata.title}': ${await updateResponse.text()}`)
     }
   }
 
   for (const rootFolder of [
-    { name: 'E2E Import', path: '/e2e/import' },
-    { name: 'E2E Library', path: '/e2e/library' },
+    { name: 'Backend Integration Import', path: '/backend-integration/import' },
+    { name: 'Backend Integration Library', path: '/backend-integration/library' },
   ]) {
     const response = await fetch(`${apiUrl}/api/v1/rootfolders`, {
       method: 'POST',
@@ -136,7 +136,7 @@ async function seedLibrary(apiUrl) {
       body: JSON.stringify({ ...rootFolder, isDefault: false, caseSensitivityMode: 0 }),
     })
     if (!response.ok) {
-      throw new Error(`Could not create E2E root folder '${rootFolder.name}': ${await response.text()}`)
+      throw new Error(`Could not create backend integration root folder '${rootFolder.name}': ${await response.text()}`)
     }
   }
 }
@@ -145,16 +145,16 @@ if (!existsSync(playwrightCli)) {
   throw new Error('Install frontend dependencies first with `npm ci --prefix fe --engine-strict`.')
 }
 
-const contentRoot = await mkdtemp(join(tmpdir(), 'listenarr-fullstack-e2e-'))
+const contentRoot = await mkdtemp(join(tmpdir(), 'listenarr-backend-integration-'))
 const configDirectory = join(contentRoot, 'config')
 const seedConfigDirectory = join(contentRoot, 'seed-config')
 const filesystemDirectory = join(contentRoot, 'filesystem')
 const seedFilesystemDirectory = join(contentRoot, 'seed-filesystem')
 const databasePath = join(configDirectory, 'database', 'listenarr.db')
 const runId = `${process.pid}-${Date.now().toString(36)}`
-const containerName = `listenarr-fullstack-e2e-${runId}`
-const appImage = `listenarr-fullstack-e2e-app:${runId}`
-const e2eImage = `listenarr-fullstack-e2e-host:${runId}`
+const containerName = `listenarr-backend-integration-${runId}`
+const appImage = `listenarr-backend-integration-app:${runId}`
+const hostImage = `listenarr-backend-integration-host:${runId}`
 const apiPort = await availablePort()
 const apiUrl = `http://127.0.0.1:${apiPort}`
 const runDocker = async (args, label) => {
@@ -169,7 +169,7 @@ try {
   await mkdir(join(seedFilesystemDirectory, 'library'), { recursive: true })
   const audioFixtureGenerator = start(
     'bash',
-    [join(repositoryRoot, 'scripts', 'e2e', 'generate-audio-fixtures.sh'), join(seedFilesystemDirectory, 'import')],
+    [join(repositoryRoot, 'scripts', 'backend-integration', 'generate-audio-fixtures.sh'), join(seedFilesystemDirectory, 'import')],
     { cwd: repositoryRoot },
   )
   await waitForExit(audioFixtureGenerator, 'Synthetic audiobook fixture generation')
@@ -181,14 +181,14 @@ try {
     [
       'build',
       '--tag',
-      e2eImage,
+      hostImage,
       '--build-arg',
       `LISTENARR_IMAGE=${appImage}`,
       '--file',
-      e2eDockerfile,
+      hostDockerfile,
       repositoryRoot,
     ],
-    'Listenarr E2E Docker image build',
+    'Listenarr backend integration Docker image build',
   )
   await runDocker(
     [
@@ -205,70 +205,70 @@ try {
       '--volume',
       `${configDirectory}:/app/config`,
       '--volume',
-      `${filesystemDirectory}:/e2e`,
-      e2eImage,
+      `${filesystemDirectory}:/backend-integration`,
+      hostImage,
     ],
-    'Listenarr E2E container startup',
+    'Listenarr backend integration container startup',
   )
   await waitFor(`${apiUrl}/api/v1/system/ready`, 'Listenarr Docker container')
 
   const settingsResponse = await fetch(`${apiUrl}/api/v1/configuration/settings`)
-  if (!settingsResponse.ok) throw new Error('Could not initialize the E2E seed database.')
+  if (!settingsResponse.ok) throw new Error('Could not initialize the backend integration seed database.')
   await seedLibrary(apiUrl)
-  await runDocker(['stop', containerName], 'Listenarr E2E container stop for seed snapshot')
+  await runDocker(['stop', containerName], 'Listenarr backend integration container stop for seed snapshot')
   await cp(configDirectory, seedConfigDirectory, { recursive: true })
   const seedHash = databaseSnapshot(databasePath)
-  await runDocker(['start', containerName], 'Listenarr E2E container restart')
+  await runDocker(['start', containerName], 'Listenarr backend integration container restart')
   await waitFor(`${apiUrl}/api/v1/system/ready`, 'Listenarr Docker container after seed snapshot')
 
-  // One Playwright project per suite (fe/playwright.e2e.config.ts); the tests only send API requests.
+  // One Playwright project per suite (fe/playwright.backend-integration.config.ts); the tests only send API requests.
   const runSuite = async (project) => {
     const suite = start(
       process.execPath,
-      [playwrightCli, 'test', '--config', 'playwright.e2e.config.ts', '--project', project],
+      [playwrightCli, 'test', '--config', 'playwright.backend-integration.config.ts', '--project', project],
       {
         cwd: frontendDirectory,
         env: {
           ...process.env,
-          LISTENARR_E2E_BASE_URL: apiUrl,
-          LISTENARR_E2E_CONTAINER: containerName,
-          LISTENARR_E2E_CONFIG_DIR: configDirectory,
-          LISTENARR_E2E_FILESYSTEM_DIR: filesystemDirectory,
-          LISTENARR_E2E_SEED_FILESYSTEM_DIR: seedFilesystemDirectory,
-          LISTENARR_E2E_SEED_CONFIG_DIR: seedConfigDirectory,
+          LISTENARR_BACKEND_INTEGRATION_BASE_URL: apiUrl,
+          LISTENARR_BACKEND_INTEGRATION_CONTAINER: containerName,
+          LISTENARR_BACKEND_INTEGRATION_CONFIG_DIR: configDirectory,
+          LISTENARR_BACKEND_INTEGRATION_FILESYSTEM_DIR: filesystemDirectory,
+          LISTENARR_BACKEND_INTEGRATION_SEED_FILESYSTEM_DIR: seedFilesystemDirectory,
+          LISTENARR_BACKEND_INTEGRATION_SEED_CONFIG_DIR: seedConfigDirectory,
         },
       },
     )
     try {
-      await waitForExit(suite, `The ${project} E2E suite`)
+      await waitForExit(suite, `The ${project} backend integration suite`)
     } catch (error) {
-      await runDocker(['logs', containerName], `Listenarr E2E container logs after the ${project} suite failed`)
+      await runDocker(['logs', containerName], `Listenarr backend integration container logs after the ${project} suite failed`)
       throw error
     }
   }
 
-  if (e2eMode !== 'write') {
+  if (suiteMode !== 'write') {
     await runSuite('read-only')
-    await runDocker(['stop', containerName], 'Listenarr E2E container stop after read-only tests')
+    await runDocker(['stop', containerName], 'Listenarr backend integration container stop after read-only tests')
     if (databaseSnapshot(databasePath) !== seedHash) {
-      throw new Error('The read-only E2E suite modified the seeded database.')
+      throw new Error('The read-only backend integration suite modified the seeded database.')
     }
-    await runDocker(['start', containerName], 'Listenarr E2E container restart before write tests')
+    await runDocker(['start', containerName], 'Listenarr backend integration container restart before write tests')
     await waitFor(`${apiUrl}/api/v1/system/ready`, 'Listenarr Docker container before write tests')
   }
 
-  if (e2eMode !== 'read-only') await runSuite('write')
+  if (suiteMode !== 'read-only') await runSuite('write')
   exitCode = 0
 } finally {
   if (dockerStarted) {
     for (const [args, label] of [
       [['rm', '--force', '--volumes', containerName], 'container'],
-      [['rmi', '--force', e2eImage, appImage], 'images'],
+      [['rmi', '--force', hostImage, appImage], 'images'],
     ]) {
       try {
-        await runDocker(args, `Listenarr E2E ${label} cleanup`)
+        await runDocker(args, `Listenarr backend integration ${label} cleanup`)
       } catch (error) {
-        console.error(`Could not clean up the Listenarr E2E ${label}: ${error.message}`)
+        console.error(`Could not clean up the Listenarr backend integration ${label}: ${error.message}`)
       }
     }
   }

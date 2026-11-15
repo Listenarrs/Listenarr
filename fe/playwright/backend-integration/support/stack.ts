@@ -3,16 +3,16 @@ import { access, cp, rm } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import type { APIRequestContext } from '@playwright/test'
 
-// Set by scripts/e2e/run-e2e.mjs, which starts the container the tests talk to.
-const container = process.env.LISTENARR_E2E_CONTAINER
-const configDirectory = process.env.LISTENARR_E2E_CONFIG_DIR
-const seedConfigDirectory = process.env.LISTENARR_E2E_SEED_CONFIG_DIR
-const filesystemDirectory = process.env.LISTENARR_E2E_FILESYSTEM_DIR
-const seedFilesystemDirectory = process.env.LISTENARR_E2E_SEED_FILESYSTEM_DIR
-const baseUrl = process.env.LISTENARR_E2E_BASE_URL ?? 'http://localhost:4545'
+// Set by scripts/backend-integration/run.mjs, which starts the container the tests talk to.
+const container = process.env.LISTENARR_BACKEND_INTEGRATION_CONTAINER
+const configDirectory = process.env.LISTENARR_BACKEND_INTEGRATION_CONFIG_DIR
+const seedConfigDirectory = process.env.LISTENARR_BACKEND_INTEGRATION_SEED_CONFIG_DIR
+const filesystemDirectory = process.env.LISTENARR_BACKEND_INTEGRATION_FILESYSTEM_DIR
+const seedFilesystemDirectory = process.env.LISTENARR_BACKEND_INTEGRATION_SEED_FILESYSTEM_DIR
+const baseUrl = process.env.LISTENARR_BACKEND_INTEGRATION_BASE_URL ?? 'http://localhost:4545'
 
-/** Where the container sees the E2E filesystem (`LISTENARR_E2E_FILESYSTEM_DIR` on the host). */
-const containerFilesystemRoot = '/e2e/'
+/** Where the container sees the backend integration filesystem (`LISTENARR_BACKEND_INTEGRATION_FILESYSTEM_DIR` on the host). */
+const containerFilesystemRoot = '/backend-integration/'
 
 async function waitForApi() {
   const readyUrl = new URL('/api/v1/system/ready', baseUrl)
@@ -33,7 +33,7 @@ async function waitForApi() {
 /** Puts the database and the files back as they were seeded, with the application stopped meanwhile. */
 export async function restoreSeed() {
   if (!container || !configDirectory || !seedConfigDirectory || !filesystemDirectory || !seedFilesystemDirectory) {
-    throw new Error('The write E2E suite needs the container started by scripts/e2e/run-e2e.mjs.')
+    throw new Error('The backend integration write suite needs the container started by scripts/backend-integration/run.mjs.')
   }
 
   execFileSync('docker', ['stop', container], { stdio: 'ignore' })
@@ -45,19 +45,19 @@ export async function restoreSeed() {
   await waitForApi()
 }
 
-/** The host path of a file the container sees under /e2e/. */
+/** The host path of a file the container sees under /backend-integration/. */
 function hostPath(containerPath: string) {
   if (!filesystemDirectory || !containerPath.startsWith(containerFilesystemRoot)) {
-    throw new Error(`'${containerPath}' is not inside the E2E filesystem mount.`)
+    throw new Error(`'${containerPath}' is not inside the backend integration filesystem mount.`)
   }
 
   const root = resolve(filesystemDirectory)
   const path = resolve(root, containerPath.slice(containerFilesystemRoot.length))
-  if (!path.startsWith(`${root}/`)) throw new Error(`'${containerPath}' escapes the E2E filesystem mount.`)
+  if (!path.startsWith(`${root}/`)) throw new Error(`'${containerPath}' escapes the backend integration filesystem mount.`)
   return path
 }
 
-/** Whether a file the container sees under /e2e/ exists. */
+/** Whether a file the container sees under /backend-integration/ exists. */
 export async function fileExists(containerPath: string) {
   try {
     await access(hostPath(containerPath))

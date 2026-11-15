@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import type { GetLibraryGetAllApiV1LibraryResponses } from '../../support/generated-api/types.gen.js'
 
-test.describe('Full-stack read-only E2E', () => {
+test.describe('Backend integration read-only', () => {
   test('loads the seeded library through the live API', async ({ request }) => {
     const response = await request.get('/api/v1/library')
     expect(response.status()).toBe(200)

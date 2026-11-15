@@ -231,7 +231,7 @@ function recordRequest(request: Request): RecordedRequest {
 }
 
 /**
- * Every API route the integration specs stub. A spec asks for the responses it needs through the
+ * Every API route the frontend integration specs stub. A spec asks for the responses it needs through the
  * helpers below and reads what the application sent with `wait(alias)` and `calls(alias)`.
  *
  * As in the browser, the stub registered last answers first. A spy records the request and leaves

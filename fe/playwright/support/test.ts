@@ -2,7 +2,7 @@ import { test as base } from '@playwright/test'
 import { ApiStubs } from './api-stubs.js'
 
 /**
- * The `test` every integration spec imports: its `api` fixture stubs the whole API before the test
+ * The `test` every frontend integration spec imports: its `api` fixture stubs the whole API before the test
  * body runs, so no request reaches a backend.
  */
 export const test = base.extend<{ api: ApiStubs }>({

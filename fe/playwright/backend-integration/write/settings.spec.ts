@@ -4,7 +4,7 @@ import { expect, test } from '../support/write-test.js'
 
 type Settings = ListenarrDomainConfigurationApplicationSettings
 
-test.describe('Full-stack E2E write path', () => {
+test.describe('Backend integration write path', () => {
   test('saves a settings change and reads it back', async ({ request }) => {
     const settingsResponse = await request.get('/api/v1/configuration/settings')
     expect(settingsResponse.status()).toBe(200)

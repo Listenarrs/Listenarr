@@ -1,8 +1,8 @@
-# Dedicated full-stack E2E host, built and started by scripts/e2e/run-e2e.mjs:
+# Dedicated backend integration host, built and started by scripts/backend-integration/run.mjs:
 #
-#   docker build --tag listenarr-e2e-app .
-#   docker build --tag listenarr-e2e --build-arg LISTENARR_IMAGE=listenarr-e2e-app \
-#     --file .devcontainer/e2e.Dockerfile .
+#   docker build --tag listenarr-backend-integration-app .
+#   docker build --tag listenarr-backend-integration --build-arg LISTENARR_IMAGE=listenarr-backend-integration-app \
+#     --file .devcontainer/backend-integration.Dockerfile .
 ARG LISTENARR_IMAGE
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS test-host-build

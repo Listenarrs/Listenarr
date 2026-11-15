@@ -6,8 +6,6 @@ import type { PluginOption, UserConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { visualizer } from 'rollup-plugin-visualizer'
 
-const apiTarget = process.env.LISTENARR_E2E_API_TARGET || 'http://localhost:4545'
-
 // https://vite.dev/config/
 export default defineConfig(({ mode }): UserConfig => {
   const analyzeBundle =
@@ -76,7 +74,7 @@ export default defineConfig(({ mode }): UserConfig => {
       port: 5173,
       proxy: {
         '/api': {
-          target: apiTarget,
+          target: 'http://localhost:4545',
           changeOrigin: true,
           // Rewrite cookie domains coming from the backend so the browser will
           // accept Set-Cookie when the backend sets cookies for its own host.
@@ -121,7 +119,7 @@ export default defineConfig(({ mode }): UserConfig => {
           },
         },
         '/hubs': {
-          target: apiTarget,
+          target: 'http://localhost:4545',
           changeOrigin: true,
           ws: true,
           configure: (proxy) => {

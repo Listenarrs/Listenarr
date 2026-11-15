@@ -2,7 +2,7 @@ import type { Page } from '@playwright/test'
 import { downloadFixture, expect, settingsFixture, test } from '../support/test.js'
 
 /**
- * E2E tests for dual file naming pattern feature
+ * Frontend integration tests for dual file naming pattern feature
  * Tests single-file vs multi-file pattern selection during imports
  */
 
