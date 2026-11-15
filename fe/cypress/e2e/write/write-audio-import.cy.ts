@@ -1,7 +1,4 @@
-import {
-  spyManualImport,
-  stubMetadata,
-} from '../../support/api-stubs'
+import { spyManualImport } from '../../support/api-stubs'
 
 const asin = 'B008DFUGCQ'
 const title = 'A Princess of Mars'
@@ -10,18 +7,7 @@ const sourcePath = '/e2e/import/Edgar Rice Burroughs/A Princess of Mars/A Prince
 
 describe('Full-stack E2E generated audio import', () => {
   it('scans, matches, and moves a generated tagged audiobook into the library', () => {
-    stubMetadata({
-      statusCode: 200,
-      body: {
-        source: 'audible',
-        metadata: {
-          asin,
-          title,
-          authors: [{ name: author }],
-          series: [{ name: 'Barsoom', sequence: 1 }],
-        },
-      },
-    }, 'generatedAudioMetadata')
+    cy.intercept('GET', `**/api/v1/metadata/${asin}*`).as('generatedAudioMetadata')
     spyManualImport()
 
     cy.request('/api/v1/rootfolders').then(({ body: rootFolders }) => {
@@ -36,7 +22,11 @@ describe('Full-stack E2E generated audio import', () => {
       cy.contains('.import-row', title, { timeout: 30_000 }).should('be.visible')
 
       cy.get('.import-row').find('button[title="Search for a match"]').click()
-      cy.wait('@generatedAudioMetadata')
+      cy.wait('@generatedAudioMetadata').then(({ response }) => {
+        expect(response?.statusCode).to.eq(200)
+        expect(response?.body?.metadata?.title).to.eq(title)
+        expect(response?.body?.metadata?.authors?.[0]?.name).to.eq(author)
+      })
       cy.contains('[data-testid="find-match-result"]', title).click()
       cy.get('[data-testid="find-match-confirm"]').should('be.enabled').click()
       cy.get('.import-row input[type="checkbox"]').should('be.checked')

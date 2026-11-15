@@ -34,4 +34,9 @@
     <EmbeddedResource Include="Search\Matching\release-annotations.json" LogicalName="Listenarr.Infrastructure.Search.Matching.release-annotations.json" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="DependencyInjection\Metadata\Fixtures\B008DFUGCQ.json"
+                      LogicalName="Listenarr.Infrastructure.AudibleFixtures.B008DFUGCQ.json" />
+  </ItemGroup>
+
 </Project>

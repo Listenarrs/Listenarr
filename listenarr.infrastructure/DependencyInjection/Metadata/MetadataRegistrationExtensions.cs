@@ -24,9 +24,17 @@ internal static class MetadataRegistrationExtensions
     {
         var retryPolicy = HttpPolicyExtensions.HandleTransientHttpError()
             .WaitAndRetryAsync(3, attempt => TimeSpan.FromSeconds(Math.Pow(2, attempt)));
-        services.AddHttpClient<AudibleService>()
-            .ConfigurePrimaryHttpMessageHandler(PlatformRegistrationExtensions.CreateExternalHandler)
-            .AddPolicyHandler(retryPolicy);
+        var audibleClient = services.AddHttpClient<AudibleService>();
+        if (configuration.GetValue<bool>("Listenarr:StubAudibleApi"))
+        {
+            audibleClient.ConfigurePrimaryHttpMessageHandler(() => new AudibleApiStubHandler());
+        }
+        else
+        {
+            audibleClient.ConfigurePrimaryHttpMessageHandler(PlatformRegistrationExtensions.CreateExternalHandler);
+        }
+
+        audibleClient.AddPolicyHandler(retryPolicy);
         services.AddHttpClient<IAudnexusService, AudnexusService>()
             .ConfigurePrimaryHttpMessageHandler(PlatformRegistrationExtensions.CreateExternalHandler)
             .AddPolicyHandler(retryPolicy);
