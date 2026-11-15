@@ -24,8 +24,8 @@ RUN apt-get update \
 	&& apt-get clean \
 	&& rm -rf /var/lib/apt/lists/*
 
-# - ffmpeg, python3-venv, git: scripts/e2e/generate-audio-fixtures.sh
-# - the browser libraries: headless Playwright Chromium integration tests
+# - ffmpeg, python3-venv, git: scripts/backend-integration/generate-audio-fixtures.sh
+# - the browser libraries: headless Playwright Chromium frontend integration tests
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends \
 		ffmpeg \

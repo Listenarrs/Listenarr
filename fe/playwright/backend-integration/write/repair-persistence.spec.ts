@@ -6,7 +6,7 @@ type LibraryBook = { id: number; title: string; authors: string[] }
 type QualityProfile = { id: number }
 type Identifier = { type: string; value: string; region?: string | null; isPrimary: boolean; source?: string }
 
-// The record the E2E host's Audible fixtures serve (tests/Listenarr.TestHost/Metadata/Fixtures).
+// The record the backend integration host's Audible fixtures serve (tests/Listenarr.TestHost/Metadata/Fixtures).
 const match = { asin: 'B005FRGT44', region: 'us', title: 'Ready Player One', author: 'Ernest Cline' }
 
 // What a repair empties before the rescan, so the book keeps nothing of its old record.
@@ -44,10 +44,10 @@ async function repair(request: APIRequestContext, bookId: number, headers: Recor
   return { stage: 'rescan', status: rescan.status(), body: rescan.ok() ? await rescan.json() : await rescan.text() }
 }
 
-test.describe('Full-stack E2E repair persistence', () => {
+test.describe('Backend integration repair persistence', () => {
   test('fails a deleted book but continues and persists the next selected book', async ({ request }) => {
     const [deletedBook, repairedBook] = (await (await request.get('/api/v1/library')).json()) as LibraryBook[]
-    if (!deletedBook || !repairedBook) throw new Error('The E2E seed needs two library books.')
+    if (!deletedBook || !repairedBook) throw new Error('The backend integration seed needs two library books.')
     const headers = await antiforgeryHeaders(request)
 
     const deleteResponse = await request.delete(`/api/v1/library/${deletedBook.id}`, {
@@ -88,11 +88,11 @@ test.describe('Full-stack E2E repair persistence', () => {
 
   test('keeps monitoring and quality-profile settings after a record-change repair', async ({ request }) => {
     const book = ((await (await request.get('/api/v1/library')).json()) as LibraryBook[])[0]
-    if (!book) throw new Error('The E2E seed needs a library book.')
+    if (!book) throw new Error('The backend integration seed needs a library book.')
     const headers = await antiforgeryHeaders(request)
 
     const profileResponse = await request.post('/api/v1/qualityprofile', {
-      data: { name: 'E2E Repair Profile', isDefault: true },
+      data: { name: 'Backend Integration Repair Profile', isDefault: true },
       headers,
     })
     expect(profileResponse.ok()).toBe(true)

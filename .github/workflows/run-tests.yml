@@ -144,8 +144,8 @@ jobs:
       - name: Publish API (linux-x64)
         run: dotnet publish ${{ env.API_PROJECT }} -c Release -r linux-x64 --no-restore --self-contained true /p:PublishSingleFile=true -o listenarr.api/publish/linux-x64
 
-  integration-tests:
-    if: ${{ !inputs.jobs || contains(inputs.jobs, 'integration-tests') }}
+  frontend-integration-tests:
+    if: ${{ !inputs.jobs || contains(inputs.jobs, 'frontend-integration-tests') }}
     # A self-hosted runner when one is named (manual run) or configured (CI_RUNNER), else GitHub's.
     runs-on: ${{ inputs.runner || vars.CI_RUNNER || 'ubuntu-24.04' }}
 
@@ -167,12 +167,12 @@ jobs:
         working-directory: fe
         run: npx playwright install --with-deps chromium
 
-      - name: Run Playwright API-stub integration tests
+      - name: Run Playwright frontend integration tests (browser, stubbed API)
         working-directory: fe
-        run: npm run test:integration:playwright
+        run: npm run test:frontend-integration
 
-  e2e-tests:
-    if: ${{ !inputs.jobs || contains(inputs.jobs, 'e2e-tests') }}
+  backend-integration-tests:
+    if: ${{ !inputs.jobs || contains(inputs.jobs, 'backend-integration-tests') }}
     # A self-hosted runner when one is named (manual run) or configured (CI_RUNNER), else GitHub's.
     runs-on: ${{ inputs.runner || vars.CI_RUNNER || 'ubuntu-24.04' }}
 
@@ -193,9 +193,9 @@ jobs:
       - name: Install synthetic audiobook generator dependencies
         run: sudo apt-get update && sudo apt-get install --yes ffmpeg python3-venv
 
-      - name: Run Playwright API E2E against Docker infrastructure
+      - name: Run Playwright backend integration tests (API only, app in Docker)
         working-directory: fe
-        run: npm run test:e2e
+        run: npm run test:backend-integration
 
   backend-tests-linux:
     if: ${{ !inputs.jobs || contains(inputs.jobs, 'backend-tests-linux') }}

@@ -4,7 +4,7 @@
     "dockerfile": "Dockerfile"
   },
   "features": {
-    // Its own Docker daemon, not the host's: the full-stack E2E runner mounts
+    // Its own Docker daemon, not the host's: the backend integration runner mounts
     // temporary directories of this container into the Listenarr container.
     "ghcr.io/devcontainers/features/docker-in-docker:2": {}
   },

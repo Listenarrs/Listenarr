@@ -1,10 +1,11 @@
 import { defineConfig, devices } from '@playwright/test'
 
-// Browser tests of the frontend alone: every API response is stubbed (playwright/support/api-stubs.ts).
+// Frontend integration tests: the frontend alone in a browser, every API response stubbed
+// (playwright/support/api-stubs.ts).
 export default defineConfig({
-  testDir: './playwright/integration',
+  testDir: './playwright/frontend-integration',
   testMatch: '**/*.spec.ts',
-  outputDir: './test-results/integration',
+  outputDir: './test-results/frontend-integration',
   workers: 4,
   fullyParallel: true,
   forbidOnly: !!process.env.CI,

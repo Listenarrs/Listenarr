@@ -79,13 +79,13 @@ dotnet ef database update
 cd fe
 npm run test:unit
 
-# Run browser integration tests with Playwright
+# Run frontend integration tests with Playwright (browser, stubbed API)
 cd fe
-npm run test:integration:playwright
+npm run test:frontend-integration
 
-# Run API-only E2E tests against Docker infrastructure
+# Run backend integration tests with Playwright (API only, app in Docker)
 cd fe
-npm run test:e2e
+npm run test:backend-integration
 ```
 
 ## Architecture Overview
