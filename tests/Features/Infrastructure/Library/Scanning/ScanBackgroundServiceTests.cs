@@ -67,7 +67,7 @@ public sealed class ScanBackgroundServiceTests : BaseTests
             It.IsAny<CancellationToken>()), Times.Never);
 
         readiness.SetReady();
-        await processed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await processed.Task.WaitAsync(TestTimeouts.Signal);
         await service.StopAsync(CancellationToken.None);
 
         processor.Verify(service => service.ProcessJobAsync(
@@ -136,7 +136,7 @@ public sealed class ScanBackgroundServiceTests : BaseTests
         await service.StartAsync(CancellationToken.None);
         try
         {
-            await secondProcessed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await secondProcessed.Task.WaitAsync(TestTimeouts.Signal);
             Assert.True(queue.TryGetJob(firstId, out var first));
             var firstJob = Assert.IsType<ScanJob>(first);
             Assert.Equal("Failed", firstJob.Status);
@@ -212,7 +212,7 @@ public sealed class ScanBackgroundServiceTests : BaseTests
         await service.StartAsync(CancellationToken.None);
         try
         {
-            await secondProcessed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await secondProcessed.Task.WaitAsync(TestTimeouts.Signal);
             processor.Verify(candidate => candidate.ProcessJobAsync(
                 second,
                 It.IsAny<CancellationToken>()), Times.Once);

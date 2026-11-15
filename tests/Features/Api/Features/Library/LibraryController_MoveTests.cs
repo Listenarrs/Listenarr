@@ -1168,7 +1168,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                     MoveFiles = true
                 });
 
-            var completed = await Task.WhenAny(moveTask, Task.Delay(TimeSpan.FromSeconds(1)));
+            var completed = await Task.WhenAny(moveTask, Task.Delay(TestTimeouts.Signal));
             Assert.Same(moveTask, completed);
             var conflict = Assert.IsType<ConflictObjectResult>(await moveTask);
             var payload = JsonSerializer.Serialize(conflict.Value);

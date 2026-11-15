@@ -1903,14 +1903,14 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
 
             using var queueCancellation = new CancellationTokenSource();
             var queueTask = adapter.GetQueueAsync(client, queueCancellation.Token);
-            await queueHistoryStarted.WaitAsync(TimeSpan.FromSeconds(5));
+            await queueHistoryStarted.WaitAsync(TestTimeouts.Signal);
             queueCancellation.Cancel();
             var queueException = await Assert.ThrowsAnyAsync<OperationCanceledException>(
                 () => queueTask);
 
             using var itemCancellation = new CancellationTokenSource();
             var itemTask = adapter.GetItemsAsync(client, itemCancellation.Token);
-            await itemHistoryStarted.WaitAsync(TimeSpan.FromSeconds(5));
+            await itemHistoryStarted.WaitAsync(TestTimeouts.Signal);
             itemCancellation.Cancel();
             var itemException = await Assert.ThrowsAnyAsync<OperationCanceledException>(
                 () => itemTask);
@@ -2381,7 +2381,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
             var itemTask = adapter.GetItemsAsync(
                 CreateClient(),
                 cancellationTokenSource.Token);
-            await historyRequestStarted.WaitAsync(TimeSpan.FromSeconds(5));
+            await historyRequestStarted.WaitAsync(TestTimeouts.Signal);
             cancellationTokenSource.Cancel();
 
             var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(

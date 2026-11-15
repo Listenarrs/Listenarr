@@ -151,7 +151,7 @@ public sealed class AudiobookOperationCoordinatorTests : BaseTests
                 return Task.CompletedTask;
             });
 
-        await secondEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await secondEntered.Task.WaitAsync(TestTimeouts.Signal);
         releaseFirst.TrySetResult();
         await Task.WhenAll(first, second);
     }
