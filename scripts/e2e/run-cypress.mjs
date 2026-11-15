@@ -2,7 +2,7 @@ import { once } from 'node:events'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { cp, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { createServer as createTcpServer } from 'node:net'
@@ -12,7 +12,7 @@ import { DatabaseSync } from 'node:sqlite'
 const repositoryRoot = resolve(fileURLToPath(new URL('../..', import.meta.url)))
 const frontendDirectory = join(repositoryRoot, 'fe')
 const cypressCli = join(frontendDirectory, 'node_modules', 'cypress', 'bin', 'cypress')
-const composeFile = join(repositoryRoot, 'scripts', 'e2e', 'docker-compose.yml')
+const e2eDockerfile = join(repositoryRoot, '.devcontainer', 'e2e.Dockerfile')
 const e2eMode = process.argv[2] ?? 'all'
 
 if (!['all', 'read-only', 'write'].includes(e2eMode)) {
@@ -144,25 +144,18 @@ const seedConfigDirectory = join(contentRoot, 'seed-config')
 const filesystemDirectory = join(contentRoot, 'filesystem')
 const seedFilesystemDirectory = join(contentRoot, 'seed-filesystem')
 const databasePath = join(configDirectory, 'database', 'listenarr.db')
-const projectName = `listenarr-cypress-${process.pid}-${Date.now().toString(36)}`
+const runId = `${process.pid}-${Date.now().toString(36)}`
+const containerName = `listenarr-cypress-${runId}`
+const appImage = `listenarr-cypress-e2e-app:${runId}`
+const e2eImage = `listenarr-cypress-e2e:${runId}`
 const apiPort = await availablePort()
 const apiUrl = `http://127.0.0.1:${apiPort}`
-const composeEnvironment = {
-  ...process.env,
-  LISTENARR_E2E_CONFIG_DIR: configDirectory,
-  LISTENARR_E2E_FILESYSTEM_DIR: filesystemDirectory,
-  LISTENARR_E2E_PORT: String(apiPort),
-  LISTENARR_E2E_IMAGE_TAG: `${process.pid}-${Date.now().toString(36)}`,
-  LISTENARR_E2E_UID: String(process.getuid?.() ?? 0),
-  LISTENARR_E2E_GID: String(process.getgid?.() ?? 0),
-}
-const composeArgs = ['compose', '--file', composeFile, '--project-name', projectName]
-const runCompose = async (args, label) => {
-  const child = start('docker', [...composeArgs, ...args], { cwd: repositoryRoot, env: composeEnvironment })
+const runDocker = async (args, label) => {
+  const child = start('docker', args, { cwd: repositoryRoot })
   await waitForExit(child, label)
 }
 let exitCode = 1
-let composeStarted = false
+let dockerStarted = false
 try {
   await mkdir(configDirectory, { recursive: true })
   await mkdir(join(seedFilesystemDirectory, 'import'), { recursive: true })
@@ -170,34 +163,55 @@ try {
   const audioFixtureGenerator = start(
     'bash',
     [join(repositoryRoot, 'scripts', 'e2e', 'generate-audio-fixtures.sh'), join(seedFilesystemDirectory, 'import')],
-    { cwd: repositoryRoot, env: composeEnvironment },
+    { cwd: repositoryRoot },
   )
   await waitForExit(audioFixtureGenerator, 'Synthetic audiobook fixture generation')
   await cp(seedFilesystemDirectory, filesystemDirectory, { recursive: true })
 
-  composeStarted = true
-  await runCompose(['up', '--build', '--detach'], 'Docker Compose E2E stack startup')
-  await waitFor(`${apiUrl}/api/v1/system/ready`, 'Listenarr Docker container')
-  await runCompose(
+  dockerStarted = true
+  await runDocker(['build', '--tag', appImage, repositoryRoot], 'Listenarr Docker image build')
+  await runDocker(
     [
-      'exec',
-      '--user',
-      '0',
-      'listenarr',
-      'sh',
-      '-c',
-      'mkdir -p /app/config/ffmpeg && cp /usr/bin/ffprobe /app/config/ffmpeg/ffprobe && chmod 755 /app/config/ffmpeg/ffprobe',
+      'build',
+      '--tag',
+      e2eImage,
+      '--build-arg',
+      `LISTENARR_IMAGE=${appImage}`,
+      '--file',
+      e2eDockerfile,
+      dirname(e2eDockerfile),
     ],
-    'E2E ffprobe setup',
+    'Listenarr E2E Docker image build',
   )
+  await runDocker(
+    [
+      'run',
+      '--detach',
+      '--name',
+      containerName,
+      '--env',
+      `PUID=${process.getuid?.() ?? 0}`,
+      '--env',
+      `PGID=${process.getgid?.() ?? 0}`,
+      '--publish',
+      `127.0.0.1:${apiPort}:4545`,
+      '--volume',
+      `${configDirectory}:/app/config`,
+      '--volume',
+      `${filesystemDirectory}:/e2e`,
+      e2eImage,
+    ],
+    'Listenarr E2E container startup',
+  )
+  await waitFor(`${apiUrl}/api/v1/system/ready`, 'Listenarr Docker container')
 
   const settingsResponse = await fetch(`${apiUrl}/api/v1/configuration/settings`)
   if (!settingsResponse.ok) throw new Error('Could not initialize the E2E seed database.')
   await seedLibrary(apiUrl)
-  await runCompose(['stop', 'listenarr'], 'Docker Compose E2E app stop for seed snapshot')
+  await runDocker(['stop', containerName], 'Listenarr E2E container stop for seed snapshot')
   await cp(configDirectory, seedConfigDirectory, { recursive: true })
   const seedHash = databaseSnapshot(databasePath)
-  await runCompose(['start', 'listenarr'], 'Docker Compose E2E app restart')
+  await runDocker(['start', containerName], 'Listenarr E2E container restart')
   await waitFor(`${apiUrl}/api/v1/system/ready`, 'Listenarr Docker container after seed snapshot')
 
   const runCypressSpec = async (spec, configFile) => {
@@ -207,10 +221,10 @@ try {
       {
         cwd: frontendDirectory,
         env: {
-          ...composeEnvironment,
+          ...process.env,
           LISTENARR_E2E_BASE_URL: apiUrl,
-          LISTENARR_E2E_COMPOSE_FILE: composeFile,
-          LISTENARR_E2E_COMPOSE_PROJECT: projectName,
+          LISTENARR_E2E_CONTAINER: containerName,
+          LISTENARR_E2E_CONFIG_DIR: configDirectory,
           LISTENARR_E2E_FILESYSTEM_DIR: filesystemDirectory,
           LISTENARR_E2E_SEED_FILESYSTEM_DIR: seedFilesystemDirectory,
           LISTENARR_E2E_SEED_CONFIG_DIR: seedConfigDirectory,
@@ -220,18 +234,18 @@ try {
     try {
       await waitForExit(cypress, `Cypress spec ${spec}`)
     } catch (error) {
-      await runCompose(['logs', '--no-color', 'listenarr'], `Docker Compose logs after ${spec} failure`)
+      await runDocker(['logs', containerName], `Listenarr E2E container logs after ${spec} failure`)
       throw error
     }
   }
 
   if (e2eMode !== 'write') {
     await runCypressSpec('cypress/e2e/read-only/loads-seeded-library-from-live-api.cy.ts', 'cypress.config.ts')
-    await runCompose(['stop', 'listenarr'], 'Docker Compose E2E app stop after read-only tests')
+    await runDocker(['stop', containerName], 'Listenarr E2E container stop after read-only tests')
     if (databaseSnapshot(databasePath) !== seedHash) {
       throw new Error('The read-only E2E suite modified the seeded database.')
     }
-    await runCompose(['start', 'listenarr'], 'Docker Compose E2E app restart before write tests')
+    await runDocker(['start', containerName], 'Listenarr E2E container restart before write tests')
     await waitFor(`${apiUrl}/api/v1/system/ready`, 'Listenarr Docker container before write tests')
   }
 
@@ -243,11 +257,16 @@ try {
   }
   exitCode = 0
 } finally {
-  if (composeStarted) {
-    try {
-      await runCompose(['down', '--volumes', '--remove-orphans', '--rmi', 'local'], 'Docker Compose E2E stack cleanup')
-    } catch (error) {
-      console.error(`Could not clean up the Docker Compose E2E stack: ${error.message}`)
+  if (dockerStarted) {
+    for (const [args, label] of [
+      [['rm', '--force', '--volumes', containerName], 'container'],
+      [['rmi', '--force', e2eImage, appImage], 'images'],
+    ]) {
+      try {
+        await runDocker(args, `Listenarr E2E ${label} cleanup`)
+      } catch (error) {
+        console.error(`Could not clean up the Listenarr E2E ${label}: ${error.message}`)
+      }
     }
   }
   await rm(contentRoot, { recursive: true, force: true })
