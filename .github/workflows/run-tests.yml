@@ -123,11 +123,15 @@ jobs:
       - name: Build solution
         run: dotnet build listenarr.slnx --no-restore --configuration Release
 
-      - name: Check generated API types
+      - name: Check backend API contract against generated TypeScript types
+        working-directory: fe
+        run: npm run api-types:check
+
+      - name: Type-check browser tests
         working-directory: fe
         run: |
-          npm run api-types:check
           npm run type-check:cypress
+          npm run type-check:playwright
 
       - name: Run frontend tests
         working-directory: fe
@@ -161,9 +165,17 @@ jobs:
         working-directory: fe
         run: npm ci --engine-strict
 
+      - name: Install Playwright Chromium
+        working-directory: fe
+        run: npx playwright install --with-deps chromium
+
       - name: Run Cypress API-stub integration tests
         working-directory: fe
         run: npm run test:integration:cypress
+
+      - name: Run Playwright API-stub integration tests
+        working-directory: fe
+        run: npm run test:integration:playwright
 
   e2e-tests:
     if: ${{ !inputs.jobs || contains(inputs.jobs, 'e2e-tests') }}
@@ -184,12 +196,20 @@ jobs:
         working-directory: fe
         run: npm ci --engine-strict
 
+      - name: Install Playwright Chromium
+        working-directory: fe
+        run: npx playwright install --with-deps chromium
+
       - name: Install synthetic audiobook generator dependencies
         run: sudo apt-get update && sudo apt-get install --yes ffmpeg python3-venv
 
       - name: Run Cypress full-stack E2E in Docker
         working-directory: fe
         run: npm run test:e2e
+
+      - name: Run Playwright full-stack E2E in Docker
+        working-directory: fe
+        run: npm run test:e2e:playwright
 
   backend-tests-linux:
     if: ${{ !inputs.jobs || contains(inputs.jobs, 'backend-tests-linux') }}
