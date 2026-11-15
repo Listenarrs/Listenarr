@@ -244,7 +244,7 @@ public sealed class ManualImportMarkerlessRegistrationTests : BaseTests
         Task<List<RenameResult>>? organise = null;
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await entered.Task.WaitAsync(TestTimeouts.Signal);
             organise = rename.ExecuteRenameAsync(operations, cancellation.Token);
             Assert.False(organise.IsCompleted);
             Assert.Equal("organise audio", await File.ReadAllTextAsync(oldPath));
@@ -260,12 +260,12 @@ public sealed class ManualImportMarkerlessRegistrationTests : BaseTests
         finally
         {
             release.TrySetResult();
-            await import.WaitAsync(TimeSpan.FromSeconds(15));
+            await import.WaitAsync(TestTimeouts.Signal);
             if (organise != null)
             {
                 try
                 {
-                    await organise.WaitAsync(TimeSpan.FromSeconds(15));
+                    await organise.WaitAsync(TestTimeouts.Signal);
                 }
                 catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
                 {
@@ -278,7 +278,7 @@ public sealed class ManualImportMarkerlessRegistrationTests : BaseTests
         {
             organise = rename.ExecuteRenameAsync(operations);
         }
-        var result = Assert.Single(await organise!.WaitAsync(TimeSpan.FromSeconds(15)));
+        var result = Assert.Single(await organise!.WaitAsync(TestTimeouts.Signal));
         if (sameAudiobook)
         {
             // Import occupied this preview's destination while Organise waited.
@@ -390,7 +390,7 @@ public sealed class ManualImportMarkerlessRegistrationTests : BaseTests
         Task<Microsoft.AspNetCore.Mvc.ActionResult<object>>? import = null;
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await entered.Task.WaitAsync(TestTimeouts.Signal);
             import = controller.Start(request, cancellation.Token);
             Assert.False(import.IsCompleted);
             Assert.Equal("import audio", await File.ReadAllTextAsync(incoming));
@@ -409,12 +409,12 @@ public sealed class ManualImportMarkerlessRegistrationTests : BaseTests
         finally
         {
             release.TrySetResult();
-            await organise.WaitAsync(TimeSpan.FromSeconds(15));
+            await organise.WaitAsync(TestTimeouts.Signal);
             if (import != null)
             {
                 try
                 {
-                    await import.WaitAsync(TimeSpan.FromSeconds(15));
+                    await import.WaitAsync(TestTimeouts.Signal);
                 }
                 catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
                 {
@@ -589,7 +589,7 @@ public sealed class ManualImportMarkerlessRegistrationTests : BaseTests
         Task<Microsoft.AspNetCore.Mvc.ActionResult<object>>? importing = null;
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await entered.Task.WaitAsync(TestTimeouts.Signal);
             importing = controller.Start(request, cancellation.Token);
             Assert.False(importing.IsCompleted);
             Assert.Equal("import audio", await File.ReadAllTextAsync(incoming));
@@ -715,7 +715,7 @@ public sealed class ManualImportMarkerlessRegistrationTests : BaseTests
         Task<Microsoft.AspNetCore.Mvc.ActionResult<object>>? importing = null;
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await entered.Task.WaitAsync(TestTimeouts.Signal);
             importing = controller.Start(request, cancellation.Token);
             Assert.False(importing.IsCompleted);
             Assert.Equal("import audio", await File.ReadAllTextAsync(incoming));
@@ -867,7 +867,7 @@ public sealed class ManualImportMarkerlessRegistrationTests : BaseTests
         Task<RootFolderPathChangeResult>? changing = null;
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await entered.Task.WaitAsync(TestTimeouts.Signal);
             changing = relocation.StartAsync(root.Id, command, cancellation.Token);
             Assert.False(changing.IsCompleted);
             await using var paused = await factory.CreateDbContextAsync();
@@ -1058,14 +1058,14 @@ public sealed class ManualImportMarkerlessRegistrationTests : BaseTests
             {
                 pause.Arm();
                 recovering = recovery.Retry(operationId, CancellationToken.None);
-                await pause.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                await pause.Entered.Task.WaitAsync(TestTimeouts.Signal);
                 importing = controller.Start(request, cancellation.Token);
                 Assert.False(importing.IsCompleted);
             }
             else
             {
                 importing = controller.Start(request);
-                await importEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                await importEntered.Task.WaitAsync(TestTimeouts.Signal);
                 recovering = recovery.Retry(operationId, cancellation.Token);
                 Assert.False(recovering.IsCompleted);
             }
@@ -1277,7 +1277,7 @@ public sealed class ManualImportMarkerlessRegistrationTests : BaseTests
         Task<Microsoft.AspNetCore.Mvc.ActionResult<object>>? importing = null;
         try
         {
-            await pause.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await pause.Entered.Task.WaitAsync(TestTimeouts.Signal);
             importing = controller.Start(request, cancellation.Token);
             Assert.False(importing.IsCompleted);
             Assert.Equal("new audio", await File.ReadAllTextAsync(incoming));
@@ -1480,7 +1480,7 @@ public sealed class ManualImportMarkerlessRegistrationTests : BaseTests
         Task<Microsoft.AspNetCore.Mvc.IActionResult>? recovering = null;
         try
         {
-            await pause.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await pause.Entered.Task.WaitAsync(TestTimeouts.Signal);
             await using var paused = await factory.CreateDbContextAsync();
             var journal = await paused.FileMutationJournals.SingleAsync();
             operationId = journal.OperationId;
@@ -1645,7 +1645,7 @@ public sealed class ManualImportMarkerlessRegistrationTests : BaseTests
         try
         {
             var reached = await Task.WhenAny(pause.Entered.Task, importing)
-                .WaitAsync(TimeSpan.FromSeconds(60));
+                .WaitAsync(TestTimeouts.Signal);
             if (reached == importing)
             {
                 var earlyResult = await importing;
@@ -1839,7 +1839,7 @@ public sealed class ManualImportMarkerlessRegistrationTests : BaseTests
         Guid companionOperation = Guid.Empty;
         try
         {
-            await Task.WhenAny(entered.Task, importing).WaitAsync(TimeSpan.FromSeconds(10));
+            await Task.WhenAny(entered.Task, importing).WaitAsync(TestTimeouts.Signal);
             if (importing.IsCompleted)
             {
                 await using var diagnostic = await factory.CreateDbContextAsync();
@@ -1849,7 +1849,7 @@ public sealed class ManualImportMarkerlessRegistrationTests : BaseTests
                     + Environment.NewLine + System.Text.Json.JsonSerializer.Serialize(
                         await diagnostic.FileMutationJournals.AsNoTracking().ToListAsync()));
             }
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await entered.Task.WaitAsync(TestTimeouts.Signal);
             await using var paused = await factory.CreateDbContextAsync();
             var journal = await paused.FileMutationJournals.SingleAsync(item => item.DestinationPath == companionDestination);
             companionOperation = journal.OperationId;
@@ -1976,7 +1976,7 @@ public sealed class ManualImportMarkerlessRegistrationTests : BaseTests
         }, cancellation.Token);
         try
         {
-            await Task.WhenAny(pause.Entered.Task, importing).WaitAsync(TimeSpan.FromSeconds(10));
+            await Task.WhenAny(pause.Entered.Task, importing).WaitAsync(TestTimeouts.Signal);
             Assert.False(importing.IsCompleted);
             await pause.Entered.Task;
             await using var paused = await factory.CreateDbContextAsync();

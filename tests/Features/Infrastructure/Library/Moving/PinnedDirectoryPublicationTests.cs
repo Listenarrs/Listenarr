@@ -73,7 +73,7 @@ public sealed partial class PinnedDirectoryCreationTests : BaseTests
         using var anchor = PinnedDirectoryCreation.OpenPinnedDirectoryNoFollow(parent);
         var openTask = Task.Run(() =>
             anchor.OpenExistingFile(Path.GetFileName(pipePath), requireDeleteAccess: false));
-        var completed = await Task.WhenAny(openTask, Task.Delay(TimeSpan.FromSeconds(2)));
+        var completed = await Task.WhenAny(openTask, Task.Delay(TestTimeouts.Signal));
 
         Assert.Same(openTask, completed);
         using var entry = await openTask;
