@@ -196,20 +196,12 @@ jobs:
         working-directory: fe
         run: npm ci --engine-strict
 
-      - name: Install Playwright Chromium
-        working-directory: fe
-        run: npx playwright install --with-deps chromium
-
       - name: Install synthetic audiobook generator dependencies
         run: sudo apt-get update && sudo apt-get install --yes ffmpeg python3-venv
 
-      - name: Run Cypress full-stack E2E in Docker
+      - name: Run Playwright API E2E against Docker infrastructure
         working-directory: fe
         run: npm run test:e2e
-
-      - name: Run Playwright full-stack E2E in Docker
-        working-directory: fe
-        run: npm run test:e2e:playwright
 
   backend-tests-linux:
     if: ${{ !inputs.jobs || contains(inputs.jobs, 'backend-tests-linux') }}

@@ -17,8 +17,8 @@ export default defineConfig((configEnv) =>
         // Keep full-suite runs stable on Windows after dependency updates increase transform load.
         testTimeout: 30000,
         hookTimeout: 30000,
-        // Exclude e2e and cypress test files from unit test runs
-        exclude: [...configDefaults.exclude, 'e2e/**', 'cypress/**'],
+        // Exclude browser test files from unit test runs
+        exclude: [...configDefaults.exclude, 'e2e/**', 'cypress/**', 'playwright/**'],
         root: fileURLToPath(new URL('./', import.meta.url)),
       },
     },
