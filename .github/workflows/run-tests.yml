@@ -129,9 +129,7 @@ jobs:
 
       - name: Type-check browser tests
         working-directory: fe
-        run: |
-          npm run type-check:cypress
-          npm run type-check:playwright
+        run: npm run type-check:playwright
 
       - name: Run frontend tests
         working-directory: fe
@@ -168,10 +166,6 @@ jobs:
       - name: Install Playwright Chromium
         working-directory: fe
         run: npx playwright install --with-deps chromium
-
-      - name: Run Cypress API-stub integration tests
-        working-directory: fe
-        run: npm run test:integration:cypress
 
       - name: Run Playwright API-stub integration tests
         working-directory: fe

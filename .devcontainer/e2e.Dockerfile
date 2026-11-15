@@ -1,4 +1,4 @@
-# Dedicated full-stack E2E host, built and started by scripts/e2e/run-cypress.mjs:
+# Dedicated full-stack E2E host, built and started by scripts/e2e/run-e2e.mjs:
 #
 #   docker build --tag listenarr-e2e-app .
 #   docker build --tag listenarr-e2e --build-arg LISTENARR_IMAGE=listenarr-e2e-app \

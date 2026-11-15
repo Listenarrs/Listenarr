@@ -159,7 +159,6 @@ export function createAppRouter() {
 
   // Navigation guard: protect routes requiring auth and preserve redirectTo
   router.beforeEach(async (to, from) => {
-    if (import.meta.env.CYPRESS) return true
     const auth = useAuthStore()
     const forceLogin =
       to.name === 'login' &&

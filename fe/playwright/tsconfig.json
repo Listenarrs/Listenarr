@@ -6,6 +6,8 @@
     "tsBuildInfoFile": "../node_modules/.tmp/tsconfig.playwright.tsbuildinfo",
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    // The integration specs run in the browser and read `window`, `sessionStorage`, ...
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "types": ["node"]
   }
 }

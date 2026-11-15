@@ -127,8 +127,6 @@ lerna-debug.log*
 coverage/
 *.coverage
 .nyc_output/
-/cypress/videos/
-/cypress/screenshots/
 test-results/
 playwright-report/
 .playwright-cli/

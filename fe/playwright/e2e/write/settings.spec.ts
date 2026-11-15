@@ -1,32 +1,32 @@
-import { expect, test } from '@playwright/test'
-import type { ListenarrDomainConfigurationApplicationSettings } from '../../../cypress/support/generated-api/types.gen.js'
+import type { ListenarrDomainConfigurationApplicationSettings } from '../../support/generated-api/types.gen.js'
+import { antiforgeryHeaders } from '../support/stack.js'
+import { expect, test } from '../support/write-test.js'
 
-test('writes settings and reads the persisted API contract back', async ({
-  request,
-}) => {
-  const settingsResponse = await request.get('/api/v1/configuration/settings')
-  expect(settingsResponse.status()).toBe(200)
-  const settings =
-    (await settingsResponse.json()) as ListenarrDomainConfigurationApplicationSettings
-  expect(typeof settings.enableNotifications).toBe('boolean')
-  const enableNotifications = !settings.enableNotifications
+type Settings = ListenarrDomainConfigurationApplicationSettings
 
-  const tokenResponse = await request.get('/api/v1/antiforgery/token')
-  expect(tokenResponse.status()).toBe(200)
-  const { token } = (await tokenResponse.json()) as { token: string }
+test.describe('Full-stack E2E write path', () => {
+  test('saves a settings change and reads it back', async ({ request }) => {
+    const settingsResponse = await request.get('/api/v1/configuration/settings')
+    expect(settingsResponse.status()).toBe(200)
+    const settings = (await settingsResponse.json()) as Settings
+    expect(settings.enableNotifications).toBe(false)
 
-  const saveResponse = await request.post('/api/v1/configuration/settings', {
-    data: { ...settings, enableNotifications },
-    headers: { 'X-XSRF-TOKEN': token },
+    const saveResponse = await request.post('/api/v1/configuration/settings', {
+      data: { ...settings, enableNotifications: true },
+      headers: await antiforgeryHeaders(request),
+    })
+    expect(saveResponse.status()).toBe(200)
+    expect(((await saveResponse.json()) as Settings).enableNotifications).toBe(true)
+
+    const persistedResponse = await request.get('/api/v1/configuration/settings')
+    expect(persistedResponse.status()).toBe(200)
+    expect(((await persistedResponse.json()) as Settings).enableNotifications).toBe(true)
   })
-  expect(saveResponse.status()).toBe(200)
-  const savedSettings =
-    (await saveResponse.json()) as ListenarrDomainConfigurationApplicationSettings
-  expect(savedSettings.enableNotifications).toBe(enableNotifications)
 
-  const persistedResponse = await request.get('/api/v1/configuration/settings')
-  expect(persistedResponse.status()).toBe(200)
-  const persistedSettings =
-    (await persistedResponse.json()) as ListenarrDomainConfigurationApplicationSettings
-  expect(persistedSettings.enableNotifications).toBe(enableNotifications)
+  test('restores seeded settings and books before the next write test', async ({ request }) => {
+    const settings = (await (await request.get('/api/v1/configuration/settings')).json()) as Settings
+    expect(settings.enableNotifications).toBe(false)
+
+    expect(await (await request.get('/api/v1/library')).json()).toHaveLength(4)
+  })
 })

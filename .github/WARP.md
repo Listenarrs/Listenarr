@@ -79,13 +79,13 @@ dotnet ef database update
 cd fe
 npm run test:unit
 
-# Run E2E tests with Cypress
-cd fe  
-npm run test:e2e
-
-# Open Cypress interactively for debugging
+# Run browser integration tests with Playwright
 cd fe
-npm run test:e2e:dev
+npm run test:integration:playwright
+
+# Run API-only E2E tests against Docker infrastructure
+cd fe
+npm run test:e2e
 ```
 
 ## Architecture Overview

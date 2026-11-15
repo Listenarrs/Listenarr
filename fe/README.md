@@ -47,18 +47,18 @@ npm run build
 npm run test:unit
 ```
 
-### Run API-stub Integration Tests with [Cypress](https://www.cypress.io/)
+### Run API-stub Integration Tests with [Playwright](https://playwright.dev/)
 
 ```sh
-npm run test:integration:cypress
+npm run test:integration:playwright
 ```
 
 These browser tests stub the HTTP API, so they are classified as integration tests rather than full-stack E2E tests. They run against Vite without starting the C# API.
-Their specs live under `cypress/integration/` and use integration-only support/configuration.
+Their browser specs live under `playwright/integration/` and run with the shared configuration in `playwright.integration.config.ts`.
 
-Put every API intercept in `cypress/support/api-stubs.ts`, including one-off endpoints, so route matching and response setup are reusable from any spec. Add an exported helper there when a test needs a new endpoint or response shape; specs call the helper and keep test-specific request assertions beside the scenario. For example, `stubSettingsPage(settingsFixture({ outputPath: '/audiobooks' }))` supplies the common page dependencies, while `stubLibrary([libraryAudiobookFixture({ title: 'Dune' })])` stubs the backend's slim library-list response.
+Put every API intercept in `playwright/support/api-stubs.ts`, including one-off endpoints, so route matching and response setup are reusable from any spec. Add an exported helper there when a test needs a new endpoint or response shape; specs call the helper and keep test-specific request assertions beside the scenario. For example, `stubSettingsPage(settingsFixture({ outputPath: '/audiobooks' }))` supplies the common page dependencies, while `stubLibrary([libraryAudiobookFixture({ title: 'Dune' })])` stubs the backend's slim library-list response.
 
-The generated types in `cypress/support/generated-api/` come from the backend OpenAPI document and cover the documented bootstrap, settings, library, download, quality-profile, filesystem, API-configuration, and health responses used by Cypress. Run `npm run api-types:generate` after changing one of these contracts; CI runs `npm run api-types:check` and `npm run type-check:cypress` to catch contract drift in shared helpers and fixtures. For endpoints without an OpenAPI response schema, keep the intercept helper centralized here and pass scenario-specific reply data to it when needed.
+The generated types in `playwright/support/generated-api/` come from the backend OpenAPI document and cover the documented bootstrap, settings, library, download, quality-profile, filesystem, API-configuration, and health responses used by the integration helpers. Run `npm run api-types:generate` after changing one of these contracts; CI runs `npm run api-types:check` and `npm run type-check:playwright` to catch contract drift in shared helpers and fixtures. For endpoints without an OpenAPI response schema, keep the intercept helper centralized here and pass scenario-specific reply data to it when needed.
 
 ### Run Full-stack E2E Tests
 
@@ -66,8 +66,8 @@ The generated types in `cypress/support/generated-api/` come from the backend Op
 npm run test:e2e
 ```
 
-This builds the production Docker image and a separate E2E host image. Cypress runs against the real API and frontend, but the test-only host registers a fixture-backed Audible client so test requests never reach Audible; production registration and its image contain no test stub. The runner mounts unique temporary config and filesystem directories, seeds the database from `scripts/e2e/seed-library.json`, and restores both snapshots before every write test. It generates a tagged M4B import fixture with the generator created by [m4bard](https://github.com/m4bard/listenarr-testdata), pinned and invoked by `scripts/e2e/generate-audio-fixtures.sh`; the write suite scans, imports, and moves that file, then verifies its persisted record and filesystem location. The container and temporary data are removed on exit, so the runner does not use a developer database or instance. The dedicated host is built from `tests/Listenarr.TestHost/Listenarr.TestHost.csproj` by `.devcontainer/e2e.Dockerfile`, using the production image for the frontend and runtime setup. Docker, Git, Python 3 with `venv`, and FFmpeg are required; the dev container (`.devcontainer/`) provides all of them.
-Read-only specs live under `cypress/e2e/read-only/`; database-mutating specs live under `cypress/e2e/write/` and use a separate Cypress config and reset hook.
+This builds the production Docker image and a separate E2E host image, then runs Playwright API tests against the app in Docker without launching a browser. The test-only host registers a fixture-backed Audible client so test requests never reach Audible; production registration and its image contain no test stub. The runner mounts unique temporary config and filesystem directories, seeds the database from `scripts/e2e/seed-library.json`, and restores both snapshots before every write test. It generates a tagged M4B import fixture with the generator created by [m4bard](https://github.com/m4bard/listenarr-testdata), pinned and invoked by `scripts/e2e/generate-audio-fixtures.sh`; the write suite scans, imports, and moves that file, then verifies its persisted record and filesystem location. The container and temporary data are removed on exit, so the runner does not use a developer database or instance. The dedicated host is built from `tests/Listenarr.TestHost/Listenarr.TestHost.csproj` by `.devcontainer/e2e.Dockerfile`. Docker, Git, Python 3 with `venv`, and FFmpeg are required; the dev container (`.devcontainer/`) provides all of them.
+Read-only specs live under `playwright/e2e/read-only/`; database-mutating specs live under `playwright/e2e/write/` and restore the seeded database and filesystem before each test.
 
 The ordered full suite is the CI command. For local debugging, `npm run test:e2e:read-only` runs only the read-only suite and `npm run test:e2e:write` runs only the reset-before-each-test write suite.
 
