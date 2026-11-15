@@ -60,8 +60,8 @@ public sealed class MoveBackgroundServiceTests : BaseTests
             It.IsAny<CancellationToken>()), Times.Never);
 
         readiness.SetReady();
-        await recovered.Task.WaitAsync(TestTimeouts.Signal);
-        await processed.Task.WaitAsync(TestTimeouts.Signal);
+        await recovered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await processed.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await worker.StopAsync(CancellationToken.None);
 
         queue.Verify(service => service.TryClaimJobAsync(
@@ -105,7 +105,7 @@ public sealed class MoveBackgroundServiceTests : BaseTests
             heartbeatInterval: TimeSpan.FromHours(1));
 
         await worker.StartAsync(CancellationToken.None);
-        await processorInvoked.Task.WaitAsync(TestTimeouts.Signal);
+        await processorInvoked.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await worker.StopAsync(CancellationToken.None);
 
         queue.Verify(service => service.UpdateJobStatusAsync(
@@ -164,7 +164,7 @@ public sealed class MoveBackgroundServiceTests : BaseTests
             heartbeatInterval: TimeSpan.FromMilliseconds(10));
 
         await worker.StartAsync(CancellationToken.None);
-        await processingCanceled.Task.WaitAsync(TestTimeouts.Signal);
+        await processingCanceled.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await worker.StopAsync(CancellationToken.None);
 
         queue.Verify(service => service.UpdateJobStatusAsync(
@@ -226,7 +226,7 @@ public sealed class MoveBackgroundServiceTests : BaseTests
             ownershipDuration: TimeSpan.FromMilliseconds(50));
 
         await worker.StartAsync(CancellationToken.None);
-        await processingCanceled.Task.WaitAsync(TestTimeouts.Signal);
+        await processingCanceled.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await worker.StopAsync(CancellationToken.None);
 
         queue.Verify(service => service.UpdateJobStatusAsync(
@@ -283,7 +283,7 @@ public sealed class MoveBackgroundServiceTests : BaseTests
             heartbeatInterval: TimeSpan.FromMilliseconds(10));
 
         await worker.StartAsync(CancellationToken.None);
-        await processingCanceled.Task.WaitAsync(TestTimeouts.Signal);
+        await processingCanceled.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await worker.StopAsync(CancellationToken.None);
 
         Assert.Equal(1, job.LeaseGeneration);

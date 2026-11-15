@@ -163,10 +163,10 @@ test.describe('Repair / Find Match card fields', () => {
     await submitSearch(page)
     await api.wait('search')
     await field(page, 'title').fill('Foundation')
-    await field(page, 'title').press('Enter')
+    await submitSearch(page)
     await api.wait('search')
     await field(page, 'title').fill('Dune')
-    await field(page, 'title').press('Enter')
+    await submitSearch(page)
     await expect.poll(() => api.calls('search').length).toBe(2)
   })
 
@@ -176,7 +176,7 @@ test.describe('Repair / Find Match card fields', () => {
     await submitSearch(page)
     await api.wait('search')
     await field(page, 'author').fill('Brian Herbert')
-    await field(page, 'author').press('Enter')
+    await submitSearch(page)
     const { request } = await api.wait('search')
     const body: SearchRequest = request.body
     expect(body.title).toBe('Dune')

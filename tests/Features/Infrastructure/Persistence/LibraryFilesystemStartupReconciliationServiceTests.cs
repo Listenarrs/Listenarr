@@ -94,7 +94,7 @@ public sealed class LibraryFilesystemStartupReconciliationServiceTests : BaseTes
             NullLogger<LibraryFilesystemStartupReconciliationService>.Instance);
 
         await service.StartAsync(CancellationToken.None);
-        await rootEntered.Task.WaitAsync(TestTimeouts.Signal);
+        await rootEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.Equal(LibraryFilesystemInitializationStatus.Running, readiness.Current.Status);
         Assert.Equal("RootFolderObjectIdentities", readiness.Current.Phase);
@@ -102,7 +102,7 @@ public sealed class LibraryFilesystemStartupReconciliationServiceTests : BaseTes
         Assert.Equal(["registration-adopt", "root"], order);
 
         releaseRoot.TrySetResult();
-        await readiness.WaitUntilReadyAsync().WaitAsync(TestTimeouts.Signal);
+        await readiness.WaitUntilReadyAsync().WaitAsync(TimeSpan.FromSeconds(5));
         await service.StopAsync(CancellationToken.None);
 
         Assert.Equal(
@@ -146,7 +146,7 @@ public sealed class LibraryFilesystemStartupReconciliationServiceTests : BaseTes
             NullLogger<LibraryFilesystemStartupReconciliationService>.Instance);
 
         await service.StartAsync(CancellationToken.None);
-        await service.ExecuteTask!.WaitAsync(TestTimeouts.Signal);
+        await service.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(5));
         await service.StopAsync(CancellationToken.None);
 
         Assert.True(
@@ -186,7 +186,7 @@ public sealed class LibraryFilesystemStartupReconciliationServiceTests : BaseTes
             NullLogger<LibraryFilesystemStartupReconciliationService>.Instance);
 
         await service.StartAsync(CancellationToken.None);
-        await service.ExecuteTask!.WaitAsync(TestTimeouts.Signal);
+        await service.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(5));
         await service.StopAsync(CancellationToken.None);
 
         Assert.True(
@@ -225,7 +225,7 @@ public sealed class LibraryFilesystemStartupReconciliationServiceTests : BaseTes
             NullLogger<LibraryFilesystemStartupReconciliationService>.Instance);
 
         await service.StartAsync(CancellationToken.None);
-        await service.ExecuteTask!.WaitAsync(TestTimeouts.Signal);
+        await service.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(5));
         await service.StopAsync(CancellationToken.None);
 
         Assert.True(
@@ -263,7 +263,7 @@ public sealed class LibraryFilesystemStartupReconciliationServiceTests : BaseTes
             NullLogger<LibraryFilesystemStartupReconciliationService>.Instance);
 
         await service.StartAsync(CancellationToken.None);
-        await service.ExecuteTask!.WaitAsync(TestTimeouts.Signal);
+        await service.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(5));
         await service.StopAsync(CancellationToken.None);
 
         Assert.Equal(
@@ -303,7 +303,7 @@ public sealed class LibraryFilesystemStartupReconciliationServiceTests : BaseTes
             NullLogger<LibraryFilesystemStartupReconciliationService>.Instance);
 
         await service.StartAsync(CancellationToken.None);
-        await rootEntered.Task.WaitAsync(TestTimeouts.Signal);
+        await rootEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await service.StopAsync(CancellationToken.None);
 
         Assert.Equal(LibraryFilesystemInitializationStatus.Running, readiness.Current.Status);

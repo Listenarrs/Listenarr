@@ -5,6 +5,7 @@ export default defineConfig({
   testDir: './playwright/integration',
   testMatch: '**/*.spec.ts',
   outputDir: './test-results/integration',
+  workers: 4,
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   reporter: 'list',

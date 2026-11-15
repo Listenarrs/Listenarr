@@ -44,7 +44,7 @@ public sealed class StartupDbNormalizerTests : BaseTests
             "filesystem_initialization_failed",
             "Injected filesystem failure.",
             "LibraryDirectoryOwnership");
-        await normalized.Task.WaitAsync(TestTimeouts.Signal);
+        await normalized.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await service.StopAsync(CancellationToken.None);
 
         repository.Verify(

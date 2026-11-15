@@ -938,7 +938,7 @@ public sealed partial class RootFolderRelocationServiceTests : BaseTests
             rootId = root.Id;
         }
 
-        using var timeout = new CancellationTokenSource(TestTimeouts.Signal);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         var exception = await Assert.ThrowsAsync<RootFolderPathChangeRejectedException>(() =>
             CreateService().StartAsync(
                 rootId,

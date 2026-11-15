@@ -406,7 +406,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                     },
                     Monitored = true
                 });
-            await lookupEntered.Task.WaitAsync(TestTimeouts.Signal);
+            await lookupEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
             var unrelatedMutationCompleted = false;
             await _provider
@@ -416,7 +416,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                     unrelatedMutationCompleted = true;
                     return Task.CompletedTask;
                 })
-                .WaitAsync(TestTimeouts.Signal);
+                .WaitAsync(TimeSpan.FromSeconds(5));
 
             Assert.True(unrelatedMutationCompleted);
             Assert.False(addTask.IsCompleted);
@@ -581,7 +581,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             var pending = _provider.GetRequiredService<LibraryAddWorkflow>().AutoSearchTask;
             if (pending != null)
             {
-                await pending.WaitAsync(TestTimeouts.Signal);
+                await pending.WaitAsync(TimeSpan.FromSeconds(10));
             }
 
             Assert.Equal(expectSearch, pending != null);
@@ -611,7 +611,7 @@ namespace Listenarr.Tests.Features.Api.Features.Library
             Assert.Single(await _audiobookRepository.GetAllAsync());
             var pending = _provider.GetRequiredService<LibraryAddWorkflow>().AutoSearchTask;
             Assert.NotNull(pending);
-            await pending!.WaitAsync(TestTimeouts.Signal);
+            await pending!.WaitAsync(TimeSpan.FromSeconds(10));
             downloads.Verify(service => service.SearchAndDownloadAsync(It.IsAny<int>()), Times.Once);
         }
 

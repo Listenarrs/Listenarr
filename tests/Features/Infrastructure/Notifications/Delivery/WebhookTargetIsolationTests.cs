@@ -106,10 +106,10 @@ namespace Listenarr.Tests.Features.Infrastructure.Notifications.Delivery
                 timeout: Timeout.InfiniteTimeSpan);
 
             var dispatch = probe.Service.SendNotificationAsync(NotificationTriggers.BookAdded, Payload);
-            await legacyRequestArrived.Task.WaitAsync(TestTimeouts.Signal);
+            await legacyRequestArrived.Task.WaitAsync(TimeSpan.FromSeconds(10));
             probe.HttpClient.CancelPendingRequests();
 
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => dispatch.WaitAsync(TestTimeouts.Signal));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => dispatch.WaitAsync(TimeSpan.FromSeconds(10)));
             Assert.Equal([LegacyUrl], probe.PostedUrls);
         }
 

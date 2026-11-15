@@ -41,7 +41,7 @@ public sealed class UnmatchedScanBackgroundServiceTests : BaseTests
         await service.StartAsync(CancellationToken.None);
         try
         {
-            await secondProcessed.Task.WaitAsync(TestTimeouts.Signal);
+            await secondProcessed.Task.WaitAsync(TimeSpan.FromSeconds(5));
             queue.Verify(candidate => candidate.UpdateJob(
                 first.Id,
                 "Failed",
@@ -88,7 +88,7 @@ public sealed class UnmatchedScanBackgroundServiceTests : BaseTests
         await service.StartAsync(CancellationToken.None);
         try
         {
-            await secondProcessed.Task.WaitAsync(TestTimeouts.Signal);
+            await secondProcessed.Task.WaitAsync(TimeSpan.FromSeconds(5));
             queue.Verify(candidate => candidate.UpdateJob(
                 first.Id,
                 "Failed",
@@ -141,7 +141,7 @@ public sealed class UnmatchedScanBackgroundServiceTests : BaseTests
         await service.StartAsync(CancellationToken.None);
         try
         {
-            await secondProcessed.Task.WaitAsync(TestTimeouts.Signal);
+            await secondProcessed.Task.WaitAsync(TimeSpan.FromSeconds(5));
             queue.Verify(candidate => candidate.UpdateJob(
                 first.Id,
                 "Failed",
@@ -177,7 +177,7 @@ public sealed class UnmatchedScanBackgroundServiceTests : BaseTests
         await service.StartAsync(CancellationToken.None);
         try
         {
-            await secondProcessed.Task.WaitAsync(TestTimeouts.Signal);
+            await secondProcessed.Task.WaitAsync(TimeSpan.FromSeconds(5));
             processor.Verify(candidate => candidate.ProcessJobAsync(
                 second,
                 It.IsAny<CancellationToken>()), Times.Once);
@@ -204,7 +204,7 @@ public sealed class UnmatchedScanBackgroundServiceTests : BaseTests
         await service.StartAsync(CancellationToken.None);
         try
         {
-            await secondProcessed.Task.WaitAsync(TestTimeouts.Signal);
+            await secondProcessed.Task.WaitAsync(TimeSpan.FromSeconds(5));
             queue.Verify(candidate => candidate.UpdateJob(
                 first.Id,
                 "Failed",
