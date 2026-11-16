@@ -8,6 +8,7 @@
  * (at your option) any later version.
  */
 using Listenarr.Infrastructure.DependencyInjection.Platform;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Polly;
@@ -17,7 +18,9 @@ namespace Listenarr.Infrastructure.DependencyInjection.Metadata;
 
 internal static class MetadataRegistrationExtensions
 {
-    public static IServiceCollection AddMetadataHttpClients(this IServiceCollection services)
+    public static IServiceCollection AddMetadataHttpClients(
+        this IServiceCollection services,
+        IConfiguration configuration)
     {
         var retryPolicy = HttpPolicyExtensions.HandleTransientHttpError()
             .WaitAndRetryAsync(3, attempt => TimeSpan.FromSeconds(Math.Pow(2, attempt)));

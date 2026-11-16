@@ -251,9 +251,8 @@ namespace Listenarr.Tests.Builders
                 FailOnUnexpectedCalls = true
             });
 
-            services.AddListenarrAudibleTestStub();
-            // Every other client keeping its production handler (OpenLibrary, Amazon, images...) is
-            // answered by the stub too: no backend test reaches the network.
+            // Every client keeping its production handler (Audible, Audnexus, OpenLibrary, Amazon, images...)
+            // is answered by the stub: Audible from its fixtures, the rest 404. No backend test reaches the network.
             services.AddListenarrExternalApiTestStub();
 
             // FIXME: All classes should rely on typed HttpClient instead of named ones
