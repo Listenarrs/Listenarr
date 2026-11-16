@@ -113,6 +113,25 @@ public sealed class AutomaticSearchScoringTests : BaseTests
         Assert.False(await scorer.IsCurrentAsync(batch, 9));
     }
 
+    [Fact]
+    public async Task TogglingUpgradeAllowedDuringAnAssessedSearch_InvalidatesTheAssessment()
+    {
+        var profile = new QualityProfile { Id = 3, UpgradeAllowed = true, CutoffQuality = "MP3 128kbps" };
+        var book = new Audiobook { Id = 9, Title = "A Princess of Mars", Authors = ["Edgar Rice Burroughs"], QualityProfile = profile };
+        var candidate = Result("A Princess of Mars", "Edgar Rice Burroughs");
+        var quality = new Mock<IQualityProfileService>();
+        quality.Setup(q => q.ScoreSearchResults(It.IsAny<List<SearchResult>>(), It.IsAny<QualityProfile>()))
+            .ReturnsAsync([new QualityScore { SearchResult = candidate, TotalScore = 100 }]);
+        var books = new Mock<IAudiobookRepository>();
+        books.Setup(b => b.GetByIdSnapshotAsync(9, It.IsAny<CancellationToken>())).ReturnsAsync(book);
+        var scorer = new AutomaticSearchScoringService(quality.Object, books.Object,
+            NullLogger<AutomaticSearchScoringService>.Instance, TestAnnotationCatalog.CreateProvider());
+        var batch = await scorer.ScoreAsync(book, [candidate], book.QualityProfile);
+        Assert.True(await scorer.IsCurrentAsync(batch, 9));
+        profile.UpgradeAllowed = false;
+        Assert.False(await scorer.IsCurrentAsync(batch, 9));
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
