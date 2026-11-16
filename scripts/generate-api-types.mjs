@@ -11,7 +11,7 @@ const generatedDirectory = path.join(frontendDirectory, 'playwright', 'support',
 const contractOperations = {
   '/api/v1/configuration/apis': ['get'],
   '/api/v1/configuration/bootstrap': ['get'],
-  '/api/v1/configuration/settings': ['get', 'post'],
+  '/api/v1/configuration/settings': ['get'],
   '/api/v1/configuration/startupconfig': ['get'],
   '/api/v1/download-clients': ['get'],
   '/api/v1/downloads': ['get'],
