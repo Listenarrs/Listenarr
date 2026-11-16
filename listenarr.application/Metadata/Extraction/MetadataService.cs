@@ -28,15 +28,17 @@ namespace Listenarr.Application.Metadata.Extraction
         private readonly IFfmpegService _ffmpegService;
         private readonly IAudioTagWriter _audioTagWriter;
         private readonly IFileSystem _fileSystem;
+        private readonly IImageCacheService _imageCacheService;
         private readonly ILogger<MetadataService> _logger;
 
-        public MetadataService(HttpClient httpClient, IConfigurationService configurationService, ILogger<MetadataService> logger, IFfmpegService ffmpegService, IAudioTagWriter audioTagWriter, IFileSystem fileSystem)
+        public MetadataService(HttpClient httpClient, IConfigurationService configurationService, ILogger<MetadataService> logger, IFfmpegService ffmpegService, IAudioTagWriter audioTagWriter, IFileSystem fileSystem, IImageCacheService imageCacheService)
         {
             _httpClient = httpClient;
             _configurationService = configurationService;
             _ffmpegService = ffmpegService;
             _audioTagWriter = audioTagWriter;
             _fileSystem = fileSystem;
+            _imageCacheService = imageCacheService;
             _logger = logger;
         }
 
@@ -268,8 +270,11 @@ namespace Listenarr.Application.Metadata.Extraction
         }
 
         /// <summary>
-        /// Fetch and identify cover artwork, but only when the setting asks for it.
+        /// Load and identify cover artwork, but only when the setting asks for it.
         ///
+        /// The stored value is either a content-root-relative cache path (what a library add
+        /// leaves behind) or an absolute URL. Both go through the image cache, which validates
+        /// the URL, refuses redirects it has not revalidated and bounds the size.
         /// The setting is read first so that an instance with embedding off never makes the
         /// request at all: this runs on the import path, and a network round trip per file
         /// is not something to spend when the result would be discarded. Any failure to
@@ -289,7 +294,7 @@ namespace Listenarr.Application.Metadata.Extraction
                 return null;
             }
 
-            var bytes = await DownloadCoverArtAsync(coverArtUrl);
+            var bytes = await _imageCacheService.GetImageBytesAsync(coverArtUrl);
             var coverArt = AudioCoverArt.FromBytes(bytes);
             if (coverArt is null && bytes is not null)
             {
