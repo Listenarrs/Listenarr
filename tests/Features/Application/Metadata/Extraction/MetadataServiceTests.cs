@@ -240,7 +240,44 @@ namespace Listenarr.Tests.Features.Application.Metadata.Extraction
                 Times.Once);
         }
 
-        private sealed class CountingImageHandler(byte[]? body = null) : HttpMessageHandler
+        [Fact]
+        public async Task DownloadCoverArtAsync_BodyAtTheLimit_IsReturned()
+        {
+            var body = new byte[MetadataService.MaxCoverArtBytes];
+            var service = CreateTagWritingService(
+                Mock.Of<IAudioTagWriter>(),
+                new CountingImageHandler(body),
+                enableCoverArt: true);
+
+            var bytes = await service.DownloadCoverArtAsync("https://images.example.com/cover.jpg");
+
+            Assert.Equal(body.Length, bytes?.Length);
+        }
+
+        [Theory]
+        [InlineData(true)]
+        [InlineData(false)]
+        public async Task DownloadCoverArtAsync_BodyOverTheLimit_IsRefused(bool declareLength)
+        {
+            // Without a declared length (chunked responses) the read itself has to stop.
+            var body = new byte[MetadataService.MaxCoverArtBytes + 1];
+            var service = CreateTagWritingService(
+                Mock.Of<IAudioTagWriter>(),
+                new CountingImageHandler(body, declareLength),
+                enableCoverArt: true);
+
+            var bytes = await service.DownloadCoverArtAsync("https://images.example.com/cover.jpg");
+
+            Assert.Null(bytes);
+        }
+
+        // A MemoryStream that refuses to report its length, so StreamContent cannot declare one.
+        private sealed class UndeclaredLengthStream(byte[] body) : MemoryStream(body)
+        {
+            public override bool CanSeek => false;
+        }
+
+        private sealed class CountingImageHandler(byte[]? body = null, bool declareLength = true) : HttpMessageHandler
         {
             private readonly byte[] _body = body ?? [0xFF, 0xD8, 0xFF, 0xE0, 0, 0, 0, 0, 0, 0, 0, 0];
 
@@ -251,9 +288,12 @@ namespace Listenarr.Tests.Features.Application.Metadata.Extraction
                 CancellationToken cancellationToken)
             {
                 Requests++;
+                HttpContent content = declareLength
+                    ? new ByteArrayContent(_body)
+                    : new StreamContent(new UndeclaredLengthStream(_body));
                 return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
                 {
-                    Content = new ByteArrayContent(_body)
+                    Content = content
                 });
             }
         }

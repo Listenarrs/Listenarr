@@ -1,3 +1,4 @@
+using Listenarr.Application.Audiobooks.Contracts;
 using Listenarr.Infrastructure.Library.Files;
 using Listenarr.Tests.Common;
 
@@ -56,6 +57,102 @@ public sealed class TagLibAudioTagWriterRoundTripTests : BaseTests
 
         Assert.Equal(Asin, ReadAsin(path));
         Assert.Equal(before, ReadAudioShape(path));
+    }
+
+    [Fact]
+    public async Task WriteTagsAsync_AsinAndCoverArt_BothSurviveOneSaveAndReopen()
+    {
+        var path = CopyFixture("round-trip-cover");
+        var before = ReadAudioShape(path);
+        var cover = new AudioCoverArt(CoverBytes(0x11, png: true), "image/png");
+
+        await WriteThroughLeaseAsync(path, Asin, cover);
+
+        Assert.Equal(Asin, ReadAsin(path));
+        var picture = Assert.Single(ReadPictures(path));
+        Assert.Equal("image/png", picture.MimeType);
+        Assert.Equal(cover.Data, picture.Data.Data);
+        Assert.Equal(before, ReadAudioShape(path));
+    }
+
+    [Fact]
+    public async Task WriteTagsAsync_CoverArtWithoutAsin_EmbedsTheCoverAndLeavesTheAsinUnset()
+    {
+        var path = CopyFixture("round-trip-cover-only");
+
+        await WriteThroughLeaseAsync(path, asin: null, new AudioCoverArt(CoverBytes(0x22), "image/jpeg"));
+
+        Assert.Null(ReadAsin(path));
+        Assert.Equal("image/jpeg", Assert.Single(ReadPictures(path)).MimeType);
+    }
+
+    [Fact]
+    public async Task WriteTagsAsync_FileAlreadyCarriesACover_ReplacesItOnDisk()
+    {
+        var path = CopyFixture("round-trip-cover-replace");
+        await WriteThroughLeaseAsync(path, asin: null, new AudioCoverArt(CoverBytes(0x33, png: true), "image/png"));
+        var replacement = new AudioCoverArt(CoverBytes(0x44), "image/jpeg");
+
+        await WriteThroughLeaseAsync(path, asin: null, replacement);
+
+        var picture = Assert.Single(ReadPictures(path));
+        Assert.Equal("image/jpeg", picture.MimeType);
+        Assert.Equal(replacement.Data, picture.Data.Data);
+    }
+
+    [Fact]
+    public async Task WriteTagsAsync_AsinOnlyOnAFileWithACover_KeepsTheExistingCover()
+    {
+        // No artwork was fetched (setting off, or the fetch failed), so the file's own cover
+        // must not be touched on the way past.
+        var path = CopyFixture("round-trip-cover-kept");
+        var original = new AudioCoverArt(CoverBytes(0x55, png: true), "image/png");
+        await WriteThroughLeaseAsync(path, asin: null, original);
+
+        await WriteThroughLeaseAsync(path, Asin, coverArt: null);
+
+        Assert.Equal(Asin, ReadAsin(path));
+        Assert.Equal(original.Data, Assert.Single(ReadPictures(path)).Data.Data);
+    }
+
+    [Fact]
+    public async Task WriteTagsAsync_WebpCoverOnAnMpeg4File_IsNotEmbeddedButTheAsinIs()
+    {
+        // The MPEG-4 cover atom has format flags for JPEG, PNG, BMP and GIF only. A WebP
+        // picture is stored with no format flag and reads back as an opaque blob that players
+        // do not show, so it is better left out than written as if it worked.
+        var path = CopyFixture("round-trip-cover-webp");
+        byte[] webp = [0x52, 0x49, 0x46, 0x46, 0x1A, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50, 0x38, 0x4C, 0, 0, 0, 0];
+
+        await WriteThroughLeaseAsync(path, Asin, new AudioCoverArt(webp, "image/webp"));
+
+        Assert.Equal(Asin, ReadAsin(path));
+        Assert.Empty(ReadPictures(path));
+    }
+
+    private static async Task WriteThroughLeaseAsync(string path, string? asin, AudioCoverArt? coverArt)
+    {
+        var writer = new TagLibAudioTagWriter(Mock.Of<ILogger<TagLibAudioTagWriter>>());
+        using var lease = PinnedAudiobookFileRegistrationLease.Open(
+            path,
+            supportsMetadataWrite: true);
+        Assert.True(lease.SupportsMetadataWrite);
+
+        await writer.WriteTagsAsync(lease, asin, coverArt);
+    }
+
+    // An MPEG-4 file records the image format, not the writer's MIME type, and works it out
+    // from the bytes when reading, so the fill sits behind a real format signature. The
+    // distinguishing fill is what proves which picture came back.
+    private static byte[] CoverBytes(byte fill, bool png = false) =>
+        png
+            ? [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, fill, fill, fill, fill]
+            : [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, fill, 0xFF, 0xD9];
+
+    private static TagLib.IPicture[] ReadPictures(string path)
+    {
+        using var file = TagLib.File.Create(path);
+        return file.Tag.Pictures;
     }
 
     private string CopyFixture(string directoryName)
