@@ -123,6 +123,7 @@ public sealed record BookMatchContext(
                 p.Id,
                 p.Qualities,
                 p.CutoffQuality,
+                p.UpgradeAllowed,
                 p.MinimumSize,
                 p.MaximumSize,
                 p.PreferredFormats,
