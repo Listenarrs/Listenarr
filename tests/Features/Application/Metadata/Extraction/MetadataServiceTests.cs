@@ -271,6 +271,57 @@ namespace Listenarr.Tests.Features.Application.Metadata.Extraction
             Assert.Null(bytes);
         }
 
+        [Fact]
+        public async Task DownloadCoverArtAsync_DeclaredLengthOverTheLimit_IsRefusedWithoutReadingTheBody()
+        {
+            var handler = new DeclaredOversizeHandler();
+            var service = CreateTagWritingService(
+                Mock.Of<IAudioTagWriter>(),
+                handler,
+                enableCoverArt: true);
+
+            var bytes = await service.DownloadCoverArtAsync("https://images.example.com/cover.jpg");
+
+            Assert.Null(bytes);
+            Assert.False(handler.Body.WasRead);
+        }
+
+        private sealed class DeclaredOversizeHandler : HttpMessageHandler
+        {
+            public ReadTrackingStream Body { get; } = new();
+
+            protected override Task<HttpResponseMessage> SendAsync(
+                HttpRequestMessage request,
+                CancellationToken cancellationToken)
+            {
+                var content = new StreamContent(Body);
+                content.Headers.ContentLength = MetadataService.MaxCoverArtBytes + 1L;
+                return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                {
+                    Content = content
+                });
+            }
+        }
+
+        private sealed class ReadTrackingStream : MemoryStream
+        {
+            public bool WasRead { get; private set; }
+
+            public override int Read(byte[] buffer, int offset, int count)
+            {
+                WasRead = true;
+                return base.Read(buffer, offset, count);
+            }
+
+            public override ValueTask<int> ReadAsync(
+                Memory<byte> buffer,
+                CancellationToken cancellationToken = default)
+            {
+                WasRead = true;
+                return base.ReadAsync(buffer, cancellationToken);
+            }
+        }
+
         // A MemoryStream that refuses to report its length, so StreamContent cannot declare one.
         private sealed class UndeclaredLengthStream(byte[] body) : MemoryStream(body)
         {
