@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Listenarr.Tests.Common;
 
-namespace Listenarr.Tests.Mocks.Api
+namespace Listenarr.Tests.Mocks.DownloadClients
 {
     public class TransmissionApiMock : BaseApiMock
     {

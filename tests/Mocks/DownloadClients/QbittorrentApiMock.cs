@@ -4,7 +4,7 @@ using System.Web;
 using Listenarr.Tests.Common;
 using Polly.CircuitBreaker;
 
-namespace Listenarr.Tests.Mocks.Api
+namespace Listenarr.Tests.Mocks.DownloadClients
 {
     public class QbittorrentApiMock : BaseApiMock
     {

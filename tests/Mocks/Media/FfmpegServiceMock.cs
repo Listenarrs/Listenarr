@@ -1,7 +1,7 @@
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
 
-namespace Listenarr.Tests.Mocks
+namespace Listenarr.Tests.Mocks.Media
 {
     public class FfmpegServiceMock : IFfmpegService, IAsyncDisposable
     {

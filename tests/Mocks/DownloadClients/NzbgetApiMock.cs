@@ -4,7 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
 
-namespace Listenarr.Tests.Mocks.Api
+namespace Listenarr.Tests.Mocks.DownloadClients
 {
     public class NzbgetApiMock : BaseApiMock
     {

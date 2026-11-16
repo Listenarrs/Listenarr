@@ -23,7 +23,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 
-namespace Listenarr.Tests.Mocks
+namespace Listenarr.Tests.Mocks.Hosting
 {
     public class ListenarrWebApplicationFactory : WebApplicationFactory<Program>
     {

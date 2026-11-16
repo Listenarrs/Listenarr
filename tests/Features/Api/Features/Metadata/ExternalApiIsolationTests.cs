@@ -1,6 +1,6 @@
 using System.Net;
 using Listenarr.Tests.Common;
-using Listenarr.Tests.Mocks;
+using Listenarr.Tests.Mocks.Hosting;
 
 namespace Listenarr.Tests.Features.Api.Features.Metadata;
 

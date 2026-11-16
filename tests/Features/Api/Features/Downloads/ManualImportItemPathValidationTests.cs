@@ -101,7 +101,7 @@ public sealed class ManualImportItemPathValidationTests : BaseTests
         string sourceDirectory,
         string fullPath)
     {
-        using var baseFactory = new Listenarr.Tests.Mocks.ListenarrWebApplicationFactory();
+        using var baseFactory = new Listenarr.Tests.Mocks.Hosting.ListenarrWebApplicationFactory();
         // The test host skips worker registration and filesystem initialization, both of
         // which the controller needs before body binding runs.
         using var factory = baseFactory.WithWebHostBuilder(builder =>

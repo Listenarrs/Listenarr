@@ -3,7 +3,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using Listenarr.Tests.Common;
 
-namespace Listenarr.Tests.Mocks.Api
+namespace Listenarr.Tests.Mocks.Trackers
 {
     public sealed record MyAnonamouseMockRoute(
         string Pattern,

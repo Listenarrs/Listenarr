@@ -22,7 +22,7 @@ using System.Text;
 
 using Listenarr.Application.Mapping;
 using Listenarr.Tests.Common;
-using Listenarr.Tests.Mocks.Api;
+using Listenarr.Tests.Mocks.DownloadClients;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Xml.Linq;
 using Listenarr.Domain.Downloads.Exceptions;

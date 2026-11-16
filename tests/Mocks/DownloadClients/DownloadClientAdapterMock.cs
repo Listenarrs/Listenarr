@@ -1,6 +1,6 @@
 using Listenarr.Tests.Builders;
 
-namespace Listenarr.Tests.Mocks
+namespace Listenarr.Tests.Mocks.DownloadClients
 {
     public class DownloadCLientAdapterMock(
         IDownloadRepository downloadRepository) : IDownloadClientAdapter

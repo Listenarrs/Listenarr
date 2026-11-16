@@ -19,7 +19,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.EntityFrameworkCore;
 using Listenarr.Application.Common.Exceptions;
 using Listenarr.Tests.Common;
-using Listenarr.Tests.Mocks;
+using Listenarr.Tests.Mocks.Realtime;
 using AppMoveQueueService = Listenarr.Application.Audiobooks.Jobs.MoveQueueService;
 using MoveQueueService = Listenarr.Tests.Features.Application.Audiobooks.Jobs.MoveQueueServiceTestAdapter;
 
