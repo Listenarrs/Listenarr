@@ -93,7 +93,7 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
             return Uri.TryCreate(url, UriKind.Absolute, out var uri)
                 && uri.Scheme == Uri.UriSchemeHttps
                 && uri.Host.Equals("evermeet.cx", StringComparison.OrdinalIgnoreCase)
-                && FfprobeArchiveExtractor.IsZipArchiveUrl(url!);
+                && uri.AbsolutePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
         }
     }
 }
