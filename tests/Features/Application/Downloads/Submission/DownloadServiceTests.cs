@@ -1,6 +1,6 @@
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
-using Listenarr.Tests.Mocks;
+using Listenarr.Tests.Mocks.Metadata;
 
 namespace Listenarr.Tests.Features.Application.Downloads.Submission
 {

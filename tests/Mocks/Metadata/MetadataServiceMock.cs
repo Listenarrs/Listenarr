@@ -1,7 +1,7 @@
 using System.Text.RegularExpressions;
 using Listenarr.Tests.Builders;
 
-namespace Listenarr.Tests.Mocks
+namespace Listenarr.Tests.Mocks.Metadata
 {
     /// <summary>
     /// Flexible metadata mock that associate hardcoded metadata with given regex

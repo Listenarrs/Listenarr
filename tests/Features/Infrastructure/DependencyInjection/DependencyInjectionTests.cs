@@ -20,7 +20,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Listenarr.Infrastructure.DependencyInjection;
 using Listenarr.Tests.Common;
-using Listenarr.Tests.Mocks;
+using Listenarr.Tests.Mocks.Hosting;
 
 namespace Listenarr.Tests.Features.Infrastructure.DependencyInjection
 {

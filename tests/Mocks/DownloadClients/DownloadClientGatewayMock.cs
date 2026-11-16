@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-namespace Listenarr.Tests.Mocks
+namespace Listenarr.Tests.Mocks.DownloadClients
 {
     /// <summary>
     /// Lightweight test implementation of IDownloadClientGateway used by unit tests.

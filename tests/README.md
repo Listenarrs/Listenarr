@@ -8,7 +8,7 @@ This project is used to test Listenarr backend
 tests/                              # Backend tests
 ├── Builders/                       # Data creation helpers using the builder pattern
 ├── Common/                         # Underlying test framework
-│   ├── BaseMock.cs                 # Base class for API mocks
+│   ├── BaseApiMock.cs              # Base class for API mocks
 │   ├── BaseTests.cs                # Base class for all tests
 │   └── MockUtils.cs                # Helper methods for mocks
 ├── Features/                       # Main directory for tests files
@@ -16,8 +16,13 @@ tests/                              # Backend tests
 │   ├── Application/                # listenarr.application tests
 │   ├── Domain/                     # listenarr.domain tests
 │   └── Infrastructure/             # listenarr.infrastructure tests
-├── Mocks/                          # Mock definitions
-│   └── Api/                        # Download client and indexer API mocks (metadata providers: TestHost)
+├── Mocks/                          # Mock definitions (metadata providers are faked by the TestHost, not here)
+│   ├── DownloadClients/            # SABnzbd, NZBGet, qBittorrent, Transmission API mocks, adapter and gateway mocks
+│   ├── Trackers/                   # Tracker API mocks (MyAnonamouse)
+│   ├── Hosting/                    # WebApplicationFactory and startup configuration
+│   ├── Media/                      # FFmpeg
+│   ├── Metadata/                   # Metadata service (in-process, not the providers' HTTP APIs)
+│   └── Realtime/                   # SignalR hub broadcaster
 ├── Listenarr.BackendIntegrationTests/ # The whole app in process, driven through its HTTP API
 ├── Listenarr.TestHost/             # Fixture-backed stub of the external APIs (also the E2E test host)
 │   └── Metadata/                   # Providers/: one route class per metadata provider; Fixtures/{Provider}/ (see its README)

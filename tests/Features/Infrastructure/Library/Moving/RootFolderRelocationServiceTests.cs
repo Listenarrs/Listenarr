@@ -1,5 +1,5 @@
 using Listenarr.Application.Common.Exceptions;
-using Listenarr.Tests.Mocks;
+using Listenarr.Tests.Mocks.Realtime;
 using Listenarr.Infrastructure.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
 

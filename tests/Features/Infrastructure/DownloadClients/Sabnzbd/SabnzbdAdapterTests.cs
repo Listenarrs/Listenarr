@@ -19,7 +19,7 @@ using System.Net;
 using Listenarr.Domain.Downloads.Exceptions;
 using Listenarr.Tests.Builders;
 using Listenarr.Tests.Common;
-using Listenarr.Tests.Mocks.Api;
+using Listenarr.Tests.Mocks.DownloadClients;
 
 
 namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Sabnzbd

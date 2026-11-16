@@ -1,4 +1,4 @@
-namespace Listenarr.Tests.Mocks
+namespace Listenarr.Tests.Mocks.Hosting
 {
     /// <summary>
     /// Simple IStartupConfigService stub for integration tests.
