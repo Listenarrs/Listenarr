@@ -28,9 +28,10 @@ namespace Listenarr.Application.Search.Indexers.MyAnonamouse
                     {
                         publishDate = DateTime.ParseExact(addedStr, "yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal).ToLocalTime();
                     }
-                    catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
+                    catch (FormatException)
                     {
-                        logger.LogDebug(ex, "MyAnonamouse 'added' timestamp {Added} did not parse; falling back to the other date fields", addedStr);
+                        // The exception is not logged: FormatException.Message quotes the raw value.
+                        logger.LogDebug("MyAnonamouse 'added' timestamp {Added} did not parse; falling back to the other date fields", LogRedaction.SanitizeText(addedStr));
                     }
                 }
             }
