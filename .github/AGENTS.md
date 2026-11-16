@@ -152,7 +152,7 @@ Never use `async void` in production code. Always use `async Task` — `async vo
 - Only add repository data *after* calling `Init()`.
 - Use builder classes under `tests/Builders/` with fluent `.With...().Build()` chains for coherent test entities. Add a focused builder rather than repeating multi-property inline object initializers.
 - Structure tests as Given / When / Then.
-- API mocks inherit `BaseMock`; use `GetCallCount()`, `GetLastRequest()`, `GetLastContent()`.
+- Metadata providers (Audible, Audnexus, OpenLibrary) are answered by `tests/Listenarr.FakeProviders` (route class per provider, fixtures per provider); never hand-mock them. Download client and tracker API mocks live in `tests/Mocks/{Category}/` and inherit `BaseApiMock`; use `GetCallCount()`, `GetLastRequest()`, `GetLastContent()`.
 
 ### Pre-Push Checks
 

@@ -143,7 +143,7 @@ This project follows a layered pattern: domain models in `listenarr.domain`, EF 
   - Add unit tests for ValueConverters and ValueComparers to ensure JSON behavior is stable (null handling, empty JSON).
   - Follow `tests/README.md`; backend tests should default to `BaseTests`, repository helpers, DI-resolved services/controllers, and builders such as `AudiobookBuilder` and `ApplicationSettingsBuilder`. Hand-wire setup only for test-specific overrides.
   - Use `WebApplicationFactory<Program>` for integration tests and apply `WithWebHostBuilder` when you need to override services.
-  - Use the test-host patching approach to keep tests hermetic (no external network or process calls).
+  - Use the test-host patching approach to keep tests hermetic (no external network or process calls). Metadata providers (Audible, Audnexus, OpenLibrary) are answered by `tests/Listenarr.FakeProviders` from per-provider fixtures (add a missing one as `tests/Listenarr.FakeProviders/Fixtures/README.md` explains); download clients and trackers use the mocks in `tests/Mocks/{Category}/`.
 
 **Testing:**
 - Run backend tests: `dotnet test`
