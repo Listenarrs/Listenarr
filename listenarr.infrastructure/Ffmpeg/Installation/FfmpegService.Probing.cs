@@ -26,12 +26,10 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
             JsonElement ffprobeData;
             try
             {
-                if (!File.Exists(_ffprobePath))
-                {
-                    throw new FfmpegException("ffprobe binary is unavailable.");
-                }
+                var ffprobePath = ResolveFfprobePath()
+                    ?? throw new FfmpegException("ffprobe binary is unavailable.");
 
-                if (!FileSystemSafety.TryValidateMutationTarget(_ffprobePath, [_baseDir], out var safeFfprobePath, out var ffprobeReason))
+                if (!FileSystemSafety.TryValidateMutationTarget(ffprobePath, [_applicationBaseDirectory, _legacyDirectory], out var safeFfprobePath, out var ffprobeReason))
                 {
                     throw new FfmpegException($"ffprobe binary is unavailable or outside configured root: {LogRedaction.SanitizeText(ffprobeReason)}");
                 }
@@ -48,7 +46,7 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
                 }
 
                 var safeReadPath = Path.GetFullPath(fileSource.ReadPath);
-                _logger.LogInformation("Running bundled ffprobe at {Path} against file {File}", safeFfprobePath, sanitizedPublicPath);
+                _logger.LogInformation("Running ffprobe at {Path} against file {File}", safeFfprobePath, sanitizedPublicPath);
 
                 var startInfo = new ProcessStartInfo
                 {
@@ -107,23 +105,15 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
             return metadata;
         }
 
-        public string FfprobePath
+        public Task<string> GetLicenseAsync()
         {
-            get
+            var path = ResolveFfprobePath();
+            if (path == null)
             {
-                return _ffprobePath;
-            }
-        }
-
-        public async Task<string> GetLicenseAsync()
-        {
-            var licensePath = Path.Join(_baseDir, "LICENSE_NOTICE.txt");
-            if (System.IO.File.Exists(licensePath))
-            {
-                return await System.IO.File.ReadAllTextAsync(licensePath);
+                return Task.FromResult(string.Empty);
             }
 
-            return string.Empty;
+            return Task.FromResult(path == ResolvePackagedFfprobePath() ? PackagedLicenseNotice : LegacyLicenseNotice);
         }
     }
 }
