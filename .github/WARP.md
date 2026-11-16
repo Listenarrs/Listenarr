@@ -258,7 +258,7 @@ This produces a single deployment artifact containing both backend and frontend.
 - Automatic migrations on startup
 
 ### External Dependencies
-- FFprobe binary required for audio metadata extraction (auto-installed by `FfmpegInstallerService`)
+- FFprobe binary required for audio metadata extraction (shipped via the `Openur.FFprobeStatic` NuGet package and resolved by `FfmpegService`)
 - Playwright browsers for web scraping (downloaded on first use)
 
 ### CI/CD Integration  
