@@ -2385,7 +2385,7 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             var book = new Audiobook
             {
                 Id = 336,
-                Title = "Artwork Only",
+                Title = "A Princess of Mars",
                 Asin = null,
                 ImageUrl = "https://example.invalid/cover.jpg",
                 BasePath = destinationRoot
@@ -2453,7 +2453,7 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             var book = new Audiobook
             {
                 Id = 337,
-                Title = "Nothing To Write",
+                Title = "Twenty Thousand Leagues Under the Sea",
                 Asin = null,
                 ImageUrl = null,
                 BasePath = destinationRoot
@@ -2527,8 +2527,8 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             var book = new Audiobook
             {
                 Id = 337,
-                Title = "Linked Cover Book",
-                Asin = "B000TEST",
+                Title = "A Princess of Mars",
+                Asin = "B008DFUGCQ",
                 ImageUrl = "https://images.example.com/cover.jpg",
                 BasePath = destinationRoot
             };
@@ -2574,7 +2574,7 @@ namespace Listenarr.Tests.Features.Api.Features.Downloads
             var results = Assert.IsAssignableFrom<IEnumerable<ManualImportResultDto>>(
                 ok.Value!.GetType().GetProperty("results")!.GetValue(ok.Value));
             Assert.True(Assert.Single(results).Success);
-            var destination = Path.Join(destinationRoot, "Linked Cover Book.mp3");
+            var destination = Path.Join(destinationRoot, "A Princess of Mars.mp3");
             Assert.Equal("audio", await File.ReadAllTextAsync(destination));
             metadata.Verify(service => service.WriteImportTagsAsync(
                 It.IsAny<IAudiobookFileRegistrationLease>(),
