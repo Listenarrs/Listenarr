@@ -16,11 +16,11 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-namespace Listenarr.TestHost.Metadata.Providers;
+namespace Listenarr.FakeProviders.Routes;
 
 /// <summary>
 /// Audible: the catalogue API (api.audible.{tld}) and the author pages of the store (www.audible.{tld}).
-/// Fixtures in <c>Metadata/Fixtures/Audible/</c>:
+/// Fixtures in <c>Fixtures/Audible/</c>:
 /// <list type="bullet">
 /// <item><c>{ASIN}.json</c>: a product record, every region; <c>{ASIN}.{host}.json</c> overrides it for one host.</item>
 /// <item><c>search-{title}[--{author}].json</c>: a title search; <c>search-author-{author}.json</c>: an author's

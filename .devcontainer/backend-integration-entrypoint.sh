@@ -1,6 +1,6 @@
 #!/bin/sh
 # Entry point of the test host image (.devcontainer/backend-integration.Dockerfile). It supervises
-# tests/Listenarr.TestHost rather than replacing itself with it, so the suites can restart the app
+# tests/Listenarr.FakeProviders rather than replacing itself with it, so the suites can restart the app
 # without restarting the container: a container restart recreates its network interface, and the
 # host's network change makes Chromium abort the page loads in flight (net::ERR_NETWORK_CHANGED).
 #
@@ -26,9 +26,9 @@ start_app() {
       --settings /opt/dotnet-coverage/listenarr.coverage.xml \
       --output-format cobertura \
       --output "$LISTENARR_COVERAGE_DIR/testhost-$(date +%s%N).cobertura.xml" \
-      -- dotnet /app/integration-host/Listenarr.TestHost.dll &
+      -- dotnet /app/integration-host/Listenarr.FakeProviders.dll &
   else
-    /testhost-entrypoint.sh dotnet /app/integration-host/Listenarr.TestHost.dll &
+    /testhost-entrypoint.sh dotnet /app/integration-host/Listenarr.FakeProviders.dll &
   fi
   app_pid=$!
   rm -f "$stopped_marker"

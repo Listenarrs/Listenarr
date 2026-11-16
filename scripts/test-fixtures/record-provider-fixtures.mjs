@@ -1,9 +1,9 @@
-// Records the metadata provider fixtures the test stub lacks (tests/Listenarr.TestHost/Metadata), from
+// Records the metadata provider fixtures the test stub lacks (tests/Listenarr.FakeProviders), from
 // the real APIs. The stub answers 404 to a request without a fixture and writes the line
 //   External API stub: no fixture for GET <url> -> record as <Provider>/<file>
 // to stderr, and to the file named by LISTENARR_TEST_MISSING_FIXTURES when that variable is set. This
 // script reads those lines, fetches each URL once and saves the answer as
-// tests/Listenarr.TestHost/Metadata/Fixtures/<Provider>/<file> (JSON indented, images as bytes).
+// tests/Listenarr.FakeProviders/Fixtures/<Provider>/<file> (JSON indented, images as bytes).
 //
 //   LISTENARR_TEST_MISSING_FIXTURES=/tmp/missing.log dotnet test tests/Listenarr.Tests.csproj --filter <test>
 //   node scripts/test-fixtures/record-provider-fixtures.mjs /tmp/missing.log
@@ -16,7 +16,7 @@ import { dirname, join, normalize, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
-const fixturesRoot = join(repositoryRoot, 'tests', 'Listenarr.TestHost', 'Metadata', 'Fixtures')
+const fixturesRoot = join(repositoryRoot, 'tests', 'Listenarr.FakeProviders', 'Fixtures')
 const missingFixtureLine = /no fixture for GET (\S+) -> record as (\S+)/
 
 function usage(message) {

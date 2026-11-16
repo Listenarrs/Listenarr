@@ -21,7 +21,7 @@ using System.Text.Json.Nodes;
 using Listenarr.Application.Configuration.Contracts;
 using Listenarr.Application.SystemDiagnostics.Contracts;
 using Listenarr.Domain.Configuration;
-using Listenarr.TestHost.Metadata;
+using Listenarr.FakeProviders;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -35,7 +35,7 @@ namespace Listenarr.BackendIntegrationTests;
 /// <summary>
 /// The whole application in process, on a SQLite file and real folders, driven only through its HTTP API.
 /// Each test starts its own host from the same seed (four library books and two root folders added through
-/// the API), so tests never share state. External APIs answer from the TestHost fixtures; ffprobe is the one
+/// the API), so tests never share state. External APIs answer from the Listenarr.FakeProviders fixtures; ffprobe is the one
 /// on PATH, so the import scan reads real tags.
 /// </summary>
 public sealed class BackendIntegrationHost : IAsyncDisposable
@@ -233,7 +233,7 @@ public sealed class BackendIntegrationHost : IAsyncDisposable
 
     /// <summary>
     /// The application on its own SQLite file, the unmatched scan worker running (the other hosted services
-    /// off), no authentication, external APIs answered by the TestHost stub, and the ffprobe on PATH.
+    /// off), no authentication, external APIs answered by the Listenarr.FakeProviders stub, and the ffprobe on PATH.
     /// </summary>
     private sealed class Factory(string databasePath) : WebApplicationFactory<Program>
     {

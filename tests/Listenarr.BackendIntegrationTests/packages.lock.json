@@ -644,7 +644,7 @@
           "TagLibSharp": "[2.3.0, )"
         }
       },
-      "listenarr.testhost": {
+      "listenarr.fakeproviders": {
         "type": "Project",
         "dependencies": {
           "Listenarr.Api": "[1.7.2, )"

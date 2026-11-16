@@ -1,7 +1,7 @@
 // Runs the browser E2E suite (fe/playwright/e2e): Chromium drives the frontend, served by the Vite dev
 // server, which forwards every API and SignalR request to Listenarr running in Docker. No Listenarr API
-// is stubbed: only the app's own outbound requests are, by the test host (tests/Listenarr.TestHost),
-// which answers Audible from fixtures and every other provider with 404; the container has no DNS
+// is stubbed: only the app's own outbound requests are, by tests/Listenarr.FakeProviders,
+// which answers the metadata providers from fixtures and anything else with 404; the container has no DNS
 // either, so the suite is deterministic and offline.
 //
 // The runner builds the images, generates the audiobook folders (generate-library-fixtures.sh),

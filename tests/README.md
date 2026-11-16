@@ -16,7 +16,7 @@ tests/                              # Backend tests
 │   ├── Application/                # listenarr.application tests
 │   ├── Domain/                     # listenarr.domain tests
 │   └── Infrastructure/             # listenarr.infrastructure tests
-├── Mocks/                          # Mock definitions (metadata providers are faked by the TestHost, not here)
+├── Mocks/                          # Mock definitions (metadata providers are faked by Listenarr.FakeProviders, not here)
 │   ├── DownloadClients/            # SABnzbd, NZBGet, qBittorrent, Transmission API mocks, adapter and gateway mocks
 │   ├── Trackers/                   # Tracker API mocks (MyAnonamouse)
 │   ├── Hosting/                    # WebApplicationFactory and startup configuration
@@ -24,8 +24,9 @@ tests/                              # Backend tests
 │   ├── Metadata/                   # Metadata service (in-process, not the providers' HTTP APIs)
 │   └── Realtime/                   # SignalR hub broadcaster
 ├── Listenarr.BackendIntegrationTests/ # The whole app in process, driven through its HTTP API
-├── Listenarr.TestHost/             # Fixture-backed stub of the external APIs (also the E2E test host)
-│   └── Metadata/                   # Providers/: one route class per metadata provider; Fixtures/{Provider}/ (see its README)
+├── Listenarr.FakeProviders/        # Fake metadata providers, and the program running Listenarr with them (E2E, backend integration)
+│   ├── Routes/                     # One route class per provider (Audible, Audnexus, OpenLibrary)
+│   └── Fixtures/                   # One folder per provider (see its README: naming, recording missing fixtures)
 ├── Listenarr.Tests.csproj          # Testing project
 └── README.md                       # Backend tests documentation
 ```
@@ -34,7 +35,7 @@ tests/                              # Backend tests
 
 `Listenarr.BackendIntegrationTests/` is a separate project: each test starts the whole application in process
 (`WebApplicationFactory`) on its own SQLite file and temporary root folders, seeds four books and two root folders
-through the API, and then uses only HTTP requests, as the frontend does. External APIs answer from the TestHost
+through the API, and then uses only HTTP requests, as the frontend does. External APIs answer from the Listenarr.FakeProviders
 fixtures; the import scan reads real tags with the `ffprobe` found on PATH (install FFmpeg). The project builds on
 every OS. In CI it runs in its own Linux job, `backend-integration-tests`; the native backend jobs skip it
 (it is a test project in CI only when `ListenarrBackendIntegrationJob=true`).

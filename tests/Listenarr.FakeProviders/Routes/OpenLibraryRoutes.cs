@@ -16,11 +16,11 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-namespace Listenarr.TestHost.Metadata.Providers;
+namespace Listenarr.FakeProviders.Routes;
 
 /// <summary>
 /// OpenLibrary: the search API (openlibrary.org) and the covers (covers.openlibrary.org). Fixtures in
-/// <c>Metadata/Fixtures/OpenLibrary/</c>:
+/// <c>Fixtures/OpenLibrary/</c>:
 /// <list type="bullet">
 /// <item><c>search-{q}.json</c>: <c>/search.json?q=</c>, or <c>search-{title}[--{author}].json</c> when the
 /// query has no <c>q</c> (slugged; <c>limit</c> and <c>fields</c> ignored).</item>

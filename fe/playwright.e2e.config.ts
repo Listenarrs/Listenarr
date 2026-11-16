@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 
 // Browser E2E tests: Chromium drives the frontend (Vite dev server), whose API and SignalR requests go
-// to Listenarr running in Docker; nothing is stubbed but Audible, answered by the test host's fixtures.
+// to Listenarr running in Docker; nothing is stubbed but the metadata providers (tests/Listenarr.FakeProviders).
 // scripts/e2e/run.mjs (`npm run test:e2e`) starts the container and sets the variables read here.
 const webPort = Number(process.env.LISTENARR_E2E_WEB_PORT ?? 5174)
 const webUrl = `http://127.0.0.1:${webPort}`

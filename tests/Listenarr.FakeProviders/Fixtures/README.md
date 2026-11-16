@@ -1,15 +1,16 @@
 # Metadata provider fixtures
 
-Every test host (the E2E test host, `Listenarr.BackendIntegrationTests`, and the `Listenarr.Tests` containers
-through `AddListenarrExternalApiTestStub`) answers the metadata providers from these files instead of the
-network. Each provider has a folder here and a route class in `../Providers/` that maps a request to a file
+Everything that runs Listenarr for tests (the `Listenarr.FakeProviders` program in the E2E and backend
+integration container, `Listenarr.BackendIntegrationTests`, and the `Listenarr.Tests` containers through
+`AddListenarrExternalApiTestStub`) answers the metadata providers from these files instead of the
+network. Each provider has a folder here and a route class in `../Routes/` that maps a request to a file
 name; the class's summary lists its routes and naming rules.
 
 | Provider    | Hosts                                       | Routes                                  |
 |-------------|---------------------------------------------|-----------------------------------------|
-| Audible     | `api.audible.{tld}`, `www.audible.{tld}`    | `Providers/AudibleRoutes.cs`            |
-| Audnexus    | `api.audnex.us`                             | `Providers/AudnexusRoutes.cs`           |
-| OpenLibrary | `openlibrary.org`, `covers.openlibrary.org` | `Providers/OpenLibraryRoutes.cs`        |
+| Audible     | `api.audible.{tld}`, `www.audible.{tld}`    | `Routes/AudibleRoutes.cs`               |
+| Audnexus    | `api.audnex.us`                             | `Routes/AudnexusRoutes.cs`              |
+| OpenLibrary | `openlibrary.org`, `covers.openlibrary.org` | `Routes/OpenLibraryRoutes.cs`           |
 
 A request without a fixture gets a 404 and a line on stderr naming the file that would answer it:
 

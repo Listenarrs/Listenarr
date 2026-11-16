@@ -1,7 +1,7 @@
 using Listenarr.Application.Metadata.Audible;
 using Microsoft.Extensions.Http;
 
-namespace Listenarr.TestHost.Metadata;
+namespace Listenarr.FakeProviders;
 
 public static class ExternalApiStubRegistration
 {
