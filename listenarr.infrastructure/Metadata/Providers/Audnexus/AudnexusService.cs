@@ -87,7 +87,7 @@ namespace Listenarr.Infrastructure.Metadata.Providers.Audnexus
                 catch (JsonException jsonEx)
                 {
                     _logger.LogError(jsonEx, "JSON deserialization failed for Audnexus ASIN {Asin}. JSON: {Json}",
-                        LogRedaction.SanitizeText(asin), json.Length > 200 ? json.Substring(0, 200) + "..." : json);
+                        LogRedaction.SanitizeText(asin), LogRedaction.SanitizeText(json, 200));
                     return null;
                 }
 
