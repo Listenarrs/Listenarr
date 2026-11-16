@@ -22,19 +22,6 @@ public sealed class LinuxFactAttribute : FactAttribute
     }
 }
 
-public sealed class LiveFfprobeFactAttribute : FactAttribute
-{
-    public const string EnableVariable = "LISTENARR_LIVE_FFPROBE_TESTS";
-
-    public LiveFfprobeFactAttribute()
-    {
-        if (Environment.GetEnvironmentVariable(EnableVariable) != "1")
-        {
-            Skip = $"Needs the network; set {EnableVariable}=1 to run it.";
-        }
-    }
-}
-
 public sealed class UnixFactAttribute : FactAttribute
 {
     public UnixFactAttribute()
