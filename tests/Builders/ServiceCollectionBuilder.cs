@@ -252,6 +252,9 @@ namespace Listenarr.Tests.Builders
             });
 
             services.AddListenarrAudibleTestStub();
+            // Every other client keeping its production handler (OpenLibrary, Amazon, images...) is
+            // answered by the stub too: no backend test reaches the network.
+            services.AddListenarrExternalApiTestStub();
 
             // FIXME: All classes should rely on typed HttpClient instead of named ones
             // TODO: Find a way to test real http client configurations (cookies, retry, security, ...)
