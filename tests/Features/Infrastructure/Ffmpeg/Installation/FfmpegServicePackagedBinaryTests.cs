@@ -19,9 +19,6 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
         public async Task EnsureFfprobeInstalledAsync_PackagedBinary_ResolvesAndProbesRealAudio()
         {
             var legacyDirectory = Path.Join(FileService.GetTempPath(), "ffmpeg-legacy-unused");
-            // A plain runner rather than SystemProcessRunner: that one regex-redacts every
-            // process's stdout against process-wide secret values, and under the full parallel
-            // suite another test's values corrupted the JSON. This test is about the binary.
             var service = CreateService(
                 new UnredactedProcessRunner(),
                 legacyDirectory,
@@ -188,31 +185,6 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
                 Mock.Of<IApplicationPathService>(service => service.FfmpegRootPath == legacyDirectory),
                 applicationBaseDirectory,
                 RuntimeInformation.RuntimeIdentifier);
-        }
-
-        private sealed class UnredactedProcessRunner : IProcessRunner
-        {
-            public async Task<ProcessResult> RunAsync(System.Diagnostics.ProcessStartInfo startInfo, int timeoutMs = 60000, CancellationToken cancellationToken = default)
-            {
-                using var process = System.Diagnostics.Process.Start(startInfo)
-                    ?? throw new InvalidOperationException("Process did not start");
-                var stdout = process.StandardOutput.ReadToEndAsync(cancellationToken);
-                var stderr = process.StandardError.ReadToEndAsync(cancellationToken);
-                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                timeout.CancelAfter(timeoutMs);
-                await process.WaitForExitAsync(timeout.Token);
-                return new ProcessResult(process.ExitCode, await stdout, await stderr, false);
-            }
-
-            public System.Diagnostics.Process StartProcess(System.Diagnostics.ProcessStartInfo startInfo)
-            {
-                throw new NotSupportedException();
-            }
-
-            public IDisposable RegisterTransientSensitive(IEnumerable<string> values)
-            {
-                throw new NotSupportedException();
-            }
         }
 
         private static DelegatingHandlerMock RecordingHandler(List<Uri?> requests)
