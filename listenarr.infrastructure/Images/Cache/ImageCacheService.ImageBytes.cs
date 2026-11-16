@@ -61,6 +61,9 @@ namespace Listenarr.Infrastructure.Images.Cache
 
         private async Task<byte[]?> ReadCachedImageAsync(string relativePath)
         {
+            // Stored library paths carry a leading slash ("/config/cache/..."), which is relative to
+            // the content root here rather than a filesystem root.
+            relativePath = relativePath.TrimStart('/', '\\');
             if (Path.IsPathRooted(relativePath))
             {
                 return null;
