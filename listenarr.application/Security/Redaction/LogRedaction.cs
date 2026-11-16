@@ -126,21 +126,61 @@ namespace Listenarr.Application.Security.Redaction
             }
         }
 
+        // Stands in for a known secret while the URL is parsed. Letters only, so Uri keeps it
+        // verbatim in any component, unlike the secret itself (%7E, backslashes, spaces and dot
+        // segments are all rewritten by canonicalization before a post-parse mask could match).
+        private const string SecretPlaceholder = "LISTENARRREDACTEDSECRET";
+
         // Sanitize a notification webhook URL for logging. Keeps scheme, host and port; drops
         // userinfo and the whole query string (same as SanitizeUrl); and for providers whose
         // credential lives in the path rather than the query, masks the segments that carry it
-        // instead of dropping the whole path. Any known environment secret left in the result
-        // (e.g. a token in a generic URL's path) is masked as well.
+        // instead of dropping the whole path. Known environment secrets are masked in the raw
+        // URL before it is parsed, so canonicalization cannot change their spelling first, and
+        // once more in the result as a backstop.
         public static string SanitizeWebhookUrl(string? url)
         {
-            var sanitized = SanitizeWebhookUrlStructure(url);
+            var secrets = GetSensitiveValuesFromEnvironment().ToList();
 
-            foreach (var secret in GetSensitiveValuesFromEnvironment())
+            // Providers with a known credential layout are recognised from the original URL: a
+            // secret that happens to be a substring of the host or a marker segment ("slack",
+            // "webhooks", "bot") must not change which branch masks the token. The placeholder
+            // is only needed for the generic branch, where the path is kept.
+            if (!string.IsNullOrWhiteSpace(url) && !HasProviderSpecificMasking(url))
+            {
+                foreach (var secret in secrets)
+                {
+                    url = Regex.Replace(url, Regex.Escape(secret), SecretPlaceholder, RegexOptions.IgnoreCase);
+                }
+            }
+
+            var sanitized = SanitizeWebhookUrlStructure(url);
+            sanitized = Regex.Replace(sanitized, SecretPlaceholder, "<redacted>", RegexOptions.IgnoreCase);
+
+            foreach (var secret in secrets)
             {
                 sanitized = Regex.Replace(sanitized, Regex.Escape(secret), "<redacted>", RegexOptions.IgnoreCase);
             }
 
             return sanitized;
+        }
+
+        private static bool HasProviderSpecificMasking(string url)
+        {
+            try
+            {
+                var uri = new Uri(url);
+                return uri.Host.Equals("api.telegram.org", StringComparison.OrdinalIgnoreCase)
+                    || uri.Host.Equals("discord.com", StringComparison.OrdinalIgnoreCase)
+                    || uri.Host.EndsWith(".discord.com", StringComparison.OrdinalIgnoreCase)
+                    || uri.Host.Equals("discordapp.com", StringComparison.OrdinalIgnoreCase)
+                    || uri.Host.EndsWith(".discordapp.com", StringComparison.OrdinalIgnoreCase)
+                    || uri.Host.Equals("hooks.slack.com", StringComparison.OrdinalIgnoreCase)
+                    || uri.Scheme.Equals("pushbullet", StringComparison.OrdinalIgnoreCase);
+            }
+            catch (UriFormatException)
+            {
+                return false;
+            }
         }
 
         private static string SanitizeWebhookUrlStructure(string? url)

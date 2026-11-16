@@ -187,5 +187,108 @@ namespace Listenarr.Tests.Features.Application.Security.Redaction
                 Environment.SetEnvironmentVariable("TOKEN", previous);
             }
         }
+
+        [Theory]
+        [InlineData("secret%7Etoken")]
+        [InlineData("secret\\token")]
+        [InlineData("secret token")]
+        [InlineData("secret/../token")]
+        [InlineData("plain-secret-token")]
+        public void SanitizeWebhookUrl_GenericUrl_MasksEnvironmentSecretThatCanonicalizationWouldRewrite(string token)
+        {
+            var previous = Environment.GetEnvironmentVariable("TOKEN");
+            try
+            {
+                Environment.SetEnvironmentVariable("TOKEN", token);
+
+                var sanitized = LogRedaction.SanitizeWebhookUrl($"https://example.com/hooks/{token}");
+
+                Assert.Equal("https://example.com/hooks/<redacted>", sanitized);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("TOKEN", previous);
+            }
+        }
+
+        [Fact]
+        public void SanitizeWebhookUrl_GenericUrl_KeepsPathWhenNoEnvironmentSecretMatches()
+        {
+            var previous = Environment.GetEnvironmentVariable("TOKEN");
+            try
+            {
+                Environment.SetEnvironmentVariable("TOKEN", "unrelated-secret%7Evalue");
+
+                var sanitized = LogRedaction.SanitizeWebhookUrl("https://example.com/hooks/channel?x=1");
+
+                Assert.Equal("https://example.com/hooks/channel", sanitized);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("TOKEN", previous);
+            }
+        }
+
+        [Theory]
+        [InlineData("https://hooks.slack.com/services/T0001/B0002/xq9zn4pyu7fj", "slack")]
+        [InlineData("https://hooks.slack.com/services/T0001/B0002/xq9zn4pyu7fj", "services")]
+        [InlineData("https://discord.com/api/webhooks/123456/xq9zn4pyu7fj", "discord")]
+        [InlineData("https://discord.com/api/webhooks/123456/xq9zn4pyu7fj", "webhooks")]
+        [InlineData("https://api.telegram.org/botxq9zn4pyu7fj/sendMessage", "bot")]
+        [InlineData("https://api.telegram.org/botxq9zn4pyu7fj/sendMessage", "telegram")]
+        [InlineData("https://api.telegram.org/botxq9zn4pyu7fj/sendMessage", "o")]
+        [InlineData("https://hooks.slack.com/services/T0001/B0002/xq9zn4pyu7fj", "o")]
+        public void SanitizeWebhookUrl_ProviderUrl_StillMasksTokenWhenEnvironmentSecretIsPartOfHostOrMarker(string url, string environmentSecret)
+        {
+            var previous = Environment.GetEnvironmentVariable("TOKEN");
+            try
+            {
+                Environment.SetEnvironmentVariable("TOKEN", environmentSecret);
+
+                var sanitized = LogRedaction.SanitizeWebhookUrl(url);
+
+                Assert.DoesNotContain("xq9zn4pyu7fj", sanitized);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("TOKEN", previous);
+            }
+        }
+
+        [Fact]
+        public void SanitizeWebhookUrl_ProviderUrl_KeepsHostAndMarkersWhenEnvironmentSecretIsUnrelated()
+        {
+            var previous = Environment.GetEnvironmentVariable("TOKEN");
+            try
+            {
+                Environment.SetEnvironmentVariable("TOKEN", "unrelated-secret-value");
+
+                var sanitized = LogRedaction.SanitizeWebhookUrl("https://hooks.slack.com/services/T0001/B0002/xq9zn4pyu7fj");
+
+                Assert.Equal("https://hooks.slack.com/services/<redacted>/<redacted>/<redacted>", sanitized);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("TOKEN", previous);
+            }
+        }
+
+        [Theory]
+        [InlineData("https://api.telegram.org/botxq9zn4pyu7fj/sendMessage", "https://api.telegram.<redacted>rg/b<redacted>t<redacted>/sendMessage")]
+        [InlineData("https://hooks.slack.com/services/T0001/B0002/xq9zn4pyu7fj", "https://h<redacted><redacted>ks.slack.c<redacted>m/services/<redacted>/<redacted>/<redacted>")]
+        public void SanitizeWebhookUrl_ProviderUrl_OneCharacterEnvironmentSecretOverMasksWithoutLeakingToken(string url, string expected)
+        {
+            var previous = Environment.GetEnvironmentVariable("TOKEN");
+            try
+            {
+                Environment.SetEnvironmentVariable("TOKEN", "o");
+
+                Assert.Equal(expected, LogRedaction.SanitizeWebhookUrl(url));
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("TOKEN", previous);
+            }
+        }
     }
 }
