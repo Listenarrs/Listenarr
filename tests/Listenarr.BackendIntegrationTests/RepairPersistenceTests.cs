@@ -26,7 +26,7 @@ namespace Listenarr.BackendIntegrationTests;
 [Trait("Category", "BackendIntegration")]
 public sealed class RepairPersistenceTests : BackendIntegrationTests
 {
-    // The record the TestHost Audible fixtures serve (tests/Listenarr.TestHost/Metadata/Fixtures).
+    // The record the TestHost Audible fixtures serve (tests/Listenarr.TestHost/Metadata/Fixtures/Audible).
     private const string MatchAsin = "B005FRGT44";
     private const string MatchRegion = "us";
     private const string MatchTitle = "Ready Player One";

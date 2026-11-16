@@ -17,9 +17,10 @@ tests/                              # Backend tests
 │   ├── Domain/                     # listenarr.domain tests
 │   └── Infrastructure/             # listenarr.infrastructure tests
 ├── Mocks/                          # Mock definitions
-│   └── Api/                        # API mock definitions
+│   └── Api/                        # Download client and indexer API mocks (metadata providers: TestHost)
 ├── Listenarr.BackendIntegrationTests/ # The whole app in process, driven through its HTTP API
 ├── Listenarr.TestHost/             # Fixture-backed stub of the external APIs (also the E2E test host)
+│   └── Metadata/                   # Providers/: one route class per metadata provider; Fixtures/{Provider}/ (see its README)
 ├── Listenarr.Tests.csproj          # Testing project
 └── README.md                       # Backend tests documentation
 ```
