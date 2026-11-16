@@ -150,8 +150,6 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
                     _logger.LogWarning(ex, "Error while reading startup ffmpeg provider config");
                 }
 
-                downloadUrl = await FfprobeEvermeetResolver.ResolveIfPinnedAsync(downloadUrl, _httpClient, _logger);
-
                 if (string.IsNullOrEmpty(downloadUrl))
                 {
                     _logger.LogWarning("No ffprobe download URL configured for this platform");

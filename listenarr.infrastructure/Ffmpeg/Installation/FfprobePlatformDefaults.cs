@@ -21,12 +21,6 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
 {
     internal static class FfprobePlatformDefaults
     {
-        /// <summary>
-        /// Verified evermeet ffprobe archive, used when the release lookup in
-        /// <see cref="FfprobeEvermeetResolver"/> is unavailable.
-        /// </summary>
-        internal const string MacOsFallbackUrl = "https://evermeet.cx/ffmpeg/ffprobe-9.0.2.zip";
-
         public static string? GetDownloadUrl()
         {
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
@@ -57,8 +51,7 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
         /// publishes one binary per archive, so macOS needs the ffprobe archive and not the ffmpeg
         /// one. The URL also has to end in a suffix <see cref="FfprobeArchiveExtractor"/>
         /// recognises, which rules out endpoints that redirect to the current release without
-        /// naming a file. The macOS value is the pinned fallback; the installer prefers the
-        /// current release named by <see cref="FfprobeEvermeetResolver"/>.
+        /// naming a file.
         /// </remarks>
         internal static string? GetDownloadUrl(OSPlatform platform, Architecture architecture)
         {
@@ -71,7 +64,7 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
 
             if (platform == OSPlatform.OSX)
             {
-                return MacOsFallbackUrl;
+                return "https://evermeet.cx/ffmpeg/ffprobe-6.0.zip";
             }
 
             if (platform == OSPlatform.Windows)
