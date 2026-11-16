@@ -1303,7 +1303,7 @@ public sealed class BackendArchitectureTests : BaseTests
             // Internal application/runtime paths, not user library volume identity.
             "listenarr.application/Configuration/Core/StartupConfigService.cs",
             "listenarr.infrastructure/DependencyInjection/InfrastructureStartupCompositionExtensions.cs",
-            "listenarr.infrastructure/Ffmpeg/Installation/FfmpegService.cs",
+            "listenarr.infrastructure/Ffmpeg/Installation/FfmpegService.Installer.cs",
             "listenarr.infrastructure/FileSystem/FileSystemSafety.cs",
             // Remote path mapping translates client-reported paths to local native paths and
             // uses host-native semantics only to keep relative joins inside the mapped local base.
