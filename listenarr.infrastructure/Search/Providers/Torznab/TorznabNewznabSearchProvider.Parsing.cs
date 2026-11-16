@@ -189,7 +189,7 @@ public partial class TorznabNewznabSearchProvider : IIndexerSearchProvider
                                     }
                                     catch (Exception caughtEx_3) when (caughtEx_3 is not OperationCanceledException && caughtEx_3 is not OutOfMemoryException && caughtEx_3 is not StackOverflowException)
                                     {
-                                        _logger.LogDebug(caughtEx_3, "Could not convert the Torznab usenetdate value {Value}; leaving the published date unset", value);
+                                        _logger.LogDebug(caughtEx_3, "Could not convert the Torznab usenetdate value {Value}; leaving the published date unset", LogRedaction.SanitizeText(value));
                                     }
                                 }
                                 else if (DateTime.TryParse(value, out var udt))

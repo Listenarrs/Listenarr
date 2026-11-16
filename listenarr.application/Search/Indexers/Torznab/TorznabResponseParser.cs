@@ -201,7 +201,7 @@ namespace Listenarr.Application.Search.Indexers.Torznab
                                         }
                                         catch (Exception caughtEx_24) when (caughtEx_24 is not OperationCanceledException && caughtEx_24 is not OutOfMemoryException && caughtEx_24 is not StackOverflowException)
                                         {
-                                            _logger.LogDebug(caughtEx_24, "Could not convert the Torznab usenetdate value {Value}; leaving the published date unset", value);
+                                            _logger.LogDebug(caughtEx_24, "Could not convert the Torznab usenetdate value {Value}; leaving the published date unset", LogRedaction.SanitizeText(value));
                                         }
                                     }
                                     else if (DateTime.TryParse(value, out var udt))
