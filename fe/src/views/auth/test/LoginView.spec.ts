@@ -113,4 +113,27 @@ describe('LoginView auth redirects', () => {
 
     expect(router.currentRoute.value.name).toBe('home')
   })
+
+  it('clears the loading state and allows retry when antiforgery bootstrap fails', async () => {
+    apiService.fetchAntiforgeryToken.mockRejectedValueOnce(new Error('CSRF unavailable'))
+    const { router, wrapper } = await mountLogin('/login?redirect=/wanted')
+    const vm = wrapper.vm as unknown as {
+      onSubmit: () => Promise<void>
+      loading: boolean
+      error: string | null
+    }
+
+    await vm.onSubmit()
+
+    expect(vm.loading).toBe(false)
+    expect(vm.error).toBe('CSRF unavailable')
+    expect(auth.login).not.toHaveBeenCalled()
+    expect(router.currentRoute.value.name).toBe('login')
+
+    await vm.onSubmit()
+
+    expect(vm.loading).toBe(false)
+    expect(vm.error).toBeNull()
+    expect(router.currentRoute.value.name).toBe('wanted')
+  })
 })

@@ -121,4 +121,23 @@ describe('router auth guards', () => {
 
     expect(router.currentRoute.value.name).toBe('settings')
   })
+
+  it('does not treat a padded enabled value as disabled', async () => {
+    getStartupConfigCached.mockResolvedValue({ AuthenticationRequired: ' Enabled ' })
+    const router = await loadRouter()
+
+    await router.push('/settings?tab=general#indexers')
+
+    expect(router.currentRoute.value.name).toBe('login')
+    expect(router.currentRoute.value.query.redirect).toBe('/settings?tab=general#indexers')
+  })
+
+  it('falls back home for repeated redirect parameters', async () => {
+    auth.user.authenticated = true
+    const router = await loadRouter()
+
+    await router.push('/login?redirect=/settings&redirect=https%3A%2F%2Fevil.example')
+
+    expect(router.currentRoute.value.name).toBe('home')
+  })
 })
