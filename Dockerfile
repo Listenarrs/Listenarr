@@ -9,6 +9,7 @@ ARG GOSU_VERSION=1.19
 RUN CGO_ENABLED=0 go install github.com/tianon/gosu@${GOSU_VERSION}
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
+LABEL org.opencontainers.image.source="https://github.com/Listenarrs/Listenarr"
 WORKDIR /app
 EXPOSE 4545
 ENV ASPNETCORE_URLS=http://*:4545
