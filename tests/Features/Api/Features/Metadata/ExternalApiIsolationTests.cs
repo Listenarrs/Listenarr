@@ -52,6 +52,20 @@ public sealed class ExternalApiIsolationTests : BaseTests
     }
 
     [Fact]
+    public async Task TestContainer_AudibleClient_AnswersNotFoundWithoutAFixture()
+    {
+        // Given the backend test container
+        Init();
+        using var client = _provider.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(AudibleService));
+
+        // When Audible is asked for a book without a fixture
+        using var response = await client.GetAsync("https://api.audible.com/1.0/catalog/products/UNKNOWN1234");
+
+        // Then the stub answers 404, not the network
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
     public async Task WebApplicationFactory_ProductionClient_IsAnsweredByTheStub()
     {
         // Given the API host used by the integration tests
