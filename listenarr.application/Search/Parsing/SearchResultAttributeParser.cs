@@ -111,8 +111,8 @@ public static class SearchResultAttributeParser
 
     /// <summary>
     /// Returns the bitrate label for the highest tier <paramref name="text"/> states, or null when
-    /// it states none. The label carries <paramref name="codec"/> when that is AAC and MP3 for any
-    /// other value, because those are the only two codecs the quality ladder has bitrate rungs for.
+    /// it states none. The label carries <paramref name="codec"/> when that is AAC or OPUS, AAC for
+    /// M4B (an MPEG-4 container, so the AAC family) and MP3 for any other value.
     /// </summary>
     public static string? DetectBitrateQuality(string text, string? codec = null)
     {
@@ -120,7 +120,12 @@ public static class SearchResultAttributeParser
         if (kbps is null)
             return null;
 
-        var family = string.Equals(codec, "AAC", StringComparison.OrdinalIgnoreCase) ? "AAC" : "MP3";
+        var family = codec?.ToUpperInvariant() switch
+        {
+            "AAC" or "M4B" => "AAC",
+            "OPUS" => "OPUS",
+            _ => "MP3"
+        };
         return $"{family} {kbps}kbps";
     }
 
