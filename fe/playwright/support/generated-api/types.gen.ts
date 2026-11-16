@@ -556,40 +556,6 @@ export type GetSettingsGetApplicationSettingsApiV1ConfigurationSettingsResponses
 
 export type GetSettingsGetApplicationSettingsApiV1ConfigurationSettingsResponse = GetSettingsGetApplicationSettingsApiV1ConfigurationSettingsResponses[keyof GetSettingsGetApplicationSettingsApiV1ConfigurationSettingsResponses];
 
-export type PostSettingsSaveApplicationSettingsApiV1ConfigurationSettingsData = {
-    /**
-     * Updated application settings.
-     */
-    body: ListenarrDomainConfigurationApplicationSettings;
-    path?: never;
-    query?: never;
-    url: '/api/v1/configuration/settings';
-};
-
-export type PostSettingsSaveApplicationSettingsApiV1ConfigurationSettingsErrors = {
-    /**
-     * Authentication is required.
-     */
-    401: unknown;
-    /**
-     * Request is authenticated but not authorized.
-     */
-    403: unknown;
-    /**
-     * An unexpected server error occurred.
-     */
-    500: unknown;
-};
-
-export type PostSettingsSaveApplicationSettingsApiV1ConfigurationSettingsResponses = {
-    /**
-     * OK
-     */
-    200: ListenarrDomainConfigurationApplicationSettings;
-};
-
-export type PostSettingsSaveApplicationSettingsApiV1ConfigurationSettingsResponse = PostSettingsSaveApplicationSettingsApiV1ConfigurationSettingsResponses[keyof PostSettingsSaveApplicationSettingsApiV1ConfigurationSettingsResponses];
-
 export type GetStartupConfigurationGetStartupConfigApiV1ConfigurationStartupconfigData = {
     body?: never;
     path?: never;

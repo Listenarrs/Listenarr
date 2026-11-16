@@ -20,7 +20,7 @@
 		<PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
 		<PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
 		<PackageReference Include="Moq" />
- </ItemGroup>
+	</ItemGroup>
 
 	<ItemGroup>
 		<Compile Remove="Listenarr.FakeProviders\**\*.cs" />
@@ -28,7 +28,7 @@
 		<Compile Remove="Listenarr.BackendIntegrationTests\**\*.cs" />
 	</ItemGroup>
 
- <ItemGroup>
+	<ItemGroup>
 		<Reference Include="Microsoft.CodeAnalysis">
 			<HintPath>$(MSBuildSDKsPath)/../Roslyn/bincore/Microsoft.CodeAnalysis.dll</HintPath>
 			<Private>true</Private>
@@ -39,7 +39,7 @@
 		</Reference>
 	</ItemGroup>
 
-  <ItemGroup>
+	<ItemGroup>
 		<ProjectReference Include="..\listenarr.api\Listenarr.Api.csproj" />
 		<ProjectReference Include="..\listenarr.infrastructure\Listenarr.Infrastructure.csproj" />
 		<ProjectReference Include="Listenarr.FakeProviders\Listenarr.FakeProviders.csproj" />
