@@ -37,7 +37,10 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
 
         private readonly ConcurrentDictionary<string, FfprobeValidation> _validationCache = new(StringComparer.Ordinal);
 
-        private sealed record FfprobeValidation(long Length, DateTime LastWriteTimeUtc, UnixFileMode? Mode, string? Failure);
+        /// <summary>The outcome of one version check: the failure reason, or the version the binary reported.</summary>
+        private sealed record FfprobeValidation(long Length, DateTime LastWriteTimeUtc, UnixFileMode? Mode, string? Failure, string? Version);
+
+        private static FfprobeValidation Uninspectable(string failure) => new(0, default, null, failure, null);
 
         /// <summary>
         /// The binary <see cref="ResolveFfprobePath"/> picks, if it passes the version check. When
@@ -52,12 +55,15 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
                 return (null, null);
             }
 
-            var failure = await ValidateFfprobeAsync(path);
+            var failure = (await ValidateFfprobeAsync(path)).Failure;
             return failure == null ? (path, null) : (null, failure);
         }
 
-        /// <summary>Null when the binary at <paramref name="path"/> is usable, else the reason it is not.</summary>
-        private async Task<string?> ValidateFfprobeAsync(string path)
+        /// <summary>
+        /// Check the binary at <paramref name="path"/>. <see cref="FfprobeValidation.Failure"/> is
+        /// null when it is usable, else the reason it is not.
+        /// </summary>
+        private async Task<FfprobeValidation> ValidateFfprobeAsync(string path)
         {
             var fullPath = Path.GetFullPath(path);
             FileInfo file;
@@ -67,14 +73,14 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
                 file = new FileInfo(fullPath);
                 if (!file.Exists)
                 {
-                    return "the binary does not exist";
+                    return Uninspectable("the binary does not exist");
                 }
 
                 mode = OperatingSystem.IsWindows() ? null : file.UnixFileMode;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                return $"the binary could not be inspected: {ex.Message}";
+                return Uninspectable($"the binary could not be inspected: {ex.Message}");
             }
 
             if (_validationCache.TryGetValue(fullPath, out var cached)
@@ -82,20 +88,25 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
                 && cached.LastWriteTimeUtc == file.LastWriteTimeUtc
                 && cached.Mode == mode)
             {
-                return cached.Failure;
+                return cached;
             }
 
-            var failure = await RunVersionCheckAsync(fullPath);
-            _validationCache[fullPath] = new FfprobeValidation(file.Length, file.LastWriteTimeUtc, mode, failure);
+            var (failure, version) = await RunVersionCheckAsync(fullPath);
+            var validation = new FfprobeValidation(file.Length, file.LastWriteTimeUtc, mode, failure, version);
+            _validationCache[fullPath] = validation;
             if (failure != null)
             {
                 _logger.LogWarning("ffprobe at {Path} is unusable: {Reason}", fullPath, LogRedaction.SanitizeText(failure));
             }
+            else
+            {
+                _logger.LogInformation("ffprobe at {Path} reports version {Version}", fullPath, version);
+            }
 
-            return failure;
+            return validation;
         }
 
-        private async Task<string?> RunVersionCheckAsync(string fullPath)
+        private async Task<(string? Failure, string? Version)> RunVersionCheckAsync(string fullPath)
         {
             var startInfo = new ProcessStartInfo
             {
@@ -114,23 +125,30 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
-                return $"-version could not be run: {ex.Message}";
+                return ($"-version could not be run: {ex.Message}", null);
             }
 
             if (result.TimedOut)
             {
-                return $"-version did not finish within {VersionCheckTimeoutMs / 1000} s";
+                return ($"-version did not finish within {VersionCheckTimeoutMs / 1000} s", null);
             }
 
             if (result.ExitCode != 0)
             {
-                return $"-version exited with code {result.ExitCode}";
+                return ($"-version exited with code {result.ExitCode}", null);
             }
 
             var firstLine = (result.Stdout ?? string.Empty).Split('\n', 2)[0].Trim();
-            return firstLine.StartsWith(VersionLinePrefix, StringComparison.Ordinal)
-                ? null
-                : $"-version output does not start with \"{VersionLinePrefix}\"";
+            if (!firstLine.StartsWith(VersionLinePrefix, StringComparison.Ordinal))
+            {
+                return ($"-version output does not start with \"{VersionLinePrefix}\"", null);
+            }
+
+            // "ffprobe version 9.0.2-Openur Copyright (c) ..." reports "9.0.2-Openur".
+            var version = firstLine[VersionLinePrefix.Length..]
+                .Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .FirstOrDefault();
+            return (null, version);
         }
     }
 }

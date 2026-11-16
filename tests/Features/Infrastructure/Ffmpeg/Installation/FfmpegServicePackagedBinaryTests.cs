@@ -80,17 +80,6 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
         }
 
         [Fact]
-        public void PackagedVersion_MatchesTheCentralPackageVersion()
-        {
-            var props = System.Xml.Linq.XDocument.Load(Path.Join(RepositoryRoot(), "Directory.Packages.props"));
-            var version = props.Descendants("PackageVersion")
-                .Single(element => (string?)element.Attribute("Include") == "Openur.FFprobeStatic")
-                .Attribute("Version")?.Value;
-
-            Assert.Equal(FfmpegService.PackagedVersion, version);
-        }
-
-        [Fact]
         public async Task GetLicenseAsync_NamesTheSourceOfTheBinaryInUse()
         {
             var applicationBase = FileService.GetTempDirectory("ffprobe-license-app");
@@ -103,8 +92,38 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
             Assert.Equal(FfmpegService.LegacyLicenseNotice, await service.GetLicenseAsync());
 
             await File.WriteAllTextAsync(Path.Join(applicationBase, ExecutableName), "packaged");
-            Assert.Equal(FfmpegService.PackagedLicenseNotice, await service.GetLicenseAsync());
-            Assert.Contains(FfmpegService.PackagedVersion, FfmpegService.PackagedLicenseNotice);
+            var notice = await service.GetLicenseAsync();
+            Assert.Contains("Openur.FFprobeStatic", notice);
+            Assert.NotEqual(FfmpegService.LegacyLicenseNotice, notice);
+        }
+
+        [Fact]
+        public async Task GetLicenseAsync_PackagedBinary_NamesTheVersionTheBinaryReports()
+        {
+            // The version comes from -version rather than a constant, so a package bump changes
+            // the notice without a code change.
+            var applicationBase = FileService.GetTempDirectory("ffprobe-license-version");
+            await File.WriteAllTextAsync(Path.Join(applicationBase, ExecutableName), "packaged");
+            var processRunner = new Mock<IProcessRunner>().AnswerFfprobeVersionCheck(
+                new ProcessResult(0, "ffprobe version 10.1-example Copyright (c) 2007-2026 the FFmpeg developers\n", string.Empty, false));
+            var service = CreateService(processRunner.Object, Path.Join(FileService.GetTempPath(), "ffmpeg-unused"), applicationBase);
+
+            var notice = await service.GetLicenseAsync();
+
+            Assert.StartsWith("ffprobe 10.1-example is a static FFmpeg build", notice);
+            Assert.DoesNotContain("9.0.2", notice);
+        }
+
+        [Fact]
+        public async Task GetLicenseAsync_PackagedBinaryFailingTheCheck_OmitsTheVersion()
+        {
+            var applicationBase = FileService.GetTempDirectory("ffprobe-license-failing");
+            await File.WriteAllTextAsync(Path.Join(applicationBase, ExecutableName), "packaged");
+            var processRunner = new Mock<IProcessRunner>().AnswerFfprobeVersionCheck(
+                new ProcessResult(1, string.Empty, "not an ffprobe", false));
+            var service = CreateService(processRunner.Object, Path.Join(FileService.GetTempPath(), "ffmpeg-unused"), applicationBase);
+
+            Assert.StartsWith("ffprobe is a static FFmpeg build", await service.GetLicenseAsync());
         }
 
         [Fact]
@@ -204,18 +223,6 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
                 requests.Add(request.RequestUri);
                 return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.NotFound));
             });
-        }
-
-        private static string RepositoryRoot()
-        {
-            var directory = new DirectoryInfo(AppContext.BaseDirectory);
-            while (directory != null && !File.Exists(Path.Join(directory.FullName, "listenarr.slnx")))
-            {
-                directory = directory.Parent;
-            }
-
-            Assert.NotNull(directory);
-            return directory.FullName;
         }
 
         private static byte[] BuildSilentWav(int sampleRate, int seconds)
