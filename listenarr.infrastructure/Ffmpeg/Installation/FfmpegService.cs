@@ -32,12 +32,17 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
     /// </summary>
     public partial class FfmpegService : IFfmpegService
     {
-        // Must match the Openur.FFprobeStatic version in Directory.Packages.props; a test enforces it.
-        internal const string PackagedVersion = "9.0.2.508";
-
-        internal const string PackagedLicenseNotice =
-            "ffprobe is a static FFmpeg build shipped with Listenarr in the Openur.FFprobeStatic "
-            + PackagedVersion + " package. Review FFmpeg licensing (LGPL/GPL) at https://ffmpeg.org/legal.html";
+        /// <summary>
+        /// The notice for the packaged binary. The version is the one the binary reports through
+        /// <c>-version</c>, so a package bump needs no code change; it is left out when the
+        /// binary does not pass the check.
+        /// </summary>
+        internal static string PackagedLicenseNotice(string? version)
+        {
+            var name = string.IsNullOrEmpty(version) ? "ffprobe" : $"ffprobe {version}";
+            return name + " is a static FFmpeg build shipped with Listenarr in the Openur.FFprobeStatic package. "
+                + "Review FFmpeg licensing (LGPL/GPL) at https://ffmpeg.org/legal.html";
+        }
 
         internal const string LegacyLicenseNotice =
             "ffprobe was found in the ffmpeg directory under the config directory and did not ship with Listenarr. "
@@ -169,7 +174,7 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
                 EnsureExecutable(path);
             }
 
-            return await ValidateFfprobeAsync(path) == null ? path : null;
+            return (await ValidateFfprobeAsync(path)).Failure == null ? path : null;
         }
 
         [UnsupportedOSPlatform("windows")]
