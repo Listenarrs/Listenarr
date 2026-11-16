@@ -5,7 +5,7 @@
 #   docker build --tag listenarr-backend-integration --build-arg LISTENARR_IMAGE=listenarr-backend-integration-app \
 #     --file .devcontainer/backend-integration.Dockerfile .
 #
-# It runs tests/Listenarr.TestHost (the API with a fixture-backed Audible client) instead of the
+# It runs tests/Listenarr.FakeProviders (the API with fixture-backed metadata providers) instead of the
 # production entry point. With LISTENARR_COVERAGE_DIR set, the host runs under dotnet-coverage and
 # writes one Cobertura report per process lifetime there when it stops.
 ARG LISTENARR_IMAGE
@@ -14,7 +14,7 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS test-host-build
 ARG DOTNET_COVERAGE_VERSION=18.12.0
 WORKDIR /src
 COPY . .
-RUN dotnet publish tests/Listenarr.TestHost/Listenarr.TestHost.csproj \
+RUN dotnet publish tests/Listenarr.FakeProviders/Listenarr.FakeProviders.csproj \
 	--configuration Release \
 	--output /out/integration-host \
 	/p:UseAppHost=false

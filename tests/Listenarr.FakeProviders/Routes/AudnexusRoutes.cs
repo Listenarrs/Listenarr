@@ -16,10 +16,10 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-namespace Listenarr.TestHost.Metadata.Providers;
+namespace Listenarr.FakeProviders.Routes;
 
 /// <summary>
-/// Audnexus (api.audnex.us). Fixtures in <c>Metadata/Fixtures/Audnexus/</c>, whatever the region asked:
+/// Audnexus (api.audnex.us). Fixtures in <c>Fixtures/Audnexus/</c>, whatever the region asked:
 /// <list type="bullet">
 /// <item><c>book-{ASIN}.json</c>: <c>/books/{ASIN}</c>; <c>book-{ASIN}-chapters.json</c>: <c>/books/{ASIN}/chapters</c>.</item>
 /// <item><c>author-{ASIN}.json</c>: <c>/authors/{ASIN}</c>; <c>search-author-{name}.json</c>: <c>/authors?name=</c> (slugged).</item>

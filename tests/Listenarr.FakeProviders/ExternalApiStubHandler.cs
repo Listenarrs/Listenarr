@@ -19,13 +19,13 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
-using Listenarr.TestHost.Metadata.Providers;
+using Listenarr.FakeProviders.Routes;
 
-namespace Listenarr.TestHost.Metadata;
+namespace Listenarr.FakeProviders;
 
 /// <summary>
-/// Answers the metadata providers' requests from the fixtures in <c>Metadata/Fixtures/{Provider}/</c>, each
-/// provider's routes in its own class (<see cref="Providers"/>). Anything else is answered 404.
+/// Answers the metadata providers' requests from the fixtures in <c>Fixtures/{Provider}/</c>, each
+/// provider's routes in its own class (<c>Routes/</c>). Anything else is answered 404.
 /// </summary>
 internal sealed class ExternalApiStubHandler : HttpMessageHandler
 {
@@ -35,7 +35,7 @@ internal sealed class ExternalApiStubHandler : HttpMessageHandler
     /// </summary>
     public const string MissingFixturesFileVariable = "LISTENARR_TEST_MISSING_FIXTURES";
 
-    private const string ResourcePrefix = "Listenarr.TestHost.Fixtures/";
+    private const string ResourcePrefix = "Listenarr.FakeProviders.Fixtures/";
 
     private static readonly ProviderRoutes[] Providers =
     [

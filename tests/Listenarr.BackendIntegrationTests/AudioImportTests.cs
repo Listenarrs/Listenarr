@@ -30,7 +30,7 @@ namespace Listenarr.BackendIntegrationTests;
 [Trait("Category", "BackendIntegration")]
 public sealed class AudioImportTests : BackendIntegrationTests
 {
-    // The record the TestHost Audible fixtures serve for this ASIN (Metadata/Fixtures/Audible/B008DFUGCQ.json).
+    // The record the fake Audible serves for this ASIN (tests/Listenarr.FakeProviders/Fixtures/Audible/B008DFUGCQ.json).
     private const string Asin = "B008DFUGCQ";
     private const string Title = "A Princess of Mars";
     private const string Author = "Edgar Rice Burroughs";

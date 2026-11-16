@@ -1,6 +1,6 @@
 using System.Net;
 using Listenarr.Infrastructure.DependencyInjection;
-using Listenarr.TestHost.Metadata;
+using Listenarr.FakeProviders;
 using Listenarr.Tests.Common;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;

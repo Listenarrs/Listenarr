@@ -23,7 +23,7 @@
 
 	<ItemGroup>
 		<ProjectReference Include="..\..\listenarr.api\Listenarr.Api.csproj" />
-		<ProjectReference Include="..\Listenarr.TestHost\Listenarr.TestHost.csproj" />
+		<ProjectReference Include="..\Listenarr.FakeProviders\Listenarr.FakeProviders.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>

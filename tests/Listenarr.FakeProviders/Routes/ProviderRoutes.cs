@@ -18,7 +18,7 @@
 
 using System.Text;
 
-namespace Listenarr.TestHost.Metadata.Providers;
+namespace Listenarr.FakeProviders.Routes;
 
 /// <summary>
 /// The fixture a request maps to: the files tried in order (in the provider's fixture folder), and the
@@ -34,7 +34,7 @@ internal sealed record FixtureRoute(IReadOnlyList<string> Candidates, string Rec
 
 /// <summary>
 /// One metadata provider's routes: which hosts it serves, and which fixture file of
-/// <c>Metadata/Fixtures/{Name}/</c> answers each request. A fixture name is derived from the request
+/// <c>Fixtures/{Name}/</c> answers each request. A fixture name is derived from the request
 /// alone, so a missing one can be recorded from the real API (scripts/test-fixtures/record-provider-fixtures.mjs).
 /// </summary>
 internal abstract class ProviderRoutes

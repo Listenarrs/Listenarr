@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-using Listenarr.TestHost.Metadata;
+using Listenarr.FakeProviders;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
@@ -85,7 +85,7 @@ namespace Listenarr.Tests.Mocks.Hosting
                     return mock.Object;
                 });
 
-                // The same stub as the E2E test host: Audible from the fixtures, any other external
+                // The same fake providers as the E2E container (Listenarr.FakeProviders): fixtures, any other external
                 // API 404, so no test reaches Audible, Audnexus, OpenLibrary or Amazon for real.
                 services.AddListenarrExternalApiTestStub();
 

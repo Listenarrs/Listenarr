@@ -2,11 +2,10 @@ using Listenarr.Api.Startup;
 using Listenarr.Infrastructure.DependencyInjection;
 using Listenarr.Infrastructure.FileSystem;
 using Listenarr.Infrastructure.Realtime.DependencyInjection;
-using Listenarr.TestHost.Metadata;
 
-namespace Listenarr.TestHost;
+namespace Listenarr.FakeProviders;
 
-public static class ListenarrTestHost
+public static class FakeProvidersHost
 {
     public static async Task Main(string[] args)
     {
