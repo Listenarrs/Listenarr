@@ -100,7 +100,7 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
             }
             else
             {
-                _logger.LogInformation("ffprobe at {Path} reports version {Version}", fullPath, version);
+                _logger.LogInformation("ffprobe at {Path} reports version {Version}", fullPath, LogRedaction.SanitizeText(version));
             }
 
             return validation;
