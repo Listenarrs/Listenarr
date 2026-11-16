@@ -61,7 +61,7 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
                                 }
                                 catch (Exception caughtEx_10) when (caughtEx_10 is not OperationCanceledException && caughtEx_10 is not OutOfMemoryException && caughtEx_10 is not StackOverflowException)
                                 {
-                                    _logger.LogDebug(caughtEx_10, "Could not download the checksum asset at {Url}; continuing without it", url);
+                                    _logger.LogDebug(caughtEx_10, "Could not download the checksum asset at {Url}; continuing without it", LogRedaction.SanitizeUrl(url));
                                 }
                             }
                         }
