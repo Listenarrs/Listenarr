@@ -279,42 +279,10 @@ namespace Listenarr.Application.Search.Indexers.MyAnonamouse
                         var formatFromField = !string.IsNullOrEmpty(rawFormatField) ? SearchResultAttributeParser.DetectFormatFromTags(rawFormatField) : null;
                         var finalFormat = (formatFromField != null && formatFromField != "MP3") ? formatFromField : formatFromTags;
 
-                        // Log explicit filetype when present
-                        if (!string.IsNullOrEmpty(rawFormatField))
-                        {
-                            logger.LogDebug("MyAnonamouse: found explicit filetype '{Filetype}' for item {Id}", rawFormatField, id);
-                        }
-
-                        // Detect quality: prefer tags, then explicit format field, then description/title
-                        var qualityFromTags = SearchResultAttributeParser.DetectQualityFromTags(tags ?? "");
-                        var finalQuality = qualityFromTags != "Unknown" ? qualityFromTags : (!string.IsNullOrEmpty(rawFormatField) ? SearchResultAttributeParser.DetectQualityFromFormat(rawFormatField) : "Unknown");
-
-                        // Fallback: try to detect quality from description or title (filename-like text)
-                        if (finalQuality == "Unknown")
-                        {
-                            if (!string.IsNullOrEmpty(description))
-                            {
-                                var q = SearchResultAttributeParser.DetectQualityFromTags(description);
-                                if (q != "Unknown") finalQuality = q;
-                                else
-                                {
-                                    var q2 = SearchResultAttributeParser.DetectQualityFromFormat(description);
-                                    if (q2 != "Unknown") finalQuality = q2;
-                                }
-                            }
-
-                            if (finalQuality == "Unknown")
-                            {
-                                var probeText = title;
-                                var q = SearchResultAttributeParser.DetectQualityFromTags(probeText);
-                                if (q != "Unknown") finalQuality = q;
-                                else
-                                {
-                                    var q2 = SearchResultAttributeParser.DetectQualityFromFormat(probeText);
-                                    if (q2 != "Unknown") finalQuality = q2;
-                                }
-                            }
-                        }
+                        // The bitrate label follows a codec the tags or filetype named; a codec guessed from
+                        // description/title text below ("Isaac" reads as aac) must not relabel a named MP3.
+                        // DetectFormatFromTags answers MP3 when nothing is named, so naming is checked apart.
+                        var declaredCodec = NamesCodec(tags ?? "") || NamesCodec(rawFormatField) ? finalFormat : null;
 
                         // Additional fallback: if format still looks generic MP3, probe description/title
                         if (finalFormat == "MP3")
@@ -330,6 +298,45 @@ namespace Listenarr.Application.Search.Indexers.MyAnonamouse
                                 var probeText = title;
                                 var f = SearchResultAttributeParser.DetectFormatFromTags(probeText);
                                 if (!string.IsNullOrEmpty(f) && f != "MP3") finalFormat = f;
+                            }
+                        }
+
+                        // Log explicit filetype when present
+                        if (!string.IsNullOrEmpty(rawFormatField))
+                        {
+                            logger.LogDebug("MyAnonamouse: found explicit filetype '{Filetype}' for item {Id}", rawFormatField, id);
+                        }
+
+                        var labelCodec = declaredCodec ?? finalFormat;
+
+                        // Detect quality: prefer tags, then explicit format field, then description/title
+                        var qualityFromTags = SearchResultAttributeParser.DetectQualityFromTags(tags ?? "", labelCodec);
+                        var finalQuality = qualityFromTags != "Unknown" ? qualityFromTags : (!string.IsNullOrEmpty(rawFormatField) ? SearchResultAttributeParser.DetectQualityFromFormat(rawFormatField) : "Unknown");
+
+                        // Fallback: try to detect quality from description or title (filename-like text)
+                        if (finalQuality == "Unknown")
+                        {
+                            if (!string.IsNullOrEmpty(description))
+                            {
+                                var q = SearchResultAttributeParser.DetectQualityFromTags(description, labelCodec);
+                                if (q != "Unknown") finalQuality = q;
+                                else
+                                {
+                                    var q2 = SearchResultAttributeParser.DetectQualityFromFormat(description);
+                                    if (q2 != "Unknown") finalQuality = q2;
+                                }
+                            }
+
+                            if (finalQuality == "Unknown")
+                            {
+                                var probeText = title;
+                                var q = SearchResultAttributeParser.DetectQualityFromTags(probeText, labelCodec);
+                                if (q != "Unknown") finalQuality = q;
+                                else
+                                {
+                                    var q2 = SearchResultAttributeParser.DetectQualityFromFormat(probeText);
+                                    if (q2 != "Unknown") finalQuality = q2;
+                                }
                             }
                         }
 
@@ -481,5 +488,7 @@ namespace Listenarr.Application.Search.Indexers.MyAnonamouse
             return results;
         }
 
+        private static bool NamesCodec(string text)
+            => SearchResultAttributeParser.DetectFormatFromTags(text) != "MP3" || text.Contains("mp3", StringComparison.OrdinalIgnoreCase);
     }
 }
