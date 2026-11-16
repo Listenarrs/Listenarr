@@ -39,6 +39,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
         [Theory]
         [InlineData(1, "ffprobe version 9.0.2", false)]
         [InlineData(-1, "", true)]
+        [InlineData(0, "ffprobe version 9.0.2", true)]
         [InlineData(0, "ffmpeg version 9.0.2", false)]
         [InlineData(0, "", false)]
         [InlineData(0, "warning: something\nffprobe version 9.0.2", false)]
