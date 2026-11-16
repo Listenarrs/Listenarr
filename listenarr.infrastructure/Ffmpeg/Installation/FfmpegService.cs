@@ -116,17 +116,18 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
         }
 
         /// <summary>
-        /// Return the ffprobe path if a packaged or configured binary exists. Never downloads; only
-        /// <see cref="EnsureFfprobeInstalledAsync"/> falls back to the download.
+        /// Return the ffprobe path if a packaged or configured binary exists and passes the version
+        /// check. Never downloads; only <see cref="EnsureFfprobeInstalledAsync"/> falls back to
+        /// the download.
         /// </summary>
-        public Task<string?> GetFfprobePathAsync()
+        public async Task<string?> GetFfprobePathAsync()
         {
-            var path = ResolveFfprobePath();
+            var (path, failure) = await ResolveValidatedFfprobePathAsync();
             if (path != null)
             {
                 _logger.LogInformation("Found ffprobe at {Path}", path);
             }
-            else
+            else if (failure == null)
             {
                 _logger.LogInformation(
                     "No ffprobe found for runtimes {Rids} under {ApplicationBase} or {LegacyDirectory}",
@@ -135,17 +136,18 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
                     _legacyDirectory);
             }
 
-            return Task.FromResult(path);
+            return path;
         }
 
         /// <summary>
-        /// Resolve ffprobe and make sure it can be executed, downloading it into the configured
-        /// ffmpeg directory only when nothing is packaged for this platform and nothing is there
-        /// yet. NuGet restore leaves
-        /// the binary executable by its owner only (0766 less the umask), and an unzip tool or an
-        /// artifact transfer can strip even that, so the execute bits are restored here when this
-        /// process owns the file. A foreign-owned install cannot be changed from here, which is
-        /// why the Docker image sets the mode at build time.
+        /// Resolve ffprobe, make sure it can be executed and check it with <c>-version</c>,
+        /// downloading it into the configured ffmpeg directory only when nothing is packaged for
+        /// this platform and nothing is there yet. NuGet restore leaves the binary executable by
+        /// its owner only (0766 less the umask), and an unzip tool or an artifact transfer can
+        /// strip even that, so the execute bits are restored here when this process owns the file.
+        /// A foreign-owned install cannot be changed from here, which is why the Docker image sets
+        /// the mode at build time. A binary that fails the check is reported as unavailable; a
+        /// failing packaged binary does not fall back to a copy in the ffmpeg directory.
         /// </summary>
         public async Task<string?> EnsureFfprobeInstalledAsync()
         {
@@ -156,15 +158,18 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
                     "No packaged ffprobe for runtimes {Rids} and none at {LegacyDirectory}; falling back to the download",
                     string.Join(", ", _runtimeIdentifiers),
                     _legacyDirectory);
-                return await DownloadFfprobeAsync();
+                path = await DownloadFfprobeAsync();
+                if (path == null)
+                {
+                    return null;
+                }
             }
-
-            if (!OperatingSystem.IsWindows())
+            else if (!OperatingSystem.IsWindows())
             {
                 EnsureExecutable(path);
             }
 
-            return path;
+            return await ValidateFfprobeAsync(path) == null ? path : null;
         }
 
         [UnsupportedOSPlatform("windows")]
