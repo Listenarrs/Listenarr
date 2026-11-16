@@ -1,24 +1,29 @@
-ffprobe / ffmpeg requirement
-=============================
+ffprobe requirement
+===================
 
-This project uses `ffprobe` (part of the FFmpeg project) to extract accurate audio file metadata (duration, sample rate, bitrate, channels, etc.).
+This project uses `ffprobe` (part of the FFmpeg project) to extract audio file metadata (duration, sample rate, bitrate, channels, embedded tags).
 
-Please do NOT check-in or bundle FFmpeg/ffprobe binaries in this repository. Instead, install ffmpeg/ffprobe on the host system and ensure `ffprobe` is available on the PATH for the user running the Listenarr service.
+Where it comes from
+-------------------
 
-Installation suggestions:
+ffprobe is a NuGet dependency, `Openur.FFprobeStatic`, the same package Sonarr references. Its version is pinned in `Directory.Packages.props` like every other package. The package carries a static build per runtime identifier under `runtimes/<rid>/native/`, covering linux-x64, linux-arm64, linux-arm, linux-musl-x64, linux-musl-arm64, osx-x64, osx-arm64, win-x64, win-arm64, win-x86, freebsd-x64 and freebsd-arm64.
 
-- Debian/Ubuntu:
-  sudo apt update
-  sudo apt install ffmpeg
-- macOS (Homebrew):
-  brew install ffmpeg
-- Windows (chocolatey / winget):
-  choco install ffmpeg
-  # or
-  winget install ffmpeg
+- A RID-specific publish (`dotnet publish -r linux-x64`, which is how release artifacts and the CI Docker images are built) places the binary next to the application.
+- A RID-agnostic build (`dotnet run`, the tests, the root `Dockerfile`) keeps the `runtimes/<rid>/native/` tree, and `FfprobeBinaryLocator` looks there for the current runtime only.
+
+Nothing is downloaded at first boot on a platform the package covers.
+
+Fallback
+--------
+
+If no packaged binary matches the running platform, Listenarr uses `ffprobe` (or `ffprobe.exe`) from the `ffmpeg` directory under its config directory if one has been placed there, and otherwise downloads one into that directory at startup as earlier releases did. A binary that an older release downloaded into that directory is ignored while a packaged one exists.
+
+Permissions
+-----------
+
+NuGet does not preserve Unix file modes reliably, so the binary can arrive without execute permission for every user. The Docker images set it during the build (`docker/runtime/finalize-app.sh`), and on startup Listenarr sets it itself when it owns the file.
 
 Licensing
 ---------
-FFmpeg is distributed under the LGPL or GPL depending on how it is built. If you link or distribute FFmpeg binaries as part of your product, be sure to comply with the FFmpeg licensing terms (LGPL/GPL) and any third-party codec licensing requirements. By default, this project does not redistribute FFmpeg — it expects system-installed ffprobe.
 
-If you need a managed or NuGet-based approach, consider adding a wrapper library (e.g., Xabe.FFmpeg) and follow its distribution/licensing guidance. Note that many NuGet packages still require FFmpeg binaries at runtime.
+FFmpeg is distributed under the LGPL or GPL depending on how it is built. The packaged linux-x64 build (9.0.2.508) reports `--enable-version3` without `--enable-gpl` in its configuration; the other platforms were not checked. Redistributing it with Listenarr carries FFmpeg's licensing obligations; review https://ffmpeg.org/legal.html.
