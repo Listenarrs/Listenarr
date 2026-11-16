@@ -60,7 +60,7 @@ let stack
 try {
   stack = await startListenarrStack({
     name: 'listenarr-e2e',
-    seedFile: join(repositoryRoot, 'scripts', 'backend-integration', 'seed-library.json'),
+    seedFile: join(repositoryRoot, 'scripts', 'e2e', 'seed-library.json'),
     rootFolders: [
       { name: 'E2E Import', path: '/backend-integration/import', isDefault: true },
       { name: 'E2E Second', path: '/backend-integration/second' },

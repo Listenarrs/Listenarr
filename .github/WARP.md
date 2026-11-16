@@ -83,9 +83,8 @@ npm run test:unit
 cd fe
 npm run test:frontend-integration
 
-# Run backend integration tests with Playwright (API only, app in Docker)
-cd fe
-npm run test:backend-integration
+# Run backend integration tests (whole app in process, API only; Linux, needs ffprobe)
+dotnet test tests/Listenarr.BackendIntegrationTests
 ```
 
 ## Architecture Overview

@@ -25,6 +25,7 @@
 	<ItemGroup>
 		<Compile Remove="Listenarr.TestHost\**\*.cs" />
 		<EmbeddedResource Remove="Listenarr.TestHost\**\*" />
+		<Compile Remove="Listenarr.BackendIntegrationTests\**\*.cs" />
 	</ItemGroup>
 
  <ItemGroup>

@@ -171,32 +171,6 @@ jobs:
         working-directory: fe
         run: npm run test:frontend-integration
 
-  backend-integration-tests:
-    if: ${{ !inputs.jobs || contains(inputs.jobs, 'backend-integration-tests') }}
-    # A self-hosted runner when one is named (manual run) or configured (CI_RUNNER), else GitHub's.
-    runs-on: ${{ inputs.runner || vars.CI_RUNNER || 'ubuntu-24.04' }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version-file: '.node-version'
-          cache: 'npm'
-          cache-dependency-path: fe/package-lock.json
-
-      - name: Install frontend deps
-        working-directory: fe
-        run: npm ci --engine-strict
-
-      - name: Install synthetic audiobook generator dependencies
-        run: sudo apt-get update && sudo apt-get install --yes ffmpeg python3-venv
-
-      - name: Run Playwright backend integration tests (API only, app in Docker)
-        working-directory: fe
-        run: npm run test:backend-integration
-
   e2e-tests:
     if: ${{ !inputs.jobs || contains(inputs.jobs, 'e2e-tests') }}
     # A self-hosted runner when one is named (manual run) or configured (CI_RUNNER), else GitHub's.
@@ -275,6 +249,11 @@ jobs:
 
       - name: Build backend
         run: dotnet build listenarr.slnx --no-restore --configuration Release
+
+      # ffprobe for tests/Listenarr.BackendIntegrationTests (the import scan reads real tags); not on Windows,
+      # where that project is not a test project.
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install --yes ffmpeg
 
       - name: Run native backend tests
         env:

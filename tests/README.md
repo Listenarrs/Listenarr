@@ -18,8 +18,22 @@ tests/                              # Backend tests
 │   └── Infrastructure/             # listenarr.infrastructure tests
 ├── Mocks/                          # Mock definitions
 │   └── Api/                        # API mock definitions
+├── Listenarr.BackendIntegrationTests/ # The whole app in process, driven through its HTTP API
+├── Listenarr.TestHost/             # Fixture-backed stub of the external APIs (also the E2E test host)
 ├── Listenarr.Tests.csproj          # Testing project
 └── README.md                       # Backend tests documentation
+```
+
+### Backend integration tests
+
+`Listenarr.BackendIntegrationTests/` is a separate project: each test starts the whole application in process
+(`WebApplicationFactory`) on its own SQLite file and temporary root folders, seeds four books and two root folders
+through the API, and then uses only HTTP requests, as the frontend does. External APIs answer from the TestHost
+fixtures; the import scan reads real tags with the `ffprobe` found on PATH (install FFmpeg). The project builds on
+every OS but is a test project only off Windows: CI runs it in `backend-tests-linux`.
+
+```
+dotnet test tests/Listenarr.BackendIntegrationTests
 ```
 
 ### Creating a test

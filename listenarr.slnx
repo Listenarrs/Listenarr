@@ -19,6 +19,7 @@
     <File Path="global.json" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Listenarr.BackendIntegrationTests/Listenarr.BackendIntegrationTests.csproj" />
     <Project Path="tests/Listenarr.TestHost/Listenarr.TestHost.csproj" />
     <Project Path="tests/Listenarr.Tests.csproj" />
   </Folder>

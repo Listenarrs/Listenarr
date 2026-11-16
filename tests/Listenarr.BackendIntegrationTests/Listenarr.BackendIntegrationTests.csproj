@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<!--
+		Backend integration tests: the whole application in process, driven only through its HTTP API, on a
+		SQLite file and real folders (see BackendIntegrationHost). Linux CI runs them with the rest of the
+		backend suite (backend-tests-linux, which installs FFmpeg for ffprobe). They build everywhere but are
+		not a test project on Windows, so the Windows job does not run them.
+	-->
+	<PropertyGroup>
+		<IsPackable>false</IsPackable>
+		<IsTestProject Condition="$([MSBuild]::IsOSPlatform('Windows'))">false</IsTestProject>
+		<EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.NET.Test.Sdk" />
+		<PackageReference Include="xunit" />
+		<PackageReference Include="xunit.runner.visualstudio" />
+		<PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+		<PackageReference Include="Moq" />
+		<PackageReference Include="TagLibSharp" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\..\listenarr.api\Listenarr.Api.csproj" />
+		<ProjectReference Include="..\Listenarr.TestHost\Listenarr.TestHost.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<!-- One second of generated silence; AudioImportTests tags a copy of it. -->
+		<None Include="..\Data\Audio\the-time-machine-silence.m4b" Link="Data\the-time-machine-silence.m4b" CopyToOutputDirectory="PreserveNewest" />
+	</ItemGroup>
+</Project>

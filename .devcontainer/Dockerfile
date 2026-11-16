@@ -24,7 +24,7 @@ RUN apt-get update \
 	&& apt-get clean \
 	&& rm -rf /var/lib/apt/lists/*
 
-# - ffmpeg, python3-venv, git: scripts/backend-integration/generate-audio-fixtures.sh
+# - ffmpeg, python3-venv, git: scripts/e2e/generate-library-fixtures.sh; ffprobe for tests/Listenarr.BackendIntegrationTests
 # - the browser libraries: headless Playwright Chromium frontend integration tests
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends \
