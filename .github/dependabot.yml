@@ -11,3 +11,15 @@ updates:
     - "/fe"
     schedule:
       interval: "daily"
+
+  - package-ecosystem: "nuget"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      nuget:
+        patterns:
+          - "*"
+        # ffprobe ships from this package, so each bump gets its own PR and its own platform checks.
+        exclude-patterns:
+          - "Openur.FFprobeStatic"
