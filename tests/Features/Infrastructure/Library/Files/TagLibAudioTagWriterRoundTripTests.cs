@@ -1,4 +1,3 @@
-using Listenarr.Application.Audiobooks.Contracts;
 using Listenarr.Infrastructure.Library.Files;
 using Listenarr.Tests.Common;
 
