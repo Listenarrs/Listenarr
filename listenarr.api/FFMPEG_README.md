@@ -18,6 +18,11 @@ Fallback
 
 If no packaged binary matches the running platform, Listenarr uses `ffprobe` (or `ffprobe.exe`) from the `ffmpeg` directory under its config directory if one has been placed there, and otherwise downloads one into that directory at startup as earlier releases did. A binary that an older release downloaded into that directory is ignored while a packaged one exists.
 
+Version check
+-------------
+
+Before it uses a binary, Listenarr runs `ffprobe -version` and accepts it only if that exits 0 within five seconds and the first line starts with `ffprobe version`. A packaged binary that fails is reported as unavailable; the copy in the config directory is not used in its place. The startup log and the licence notice name the version this check reports, so a package bump needs no code change.
+
 Permissions
 -----------
 
