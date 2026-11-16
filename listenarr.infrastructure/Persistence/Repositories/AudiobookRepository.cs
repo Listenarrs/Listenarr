@@ -458,16 +458,6 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             await _db.SaveChangesAsync(ct);
         }
 
-        public async Task<List<Audiobook>> GetMonitoredAudiobooksForSearchAsync(DateTime cutoff, System.Threading.CancellationToken ct = default)
-        {
-            return await _db.Audiobooks
-                .Include(a => a.QualityProfile)
-                .Where(a => a.Monitored &&
-                            a.QualityProfileId != null &&
-                            (a.LastSearchTime == null || a.LastSearchTime < cutoff))
-                .ToListAsync(ct);
-        }
-
         public async Task NormalizeJsonColumnsAsync(System.Threading.CancellationToken ct = default)
         {
             var columns = new[] { "Authors", "Genres", "Tags", "Narrators", "AuthorAsins", "Isbn" }
