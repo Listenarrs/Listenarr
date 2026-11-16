@@ -1314,7 +1314,7 @@ describe('AddNewView pagination', () => {
         publisher: 'Pottermore Publishing',
         releaseDate: '2016-11-20',
         link: 'https://www.audible.de/pd/B01M02FJ7A',
-      },
+      } as unknown as SearchResult,
     ])
     await flushPromises()
     await wrapper.vm.$nextTick()
@@ -1350,7 +1350,7 @@ describe('AddNewView pagination', () => {
         author: 'Author Name',
         language: 'english',
         link: 'https://www.audible.de/pd/B01M02FJ7A',
-      },
+      } as unknown as SearchResult,
     ])
 
     try {

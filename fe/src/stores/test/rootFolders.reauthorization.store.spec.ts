@@ -288,3 +288,13 @@ describe('root folder storage and relocation store actions', () => {
     expect(apiService.getRootFolders).toHaveBeenCalledTimes(1)
   })
 })
+
+vi.mock('@/services/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/services/api')>()
+  const apiService = Object.create(actual.apiService)
+  apiService.updateRootFolder = vi.fn()
+  apiService.getRootFolders = vi.fn()
+  apiService.changeRootFolderPath = vi.fn()
+  apiService.confirmRootFolder = vi.fn()
+  return { ...actual, apiService }
+})

@@ -1085,7 +1085,7 @@ let unsubscribeQueue: (() => void) | null = null
 let unsubscribeFilesRemoved: (() => void) | null = null
 let unsubscribeScanJobs: (() => void) | null = null
 let unsubscribeSignalRConnected: (() => void) | null = null
-let scanStatusReconcileTimer: ReturnType<typeof setInterval> | null = null
+let scanStatusReconcileTimer: number | null = null
 let scanStatusReconcileInFlight = false
 
 const hasActiveVisibleScan = () =>

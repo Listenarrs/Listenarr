@@ -1,3 +1,4 @@
+import { installStorageMock } from '@/test/utils/storage'
 /*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2026 Listenarr Contributors
@@ -18,7 +19,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { SearchResult } from '@/types'
-import { flushAsync } from '@/test/utils/wait'
 
 const startManualImport = vi.fn()
 const addToLibrary = vi.fn()
@@ -66,6 +66,7 @@ vi.mock('@/utils/logger', () => ({
 
 describe('library import store', () => {
   beforeEach(() => {
+    installStorageMock()
     vi.clearAllMocks()
     unmatchedScanHandler = null
     setActivePinia(createPinia())

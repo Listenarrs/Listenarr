@@ -149,3 +149,8 @@ describe('NotificationsTab', () => {
     })
   })
 })
+
+vi.mock('@/components/feedback/Modal.vue', async () => {
+  const { modalStubs } = await import('@/test/stubs')
+  return { default: modalStubs.Modal }
+})

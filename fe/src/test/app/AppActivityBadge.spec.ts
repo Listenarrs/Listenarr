@@ -1,3 +1,4 @@
+import { installStorageMock } from '@/test/utils/storage'
 /*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2026 Listenarr Contributors
@@ -16,7 +17,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest'
-import { enableAutoUnmount, mount, type VueWrapper } from '@vue/test-utils'
+import { enableAutoUnmount, mount } from '@vue/test-utils'
 import { computed, reactive, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { delay, flushAsync } from '@/test/utils/wait'
@@ -147,6 +148,7 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 
 describe('App.vue activity badge', () => {
   beforeEach(() => {
+    installStorageMock()
     // reset mocks between tests
     vi.resetModules()
     moveJobsMock.trackedJobs.length = 0
@@ -202,7 +204,7 @@ describe('App.vue activity badge', () => {
     await router.push('/')
     await router.isReady().catch(() => {})
 
-    wrapper = mount(AppComponent, {
+    const wrapper = mount(AppComponent, {
       global: { stubs: ['RouterLink', 'RouterView'], plugins: [createPinia(), router] },
     })
     await new Promise((resolve) => setTimeout(resolve, 20))
@@ -226,7 +228,7 @@ describe('App.vue activity badge', () => {
     await router.push('/')
     await router.isReady().catch(() => {})
 
-    wrapper = mount(AppComponent, {
+    const wrapper = mount(AppComponent, {
       global: { stubs: ['RouterLink', 'RouterView'], plugins: [createPinia(), router] },
     })
     await new Promise((resolve) => setTimeout(resolve, 20))
@@ -305,7 +307,7 @@ describe('App.vue activity badge', () => {
     await router.push('/')
     await router.isReady().catch(() => {})
 
-    wrapper = mount(AppComponent, {
+    const wrapper = mount(AppComponent, {
       global: { stubs: ['RouterLink', 'RouterView'], plugins: [createPinia(), router] },
     })
     await new Promise((resolve) => setTimeout(resolve, 20))
@@ -345,7 +347,7 @@ describe('App.vue activity badge', () => {
     await router.push('/')
     await router.isReady().catch(() => {})
 
-    wrapper = mount(AppComponent, {
+    const wrapper = mount(AppComponent, {
       global: { stubs: ['RouterLink', 'RouterView'], plugins: [createPinia(), router] },
     })
     await new Promise((resolve) => setTimeout(resolve, 20))
@@ -381,7 +383,7 @@ describe('App.vue activity badge', () => {
     await router.push('/')
     await router.isReady().catch(() => {})
 
-    wrapper = mount(AppComponent, {
+    const wrapper = mount(AppComponent, {
       global: { stubs: ['RouterLink', 'RouterView'], plugins: [createPinia(), router] },
     })
     await new Promise((resolve) => setTimeout(resolve, 20))
@@ -409,7 +411,7 @@ describe('App.vue activity badge', () => {
     await router.push('/')
     await router.isReady().catch(() => {})
 
-    wrapper = mount(AppComponent, {
+    const wrapper = mount(AppComponent, {
       global: { stubs: ['RouterLink', 'RouterView'], plugins: [createPinia(), router] },
     })
     await new Promise((resolve) => setTimeout(resolve, 20))
@@ -459,7 +461,7 @@ describe('App.vue activity badge', () => {
     await router.push('/')
     await router.isReady().catch(() => {})
 
-    wrapper = mount(AppComponent, {
+    const wrapper = mount(AppComponent, {
       global: { stubs: ['RouterLink', 'RouterView'], plugins: [createPinia(), router] },
     })
     await new Promise((resolve) => setTimeout(resolve, 20))
@@ -496,7 +498,7 @@ describe('App.vue activity badge', () => {
     await router.push('/')
     await router.isReady().catch(() => {})
 
-    wrapper = mount(AppComponent, {
+    const wrapper = mount(AppComponent, {
       global: { stubs: ['RouterLink', 'RouterView'], plugins: [createPinia(), router] },
     })
     await new Promise((resolve) => setTimeout(resolve, 20))

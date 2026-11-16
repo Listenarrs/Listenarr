@@ -46,7 +46,9 @@ function createFilesystemPinia(filesystemStatus: 'Running' | 'Ready') {
 }
 import { modalStubs } from '@/test/stubs'
 
-vi.mock('@/services/api', () => ({ apiService: { previewRename: vi.fn() } }))
+vi.mock('@/services/api', () => ({
+  apiService: { previewRename: vi.fn(), executeRename: vi.fn() },
+}))
 
 describe('RenamePreviewModal', () => {
   beforeEach(() => {
@@ -285,4 +287,9 @@ describe('RenamePreviewModal', () => {
     expect(wrapper.find('.result-row.error').exists()).toBe(true)
     expect(wrapper.text()).toContain('folder changed after the organize preview')
   })
+})
+
+vi.mock('@/components/feedback/Modal.vue', async () => {
+  const { modalStubs } = await import('@/test/stubs')
+  return { default: modalStubs.Modal }
 })

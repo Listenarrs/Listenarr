@@ -196,6 +196,8 @@ async function repair(wrapper: ReturnType<typeof mountModal>) {
 
 describe('RepairBooksModal', () => {
   beforeEach(() => {
+    resultsReveal.holdMs = 0
+    resultsReveal.fadeMs = 0
     vi.clearAllMocks()
     // Repair asks first: accepted, unless a test says otherwise
     leaveMocks.showConfirm.mockReset().mockResolvedValue(true)
@@ -355,7 +357,7 @@ describe('RepairBooksModal', () => {
     await flushPromises()
     // A browser applies a length limit to a paste before the trim: " B0BK9W82PQ" would lose its
     // last letter. jsdom doesn't apply it, so the field must simply have none
-    expect(field(wrapper, 'match-asin').maxLength).toBe(-1)
+    expect((field(wrapper, 'match-asin') as HTMLInputElement).maxLength).toBe(-1)
 
     await bookCard(wrapper).get('[data-testid="match-region"]').setValue('us')
     await flushPromises()
@@ -451,7 +453,7 @@ describe('RepairBooksModal', () => {
     await flushPromises()
 
     // The title says the step, and how many there are
-    expect(wrapper.get('#modal-title h2').text()).toBe('Repair Books - Matching - Step 1/3')
+    expect(wrapper.get('.modal-title h3').text()).toBe('Repair Books - Matching - Step 1/3')
     expect(bookCard(wrapper).text()).toContain('Primal Hunter, Vol. 7')
     expect(bookCard(wrapper).get('[data-testid="match-current"]').text()).toMatch(
       /^B0HM45F8MW - Primal Hunter, Vol. 7 - Zogarth - France \(FR\)$/,
@@ -809,7 +811,7 @@ describe('RepairBooksModal', () => {
     expect(bookCard(wrapper).find('[data-testid="find-match-result"].selected').exists()).toBe(
       false,
     )
-    expect(bookCard(wrapper).get('[data-testid="match-none"]').exists()).toBe(true)
+    expect(bookCard(wrapper).find('[data-testid="match-none"]').exists()).toBe(true)
 
     await bookCard(wrapper).get('[data-testid="match-cancel-search"]').trigger('click')
     await flushPromises()
@@ -1694,7 +1696,7 @@ describe('RepairBooksModal', () => {
     expect(apiMocks.getAudibleMetadata).toHaveBeenLastCalledWith('B0OTHER123', 'us')
     // The new search unpicked the previous record: New is back to no record
     expect(bookCard(wrapper).find('[data-testid="match-picked"]').exists()).toBe(false)
-    expect(bookCard(wrapper).get('[data-testid="match-none"]').exists()).toBe(true)
+    expect(bookCard(wrapper).find('[data-testid="match-none"]').exists()).toBe(true)
     await bookCard(wrapper).get('[data-testid="find-match-result"]').trigger('click')
     expect(bookCard(wrapper).get('[data-testid="match-picked"]').text()).toContain('B0OTHER123')
   })
@@ -1982,7 +1984,7 @@ describe('RepairBooksModal', () => {
     expect(apiMocks.updateAudiobookIdentifiers).not.toHaveBeenCalled()
     expect(apiMocks.updateAudiobook).not.toHaveBeenCalled()
     expect(apiMocks.rescanAudiobookMetadata).not.toHaveBeenCalled()
-    expect(wrapper.get('#modal-title h2').text()).toBe('Repair Books - Matching - Step 1/3')
+    expect(wrapper.get('.modal-title h3').text()).toBe('Repair Books - Matching - Step 1/3')
     expect(wrapper.get('[data-testid="repair-confirm"]').text()).toContain('Repair 1')
 
     // Asked again, accepted: repaired
@@ -2498,7 +2500,7 @@ describe('RepairBooksModal', () => {
       'Repair failed (0.25 s): Database locked',
     )
     expect(apiMocks.rescanAudiobookMetadata).not.toHaveBeenCalled()
-    expect(wrapper.get('#modal-title h2').text()).toBe('Repair Books - Repair process - Step 2/3')
+    expect(wrapper.get('.modal-title h3').text()).toBe('Repair Books - Repair process - Step 2/3')
     // The footer warns: its bar orange, and what went wrong
     expect(wrapper.get('[data-testid="repair-problems"]').text()).toBe('Not all repaired: 1 failed')
     expect(wrapper.get('[data-testid="repair-progress"]').attributes('data-tone')).toBe('warning')
@@ -2527,7 +2529,7 @@ describe('RepairBooksModal', () => {
     await flushPromises()
 
     // Step 2 at once: the book cards are gone, every book shows on the results step
-    expect(wrapper.get('#modal-title h2').text()).toBe('Repair Books - Repair process - Step 2/3')
+    expect(wrapper.get('.modal-title h3').text()).toBe('Repair Books - Repair process - Step 2/3')
     expect(wrapper.find('[data-testid="repair-row-7"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="repair-results-message"]').text()).toContain(
       'Repairing 1 of 1…',
@@ -2972,7 +2974,7 @@ describe('RepairBooksModal', () => {
     await flushPromises()
 
     expect(apiMocks.getAudiobook).toHaveBeenCalledTimes(loads)
-    expect(wrapper.get('#modal-title h2').text()).toBe('Repair Books - Repair process - Step 2/3')
+    expect(wrapper.get('.modal-title h3').text()).toBe('Repair Books - Repair process - Step 2/3')
     expect(resultCard(wrapper).attributes('data-result-state')).toBe('done')
     expect(wrapper.get('[data-testid="repair-organize"]').text()).toContain('Organize 1')
   })
@@ -2987,7 +2989,7 @@ describe('RepairBooksModal', () => {
     await wrapper.setProps({ visible: true })
     await flushPromises()
 
-    expect(wrapper.get('#modal-title h2').text()).toBe('Repair Books - Matching - Step 1/3')
+    expect(wrapper.get('.modal-title h3').text()).toBe('Repair Books - Matching - Step 1/3')
   })
 
   it('goes Back from step 2 to step 1 loaded afresh, and closing then refreshes the page', async () => {
@@ -3011,7 +3013,7 @@ describe('RepairBooksModal', () => {
     await flushPromises()
 
     // Step 1 again, each book as it is now: its repaired record, nothing picked
-    expect(wrapper.get('#modal-title h2').text()).toBe('Repair Books - Matching - Step 1/3')
+    expect(wrapper.get('.modal-title h3').text()).toBe('Repair Books - Matching - Step 1/3')
     expect(bookCard(wrapper).get('[data-testid="match-current"]').text()).toBe(
       'B0BK9W82PQ - Primal Hunter 4 - Zogarth - United States (US)',
     )
@@ -3297,4 +3299,9 @@ describe('RepairBooksModal', () => {
 
     expect(wrapper.emitted('organize')).toEqual([[[7]]])
   })
+})
+
+vi.mock('@/components/feedback/Modal.vue', async () => {
+  const { modalStubs } = await import('@/test/stubs')
+  return { default: modalStubs.Modal }
 })

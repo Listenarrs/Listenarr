@@ -1,3 +1,4 @@
+import { resultsReveal } from '@/utils/resultsReveal'
 /*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2026 Listenarr Contributors
@@ -20,10 +21,8 @@ import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { apiService } from '@/services/api'
 import type { SearchResult } from '@/types'
-import { useLibraryImportStore } from '@/stores/libraryImport'
+import { useLibraryImportStore, type LibraryImportItem } from '@/stores/libraryImport'
 import LibraryImportSearchModal from '@/components/domain/audiobook/LibraryImportSearchModal.vue'
-import { modalStubs } from '@/test/stubs'
-import { flushAsync } from '@/test/utils/wait'
 
 const getProtectedImageSrc = vi.fn(() => 'https://example.com/protected.jpg')
 
@@ -69,12 +68,12 @@ const primalHunter4 = {
   authors: [{ name: 'Zogarth' }],
 } as unknown as SearchResult
 
-function mountModal(item: typeof alchemised = alchemised) {
+function mountModal(item: LibraryImportItem = alchemised) {
   return mount(LibraryImportSearchModal, { props: { item } })
 }
 
 function field(wrapper: ReturnType<typeof mountModal>, testId: string) {
-  return wrapper.get(`[data-testid="${testId}"]`)
+  return wrapper.find(`[data-testid="${testId}"]`)
 }
 
 const metadata = vi.fn()
@@ -85,6 +84,8 @@ const notFound = () => Promise.reject(Object.assign(new Error('Not found'), { st
 
 describe('LibraryImportSearchModal', () => {
   beforeEach(() => {
+    resultsReveal.holdMs = 0
+    resultsReveal.fadeMs = 0
     vi.clearAllMocks()
     setActivePinia(createPinia())
     vi.spyOn(apiService, 'getApplicationSettings').mockResolvedValue({
@@ -296,7 +297,7 @@ describe('LibraryImportSearchModal', () => {
     expect(wrapper.get('[data-testid="find-match-card"]').attributes('data-match-state')).toBe(
       'ignored',
     )
-    expect(wrapper.get('[data-testid="match-legend"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="match-legend"]').exists()).toBe(true)
 
     await field(wrapper, 'match-asin').setValue('B0BK9')
     await field(wrapper, 'match-search').trigger('click')
@@ -527,4 +528,9 @@ describe('LibraryImportSearchModal', () => {
     await flushPromises()
     expect(store.findMatchSearching).toBe(false)
   })
+})
+
+vi.mock('@/components/feedback/Modal.vue', async () => {
+  const { modalStubs } = await import('@/test/stubs')
+  return { default: modalStubs.Modal }
 })

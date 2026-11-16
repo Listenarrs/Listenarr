@@ -25,6 +25,7 @@ type MoveJobUpdate = {
   progress?: number
   phase?: string
   target?: string
+  sourceRetained?: boolean
   error?: string
 }
 

@@ -253,3 +253,8 @@ describe('AddLibraryModal when the configured region has no record for the ASIN'
     expect(wrapper.get('button.btn-primary').attributes('disabled')).toBeUndefined()
   })
 })
+
+vi.mock('@/components/feedback/Modal.vue', async () => {
+  const { modalStubs } = await import('@/test/stubs')
+  return { default: modalStubs.Modal }
+})

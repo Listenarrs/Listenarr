@@ -1,3 +1,4 @@
+import { createApplicationSettings } from '@/test/factories/settings'
 /*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2026 Listenarr Contributors
@@ -29,7 +30,9 @@ vi.mock('@/services/api', () => ({
     getApplicationSettings: vi.fn().mockResolvedValue({ outputPath: 'C:\\root' }),
     getQualityProfiles: vi.fn().mockResolvedValue([]),
     getRootFolders: vi.fn().mockResolvedValue([]),
-    addToLibrary: vi.fn().mockResolvedValue({ audiobook: { id: 1 } }),
+    addToLibrary: vi
+      .fn()
+      .mockResolvedValue({ message: 'Added', audiobook: { id: 1, title: 'Test' } }),
   },
 }))
 
@@ -87,7 +90,9 @@ describe('AddLibraryModal relative path derivation', () => {
   it('submits a configured-root relative destination whose Unix trailing whitespace is significant', async () => {
     const { apiService } = await import('@/services/api')
     vi.mocked(apiService.addToLibrary).mockClear()
-    vi.mocked(apiService.getApplicationSettings).mockResolvedValueOnce({ outputPath: '/library' })
+    vi.mocked(apiService.getApplicationSettings).mockResolvedValueOnce(
+      createApplicationSettings({ outputPath: '/library' }),
+    )
     vi.mocked(apiService.previewLibraryPath).mockResolvedValueOnce({
       fullPath: '/library/Author/Title',
       relativePath: 'Author/Title',
@@ -124,7 +129,9 @@ describe('AddLibraryModal relative path derivation', () => {
   it('preserves a literal backslash in a Unix relative destination segment', async () => {
     const { apiService } = await import('@/services/api')
     vi.mocked(apiService.addToLibrary).mockClear()
-    vi.mocked(apiService.getApplicationSettings).mockResolvedValueOnce({ outputPath: '/library' })
+    vi.mocked(apiService.getApplicationSettings).mockResolvedValueOnce(
+      createApplicationSettings({ outputPath: '/library' }),
+    )
     vi.mocked(apiService.previewLibraryPath).mockResolvedValueOnce({
       fullPath: '/library/Author/Title',
       relativePath: 'Author/Title',
@@ -206,7 +213,9 @@ describe('AddLibraryModal relative path derivation', () => {
 
   it('recovers when the server violates the relativePath contract with an absolute path', async () => {
     const { apiService } = await import('@/services/api')
-    vi.mocked(apiService.getApplicationSettings).mockResolvedValueOnce({ outputPath: 'C:\\root' })
+    vi.mocked(apiService.getApplicationSettings).mockResolvedValueOnce(
+      createApplicationSettings({ outputPath: 'C:\\root' }),
+    )
     vi.mocked(apiService.previewLibraryPath).mockResolvedValueOnce({
       fullPath: 'C:\\root\\Author\\Title',
       relativePath: 'C:\\root\\Author\\Title',
@@ -235,7 +244,9 @@ describe('AddLibraryModal relative path derivation', () => {
 
   it('rejects an absolute server relativePath even when it uses a different path syntax than the selected root', async () => {
     const { apiService } = await import('@/services/api')
-    vi.mocked(apiService.getApplicationSettings).mockResolvedValue({ outputPath: '/library' })
+    vi.mocked(apiService.getApplicationSettings).mockResolvedValue(
+      createApplicationSettings({ outputPath: '/library' }),
+    )
     vi.mocked(apiService.previewLibraryPath).mockResolvedValue({
       fullPath: '/library/Author/Title',
       relativePath: 'C:\\root\\Author\\Title',
@@ -260,7 +271,9 @@ describe('AddLibraryModal relative path derivation', () => {
       'Enter a path relative to the selected configured root folder.',
     )
     wrapper.unmount()
-    vi.mocked(apiService.getApplicationSettings).mockResolvedValue({ outputPath: 'C:\\root' })
+    vi.mocked(apiService.getApplicationSettings).mockResolvedValue(
+      createApplicationSettings({ outputPath: 'C:\\root' }),
+    )
     vi.mocked(apiService.previewLibraryPath).mockResolvedValue({
       fullPath: 'C:\\root\\Author\\Title',
       relativePath: '',
@@ -292,7 +305,9 @@ describe('AddLibraryModal relative path derivation', () => {
   it('rejects a Windows-rooted manual relative path under a Unix configured root', async () => {
     const { apiService } = await import('@/services/api')
     vi.mocked(apiService.addToLibrary).mockClear()
-    vi.mocked(apiService.getApplicationSettings).mockResolvedValue({ outputPath: '/library' })
+    vi.mocked(apiService.getApplicationSettings).mockResolvedValue(
+      createApplicationSettings({ outputPath: '/library' }),
+    )
     vi.mocked(apiService.previewLibraryPath).mockResolvedValue({
       fullPath: '/library/Author/Title',
       relativePath: 'Author/Title',
@@ -314,7 +329,9 @@ describe('AddLibraryModal relative path derivation', () => {
     await (wrapper.vm as unknown as { addToLibrary: () => Promise<void> }).addToLibrary()
     expect(apiService.addToLibrary).not.toHaveBeenCalled()
     wrapper.unmount()
-    vi.mocked(apiService.getApplicationSettings).mockResolvedValue({ outputPath: 'C:\\root' })
+    vi.mocked(apiService.getApplicationSettings).mockResolvedValue(
+      createApplicationSettings({ outputPath: 'C:\\root' }),
+    )
     vi.mocked(apiService.previewLibraryPath).mockResolvedValue({
       fullPath: 'C:\\root\\Author\\Title',
       relativePath: '',
@@ -448,9 +465,9 @@ describe('AddLibraryModal relative path derivation', () => {
 
   it('does not allow the modal to close while an add commit is in flight', async () => {
     const { apiService } = await import('@/services/api')
-    const pendingAdd = deferred<{ audiobook: { id: number; title: string } }>()
+    const pendingAdd = deferred<Awaited<ReturnType<typeof apiService.addToLibrary>>>()
     vi.mocked(apiService.addToLibrary).mockImplementationOnce(() => pendingAdd.promise)
-    const identifierlessBook = { ...fakeBook, asin: '', isbn: [], title: 'Identifierless Add' }
+    const identifierlessBook = { ...fakeBook, asin: '', isbn: '', title: 'Identifierless Add' }
     const wrapper = mount(AddLibraryModal, {
       props: { visible: false, book: identifierlessBook },
       attachTo: document.body,
@@ -477,14 +494,17 @@ describe('AddLibraryModal relative path derivation', () => {
       .find((button) => button.text().includes('Cancel'))
     expect(cancelButton?.attributes('disabled')).toBeDefined()
 
-    pendingAdd.resolve({ audiobook: { id: 9, title: identifierlessBook.title } })
+    pendingAdd.resolve({ message: 'Added', audiobook: { id: 9, title: identifierlessBook.title } })
     await request
 
     expect(vm.isAdding).toBe(false)
     expect(wrapper.emitted('added')).toHaveLength(1)
     expect(wrapper.emitted('close')).toHaveLength(1)
     wrapper.unmount()
-    vi.mocked(apiService.addToLibrary).mockResolvedValue({ audiobook: { id: 1 } })
+    vi.mocked(apiService.addToLibrary).mockResolvedValue({
+      message: 'Added',
+      audiobook: { id: 1, title: 'Test' },
+    })
   })
 
   it('reconciles an already-existing destination conflict as an idempotent add success', async () => {
@@ -502,7 +522,7 @@ describe('AddLibraryModal relative path derivation', () => {
     const identifierlessBook = {
       ...fakeBook,
       asin: '',
-      isbn: [],
+      isbn: '',
       title: 'Identifierless Existing Book',
     }
     const wrapper = mount(AddLibraryModal, {
@@ -524,13 +544,16 @@ describe('AddLibraryModal relative path derivation', () => {
     expect(wrapper.emitted('close')).toHaveLength(1)
     expect(vm.isAdding).toBe(false)
     wrapper.unmount()
-    vi.mocked(apiService.addToLibrary).mockResolvedValue({ audiobook: { id: 1 } })
+    vi.mocked(apiService.addToLibrary).mockResolvedValue({
+      message: 'Added',
+      audiobook: { id: 1, title: 'Test' },
+    })
   })
 
   it('does not let a stale add request close or unlock a newer modal session', async () => {
     const { apiService } = await import('@/services/api')
-    const oldAdd = deferred<{ audiobook: { id: number; title: string; asin: string } }>()
-    const newAdd = deferred<{ audiobook: { id: number; title: string; asin: string } }>()
+    const oldAdd = deferred<Awaited<ReturnType<typeof apiService.addToLibrary>>>()
+    const newAdd = deferred<Awaited<ReturnType<typeof apiService.addToLibrary>>>()
     vi.mocked(apiService.addToLibrary)
       .mockImplementationOnce(() => oldAdd.promise)
       .mockImplementationOnce(() => newAdd.promise)
@@ -561,21 +584,30 @@ describe('AddLibraryModal relative path derivation', () => {
 
     const newRequest = vm.addToLibrary()
     await vi.waitFor(() => expect(vm.isAdding).toBe(true))
-    oldAdd.resolve({ audiobook: { id: 10, title: oldBook.title, asin: oldBook.asin } })
+    oldAdd.resolve({
+      message: 'Added',
+      audiobook: { id: 10, title: oldBook.title, asin: oldBook.asin },
+    })
     await oldRequest
 
     expect(vm.isAdding).toBe(true)
     expect(wrapper.emitted('added')).toBeUndefined()
     expect(wrapper.emitted('close')).toBeUndefined()
 
-    newAdd.resolve({ audiobook: { id: 11, title: newBook.title, asin: newBook.asin } })
+    newAdd.resolve({
+      message: 'Added',
+      audiobook: { id: 11, title: newBook.title, asin: newBook.asin },
+    })
     await newRequest
 
     expect(vm.isAdding).toBe(false)
     expect(wrapper.emitted('added')).toHaveLength(1)
     expect(wrapper.emitted('close')).toHaveLength(1)
     wrapper.unmount()
-    vi.mocked(apiService.addToLibrary).mockResolvedValue({ audiobook: { id: 1 } })
+    vi.mocked(apiService.addToLibrary).mockResolvedValue({
+      message: 'Added',
+      audiobook: { id: 1, title: 'Test' },
+    })
   })
 
   it('does not let an in-flight automatic preview overwrite a manual relative-path edit', async () => {
@@ -755,4 +787,9 @@ describe('AddLibraryModal relative path derivation', () => {
     wrapper.unmount()
     vi.mocked(apiService.getAudibleMetadata).mockResolvedValue({})
   })
+})
+
+vi.mock('@/components/feedback/Modal.vue', async () => {
+  const { modalStubs } = await import('@/test/stubs')
+  return { default: modalStubs.Modal }
 })

@@ -200,3 +200,15 @@ describe('MoveAudiobookModal filesystem readiness', () => {
     expect(wrapper.text()).not.toContain('Source files will be moved into the new location.')
   })
 })
+
+vi.mock('@/components/feedback/Modal.vue', async () => {
+  const { modalStubs } = await import('@/test/stubs')
+  return { default: modalStubs.Modal }
+})
+
+vi.mock('@/services/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/services/api')>()
+  const apiService = Object.create(actual.apiService)
+  apiService.checkVolume = vi.fn()
+  return { ...actual, apiService }
+})

@@ -1,3 +1,4 @@
+import { createApplicationSettings } from '@/test/factories/settings'
 /*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2026 Listenarr Contributors
@@ -205,9 +206,11 @@ describe('EditAudiobookModal configured-root destination editing', () => {
         resolvedCaseSensitivity: 'Sensitive',
       },
     ])
-    vi.mocked(apiService.getApplicationSettings).mockResolvedValueOnce({
-      outputPath: '/library/Books\\Archive',
-    })
+    vi.mocked(apiService.getApplicationSettings).mockResolvedValueOnce(
+      createApplicationSettings({
+        outputPath: '/library/Books\\Archive',
+      }),
+    )
 
     const { vm } = await mountModal({
       ...audiobook,
@@ -233,7 +236,9 @@ describe('EditAudiobookModal configured-root destination editing', () => {
         resolvedCaseSensitivity: 'Sensitive',
       },
     ])
-    vi.mocked(apiService.getApplicationSettings).mockResolvedValueOnce({ outputPath: '/library' })
+    vi.mocked(apiService.getApplicationSettings).mockResolvedValueOnce(
+      createApplicationSettings({ outputPath: '/library' }),
+    )
 
     const { vm } = await mountModal({
       ...audiobook,
@@ -247,4 +252,9 @@ describe('EditAudiobookModal configured-root destination editing', () => {
     expect(vm.formData.relativePath).toBe('\\Chapter')
     expect(vm.editingDestination).toBe(false)
   })
+})
+
+vi.mock('@/components/feedback/Modal.vue', async () => {
+  const { modalStubs } = await import('@/test/stubs')
+  return { default: modalStubs.Modal }
 })

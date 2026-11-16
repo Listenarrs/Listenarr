@@ -122,7 +122,7 @@ describe('WantedView image recache behavior', () => {
     ] as ReturnType<typeof useDownloadsStore>['downloads']
     downloadsStore.downloads = fixtureDownloads
     vi.mocked(apiService.getDownloads).mockResolvedValueOnce(
-      fixtureDownloads as unknown as ReturnType<typeof apiService.getDownloads>,
+      fixtureDownloads as unknown as Awaited<ReturnType<typeof apiService.getDownloads>>,
     )
 
     const wrapper = mount(WantedView, { global: { plugins: [pinia] } })
@@ -243,7 +243,7 @@ describe('WantedView - Search All (Issue #936)', () => {
     ] as ReturnType<typeof useDownloadsStore>['downloads']
     downloadsStore.downloads = fixtureDownloads
     vi.mocked(apiService.getDownloads).mockResolvedValueOnce(
-      fixtureDownloads as unknown as ReturnType<typeof apiService.getDownloads>,
+      fixtureDownloads as unknown as Awaited<ReturnType<typeof apiService.getDownloads>>,
     )
 
     const wrapper = mount(WantedView, { global: { plugins: [pinia] } })
@@ -333,7 +333,7 @@ describe('WantedView - Search All (Issue #936)', () => {
     ] as ReturnType<typeof useDownloadsStore>['downloads']
     downloadsStore.downloads = fixtureDownloads
     vi.mocked(apiService.getDownloads).mockResolvedValueOnce(
-      fixtureDownloads as unknown as ReturnType<typeof apiService.getDownloads>,
+      fixtureDownloads as unknown as Awaited<ReturnType<typeof apiService.getDownloads>>,
     )
 
     const wrapper = mount(WantedView, { global: { plugins: [pinia] } })
@@ -398,7 +398,7 @@ describe('WantedView - Search All (Issue #936)', () => {
         startedAt: new Date().toISOString(),
         metadata: {},
       },
-    ] as unknown as ReturnType<typeof apiService.getDownloads>)
+    ] as unknown as Awaited<ReturnType<typeof apiService.getDownloads>>)
 
     libraryStore.audiobooks = [
       { id: 101, title: 'Downloading Book', monitored: true, files: [] },

@@ -206,15 +206,15 @@ describe('EditAudiobookModal move options', () => {
       },
     ]
 
-    const confirmation = (wrapper.vm as unknown).askMoveConfirmation(
+    const confirmation = (wrapper.vm as any).askMoveConfirmation(
       'C:\\root',
       'D:\\Audiobooks\\Author\\Book',
     )
     await wrapper.vm.$nextTick()
 
     expect(wrapper.getComponent(MoveAudiobookModal).props('allowDeleteEmpty')).toBe(false)
-    expect((wrapper.vm as unknown).modalDeleteEmpty).toBe(false)
-    ;(wrapper.vm as unknown).cancelMoveConfirm()
+    expect((wrapper.vm as any).modalDeleteEmpty).toBe(false)
+    ;(wrapper.vm as any).cancelMoveConfirm()
     await confirmation
   })
 
@@ -341,12 +341,12 @@ describe('EditAudiobookModal move options', () => {
       global: { plugins: [(await import('pinia')).createPinia()] },
     })
     await new Promise((resolve) => setTimeout(resolve, 200))
-    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
+    ;(wrapper.vm as any).formData.relativePath = 'New Author\\New Book'
     await wrapper.vm.$nextTick()
 
-    const savePromise = (wrapper.vm as unknown).handleSave()
+    const savePromise = (wrapper.vm as any).handleSave()
     await new Promise((resolve) => setTimeout(resolve, 10))
-    const resolver = (wrapper.vm as unknown).moveConfirmResolver
+    const resolver = (wrapper.vm as any).moveConfirmResolver
     if (resolver) resolver({ proceed: true, moveFiles: true, deleteEmptySource: true })
     await savePromise
     await wrapper.vm.$nextTick()
@@ -356,7 +356,7 @@ describe('EditAudiobookModal move options', () => {
     expect(wrapper.get('[data-testid="move-recovery-notice"]').text()).toContain(
       'An interrupted move needs to be resumed.',
     )
-    expect(wrapper.get('[data-testid="resume-move-button"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="resume-move-button"]').exists()).toBe(true)
     expect(toastMocks.error).toHaveBeenCalledWith(
       'Resume interrupted move',
       'An interrupted move still owns this audiobook filesystem state.',
@@ -406,12 +406,12 @@ describe('EditAudiobookModal move options', () => {
       global: { plugins: [(await import('pinia')).createPinia()] },
     })
     await new Promise((resolve) => setTimeout(resolve, 200))
-    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
+    ;(wrapper.vm as any).formData.relativePath = 'New Author\\New Book'
     await wrapper.vm.$nextTick()
 
-    const savePromise = (wrapper.vm as unknown).handleSave()
+    const savePromise = (wrapper.vm as any).handleSave()
     await new Promise((resolve) => setTimeout(resolve, 10))
-    const resolver = (wrapper.vm as unknown).moveConfirmResolver
+    const resolver = (wrapper.vm as any).moveConfirmResolver
     if (resolver) resolver({ proceed: true, moveFiles: true, deleteEmptySource: false })
     await savePromise
     await wrapper.vm.$nextTick()
@@ -421,7 +421,7 @@ describe('EditAudiobookModal move options', () => {
     expect(wrapper.get('[data-testid="move-recovery-notice"]').text()).toContain(
       'An interrupted move needs to be resumed.',
     )
-    expect(wrapper.get('[data-testid="resume-move-button"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="resume-move-button"]').exists()).toBe(true)
     expect(toastMocks.error).toHaveBeenCalledWith(
       'Move blocked',
       'An active move for this audiobook uses different execution options.',
@@ -440,9 +440,9 @@ describe('EditAudiobookModal move options', () => {
     await delay(200)
 
     // Ensure there is a detectable destination change under the configured output root.
-    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
-    ;(wrapper.vm as unknown).formData.title = 'Sample Updated'
-    ;(wrapper.vm as unknown).formData.identifiers = [
+    ;(wrapper.vm as any).formData.relativePath = 'New Author\\New Book'
+    ;(wrapper.vm as any).formData.title = 'Sample Updated'
+    ;(wrapper.vm as any).formData.identifiers = [
       {
         localKey: 'new-asin',
         type: 'Asin',
@@ -499,13 +499,13 @@ describe('EditAudiobookModal move options', () => {
     })
 
     await new Promise((r) => setTimeout(r, 200))
-    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
-    ;(wrapper.vm as unknown).formData.title = 'Saved Before Move Failure'
+    ;(wrapper.vm as any).formData.relativePath = 'New Author\\New Book'
+    ;(wrapper.vm as any).formData.title = 'Saved Before Move Failure'
     await wrapper.vm.$nextTick()
 
-    const savePromise = (wrapper.vm as unknown).handleSave()
+    const savePromise = (wrapper.vm as any).handleSave()
     await new Promise((r) => setTimeout(r, 10))
-    const resolver = (wrapper.vm as unknown).moveConfirmResolver
+    const resolver = (wrapper.vm as any).moveConfirmResolver
     if (resolver) resolver({ proceed: true, moveFiles: true, deleteEmptySource: true })
     await savePromise
 
@@ -543,12 +543,12 @@ describe('EditAudiobookModal move options', () => {
     })
 
     await new Promise((resolve) => setTimeout(resolve, 200))
-    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
+    ;(wrapper.vm as any).formData.relativePath = 'New Author\\New Book'
     await wrapper.vm.$nextTick()
 
-    const savePromise = (wrapper.vm as unknown).handleSave()
+    const savePromise = (wrapper.vm as any).handleSave()
     await new Promise((resolve) => setTimeout(resolve, 10))
-    const resolver = (wrapper.vm as unknown).moveConfirmResolver
+    const resolver = (wrapper.vm as any).moveConfirmResolver
     if (resolver) resolver({ proceed: true, moveFiles: true, deleteEmptySource: true })
     await savePromise
 
@@ -581,12 +581,12 @@ describe('EditAudiobookModal move options', () => {
     })
 
     await new Promise((resolve) => setTimeout(resolve, 200))
-    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
+    ;(wrapper.vm as any).formData.relativePath = 'New Author\\New Book'
     await wrapper.vm.$nextTick()
 
-    const savePromise = (wrapper.vm as unknown).handleSave()
+    const savePromise = (wrapper.vm as any).handleSave()
     await new Promise((resolve) => setTimeout(resolve, 10))
-    const resolver = (wrapper.vm as unknown).moveConfirmResolver
+    const resolver = (wrapper.vm as any).moveConfirmResolver
     if (resolver) resolver({ proceed: true, moveFiles: true, deleteEmptySource: true })
     await savePromise
     await wrapper.vm.$nextTick()
@@ -610,12 +610,12 @@ describe('EditAudiobookModal move options', () => {
     })
 
     await new Promise((r) => setTimeout(r, 200))
-    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
+    ;(wrapper.vm as any).formData.relativePath = 'New Author\\New Book'
     await wrapper.vm.$nextTick()
 
-    const savePromise = (wrapper.vm as unknown).handleSave()
+    const savePromise = (wrapper.vm as any).handleSave()
     await new Promise((r) => setTimeout(r, 10))
-    const resolver = (wrapper.vm as unknown).moveConfirmResolver
+    const resolver = (wrapper.vm as any).moveConfirmResolver
     if (resolver) resolver({ proceed: true, moveFiles: false, deleteEmptySource: true })
     await savePromise
     await new Promise((r) => setTimeout(r, 50))
@@ -640,8 +640,8 @@ describe('EditAudiobookModal move options', () => {
     await delay(200)
 
     // Ensure there is a detectable destination change and flip monitored.
-    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
-    ;(wrapper.vm as unknown).formData.monitored = false
+    ;(wrapper.vm as any).formData.relativePath = 'New Author\\New Book'
+    ;(wrapper.vm as any).formData.monitored = false
     await wrapper.vm.$nextTick()
 
     // Start save flow and resolve the in-component confirmation promise to
@@ -678,11 +678,11 @@ describe('EditAudiobookModal move options', () => {
     })
 
     await new Promise((resolve) => setTimeout(resolve, 200))
-    ;(wrapper.vm as unknown).formData.relativePath = 'C:\\root\\New Author\\New Book'
-    ;(wrapper.vm as unknown).formData.title = 'Should Not Save'
+    ;(wrapper.vm as any).formData.relativePath = 'C:\\root\\New Author\\New Book'
+    ;(wrapper.vm as any).formData.title = 'Should Not Save'
     await wrapper.vm.$nextTick()
 
-    await (wrapper.vm as unknown).handleSave()
+    await (wrapper.vm as any).handleSave()
 
     expect(apiService.updateAudiobook).not.toHaveBeenCalled()
     expect(apiService.moveAudiobook).not.toHaveBeenCalled()
@@ -700,7 +700,7 @@ describe('EditAudiobookModal move options', () => {
     })
 
     await new Promise((r) => setTimeout(r, 200))
-    ;(wrapper.vm as unknown).formData.relativePath = 'Some Author\\Some Title\\..'
+    ;(wrapper.vm as any).formData.relativePath = 'Some Author\\Some Title\\..'
     await wrapper.vm.$nextTick()
 
     expect(wrapper.text()).toContain('Path traversal is not allowed in the destination folder')
@@ -708,7 +708,7 @@ describe('EditAudiobookModal move options', () => {
       wrapper.find('button[aria-label="Save destination"]').attributes('disabled'),
     ).toBeDefined()
 
-    await (wrapper.vm as unknown).handleSave()
+    await (wrapper.vm as any).handleSave()
     await new Promise((r) => setTimeout(r, 50))
 
     const { apiService } = await import('@/services/api')
@@ -724,7 +724,7 @@ describe('EditAudiobookModal move options', () => {
     })
 
     await new Promise((r) => setTimeout(r, 200))
-    ;(wrapper.vm as unknown).formData.relativePath = 'Some Author\\Some Title\\test '
+    ;(wrapper.vm as any).formData.relativePath = 'Some Author\\Some Title\\test '
     await wrapper.vm.$nextTick()
 
     expect(wrapper.text()).toContain(
@@ -734,7 +734,7 @@ describe('EditAudiobookModal move options', () => {
       wrapper.find('button[aria-label="Save destination"]').attributes('disabled'),
     ).toBeDefined()
 
-    await (wrapper.vm as unknown).handleSave()
+    await (wrapper.vm as any).handleSave()
     await new Promise((r) => setTimeout(r, 50))
 
     const { apiService } = await import('@/services/api')
@@ -750,7 +750,7 @@ describe('EditAudiobookModal move options', () => {
     })
 
     await new Promise((r) => setTimeout(r, 200))
-    ;(wrapper.vm as unknown).formData.relativePath = 'Some Author\\Some Title\\ test'
+    ;(wrapper.vm as any).formData.relativePath = 'Some Author\\Some Title\\ test'
     await wrapper.vm.$nextTick()
 
     expect(wrapper.text()).not.toContain('Source and destination folders cannot overlap')
@@ -758,9 +758,9 @@ describe('EditAudiobookModal move options', () => {
       wrapper.find('button[aria-label="Save destination"]').attributes('disabled'),
     ).toBeUndefined()
 
-    const savePromise = (wrapper.vm as unknown).handleSave()
+    const savePromise = (wrapper.vm as any).handleSave()
     await new Promise((r) => setTimeout(r, 10))
-    const resolver = (wrapper.vm as unknown).moveConfirmResolver
+    const resolver = (wrapper.vm as any).moveConfirmResolver
     if (resolver) resolver({ proceed: true, moveFiles: true, deleteEmptySource: true })
     await savePromise
     await new Promise((r) => setTimeout(r, 50))
@@ -786,7 +786,7 @@ describe('EditAudiobookModal move options', () => {
     })
 
     await new Promise((r) => setTimeout(r, 200))
-    ;(wrapper.vm as unknown).formData.relativePath = 'Some Author\\Other Title\\ test'
+    ;(wrapper.vm as any).formData.relativePath = 'Some Author\\Other Title\\ test'
     await wrapper.vm.$nextTick()
 
     expect(wrapper.text()).not.toContain('Windows destination folder segments cannot end')
@@ -794,9 +794,9 @@ describe('EditAudiobookModal move options', () => {
       wrapper.find('button[aria-label="Save destination"]').attributes('disabled'),
     ).toBeUndefined()
 
-    const savePromise = (wrapper.vm as unknown).handleSave()
+    const savePromise = (wrapper.vm as any).handleSave()
     await new Promise((r) => setTimeout(r, 10))
-    const resolver = (wrapper.vm as unknown).moveConfirmResolver
+    const resolver = (wrapper.vm as any).moveConfirmResolver
     if (resolver) resolver({ proceed: true, moveFiles: true, deleteEmptySource: true })
     await savePromise
     await new Promise((r) => setTimeout(r, 50))
@@ -830,9 +830,9 @@ describe('EditAudiobookModal move options', () => {
       status: 'Running',
       target: 'C:\\root\\First Destination',
     })
-    ;(wrapper.vm as unknown).formData.relativePath = 'Second Destination'
+    ;(wrapper.vm as any).formData.relativePath = 'Second Destination'
     await wrapper.vm.$nextTick()
-    await (wrapper.vm as unknown).handleSave()
+    await (wrapper.vm as any).handleSave()
 
     const { apiService } = await import('@/services/api')
     expect(apiService.moveAudiobook).not.toHaveBeenCalled()
@@ -850,12 +850,12 @@ describe('EditAudiobookModal move options', () => {
     })
 
     await new Promise((r) => setTimeout(r, 200))
-    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
+    ;(wrapper.vm as any).formData.relativePath = 'New Author\\New Book'
     await wrapper.vm.$nextTick()
 
-    const savePromise = (wrapper.vm as unknown).handleSave()
+    const savePromise = (wrapper.vm as any).handleSave()
     await new Promise((r) => setTimeout(r, 10))
-    const resolver = (wrapper.vm as unknown).moveConfirmResolver
+    const resolver = (wrapper.vm as any).moveConfirmResolver
     if (resolver) resolver({ proceed: true, moveFiles: true, deleteEmptySource: true })
     await savePromise
     await new Promise((r) => setTimeout(r, 50))
@@ -899,12 +899,12 @@ describe('EditAudiobookModal move options', () => {
     })
 
     await new Promise((resolve) => setTimeout(resolve, 200))
-    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
+    ;(wrapper.vm as any).formData.relativePath = 'New Author\\New Book'
     await wrapper.vm.$nextTick()
 
-    const savePromise = (wrapper.vm as unknown).handleSave()
+    const savePromise = (wrapper.vm as any).handleSave()
     await new Promise((resolve) => setTimeout(resolve, 10))
-    const resolver = (wrapper.vm as unknown).moveConfirmResolver
+    const resolver = (wrapper.vm as any).moveConfirmResolver
     if (resolver) resolver({ proceed: true, moveFiles: true, deleteEmptySource: true })
     await savePromise
 
@@ -930,12 +930,12 @@ describe('EditAudiobookModal move options', () => {
     })
 
     await new Promise((resolve) => setTimeout(resolve, 200))
-    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
+    ;(wrapper.vm as any).formData.relativePath = 'New Author\\New Book'
     await wrapper.vm.$nextTick()
 
-    const savePromise = (wrapper.vm as unknown).handleSave()
+    const savePromise = (wrapper.vm as any).handleSave()
     await new Promise((resolve) => setTimeout(resolve, 10))
-    const resolver = (wrapper.vm as unknown).moveConfirmResolver
+    const resolver = (wrapper.vm as any).moveConfirmResolver
     if (resolver) resolver({ proceed: true, moveFiles: true, deleteEmptySource: true })
     await savePromise
 
@@ -954,12 +954,12 @@ describe('EditAudiobookModal move options', () => {
     })
 
     await new Promise((resolve) => setTimeout(resolve, 200))
-    ;(wrapper.vm as unknown).formData.relativePath = 'New Author\\New Book'
+    ;(wrapper.vm as any).formData.relativePath = 'New Author\\New Book'
     await wrapper.vm.$nextTick()
 
-    const savePromise = (wrapper.vm as unknown).handleSave()
+    const savePromise = (wrapper.vm as any).handleSave()
     await new Promise((resolve) => setTimeout(resolve, 10))
-    const resolver = (wrapper.vm as unknown).moveConfirmResolver
+    const resolver = (wrapper.vm as any).moveConfirmResolver
     if (resolver) resolver({ proceed: true, moveFiles: true, deleteEmptySource: true })
     await savePromise
 
@@ -988,10 +988,10 @@ describe('EditAudiobookModal move options', () => {
     })
 
     await new Promise((resolve) => setTimeout(resolve, 200))
-    ;(wrapper.vm as unknown).formData.title = 'Legacy Metadata Updated'
+    ;(wrapper.vm as any).formData.title = 'Legacy Metadata Updated'
     await wrapper.vm.$nextTick()
 
-    await (wrapper.vm as unknown).handleSave()
+    await (wrapper.vm as any).handleSave()
 
     expect(apiService.updateAudiobook).toHaveBeenCalledWith(
       1,
@@ -1324,4 +1324,9 @@ describe('EditAudiobookModal move options', () => {
       expect.arrayContaining(['Narrator One']),
     )
   })
+})
+
+vi.mock('@/components/feedback/Modal.vue', async () => {
+  const { modalStubs } = await import('@/test/stubs')
+  return { default: modalStubs.Modal }
 })

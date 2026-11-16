@@ -88,13 +88,15 @@ const {
   mockToastSuccess: vi.fn(),
   mockToastWarning: vi.fn(),
   mockToastError: vi.fn(),
-  mockGetAudiobookDeleteCapabilities: vi.fn(async () => ({
-    canRemoveFromLibrary: true,
-    canDeleteTrackedFiles: true,
-    canDeleteFolder: true,
-    reason: null,
-    fallbackAction: 'RemoveFromLibraryOnly' as const,
-  })),
+  mockGetAudiobookDeleteCapabilities: vi.fn(
+    async (): Promise<import('@/types').AudiobookDeleteCapabilities> => ({
+      canRemoveFromLibrary: true,
+      canDeleteTrackedFiles: true,
+      canDeleteFolder: true,
+      reason: null,
+      fallbackAction: 'RemoveFromLibraryOnly' as const,
+    }),
+  ),
 }))
 
 vi.mock('@/services/api', () => ({
@@ -294,13 +296,13 @@ describe('CollectionView', () => {
     mockGetAudiobookDeleteCapabilities
       .mockImplementationOnce(
         () =>
-          new Promise((resolve) => {
+          new Promise<import('@/types').AudiobookDeleteCapabilities>((resolve) => {
             resolveFirst = resolve
           }),
       )
       .mockImplementationOnce(
         () =>
-          new Promise((resolve) => {
+          new Promise<import('@/types').AudiobookDeleteCapabilities>((resolve) => {
             resolveSecond = resolve
           }),
       )
@@ -956,7 +958,7 @@ describe('CollectionView', () => {
     let resolveLookup: ((value: import('@/types').AuthorLookupResponse | null) => void) | undefined
     mockGetAuthorLookup.mockImplementation(
       () =>
-        new Promise((resolve) => {
+        new Promise<import('@/types').AuthorLookupResponse>((resolve) => {
           resolveLookup = resolve
         }),
     )
@@ -1039,7 +1041,7 @@ describe('CollectionView', () => {
       | undefined
     mockGetAuthorLookup.mockImplementationOnce(
       () =>
-        new Promise((resolve) => {
+        new Promise<import('@/types').AuthorLookupResponse>((resolve) => {
           resolveNextLookup = resolve
         }),
     )

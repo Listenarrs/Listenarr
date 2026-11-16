@@ -1,3 +1,4 @@
+import { installStorageMock } from '@/test/utils/storage'
 /*
  * Listenarr - Audiobook Management System
  * Copyright (C) 2024-2026 Listenarr Contributors
@@ -53,6 +54,7 @@ const resetStorage = () => {
 
 describe('auth store', () => {
   beforeEach(() => {
+    installStorageMock()
     setActivePinia(createPinia())
     apiMocks.getCurrentUser.mockReset()
     apiMocks.getCurrentUser.mockResolvedValue({ authenticated: false })

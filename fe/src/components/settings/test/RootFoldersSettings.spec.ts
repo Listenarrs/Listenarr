@@ -679,3 +679,21 @@ describe('RootFoldersSettings', () => {
     wrapper.unmount()
   })
 })
+
+vi.mock('@/services/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/services/api')>()
+  const apiService = Object.create(actual.apiService)
+  apiService.updateRootFolder = vi.fn()
+  apiService.getRootFolders = vi.fn()
+  apiService.getRootFolderMetadataRepairDetails = vi.fn()
+  apiService.removeRootFolderMetadataRepairFile = vi.fn()
+  apiService.abandonUnpublishedRootFolderRelocation = vi.fn()
+  apiService.retryRootFolderRelocation = vi.fn()
+  apiService.confirmRootFolder = vi.fn()
+  return { ...actual, apiService }
+})
+
+vi.mock('@/components/feedback/Modal.vue', async () => {
+  const { modalStubs } = await import('@/test/stubs')
+  return { default: modalStubs.Modal }
+})

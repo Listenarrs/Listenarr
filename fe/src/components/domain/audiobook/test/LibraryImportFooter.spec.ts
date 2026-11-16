@@ -54,7 +54,9 @@ describe('LibraryImportFooter', () => {
       filesystemErrorMessage: null,
     }
 
-    let resolveImport: ((value: { imported: number; errors: string[] }) => void) | null = null
+    let resolveImport:
+      | ((value: { imported: number; errors: string[]; warnings: string[] }) => void)
+      | null = null
 
     store.items = {
       'C:\\incoming\\Book 1.mp3': {
@@ -89,7 +91,7 @@ describe('LibraryImportFooter', () => {
 
     vi.spyOn(store, 'importSelected').mockImplementation(
       () =>
-        new Promise<{ imported: number; errors: string[] }>((resolve) => {
+        new Promise<{ imported: number; errors: string[]; warnings: string[] }>((resolve) => {
           resolveImport = resolve
         }),
     )
@@ -110,7 +112,7 @@ describe('LibraryImportFooter', () => {
     expect(importButton.text()).toContain('Importing 2 Books...')
     expect((importButton.element as HTMLButtonElement).disabled).toBe(true)
 
-    resolveImport?.({ imported: 2, errors: [] })
+    resolveImport?.({ imported: 2, errors: [], warnings: [] })
     await flushAsync()
     await wrapper.vm.$nextTick()
 
