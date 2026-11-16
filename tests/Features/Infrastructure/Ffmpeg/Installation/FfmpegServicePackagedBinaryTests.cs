@@ -54,11 +54,12 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
             var packaged = Path.Join(applicationBase, ExecutableName);
             await File.WriteAllTextAsync(packaged, "packaged");
             var legacyDirectory = Path.Join(FileService.GetTempPath(), "ffmpeg-not-created");
-            var handler = new RecordingHandler();
-            var service = CreateService(new Mock<IProcessRunner>().Object, legacyDirectory, applicationBase, handler);
+            var requests = new List<Uri?>();
+            var handler = RecordingHandler(requests);
+            var service = CreateService(new Mock<IProcessRunner>().AnswerFfprobeVersionCheck().Object, legacyDirectory, applicationBase, handler);
 
             Assert.Equal(packaged, await service.EnsureFfprobeInstalledAsync());
-            Assert.Empty(handler.Requests);
+            Assert.Empty(requests);
             Assert.False(Directory.Exists(legacyDirectory));
         }
 
@@ -69,11 +70,12 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
             // retired, so with nothing packaged and nothing hand-placed the installer runs.
             var emptyApplicationBase = FileService.GetTempDirectory("ffprobe-empty-app");
             var legacyDirectory = Path.Join(FileService.GetTempPath(), "ffmpeg-download-target");
-            var handler = new RecordingHandler();
-            var service = CreateService(new Mock<IProcessRunner>().Object, legacyDirectory, emptyApplicationBase, handler);
+            var requests = new List<Uri?>();
+            var handler = RecordingHandler(requests);
+            var service = CreateService(new Mock<IProcessRunner>().AnswerFfprobeVersionCheck().Object, legacyDirectory, emptyApplicationBase, handler);
 
             Assert.Null(await service.EnsureFfprobeInstalledAsync());
-            Assert.Single(handler.Requests);
+            Assert.Single(requests);
             Assert.Empty(Directory.EnumerateFileSystemEntries(emptyApplicationBase));
         }
 
@@ -93,7 +95,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
         {
             var applicationBase = FileService.GetTempDirectory("ffprobe-license-app");
             var legacyDirectory = FileService.GetTempDirectory("ffprobe-license-legacy");
-            var service = CreateService(new Mock<IProcessRunner>().Object, legacyDirectory, applicationBase);
+            var service = CreateService(new Mock<IProcessRunner>().AnswerFfprobeVersionCheck().Object, legacyDirectory, applicationBase);
 
             Assert.Equal(string.Empty, await service.GetLicenseAsync());
 
@@ -113,7 +115,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
             await File.WriteAllTextAsync(packaged, "packaged");
             var legacyDirectory = FileService.GetTempDirectory("ffprobe-legacy");
             await File.WriteAllTextAsync(Path.Join(legacyDirectory, ExecutableName), "downloaded by an older release");
-            var service = CreateService(new Mock<IProcessRunner>().Object, legacyDirectory, applicationBase);
+            var service = CreateService(new Mock<IProcessRunner>().AnswerFfprobeVersionCheck().Object, legacyDirectory, applicationBase);
 
             Assert.Equal(packaged, await service.GetFfprobePathAsync());
         }
@@ -125,7 +127,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
             var legacyDirectory = FileService.GetTempDirectory("ffprobe-legacy-only");
             var legacy = Path.Join(legacyDirectory, ExecutableName);
             await File.WriteAllTextAsync(legacy, "placed by hand");
-            var service = CreateService(new Mock<IProcessRunner>().Object, legacyDirectory, applicationBase);
+            var service = CreateService(new Mock<IProcessRunner>().AnswerFfprobeVersionCheck().Object, legacyDirectory, applicationBase);
 
             Assert.Equal(legacy, await service.GetFfprobePathAsync());
         }
@@ -141,7 +143,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
             await File.WriteAllTextAsync(packaged, "packaged");
             File.SetUnixFileMode(packaged, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
             var service = CreateService(
-                new Mock<IProcessRunner>(MockBehavior.Strict).Object,
+                new Mock<IProcessRunner>(MockBehavior.Strict).AnswerFfprobeVersionCheck().Object,
                 Path.Join(FileService.GetTempPath(), "ffmpeg-unused"),
                 applicationBase);
 
@@ -161,7 +163,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
         {
             return new FfmpegService(
                 new Mock<ILogger<FfmpegService>>().Object,
-                new HttpClient(httpHandler ?? new RecordingHandler()),
+                new HttpClient(httpHandler ?? RecordingHandler([])),
                 _provider.GetRequiredService<IStartupConfigService>(),
                 processRunner,
                 Mock.Of<IApplicationPathService>(service => service.FfmpegRootPath == legacyDirectory),
@@ -194,16 +196,14 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
             }
         }
 
-        /// <summary>Answers every request with 404 and records it, so no test reaches a vendor host.</summary>
-        private sealed class RecordingHandler : HttpMessageHandler
+        private static DelegatingHandlerMock RecordingHandler(List<Uri?> requests)
         {
-            public List<Uri?> Requests { get; } = [];
-
-            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            // Answers every request with 404 and records it, so no test reaches a vendor host.
+            return new DelegatingHandlerMock((request, _) =>
             {
-                Requests.Add(request.RequestUri);
+                requests.Add(request.RequestUri);
                 return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.NotFound));
-            }
+            });
         }
 
         private static string RepositoryRoot()

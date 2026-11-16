@@ -45,6 +45,12 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
                     throw new FfmpegException($"ffprobe target is not a supported audio file: {sanitizedPublicPath}");
                 }
 
+                var ffprobeFailure = await ValidateFfprobeAsync(safeFfprobePath);
+                if (ffprobeFailure != null)
+                {
+                    throw new FfmpegException($"ffprobe binary is unavailable: {LogRedaction.SanitizeText(ffprobeFailure)}");
+                }
+
                 var safeReadPath = Path.GetFullPath(fileSource.ReadPath);
                 _logger.LogInformation("Running ffprobe at {Path} against file {File}", safeFfprobePath, sanitizedPublicPath);
 
