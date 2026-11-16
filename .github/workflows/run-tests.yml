@@ -198,62 +198,6 @@ jobs:
           ASPNETCORE_ENVIRONMENT: Test
         run: dotnet test tests/Listenarr.BackendIntegrationTests/Listenarr.BackendIntegrationTests.csproj -c Release --logger 'console;verbosity=normal'
 
-  e2e-tests:
-    if: ${{ !inputs.jobs || contains(inputs.jobs, 'e2e-tests') }}
-    # A self-hosted runner when one is named (manual run) or configured (CI_RUNNER), else GitHub's.
-    runs-on: ${{ inputs.runner || vars.CI_RUNNER || 'ubuntu-24.04' }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version-file: '.node-version'
-          cache: 'npm'
-          cache-dependency-path: fe/package-lock.json
-
-      - name: Install frontend deps
-        working-directory: fe
-        run: npm ci --engine-strict
-
-      - name: Install Playwright Chromium
-        working-directory: fe
-        run: npx playwright install --with-deps chromium
-
-      - name: Install synthetic audiobook generator dependencies
-        run: sudo apt-get update && sudo apt-get install --yes ffmpeg python3-venv
-
-      - name: Run Playwright E2E tests (browser, app in Docker, coverage gate)
-        working-directory: fe
-        run: npm run test:e2e
-
-      - name: Coverage summary
-        if: ${{ !cancelled() }}
-        working-directory: fe
-        run: |
-          {
-            echo '## E2E coverage: Library Import'
-            if [ -f test-results/e2e-coverage/coverage-summary.json ]; then
-              echo '### Frontend (gated)'
-              node -e "const s=require('./test-results/e2e-coverage/coverage-summary.json');for(const k of ['lines','statements','functions','branches'])console.log('- '+k+': '+s.total[k].pct+'%')"
-            fi
-            if [ -f test-results/e2e-coverage-backend/summary.md ]; then
-              cat test-results/e2e-coverage-backend/summary.md
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload E2E coverage and failure traces
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-coverage
-          path: |
-            fe/test-results/e2e-coverage/
-            fe/test-results/e2e-coverage-backend/
-            fe/test-results/e2e/
-          if-no-files-found: ignore
-
   backend-tests-linux:
     if: ${{ !inputs.jobs || contains(inputs.jobs, 'backend-tests-linux') }}
     # A self-hosted runner when one is named (manual run) or configured (CI_RUNNER), else GitHub's.
@@ -310,3 +254,60 @@ jobs:
           ASPNETCORE_ENVIRONMENT: Test
           Playwright__Enabled: 'false'
         run: pwsh -NoProfile -File scripts/run-native-backend-tests.ps1
+
+  e2e-tests:
+    # Defined last so it is listed last; it runs alongside the other jobs.
+    if: ${{ !inputs.jobs || contains(inputs.jobs, 'e2e-tests') }}
+    # A self-hosted runner when one is named (manual run) or configured (CI_RUNNER), else GitHub's.
+    runs-on: ${{ inputs.runner || vars.CI_RUNNER || 'ubuntu-24.04' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.node-version'
+          cache: 'npm'
+          cache-dependency-path: fe/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: fe
+        run: npm ci --engine-strict
+
+      - name: Install Playwright Chromium
+        working-directory: fe
+        run: npx playwright install --with-deps chromium
+
+      - name: Install synthetic audiobook generator dependencies
+        run: sudo apt-get update && sudo apt-get install --yes ffmpeg python3-venv
+
+      - name: Run Playwright E2E tests (browser, app in Docker, coverage gate)
+        working-directory: fe
+        run: npm run test:e2e
+
+      - name: Coverage summary
+        if: ${{ !cancelled() }}
+        working-directory: fe
+        run: |
+          {
+            echo '## E2E coverage: Library Import'
+            if [ -f test-results/e2e-coverage/coverage-summary.json ]; then
+              echo '### Frontend (gated)'
+              node -e "const s=require('./test-results/e2e-coverage/coverage-summary.json');for(const k of ['lines','statements','functions','branches'])console.log('- '+k+': '+s.total[k].pct+'%')"
+            fi
+            if [ -f test-results/e2e-coverage-backend/summary.md ]; then
+              cat test-results/e2e-coverage-backend/summary.md
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload E2E coverage and failure traces
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-coverage
+          path: |
+            fe/test-results/e2e-coverage/
+            fe/test-results/e2e-coverage-backend/
+            fe/test-results/e2e/
+          if-no-files-found: ignore
