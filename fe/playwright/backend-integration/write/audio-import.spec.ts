@@ -1,4 +1,4 @@
-import { antiforgeryHeaders, fileExists } from '../support/stack.js'
+import { antiforgeryHeaders, fileExists } from '../../support/docker-stack.js'
 import { expect, test } from '../support/write-test.js'
 
 type RootFolder = { id: number; name: string; path: string }

@@ -16,7 +16,7 @@ public static class ListenarrTestHost
 
         builder.AddListenarrApiServices(bootstrapFileSystem);
         builder.Services.AddListenarrInfrastructureComposition(builder.Configuration, builder.Environment);
-        builder.Services.AddListenarrAudibleTestStub();
+        builder.Services.AddListenarrExternalApiTestStub();
 
         var app = builder.Build();
 
