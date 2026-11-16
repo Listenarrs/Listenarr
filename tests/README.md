@@ -82,12 +82,16 @@ Tests cases should be defined using the following steps:
 * Then: Assertions to make sure the situation is as expected
 
 ### Creating a mock
-* API mock should inherits `BaseMocks`
-* Any mock inheriting `BaseMocks` has access to:
+* Metadata providers (Audible, Audnexus, OpenLibrary) are never mocked by hand: they are answered by
+  `Listenarr.FakeProviders`, one route class per provider in `Routes/` and its fixtures in `Fixtures/{Provider}/`.
+  A missing fixture is a 404 plus a log line naming the file to add; see `Listenarr.FakeProviders/Fixtures/README.md`
+  to record it from the real API with `scripts/test-fixtures/record-provider-fixtures.mjs`.
+* Other HTTP APIs (download clients, trackers) are mocked in `Mocks/{Category}/` (`DownloadClients/`, `Trackers/`, ...),
+  one namespace per folder. Their API mocks inherit `BaseApiMock` (`Common/BaseApiMock.cs`), which gives:
     * `GetCallCount()` to know how many times the mock was used
     * `GetLastRequest()` to get the latest request processed by the mock
     * `GetLastContent()` to get the latest request body processed by the mock
-    * And some other helpful things, check the code for more informations
+    * `RequestHistory` and `AddRoute(...)` for per-test routes; check the code for the rest
 
 ### Initializing data
 
@@ -97,4 +101,4 @@ Tests cases should be defined using the following steps:
 ### Dependency Injection (DI)
 
 * Each test class is responsible for defining the mock it wants to use
-* Mandatory mocks are the ones that interfaces with external interfaces (search providers, download client adapters through, mostly, http clients, ...)
+* Mandatory mocks are the ones that interface with external services (download clients, trackers, mostly through HTTP clients). Metadata providers need none: every test container answers them from `Listenarr.FakeProviders`, and any other production HTTP client gets its 404, so no test reaches the network
