@@ -77,12 +77,23 @@ namespace Listenarr.Infrastructure.Library.Files
                 using var file = TagLib.File.Create(
                     new RegistrationLeaseFileAbstraction(registrationLease));
 
-                if (!string.IsNullOrWhiteSpace(asin))
+                var hasAsin = !string.IsNullOrWhiteSpace(asin);
+                if (hasAsin)
                 {
-                    ApplyAsinTag(file, asin);
+                    ApplyAsinTag(file, asin!);
                 }
 
                 var wroteCover = coverArt is not null && ApplyCoverArt(file, coverArt);
+                if (!hasAsin && !wroteCover)
+                {
+                    // Artwork the container cannot hold is the only request: nothing changed,
+                    // so do not rewrite a possibly multi-gigabyte file or claim a write.
+                    _logger.LogDebug(
+                        "No tags were applicable to generation-bound file {File}, so it was left unchanged",
+                        LogRedaction.SanitizeFilePath(registrationLease.PublicPath));
+                    return Task.CompletedTask;
+                }
+
                 file.Save();
                 _logger.LogDebug(
                     "Wrote tags to generation-bound file {File}. ASIN: {Asin}, cover art embedded: {Cover}",

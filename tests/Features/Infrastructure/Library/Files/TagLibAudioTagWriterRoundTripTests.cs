@@ -129,9 +129,47 @@ public sealed class TagLibAudioTagWriterRoundTripTests : BaseTests
         Assert.Empty(ReadPictures(path));
     }
 
-    private static async Task WriteThroughLeaseAsync(string path, string? asin, AudioCoverArt? coverArt)
+    [Fact]
+    public async Task WriteTagsAsync_WhenNothingCouldBeApplied_DoesNotSaveOrClaimAWrite()
     {
-        var writer = new TagLibAudioTagWriter(Mock.Of<ILogger<TagLibAudioTagWriter>>());
+        // A WebP cover with no ASIN on an MPEG-4 file leaves nothing to write.
+        var path = CopyFixture("round-trip-nothing-applied");
+        var before = File.GetLastWriteTimeUtc(path);
+        var bytesBefore = await File.ReadAllBytesAsync(path);
+        var logger = new CapturingLogger();
+        byte[] webp = [0x52, 0x49, 0x46, 0x46, 0x1A, 0, 0, 0, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50, 0x38, 0x4C, 0, 0, 0, 0];
+
+        await WriteThroughLeaseAsync(path, asin: null, new AudioCoverArt(webp, "image/webp"), logger);
+
+        Assert.DoesNotContain(logger.Messages, message => message.Contains("Wrote tags"));
+        Assert.Contains(logger.Messages, message => message.Contains("left unchanged"));
+        Assert.Equal(before, File.GetLastWriteTimeUtc(path));
+        Assert.Equal(bytesBefore, await File.ReadAllBytesAsync(path));
+    }
+
+    private sealed class CapturingLogger : ILogger<TagLibAudioTagWriter>
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
+    }
+
+    private static async Task WriteThroughLeaseAsync(
+        string path,
+        string? asin,
+        AudioCoverArt? coverArt,
+        ILogger<TagLibAudioTagWriter>? logger = null)
+    {
+        var writer = new TagLibAudioTagWriter(logger ?? Mock.Of<ILogger<TagLibAudioTagWriter>>());
         using var lease = PinnedAudiobookFileRegistrationLease.Open(
             path,
             supportsMetadataWrite: true);
