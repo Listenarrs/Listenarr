@@ -173,71 +173,119 @@ namespace Listenarr.Tests.Features.Application.Metadata.Extraction
             Assert.Equal(1, metadata.DiscNumber);
         }
 
+        private const string CoverAsin = "B008DFUGCQ";
+        private const string AbsoluteCoverUrl = "https://images.example.com/cover.jpg";
+
         [Fact]
         public async Task WriteImportTagsAsync_WhenCoverArtIsDisabled_WritesTheAsinAndNoArtwork()
         {
             var writer = new Mock<IAudioTagWriter>();
-            var handler = new CountingImageHandler();
-            var service = CreateTagWritingService(writer.Object, handler, enableCoverArt: false);
+            var imageCache = new Mock<IImageCacheService>();
+            var service = CreateTagWritingService(
+                writer.Object, new HttpClientGuardHandler(), enableCoverArt: false, imageCache.Object);
 
             await service.WriteImportTagsAsync(
                 Mock.Of<IAudiobookFileRegistrationLease>(),
-                "B0TESTASIN",
-                "https://images.example.com/cover.jpg");
+                CoverAsin,
+                AbsoluteCoverUrl);
 
             writer.Verify(
                 w => w.WriteTagsAsync(
                     It.IsAny<IAudiobookFileRegistrationLease>(),
-                    "B0TESTASIN",
+                    CoverAsin,
                     null),
                 Times.Once);
 
-            // The setting is checked before the request, so a disabled instance does not pay
-            // for a fetch whose result it would throw away.
-            Assert.Equal(0, handler.Requests);
+            // The setting is checked before the image is loaded, so a disabled instance does
+            // not pay for a fetch whose result it would throw away.
+            imageCache.Verify(cache => cache.GetImageBytesAsync(It.IsAny<string>()), Times.Never);
         }
 
-        [Fact]
-        public async Task WriteImportTagsAsync_WhenCoverArtIsEnabled_EmbedsTheFetchedArtwork()
+        [Theory]
+        [InlineData(AbsoluteCoverUrl)]
+        [InlineData("config/cache/images/library/B008DFUGCQ.jpg")]
+        public async Task WriteImportTagsAsync_WhenCoverArtIsEnabled_EmbedsTheImageTheCacheReturns(
+            string storedCover)
         {
+            // Library-added books store the published cover as a content-root-relative path
+            // rather than a URL, so both shapes must reach the image cache and not an
+            // unconfigured HttpClient.
             var writer = new Mock<IAudioTagWriter>();
-            var handler = new CountingImageHandler();
-            var service = CreateTagWritingService(writer.Object, handler, enableCoverArt: true);
+            var service = CreateTagWritingService(
+                writer.Object,
+                new HttpClientGuardHandler(),
+                enableCoverArt: true,
+                ImageCacheReturning(storedCover, JpegBytes));
 
             await service.WriteImportTagsAsync(
                 Mock.Of<IAudiobookFileRegistrationLease>(),
-                "B0TESTASIN",
-                "https://images.example.com/cover.jpg");
+                CoverAsin,
+                storedCover);
 
             writer.Verify(
                 w => w.WriteTagsAsync(
                     It.IsAny<IAudiobookFileRegistrationLease>(),
-                    "B0TESTASIN",
-                    It.Is<AudioCoverArt>(art => art.MimeType == "image/jpeg")),
+                    CoverAsin,
+                    It.Is<AudioCoverArt>(art => art != null && art.MimeType == "image/jpeg")),
                 Times.Once);
-            Assert.Equal(1, handler.Requests);
         }
 
         [Fact]
-        public async Task WriteImportTagsAsync_WhenTheResponseIsNotAnImage_StillWritesTheAsin()
+        public async Task WriteImportTagsAsync_WhenTheImageIsNotAnImage_StillWritesTheAsin()
         {
             // An image host answering with an error page must not cost the import its ASIN
             // tag, and must not embed the error page as a cover.
             var writer = new Mock<IAudioTagWriter>();
-            var handler = new CountingImageHandler(body: "<html>nope</html>"u8.ToArray());
-            var service = CreateTagWritingService(writer.Object, handler, enableCoverArt: true);
+            var service = CreateTagWritingService(
+                writer.Object,
+                new HttpClientGuardHandler(),
+                enableCoverArt: true,
+                ImageCacheReturning(AbsoluteCoverUrl, "<html>nope</html>"u8.ToArray()));
 
             await service.WriteImportTagsAsync(
                 Mock.Of<IAudiobookFileRegistrationLease>(),
-                "B0TESTASIN",
-                "https://images.example.com/cover.jpg");
+                CoverAsin,
+                AbsoluteCoverUrl);
 
             writer.Verify(
                 w => w.WriteTagsAsync(
                     It.IsAny<IAudiobookFileRegistrationLease>(),
-                    "B0TESTASIN",
+                    CoverAsin,
                     null),
                 Times.Once);
+        }
+
+        [Fact]
+        public async Task WriteImportTagsAsync_WhenTheCacheCannotLoadTheImage_StillWritesTheAsin()
+        {
+            var writer = new Mock<IAudioTagWriter>();
+            var service = CreateTagWritingService(
+                writer.Object,
+                new HttpClientGuardHandler(),
+                enableCoverArt: true,
+                ImageCacheReturning(AbsoluteCoverUrl, null));
+
+            await service.WriteImportTagsAsync(
+                Mock.Of<IAudiobookFileRegistrationLease>(),
+                CoverAsin,
+                AbsoluteCoverUrl);
+
+            writer.Verify(
+                w => w.WriteTagsAsync(
+                    It.IsAny<IAudiobookFileRegistrationLease>(),
+                    CoverAsin,
+                    null),
+                Times.Once);
+        }
+
+        // The import path must not touch the typed HttpClient: it has no validation and
+        // follows redirects.
+        private sealed class HttpClientGuardHandler : HttpMessageHandler
+        {
+            protected override Task<HttpResponseMessage> SendAsync(
+                HttpRequestMessage request,
+                CancellationToken cancellationToken) =>
+                throw new InvalidOperationException("The import path made an unvalidated request.");
         }
 
         [Fact]
@@ -246,7 +294,7 @@ namespace Listenarr.Tests.Features.Application.Metadata.Extraction
             var body = new byte[MetadataService.MaxCoverArtBytes];
             var service = CreateTagWritingService(
                 Mock.Of<IAudioTagWriter>(),
-                new CountingImageHandler(body),
+                new StaticImageHandler(body),
                 enableCoverArt: true);
 
             var bytes = await service.DownloadCoverArtAsync("https://images.example.com/cover.jpg");
@@ -263,7 +311,7 @@ namespace Listenarr.Tests.Features.Application.Metadata.Extraction
             var body = new byte[MetadataService.MaxCoverArtBytes + 1];
             var service = CreateTagWritingService(
                 Mock.Of<IAudioTagWriter>(),
-                new CountingImageHandler(body, declareLength),
+                new StaticImageHandler(body, declareLength),
                 enableCoverArt: true);
 
             var bytes = await service.DownloadCoverArtAsync("https://images.example.com/cover.jpg");
@@ -328,17 +376,14 @@ namespace Listenarr.Tests.Features.Application.Metadata.Extraction
             public override bool CanSeek => false;
         }
 
-        private sealed class CountingImageHandler(byte[]? body = null, bool declareLength = true) : HttpMessageHandler
+        private sealed class StaticImageHandler(byte[]? body = null, bool declareLength = true) : HttpMessageHandler
         {
             private readonly byte[] _body = body ?? [0xFF, 0xD8, 0xFF, 0xE0, 0, 0, 0, 0, 0, 0, 0, 0];
-
-            public int Requests { get; private set; }
 
             protected override Task<HttpResponseMessage> SendAsync(
                 HttpRequestMessage request,
                 CancellationToken cancellationToken)
             {
-                Requests++;
                 HttpContent content = declareLength
                     ? new ByteArrayContent(_body)
                     : new StreamContent(new UndeclaredLengthStream(_body));
@@ -352,7 +397,8 @@ namespace Listenarr.Tests.Features.Application.Metadata.Extraction
         private static MetadataService CreateTagWritingService(
             IAudioTagWriter writer,
             HttpMessageHandler handler,
-            bool enableCoverArt)
+            bool enableCoverArt,
+            IImageCacheService? imageCache = null)
         {
             var configuration = new Mock<IConfigurationService>();
             configuration.Setup(service => service.GetApplicationSettingsAsync())
@@ -367,8 +413,18 @@ namespace Listenarr.Tests.Features.Application.Metadata.Extraction
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<MetadataService>.Instance,
                 Mock.Of<IFfmpegService>(),
                 writer,
-                Mock.Of<IFileSystem>());
+                Mock.Of<IFileSystem>(),
+                imageCache ?? Mock.Of<IImageCacheService>());
         }
+
+        private static IImageCacheService ImageCacheReturning(string reference, byte[]? bytes)
+        {
+            var imageCache = new Mock<IImageCacheService>();
+            imageCache.Setup(cache => cache.GetImageBytesAsync(reference)).ReturnsAsync(bytes);
+            return imageCache.Object;
+        }
+
+        private static readonly byte[] JpegBytes = [0xFF, 0xD8, 0xFF, 0xE0, 0, 0, 0, 0, 0, 0, 0, 0];
 
         private static MetadataService CreateMetadataService(
             IFfmpegService ffmpegService)
@@ -389,7 +445,8 @@ namespace Listenarr.Tests.Features.Application.Metadata.Extraction
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<MetadataService>.Instance,
                 ffmpegService,
                 Mock.Of<IAudioTagWriter>(),
-                fileSystem.Object);
+                fileSystem.Object,
+                Mock.Of<IImageCacheService>());
         }
     }
 }
