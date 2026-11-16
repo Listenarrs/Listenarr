@@ -41,7 +41,7 @@ generate() {
 }
 
 # BOOKS: what each folder exercises, with the Audible fixture it needs
-# (tests/Listenarr.TestHost/Metadata/Fixtures).
+# (tests/Listenarr.TestHost/Metadata/Fixtures/Audible).
 # A Princess of Mars: tagged ASIN, matched by ASIN (B008DFUGCQ.json).
 generate import B008DFUGCQ correct-with-asin single
 # The scan reads a book's title from its album tag, which the generator sets to the series for books in

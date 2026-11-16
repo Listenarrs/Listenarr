@@ -17,212 +17,109 @@
  */
 
 using System.Net;
+using System.Net.Http.Headers;
 using System.Text;
+using Listenarr.TestHost.Metadata.Providers;
 
 namespace Listenarr.TestHost.Metadata;
 
+/// <summary>
+/// Answers the metadata providers' requests from the fixtures in <c>Metadata/Fixtures/{Provider}/</c>, each
+/// provider's routes in its own class (<see cref="Providers"/>). Anything else is answered 404.
+/// </summary>
 internal sealed class ExternalApiStubHandler : HttpMessageHandler
 {
+    /// <summary>
+    /// When set, a file each request without a fixture is appended to, one line per request, which
+    /// scripts/test-fixtures/record-provider-fixtures.mjs reads to record the missing fixtures.
+    /// </summary>
+    public const string MissingFixturesFileVariable = "LISTENARR_TEST_MISSING_FIXTURES";
+
+    private const string ResourcePrefix = "Listenarr.TestHost.Fixtures/";
+
+    private static readonly ProviderRoutes[] Providers =
+    [
+        new AudibleRoutes(),
+        new AudnexusRoutes(),
+        new OpenLibraryRoutes(),
+    ];
+
+    // "{Provider}/{file}" -> manifest resource name (the separator of RecursiveDir depends on the OS).
+    private static readonly Dictionary<string, string> Fixtures = typeof(ExternalApiStubHandler).Assembly
+        .GetManifestResourceNames()
+        .Where(name => name.StartsWith(ResourcePrefix, StringComparison.Ordinal))
+        .ToDictionary(name => name[ResourcePrefix.Length..].Replace('\\', '/'), StringComparer.OrdinalIgnoreCase);
+
+    private static readonly object MissingFixturesLock = new();
+
     protected override Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (request.Method == HttpMethod.Get && TryGetStubResponse(request.RequestUri, out var responseBody, out var mediaType))
+        var requestUri = request.RequestUri;
+        var provider = requestUri == null ? null : Providers.FirstOrDefault(routes => routes.Handles(requestUri));
+        var route = request.Method == HttpMethod.Get ? provider?.Resolve(requestUri!) : null;
+
+        if (route != null)
         {
-            return Task.FromResult(CreateResponse(responseBody, mediaType));
+            foreach (var candidate in route.Candidates)
+            {
+                if (Fixtures.TryGetValue($"{provider!.Name}/{candidate}", out var resourceName))
+                {
+                    return Task.FromResult(CreateResponse(resourceName, candidate));
+                }
+            }
         }
 
-        // Any other request (another host, an Audible request without a fixture) is answered 404 and
-        // written to the container log, so a suite's author sees which fixture a request needs.
-        Console.Error.WriteLine($"External API stub: no fixture for {request.Method} {request.RequestUri}");
+        // No fixture (another host, a route without its file): 404, and a line in the log naming the
+        // fixture that would answer, so a suite's author can record it.
+        ReportMissingFixture(request, route == null ? null : $"{provider!.Name}/{route.RecordAs}");
         return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)
         {
             Content = new StringContent("No test fixture matches this request.", Encoding.UTF8, "text/plain")
         });
     }
 
-    private static bool TryGetStubResponse(Uri? requestUri, out string responseBody, out string mediaType)
+    private static void ReportMissingFixture(HttpRequestMessage request, string? fixture)
     {
-        responseBody = string.Empty;
-        mediaType = "application/json";
-        if (requestUri == null)
+        var line = fixture == null
+            ? $"External API stub: no fixture for {request.Method} {request.RequestUri}"
+            : $"External API stub: no fixture for {request.Method} {request.RequestUri} -> record as {fixture}";
+        Console.Error.WriteLine(line);
+
+        var missingFixturesFile = Environment.GetEnvironmentVariable(MissingFixturesFileVariable);
+        if (string.IsNullOrWhiteSpace(missingFixturesFile))
         {
-            return false;
+            return;
         }
 
-        var pathSegments = requestUri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        if (pathSegments.Length == 4 &&
-            pathSegments[0].Equals("1.0", StringComparison.OrdinalIgnoreCase) &&
-            pathSegments[1].Equals("catalog", StringComparison.OrdinalIgnoreCase) &&
-            pathSegments[2].Equals("products", StringComparison.OrdinalIgnoreCase))
+        lock (MissingFixturesLock)
         {
-            // A product record: the region's own fixture ({ASIN}.{host}.json, for a record that region
-            // lacks or tells differently), else the one every region shares ({ASIN}.json).
-            var asin = Uri.UnescapeDataString(pathSegments[3]).ToUpperInvariant();
-            return TryLoadFixture(out responseBody, $"{asin}.{requestUri.Host}.json", $"{asin}.json");
+            File.AppendAllText(missingFixturesFile, line + Environment.NewLine);
         }
-
-        if (pathSegments.Length == 4 &&
-            pathSegments[0].Equals("1.0", StringComparison.OrdinalIgnoreCase) &&
-            pathSegments[1].Equals("screens", StringComparison.OrdinalIgnoreCase) &&
-            pathSegments[2].Equals("audible-android-author-detail", StringComparison.OrdinalIgnoreCase) &&
-            new[] { "B00G0WYW92", "B004XRR8Z6", "B0DTNVW7SG" }.Contains(pathSegments[3], StringComparer.OrdinalIgnoreCase))
-        {
-            responseBody = LoadFixture("empty-author-screen.json");
-            return true;
-        }
-
-        if (requestUri.AbsolutePath.Equals("/1.0/catalog/products/", StringComparison.OrdinalIgnoreCase))
-        {
-            var query = Uri.UnescapeDataString(requestUri.Query.Replace("+", "%20", StringComparison.Ordinal));
-            // A title search, with or without an author: search-{title}[--{author}].json; an author's
-            // catalogue (an author search, whatever its sort): search-author-{author}.json; each slugged.
-            var parameters = ParseQuery(requestUri.Query);
-            parameters.TryGetValue("author", out var author);
-            if (parameters.TryGetValue("title", out var title))
-            {
-                var titleSlug = Slug(title);
-                var fixtureNames = author != null
-                    ? new[] { $"search-{titleSlug}--{Slug(author)}.json", $"search-{titleSlug}.json" }
-                    : new[] { $"search-{titleSlug}.json" };
-                if (TryLoadFixture(out responseBody, fixtureNames))
-                {
-                    return true;
-                }
-            }
-            else if (author != null && !parameters.ContainsKey("keywords") &&
-                TryLoadFixture(out responseBody, $"search-author-{Slug(author)}.json"))
-            {
-                return true;
-            }
-
-            if (query.Contains("keywords=Project Hail Mary", StringComparison.OrdinalIgnoreCase))
-            {
-                responseBody = LoadFixture("project-hail-mary-products.json");
-                return true;
-            }
-
-            if (query.Contains("title=Project Hail Mary", StringComparison.OrdinalIgnoreCase))
-            {
-                responseBody = LoadFixture("empty-products.json");
-                return true;
-            }
-
-            if (query.Contains("author=Stephen", StringComparison.OrdinalIgnoreCase))
-            {
-                responseBody = LoadFixture("stephen-king-products.json");
-                return true;
-            }
-
-            if (query.Contains("author=SenLinYu", StringComparison.OrdinalIgnoreCase) &&
-                query.Contains("products_sort_by=Relevance", StringComparison.OrdinalIgnoreCase))
-            {
-                responseBody = LoadFixture("senlinyu-products.json");
-                return true;
-            }
-
-            if (query.Contains("author=SenLinYu", StringComparison.OrdinalIgnoreCase) &&
-                query.Contains("products_sort_by=BestSellers", StringComparison.OrdinalIgnoreCase))
-            {
-                responseBody = LoadFixture("empty-products.json");
-                return true;
-            }
-        }
-
-        if (requestUri.AbsolutePath.Equals("/author/Andy-Weir/B00G0WYW92", StringComparison.OrdinalIgnoreCase))
-        {
-            responseBody = LoadFixture("andy-weir-author.html");
-            mediaType = "text/html";
-            return true;
-        }
-
-        if (requestUri.AbsolutePath.Equals("/author/Ernest-Cline/B004XRR8Z6", StringComparison.OrdinalIgnoreCase))
-        {
-            responseBody = LoadFixture("ernest-cline-author.html");
-            mediaType = "text/html";
-            return true;
-        }
-
-        if (requestUri.AbsolutePath.Equals("/author/SenLinYu/B0DTNVW7SG", StringComparison.OrdinalIgnoreCase))
-        {
-            responseBody = LoadFixture("senlinyu-author.html");
-            mediaType = "text/html";
-            return true;
-        }
-
-        return false;
     }
 
-    private static Dictionary<string, string> ParseQuery(string query)
+    private static HttpResponseMessage CreateResponse(string resourceName, string fixtureName)
     {
-        var parameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var pair in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
-        {
-            var separator = pair.IndexOf('=');
-            if (separator <= 0)
-            {
-                continue;
-            }
-
-            parameters[Uri.UnescapeDataString(pair[..separator].Replace('+', ' '))] =
-                Uri.UnescapeDataString(pair[(separator + 1)..].Replace('+', ' '));
-        }
-
-        return parameters;
-    }
-
-    // Lower case, letters and digits, one dash between words: "The Gods of Mars" -> "the-gods-of-mars".
-    private static string Slug(string value)
-    {
-        var slug = new StringBuilder();
-        foreach (var character in value.Trim().ToLowerInvariant())
-        {
-            if (char.IsAsciiLetterOrDigit(character))
-            {
-                slug.Append(character);
-            }
-            else if (slug.Length > 0 && slug[^1] != '-')
-            {
-                slug.Append('-');
-            }
-        }
-
-        return slug.ToString().TrimEnd('-');
-    }
-
-    private static bool TryLoadFixture(out string responseBody, params string[] fixtureNames)
-    {
-        foreach (var fixtureName in fixtureNames)
-        {
-            if (typeof(ExternalApiStubHandler).Assembly.GetManifestResourceInfo(ResourceName(fixtureName)) != null)
-            {
-                responseBody = LoadFixture(fixtureName);
-                return true;
-            }
-        }
-
-        responseBody = string.Empty;
-        return false;
-    }
-
-    private static string ResourceName(string fixtureName) => $"Listenarr.TestHost.AudibleFixtures.{fixtureName}";
-
-    private static HttpResponseMessage CreateResponse(string body, string mediaType)
-    {
-        return new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new StringContent(body, Encoding.UTF8, mediaType)
-        };
-    }
-
-    private static string LoadFixture(string fixtureName)
-    {
-        var resourceName = ResourceName(fixtureName);
         using var stream = typeof(ExternalApiStubHandler).Assembly.GetManifestResourceStream(resourceName)
-            ?? throw new InvalidOperationException($"Missing embedded Audible fixture resource {resourceName}.");
-        using var reader = new StreamReader(stream);
-        return reader.ReadToEnd();
+            ?? throw new InvalidOperationException($"Missing embedded fixture resource {resourceName}.");
+        using var buffer = new MemoryStream();
+        stream.CopyTo(buffer);
+
+        var content = new ByteArrayContent(buffer.ToArray());
+        var mediaType = Path.GetExtension(fixtureName).ToLowerInvariant() switch
+        {
+            ".html" => "text/html",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            _ => "application/json",
+        };
+        content.Headers.ContentType = mediaType.StartsWith("image/", StringComparison.Ordinal)
+            ? new MediaTypeHeaderValue(mediaType)
+            : new MediaTypeHeaderValue(mediaType) { CharSet = "utf-8" };
+
+        return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
     }
 }

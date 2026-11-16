@@ -241,7 +241,6 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton<ImagesController>();
             services.AddSingleton(new EphemeralDataProtectionProvider().CreateProtector("Listenarr.ConfigurationService.ProwlarrImport"));
 
-            services.AddSingleton<AudnexusServiceApiMock>();
             services.AddSingleton<TransmissionApiMock>();
             services.AddSingleton<SabnzbdApiMock>();
             services.AddSingleton<NzbgetApiMock>();
@@ -275,8 +274,8 @@ namespace Listenarr.Tests.Builders
             services.AddHttpClient(DownloadRegistrationExtensions.MyAnonamouseTorrentClientName)
                 .ConfigurePrimaryHttpMessageHandler<MyAnonamouseApiMock>();
 
-            services.AddHttpClient<IAudnexusService, AudnexusService>()
-                .ConfigurePrimaryHttpMessageHandler<AudnexusServiceApiMock>();
+            // Audnexus keeps its production handler: the external API stub answers it from its fixtures.
+            services.AddHttpClient<IAudnexusService, AudnexusService>();
 
             services.AddSingleton<IDownloadClientAdapter, DownloadCLientAdapterMock>();
             services.AddSingleton<IDirectDownloadImportSourceResolver, DirectDownloadImportSourceResolver>();
