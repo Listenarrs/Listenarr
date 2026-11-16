@@ -15,7 +15,9 @@ internal static class AudiobookPathReferenceRewriter
         FileSystemPathSemantics targetSemantics,
         FileSystemCaseSensitivityMode targetCaseSensitivityMode = FileSystemCaseSensitivityMode.Auto,
         IReadOnlyDictionary<string, string>? targetPhysicalObjectIdentities = null,
-        DateTime? targetPhysicalIdentityObservedAtUtc = null)
+        DateTime? targetPhysicalIdentityObservedAtUtc = null,
+        string? sourceNamingRoot = null,
+        string? targetNamingRoot = null)
     {
         ArgumentNullException.ThrowIfNull(audiobook);
         ArgumentException.ThrowIfNullOrWhiteSpace(targetBasePath);
@@ -32,6 +34,15 @@ internal static class AudiobookPathReferenceRewriter
         _ = targetPhysicalObjectIdentities;
         _ = targetPhysicalIdentityObservedAtUtc;
 
+        var namingRoot = audiobook.NamingRootPath;
+        var customDestination = audiobook.CustomDestinationPath;
+        if (!string.IsNullOrWhiteSpace(sourceBasePath))
+            customDestination = RewriteAbsoluteReference(customDestination, sourceBasePath, targetBasePath, sourceSemantics, targetSemantics);
+        if (!string.IsNullOrWhiteSpace(sourceNamingRoot) && !string.IsNullOrWhiteSpace(targetNamingRoot))
+        {
+            namingRoot = RewriteAbsoluteReference(namingRoot, sourceNamingRoot, targetNamingRoot, sourceSemantics, targetSemantics);
+            customDestination = RewriteAbsoluteReference(audiobook.CustomDestinationPath, sourceNamingRoot, targetNamingRoot, sourceSemantics, targetSemantics);
+        }
         var filePath = audiobook.FilePath;
         var imageUrl = audiobook.ImageUrl;
         var rewrittenFiles = new List<(
@@ -111,6 +122,8 @@ internal static class AudiobookPathReferenceRewriter
         }
 
         audiobook.BasePath = targetBasePath;
+        audiobook.NamingRootPath = namingRoot;
+        audiobook.CustomDestinationPath = customDestination;
     }
 
     private static void EnsureCurrentBasePathMatchesExpectedState(
@@ -185,7 +198,7 @@ internal static class AudiobookPathReferenceRewriter
         }
     }
 
-    private static string? RewriteAbsoluteReference(
+    internal static string? RewriteAbsoluteReference(
         string? path,
         string sourceBasePath,
         string targetBasePath,

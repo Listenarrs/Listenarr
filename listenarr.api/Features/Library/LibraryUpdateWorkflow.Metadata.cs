@@ -23,6 +23,8 @@ public sealed partial class LibraryUpdateWorkflow
             return new NotFoundObjectResult(new { message = "Audiobook not found" });
         }
 
+        if (request.NamingRootPath != null) existingAudiobook.SetNamingRoot(request.NamingRootPath);
+        else if (request.CustomDestinationPath != null) existingAudiobook.SetCustomDestination(request.CustomDestinationPath);
         var legacyIdentifierFieldsTouched = false;
         if (request.Title != null) existingAudiobook.Title = request.Title;
         if (request.Subtitle != null) existingAudiobook.Subtitle = request.Subtitle;

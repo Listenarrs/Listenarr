@@ -50,6 +50,7 @@ public partial class LibraryController
         public int? QualityProfileId { get; set; }
         public bool AutoSearch { get; set; }
         public string? DestinationPath { get; set; }
+        public string? DestinationRoot { get; set; }
         public SearchResult? SearchResult { get; set; }
     }
 

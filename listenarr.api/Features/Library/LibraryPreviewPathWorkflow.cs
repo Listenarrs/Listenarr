@@ -39,17 +39,12 @@ public sealed class LibraryPreviewPathWorkflow(
                 request.Metadata.SeriesNumber,
                 request.Metadata.SeriesAsin);
 
-            var namingPattern = !string.IsNullOrWhiteSpace(settings.FolderNamingPattern)
-                ? settings.FolderNamingPattern
-                : settings.FileNamingPattern;
             // Preview owns the naming calculation, so preserve the generated relative
             // directory directly instead of re-deriving it from the full path through
             // live filesystem semantics. Read-only preview must not depend on CIFS/NFS/
             // FUSE case-sensitivity probes merely to recover a string it just produced.
-            var relativePath = LibraryPathPlanner.ComputeAudiobookRelativeDirectoryFromPattern(
-                audiobook,
-                namingPattern,
-                fileNamingService);
+            var relativePath = Listenarr.Application.Common.AudiobookNamingDirectory.Render(
+                audiobook, settings, fileNamingService);
             var fullPath = FileUtils.CombineWithOptionalBase(
                 root ?? string.Empty,
                 relativePath);

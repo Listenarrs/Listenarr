@@ -58,6 +58,28 @@ namespace Listenarr.Api.Features.Library
                 return new NotFoundObjectResult(new { message = "Audiobook not found" });
             }
 
+            var explicitPlacement = request.NamingRootPath != null || request.CustomDestinationPath != null;
+            if (request.NamingRootPath != null && request.CustomDestinationPath != null)
+                return new BadRequestObjectResult(new { message = "Specify either namingRootPath or customDestinationPath, not both." });
+            if (explicitPlacement)
+            {
+                var selected = request.NamingRootPath ?? request.CustomDestinationPath!;
+                using var placementScope = _scopeFactory.CreateScope();
+                var roots = await placementScope.ServiceProvider.GetRequiredService<IRootFolderService>().GetAllAsync();
+                var settings = await placementScope.ServiceProvider.GetRequiredService<IConfigurationService>().GetApplicationSettingsAsync();
+                var allowed = FileUtils.GetValidMutationRootsForCurrentOs(roots.Count > 0 ? roots.Select(r => r.Path) : [settings.OutputPath]);
+                if (!FileUtils.TryNormalizeUserProvidedDirectoryPathForCurrentOs(selected, out var normalized, out _, rejectParentTraversal: true)
+                    || !placementScope.ServiceProvider.GetRequiredService<IFileSystem>().TryValidateMutationTarget(normalized, allowed, out normalized, out _))
+                    return new BadRequestObjectResult(new { message = "The selected placement path is invalid or outside configured roots." });
+                var blocker = await placementScope.ServiceProvider.GetRequiredService<ILibraryDestinationMutationGuard>().GetBlockingReasonAsync(normalized, cancellationToken);
+                if (blocker != null) return new ConflictObjectResult(new { message = blocker });
+                request = request.NamingRootPath != null ? request with { NamingRootPath = normalized } : request with { CustomDestinationPath = normalized };
+            }
+            var basePathChanges = request.BasePath != null
+                && !await AreEquivalentDestinationsAsync(request.BasePath, existingAudiobook.BasePath, cancellationToken);
+            if (basePathChanges && !explicitPlacement && existingAudiobook.TryGetNamingDestination(out _, out _))
+                return new BadRequestObjectResult(new { message = "A destination change must specify namingRootPath or customDestinationPath." });
+
             int? resolvedQualityProfileId = null;
             if (request.QualityProfileId.HasValue)
             {
@@ -80,10 +102,7 @@ namespace Listenarr.Api.Features.Library
 
             if (request.BasePath != null)
             {
-                if (!string.Equals(
-                        request.BasePath,
-                        existingAudiobook.BasePath,
-                        StringComparison.Ordinal))
+                if (basePathChanges)
                 {
                     suppressStaleImageUrl = await IsPathInsideBasePathAsync(
                         request.ImageUrl,
@@ -179,8 +198,29 @@ namespace Listenarr.Api.Features.Library
             }
         }
 
+        private async Task<bool> AreEquivalentDestinationsAsync(string left, string? right, CancellationToken ct)
+        {
+            if (string.Equals(left, right, StringComparison.Ordinal)) return true;
+            if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right)) return false;
+            if (FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(left, out var l, out _)
+                && FileSystemPathIdentity.TryCanonicalizeUnambiguousStoredAbsolutePathForHost(right, out var r, out _)
+                && string.Equals(Path.TrimEndingDirectorySeparator(l), Path.TrimEndingDirectorySeparator(r), StringComparison.Ordinal)) return true;
+            try
+            {
+                var resolution = await _fileSystemSemanticsResolver.ResolveAsync(right, FileSystemCaseSensitivityMode.Auto, ct);
+                return resolution.State == PathIdentityState.Valid && FileSystemPathIdentity.AreEquivalent(left, right, resolution.Semantics);
+            }
+            catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException
+                or IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                return false;
+            }
+        }
+
         private static bool HasMetadataUpdates(AudiobookUpdateRequest request) =>
             request.Title != null
+            || request.NamingRootPath != null
+            || request.CustomDestinationPath != null
             || request.Subtitle != null
             || request.Authors != null
             || request.ImageUrl != null

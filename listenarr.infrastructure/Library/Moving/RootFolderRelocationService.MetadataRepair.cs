@@ -309,7 +309,7 @@ public sealed partial class RootFolderRelocationService
                     destination,
                     sourceSemantics,
                     targetSemantics,
-                    relocation.TargetCaseSensitivityMode);
+                    relocation.TargetCaseSensitivityMode, sourceNamingRoot: relocation.SourcePath, targetNamingRoot: relocation.TargetPath);
                 var candidateFileIds = (audiobook.Files ?? [])
                     .Select(file => file.Id)
                     .ToHashSet();

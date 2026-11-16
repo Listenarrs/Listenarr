@@ -250,6 +250,7 @@ public sealed partial class RootFolderRelocationService
                 relocation.DesiredName,
                 relocation.DesiredIsDefault,
                 relocation.TargetCaseSensitivityMode);
+            await RewritePlacementOnlyReferencesAsync(db, root, canonicalTargetPath, resolution.Semantics, cancellationToken);
             ApplyRootMetadata(
                 root,
                 command,
@@ -281,6 +282,34 @@ public sealed partial class RootFolderRelocationService
         {
             targetGenerationLease.Dispose();
             throw;
+        }
+    }
+
+    private static async Task RewritePlacementOnlyReferencesAsync(
+        ListenArrDbContext db, RootFolder root, string targetPath,
+        FileSystemPathSemantics targetSemantics, CancellationToken ct,
+        FileSystemPathSemantics? sourceSemantics = null)
+    {
+        var books = await db.Audiobooks.Where(book => book.NamingRootPath != null || book.CustomDestinationPath != null).ToListAsync(ct);
+        if (books.Count == 0) return;
+        FileSystemPathSyntax syntax;
+        if (sourceSemantics.HasValue) syntax = sourceSemantics.Value.Syntax;
+        else if (!FileSystemPathIdentity.TryDetectAbsoluteSyntax(root.Path, out syntax))
+            throw new InvalidOperationException("Root placement references require known source path syntax.");
+        var known = sourceSemantics ?? new FileSystemPathSemantics(syntax, root.ResolvedCaseSensitivity);
+        // Insensitive comparison is only a conservative discovery screen, never authority.
+        var discovery = known.CaseSensitivity == FileSystemCaseSensitivity.Unknown
+            ? new FileSystemPathSemantics(syntax, FileSystemCaseSensitivity.Insensitive) : known;
+        foreach (var book in books)
+        {
+            if (!string.IsNullOrWhiteSpace(book.BasePath)
+                && FileSystemPathIdentity.StoredPathMayTouchBoundary(book.BasePath, root.Path, discovery)) continue;
+            if (!new[] { book.NamingRootPath, book.CustomDestinationPath }.Any(path =>
+                    !string.IsNullOrWhiteSpace(path) && FileSystemPathIdentity.StoredPathMayTouchBoundary(path, root.Path, discovery))) continue;
+            if (known.CaseSensitivity == FileSystemCaseSensitivity.Unknown)
+                throw new InvalidOperationException("Root placement references require known source case sensitivity.");
+            book.NamingRootPath = AudiobookPathReferenceRewriter.RewriteAbsoluteReference(book.NamingRootPath, root.Path, targetPath, known, targetSemantics);
+            book.CustomDestinationPath = AudiobookPathReferenceRewriter.RewriteAbsoluteReference(book.CustomDestinationPath, root.Path, targetPath, known, targetSemantics);
         }
     }
 
@@ -386,7 +415,7 @@ public sealed partial class RootFolderRelocationService
                 plan.Destination,
                 sourceSemantics,
                 targetSemantics,
-                relocation.TargetCaseSensitivityMode);
+                relocation.TargetCaseSensitivityMode, sourceNamingRoot: relocation.SourcePath, targetNamingRoot: relocation.TargetPath);
             var skippedItem = skippedItems.Single(item =>
                 item.AudiobookId == plan.Candidate.Audiobook.Id);
             relocation.SkippedItems.Remove(skippedItem);

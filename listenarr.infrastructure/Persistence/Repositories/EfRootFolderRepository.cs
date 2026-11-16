@@ -262,12 +262,13 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
         {
             await using var ctx = await _dbFactory.CreateDbContextAsync();
             var basePaths = await ctx.Audiobooks
-                .Where(a => a.BasePath != null)
-                .Select(a => a.BasePath!)
+                .Where(a => a.BasePath != null || a.NamingRootPath != null || a.CustomDestinationPath != null)
+                .Select(a => new { a.BasePath, a.NamingRootPath, a.CustomDestinationPath })
                 .ToListAsync(ct);
-            return basePaths.Any(path =>
+            return basePaths.SelectMany(a => new[] { a.BasePath, a.NamingRootPath, a.CustomDestinationPath })
+                .Where(path => !string.IsNullOrWhiteSpace(path)).Any(path =>
                 FileSystemPathIdentity.StoredPathMayTouchBoundary(
-                    path,
+                    path!,
                     rootPath,
                     semantics));
         }
@@ -279,13 +280,11 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
         {
             await using var ctx = await _dbFactory.CreateDbContextAsync();
             var audiobooks = await ctx.Audiobooks
-                .Where(a => a.BasePath != null)
+                .Where(a => a.BasePath != null || a.NamingRootPath != null || a.CustomDestinationPath != null)
                 .ToListAsync(ct);
             return audiobooks
-                .Where(a => FileSystemPathIdentity.StoredPathMayTouchBoundary(
-                    a.BasePath!,
-                    rootPath,
-                    semantics))
+                .Where(a => new[] { a.BasePath, a.NamingRootPath, a.CustomDestinationPath }
+                    .Any(path => !string.IsNullOrWhiteSpace(path) && FileSystemPathIdentity.StoredPathMayTouchBoundary(path, rootPath, semantics)))
                 .ToList();
         }
 
@@ -363,6 +362,9 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
             var audiobooks = await ctx.Audiobooks
                 .Include(audiobook => audiobook.Files)
                 .ToListAsync(ct);
+            var placementRewrites = audiobooks.Select(book => (Book: book,
+                Naming: AudiobookPathReferenceRewriter.RewriteAbsoluteReference(book.NamingRootPath, sourceRoot.Path, targetRoot.Path, sourceSemantics, targetSemantics),
+                Custom: AudiobookPathReferenceRewriter.RewriteAbsoluteReference(book.CustomDestinationPath, sourceRoot.Path, targetRoot.Path, sourceSemantics, targetSemantics))).ToList();
             var plannedRewrites = new List<(Audiobook Audiobook, string SourceBasePath, string TargetBasePath)>();
             foreach (var audiobook in audiobooks)
             {
@@ -436,9 +438,14 @@ namespace Listenarr.Infrastructure.Persistence.Repositories
                     rewrite.TargetBasePath,
                     sourceSemantics,
                     targetSemantics,
-                    targetRoot.CaseSensitivityMode);
+                    targetRoot.CaseSensitivityMode, sourceNamingRoot: sourceRoot.Path, targetNamingRoot: targetRoot.Path);
             }
 
+            foreach (var placement in placementRewrites)
+            {
+                placement.Book.NamingRootPath = placement.Naming;
+                placement.Book.CustomDestinationPath = placement.Custom;
+            }
             AudiobookFileOwnershipValidator.RejectDuplicateValidOwnership(
                 ctx.ChangeTracker.Entries<AudiobookFile>().Select(entry => entry.Entity),
                 "The root reassignment would assign the same filesystem identity to multiple audiobook files.");

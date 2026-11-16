@@ -43,6 +43,8 @@ public sealed record AudiobookUpdateRequest
     public string? FilePath { get; init; }
     public long? FileSize { get; init; }
     public string? BasePath { get; init; }
+    public string? NamingRootPath { get; init; }
+    public string? CustomDestinationPath { get; init; }
     public string? Quality { get; init; }
     public int? QualityProfileId { get; init; }
 }

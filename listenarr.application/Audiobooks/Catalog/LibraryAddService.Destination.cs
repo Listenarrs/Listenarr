@@ -14,7 +14,8 @@ public partial class LibraryAddService
         cancellationToken.ThrowIfCancellationRequested();
         ApplicationSettings? settings = null;
         if (configuredRootFolders.Count == 0
-            || string.IsNullOrWhiteSpace(request.DestinationPath))
+            || string.IsNullOrWhiteSpace(request.DestinationPath)
+            || !string.IsNullOrWhiteSpace(request.DestinationRoot))
         {
             settings = await _configurationService.GetApplicationSettingsAsync();
             cancellationToken.ThrowIfCancellationRequested();
@@ -24,6 +25,15 @@ public partial class LibraryAddService
                 ? configuredRootFolders.Select(root => root.Path)
                 : [settings!.OutputPath]);
 
+        string? namingRoot = null;
+        if (!string.IsNullOrWhiteSpace(request.DestinationRoot))
+        {
+            if (!FileUtils.TryNormalizeUserProvidedDirectoryPathForCurrentOs(request.DestinationRoot,
+                    out var normalizedRoot, out _, rejectParentTraversal: true)
+                || !_fileSystem.TryValidateMutationTarget(normalizedRoot, allowedDestinationRoots, out normalizedRoot, out _))
+                return ValidationFailure("destination_path_outside_roots", "DestinationRoot must identify a configured library root.", request.DestinationRoot);
+            namingRoot = normalizedRoot;
+        }
         var requestedBaseDirectory = request.DestinationPath;
         if (!string.IsNullOrWhiteSpace(requestedBaseDirectory))
         {
@@ -66,10 +76,10 @@ public partial class LibraryAddService
         {
             var rootFolder = await _rootFolderService.GetDefaultAsync();
             cancellationToken.ThrowIfCancellationRequested();
-            var baseDirectory = rootFolder != null ? rootFolder.Path : settings!.OutputPath;
-            var generatedBasePath = Path.Join(
-                baseDirectory,
-                _fileNamingService.ApplyNamingPattern(settings!.FolderNamingPattern, metadata));
+            var baseDirectory = namingRoot ?? (rootFolder != null ? rootFolder.Path : settings!.OutputPath);
+            namingRoot = baseDirectory;
+            var generatedBasePath = Path.Join(baseDirectory,
+                Listenarr.Application.Common.AudiobookNamingDirectory.Render(audiobook, settings!, _fileNamingService));
             if (!FileUtils.TryNormalizeUserProvidedDirectoryPathForCurrentOs(
                 generatedBasePath,
                 out var normalizedGeneratedBasePath,
@@ -97,6 +107,14 @@ public partial class LibraryAddService
 
             audiobook.BasePath = normalizedGeneratedBasePath;
         }
+
+        if (namingRoot != null)
+        {
+            if (!_fileSystem.TryValidateMutationTarget(audiobook.BasePath!, [namingRoot], out _, out _))
+                return ValidationFailure("destination_path_outside_roots", "DestinationPath must be inside DestinationRoot.", audiobook.BasePath);
+            audiobook.SetNamingRoot(namingRoot);
+        }
+        else audiobook.SetCustomDestination(audiobook.BasePath!);
 
         cancellationToken.ThrowIfCancellationRequested();
         var existingDestinationOwner = await FindExistingDestinationOwnerAsync(

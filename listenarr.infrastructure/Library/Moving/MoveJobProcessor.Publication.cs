@@ -1,4 +1,6 @@
 using Listenarr.Domain.Common;
+using Listenarr.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Listenarr.Infrastructure.Library.Moving;
@@ -36,5 +38,21 @@ internal partial class MoveJobProcessor
             cancellationToken,
             publication.TargetPhysicalObjectIdentities,
             targetCaseSensitivityMode);
+        var movedBook = await repository.GetByIdAsync(audiobookId);
+        if (movedBook != null)
+        {
+            if (job.RelocationId.HasValue && !string.IsNullOrWhiteSpace(movedBook.NamingRootPath))
+            {
+                var factory = rewriteScope.ServiceProvider.GetRequiredService<IDbContextFactory<ListenArrDbContext>>();
+                await using var db = await factory.CreateDbContextAsync(cancellationToken);
+                var relocation = await db.RootFolderRelocations.FindAsync([job.RelocationId.Value], cancellationToken)
+                    ?? throw new MoveNeedsAttentionException("The root relocation context is unavailable.");
+                movedBook.NamingRootPath = AudiobookPathReferenceRewriter.RewriteAbsoluteReference(
+                    movedBook.NamingRootPath, relocation.SourcePath, relocation.TargetPath, request.SourceSemantics, request.TargetSemantics);
+            }
+            else if (!job.RelocationId.HasValue) movedBook.SetCustomDestination(publication.Target);
+            if (!await repository.UpdateAsync(movedBook))
+                throw new MoveNeedsAttentionException("The moved audiobook placement could not be persisted.");
+        }
     }
 }

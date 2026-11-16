@@ -91,6 +91,7 @@ namespace Listenarr.Api.Features.Library
                 QualityProfileId = request.QualityProfileId,
                 AutoSearch = request.AutoSearch,
                 DestinationPath = request.DestinationPath,
+                DestinationRoot = request.DestinationRoot,
                 SearchResult = request.SearchResult,
                 HistorySource = "AddNew",
                 HistoryMessage = $"Audiobook '{request.Metadata.Title}' added to library from Add New page"

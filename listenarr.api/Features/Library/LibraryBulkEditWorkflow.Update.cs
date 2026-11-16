@@ -51,14 +51,8 @@ namespace Listenarr.Api.Features.Library
                         $"Audiobook with ID {id} not found");
                 }
 
-                var namingPattern = !string.IsNullOrWhiteSpace(settings?.FolderNamingPattern)
-                    ? settings!.FolderNamingPattern
-                    : settings?.FileNamingPattern ?? string.Empty;
-                var newBasePath = LibraryPathPlanner.ComputeAudiobookBaseDirectoryFromPattern(
-                    audiobook,
-                    rootPath,
-                    namingPattern,
-                    _fileNamingService);
+                var newBasePath = Path.Join(rootPath, Listenarr.Application.Common.AudiobookNamingDirectory.Render(
+                    audiobook, settings ?? new ApplicationSettings(), _fileNamingService));
                 if (!_fileSystem.TryValidateMutationTarget(
                         newBasePath,
                         [rootPath],
@@ -76,6 +70,14 @@ namespace Listenarr.Api.Features.Library
                     newBasePath,
                     audiobook.BasePath,
                     cancellationToken);
+                using var placementScope = _scopeFactory.CreateScope();
+                var placementRepository = placementScope.ServiceProvider.GetRequiredService<IAudiobookRepository>();
+                var rewrittenBook = await placementRepository.GetByIdAsync(id);
+                if (rewrittenBook != null)
+                {
+                    rewrittenBook.SetNamingRoot(rootPath);
+                    await placementRepository.UpdateAsync(rewrittenBook);
+                }
                 await TryAddBulkUpdateHistoryAsync(
                     audiobook,
                     $"Destination path rewritten to {newBasePath} via bulk update");

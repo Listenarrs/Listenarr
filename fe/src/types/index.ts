@@ -758,6 +758,8 @@ export interface Audiobook {
   fileSize?: number
   fileCount?: number
   basePath?: string
+  namingRootPath?: string
+  customDestinationPath?: string
   files?: {
     id: number
     path?: string

@@ -30,6 +30,8 @@ public sealed partial class RootFolderRelocationService
     private sealed record MetadataRewriteSnapshot(
         Audiobook Audiobook,
         string? BasePath,
+        string? NamingRootPath,
+        string? CustomDestinationPath,
         string? FilePath,
         string? ImageUrl,
         IReadOnlyList<(
@@ -102,7 +104,7 @@ public sealed partial class RootFolderRelocationService
                         plan.Destination,
                         sourceSemantics.Value,
                         targetSemantics,
-                        targetMode);
+                        targetMode, sourceNamingRoot: sourceRootPath, targetNamingRoot: targetRootPath);
                     provisionallySafe.Add(plan);
                 }
                 catch (AudiobookPathRewriteException exception)
@@ -193,6 +195,8 @@ public sealed partial class RootFolderRelocationService
         new(
             audiobook,
             audiobook.BasePath,
+            audiobook.NamingRootPath,
+            audiobook.CustomDestinationPath,
             audiobook.FilePath,
             audiobook.ImageUrl,
             (audiobook.Files ?? [])
@@ -207,6 +211,8 @@ public sealed partial class RootFolderRelocationService
         MetadataRewriteSnapshot snapshot)
     {
         snapshot.Audiobook.BasePath = snapshot.BasePath;
+        snapshot.Audiobook.NamingRootPath = snapshot.NamingRootPath;
+        snapshot.Audiobook.CustomDestinationPath = snapshot.CustomDestinationPath;
         snapshot.Audiobook.FilePath = snapshot.FilePath;
         snapshot.Audiobook.ImageUrl = snapshot.ImageUrl;
         foreach (var (
