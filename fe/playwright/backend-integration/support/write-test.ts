@@ -1,5 +1,5 @@
 import { test as base } from '@playwright/test'
-import { restoreSeed } from './stack.js'
+import { restoreSeed } from '../../support/docker-stack.js'
 
 /** The `test` of the write suite: every test starts from the seeded database and files. */
 export const test = base.extend<{ seededStack: void }>({

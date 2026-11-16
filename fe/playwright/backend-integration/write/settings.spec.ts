@@ -1,5 +1,5 @@
 import type { ListenarrDomainConfigurationApplicationSettings } from '../../support/generated-api/types.gen.js'
-import { antiforgeryHeaders } from '../support/stack.js'
+import { antiforgeryHeaders } from '../../support/docker-stack.js'
 import { expect, test } from '../support/write-test.js'
 
 type Settings = ListenarrDomainConfigurationApplicationSettings

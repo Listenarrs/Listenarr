@@ -71,6 +71,21 @@ Their specs run with the configuration in `playwright.backend-integration.config
 
 The ordered full suite is the CI command. For local debugging, `npm run test:backend-integration:read-only` runs only the read-only suite and `npm run test:backend-integration:write` runs only the reset-before-each-test write suite.
 
+### Run E2E Tests
+
+```sh
+npm run test:e2e
+```
+
+End-to-end browser tests: Chromium drives the frontend, served by the Vite dev server, which forwards every API and SignalR request to the app running in Docker. No Listenarr API response is stubbed. The test host (`tests/Listenarr.TestHost`) stubs only the app's own outbound requests: every `IHttpClientFactory` client goes to one handler that answers Audible from the fixtures in `tests/Listenarr.TestHost/Metadata/Fixtures/`: product records are `{ASIN}.json`, or `{ASIN}.{api host}.json` for one region, title searches are `search-{title}[--{author}].json`, and an author's catalogue (what a title and author search filters) is `search-author-{author}.json`, each part slugged. Every other provider (Audnexus, OpenLibrary, Amazon, images) gets a 404. The container log lists every request that had no fixture. The container also has no DNS, so a request made outside the factory fails too, and the suite runs offline. The runner (`scripts/e2e/run.mjs`) shares its Docker stack with the backend integration suite (`scripts/lib/listenarr-stack.mjs`). It generates the audiobook folders with `scripts/e2e/generate-library-fixtures.sh`, using the same pinned generator, and creates the `E2E Import` (default), `E2E Second`, `E2E Empty` and `E2E Library` root folders. Every test restores the seeded database and files first.
+
+The specs live under `playwright/e2e/` and run with `playwright.e2e.config.ts`, one at a time. The run collects coverage on both sides:
+
+- Frontend: V8 coverage from Chromium, mapped to the sources, in `test-results/e2e-coverage/index.html`. The whole suite fails when the Library Import code (`LIBRARY_IMPORT_SOURCES` in `playwright/e2e/support/coverage.ts`) falls below `THRESHOLDS`.
+- Backend: the host runs under `dotnet-coverage`. The merged Cobertura report goes to `test-results/e2e-coverage-backend/cobertura.xml`, with a summary of the library import code in `summary.md`. This side is reported but not gated.
+
+`node ../scripts/e2e/run.mjs -- <playwright arguments>` runs a subset, such as a spec or `--repeat-each`, without the coverage gate. `--no-coverage` skips collection. `--serve` starts the stack and prints the variables to run Playwright against it repeatedly.
+
 ### Lint with [ESLint](https://eslint.org/)
 
 ```sh

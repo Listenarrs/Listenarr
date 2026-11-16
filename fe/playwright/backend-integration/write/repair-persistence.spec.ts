@@ -1,5 +1,5 @@
 import type { APIRequestContext } from '@playwright/test'
-import { antiforgeryHeaders } from '../support/stack.js'
+import { antiforgeryHeaders } from '../../support/docker-stack.js'
 import { expect, test } from '../support/write-test.js'
 
 type LibraryBook = { id: number; title: string; authors: string[] }

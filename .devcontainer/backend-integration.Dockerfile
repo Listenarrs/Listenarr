@@ -1,37 +1,57 @@
-# Dedicated backend integration host, built and started by scripts/backend-integration/run.mjs:
+# Dedicated test host for the suites that run Listenarr in Docker (backend integration, E2E), built and
+# started by scripts/lib/listenarr-stack.mjs:
 #
 #   docker build --tag listenarr-backend-integration-app .
 #   docker build --tag listenarr-backend-integration --build-arg LISTENARR_IMAGE=listenarr-backend-integration-app \
 #     --file .devcontainer/backend-integration.Dockerfile .
+#
+# It runs tests/Listenarr.TestHost (the API with a fixture-backed Audible client) instead of the
+# production entry point. With LISTENARR_COVERAGE_DIR set, the host runs under dotnet-coverage and
+# writes one Cobertura report per process lifetime there when it stops.
 ARG LISTENARR_IMAGE
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS test-host-build
+ARG DOTNET_COVERAGE_VERSION=18.12.0
 WORKDIR /src
 COPY . .
 RUN dotnet publish tests/Listenarr.TestHost/Listenarr.TestHost.csproj \
 	--configuration Release \
-	--output /out/testhost \
+	--output /out/integration-host \
 	/p:UseAppHost=false
+RUN dotnet tool install dotnet-coverage --version "${DOTNET_COVERAGE_VERSION}" --tool-path /out/dotnet-coverage
 
 FROM ${LISTENARR_IMAGE}
 
-COPY --from=test-host-build /out/testhost/ /app/testhost/
+# Not under a path containing "testhost": Microsoft code coverage excludes those modules by default.
+COPY --from=test-host-build /out/integration-host/ /app/integration-host/
+COPY --from=test-host-build /out/dotnet-coverage/ /opt/dotnet-coverage/
+COPY .devcontainer/backend-integration-coverage.xml /opt/dotnet-coverage/listenarr.coverage.xml
 
-# ffprobe reads the tags of the generated audiobook the write suite imports.
+# ffprobe reads the tags of the generated audiobooks the suites import; the
+# dotnet-coverage profiler needs libxml2.
 RUN apt-get update \
-	&& apt-get install -y --no-install-recommends ffmpeg \
+	&& apt-get install -y --no-install-recommends ffmpeg libxml2 \
 	&& apt-get clean \
 	&& rm -rf /var/lib/apt/lists/*
 
+# The production entry point (user remapping, umask) with the command it starts taken from its
+# arguments rather than the production Listenarr.Api.dll.
+RUN sed 's#exec \(gosu [^ ]* \)\{0,1\}dotnet Listenarr.Api.dll "\$@"#exec \1"$@"#' /docker-entrypoint.sh > /testhost-entrypoint.sh \
+	&& chmod 755 /testhost-entrypoint.sh \
+	&& if grep -q 'Listenarr.Api.dll' /testhost-entrypoint.sh; then echo 'testhost-entrypoint.sh still starts Listenarr.Api.dll' >&2; exit 1; fi
+
 # No background work that would change the seeded database between tests,
-# except the scan the import test waits for. Files written to the mounted
-# directories stay removable by the user running the suite.
+# except the scan the import tests wait for. Files written to the mounted
+# directories stay removable by the user running the suite. dotnet-coverage
+# targets an older runtime than the image's.
 ENV UMASK=000 \
 	LISTENARR_DISABLE_HOSTED_SERVICES=true \
 	LISTENARR_CONTENT_ROOT=/app \
 	LISTENARR_ENABLE_UNMATCHED_SCAN_WORKER=true \
-	LISTENARR_LOG_LEVEL=Warning
+	LISTENARR_LOG_LEVEL=Warning \
+	DOTNET_ROLL_FORWARD=Major
 
-# Listenarr looks for ffprobe in its config directory, which is mounted at run
-# time and restored before each write test: put it there on every start.
-ENTRYPOINT ["/bin/sh", "-c", "mkdir -p /app/config/ffmpeg && cp /usr/bin/ffprobe /app/config/ffmpeg/ffprobe && chmod 755 /app/config/ffmpeg/ffprobe && exec /docker-entrypoint.sh dotnet /app/testhost/Listenarr.TestHost.dll"]
+COPY .devcontainer/backend-integration-entrypoint.sh /backend-integration-entrypoint.sh
+RUN chmod 755 /backend-integration-entrypoint.sh
+
+ENTRYPOINT ["/backend-integration-entrypoint.sh"]

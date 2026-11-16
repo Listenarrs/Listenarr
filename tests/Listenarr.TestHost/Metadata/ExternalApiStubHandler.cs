@@ -21,7 +21,7 @@ using System.Text;
 
 namespace Listenarr.TestHost.Metadata;
 
-internal sealed class AudibleApiStubHandler : HttpMessageHandler
+internal sealed class ExternalApiStubHandler : HttpMessageHandler
 {
     protected override Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
@@ -34,9 +34,12 @@ internal sealed class AudibleApiStubHandler : HttpMessageHandler
             return Task.FromResult(CreateResponse(responseBody, mediaType));
         }
 
+        // Any other request (another host, an Audible request without a fixture) is answered 404 and
+        // written to the container log, so a suite's author sees which fixture a request needs.
+        Console.Error.WriteLine($"External API stub: no fixture for {request.Method} {request.RequestUri}");
         return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)
         {
-            Content = new StringContent("No Audible API fixture matches this request.", Encoding.UTF8, "text/plain")
+            Content = new StringContent("No test fixture matches this request.", Encoding.UTF8, "text/plain")
         });
     }
 
@@ -55,20 +58,10 @@ internal sealed class AudibleApiStubHandler : HttpMessageHandler
             pathSegments[1].Equals("catalog", StringComparison.OrdinalIgnoreCase) &&
             pathSegments[2].Equals("products", StringComparison.OrdinalIgnoreCase))
         {
-            string? fixtureName = Uri.UnescapeDataString(pathSegments[3]).ToUpperInvariant() switch
-            {
-                "B008DFUGCQ" => "B008DFUGCQ.json",
-                "B005FRGT44" => "B005FRGT44.json",
-                "0593396960" => "0593396960.json",
-                _ => null
-            };
-            if (fixtureName == null)
-            {
-                return false;
-            }
-
-            responseBody = LoadFixture(fixtureName);
-            return true;
+            // A product record: the region's own fixture ({ASIN}.{host}.json, for a record that region
+            // lacks or tells differently), else the one every region shares ({ASIN}.json).
+            var asin = Uri.UnescapeDataString(pathSegments[3]).ToUpperInvariant();
+            return TryLoadFixture(out responseBody, $"{asin}.{requestUri.Host}.json", $"{asin}.json");
         }
 
         if (pathSegments.Length == 4 &&
@@ -84,6 +77,27 @@ internal sealed class AudibleApiStubHandler : HttpMessageHandler
         if (requestUri.AbsolutePath.Equals("/1.0/catalog/products/", StringComparison.OrdinalIgnoreCase))
         {
             var query = Uri.UnescapeDataString(requestUri.Query.Replace("+", "%20", StringComparison.Ordinal));
+            // A title search, with or without an author: search-{title}[--{author}].json; an author's
+            // catalogue (an author search, whatever its sort): search-author-{author}.json; each slugged.
+            var parameters = ParseQuery(requestUri.Query);
+            parameters.TryGetValue("author", out var author);
+            if (parameters.TryGetValue("title", out var title))
+            {
+                var titleSlug = Slug(title);
+                var fixtureNames = author != null
+                    ? new[] { $"search-{titleSlug}--{Slug(author)}.json", $"search-{titleSlug}.json" }
+                    : new[] { $"search-{titleSlug}.json" };
+                if (TryLoadFixture(out responseBody, fixtureNames))
+                {
+                    return true;
+                }
+            }
+            else if (author != null && !parameters.ContainsKey("keywords") &&
+                TryLoadFixture(out responseBody, $"search-author-{Slug(author)}.json"))
+            {
+                return true;
+            }
+
             if (query.Contains("keywords=Project Hail Mary", StringComparison.OrdinalIgnoreCase))
             {
                 responseBody = LoadFixture("project-hail-mary-products.json");
@@ -141,6 +155,60 @@ internal sealed class AudibleApiStubHandler : HttpMessageHandler
         return false;
     }
 
+    private static Dictionary<string, string> ParseQuery(string query)
+    {
+        var parameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var separator = pair.IndexOf('=');
+            if (separator <= 0)
+            {
+                continue;
+            }
+
+            parameters[Uri.UnescapeDataString(pair[..separator].Replace('+', ' '))] =
+                Uri.UnescapeDataString(pair[(separator + 1)..].Replace('+', ' '));
+        }
+
+        return parameters;
+    }
+
+    // Lower case, letters and digits, one dash between words: "The Gods of Mars" -> "the-gods-of-mars".
+    private static string Slug(string value)
+    {
+        var slug = new StringBuilder();
+        foreach (var character in value.Trim().ToLowerInvariant())
+        {
+            if (char.IsAsciiLetterOrDigit(character))
+            {
+                slug.Append(character);
+            }
+            else if (slug.Length > 0 && slug[^1] != '-')
+            {
+                slug.Append('-');
+            }
+        }
+
+        return slug.ToString().TrimEnd('-');
+    }
+
+    private static bool TryLoadFixture(out string responseBody, params string[] fixtureNames)
+    {
+        foreach (var fixtureName in fixtureNames)
+        {
+            if (typeof(ExternalApiStubHandler).Assembly.GetManifestResourceInfo(ResourceName(fixtureName)) != null)
+            {
+                responseBody = LoadFixture(fixtureName);
+                return true;
+            }
+        }
+
+        responseBody = string.Empty;
+        return false;
+    }
+
+    private static string ResourceName(string fixtureName) => $"Listenarr.TestHost.AudibleFixtures.{fixtureName}";
+
     private static HttpResponseMessage CreateResponse(string body, string mediaType)
     {
         return new HttpResponseMessage(HttpStatusCode.OK)
@@ -151,8 +219,8 @@ internal sealed class AudibleApiStubHandler : HttpMessageHandler
 
     private static string LoadFixture(string fixtureName)
     {
-        var resourceName = $"Listenarr.TestHost.AudibleFixtures.{fixtureName}";
-        using var stream = typeof(AudibleApiStubHandler).Assembly.GetManifestResourceStream(resourceName)
+        var resourceName = ResourceName(fixtureName);
+        using var stream = typeof(ExternalApiStubHandler).Assembly.GetManifestResourceStream(resourceName)
             ?? throw new InvalidOperationException($"Missing embedded Audible fixture resource {resourceName}.");
         using var reader = new StreamReader(stream);
         return reader.ReadToEnd();

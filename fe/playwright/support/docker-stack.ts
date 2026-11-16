@@ -1,9 +1,10 @@
 import { execFileSync } from 'node:child_process'
-import { access, cp, rm } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { access, cp, readdir, rm } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
 import type { APIRequestContext } from '@playwright/test'
 
-// Set by scripts/backend-integration/run.mjs, which starts the container the tests talk to.
+// The Listenarr container the backend integration and E2E suites talk to, started by
+// scripts/lib/listenarr-stack.mjs (through scripts/backend-integration/run.mjs or scripts/e2e/run.mjs).
 const container = process.env.LISTENARR_BACKEND_INTEGRATION_CONTAINER
 const configDirectory = process.env.LISTENARR_BACKEND_INTEGRATION_CONFIG_DIR
 const seedConfigDirectory = process.env.LISTENARR_BACKEND_INTEGRATION_SEED_CONFIG_DIR
@@ -30,30 +31,69 @@ async function waitForApi() {
   throw new Error(`Listenarr did not become ready at ${readyUrl}.`)
 }
 
-/** Puts the database and the files back as they were seeded, with the application stopped meanwhile. */
+/**
+ * Makes a directory hold exactly what another holds. The directory itself stays: it is mounted into the
+ * running container, which would keep seeing a removed one.
+ */
+async function replaceContents(directory: string, source: string) {
+  for (const entry of await readdir(directory)) {
+    await rm(join(directory, entry), { recursive: true, force: true })
+  }
+  await cp(source, directory, { recursive: true })
+}
+
+/** Stops the app inside its container and waits until it exited (.devcontainer/backend-integration-entrypoint.sh). */
+async function stopApp(name: string) {
+  execFileSync('docker', ['kill', '--signal', 'USR1', name], { stdio: 'ignore' })
+  const deadline = Date.now() + 120_000
+  while (Date.now() < deadline) {
+    try {
+      execFileSync('docker', ['exec', name, 'test', '-f', '/run/listenarr-host.stopped'], {
+        stdio: 'ignore',
+      })
+      return
+    } catch {
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 250))
+    }
+  }
+  throw new Error('The Listenarr test host did not stop.')
+}
+
+/**
+ * Puts the database and the files back as they were seeded, with the app stopped meanwhile. The app
+ * restarts inside its running container: restarting the container would change the host's network,
+ * and Chromium would abort the page loads in flight.
+ */
 export async function restoreSeed() {
-  if (!container || !configDirectory || !seedConfigDirectory || !filesystemDirectory || !seedFilesystemDirectory) {
-    throw new Error('The backend integration write suite needs the container started by scripts/backend-integration/run.mjs.')
+  if (
+    !container ||
+    !configDirectory ||
+    !seedConfigDirectory ||
+    !filesystemDirectory ||
+    !seedFilesystemDirectory
+  ) {
+    throw new Error(
+      'This suite needs the container started by scripts/backend-integration/run.mjs or scripts/e2e/run.mjs.',
+    )
   }
 
-  execFileSync('docker', ['stop', container], { stdio: 'ignore' })
-  await rm(configDirectory, { recursive: true, force: true })
-  await cp(seedConfigDirectory, configDirectory, { recursive: true })
-  await rm(filesystemDirectory, { recursive: true, force: true })
-  await cp(seedFilesystemDirectory, filesystemDirectory, { recursive: true })
-  execFileSync('docker', ['start', container], { stdio: 'ignore' })
+  await stopApp(container)
+  await replaceContents(configDirectory, seedConfigDirectory)
+  await replaceContents(filesystemDirectory, seedFilesystemDirectory)
+  execFileSync('docker', ['kill', '--signal', 'USR2', container], { stdio: 'ignore' })
   await waitForApi()
 }
 
 /** The host path of a file the container sees under /backend-integration/. */
-function hostPath(containerPath: string) {
+export function hostPath(containerPath: string) {
   if (!filesystemDirectory || !containerPath.startsWith(containerFilesystemRoot)) {
     throw new Error(`'${containerPath}' is not inside the backend integration filesystem mount.`)
   }
 
   const root = resolve(filesystemDirectory)
   const path = resolve(root, containerPath.slice(containerFilesystemRoot.length))
-  if (!path.startsWith(`${root}/`)) throw new Error(`'${containerPath}' escapes the backend integration filesystem mount.`)
+  if (!path.startsWith(`${root}/`))
+    throw new Error(`'${containerPath}' escapes the backend integration filesystem mount.`)
   return path
 }
 
@@ -71,7 +111,8 @@ export async function fileExists(containerPath: string) {
 /** The header a mutating request needs; the matching cookie stays in the request context. */
 export async function antiforgeryHeaders(request: APIRequestContext) {
   const response = await request.get('/api/v1/antiforgery/token')
-  if (!response.ok()) throw new Error(`The API did not issue an antiforgery token (${response.status()}).`)
+  if (!response.ok())
+    throw new Error(`The API did not issue an antiforgery token (${response.status()}).`)
   const { token } = (await response.json()) as { token: string }
   return { 'X-XSRF-TOKEN': token }
 }
