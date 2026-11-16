@@ -20,8 +20,8 @@ using Microsoft.Extensions.Logging;
 namespace Listenarr.Infrastructure.Ffmpeg.Installation
 {
     /// <summary>
-    /// Background service that ensures ffprobe is installed without blocking application startup.
-    /// It will attempt installation once and broadcast a SignalR message when finished.
+    /// Background service that resolves ffprobe without blocking application startup.
+    /// It runs once and broadcasts a SignalR message with the result.
     /// </summary>
     public class FfmpegInstallBackgroundService(
         IFfmpegInstallProcessor processor,
@@ -32,21 +32,21 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
         {
             try
             {
-                logger.LogInformation("FFmpeg installer background service started. Will attempt installation in the background if needed.");
+                logger.LogInformation("ffprobe availability check started in the background.");
 
                 await processor.EnsureInstalledAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
-                logger.LogDebug("FFmpeg installer background service canceled due to host shutdown.");
+                logger.LogDebug("ffprobe availability check canceled due to host shutdown.");
             }
             catch (OperationCanceledException ex)
             {
-                logger.LogWarning(ex, "FFmpeg installer background service canceled/timed out; continuing without bundled ffprobe.");
+                logger.LogWarning(ex, "ffprobe availability check canceled or timed out; continuing without ffprobe.");
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
-                logger.LogWarning(ex, "Error while attempting background ffprobe installation");
+                logger.LogWarning(ex, "Error while resolving ffprobe in the background");
                 try
                 {
                     await hubContext.Clients.All.SendAsync("FfmpegInstallStatus", new { status = "Error" }, cancellationToken: stoppingToken);
@@ -71,7 +71,7 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
 
             if (!string.IsNullOrEmpty(path))
             {
-                logger.LogInformation("ffprobe installed/available at {Path}", path);
+                logger.LogInformation("ffprobe available at {Path}", path);
                 try
                 {
                     await hubContext.Clients.All.SendAsync("FfmpegInstallStatus", new { status = "Installed", path }, cancellationToken: cancellationToken);
@@ -83,7 +83,7 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
             }
             else
             {
-                logger.LogWarning("ffprobe was not installed or auto-install disabled");
+                logger.LogWarning("No ffprobe available; audio metadata extraction is disabled");
                 try
                 {
                     await hubContext.Clients.All.SendAsync("FfmpegInstallStatus", new { status = "NotInstalled" }, cancellationToken: cancellationToken);
