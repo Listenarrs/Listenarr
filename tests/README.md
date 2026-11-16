@@ -30,7 +30,8 @@ tests/                              # Backend tests
 (`WebApplicationFactory`) on its own SQLite file and temporary root folders, seeds four books and two root folders
 through the API, and then uses only HTTP requests, as the frontend does. External APIs answer from the TestHost
 fixtures; the import scan reads real tags with the `ffprobe` found on PATH (install FFmpeg). The project builds on
-every OS but is a test project only off Windows: CI runs it in `backend-tests-linux`.
+every OS. In CI it runs in its own Linux job, `backend-integration-tests`; the native backend jobs skip it
+(it is a test project in CI only when `ListenarrBackendIntegrationJob=true`).
 
 ```
 dotnet test tests/Listenarr.BackendIntegrationTests

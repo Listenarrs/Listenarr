@@ -1,13 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<!--
 		Backend integration tests: the whole application in process, driven only through its HTTP API, on a
-		SQLite file and real folders (see BackendIntegrationHost). Linux CI runs them with the rest of the
-		backend suite (backend-tests-linux, which installs FFmpeg for ffprobe). They build everywhere but are
-		not a test project on Windows, so the Windows job does not run them.
+		SQLite file and real folders (see BackendIntegrationHost). In CI they run in their own Linux job,
+		backend-integration-tests, which sets ListenarrBackendIntegrationJob=true and installs FFmpeg for
+		ffprobe. Elsewhere in CI this is not a test project, so the native backend jobs, which test the whole
+		solution, skip it. Locally it is a test project like any other.
 	-->
 	<PropertyGroup>
 		<IsPackable>false</IsPackable>
-		<IsTestProject Condition="$([MSBuild]::IsOSPlatform('Windows'))">false</IsTestProject>
+		<IsTestProject Condition="'$(CI)' == 'true' and '$(ListenarrBackendIntegrationJob)' != 'true'">false</IsTestProject>
 		<EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
 	</PropertyGroup>
 
