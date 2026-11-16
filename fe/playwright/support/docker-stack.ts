@@ -3,8 +3,8 @@ import { access, cp, readdir, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import type { APIRequestContext } from '@playwright/test'
 
-// The Listenarr container the backend integration and E2E suites talk to, started by
-// scripts/lib/listenarr-stack.mjs (through scripts/backend-integration/run.mjs or scripts/e2e/run.mjs).
+// The Listenarr container the E2E suite talks to, started by
+// scripts/lib/listenarr-stack.mjs (through scripts/e2e/run.mjs).
 const container = process.env.LISTENARR_BACKEND_INTEGRATION_CONTAINER
 const configDirectory = process.env.LISTENARR_BACKEND_INTEGRATION_CONFIG_DIR
 const seedConfigDirectory = process.env.LISTENARR_BACKEND_INTEGRATION_SEED_CONFIG_DIR
@@ -72,9 +72,7 @@ export async function restoreSeed() {
     !filesystemDirectory ||
     !seedFilesystemDirectory
   ) {
-    throw new Error(
-      'This suite needs the container started by scripts/backend-integration/run.mjs or scripts/e2e/run.mjs.',
-    )
+    throw new Error('This suite needs the container started by scripts/e2e/run.mjs.')
   }
 
   await stopApp(container)

@@ -1,8 +1,7 @@
 // Starts Listenarr in Docker for the suites that test it running: the production image, the test host
 // image built on top of it (.devcontainer/backend-integration.Dockerfile: fixture-backed Audible client,
 // ffprobe), one container on a temporary config and filesystem, a seeded library, and snapshots of the
-// seeded database and files that tests restore. Used by scripts/backend-integration/run.mjs (API only)
-// and scripts/e2e/run.mjs (browser).
+// seeded database and files that tests restore. Used by scripts/e2e/run.mjs.
 import { once } from 'node:events'
 import { createHash } from 'node:crypto'
 import { cp, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
@@ -254,7 +253,7 @@ export async function startListenarrStack({
       run,
       restart,
       dispose,
-      /** The variables the Playwright support code (fe/playwright/backend-integration/support/stack.ts) reads. */
+      /** The variables the Playwright support code (fe/playwright/support/docker-stack.ts) reads. */
       testEnvironment: {
         LISTENARR_BACKEND_INTEGRATION_BASE_URL: apiUrl,
         LISTENARR_BACKEND_INTEGRATION_CONTAINER: containerName,
