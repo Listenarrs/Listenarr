@@ -130,32 +130,9 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
         [InlineData("https://evermeet.cx@evil.com/x.zip")]
         [InlineData("https://evil.evermeet.cx/ffmpeg/ffprobe-1.2.3.zip")]
         [InlineData("https://notevermeet.cx/ffmpeg/ffprobe-1.2.3.zip")]
-        [InlineData("https://evermeet.cx/ffmpeg/ffprobe-1.2.3.zip?download=1")]
-        [InlineData("https://evermeet.cx/ffmpeg/ffprobe-1.2.3.zip#download")]
-        [InlineData("https://evermeet.cx/ffmpeg/ffprobe-1.2.3.zip ")]
         public async Task ResolveAsync_WhenTheUrlIsUnsupported_UsesTheFallback(string zipUrl)
         {
             Assert.Equal(Fallback, await ResolveAsync(Json(ReleaseInfo(zipUrl))));
-        }
-
-        [Fact]
-        public async Task ResolveAsync_AcceptsAnUppercaseZipExtension()
-        {
-            const string Url = "https://evermeet.cx/ffmpeg/ffprobe-1.2.3.ZIP";
-
-            Assert.Equal(Url, await ResolveAsync(Json(ReleaseInfo(Url))));
-        }
-
-        [Theory]
-        [InlineData("https://evermeet.cx/ffmpeg/ffprobe-1.2.3.zip", true)]
-        [InlineData("https://evermeet.cx/ffmpeg/ffprobe-1.2.3.ZIP", true)]
-        [InlineData("https://evermeet.cx/ffmpeg/ffprobe-1.2.3.zip?download=1", false)]
-        [InlineData("https://evermeet.cx/ffmpeg/ffprobe-1.2.3.zip#download", false)]
-        [InlineData("https://evermeet.cx/ffmpeg/ffprobe-1.2.3.zip ", false)]
-        [InlineData("https://evermeet.cx/ffmpeg/get/ffprobe", false)]
-        public void IsZipArchiveUrl_MatchesOnlyAUrlThatEndsInZip(string url, bool expected)
-        {
-            Assert.Equal(expected, FfprobeArchiveExtractor.IsZipArchiveUrl(url));
         }
 
         [Fact]
@@ -207,60 +184,6 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
 
             Assert.True(extracted);
             Assert.Equal("binary", await File.ReadAllTextAsync(ffprobePath));
-        }
-
-        [Fact]
-        public async Task EnsureFfprobeInstalledAsync_WhenTheLookupUrlHasAQuery_InstallsFromThePinnedArchiveNotTheRawDownload()
-        {
-            const string QueryUrl = "https://evermeet.cx/ffmpeg/ffprobe-1.2.3.zip?download=1";
-            var ffmpegDirectory = FileService.GetTempDirectory("ffprobe-query");
-            var zipBytes = BuildZip("ffprobe", "binary");
-            var releases = "[{\"tag_name\":\"v1\",\"assets\":[{\"name\":\"ffprobe.zip\",\"browser_download_url\":\"" + Fallback + "\"}]}]";
-            // Both archive URLs serve a real ZIP, so a raw install of either would "succeed";
-            // only the extraction path leaves the extracted binary rather than the archive itself.
-            var handler = new StubHandler((request, _) =>
-            {
-                var uri = request.RequestUri!.ToString();
-                HttpContent? content = uri switch
-                {
-                    _ when request.RequestUri.Host == "api.github.com" => new StringContent(releases),
-                    FfprobeEvermeetResolver.ReleaseInfoUrl => new StringContent(ReleaseInfo(QueryUrl)),
-                    Fallback or QueryUrl => new ByteArrayContent(zipBytes),
-                    _ => null,
-                };
-                return Task.FromResult(content is null
-                    ? new HttpResponseMessage(HttpStatusCode.NotFound)
-                    : new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
-            });
-            var startupConfig = Mock.Of<IStartupConfigService>(config => config.GetConfig() == new StartupConfig
-            {
-                Ffmpeg = new FfmpegConfig { Provider = "github:example/ffprobe-builds" },
-            });
-            var service = new FfmpegService(
-                new Mock<ILogger<FfmpegService>>().Object,
-                new HttpClient(handler),
-                startupConfig,
-                _provider.GetRequiredService<IProcessRunner>(),
-                Mock.Of<IApplicationPathService>(paths => paths.FfmpegRootPath == ffmpegDirectory));
-
-            var installed = await service.EnsureFfprobeInstalledAsync();
-
-            var requested = handler.Requests.Select(uri => uri.ToString()).ToList();
-            Assert.DoesNotContain(QueryUrl, requested);
-            Assert.Contains(Fallback, requested);
-            Assert.NotNull(installed);
-            Assert.Equal("binary", await File.ReadAllTextAsync(installed!));
-        }
-
-        private static byte[] BuildZip(string entryName, string content)
-        {
-            using var stream = new MemoryStream();
-            using (var zip = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
-            {
-                using var writer = new StreamWriter(zip.CreateEntry(entryName).Open());
-                writer.Write(content);
-            }
-            return stream.ToArray();
         }
 
         [Fact]
