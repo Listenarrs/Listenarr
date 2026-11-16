@@ -1976,7 +1976,8 @@ public sealed class ManualImportMarkerlessRegistrationTests : BaseTests
         }, cancellation.Token);
         try
         {
-            await Task.WhenAny(pause.Entered.Task, importing).WaitAsync(TimeSpan.FromSeconds(10));
+            // 15 s: 10 s expired once on GitHub's Windows runner (import still on its way to the pause).
+            await Task.WhenAny(pause.Entered.Task, importing).WaitAsync(TimeSpan.FromSeconds(15));
             Assert.False(importing.IsCompleted);
             await pause.Entered.Task;
             await using var paused = await factory.CreateDbContextAsync();
