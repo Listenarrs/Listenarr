@@ -26,6 +26,11 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
 {
     internal static class FfprobeArchiveExtractor
     {
+        // The one test for "this download is a ZIP". The resolver validates with it and ExtractAsync
+        // dispatches on it, so a URL the resolver accepts can never fall through to the raw-file move.
+        internal static bool IsZipArchiveUrl(string downloadUrl) =>
+            downloadUrl.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
+
         public static async Task<bool> ExtractAsync(
             string downloadUrl,
             string tmpFile,
@@ -33,7 +38,7 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
             string ffprobePath,
             ILogger logger)
         {
-            if (downloadUrl.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) || downloadUrl.EndsWith(".ffmpeg.zip", StringComparison.OrdinalIgnoreCase))
+            if (IsZipArchiveUrl(downloadUrl))
             {
                 using var archive = SharpCompress.Archives.Zip.ZipArchive.OpenArchive(tmpFile, new ReaderOptions());
                 var baseRoot = Path.GetFullPath(baseDir);
