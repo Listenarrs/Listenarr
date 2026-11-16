@@ -38,8 +38,21 @@ namespace Listenarr.Tests.Features.Infrastructure.Images.Cache
             Assert.Equal(ImageBytes, bytes);
         }
 
+        [Fact]
+        public async Task GetImageBytesAsync_ForAStoredLibraryPathWithALeadingSlash_ReturnsTheFile()
+        {
+            // Every writer stores the library cover as "/config/cache/images/library/<asin>.jpg".
+            using var fixture = CacheFixture.Create();
+            await File.WriteAllBytesAsync(Path.Join(fixture.LibraryPath, Asin + ".jpg"), ImageBytes);
+
+            var bytes = await fixture.Service.GetImageBytesAsync($"/config/cache/images/library/{Asin}.jpg");
+
+            Assert.Equal(ImageBytes, bytes);
+        }
+
         [Theory]
         [InlineData("config/cache/images/library/missing.jpg")]
+        [InlineData("/config/appsettings.json")]
         [InlineData("config/cache/images/library/../../../outside.jpg")]
         [InlineData("config/appsettings.json")]
         [InlineData("/etc/hostname")]

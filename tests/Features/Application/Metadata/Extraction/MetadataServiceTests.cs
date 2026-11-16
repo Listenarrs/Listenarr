@@ -203,12 +203,12 @@ namespace Listenarr.Tests.Features.Application.Metadata.Extraction
 
         [Theory]
         [InlineData(AbsoluteCoverUrl)]
-        [InlineData("config/cache/images/library/B008DFUGCQ.jpg")]
+        [InlineData("/config/cache/images/library/B008DFUGCQ.jpg")]
         public async Task WriteImportTagsAsync_WhenCoverArtIsEnabled_EmbedsTheImageTheCacheReturns(
             string storedCover)
         {
-            // Library-added books store the published cover as a content-root-relative path
-            // rather than a URL, so both shapes must reach the image cache and not an
+            // Library-added books store the published cover as a content-root-relative path with a
+            // leading slash rather than a URL, so both shapes must reach the image cache and not an
             // unconfigured HttpClient.
             var writer = new Mock<IAudioTagWriter>();
             var service = CreateTagWritingService(
