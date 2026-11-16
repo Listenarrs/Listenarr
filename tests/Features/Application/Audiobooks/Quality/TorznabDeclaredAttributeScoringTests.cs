@@ -214,5 +214,24 @@ namespace Listenarr.Tests.Features.Application.Audiobooks.Quality
 
             Assert.Equal("AAC 192kbps", aac.Quality);
         }
+
+        [Theory]
+        [InlineData("application", "opus 128kbps", "OPUS", "OPUS 128kbps")]
+        [InlineData("infrastructure", "opus 128kbps", "OPUS", "OPUS 128kbps")]
+        [InlineData("application", "m4b 128kbps", "M4B", "AAC 128kbps")]
+        [InlineData("infrastructure", "m4b 128kbps", "M4B", "AAC 128kbps")]
+        public async Task DeclaredCodec_KeepsItsFamilyInTheBitrateLabel_AndIsAcceptedWhereThatRungIsAllowed(
+            string parser, string declared, string expectedFormat, string expectedQuality)
+        {
+            var profile = Profile((expectedQuality, true), ("MP3 128kbps", false), ("MP3 64kbps", true));
+            var service = CreateService();
+
+            var result = await ParseOne(parser, Feed(BookTitle, "Read in full.", declared));
+            var score = await service.ScoreSearchResult(result, profile);
+
+            Assert.Equal(expectedFormat, result.Format);
+            Assert.Equal(expectedQuality, result.Quality);
+            Assert.False(score.IsRejected, $"A declared {declared} release must be accepted: {string.Join("; ", score.RejectionReasons)}");
+        }
     }
 }
