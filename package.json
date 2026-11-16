@@ -23,6 +23,7 @@
     "lint:frontend": "cd fe && npm run lint:check",
     "validate:repository-paths": "node scripts/validate-repository-paths.mjs",
     "test:repository-paths": "node --test scripts/validate-repository-paths.test.mjs",
+    "verify:frontend": "cd fe && npm run verify",
     "lint:staged": "node scripts/lint-staged.mjs",
     "lint:fix": "cd fe && npm run lint:fix",
     "format": "npm run format:backend && npm run format:frontend",

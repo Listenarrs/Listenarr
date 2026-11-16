@@ -1,28 +1,33 @@
+import { apiPath } from '../support/api'
+
 /* eslint-disable cypress/unsafe-to-chain-command */
 describe('Hardlink/Copy Move Flow (E2E)', () => {
   beforeEach(() => {
     // Stub startup config and account checks (no auth)
-    cy.intercept('GET', '/api/configuration/startupconfig', {
+    cy.intercept('GET', apiPath('/configuration/startupconfig'), {
       statusCode: 200,
-      body: { authenticationRequired: false, apiKey: null, baseUrl: '/' }
+      body: { authenticationRequired: false, apiKey: null, baseUrl: '/' },
     }).as('getStartupConfig')
 
-    cy.intercept('GET', '/api/account/me', { statusCode: 200, body: { authenticated: false } }).as('getCurrentUser')
+    cy.intercept('GET', apiPath('/account/me'), {
+      statusCode: 200,
+      body: { authenticated: false },
+    }).as('getCurrentUser')
 
     // App settings with outputPath and default file handling mode (Hardlink/Copy)
-    cy.intercept('GET', '/api/configuration/settings', {
+    cy.intercept('GET', apiPath('/configuration/settings'), {
       statusCode: 200,
       body: {
         outputPath: '/mnt/audiobooks',
         fileNamingPattern: '{Author}/{Title}',
         completedFileAction: 'Hardlink/Copy',
         maxConcurrentDownloads: 2,
-        pollingIntervalSeconds: 30
-      }
+        pollingIntervalSeconds: 30,
+      },
     }).as('getSettings')
 
     // Stub library endpoint to return a single audiobook
-    cy.intercept('GET', '/api/library', {
+    cy.intercept('GET', apiPath('/library'), {
       statusCode: 200,
       body: [
         {
@@ -34,39 +39,45 @@ describe('Hardlink/Copy Move Flow (E2E)', () => {
           qualityProfileId: null,
           tags: [],
           abridged: false,
-          explicit: false
-        }
-      ]
+          explicit: false,
+        },
+      ],
     }).as('getLibrary')
 
     // Stub other endpoints
-    cy.intercept('GET', '/api/qualityprofile', { statusCode: 200, body: [] }).as('getProfiles')
-    cy.intercept('GET', '/api/configuration/apis', { statusCode: 200, body: [] }).as('getApis')
-    cy.intercept('GET', '/api/download-clients', { statusCode: 200, body: [] }).as('getDownloadClients')
+    cy.intercept('GET', apiPath('/qualityprofile'), { statusCode: 200, body: [] }).as('getProfiles')
+    cy.intercept('GET', apiPath('/configuration/apis'), { statusCode: 200, body: [] }).as('getApis')
+    cy.intercept('GET', apiPath('/configuration/download-clients'), {
+      statusCode: 200,
+      body: [],
+    }).as('getDownloadClients')
 
     // Capture the PUT update request for assertions
-    cy.intercept('PUT', '/api/library/1', (req) => {
+    cy.intercept('PUT', apiPath('/library/1'), (req) => {
       req.reply((res) => {
-        const updated = Object.assign({ id: 1, title: 'Test Book', author: 'Test Author' }, req.body)
+        const updated = Object.assign(
+          { id: 1, title: 'Test Book', author: 'Test Author' },
+          req.body,
+        )
         res.send({ statusCode: 200, body: { message: 'ok', audiobook: updated } })
       })
     }).as('updateAudiobook')
 
     // Capture move request with fileHandling mode
-    cy.intercept('POST', '/api/library/1/move', (req) => {
+    cy.intercept('POST', apiPath('/library/1/move'), (req) => {
       req.reply({ statusCode: 200, body: { message: 'queued', jobId: 'job-test-1' } })
     }).as('moveAudiobook')
 
     // Stub volume check endpoint
-    cy.intercept('GET', '/api/filesystem/check-volume*', {
+    cy.intercept('GET', apiPath('/filesystem/check-volume*'), {
       statusCode: 200,
       body: {
         sameVolume: true,
         willBreakHardlinks: false,
         sourceVolume: '/mnt',
         destVolume: '/mnt',
-        message: 'Same volume'
-      }
+        message: 'Same volume',
+      },
     }).as('checkVolume')
   })
 
