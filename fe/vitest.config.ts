@@ -31,7 +31,7 @@ export default defineConfig((configEnv) =>
           reporter: ['text', 'html', 'lcov'],
           include: ['src/**/*.{ts,vue}'],
           exclude: [
-            ...configDefaults.coverage.exclude,
+            ...(configDefaults.coverage.exclude ?? []),
             'src/**/test/**',
             'src/test/**',
             'src/**/*.d.ts',
