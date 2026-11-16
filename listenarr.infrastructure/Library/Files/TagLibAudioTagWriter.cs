@@ -107,12 +107,15 @@ namespace Listenarr.Infrastructure.Library.Files
         /// Replacing rather than appending: a file that already carries a cover and gains a
         /// second one shows whichever the player happens to pick first, which looks like a
         /// bug to whoever asked for the artwork to be corrected. Returns false when the
-        /// container reports no tag to write into, so the caller can say so rather than
-        /// claim a write that did not happen.
+        /// container reports no tag to write into, or cannot represent the image format (the
+        /// MPEG-4 cover atom has format flags for JPEG, PNG, BMP and GIF only, so a WebP
+        /// picture would be stored unlabelled and not shown), so the caller can say so
+        /// rather than claim a write that did not happen.
         /// </summary>
         internal static bool ApplyCoverArt(TagLib.File file, AudioCoverArt coverArt)
         {
-            if (file.Tag is null)
+            if (file.Tag is null
+                || (file is TagLib.Mpeg4.File && coverArt.MimeType is not ("image/jpeg" or "image/png")))
             {
                 return false;
             }

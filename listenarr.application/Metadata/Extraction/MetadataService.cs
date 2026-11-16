@@ -301,16 +301,49 @@ namespace Listenarr.Application.Metadata.Extraction
             return coverArt;
         }
 
+        /// <summary>
+        /// Upper bound on cover artwork fetched for embedding. A real cover is a few hundred
+        /// kilobytes; the bound exists so a hostile or misconfigured image host cannot make an
+        /// import buffer an arbitrary body in memory and then write it into the audio file.
+        /// </summary>
+        internal const int MaxCoverArtBytes = 10 * 1024 * 1024;
+
         public async Task<byte[]?> DownloadCoverArtAsync(string coverArtUrl)
         {
             try
             {
-                var response = await _httpClient.GetAsync(coverArtUrl);
-                if (response.IsSuccessStatusCode)
+                using var response = await _httpClient.GetAsync(
+                    coverArtUrl,
+                    HttpCompletionOption.ResponseHeadersRead);
+                if (!response.IsSuccessStatusCode)
                 {
-                    return await response.Content.ReadAsByteArrayAsync();
+                    return null;
                 }
-                return null;
+
+                if (response.Content.Headers.ContentLength > MaxCoverArtBytes)
+                {
+                    LogCoverArtTooLarge(coverArtUrl);
+                    return null;
+                }
+
+                // The header is advisory and absent on chunked responses, so the read is
+                // bounded as well.
+                await using var stream = await response.Content.ReadAsStreamAsync();
+                using var buffer = new MemoryStream();
+                var chunk = new byte[81920];
+                int read;
+                while ((read = await stream.ReadAsync(chunk)) > 0)
+                {
+                    if (buffer.Length + read > MaxCoverArtBytes)
+                    {
+                        LogCoverArtTooLarge(coverArtUrl);
+                        return null;
+                    }
+
+                    buffer.Write(chunk, 0, read);
+                }
+
+                return buffer.ToArray();
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
@@ -318,6 +351,12 @@ namespace Listenarr.Application.Metadata.Extraction
                 return null;
             }
         }
+
+        private void LogCoverArtTooLarge(string coverArtUrl) =>
+            _logger.LogDebug(
+                "Cover art from {Url} is larger than {Limit} bytes, so nothing was embedded",
+                LogRedaction.SanitizeUrl(coverArtUrl),
+                MaxCoverArtBytes);
 
         private AudioMetadata? ParseAudnexusResponse(JsonElement audnexusData)
         {
