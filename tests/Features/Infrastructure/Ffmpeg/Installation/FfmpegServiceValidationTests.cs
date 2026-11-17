@@ -52,7 +52,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
             var processRunner = new Mock<IProcessRunner>()
                 .AnswerFfprobeVersionCheck(new ProcessResult(exitCode, stdout, string.Empty, timedOut));
             var requests = new List<Uri?>();
-            var service = CreateService(processRunner.Object, legacyDirectory, applicationBase, requests);
+            var service = CreateService(processRunner.Object, legacyDirectory, applicationBase, requests: requests);
 
             Assert.Null(await service.GetFfprobePathAsync());
             Assert.Null(await service.EnsureFfprobeInstalledAsync());
@@ -95,7 +95,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
             var processRunner = new Mock<IProcessRunner>()
                 .AnswerFfprobeVersionCheck(new ProcessResult(1, string.Empty, "exec format error", false));
             var requests = new List<Uri?>();
-            var service = CreateService(processRunner.Object, legacyDirectory, FileService.GetTempDirectory("ffprobe-legacy-invalid-app"), requests);
+            var service = CreateService(processRunner.Object, legacyDirectory, FileService.GetTempDirectory("ffprobe-legacy-invalid-app"), requests: requests);
 
             Assert.Null(await service.EnsureFfprobeInstalledAsync());
             Assert.Empty(requests);
@@ -145,36 +145,68 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
         [Theory]
         [InlineData(-1, "", true)]
         [InlineData(-1, "resource temporarily unavailable", false)]
-        public async Task VersionCheck_TimeoutOrRunnerFailure_IsNotCachedSoTheNextCallSucceeds(int exitCode, string stderr, bool timedOut)
+        public async Task VersionCheck_TimeoutOrRunnerFailure_IsHeldForSixtySecondsThenCheckedAgain(int exitCode, string stderr, bool timedOut)
         {
             // A timeout, or a process the runner could not start (exit -1 and no output), says
-            // nothing lasting about the binary, so the next caller checks again instead of
-            // treating ffprobe as unusable until restart.
+            // nothing lasting about the binary: it is held briefly so a binary that never starts
+            // is not re-run on every probe, then checked again instead of staying unusable until
+            // restart.
             var (applicationBase, packaged) = await PlacePackagedBinaryAsync($"ffprobe-transient-app-{timedOut}");
             var processRunner = new Mock<IProcessRunner>()
                 .AnswerFfprobeVersionCheck(new ProcessResult(exitCode, string.Empty, stderr, timedOut));
-            var service = CreateService(processRunner.Object, FileService.GetTempDirectory($"ffprobe-transient-legacy-{timedOut}"), applicationBase);
+            var clock = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
+            var service = CreateService(processRunner.Object, FileService.GetTempDirectory($"ffprobe-transient-legacy-{timedOut}"), applicationBase, clock);
             Assert.Null(await service.GetFfprobePathAsync());
-
             processRunner.AnswerFfprobeVersionCheck();
 
+            clock.Advance(TimeSpan.FromSeconds(59));
+            Assert.Null(await service.GetFfprobePathAsync());
+            VerifyVersionChecks(processRunner, 1);
+
+            clock.Advance(TimeSpan.FromSeconds(2));
             Assert.Equal(packaged, await service.GetFfprobePathAsync());
             VerifyVersionChecks(processRunner, 2);
         }
 
         [Fact]
-        public async Task VersionCheck_RunnerThrowing_IsNotCachedSoTheNextCallSucceeds()
+        public async Task VersionCheck_RunnerThrowing_IsHeldForSixtySecondsThenCheckedAgain()
         {
             var (applicationBase, packaged) = await PlacePackagedBinaryAsync("ffprobe-runner-throws-app");
             var processRunner = new Mock<IProcessRunner>();
             processRunner.SetupSequence(runner => runner.RunAsync(It.IsAny<ProcessStartInfo>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
                 .ThrowsAsync(new Win32Exception("Text file busy"))
                 .ReturnsAsync(new ProcessResult(0, FfprobeProcessRunnerMockExtensions.VersionOutput, string.Empty, false));
-            var service = CreateService(processRunner.Object, FileService.GetTempDirectory("ffprobe-runner-throws-legacy"), applicationBase);
+            var clock = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
+            var service = CreateService(processRunner.Object, FileService.GetTempDirectory("ffprobe-runner-throws-legacy"), applicationBase, clock);
             Assert.Null(await service.GetFfprobePathAsync());
+
+            clock.Advance(TimeSpan.FromSeconds(61));
 
             Assert.Equal(packaged, await service.GetFfprobePathAsync());
             VerifyVersionChecks(processRunner, 2);
+        }
+
+        [Fact]
+        public async Task VersionCheck_BinaryThatNeverStarts_WarnsOnceAndLogsRepeatsAtDebug()
+        {
+            var (applicationBase, _) = await PlacePackagedBinaryAsync("ffprobe-never-starts-app");
+            var processRunner = new Mock<IProcessRunner>()
+                .AnswerFfprobeVersionCheck(new ProcessResult(-1, string.Empty, "permission denied", false));
+            var clock = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
+            var logger = new LevelRecordingLogger();
+            var service = CreateService(processRunner.Object, FileService.GetTempDirectory("ffprobe-never-starts-legacy"), applicationBase, clock, logger);
+
+            for (var call = 0; call < 5; call++)
+            {
+                Assert.Null(await service.GetFfprobePathAsync());
+            }
+
+            VerifyVersionChecks(processRunner, 1);
+            clock.Advance(TimeSpan.FromSeconds(61));
+            Assert.Null(await service.GetFfprobePathAsync());
+
+            VerifyVersionChecks(processRunner, 2);
+            Assert.Equal([LogLevel.Warning, LogLevel.Debug], logger.Levels.Where(level => level is LogLevel.Warning or LogLevel.Debug));
         }
 
         [Fact]
@@ -232,11 +264,13 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
             IProcessRunner processRunner,
             string legacyDirectory,
             string applicationBaseDirectory,
+            TimeProvider? timeProvider = null,
+            ILogger<FfmpegService>? logger = null,
             List<Uri?>? requests = null)
         {
             var recorded = requests ?? [];
             return new FfmpegService(
-                new Mock<ILogger<FfmpegService>>().Object,
+                logger ?? new Mock<ILogger<FfmpegService>>().Object,
                 new HttpClient(new DelegatingHandlerMock((request, _) =>
                 {
                     recorded.Add(request.RequestUri);
@@ -246,7 +280,31 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
                 processRunner,
                 Mock.Of<IApplicationPathService>(service => service.FfmpegRootPath == legacyDirectory),
                 applicationBaseDirectory,
-                RuntimeInformation.RuntimeIdentifier);
+                RuntimeInformation.RuntimeIdentifier,
+                timeProvider);
+        }
+
+        private sealed class MutableTimeProvider(DateTimeOffset utcNow) : TimeProvider
+        {
+            private DateTimeOffset _utcNow = utcNow;
+
+            public override DateTimeOffset GetUtcNow() => _utcNow;
+
+            public void Advance(TimeSpan duration) => _utcNow += duration;
+        }
+
+        private sealed class LevelRecordingLogger : ILogger<FfmpegService>
+        {
+            public List<LogLevel> Levels { get; } = [];
+
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            {
+                Levels.Add(logLevel);
+            }
         }
     }
 }

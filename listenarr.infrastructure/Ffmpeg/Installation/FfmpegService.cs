@@ -65,6 +65,7 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
         private readonly FfprobeGithubAssetDiscoverer _githubAssetDiscoverer;
         // Allow disabling auto-download via environment variable
         private readonly bool _autoInstall;
+        private readonly TimeProvider _timeProvider;
 
         public FfmpegService(
             ILogger<FfmpegService> logger,
@@ -73,7 +74,8 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
             IProcessRunner processRunner,
             IApplicationPathService applicationPathService,
             string? applicationBaseDirectory = null,
-            string? runtimeIdentifier = null)
+            string? runtimeIdentifier = null,
+            TimeProvider? timeProvider = null)
         {
             _logger = logger;
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
@@ -92,6 +94,7 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
             _autoInstall = Environment.GetEnvironmentVariable("LISTENARR_AUTO_INSTALL_FFPROBE")?.ToLower() != "false"; // default true
             _startupConfigService = startupConfigService;
             _processRunner = processRunner;
+            _timeProvider = timeProvider ?? TimeProvider.System;
             _applicationBaseDirectory = applicationBaseDirectory ?? AppContext.BaseDirectory;
             _runtimeIdentifiers = runtimeIdentifier == null
                 ? FfprobeBinaryLocator.CurrentRuntimeIdentifiers()

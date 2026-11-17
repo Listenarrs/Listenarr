@@ -27,20 +27,25 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
     /// line starts with <c>ffprobe version</c>, so a truncated download, another platform's build
     /// or an unrelated file at the expected path is reported as unavailable instead of failing
     /// every probe. The result is cached per path and invalidated when the file's length,
-    /// modification time or (on Unix) mode changes; the mode is part of the key because the
-    /// execute-bit repair changes it without touching the modification time. A timeout, or a
-    /// failure to run the process at all, is not cached: it says nothing lasting about the binary,
-    /// so the next caller checks again.
+    /// modification time or (on Unix) mode changes; the mode is part of the key because chmod,
+    /// the execute-bit repair included, changes it without touching the modification time. A
+    /// timeout, or a failure to run the process at all, says nothing lasting about the binary, so
+    /// it is cached for <see cref="RetryableFailureCacheDuration"/> only and then checked again;
+    /// when the same failure comes back it is logged at Debug rather than warned about again.
     /// </summary>
     public partial class FfmpegService
     {
         internal const int VersionCheckTimeoutMs = 5000;
         internal const string VersionLinePrefix = "ffprobe version";
+        internal static readonly TimeSpan RetryableFailureCacheDuration = TimeSpan.FromSeconds(60);
 
         private readonly ConcurrentDictionary<string, FfprobeValidation> _validationCache = new(StringComparer.Ordinal);
 
-        /// <summary>The outcome of one version check: the failure reason, or the version the binary reported.</summary>
-        private sealed record FfprobeValidation(long Length, DateTime LastWriteTimeUtc, UnixFileMode? Mode, string? Failure, string? Version);
+        /// <summary>
+        /// The outcome of one version check: the failure reason, or the version the binary
+        /// reported. <c>RetryAfter</c> is set only for a failure that is worth checking again.
+        /// </summary>
+        private sealed record FfprobeValidation(long Length, DateTime LastWriteTimeUtc, UnixFileMode? Mode, string? Failure, string? Version, DateTimeOffset? RetryAfter = null);
 
         private static FfprobeValidation Uninspectable(string failure) => new(0, default, null, failure, null);
 
@@ -85,25 +90,25 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
                 return Uninspectable($"the binary could not be inspected: {ex.Message}");
             }
 
-            if (_validationCache.TryGetValue(fullPath, out var cached)
-                && cached.Length == file.Length
-                && cached.LastWriteTimeUtc == file.LastWriteTimeUtc
-                && cached.Mode == mode)
+            var previous = _validationCache.GetValueOrDefault(fullPath);
+            if (previous != null
+                && previous.Length == file.Length
+                && previous.LastWriteTimeUtc == file.LastWriteTimeUtc
+                && previous.Mode == mode
+                && (previous.RetryAfter == null || _timeProvider.GetUtcNow() < previous.RetryAfter))
             {
-                return cached;
+                return previous;
             }
 
             var (failure, version, retryable) = await RunVersionCheckAsync(fullPath);
-            var validation = new FfprobeValidation(file.Length, file.LastWriteTimeUtc, mode, failure, version);
-            if (retryable)
+            var retryAfter = retryable ? _timeProvider.GetUtcNow() + RetryableFailureCacheDuration : (DateTimeOffset?)null;
+            var validation = new FfprobeValidation(file.Length, file.LastWriteTimeUtc, mode, failure, version, retryAfter);
+            _validationCache[fullPath] = validation;
+            if (failure != null && previous?.RetryAfter != null && previous.Failure == failure)
             {
-                _validationCache.TryRemove(fullPath, out _);
+                _logger.LogDebug("ffprobe at {Path} is still unusable: {Reason}", fullPath, LogRedaction.SanitizeText(failure));
             }
-            else
-            {
-                _validationCache[fullPath] = validation;
-            }
-            if (failure != null)
+            else if (failure != null)
             {
                 _logger.LogWarning("ffprobe at {Path} is unusable: {Reason}", fullPath, LogRedaction.SanitizeText(failure));
             }
