@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   chooseRunner,
+  workflowJobs,
   findFork,
   formatJobs,
   main,
@@ -142,8 +143,29 @@ test('formatJobs: one line per job that ran, with minutes when known', () => {
   assert.deepEqual(lines, ['SUCCESS unit-tests (12 min)', 'IN_PROGRESS coverage'])
 })
 
+test('workflowJobs: the job ids of a workflow file', () => {
+  const workflow = [
+    'name: Run Tests',
+    'on:',
+    '  workflow_dispatch:',
+    '    inputs:',
+    '      jobs:',
+    '        type: string',
+    'jobs:',
+    '  unit-tests:',
+    '    runs-on: x',
+    '    steps:',
+    '      - run: echo',
+    '  # a comment',
+    '  e2e-tests:  # trailing comment',
+    '    runs-on: x',
+    ''
+  ].join('\n')
+  assert.deepEqual(workflowJobs(workflow), ['unit-tests', 'e2e-tests'])
+})
+
 // A fake of git and gh: answers the calls main() makes and records them.
-function fakeEnvironment ({ dirty = true, online = true, refCommit = 'abc123def456', conclusion = 0 } = {}) {
+function fakeEnvironment ({ dirty = true, online = true, refCommit = 'abc123def456', conclusion = 0, skipped = false } = {}) {
   const calls = []
   const output = []
   const ok = (stdout = '') => ({ code: 0, stdout, stderr: '' })
@@ -170,7 +192,8 @@ function fakeEnvironment ({ dirty = true, online = true, refCommit = 'abc123def4
     if (line.startsWith('gh run watch')) return { code: conclusion, stdout: '', stderr: '' }
     if (line.startsWith('gh run view') && args.includes('--log-failed')) return ok('job\tstep\t2026-01-01T00:00:00.0000000Z boom\n')
     if (line.startsWith('gh run view')) {
-      return ok(JSON.stringify({ jobs: [{ name: 'unit-tests', conclusion: conclusion ? 'failure' : 'success' }] }))
+      const result = skipped ? 'skipped' : conclusion ? 'failure' : 'success'
+      return ok(JSON.stringify({ conclusion: result, jobs: [{ name: 'unit-tests', conclusion: result }] }))
     }
     return ok()
   }
@@ -184,6 +207,10 @@ function fakeEnvironment ({ dirty = true, online = true, refCommit = 'abc123def4
     sleep: async () => {},
     env: {},
     tempFile: () => '/tmp/index-copy',
+    readFile: (file) => {
+      calls.push({ cmd: 'read', args: [file] })
+      return 'jobs:\n  unit-tests:\n    x: 1\n  e2e-tests:\n    x: 1\n'
+    },
     copyFile: () => {},
     removeFile: () => {}
   }
@@ -257,6 +284,21 @@ test('main: no runner online exits 4 before pushing anything', async () => {
   const fake = fakeEnvironment({ online: false })
   assert.equal(await main([], fake.deps), 4)
   assert.equal(fake.called('git push').length, 0)
+})
+
+test('main: --jobs naming no job of the workflow exits 2 before pushing anything', async () => {
+  const fake = fakeEnvironment()
+  assert.equal(await main(['--jobs', 'unit-tests,unit-test'], fake.deps), 2)
+  assert.ok(fake.output.some((line) => /unit-test\b.*unit-tests, e2e-tests/.test(line)))
+  assert.deepEqual(fake.called('read')[0].args, ['/src/.github/workflows/run-tests.yml'])
+  assert.equal(fake.called('git push').length, 0)
+})
+
+test('main: a run where no job ran says so and exits 1', async () => {
+  const fake = fakeEnvironment({ skipped: true })
+  assert.equal(await main([], fake.deps), 1)
+  assert.ok(fake.output.includes('CI RUN: NO JOB RAN'))
+  assert.equal(fake.called('gh run view').filter((call) => call.args.includes('--log-failed')).length, 0)
 })
 
 test('main: usage errors exit 2, --help exits 0', async () => {
