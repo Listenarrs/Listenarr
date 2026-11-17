@@ -24,11 +24,10 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
     /// <summary>
     /// Resolves and runs ffprobe. The binary is provided by the Openur.FFprobeStatic NuGet package
     /// and restored at build time, so the version is pinned in Directory.Packages.props like any
-    /// other dependency and nothing is downloaded where the package covers the platform. A binary
-    /// in the configured ffmpeg directory is used only when no packaged binary matches the running
-    /// platform; while a packaged one exists, a hand-placed or previously downloaded copy there is
-    /// ignored, even if the packaged one later fails to run. With neither, startup falls back to
-    /// the download in <c>FfmpegService.Installer.cs</c>.
+    /// other dependency and nothing is downloaded at runtime. A binary in the configured ffmpeg
+    /// directory is used only when no packaged binary matches the running platform; while a
+    /// packaged one exists, a hand-placed or previously downloaded copy there is ignored, even if
+    /// the packaged one later fails to run. With neither, ffprobe is unavailable.
     /// </summary>
     public partial class FfmpegService : IFfmpegService
     {
@@ -56,21 +55,13 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
         private readonly IReadOnlyList<string> _runtimeIdentifiers;
         private readonly bool _isWindows;
         private readonly string _legacyDirectory;
-        private readonly string _ffprobeExecutableName;
         private readonly string _legacyFfprobePath;
         private readonly ILogger<FfmpegService> _logger;
-        private readonly HttpClient _httpClient;
-        private readonly IStartupConfigService _startupConfigService;
         private readonly IProcessRunner _processRunner;
-        private readonly FfprobeGithubAssetDiscoverer _githubAssetDiscoverer;
-        // Allow disabling auto-download via environment variable
-        private readonly bool _autoInstall;
         private readonly TimeProvider _timeProvider;
 
         public FfmpegService(
             ILogger<FfmpegService> logger,
-            HttpClient httpClient,
-            IStartupConfigService startupConfigService,
             IProcessRunner processRunner,
             IApplicationPathService applicationPathService,
             string? applicationBaseDirectory = null,
@@ -78,21 +69,6 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
             TimeProvider? timeProvider = null)
         {
             _logger = logger;
-            _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-            // Use a longer timeout than HttpClient's 100s default because static ffprobe archives
-            // can be large and hosts may have slow links. Allow override via environment variable.
-            var timeoutSeconds = 300;
-            var timeoutEnv = Environment.GetEnvironmentVariable("LISTENARR_FFPROBE_DOWNLOAD_TIMEOUT_SECONDS");
-            if (!string.IsNullOrWhiteSpace(timeoutEnv)
-                && int.TryParse(timeoutEnv, out var parsedSeconds)
-                && parsedSeconds > 0)
-            {
-                timeoutSeconds = parsedSeconds;
-            }
-            _httpClient.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
-            _githubAssetDiscoverer = new FfprobeGithubAssetDiscoverer(_httpClient, _logger);
-            _autoInstall = Environment.GetEnvironmentVariable("LISTENARR_AUTO_INSTALL_FFPROBE")?.ToLower() != "false"; // default true
-            _startupConfigService = startupConfigService;
             _processRunner = processRunner;
             _timeProvider = timeProvider ?? TimeProvider.System;
             _applicationBaseDirectory = applicationBaseDirectory ?? AppContext.BaseDirectory;
@@ -101,8 +77,7 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
                 : new[] { runtimeIdentifier }.Concat(FfprobeBinaryLocator.CurrentRuntimeIdentifiers()).Distinct(StringComparer.Ordinal).ToArray();
             _isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
             _legacyDirectory = applicationPathService.FfmpegRootPath;
-            _ffprobeExecutableName = FfprobeBinaryLocator.ExecutableName(_isWindows);
-            _legacyFfprobePath = Path.Join(_legacyDirectory, _ffprobeExecutableName);
+            _legacyFfprobePath = Path.Join(_legacyDirectory, FfprobeBinaryLocator.ExecutableName(_isWindows));
         }
 
         /// <summary>
@@ -127,8 +102,7 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
 
         /// <summary>
         /// Return the ffprobe path if a packaged or configured binary exists and passes the version
-        /// check. Never downloads; only <see cref="EnsureFfprobeInstalledAsync"/> falls back to
-        /// the download.
+        /// check. Never downloads anything.
         /// </summary>
         public async Task<string?> GetFfprobePathAsync()
         {
@@ -150,9 +124,9 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
         }
 
         /// <summary>
-        /// Resolve ffprobe, make sure it can be executed and check it with <c>-version</c>,
-        /// downloading it into the configured ffmpeg directory only when nothing is packaged for
-        /// this platform and nothing is there yet. NuGet restore leaves the binary executable by
+        /// Resolve ffprobe, make sure it can be executed and check it with <c>-version</c>. Nothing
+        /// is downloaded, so with no packaged or configured binary ffprobe stays unavailable and
+        /// audio metadata extraction is disabled. NuGet restore leaves the binary executable by
         /// its owner only (0766 less the umask), and an unzip tool or an artifact transfer can
         /// strip even that, so the execute bits are restored here when this process owns the file.
         /// A foreign-owned install cannot be changed from here, which is why the Docker image sets
@@ -165,16 +139,13 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
             if (path == null)
             {
                 _logger.LogInformation(
-                    "No packaged ffprobe for runtimes {Rids} and none at {LegacyDirectory}; falling back to the download",
+                    "No packaged ffprobe for runtimes {Rids} and none at {LegacyDirectory}",
                     string.Join(", ", _runtimeIdentifiers),
                     _legacyDirectory);
-                path = await DownloadFfprobeAsync();
-                if (path == null)
-                {
-                    return null;
-                }
+                return null;
             }
-            else if (!OperatingSystem.IsWindows())
+
+            if (!OperatingSystem.IsWindows())
             {
                 EnsureExecutable(path);
             }

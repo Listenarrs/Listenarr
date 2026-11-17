@@ -83,8 +83,6 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
         {
             return new FfmpegService(
                 new Mock<ILogger<FfmpegService>>().Object,
-                new HttpClient(new DelegatingHandlerMock((_, _) => throw new InvalidOperationException("No test may reach a vendor host"))),
-                _provider.GetRequiredService<IStartupConfigService>(),
                 new UnredactedProcessRunner(),
                 Mock.Of<IApplicationPathService>(service => service.FfmpegRootPath == Path.Join(FileService.GetTempPath(), "ffmpeg-real-unused")),
                 applicationBaseDirectory: null,

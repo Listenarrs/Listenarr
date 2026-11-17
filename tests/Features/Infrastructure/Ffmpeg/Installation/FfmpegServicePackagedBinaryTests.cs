@@ -1,13 +1,14 @@
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using System.Text.RegularExpressions;
 using Listenarr.Tests.Common;
 
 namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
 {
     /// <summary>
-    /// ffprobe comes from the Openur.FFprobeStatic package restored at build time, so where the
-    /// package covers the platform startup resolves a binary that is already on disk and never
-    /// downloads one.
+    /// ffprobe comes from the Openur.FFprobeStatic package restored at build time, so startup
+    /// resolves a binary that is already on disk and never downloads one.
     /// </summary>
     [Trait("Name", "FfmpegServicePackagedBinaryTests")]
     [Trait("Category", "FfmpegService")]
@@ -45,35 +46,62 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
         }
 
         [Fact]
-        public async Task EnsureFfprobeInstalledAsync_PackagedBinaryPresent_NeverDownloads()
+        public async Task EnsureFfprobeInstalledAsync_NothingPackagedOrPresent_ReturnsNullAndTouchesNothing()
         {
-            var applicationBase = FileService.GetTempDirectory("ffprobe-app-no-download");
-            var packaged = Path.Join(applicationBase, ExecutableName);
-            await File.WriteAllTextAsync(packaged, "packaged");
-            var legacyDirectory = Path.Join(FileService.GetTempPath(), "ffmpeg-not-created");
-            var requests = new List<Uri?>();
-            var handler = RecordingHandler(requests);
-            var service = CreateService(new Mock<IProcessRunner>().AnswerFfprobeVersionCheck().Object, legacyDirectory, applicationBase, handler);
+            // Regression guard for the removed first-boot download: with no packaged binary and
+            // no legacy one, startup used to create the ffmpeg directory and fetch an archive.
+            // Now it reports absence and leaves the filesystem alone.
+            var emptyApplicationBase = FileService.GetTempDirectory("ffprobe-empty-app");
+            var legacyDirectory = Path.Join(FileService.GetTempPath(), "ffmpeg-never-created");
+            var processRunner = new Mock<IProcessRunner>(MockBehavior.Strict);
+            var service = CreateService(processRunner.Object, legacyDirectory, emptyApplicationBase);
 
-            Assert.Equal(packaged, await service.EnsureFfprobeInstalledAsync());
-            Assert.Empty(requests);
+            var path = await service.EnsureFfprobeInstalledAsync();
+
+            Assert.Null(path);
+            Assert.Null(await service.GetFfprobePathAsync());
             Assert.False(Directory.Exists(legacyDirectory));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(emptyApplicationBase));
         }
 
         [Fact]
-        public async Task EnsureFfprobeInstalledAsync_NothingPackagedOrPresent_FallsBackToTheDownload()
+        public void FfmpegTypes_TakeNoHttpClientDependency()
         {
-            // Platforms the package does not cover keep the first-boot download until it is
-            // retired, so with nothing packaged and nothing hand-placed the installer runs.
-            var emptyApplicationBase = FileService.GetTempDirectory("ffprobe-empty-app");
-            var legacyDirectory = Path.Join(FileService.GetTempPath(), "ffmpeg-download-target");
-            var requests = new List<Uri?>();
-            var handler = RecordingHandler(requests);
-            var service = CreateService(new Mock<IProcessRunner>().AnswerFfprobeVersionCheck().Object, legacyDirectory, emptyApplicationBase, handler);
+            var networkTypes = new[] { typeof(HttpClient), typeof(IHttpClientFactory), typeof(HttpMessageHandler) };
+            var offenders = typeof(FfmpegService).Assembly
+                .GetTypes()
+                .Where(type => type.Namespace?.StartsWith("Listenarr.Infrastructure.Ffmpeg", StringComparison.Ordinal) == true)
+                .SelectMany(type => type
+                    .GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static)
+                    .SelectMany(constructor => constructor.GetParameters().Select(parameter => parameter.ParameterType))
+                    .Concat(type
+                        .GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static)
+                        .Select(field => field.FieldType))
+                    .Where(memberType => networkTypes.Any(networkType => networkType.IsAssignableFrom(memberType)))
+                    .Select(memberType => $"{type.FullName} -> {memberType.Name}"))
+                .Distinct()
+                .ToArray();
 
-            Assert.Null(await service.EnsureFfprobeInstalledAsync());
-            Assert.Single(requests);
-            Assert.Empty(Directory.EnumerateFileSystemEntries(emptyApplicationBase));
+            Assert.True(
+                offenders.Length == 0,
+                $"ffprobe provisioning must not take an HTTP dependency: {string.Join(", ", offenders)}");
+        }
+
+        [Fact]
+        public void FfmpegSources_ContainNoNetworkCalls()
+        {
+            // The reflection test above misses an HttpClient created inside a method body, so
+            // scan the source for any network API as well.
+            var forbidden = new Regex(@"\b(HttpClient|HttpMessageHandler|System\.Net\.Http|WebClient|WebRequest|Socket|SslStream)\b", RegexOptions.Compiled);
+            var ffmpegRoot = Path.Join(TestUtils.FindRepositoryRoot(), "listenarr.infrastructure", "Ffmpeg");
+            var offenders = Directory.EnumerateFiles(ffmpegRoot, "*.cs", SearchOption.AllDirectories)
+                .SelectMany(file => File.ReadLines(file)
+                    .Select((line, index) => (line, index))
+                    .Where(entry => !entry.line.TrimStart().StartsWith("//", StringComparison.Ordinal) && forbidden.IsMatch(entry.line))
+                    .Select(entry => $"{Path.GetFileName(file)}:{entry.index + 1}"))
+                .ToArray();
+
+            Assert.True(offenders.Length == 0, $"Network API in ffprobe sources: {string.Join(", ", offenders)}");
         }
 
         [Fact]
@@ -192,27 +220,14 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
         private FfmpegService CreateService(
             IProcessRunner processRunner,
             string legacyDirectory,
-            string? applicationBaseDirectory,
-            HttpMessageHandler? httpHandler = null)
+            string? applicationBaseDirectory)
         {
             return new FfmpegService(
                 new Mock<ILogger<FfmpegService>>().Object,
-                new HttpClient(httpHandler ?? RecordingHandler([])),
-                _provider.GetRequiredService<IStartupConfigService>(),
                 processRunner,
                 Mock.Of<IApplicationPathService>(service => service.FfmpegRootPath == legacyDirectory),
                 applicationBaseDirectory,
                 RuntimeInformation.RuntimeIdentifier);
-        }
-
-        private static DelegatingHandlerMock RecordingHandler(List<Uri?> requests)
-        {
-            // Answers every request with 404 and records it, so no test reaches a vendor host.
-            return new DelegatingHandlerMock((request, _) =>
-            {
-                requests.Add(request.RequestUri);
-                return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.NotFound));
-            });
         }
 
         private static byte[] BuildSilentWav(int sampleRate, int seconds)
