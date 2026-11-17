@@ -123,20 +123,22 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
 
         [LinuxFact]
         [SupportedOSPlatform("linux")]
-        public async Task VersionCheck_RerunsAfterTheExecuteBitRepair()
+        public async Task VersionCheck_RerunsWhenOnlyTheModeChanges()
         {
-            // The repair changes the mode but not the modification time, so a failure cached
-            // before it must not outlive it.
+            // chmod changes the mode but not the length or the modification time (the execute-bit
+            // repair is one such change), so a cached result must not outlive it.
             var (applicationBase, packaged) = await PlacePackagedBinaryAsync("ffprobe-mode-cache-app");
-            File.SetUnixFileMode(packaged, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-            var processRunner = new Mock<IProcessRunner>()
-                .AnswerFfprobeVersionCheck(new ProcessResult(-1, string.Empty, "permission denied", false));
+            var processRunner = new Mock<IProcessRunner>().AnswerFfprobeVersionCheck();
             var service = CreateService(processRunner.Object, FileService.GetTempDirectory("ffprobe-mode-cache-legacy"), applicationBase);
-            Assert.Null(await service.GetFfprobePathAsync());
+            Assert.Equal(packaged, await service.GetFfprobePathAsync());
+            Assert.Equal(packaged, await service.GetFfprobePathAsync());
+            VerifyVersionChecks(processRunner, 1);
+            var lastWrite = File.GetLastWriteTimeUtc(packaged);
 
-            processRunner.AnswerFfprobeVersionCheck();
+            File.SetUnixFileMode(packaged, UnixFileMode.UserRead | UnixFileMode.UserWrite);
 
-            Assert.Equal(packaged, await service.EnsureFfprobeInstalledAsync());
+            Assert.Equal(lastWrite, File.GetLastWriteTimeUtc(packaged));
+            await service.GetFfprobePathAsync();
             VerifyVersionChecks(processRunner, 2);
         }
 
