@@ -269,7 +269,10 @@ test.describe('File Naming Patterns integration', () => {
       const card = page.locator('.download-card')
       await expect(card.getByText('The Hobbit').first()).toBeVisible()
       await expect(card.locator('.download-status', { hasText: 'Completed' })).toBeVisible()
-      await expect(card.locator('button', { hasText: 'Open Folder' })).toBeVisible()
+      await card.locator('button', { hasText: 'Open Folder' }).click()
+      await expect(page.locator('.toast-message')).toHaveText(
+        'Would open folder: /audiobooks/J.R.R. Tolkien/The Hobbit.m4b',
+      )
     })
 
     test('renders the completed multi-file download and its final-folder action', async ({ page, api }) => {
@@ -288,7 +291,10 @@ test.describe('File Naming Patterns integration', () => {
       const card = page.locator('.download-card')
       await expect(card.getByText('The Lord of the Rings').first()).toBeVisible()
       await expect(card.locator('.download-status', { hasText: 'Completed' })).toBeVisible()
-      await expect(card.locator('button', { hasText: 'Open Folder' })).toBeVisible()
+      await card.locator('button', { hasText: 'Open Folder' }).click()
+      await expect(page.locator('.toast-message')).toHaveText(
+        'Would open folder: /audiobooks/J.R.R. Tolkien/The Lord of the Rings-01.m4b',
+      )
     })
   })
 

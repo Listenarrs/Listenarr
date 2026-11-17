@@ -209,13 +209,22 @@ test.describe('Add New simple search requests', () => {
 
   test('does not search while typing', async ({ page, api }) => {
     await page.locator('#unified-search-input').pressSequentially('B008DFUGCQ')
-    expectNoRequests(api)
+    // Typing alone must not search: the explicit submit is the first and only request.
+    await page.locator('button[aria-label="Execute search"]').click()
+    const { request } = await api.wait('metadata')
+    expect(request.url).toContain('/api/v1/metadata/B008DFUGCQ')
+    expect(api.calls('metadata')).toHaveLength(1)
+    expect(api.calls('search')).toHaveLength(0)
   })
 
   test('does not search when the region changes', async ({ page, api }) => {
     await page.locator('#unified-search-input').pressSequentially('Dune')
     await page.locator('#region-select').selectOption('fr')
-    expectNoRequests(api)
+    // Changing the region must not search on its own: the explicit submit is the only search.
+    await page.locator('button[aria-label="Execute search"]').click()
+    await api.wait('search')
+    expect(api.calls('search')).toHaveLength(1)
+    expect(api.calls('metadata')).toHaveLength(0)
   })
 
   test('rejects an invalid ASIN without making a request', async ({ page, api }) => {
