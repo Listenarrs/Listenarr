@@ -175,7 +175,25 @@ async function runTests (options, deps) {
     : JSON.parse(await sh('gh', ['api', `repos/${fork}/actions/runners?per_page=100`])).runners
   const runner = chooseRunner(runners, options.runner, options.prefer)
 
+  // Arm the interrupt handler before pushing the snapshot or dispatching the workflow: a Ctrl+C during
+  // either step must still cancel the run and remove the throwaway branch.
+  let interrupted = false
+  let runId = null
+  deps.onInterrupt?.(async () => {
+    if (interrupted) return
+    interrupted = true
+    deps.error('interrupted: cancelling the run')
+    if (runId) {
+      try {
+        await deps.run('gh', ['run', 'cancel', String(runId), '-R', fork])
+      } catch {
+        // Best effort: the finally block still removes the branch.
+      }
+    }
+  })
+
   let branch, commit
+  let pushed = false
   let cleanup = async () => {}
   if (options.ref) {
     branch = options.ref
@@ -197,10 +215,11 @@ async function runTests (options, deps) {
     } finally {
       deps.removeFile(index)
     }
-    await git(['push', '-q', '-f', url, `${commit}:refs/heads/${branch}`])
     cleanup = async () => {
-      if (!options.keep) await deps.run('git', ['push', '-q', url, `:refs/heads/${branch}`], { cwd: top })
+      if (!options.keep && pushed) await deps.run('git', ['push', '-q', url, `:refs/heads/${branch}`], { cwd: top })
     }
+    await git(['push', '-q', '-f', url, `${commit}:refs/heads/${branch}`])
+    pushed = true
     deps.log(`snapshot ${commit.slice(0, 9)} on ${fork}@${branch}, runner: ${runner.name}`)
   }
 
@@ -221,16 +240,12 @@ async function runTests (options, deps) {
       run = runs.find((candidate) => candidate.headSha === commit && candidate.createdAt >= before)?.databaseId
     }
     if (!run) throw new ExitError(1, 'the run did not appear on GitHub')
+    runId = run
     deps.log(`run: https://github.com/${fork}/actions/runs/${run}`)
+    if (interrupted) return 130
     if (!options.wait) return 0
 
-    let interrupted = false
-    deps.onInterrupt?.(async () => {
-      interrupted = true
-      deps.error('interrupted: cancelling the run')
-      await deps.run('gh', ['run', 'cancel', String(run), '-R', fork])
-    })
-    await deps.run('gh', ['run', 'watch', String(run), '-R', fork, '--interval', '15'])
+    await deps.run('gh', ['run', 'watch', String(runId), '-R', fork, '--interval', '15'])
     if (interrupted) {
       deps.log('CI RUN: CANCELLED')
       return 130
@@ -276,12 +291,22 @@ function defaultDeps () {
       child.on('error', (error) => resolve({ code: 127, stdout, stderr: `${cmd}: ${error.message}` }))
       child.on('close', (code) => { children.delete(child); resolve({ code: code ?? 1, stdout, stderr }) })
     }),
-    // Ctrl+C while waiting cancels the run; the snapshot branch is deleted once the watch ends.
-    onInterrupt: (cancel) => process.once('SIGINT', async () => {
-      const watching = [...children]
-      await cancel()
-      for (const child of watching) child.kill()
-    })
+    // SIGINT and SIGTERM cancel the run; the watchers are always killed, even if cancelling fails.
+    onInterrupt: (handler) => {
+      let handled = false
+      for (const signal of ['SIGINT', 'SIGTERM']) {
+        process.once(signal, async () => {
+          if (handled) return
+          handled = true
+          const watching = [...children]
+          try {
+            await handler()
+          } finally {
+            for (const child of watching) child.kill()
+          }
+        })
+      }
+    }
   }
 }
 
