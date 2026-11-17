@@ -6,6 +6,7 @@ import {
   repairSearchResultFixture,
   test,
   type ApiStubs,
+  LIBRARY_PATH,
 } from '../support/test.js'
 
 type RepairReplies = Parameters<ApiStubs['stubRepairWrites']>[1]
@@ -104,7 +105,7 @@ async function prepareBatchRepair(
     'repairBatchSearch',
   )
 
-  await page.goto('/')
+  await page.goto(LIBRARY_PATH)
   await page.locator('button', { hasText: 'Select All' }).first().click()
   await page.locator('button', { hasText: 'Repair Selected (2)' }).click()
   await expect(page.locator(`[data-testid="repair-row-${firstAudiobookId}"]`)).toHaveCount(1)

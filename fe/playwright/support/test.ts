@@ -16,5 +16,12 @@ export const test = base.extend<{ api: ApiStubs }>({
   ],
 })
 
+/**
+ * The library as the app shows it: on `/` it replaces the URL with this one, which changes the route name,
+ * and App.vue's page transition then mounts a second view while the first leaves. Open this URL so that a
+ * test never acts during that swap.
+ */
+export const LIBRARY_PATH = '/audiobooks?group=books'
+
 export { expect } from '@playwright/test'
 export * from './api-stubs.js'

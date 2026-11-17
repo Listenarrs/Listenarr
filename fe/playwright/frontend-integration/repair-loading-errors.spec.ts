@@ -1,4 +1,4 @@
-import { audiobookFixture, expect, libraryAudiobookFixture, test } from '../support/test.js'
+import { audiobookFixture, expect, libraryAudiobookFixture, test, LIBRARY_PATH } from '../support/test.js'
 
 const temporaryId = 201
 const deletedId = 202
@@ -66,7 +66,7 @@ test.describe('Repair Books loading errors (API-stubbed)', () => {
     const deletedRow = page.locator(`[data-testid="repair-row-${deletedId}"]`)
     const availableRow = page.locator(`[data-testid="repair-row-${availableId}"]`)
 
-    await page.goto('/')
+    await page.goto(LIBRARY_PATH)
     await page.locator('button', { hasText: 'Select All' }).first().click()
     await page.locator('button', { hasText: 'Repair Selected (3)' }).first().click()
 

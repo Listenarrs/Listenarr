@@ -1,8 +1,8 @@
 import type { Page } from '@playwright/test'
-import { expect, libraryAudiobookFixture, rootFolderFixture, settingsFixture, test, type ApiStubs } from '../support/test.js'
+import { expect, libraryAudiobookFixture, rootFolderFixture, settingsFixture, test, type ApiStubs, LIBRARY_PATH } from '../support/test.js'
 
 async function editDestination(page: Page, api: ApiStubs) {
-  await page.goto('/')
+  await page.goto(LIBRARY_PATH)
   await page.getByText('Audiobooks').first().click()
   await api.wait('getStartupConfig')
   await api.wait('getLibrary')
