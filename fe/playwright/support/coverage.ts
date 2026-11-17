@@ -72,6 +72,22 @@ export async function writeCoverage(options: CoverageReportOptions): Promise<Cov
   return results
 }
 
+/** LISTENARR_COVERAGE=1 (set by scripts/e2e/run.mjs --coverage) turns frontend coverage on. */
+export const collectCoverage = process.env.LISTENARR_COVERAGE === '1'
+
+/** The `jsCoverage` auto fixture both suites share: collects a test's page coverage when enabled. */
+export async function withPageCoverage(
+  page: Page,
+  options: CoverageReportOptions,
+  use: () => Promise<void>,
+) {
+  if (!collectCoverage) {
+    await use()
+    return
+  }
+  await collectPageCoverage(page, options, () => use())
+}
+
 /**
  * Collects the V8 coverage of every page a test loads while `run` runs. Chromium only reports the current
  * document's scripts, so the coverage is taken before each load (goto, reload) and again at the end.
