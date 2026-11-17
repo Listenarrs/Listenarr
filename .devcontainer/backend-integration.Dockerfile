@@ -47,7 +47,6 @@ RUN sed 's#exec \(gosu [^ ]* \)\{0,1\}dotnet Listenarr.Api.dll "\$@"#exec \1"$@"
 ENV UMASK=000 \
 	LISTENARR_DISABLE_HOSTED_SERVICES=true \
 	LISTENARR_CONTENT_ROOT=/app \
-	LISTENARR_ENABLE_UNMATCHED_SCAN_WORKER=true \
 	LISTENARR_LOG_LEVEL=Warning \
 	DOTNET_ROLL_FORWARD=Major
 

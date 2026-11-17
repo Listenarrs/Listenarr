@@ -97,9 +97,6 @@ public static class InfrastructureStartupCompositionExtensions
         var disableHostedServices =
             configuration.GetValue<bool>("Listenarr:DisableHostedServices") ||
             string.Equals(Environment.GetEnvironmentVariable("LISTENARR_DISABLE_HOSTED_SERVICES"), "true", StringComparison.OrdinalIgnoreCase);
-        var enableUnmatchedScanWorker =
-            configuration.GetValue<bool>("Listenarr:EnableUnmatchedScanWorker") ||
-            string.Equals(Environment.GetEnvironmentVariable("LISTENARR_ENABLE_UNMATCHED_SCAN_WORKER"), "true", StringComparison.OrdinalIgnoreCase);
 
         if (disableHostedServices)
         {
@@ -119,11 +116,9 @@ public static class InfrastructureStartupCompositionExtensions
         }
         else
         {
+            // ManualImportController needs the scan queue even with the background workers off.
+            // A host that wants the unmatched scan to run (the test hosts) calls AddUnmatchedScanWorker itself.
             services.AddScanQueueService();
-            if (enableUnmatchedScanWorker)
-            {
-                services.AddUnmatchedScanWorker();
-            }
         }
 
         services.AddHostedService<StartupDbNormalizer>();

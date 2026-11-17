@@ -1,5 +1,6 @@
 using Listenarr.Api.Startup;
 using Listenarr.Infrastructure.DependencyInjection;
+using Listenarr.Infrastructure.DependencyInjection.Workers;
 using Listenarr.Infrastructure.FileSystem;
 using Listenarr.Infrastructure.Realtime.DependencyInjection;
 
@@ -15,6 +16,9 @@ public static class FakeProvidersHost
 
         builder.AddListenarrApiServices(bootstrapFileSystem);
         builder.Services.AddListenarrInfrastructureComposition(builder.Configuration, builder.Environment);
+        // The background workers are off in this host (LISTENARR_DISABLE_HOSTED_SERVICES); the import
+        // tests driving this host still need the unmatched scan to run.
+        builder.Services.AddUnmatchedScanWorker();
         builder.Services.AddListenarrExternalApiTestStub();
 
         var app = builder.Build();
