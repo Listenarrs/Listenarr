@@ -1191,6 +1191,30 @@ describe('RepairBooksModal', () => {
     )
   })
 
+  it('keeps apart searches whose title and author only differ by where a "|" splits them', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    await bookCard(wrapper).get('[data-testid="match-region"]').setValue('us')
+    await flushPromises()
+    await emptyAsin(wrapper)
+    const search = async (title: string, author: string) => {
+      await bookCard(wrapper).get('[data-testid="match-title"]').setValue(title)
+      await bookCard(wrapper).get('[data-testid="match-author"]').setValue(author)
+      await bookCard(wrapper).get('[data-testid="match-search"]').trigger('click')
+      await flushPromises()
+    }
+
+    apiMocks.advancedSearch.mockClear()
+    await search('Dune|Frank', 'Herbert')
+    await search('Dune', 'Frank|Herbert')
+
+    // Two different searches: two requests, the second answer not taken from the first
+    expect(apiMocks.advancedSearch).toHaveBeenCalledTimes(2)
+    expect(bookCard(wrapper).get('[data-testid="match-results-header"]').text()).not.toMatch(
+      / - Cached results$/,
+    )
+  })
+
   it('asks Audible afresh each time the dialog opens', async () => {
     const wrapper = mountModal()
     await flushPromises()
