@@ -21,6 +21,7 @@ build
 coverage
 test-results/
 playwright-report/
+eslint-report.json
 
 # Editor directories and files
 .vscode/*
