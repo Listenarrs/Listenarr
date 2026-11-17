@@ -3,7 +3,7 @@
 // GitHub's, for the working tree as it is now or for a branch already pushed. See USAGE below and
 // "Running CI on your fork" in CONTRIBUTING.md. Needs git, and the GitHub CLI (gh) signed in.
 import { spawn } from 'node:child_process'
-import { copyFileSync, rmSync } from 'node:fs'
+import { copyFileSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -111,6 +111,20 @@ export function chooseRunner (runners, wanted, prefer) {
   return { name: ordered[0].name, label: labelOf(ordered[0]) }
 }
 
+// The job ids under the top-level "jobs:" key of a workflow file.
+export function workflowJobs (workflow) {
+  const lines = workflow.split(/\r?\n/)
+  const start = lines.findIndex((line) => /^jobs:\s*(#.*)?$/.test(line))
+  if (start < 0) return []
+  const jobs = []
+  for (const line of lines.slice(start + 1)) {
+    if (/^\S/.test(line) && !line.startsWith('#')) break
+    const job = line.match(/^ {2}([A-Za-z0-9_-]+):\s*(#.*)?$/)
+    if (job) jobs.push(job[1])
+  }
+  return jobs
+}
+
 export function snapshotBranch (current, tag) {
   return `ci/wip-${current.replace(/[^A-Za-z0-9._-]/g, '-')}${tag ? `-${tag}` : ''}`
 }
@@ -145,6 +159,11 @@ async function runTests (options, deps) {
   }
   const top = await sh('git', ['rev-parse', '--show-toplevel'], { cwd: options.dir })
   const git = (args, extra = {}) => sh('git', args, { cwd: top, ...extra })
+  if (options.jobs) {
+    const known = workflowJobs(deps.readFile(join(top, '.github', 'workflows', options.workflow)))
+    const unknown = splitList(options.jobs).filter((job) => !known.includes(job))
+    if (unknown.length) throw new ExitError(2, `--jobs: no job ${unknown.join(', ')} in ${options.workflow} (jobs: ${known.join(', ')})`)
+  }
   const login = options.fork ? '' : await sh('gh', ['api', 'user', '--jq', '.login'])
   const { fork, url } = findFork(await git(['remote', '-v']), login, options.fork)
 
@@ -203,12 +222,16 @@ async function runTests (options, deps) {
     if (!options.wait) return 0
 
     deps.onInterrupt?.(() => deps.run('gh', ['run', 'cancel', String(run), '-R', fork]))
-    const watched = await deps.run('gh', ['run', 'watch', String(run), '-R', fork, '--interval', '15', '--exit-status'])
-    const { jobs } = JSON.parse(await sh('gh', ['run', 'view', String(run), '-R', fork, '--json', 'jobs']))
+    await deps.run('gh', ['run', 'watch', String(run), '-R', fork, '--interval', '15'])
+    const { conclusion, jobs } = JSON.parse(await sh('gh', ['run', 'view', String(run), '-R', fork, '--json', 'conclusion,jobs']))
     for (const line of formatJobs(jobs)) deps.log(line)
-    if (watched.code === 0) {
+    if (conclusion === 'success') {
       deps.log('CI RUN: PASS')
       return 0
+    }
+    if (conclusion === 'skipped') {
+      deps.log('CI RUN: NO JOB RAN')
+      return 1
     }
     const logs = (await deps.run('gh', ['run', 'view', String(run), '-R', fork, '--log-failed'])).stdout
     const tail = Number(deps.env.TAIL) || 60
@@ -229,6 +252,7 @@ function defaultDeps () {
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     tempFile: () => join(tmpdir(), `listenarr-ci-index-${process.pid}`),
     copyFile: copyFileSync,
+    readFile: (file) => readFileSync(file, 'utf8'),
     removeFile: (file) => rmSync(file, { force: true }),
     run: (cmd, args, { cwd, env } = {}) => new Promise((resolve) => {
       const child = spawn(cmd, args, { cwd, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] })
