@@ -6,17 +6,19 @@
 //
 // The runner builds the images, generates the audiobook folders (generate-library-fixtures.sh),
 // seeds the library and root folders, then runs Playwright; every test restores the seeded database
-// and files first. Coverage is collected on both sides:
+// and files first. With --coverage, coverage is collected on both sides:
 // - frontend: V8 coverage from Chromium, mapped to the sources, in fe/test-results/e2e-coverage/
-//   (index.html; the Library Import files must reach the thresholds of fe/playwright/e2e/support/coverage.ts);
-// - backend: dotnet-coverage around the test host, merged into cobertura.xml with summary.md,
-//   in fe/test-results/e2e-coverage-backend/, reported for the library import code (not gated).
+//   (index.html, lcov.info);
+// - backend: dotnet-coverage around the test host, merged into cobertura.xml, with summary.md for the
+//   library import code, in fe/test-results/e2e-coverage-backend/.
+// Both are reported, not gated; a CI run with the coverage input merges them with the other test jobs'
+// (scripts/test-coverage/aggregate.mjs).
 // The container, the images and the temporary data are removed at the end.
 //
-//   node scripts/e2e/run.mjs [--no-coverage] [--serve] [-- <playwright test arguments>]
+//   node scripts/e2e/run.mjs [--coverage] [--serve] [-- <playwright test arguments>]
 //
 // --serve starts the stack and waits (Ctrl+C to stop): run Playwright yourself with the variables it prints.
-// Playwright arguments (a spec, --repeat-each, --grep, ...) skip the coverage gate, which needs the whole suite.
+// Playwright arguments (a spec, --repeat-each, --grep, ...) are passed on.
 import { existsSync } from 'node:fs'
 import { mkdir, readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -36,9 +38,9 @@ const separator = argv.indexOf('--')
 const options = separator === -1 ? argv : argv.slice(0, separator)
 const playwrightArguments = separator === -1 ? [] : argv.slice(separator + 1)
 for (const option of options) {
-  if (!['--no-coverage', '--serve'].includes(option)) throw new Error(`Unknown option ${option}.`)
+  if (!['--coverage', '--serve'].includes(option)) throw new Error(`Unknown option ${option}.`)
 }
-const coverage = !options.includes('--no-coverage')
+const coverage = options.includes('--coverage')
 const serve = options.includes('--serve')
 
 if (!existsSync(playwrightCli)) {
@@ -91,8 +93,7 @@ try {
     ...stack.testEnvironment,
     LISTENARR_API_URL: stack.apiUrl,
     LISTENARR_E2E_WEB_PORT: String(await availablePort()),
-    ...(coverage ? { LISTENARR_E2E_COVERAGE: '1' } : {}),
-    ...(coverage && playwrightArguments.length === 0 ? { LISTENARR_E2E_COVERAGE_GATE: '1' } : {}),
+    ...(coverage ? { LISTENARR_COVERAGE: '1' } : {}),
   }
 
   if (serve) {

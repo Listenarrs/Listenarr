@@ -149,6 +149,7 @@ This project follows a layered pattern: domain models in `listenarr.domain`, EF 
 - Run backend tests: `dotnet test`
 - Run frontend tests: `cd fe && npm run test:unit`
 - Run frontend type checks: `cd fe && npm run type-check`
+- Test coverage is off by default and never gated: see "Test Coverage" in `fe/README.md` to collect it locally, or run the `Run Tests` workflow manually with the `coverage` input to get a merged report of every test job
 - Ensure all tests pass before submitting PR
 
 ### Compatibility and migration development policy

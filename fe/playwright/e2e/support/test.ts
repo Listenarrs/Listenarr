@@ -1,9 +1,7 @@
 import { test as base, expect, type APIRequestContext, type Page } from '@playwright/test'
-import MCR from 'monocart-coverage-reports'
+import { collectPageCoverage } from '../../support/coverage.js'
 import { antiforgeryHeaders, restoreSeed } from '../../support/docker-stack.js'
-import { coverageOptions } from './coverage.js'
-
-const collectCoverage = process.env.LISTENARR_E2E_COVERAGE === '1'
+import { collectCoverage, e2eCoverage } from './coverage.js'
 
 export type RootFolder = { id: number; name: string; path: string; isDefault?: boolean }
 
@@ -66,35 +64,14 @@ export const test = base.extend<{ seededStack: void; jsCoverage: void; listenarr
     },
     { auto: true, timeout: 180_000 },
   ],
-  // V8 coverage of every page the test loads. Chromium only reports the current document's scripts,
-  // so the coverage is taken before each load (goto, reload) and again at the end.
+  // V8 coverage of every page the test loads (LISTENARR_COVERAGE=1).
   jsCoverage: [
     async ({ page }, use) => {
       if (!collectCoverage) {
         await use()
         return
       }
-      const report = MCR(coverageOptions)
-      const options = { resetOnNavigation: false }
-      const collect = async () => {
-        const entries = await page.coverage.stopJSCoverage()
-        if (entries.length > 0) await report.add(entries)
-      }
-      const goto = page.goto.bind(page)
-      const reload = page.reload.bind(page)
-      page.goto = async (...args: Parameters<Page['goto']>) => {
-        await collect()
-        await page.coverage.startJSCoverage(options)
-        return goto(...args)
-      }
-      page.reload = async (...args: Parameters<Page['reload']>) => {
-        await collect()
-        await page.coverage.startJSCoverage(options)
-        return reload(...args)
-      }
-      await page.coverage.startJSCoverage(options)
-      await use()
-      await collect()
+      await collectPageCoverage(page, e2eCoverage, () => use())
     },
     { auto: true },
   ],

@@ -124,6 +124,9 @@ lerna-debug.log*
 # Testing
 coverage/
 *.coverage
+TestResults/
+coverage-input/
+coverage-report/
 .nyc_output/
 test-results/
 playwright-report/
