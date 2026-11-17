@@ -8,7 +8,7 @@ import type {
   GetSettingsGetApplicationSettingsApiV1ConfigurationSettingsResponses,
   GetStartupConfigurationGetBootstrapConfigApiV1ConfigurationBootstrapResponses,
   GetSystemGetServiceHealthApiV1SystemHealthResponses,
-} from './generated-api/types.gen.js'
+} from './generated-api/index.js'
 
 type DocumentedResponse<T> = unknown extends T ? never : T
 type BootstrapResponse = DocumentedResponse<GetStartupConfigurationGetBootstrapConfigApiV1ConfigurationBootstrapResponses[200]>
