@@ -179,7 +179,7 @@ onMounted(() => {
 
 #### Testing
 - Write unit tests for all business logic; test both success and error scenarios.
-- Mock external dependencies (file system, download clients, trackers); metadata provider APIs come from `tests/Listenarr.FakeProviders` fixtures.
+- Mock external dependencies: the file system, download clients and trackers (see the mocks bullet below for how).
 - Test classes are named `{TestedClassName}Tests` and mirror the source project path under `tests/`.
 - Every test class inherits `BaseTests`.
 - Annotate with `[Trait("Name", "...Tests")]` and `[Trait("Category", "...")]`.
