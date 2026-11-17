@@ -16,7 +16,8 @@ app_dir=${1:?usage: prepare-ffprobe.sh <app directory>}
 
 if [ -d "$app_dir/runtimes" ]; then
 	# A RID-agnostic publish carries ffprobe for every platform the package supports, around
-	# 185 MB. Keep only this image's Linux builds.
+	# 185 MB. Keep only this image's Linux build, plus the musl one on a musl system. The root
+	# Dockerfile's build stage and final image share a libc, so the check holds for both.
 	case "$(uname -m)" in
 		x86_64) keep_arch=x64 ;;
 		aarch64) keep_arch=arm64 ;;
@@ -24,9 +25,13 @@ if [ -d "$app_dir/runtimes" ]; then
 		*) keep_arch="" ;;
 	esac
 	if [ -n "$keep_arch" ]; then
+		keep_musl="$app_dir/runtimes/linux-$keep_arch/*"
+		if ls /lib/ld-musl-* > /dev/null 2>&1; then
+			keep_musl="$app_dir/runtimes/linux-musl-$keep_arch/*"
+		fi
 		find "$app_dir/runtimes" -type f -path '*/native/ffprobe*' \
 			! -path "$app_dir/runtimes/linux-$keep_arch/*" \
-			! -path "$app_dir/runtimes/linux-musl-$keep_arch/*" \
+			! -path "$keep_musl" \
 			-delete
 	fi
 	find "$app_dir/runtimes" -type f -path '*/native/ffprobe' ! -perm 755 -exec chmod 755 {} +
