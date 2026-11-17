@@ -46,6 +46,13 @@ public sealed class LibraryPersistenceTests : BackendIntegrationTests
         }
 
         Assert.Equal(3, (await Host.GetLibraryAsync()).Count);
+
+        await Host.RestartOnSameRootAsync();
+        Assert.Equal(3, (await Host.GetLibraryAsync()).Count);
+        using (var deletedAgain = await Host.GetAsync($"/api/v1/library/{deletedId}"))
+        {
+            Assert.Equal(HttpStatusCode.NotFound, deletedAgain.StatusCode);
+        }
     }
 
     [Fact]

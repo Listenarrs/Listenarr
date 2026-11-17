@@ -83,6 +83,11 @@ public sealed class RepairPersistenceTests : BackendIntegrationTests
             Assert.Equal(HttpStatusCode.NotFound, deleted.StatusCode);
         }
 
+        await Host.RestartOnSameRootAsync();
+        var afterRestart = await Host.GetJsonAsync($"/api/v1/library/{repairedId}");
+        Assert.Equal(MatchTitle, (string?)afterRestart["title"]);
+        Assert.Equal(MatchAsin, (string?)afterRestart["asin"]);
+
         // Retrying the deleted book fails the same way.
         var retried = await RepairAsync(deletedId);
         Assert.Equal(("identifiers", HttpStatusCode.NotFound), (retried.Stage, retried.Status));
