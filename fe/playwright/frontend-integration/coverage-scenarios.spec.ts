@@ -460,7 +460,6 @@ test.describe('ported coverage scenarios (API-stubbed)', () => {
     await api.stubRootFolders([rootFolderFixture({ id: 1, path: '/audiobooks', isDefault: true })])
     await api.stubSearch({ statusCode: 200, body: [result] }, 'addNewSearch')
     await api.stubMetadata({ statusCode: 200, body: { metadata } }, 'addNewMetadata')
-    await api.stubQualityProfiles()
     await api.stubLibraryPathPreview(
       '/audiobooks/Selected Author/Selected Series/The Selected Edition',
       'Selected Author/Selected Series/The Selected Edition',

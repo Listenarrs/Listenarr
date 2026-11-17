@@ -1,44 +1,34 @@
 import { expect, type Page, type Request } from '@playwright/test'
 import type {
-  GetApiSourcesGetApiConfigurationsApiV1ConfigurationApisResponses,
-  GetDownloadClientGetDownloadClientConfigurationsApiV1DownloadClientsResponses,
   GetDownloadsGetDownloadsApiV1DownloadsResponses,
   GetFileSystemCheckVolumeApiV1FilesystemCheckVolumeResponses,
   GetFileSystemValidatePathApiV1FilesystemValidateResponses,
   GetLibraryGetAudiobookApiV1LibraryIdResponses,
   GetLibraryGetAllApiV1LibraryResponses,
-  GetQualityProfileGetAllApiV1QualityprofileResponses,
   GetSettingsGetApplicationSettingsApiV1ConfigurationSettingsResponses,
   GetStartupConfigurationGetBootstrapConfigApiV1ConfigurationBootstrapResponses,
-  GetStartupConfigurationGetStartupConfigApiV1ConfigurationStartupconfigResponses,
   GetSystemGetServiceHealthApiV1SystemHealthResponses,
 } from './generated-api/types.gen.js'
 
 type DocumentedResponse<T> = unknown extends T ? never : T
-type ApiSourcesResponse = DocumentedResponse<GetApiSourcesGetApiConfigurationsApiV1ConfigurationApisResponses[200]>
 type BootstrapResponse = DocumentedResponse<GetStartupConfigurationGetBootstrapConfigApiV1ConfigurationBootstrapResponses[200]>
-type DownloadClientsResponse = DocumentedResponse<GetDownloadClientGetDownloadClientConfigurationsApiV1DownloadClientsResponses[200]>
-export type DownloadsResponse = DocumentedResponse<GetDownloadsGetDownloadsApiV1DownloadsResponses[200]>
+type DownloadsResponse = DocumentedResponse<GetDownloadsGetDownloadsApiV1DownloadsResponses[200]>
 type FileSystemCheckVolumeResponse = DocumentedResponse<GetFileSystemCheckVolumeApiV1FilesystemCheckVolumeResponses[200]>
 type FileSystemValidateResponse = DocumentedResponse<GetFileSystemValidatePathApiV1FilesystemValidateResponses[200]>
-export type AudiobookResponse = DocumentedResponse<GetLibraryGetAudiobookApiV1LibraryIdResponses[200]>
-export type SettingsResponse = DocumentedResponse<GetSettingsGetApplicationSettingsApiV1ConfigurationSettingsResponses[200]>
-export type StartupConfigResponse = DocumentedResponse<GetStartupConfigurationGetStartupConfigApiV1ConfigurationStartupconfigResponses[200]>
-type QualityProfilesResponse = DocumentedResponse<GetQualityProfileGetAllApiV1QualityprofileResponses[200]>
-export type SystemHealthResponse = DocumentedResponse<GetSystemGetServiceHealthApiV1SystemHealthResponses[200]>
-export type LibraryResponse = DocumentedResponse<GetLibraryGetAllApiV1LibraryResponses[200]>
-export type LibraryAudiobook = LibraryResponse[number]
+type AudiobookResponse = DocumentedResponse<GetLibraryGetAudiobookApiV1LibraryIdResponses[200]>
+type SettingsResponse = DocumentedResponse<GetSettingsGetApplicationSettingsApiV1ConfigurationSettingsResponses[200]>
+type SystemHealthResponse = DocumentedResponse<GetSystemGetServiceHealthApiV1SystemHealthResponses[200]>
+type LibraryResponse = DocumentedResponse<GetLibraryGetAllApiV1LibraryResponses[200]>
+type LibraryAudiobook = LibraryResponse[number]
 type DownloadRecord = DownloadsResponse[number]
 export type ApiReply = { statusCode?: number; body?: unknown; delay?: number }
-export type SearchReply = ApiReply
-export type MetadataReply = ApiReply
-export type RepairWriteReplies = {
+type RepairWriteReplies = {
   identifiers?: ApiReply[]
   metadata?: ApiReply[]
   rescan?: ApiReply[]
 }
 
-export type LibraryImportUnmatchedFile = {
+type LibraryImportUnmatchedFile = {
   fullPath: string
   sourceFiles: string[]
   relativePath: string
@@ -51,7 +41,7 @@ export type LibraryImportUnmatchedFile = {
   format: string
 }
 
-export type LibraryImportSearchResult = {
+type LibraryImportSearchResult = {
   id: string
   asin: string
   title: string
@@ -68,7 +58,7 @@ export type RepairIdentifier = {
   source: string
 }
 
-export type RepairSearchResult = {
+type RepairSearchResult = {
   asin: string
   title: string
   authors: { name: string }[]
@@ -101,12 +91,6 @@ export const settingsFixture = (overrides: Partial<SettingsResponse> = {}) => ({
   pollingIntervalSeconds: 30,
   ...overrides,
 } satisfies Partial<SettingsResponse>)
-
-export const startupConfigFixture = (overrides: Partial<StartupConfigResponse> = {}): StartupConfigResponse => ({
-  apiKey: null,
-  urlBase: '/',
-  ...overrides,
-})
 
 export const audiobookFixture = (overrides: Partial<AudiobookResponse> = {}): AudiobookResponse => ({
   id: 1,
@@ -174,7 +158,7 @@ export const rootFolderFixture = (overrides: Partial<RootFolder> = {}): RootFold
   ...overrides,
 })
 
-export const fileSystemCheckVolumeFixture = (overrides: Partial<FileSystemCheckVolumeResponse> = {}) => ({
+const fileSystemCheckVolumeFixture = (overrides: Partial<FileSystemCheckVolumeResponse> = {}) => ({
   sameVolume: true,
   willBreakHardlinks: false,
   sourceVolume: '/mnt',
@@ -183,7 +167,7 @@ export const fileSystemCheckVolumeFixture = (overrides: Partial<FileSystemCheckV
   ...overrides,
 } satisfies FileSystemCheckVolumeResponse)
 
-export const fileSystemValidateFixture = (overrides: Partial<FileSystemValidateResponse> = {}) => ({
+const fileSystemValidateFixture = (overrides: Partial<FileSystemValidateResponse> = {}) => ({
   isValid: true,
   exists: true,
   isWritable: true,
@@ -191,14 +175,14 @@ export const fileSystemValidateFixture = (overrides: Partial<FileSystemValidateR
   ...overrides,
 } satisfies FileSystemValidateResponse)
 
-export const systemReadinessFixture = (overrides: Partial<SystemReadiness> = {}): SystemReadiness => ({
+const systemReadinessFixture = (overrides: Partial<SystemReadiness> = {}): SystemReadiness => ({
   isReady: true,
   filesystemReady: true,
   filesystemStatus: 'Ready',
   ...overrides,
 })
 
-export type RecordedRequest = {
+type RecordedRequest = {
   method: string
   url: string
   /** The parsed JSON body, or the raw text when the body is not JSON. */
@@ -207,7 +191,7 @@ export type RecordedRequest = {
   headers: Record<string, string>
 }
 
-export type RecordedCall = {
+type RecordedCall = {
   request: RecordedRequest
   /** The stubbed reply; absent for a spy, which lets an earlier stub answer. */
   response?: { statusCode: number; body: unknown }
@@ -323,10 +307,6 @@ export class ApiStubs {
     )
   }
 
-  stubLegacyStartupConfig(startupConfig = startupConfigFixture()) {
-    return this.stubJson('GET', '**/api/v1/configuration/startupconfig', startupConfig, 'getLegacyStartupConfig')
-  }
-
   stubSettings(settings: Partial<SettingsResponse>) {
     return this.stubJson('GET', '**/api/v1/configuration/settings', settings, 'getSettings')
   }
@@ -346,10 +326,6 @@ export class ApiStubs {
       replyIndex += 1
       return reply
     })
-  }
-
-  stubLibraryIdentifiers(id: number, alias = 'identifiers') {
-    return this.stubJson('GET', `**/api/v1/library/${id}/identifiers`, { audiobookId: id, identifiers: [] }, alias)
   }
 
   stubAudiobookIdentifiers(id: number, identifiers: RepairIdentifier[], alias = 'identifiers') {
@@ -372,7 +348,6 @@ export class ApiStubs {
     await this.stubAudiobook(id, audiobook)
     await this.stubAudiobookIdentifiers(id, identifiers)
     await this.stubWeakStorageMissingFiles(id)
-    await this.stubQualityProfiles()
   }
 
   async stubRepairPageWithResults(
@@ -397,7 +372,6 @@ export class ApiStubs {
       body: { audiobookId: id, identifiers: currentIdentifiers },
     }))
     await this.stubWeakStorageMissingFiles(id)
-    await this.stubQualityProfiles()
     await this.register('PUT', `**/api/v1/library/${id}/identifiers`, 'saveAudiobookIdentifiers', (request) => {
       currentIdentifiers = request.body.identifiers
       return { body: { message: 'Identifiers updated', audiobook: { id }, identifiers: currentIdentifiers } }
@@ -455,30 +429,22 @@ export class ApiStubs {
     )
   }
 
-  stubSearch(reply: SearchReply = { statusCode: 200, body: { results: [] } }, alias = 'search') {
+  stubSearch(reply: ApiReply = { statusCode: 200, body: { results: [] } }, alias = 'search') {
     return this.register('POST', '**/api/v1/search', alias, reply)
   }
 
-  stubSearchWithReply(getReply: () => SearchReply, alias = 'search') {
+  stubSearchWithReply(getReply: () => ApiReply, alias = 'search') {
     return this.register('POST', '**/api/v1/search', alias, () => getReply())
   }
 
-  stubRepairRescan(id: number, reply: ApiReply = {}) {
-    return this.register('POST', `**/api/v1/library/${id}/rescan-metadata`, 'rescanAudiobookMetadata', {
-      statusCode: reply.statusCode ?? 200,
-      body: reply.body ?? { message: 'Metadata refreshed', audiobookId: id },
-      ...(reply.delay === undefined ? {} : { delay: reply.delay }),
-    })
-  }
-
   stubMetadata(
-    reply: MetadataReply = { statusCode: 200, body: { metadata: { asin: 'B008DFUGCQ', title: 'Dune' } } },
+    reply: ApiReply = { statusCode: 200, body: { metadata: { asin: 'B008DFUGCQ', title: 'Dune' } } },
     alias = 'metadata',
   ) {
     return this.register(undefined, '**/api/v1/metadata/**', alias, reply)
   }
 
-  stubMetadataWithReply(getReply: () => MetadataReply, alias = 'metadata') {
+  stubMetadataWithReply(getReply: () => ApiReply, alias = 'metadata') {
     return this.register(undefined, '**/api/v1/metadata/**', alias, () => getReply())
   }
 
@@ -561,7 +527,7 @@ export class ApiStubs {
     )
   }
 
-  stubLibraryImportSearch(getReply: () => SearchReply, alias = 'libraryImportSearch') {
+  stubLibraryImportSearch(getReply: () => ApiReply, alias = 'libraryImportSearch') {
     return this.stubSearchWithReply(getReply, alias)
   }
 
@@ -591,20 +557,8 @@ export class ApiStubs {
     })
   }
 
-  stubApiSources() {
-    return this.stubJson('GET', '**/api/v1/configuration/apis', [] satisfies ApiSourcesResponse, 'getApis')
-  }
-
-  stubDownloadClients() {
-    return this.stubJson('GET', '**/api/v1/download-clients', [] satisfies DownloadClientsResponse, 'getDownloadClients')
-  }
-
   stubDownloads(downloads: DownloadsResponse = [], alias = 'getDownloads') {
     return this.stubJson('GET', '**/api/v1/downloads', downloads, alias)
-  }
-
-  stubQualityProfiles() {
-    return this.stubJson('GET', '**/api/v1/qualityprofile', [] satisfies QualityProfilesResponse, 'getQualityProfiles')
   }
 
   stubSystemHealth(health: SystemHealthResponse = { status: 'healthy', version: 'test' }) {
@@ -619,19 +573,8 @@ export class ApiStubs {
     return this.stubJson('GET', '**/api/v1/system/ready', readiness, 'getSystemReadiness')
   }
 
-  async stubSettingsDependencies() {
-    await this.stubAccount()
-    await this.stubApiSources()
-    await this.stubDownloadClients()
-    await this.stubJson('GET', '**/api/v1/remotepath', [], 'getRemotePathMappings')
-    await this.stubJson('GET', '**/api/v1/indexers', [], 'getIndexers')
-    await this.stubQualityProfiles()
-    await this.stubJson('GET', '**/api/v1/account/admins', [], 'getAdminUsers')
-  }
-
-  async stubSettingsPage(settings = settingsFixture()) {
-    await this.stubBootstrap()
-    await this.stubSettings(settings)
-    await this.stubSettingsDependencies()
+  /** The settings page's own data: the defaults already answer bootstrap, account, and every list with []. */
+  stubSettingsPage(settings = settingsFixture()) {
+    return this.stubSettings(settings)
   }
 }
