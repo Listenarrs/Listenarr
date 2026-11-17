@@ -43,7 +43,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
         [InlineData(0, "ffmpeg version 9.0.2", false)]
         [InlineData(0, "", false)]
         [InlineData(0, "warning: something\nffprobe version 9.0.2", false)]
-        public async Task PackagedBinaryFailingTheCheck_IsUnavailableAndTheLegacyCopyIsNotUsed(int exitCode, string stdout, bool timedOut)
+        public async Task PackagedBinaryFailingTheCheck_IsUnavailableAndTheLegacyCopyStaysOnDisk(int exitCode, string stdout, bool timedOut)
         {
             var (applicationBase, _) = await PlacePackagedBinaryAsync("ffprobe-invalid-app");
             var legacyDirectory = FileService.GetTempDirectory("ffprobe-invalid-legacy");
@@ -106,9 +106,12 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
         {
             var (applicationBase, packaged) = await PlacePackagedBinaryAsync("ffprobe-cache-app");
             var processRunner = new Mock<IProcessRunner>().AnswerFfprobeVersionCheck();
-            var service = CreateService(processRunner.Object, FileService.GetTempDirectory("ffprobe-cache-legacy"), applicationBase);
+            var clock = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
+            var service = CreateService(processRunner.Object, FileService.GetTempDirectory("ffprobe-cache-legacy"), applicationBase, clock);
 
             await service.GetFfprobePathAsync();
+            // A success has no time limit, unlike a held timeout or start failure.
+            clock.Advance(TimeSpan.FromDays(1));
             await service.GetFfprobePathAsync();
             VerifyVersionChecks(processRunner, 1);
 
@@ -183,8 +186,11 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
             var service = CreateService(processRunner.Object, FileService.GetTempDirectory("ffprobe-runner-throws-legacy"), applicationBase, clock);
             Assert.Null(await service.GetFfprobePathAsync());
 
-            clock.Advance(TimeSpan.FromSeconds(61));
+            clock.Advance(TimeSpan.FromSeconds(59));
+            Assert.Null(await service.GetFfprobePathAsync());
+            VerifyVersionChecks(processRunner, 1);
 
+            clock.Advance(TimeSpan.FromSeconds(2));
             Assert.Equal(packaged, await service.GetFfprobePathAsync());
             VerifyVersionChecks(processRunner, 2);
         }
@@ -213,20 +219,84 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
         }
 
         [Fact]
-        public async Task VersionCheck_FailureTheBinaryReports_StaysCachedUntilTheFileChanges()
+        public async Task VersionCheck_DifferentFailureAfterTheHold_IsWarnedAboutAgain()
         {
-            // A non-zero exit or the wrong first line comes from the binary itself, so re-running
-            // it on every probe would only repeat the same answer.
-            var (applicationBase, _) = await PlacePackagedBinaryAsync("ffprobe-reported-failure-app");
+            // Only a repeat of the same held failure drops to Debug; a new reason is news.
+            var (applicationBase, _) = await PlacePackagedBinaryAsync("ffprobe-new-reason-app");
+            var processRunner = new Mock<IProcessRunner>()
+                .AnswerFfprobeVersionCheck(new ProcessResult(-1, string.Empty, string.Empty, true));
+            var clock = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
+            var logger = new LevelRecordingLogger();
+            var service = CreateService(processRunner.Object, FileService.GetTempDirectory("ffprobe-new-reason-legacy"), applicationBase, clock, logger);
+            Assert.Null(await service.GetFfprobePathAsync());
+            processRunner.AnswerFfprobeVersionCheck(new ProcessResult(-1, string.Empty, "permission denied", false));
+
+            clock.Advance(RetryableFailureWindowAndThenSome);
+            Assert.Null(await service.GetFfprobePathAsync());
+
+            Assert.Equal([LogLevel.Warning, LogLevel.Warning], logger.Levels.Where(level => level is LogLevel.Warning or LogLevel.Debug));
+        }
+
+        [Fact]
+        public async Task VersionCheck_ReplacedBinaryFailingTheSameWay_IsWarnedAboutAgain()
+        {
+            // A failure the binary reports is only checked again once the file changes, and a
+            // changed file that still fails is worth a warning, not a Debug line.
+            var (applicationBase, packaged) = await PlacePackagedBinaryAsync("ffprobe-replaced-failing-app");
             var processRunner = new Mock<IProcessRunner>()
                 .AnswerFfprobeVersionCheck(new ProcessResult(1, string.Empty, "unknown option", false));
-            var service = CreateService(processRunner.Object, FileService.GetTempDirectory("ffprobe-reported-failure-legacy"), applicationBase);
+            var logger = new LevelRecordingLogger();
+            var service = CreateService(processRunner.Object, FileService.GetTempDirectory("ffprobe-replaced-failing-legacy"), applicationBase, logger: logger);
             Assert.Null(await service.GetFfprobePathAsync());
 
+            await File.WriteAllTextAsync(packaged, "packaged, replaced by another broken build");
+            Assert.Null(await service.GetFfprobePathAsync());
+
+            VerifyVersionChecks(processRunner, 2);
+            Assert.Equal([LogLevel.Warning, LogLevel.Warning], logger.Levels.Where(level => level is LogLevel.Warning or LogLevel.Debug));
+        }
+
+        [Theory]
+        [InlineData(1, "", "unknown option")]
+        [InlineData(0, "ffmpeg version 9.0.2 Copyright (c) 2000-2026 the FFmpeg developers\n", "")]
+        public async Task VersionCheck_FailureTheBinaryReports_StaysCachedUntilTheFileChanges(int exitCode, string stdout, string stderr)
+        {
+            // A non-zero exit other than -1, or the wrong first line, comes from the binary itself,
+            // so it is not held for a while like a timeout: it stays until the file changes.
+            var (applicationBase, packaged) = await PlacePackagedBinaryAsync($"ffprobe-reported-failure-app-{exitCode}");
+            var processRunner = new Mock<IProcessRunner>()
+                .AnswerFfprobeVersionCheck(new ProcessResult(exitCode, stdout, stderr, false));
+            var clock = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
+            var service = CreateService(processRunner.Object, FileService.GetTempDirectory($"ffprobe-reported-failure-legacy-{exitCode}"), applicationBase, clock);
+            Assert.Null(await service.GetFfprobePathAsync());
             processRunner.AnswerFfprobeVersionCheck();
 
+            clock.Advance(RetryableFailureWindowAndThenSome);
             Assert.Null(await service.GetFfprobePathAsync());
             VerifyVersionChecks(processRunner, 1);
+
+            await File.WriteAllTextAsync(packaged, "packaged, replaced by a working build");
+            Assert.Equal(packaged, await service.GetFfprobePathAsync());
+            VerifyVersionChecks(processRunner, 2);
+        }
+
+        [LinuxFact]
+        [SupportedOSPlatform("linux")]
+        public async Task VersionCheck_HeldStartFailure_IsCheckedAgainWhenTheExecuteBitRepairChangesTheMode()
+        {
+            // A held failure is keyed like any other result, so the startup repair of the execute
+            // bits ends the hold at once instead of after the window.
+            var (applicationBase, packaged) = await PlacePackagedBinaryAsync("ffprobe-held-repair-app");
+            File.SetUnixFileMode(packaged, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            var processRunner = new Mock<IProcessRunner>()
+                .AnswerFfprobeVersionCheck(new ProcessResult(-1, string.Empty, "permission denied", false));
+            var clock = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
+            var service = CreateService(processRunner.Object, FileService.GetTempDirectory("ffprobe-held-repair-legacy"), applicationBase, clock);
+            Assert.Null(await service.GetFfprobePathAsync());
+            processRunner.AnswerFfprobeVersionCheck();
+
+            Assert.Equal(packaged, await service.EnsureFfprobeInstalledAsync());
+            VerifyVersionChecks(processRunner, 2);
         }
 
         [Fact]
@@ -306,6 +376,8 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
                     It.IsAny<CancellationToken>()),
                 Times.Never);
         }
+
+        private static readonly TimeSpan RetryableFailureWindowAndThenSome = FfmpegService.RetryableFailureCacheDuration + TimeSpan.FromMinutes(1);
 
         private static void VerifyVersionChecks(Mock<IProcessRunner> processRunner, int expected)
         {
