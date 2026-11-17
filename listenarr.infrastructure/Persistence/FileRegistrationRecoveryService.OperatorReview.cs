@@ -8,18 +8,25 @@ namespace Listenarr.Infrastructure.Persistence;
 
 public sealed partial class FileRegistrationRecoveryService
 {
-    public async Task<IReadOnlyList<FileRegistrationReview>> ListReviewsAsync(CancellationToken cancellationToken = default)
+    public async Task<FileRegistrationReviewPage> ListReviewsAsync(int take = FileRegistrationReviewPage.DefaultTake,
+        int skip = 0, CancellationToken cancellationToken = default)
     {
+        take = Math.Clamp(take, 1, FileRegistrationReviewPage.DefaultTake);
+        skip = Math.Max(skip, 0);
         await using var db = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        // List metadata only: hashing a large library is an explicit per-operation review.
-        var journals = await db.FileMutationJournals.AsNoTracking()
+        var reviewable = db.FileMutationJournals.AsNoTracking()
             .Where(RegistrationPublicationPredicate)
             .Where(j => j.State == FileMutationJournalState.NeedsAttention
-                || j.State == FileMutationJournalState.OperatorResolved)
+                || j.State == FileMutationJournalState.OperatorResolved);
+        var total = await reviewable.CountAsync(cancellationToken);
+        // List metadata only: hashing a large library is an explicit per-operation review.
+        var journals = await reviewable
             .OrderBy(j => j.State == FileMutationJournalState.OperatorResolved)
-            .ThenByDescending(j => j.UpdatedAt).Take(200).ToListAsync(cancellationToken);
-        return journals.Select(j => Describe(j, new("NotInspected", null, null),
+            .ThenByDescending(j => j.UpdatedAt).ThenBy(j => j.OperationId)
+            .Skip(skip).Take(take).ToListAsync(cancellationToken);
+        var items = journals.Select(j => Describe(j, new("NotInspected", null, null),
             new("NotInspected", null, null), [], "Completeness cannot be verified", "")).ToList();
+        return new FileRegistrationReviewPage(items, total);
     }
 
     public async Task<FileRegistrationReview> InspectAsync(Guid operationId, CancellationToken cancellationToken = default)
