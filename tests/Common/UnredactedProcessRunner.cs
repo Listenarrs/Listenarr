@@ -18,7 +18,23 @@ internal sealed class UnredactedProcessRunner : IProcessRunner
         var stderr = process.StandardError.ReadToEndAsync(cancellationToken);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(timeoutMs);
-        await process.WaitForExitAsync(timeout.Token);
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Stop the child, as SystemProcessRunner does, instead of leaving it running after
+            // the test has moved on.
+            process.Kill(entireProcessTree: true);
+            if (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+
+            return new ProcessResult(-1, string.Empty, string.Empty, true);
+        }
+
         return new ProcessResult(process.ExitCode, await stdout, await stderr, false);
     }
 
