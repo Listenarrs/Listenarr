@@ -53,6 +53,37 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
             Assert.Equal(knownPolicy, item.CanBeRemoved);
         }
 
+        // A limit that cannot be read must never be treated as "inherit the global limit", because
+        // that can authorize removal the user's per-torrent limit would have forbidden. The torrent
+        // stays in the queue but is not removable. The well-formed rows are the control.
+        [Theory]
+        [InlineData("\"ratio_limit\":2", true)]
+        [InlineData("\"seeding_time_limit\":-2", true)]
+        [InlineData("\"ratio_limit\":\"2\"", false)]
+        [InlineData("\"ratio_limit\":{}", false)]
+        [InlineData("\"seeding_time_limit\":\"60\"", false)]
+        [InlineData("\"seeding_time_limit\":[]", false)]
+        [InlineData("\"seeding_time_limit\":9223372036854775808", false)]
+        public async Task GetItemsAsync_UnreadableSeedLimitKeepsTheTorrentButCannotAuthorizeRemoval(string limitField, bool expectedRemovable)
+        {
+            using var http = new HttpClient(new DelegatingHandlerMock((request, _) =>
+            {
+                var path = request.RequestUri!.AbsolutePath;
+                var response = path.EndsWith("/preferences")
+                    ? """{"max_ratio_enabled":true,"max_ratio":2,"max_seeding_time_enabled":false,"max_seeding_time":30}"""
+                    : path.EndsWith("/login") ? "Ok."
+                    : $$"""[{"hash":"EXACT","name":"Book","state":"stoppedUP","progress":1,"ratio":3,{{limitField}}}]""";
+                return Task.FromResult(MockUtils.GetCannedResponse(response));
+            }));
+            var factory = new Mock<IHttpClientFactory>();
+            factory.Setup(value => value.CreateClient(It.IsAny<string>())).Returns(http);
+            var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<QbittorrentAdapter>.Instance;
+            var workflow = new QbittorrentItemFetchWorkflow(factory.Object, new QbittorrentAuthSession(logger), logger, "qbittorrent");
+            var client = new DownloadClientConfiguration { Host = "localhost", Port = 8080, RemoveCompletedDownloads = "remove_and_delete" };
+            var item = Assert.Single(await workflow.GetItemsAsync(client));
+            Assert.Equal(expectedRemovable, item.CanBeRemoved);
+        }
+
         private DownloadClientConfiguration _client = null!;
 
         public override async Task InitializeAsync()
@@ -588,10 +619,16 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
         private static string SavePathJson(string folder) =>
             JsonSerializer.Serialize(FileUtils.GetAbsolutePath("downloads", folder));
 
-        // A queue response whose middle torrent carries `downloaded` in the given JSON token form.
+        // A queue response whose middle torrent carries `state` in the given JSON token form.
         // The torrents either side of it are well formed, so anything missing from the result is
         // attributable to that one field.
-        private static string QueueWithMalformedMiddleTorrent(string malformedDownloaded) => $$"""
+        //
+        // This used to malform `downloaded` instead. #1008's numeric-tolerance fix means no JSON
+        // shape in `downloaded` throws any more: a non-Number token (the old quoted-string case)
+        // now falls back to the default the same as a missing field would, rather than throwing.
+        // `state` is read with `GetString`, which this fix does not touch, so it is still the
+        // field that can genuinely make a torrent unreadable.
+        private static string QueueWithMalformedMiddleTorrent(string malformedState) => $$"""
         [
             {
                 "hash": "aaaa1111", "name": "First", "progress": 0.5, "size": 1000,
@@ -599,7 +636,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
             },
             {
                 "hash": "bbbb2222", "name": "Second", "progress": 0.5, "size": 1000,
-                "downloaded": {{malformedDownloaded}}, "state": "downloading", "save_path": {{SavePathJson("b")}}
+                "downloaded": 600, "state": {{malformedState}}, "save_path": {{SavePathJson("b")}}
             },
             {
                 "hash": "cccc3333", "name": "Third", "progress": 0.5, "size": 1000,
@@ -608,23 +645,25 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
         ]
         """;
 
-        // qBittorrent documents `downloaded` as an integer, so the typed accessor reading it is
-        // right about the normal case. It was not resilient about the abnormal one: a value in
-        // another token form threw out of the mapper, out of the loop walking the response, and
-        // took every torrent after it along with it, while the poll still reported itself as a
-        // healthy live snapshot.
+        // qBittorrent documents `state` as a string, so the typed accessor reading it is right
+        // about the normal case. It is not resilient about the abnormal one: a non-string value
+        // throws `InvalidOperationException` out of the mapper, out of the loop walking the
+        // response, and takes every torrent after it along with it, while the poll still reports
+        // itself as a healthy live snapshot.
         //
-        // "600.5" is a JSON number that is not an integer (FormatException from GetInt64) and
-        // "\"600\"" is a quoted one (InvalidOperationException). The quoted form is the shape
-        // already reported against the NZBGet adapter in #618 and #619.
+        // These cases used to malform `downloaded` instead, with "600.5" (FormatException),
+        // "\"600\"" (InvalidOperationException) and "6e2" (FormatException). #1008's fix makes
+        // `downloaded` tolerate all three: a non-integral number truncates, exponent notation
+        // truncates, and a quoted string now falls back to the default rather than throwing. None
+        // of them is "unreadable" any more, so this malforms `state` instead: "123" and "{}" are
+        // both JSON values `GetString` cannot read, and that helper was not touched by the fix.
         [Theory]
-        [InlineData("600.5")]
-        [InlineData("\"600\"")]
-        [InlineData("6e2")]
-        public async Task GetQueueAsync_WhenOneTorrentIsUnreadable_DropsOnlyThatTorrent(string malformedDownloaded)
+        [InlineData("123")]
+        [InlineData("{}")]
+        public async Task GetQueueAsync_WhenOneTorrentIsUnreadable_DropsOnlyThatTorrent(string malformedState)
         {
             var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
-            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent(malformedDownloaded);
+            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent(malformedState);
             var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
             var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
 
@@ -644,13 +683,12 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
         // rather than merely going missing from a view. Without a case of its own, deleting the
         // guard in QbittorrentItemFetchWorkflow leaves every test in this file green.
         [Theory]
-        [InlineData("600.5")]
-        [InlineData("\"600\"")]
-        [InlineData("6e2")]
-        public async Task GetItemsAsync_WhenOneTorrentIsUnreadable_DropsOnlyThatTorrent(string malformedDownloaded)
+        [InlineData("123")]
+        [InlineData("{}")]
+        public async Task GetItemsAsync_WhenOneTorrentIsUnreadable_DropsOnlyThatTorrent(string malformedState)
         {
             var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
-            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent(malformedDownloaded);
+            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent(malformedState);
             var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
             var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
 
@@ -662,6 +700,141 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
             Assert.Equal(2, items.Count);
         }
 
+        // A single torrent whose given field carries the given raw JSON token, everything else
+        // filled in with ordinary, well-formed values. Used below to probe one numeric helper at
+        // a time without the three-torrent bookending the drop tests above need. `downloaded` is
+        // the field under test as often as any other, so it is folded into the substitution
+        // itself rather than also appearing as a fixed property, which would otherwise duplicate
+        // the JSON key.
+        private static string SingleTorrentWithField(string fieldName, string rawToken)
+        {
+            var downloadedToken = fieldName == "downloaded" ? rawToken : "500";
+            var extraField = fieldName == "downloaded" ? "" : $$""", "{{fieldName}}": {{rawToken}}""";
+
+            return $$"""
+            [
+                {
+                    "hash": "ffff4444", "name": "Single", "progress": 0.5, "size": 1000,
+                    "downloaded": {{downloadedToken}}, "state": "downloading",
+                    "save_path": {{SavePathJson("single")}}{{extraField}}
+                }
+            ]
+            """;
+        }
+
+        // #1008: `downloaded` is read with `GetInt64`, which called `JsonElement.GetInt64()`
+        // directly and threw on any token that was not already a bare integer. The fix tolerates
+        // every numeric shape qBittorrent might actually send and only falls back to the default
+        // for a token that cannot be read as a number at all.
+        //
+        // - "600.0" is an integral value written with a fraction: TryGetInt64 fails, TryGetDouble
+        //   succeeds (600.0), truncates to 600.
+        // - "600.5" is non-integral: TryGetInt64 fails, TryGetDouble succeeds (600.5), truncates.
+        // - "6e2" is exponent notation: TryGetInt64 fails even though the value is whole,
+        //   TryGetDouble succeeds (600.0), truncates to the same 600.
+        // - "1.8446744073709552e+19" is a finite double about 2x long.MaxValue. TryGetDouble
+        //   succeeds, but the value is rejected because it cannot be represented as a long, so
+        //   this is the case that actually proves the range check exists.
+        // - JSON `null` is not a Number at all, so it falls back to the default immediately.
+        [Theory]
+        [InlineData("600.0", 600L)]
+        [InlineData("600.5", 600L)]
+        [InlineData("6e2", 600L)]
+        [InlineData("1.8446744073709552e+19", 0L)]
+        [InlineData("null", 0L)]
+        public async Task GetQueueAsync_TheDownloadedFieldToleratesEveryNumericShape(string downloadedToken, long expectedDownloaded)
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = SingleTorrentWithField("downloaded", downloadedToken);
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            var items = await adapter.GetQueueAsync(_client);
+
+            // None of these shapes throw any more, so the torrent survives regardless of which
+            // one of the five it was given, unlike the drop tests above which exercise genuinely
+            // unreadable input.
+            var item = Assert.Single(items);
+            Assert.Equal(expectedDownloaded, item.Downloaded);
+        }
+
+        // Representative coverage for the other numeric helpers touched by the same fix.
+        // `dlspeed` goes through `GetDouble`, which has no narrower integer range to reject into:
+        // any finite number is accepted as-is, and a non-Number token falls back to the default.
+        [Theory]
+        [InlineData("500.0", 500.0)]
+        [InlineData("6e2", 600.0)]
+        [InlineData("{}", 0.0)]
+        public async Task GetQueueAsync_TheDlspeedFieldToleratesEveryNumericShape(string dlspeedToken, double expectedDlspeed)
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = SingleTorrentWithField("dlspeed", dlspeedToken);
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            var items = await adapter.GetQueueAsync(_client);
+
+            var item = Assert.Single(items);
+            Assert.Equal(expectedDlspeed, item.DownloadSpeed);
+        }
+
+        // `ratio` goes through `GetNullableDouble`: a non-Number token (here, a quoted string)
+        // falls back to null rather than throwing `InvalidOperationException`.
+        [Theory]
+        [InlineData("1.5", 1.5)]
+        [InlineData("\"1.5\"", null)]
+        public async Task GetQueueAsync_TheRatioFieldToleratesEveryNumericShape(string ratioToken, double? expectedRatio)
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = SingleTorrentWithField("ratio", ratioToken);
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            var items = await adapter.GetQueueAsync(_client);
+
+            var item = Assert.Single(items);
+            Assert.Equal(expectedRatio, item.Ratio);
+        }
+
+        // `eta` goes through `GetNullableInt32`: the same truncate-or-reject behavior as
+        // `downloaded`, just on the 32-bit nullable path, plus the JSON `null` literal case.
+        [Theory]
+        [InlineData("120.5", 120)]
+        [InlineData("6e2", 600)]
+        [InlineData("null", null)]
+        public async Task GetQueueAsync_TheEtaFieldToleratesEveryNumericShape(string etaToken, int? expectedEta)
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = SingleTorrentWithField("eta", etaToken);
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            var items = await adapter.GetQueueAsync(_client);
+
+            var item = Assert.Single(items);
+            Assert.Equal(expectedEta, item.Eta);
+        }
+
+        // `seeding_time` goes through `GetNullableInt64` and is only consumed internally by the
+        // seed-limit evaluator, with no field of its own on the mapped item. Unlike the fields
+        // above, this case only confirms the mapping survives at all for a malformed value; it
+        // doesn't assert the resulting seed-limit decision, since that depends on several other
+        // fields too.
+        [Theory]
+        [InlineData("7200.5")]
+        [InlineData("{}")]
+        public async Task GetItemsAsync_TheSeedingTimeFieldNeverThrows(string seedingTimeToken)
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = SingleTorrentWithField("seeding_time", seedingTimeToken);
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            var items = await adapter.GetItemsAsync(_client);
+
+            Assert.Single(items);
+        }
+
         // The counterpart control for the guard above. The per-torrent files request lives inside
         // the guarded block, so a client that stops answering after the torrent list arrives
         // throws once per remaining torrent. If the guard swallowed those, a monitor poll would
@@ -671,7 +844,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
         public async Task GetQueueAsync_WithIds_WhenTheClientStopsAnsweringMidPoll_StillFailsThePoll()
         {
             var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
-            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent("500");
+            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent("\"downloading\"");
             apiMock.FilesRequestFailsAtTransport = true;
             var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
             var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
@@ -689,7 +862,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
         public async Task GetQueueAsync_WithIds_WhenTheBreakerOpensMidPoll_StillFailsThePoll()
         {
             var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
-            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent("500");
+            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent("\"downloading\"");
             apiMock.FilesRequestsBeforeBreakerOpens = 1;
             var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
             var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
@@ -705,7 +878,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
         public async Task OrphanCleanup_WhenTheBreakerOpensMidPoll_KeepsTheUnreadTorrentsRecords()
         {
             var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
-            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent("500");
+            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent("\"downloading\"");
             apiMock.FilesRequestsBeforeBreakerOpens = 1;
             var tracked = await TrackDownloadsAsync("aaaa1111", "bbbb2222", "cccc3333");
 
@@ -728,7 +901,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
                 .WithSingleton<ILoggerProvider>(logs)
                 .WithMocks(RecordingLoggerProvider.CaptureEveryLevel));
             var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
-            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent("\"600\"");
+            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent("123");
             var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
             var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
 
@@ -747,7 +920,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
                 .WithSingleton<ILoggerProvider>(logs)
                 .WithMocks(RecordingLoggerProvider.CaptureEveryLevel));
             var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
-            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent("\"600\"");
+            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent("123");
             var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
             var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
 
@@ -795,7 +968,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
         public async Task OrphanCleanup_WhenOneTorrentIsUnreadable_KeepsItsTrackingRecord()
         {
             var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
-            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent("\"600\"");
+            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent("123");
             var tracked = await TrackDownloadsAsync("aaaa1111", "bbbb2222", "cccc3333");
 
             await RunOrphanCleanupAsync(tracked);
@@ -810,7 +983,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
         public async Task OrphanCleanup_WhenEveryTorrentIsReadable_StillRemovesAGenuineOrphan()
         {
             var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
-            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent("500");
+            apiMock.InfoResponseOverride = QueueWithMalformedMiddleTorrent("\"downloading\"");
             var tracked = await TrackDownloadsAsync("aaaa1111", "bbbb2222", "cccc3333", "dddd4444");
 
             await RunOrphanCleanupAsync(tracked);
