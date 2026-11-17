@@ -55,7 +55,8 @@ public sealed class BackendIntegrationHost : IAsyncDisposable
             "Elizabeth Bennet navigates family, manners, and first impressions.", ["Classics", "Romance"], 660),
     ];
 
-    private readonly Factory _factory;
+    private readonly string _databasePath;
+    private Factory _factory;
     private string? _xsrfToken;
 
     private BackendIntegrationHost(string root)
@@ -64,11 +65,12 @@ public sealed class BackendIntegrationHost : IAsyncDisposable
         LibraryPath = Path.Join(root, "library");
         Directory.CreateDirectory(ImportPath);
         Directory.CreateDirectory(LibraryPath);
-        _factory = new Factory(Path.Join(root, "config", "listenarr.db"));
+        _databasePath = Path.Join(root, "config", "listenarr.db");
+        _factory = new Factory(_databasePath);
         Client = _factory.CreateClient();
     }
 
-    public HttpClient Client { get; }
+    public HttpClient Client { get; private set; }
 
     /// <summary>The folder of the "Backend Integration Import" root folder.</summary>
     public string ImportPath { get; }
@@ -155,6 +157,17 @@ public sealed class BackendIntegrationHost : IAsyncDisposable
         var folders = (await GetJsonAsync("/api/v1/rootfolders")).AsArray();
         return folders.SingleOrDefault(folder => (string?)folder?["name"] == name)
             ?? throw new InvalidOperationException($"The root folder '{name}' is missing.");
+    }
+
+    /// <summary>Restarts the app on the same database and folders, without re-seeding.</summary>
+    public async Task<BackendIntegrationHost> RestartOnSameRootAsync()
+    {
+        Client.Dispose();
+        await _factory.DisposeAsync();
+        _factory = new Factory(_databasePath);
+        Client = _factory.CreateClient();
+        _xsrfToken = null;
+        return this;
     }
 
     public async ValueTask DisposeAsync()

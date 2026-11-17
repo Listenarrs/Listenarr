@@ -38,4 +38,17 @@ public sealed class SettingsPersistenceTests : BackendIntegrationTests
         var persisted = await Host.GetJsonAsync(SettingsPath);
         Assert.True((bool)persisted["enableNotifications"]!);
     }
+
+    [Fact]
+    public async Task SaveSettings_ChangeSurvivesHostRestart()
+    {
+        var settings = (await Host.GetJsonAsync(SettingsPath)).AsObject();
+        settings["enableNotifications"] = true;
+        await Host.SendJsonAsync(HttpMethod.Post, SettingsPath, settings);
+
+        await Host.RestartOnSameRootAsync();
+
+        var persisted = await Host.GetJsonAsync(SettingsPath);
+        Assert.True((bool)persisted["enableNotifications"]!);
+    }
 }
