@@ -54,7 +54,7 @@ npm run test:frontend-integration
 ```
 
 These browser tests exercise the frontend alone: they stub the HTTP API and run against Vite without starting the C# API.
-Their specs live under `playwright/frontend-integration/` and run with the configuration in `playwright.frontend-integration.config.ts`.
+Their specs live under `playwright/frontend-integration/` and run with the configuration in `playwright.frontend-integration.config.ts`. They start their own dev server on port 5190 (`LISTENARR_FRONTEND_INTEGRATION_WEB_PORT` to change it), so they run beside `npm run dev`; they stop at once if that port is already in use.
 
 Put every API intercept in `playwright/support/api-stubs.ts`, including one-off endpoints, so route matching and response setup are reusable from any spec. Add an exported helper there when a test needs a new endpoint or response shape; specs call the helper and keep test-specific request assertions beside the scenario. For example, `stubSettingsPage(settingsFixture({ outputPath: '/audiobooks' }))` supplies the common page dependencies, while `stubLibrary([libraryAudiobookFixture({ title: 'Dune' })])` stubs the backend's slim library-list response.
 
