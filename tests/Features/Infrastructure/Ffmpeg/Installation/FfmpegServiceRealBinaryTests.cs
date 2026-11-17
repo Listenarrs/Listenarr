@@ -52,6 +52,33 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
             Assert.InRange(metadata.Duration.TotalSeconds, 0.9, 1.1);
         }
 
+        [LinuxFact]
+        public async Task UnredactedProcessRunner_Timeout_KillsTheChildAndReportsTimedOut()
+        {
+            // The runner these tests use must not leave a hung binary running after its timeout.
+            var pidFile = Path.Join(FileService.GetTempDirectory("runner-timeout"), "child.pid");
+            var startInfo = new ProcessStartInfo("/bin/sh")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            };
+            startInfo.ArgumentList.Add("-c");
+            startInfo.ArgumentList.Add($"echo $$ > '{pidFile}'; exec sleep 30");
+
+            var result = await new UnredactedProcessRunner().RunAsync(startInfo, timeoutMs: 500);
+
+            Assert.True(result.TimedOut);
+            var pid = int.Parse((await File.ReadAllTextAsync(pidFile)).Trim());
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            while (Directory.Exists($"/proc/{pid}") && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(50);
+            }
+
+            Assert.False(Directory.Exists($"/proc/{pid}"), $"child {pid} is still running after the timeout");
+        }
+
         private FfmpegService CreateService()
         {
             return new FfmpegService(
