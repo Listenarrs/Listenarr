@@ -3,7 +3,6 @@
 // convertVideos() on fe/test-results/e2e after the suite; a missing ffmpeg or a failed conversion is
 // logged and skipped, never failing the run (the suite's own exit code gates it).
 import { spawn } from 'node:child_process'
-import { once } from 'node:events'
 import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 
@@ -32,10 +31,19 @@ export async function findVideos(dir) {
   return videos
 }
 
+// events.once() rejects on an 'error' event, which would make a missing ffmpeg throw instead of being
+// skipped. Resolve on both events and return the outcome to the caller.
+function ffmpegResult(child) {
+  return new Promise((resolve) => {
+    child.once('error', resolve)
+    child.once('close', resolve)
+  })
+}
+
 async function convertOne(input) {
   const output = input.replace(/\.webm$/, '.gif')
   const ffmpeg = spawn('ffmpeg', ffmpegGifArgs(input, output), { stdio: ['ignore', 'ignore', 'inherit'] })
-  const [result] = await Promise.race([once(ffmpeg, 'close'), once(ffmpeg, 'error')])
+  const result = await ffmpegResult(ffmpeg)
   if (result instanceof Error) {
     console.warn(`Could not run ffmpeg to make a GIF from ${input}: ${result.message}`)
     return null

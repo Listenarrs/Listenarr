@@ -41,3 +41,17 @@ test('convertVideos on a directory with no videos does nothing and does not thro
   const dir = await mkdtemp(join(tmpdir(), 'webm-'))
   assert.deepEqual(await convertVideos(dir), [])
 })
+
+test('convertVideos skips a retained video when ffmpeg is missing', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'webm-'))
+  await mkdir(join(dir, 'failing-test'), { recursive: true })
+  await writeFile(join(dir, 'failing-test', 'video.webm'), 'x')
+  const emptyPath = await mkdtemp(join(tmpdir(), 'no-ffmpeg-'))
+  const originalPath = process.env.PATH
+  process.env.PATH = emptyPath
+  try {
+    assert.deepEqual(await convertVideos(dir), [])
+  } finally {
+    process.env.PATH = originalPath
+  }
+})

@@ -161,8 +161,12 @@ try {
   }
 } finally {
   // Turn the videos Playwright kept for failed tests into GIFs, whichever path we took out of the suite.
-  await convertVideos(join(frontendDirectory, 'test-results', 'e2e'))
-  await stack?.dispose()
+  // A GIF conversion failure must never skip removing the stack.
+  try {
+    await convertVideos(join(frontendDirectory, 'test-results', 'e2e'))
+  } finally {
+    await stack?.dispose()
+  }
 }
 
 process.exitCode = exitCode
