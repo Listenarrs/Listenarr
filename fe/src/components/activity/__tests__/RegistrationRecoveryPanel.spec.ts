@@ -31,7 +31,7 @@ const review = {
 
 beforeEach(() => {
   vi.resetAllMocks()
-  api.getRegistrationReviews.mockResolvedValue([review])
+  api.getRegistrationReviews.mockResolvedValue({ reviews: [review], total: 1 })
   api.inspectRegistration.mockResolvedValue(review)
 })
 
@@ -99,5 +99,145 @@ describe('RegistrationRecoveryPanel', () => {
     await flushPromises()
     expect((wrapper.get('input[type=checkbox]').element as HTMLInputElement).checked).toBe(false)
     expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('')
+  })
+
+  it('shows how many of the total operations are listed when the list is truncated', async () => {
+    api.getRegistrationReviews.mockResolvedValue({ reviews: [review], total: 250 })
+    const wrapper = mount(RegistrationRecoveryPanel)
+    await flushPromises()
+    expect(wrapper.text()).toContain('Showing 1 of 250 operations.')
+  })
+
+  it('places the status line and Load more control after the list', async () => {
+    api.getRegistrationReviews.mockResolvedValue({ reviews: [review], total: 3 })
+    const wrapper = mount(RegistrationRecoveryPanel)
+    await flushPromises()
+    const html = wrapper.html()
+    expect(html.indexOf('Showing 1 of 3')).toBeGreaterThan(html.indexOf('</ul>'))
+    expect(html.indexOf('Load more')).toBeGreaterThan(html.indexOf('</ul>'))
+  })
+
+  const row = (id: string) => ({ ...review, operationId: id })
+  const buttonByText = (wrapper: ReturnType<typeof mount>, text: string) =>
+    wrapper.findAll('button').find((b) => b.text() === text)
+
+  it('loads further rows with a Load more control until every row is listed', async () => {
+    api.getRegistrationReviews.mockImplementation(async (skip = 0) =>
+      skip === 0
+        ? { reviews: [row('op-1'), row('op-2')], total: 3 }
+        : { reviews: [row('op-3')], total: 3 },
+    )
+    const wrapper = mount(RegistrationRecoveryPanel)
+    await flushPromises()
+    expect(wrapper.text()).toContain('Showing 2 of 3 operations.')
+    await buttonByText(wrapper, 'Load more')!.trigger('click')
+    await flushPromises()
+    expect(api.getRegistrationReviews).toHaveBeenLastCalledWith(2)
+    expect(wrapper.findAll('code').map((c) => c.text())).toEqual(['op-1', 'op-2', 'op-3'])
+    expect(wrapper.text()).toContain('Showing 3 of 3 operations.')
+    expect(buttonByText(wrapper, 'Load more')).toBeUndefined()
+  })
+
+  it('reloads every loaded row, not only the first page, after a resolve', async () => {
+    const all = [row('op-1'), row('op-2'), row('op-3')]
+    api.getRegistrationReviews.mockImplementation(async (skip = 0) => ({
+      reviews: all.slice(skip, skip + 2),
+      total: 3,
+    }))
+    const wrapper = mount(RegistrationRecoveryPanel)
+    await flushPromises()
+    await buttonByText(wrapper, 'Load more')!.trigger('click')
+    await flushPromises()
+    await buttonByText(wrapper, 'Inspect operation')!.trigger('click')
+    await flushPromises()
+    await wrapper.get('textarea').setValue('reviewed')
+    await wrapper.get('input[type=checkbox]').setValue(true)
+    api.resolveRegistration.mockResolvedValue({ ...review, canResolve: false })
+    api.getRegistrationReviews.mockClear()
+    await buttonByText(wrapper, 'Release this recovery block')!.trigger('click')
+    await flushPromises()
+    expect(api.getRegistrationReviews.mock.calls).toEqual([[], [2]])
+    expect(wrapper.findAll('code').map((c) => c.text())).toContain('op-3')
+    expect(wrapper.text()).toContain('Showing 3 of 3 operations.')
+  })
+
+  it('takes the total from the reload after a resolve', async () => {
+    api.getRegistrationReviews.mockResolvedValue({ reviews: [review], total: 5 })
+    const wrapper = mount(RegistrationRecoveryPanel)
+    await flushPromises()
+    expect(wrapper.text()).toContain('Showing 1 of 5 operations.')
+    await buttonByText(wrapper, 'Inspect operation')!.trigger('click')
+    await flushPromises()
+    await wrapper.get('textarea').setValue('reviewed')
+    await wrapper.get('input[type=checkbox]').setValue(true)
+    api.resolveRegistration.mockResolvedValue({ ...review, canResolve: false })
+    api.getRegistrationReviews.mockResolvedValue({ reviews: [review], total: 4 })
+    await buttonByText(wrapper, 'Release this recovery block')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Showing 1 of 4 operations.')
+  })
+
+  async function openResolveForm(wrapper: ReturnType<typeof mount>) {
+    await buttonByText(wrapper, 'Inspect operation')!.trigger('click')
+    await flushPromises()
+    await wrapper.get('textarea').setValue('reviewed')
+    await wrapper.get('input[type=checkbox]').setValue(true)
+  }
+
+  it('says the resolution was not confirmed only when the resolve request fails', async () => {
+    const wrapper = mount(RegistrationRecoveryPanel)
+    await flushPromises()
+    await openResolveForm(wrapper)
+    api.resolveRegistration.mockRejectedValue(new Error('stale'))
+    api.getRegistrationReviews.mockClear()
+    await buttonByText(wrapper, 'Release this recovery block')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Resolution was not confirmed')
+    expect(wrapper.text()).not.toContain('Resolved, but')
+    expect(wrapper.find('textarea').exists()).toBe(false)
+    expect(api.getRegistrationReviews).not.toHaveBeenCalled()
+  })
+
+  it('keeps the old list and says so when the resolve succeeds but the reload fails', async () => {
+    const wrapper = mount(RegistrationRecoveryPanel)
+    await flushPromises()
+    await openResolveForm(wrapper)
+    api.resolveRegistration.mockResolvedValue({
+      ...review,
+      state: 'OperatorResolved',
+      canResolve: false,
+      resolvedBy: 'tester',
+    })
+    api.getRegistrationReviews.mockRejectedValue(new Error('offline'))
+    await buttonByText(wrapper, 'Release this recovery block')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Resolved, but the list could not be refreshed.')
+    expect(wrapper.text()).not.toContain('Resolution was not confirmed')
+    expect(wrapper.text()).toContain('Resolved by tester')
+    expect(wrapper.findAll('li code').map((c) => c.text())).toEqual(['test-operation'])
+  })
+
+  it('lists a row once when two reload pages overlap by one row', async () => {
+    const pages: Record<number, ReturnType<typeof row>[]> = {
+      0: [row('op-1'), row('op-2')],
+      2: [row('op-3')],
+    }
+    api.getRegistrationReviews.mockImplementation(async (skip = 0) => ({
+      reviews: pages[skip],
+      total: 3,
+    }))
+    const wrapper = mount(RegistrationRecoveryPanel)
+    await flushPromises()
+    await buttonByText(wrapper, 'Load more')!.trigger('click')
+    await flushPromises()
+    await buttonByText(wrapper, 'Inspect operation')!.trigger('click')
+    await flushPromises()
+    await wrapper.get('textarea').setValue('reviewed')
+    await wrapper.get('input[type=checkbox]').setValue(true)
+    api.resolveRegistration.mockResolvedValue({ ...review, canResolve: false })
+    pages[2] = [row('op-2'), row('op-3')]
+    await buttonByText(wrapper, 'Release this recovery block')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('li code').map((c) => c.text())).toEqual(['op-1', 'op-2', 'op-3'])
   })
 })

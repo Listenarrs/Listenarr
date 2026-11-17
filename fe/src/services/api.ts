@@ -101,10 +101,22 @@ const buildApiRequestUrl = (endpoint: string): string => {
 type ErrorWithStatus = Error & { status?: number; body?: string; retryAfter?: number }
 
 class ApiService {
-  getRegistrationReviews() {
-    return this.request<import('@/types/registrationRecovery').RegistrationReview[]>(
-      '/file-registration-recovery',
+  async getRegistrationReviews(
+    skip = 0,
+  ): Promise<import('@/types/registrationRecovery').RegistrationReviewList> {
+    const header: { total: string | null } = { total: null }
+    const reviews = await this.request<import('@/types/registrationRecovery').RegistrationReview[]>(
+      skip > 0 ? `/file-registration-recovery?skip=${skip}` : '/file-registration-recovery',
+      {},
+      (resp) => {
+        header.total = resp.headers.get('X-Total-Count')
+      },
     )
+    const total = Number(header.total)
+    return {
+      reviews,
+      total: header.total !== null && Number.isInteger(total) ? total : reviews.length,
+    }
   }
 
   inspectRegistration(operationId: string) {
@@ -131,7 +143,11 @@ class ApiService {
     return {}
   }
 
-  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  private async request<T>(
+    endpoint: string,
+    options: RequestInit = {},
+    onResponse?: (resp: Response) => void,
+  ): Promise<T> {
     // Await tokenReadyPromise before any unsafe request to guarantee fresh token
     const method = (options.method || 'GET').toString().toUpperCase()
     if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method) && this.tokenReadyPromise) {
@@ -284,6 +300,8 @@ class ApiService {
       err.body = text
       throw err
     }
+
+    onResponse?.(resp)
 
     // Try to parse JSON, fallback to text if not JSON
     const contentType = resp.headers.get('content-type') || ''

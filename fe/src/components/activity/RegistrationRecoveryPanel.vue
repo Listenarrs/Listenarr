@@ -23,6 +23,17 @@
         </button>
       </li>
     </ul>
+    <p v-if="reviews.length" role="status">
+      Showing {{ reviews.length }} of {{ total }} operations.
+    </p>
+    <button
+      v-if="reviews.length < total"
+      class="btn btn-secondary"
+      :disabled="busy"
+      @click="loadMore"
+    >
+      Load more
+    </button>
     <div v-if="selected" class="operation-review">
       <h3>Review {{ selected.operationId }}</h3>
       <p>{{ selected.error }}</p>
@@ -94,6 +105,7 @@ import { apiService } from '@/services/api'
 import type { RegistrationReview } from '@/types/registrationRecovery'
 
 const reviews = ref<RegistrationReview[]>([])
+const total = ref(0)
 const selected = ref<RegistrationReview | null>(null)
 const busy = ref(false)
 const error = ref('')
@@ -105,9 +117,26 @@ async function refresh() {
   error.value = ''
   selected.value = null
   try {
-    reviews.value = await apiService.getRegistrationReviews()
+    const list = await apiService.getRegistrationReviews()
+    reviews.value = list.reviews
+    total.value = list.total
   } catch {
     error.value = 'Could not load recovery operations. Try refreshing.'
+  } finally {
+    busy.value = false
+  }
+}
+
+async function loadMore() {
+  busy.value = true
+  error.value = ''
+  try {
+    const list = await apiService.getRegistrationReviews(reviews.value.length)
+    const known = new Set(reviews.value.map((r) => r.operationId))
+    reviews.value = [...reviews.value, ...list.reviews.filter((r) => !known.has(r.operationId))]
+    total.value = list.total
+  } catch {
+    error.value = 'Could not load more recovery operations. Try again.'
   } finally {
     busy.value = false
   }
@@ -138,14 +167,37 @@ async function resolve() {
       selected.value.reviewToken,
       note.value,
     )
-    reviews.value = await apiService.getRegistrationReviews()
   } catch {
     selected.value = null
     error.value =
       'Resolution was not confirmed. Inspect the operation again; its state or files may have changed.'
+    busy.value = false
+    return
+  }
+  try {
+    const loaded = reviews.value.length
+    const reloaded: RegistrationReview[] = []
+    const known = new Set<string>()
+    let list = await apiService.getRegistrationReviews()
+    let added = appendNew(reloaded, known, list.reviews)
+    while (reloaded.length < loaded && added) {
+      list = await apiService.getRegistrationReviews(reloaded.length)
+      added = appendNew(reloaded, known, list.reviews)
+    }
+    reviews.value = reloaded
+    total.value = list.total
+  } catch {
+    error.value = 'Resolved, but the list could not be refreshed.'
   } finally {
     busy.value = false
   }
+}
+
+function appendNew(target: RegistrationReview[], known: Set<string>, rows: RegistrationReview[]) {
+  const fresh = rows.filter((r) => !known.has(r.operationId))
+  fresh.forEach((r) => known.add(r.operationId))
+  target.push(...fresh)
+  return fresh.length
 }
 
 onMounted(refresh)
