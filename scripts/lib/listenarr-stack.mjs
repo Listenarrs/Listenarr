@@ -1,7 +1,7 @@
-// Starts Listenarr in Docker for the suites that test it running: the production image, the test host
-// image built on top of it (.devcontainer/backend-integration.Dockerfile: fixture-backed Audible client,
-// ffprobe), one container on a temporary config and filesystem, a seeded library, and snapshots of the
-// seeded database and files that tests restore. Used by scripts/e2e/run.mjs.
+// Starts Listenarr in Docker for the browser E2E suite: the production image, the test host image built
+// on top of it (scripts/e2e/e2e-host.Dockerfile: fixture-backed Audible client, ffprobe), one container
+// on a temporary config and filesystem, a seeded library, and snapshots of the seeded database and files
+// that tests restore. Used by scripts/e2e/run.mjs.
 import { once } from 'node:events'
 import { createHash } from 'node:crypto'
 import { cp, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
@@ -15,7 +15,7 @@ import { DatabaseSync } from 'node:sqlite'
 export const repositoryRoot = resolve(fileURLToPath(new URL('../..', import.meta.url)))
 export const frontendDirectory = join(repositoryRoot, 'fe')
 export const playwrightCli = join(frontendDirectory, 'node_modules', '@playwright', 'test', 'cli.js')
-const hostDockerfile = join(repositoryRoot, '.devcontainer', 'backend-integration.Dockerfile')
+const hostDockerfile = join(repositoryRoot, 'scripts', 'e2e', 'e2e-host.Dockerfile')
 
 export function start(command, args, options) {
   const child = spawn(command, args, { stdio: 'inherit', ...options })
@@ -134,7 +134,7 @@ async function seedLibrary(apiUrl, seedFile, rootFolders) {
  * Builds the images, starts the container and seeds it.
  *
  * - `name`: prefix of the container, image and temporary directory names.
- * - `generateFixtures(seedFilesystemDirectory)`: writes the files the container sees under /backend-integration.
+ * - `generateFixtures(seedFilesystemDirectory)`: writes the files the container sees under /e2e.
  * - `seedFile`: JSON array of books added to the library.
  * - `rootFolders`: root folders created after the books ({ name, path, isDefault? }).
  * - `environment`: extra container environment variables.
@@ -222,7 +222,7 @@ export async function startListenarrStack({
         '--volume',
         `${configDirectory}:/app/config`,
         '--volume',
-        `${filesystemDirectory}:/backend-integration`,
+        `${filesystemDirectory}:/e2e`,
         ...volumes.flatMap((volume) => ['--volume', volume]),
         ...dockerRunArguments,
         hostImage,
@@ -255,12 +255,12 @@ export async function startListenarrStack({
       dispose,
       /** The variables the Playwright support code (fe/playwright/support/docker-stack.ts) reads. */
       testEnvironment: {
-        LISTENARR_BACKEND_INTEGRATION_BASE_URL: apiUrl,
-        LISTENARR_BACKEND_INTEGRATION_CONTAINER: containerName,
-        LISTENARR_BACKEND_INTEGRATION_CONFIG_DIR: configDirectory,
-        LISTENARR_BACKEND_INTEGRATION_FILESYSTEM_DIR: filesystemDirectory,
-        LISTENARR_BACKEND_INTEGRATION_SEED_FILESYSTEM_DIR: seedFilesystemDirectory,
-        LISTENARR_BACKEND_INTEGRATION_SEED_CONFIG_DIR: seedConfigDirectory,
+        LISTENARR_E2E_BASE_URL: apiUrl,
+        LISTENARR_E2E_CONTAINER: containerName,
+        LISTENARR_E2E_CONFIG_DIR: configDirectory,
+        LISTENARR_E2E_FILESYSTEM_DIR: filesystemDirectory,
+        LISTENARR_E2E_SEED_FILESYSTEM_DIR: seedFilesystemDirectory,
+        LISTENARR_E2E_SEED_CONFIG_DIR: seedConfigDirectory,
       },
     }
   } catch (error) {

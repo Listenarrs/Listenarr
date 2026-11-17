@@ -169,7 +169,7 @@ test.describe('Library Import scan', () => {
   test('a scan skips an unreadable folder, warns about it and keeps the readable books', async ({
     page,
   }) => {
-    const unreadable = hostPath('/backend-integration/import/Edgar Rice Burroughs/Pellucidar')
+    const unreadable = hostPath('/e2e/import/Edgar Rice Burroughs/Pellucidar')
     await chmod(unreadable, 0o000)
     try {
       await openLibraryImport(page)
@@ -188,7 +188,7 @@ test.describe('Library Import scan', () => {
 
   test('a scan of a root folder that disappeared fails with the reason', async ({ page }) => {
     await openLibraryImport(page)
-    await rm(hostPath('/backend-integration/import'), { recursive: true, force: true })
+    await rm(hostPath('/e2e/import'), { recursive: true, force: true })
     await scanButton(page).click()
     await expect(page.locator('.scan-error')).toBeVisible({ timeout: 60_000 })
     await expect(page.locator('.scan-error')).not.toHaveText(/^\s*$/)
@@ -200,7 +200,7 @@ test.describe('Library Import scan', () => {
     await page.route('**/hubs/**', (route) => route.abort())
     await page.routeWebSocket(/\/hubs\//, (socket) => socket.close())
     await openLibraryImport(page)
-    await rm(hostPath('/backend-integration/import'), { recursive: true, force: true })
+    await rm(hostPath('/e2e/import'), { recursive: true, force: true })
     await scanButton(page).click()
     await expect(page.locator('.scan-error')).toBeVisible({ timeout: 60_000 })
     await expect(page.locator('.import-row')).toHaveCount(0)

@@ -64,10 +64,10 @@ try {
     name: 'listenarr-e2e',
     seedFile: join(repositoryRoot, 'scripts', 'e2e', 'seed-library.json'),
     rootFolders: [
-      { name: 'E2E Import', path: '/backend-integration/import', isDefault: true },
-      { name: 'E2E Second', path: '/backend-integration/second' },
-      { name: 'E2E Empty', path: '/backend-integration/empty' },
-      { name: 'E2E Library', path: '/backend-integration/library' },
+      { name: 'E2E Import', path: '/e2e/import', isDefault: true },
+      { name: 'E2E Second', path: '/e2e/second' },
+      { name: 'E2E Empty', path: '/e2e/empty' },
+      { name: 'E2E Library', path: '/e2e/library' },
     ],
     environment: coverage ? { LISTENARR_COVERAGE_DIR: '/coverage' } : {},
     dockerRunArguments: [
