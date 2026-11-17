@@ -95,6 +95,24 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
         }
 
         [Fact]
+        public void PackagedLicenseNotice_NamesTheLicenceAndPointsAtTheShippedFiles()
+        {
+            var notice = FfmpegService.PackagedLicenseNotice("9.0.2-example");
+
+            Assert.Contains("LGPL version 3 or later", notice);
+            Assert.DoesNotContain("LGPL/GPL", notice);
+            Assert.Contains("licenses/ffprobe/", notice);
+            // The build copies licenses/ffprobe/ into every output, the test output included, so
+            // the directory the notice names is really there next to the application.
+            foreach (var file in new[] { "NOTICE", "LGPL-3.0.txt", "GPL-3.0.txt", "dav1d-BSD-2-Clause.txt" })
+            {
+                Assert.True(
+                    File.Exists(Path.Join(AppContext.BaseDirectory, "licenses", "ffprobe", file)),
+                    $"licenses/ffprobe/{file} is missing from the build output");
+            }
+        }
+
+        [Fact]
         public async Task GetLicenseAsync_PackagedBinary_NamesTheVersionTheBinaryReports()
         {
             // The version comes from -version rather than a constant, so a package bump changes
