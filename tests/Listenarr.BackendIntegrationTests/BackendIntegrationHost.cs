@@ -254,6 +254,9 @@ public sealed class BackendIntegrationHost : IAsyncDisposable
                 services.AddSingleton(startupConfig.Object);
 
                 services.AddListenarrExternalApiTestStub();
+                // Hosted services are disabled in the test environment, so the unmatched scan
+                // worker that the tagged-file import test needs is not registered by the app.
+                FakeProvidersHost.AddUnmatchedScanWorker(services);
 
                 services.RemoveAll<IFfmpegService>();
                 var ffprobe = FindFfprobe();

@@ -8,6 +8,14 @@ namespace Listenarr.FakeProviders;
 
 public static class FakeProvidersHost
 {
+    /// <summary>
+    /// Registers the unmatched scan worker for test hosts that run with background services disabled.
+    /// The worker registration is internal to Infrastructure; this assembly is a friend, while the
+    /// backend-integration test assembly is not, so it reaches the worker through here.
+    /// </summary>
+    public static void AddUnmatchedScanWorker(IServiceCollection services) =>
+        services.AddUnmatchedScanWorker();
+
     public static async Task Main(string[] args)
     {
         var realtimeLogSink = RealtimeLoggingExtensions.CreateListenarrRealtimeLogSink();
