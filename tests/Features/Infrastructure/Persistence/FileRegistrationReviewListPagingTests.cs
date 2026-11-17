@@ -5,8 +5,9 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Listenarr.Tests.Features.Infrastructure.Persistence;
 
+[Trait("Area", "Library")]
 [Trait("Name", "FileRegistrationReviewListPagingTests")]
-[Trait("Category", "FileRegistrationRecovery")]
+[Trait("Category", "Infrastructure")]
 public sealed class FileRegistrationReviewListPagingTests : BaseTests
 {
     private const int NeedsAttentionRows = 260;
@@ -113,6 +114,38 @@ public sealed class FileRegistrationReviewListPagingTests : BaseTests
         var beyond = await service.ListReviewsAsync(200, 10_000);
         Assert.Empty(beyond.Items);
         Assert.Equal(TotalRows, beyond.TotalCount);
+    }
+
+    [Fact]
+    public async Task List_RowsSharingAnUpdatedAtAcrossAPageBoundary_AreOrderedByOperationIdAndNeverRepeat()
+    {
+        var factory = new Factory(new DbContextOptionsBuilder<ListenArrDbContext>()
+            .UseSqlite($"Data Source={Path.Join(FileService.GetTempPath(), "ties.db")};Pooling=False").Options);
+        await using (var db = factory.CreateDbContext())
+        {
+            await db.Database.EnsureCreatedAsync();
+            var sameInstant = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            // One save per row, in descending id order, so rowid (insertion) order disagrees with the id tiebreak.
+            var descendingIds = Enumerable.Range(0, 250).Select(_ => Guid.NewGuid())
+                .OrderByDescending(id => id.ToString(), StringComparer.Ordinal).ToList();
+            for (var i = 0; i < descendingIds.Count; i++)
+            {
+                var journal = Journal(FileMutationJournalState.NeedsAttention, i, sameInstant);
+                journal.OperationId = descendingIds[i];
+                db.FileMutationJournals.Add(journal);
+                await db.SaveChangesAsync();
+            }
+        }
+        var service = new FileRegistrationRecoveryService(factory,
+            new FileMover(NullLogger<FileMover>.Instance, dbContextFactory: factory),
+            TimeProvider.System, NullLogger<FileRegistrationRecoveryService>.Instance);
+
+        var first = await IdsAsync(service, 200, 0);
+        var rest = await IdsAsync(service, 200, 200);
+
+        var all = first.Concat(rest).ToList();
+        Assert.Equal(250, all.Distinct().Count());
+        Assert.Equal(all.OrderBy(id => id.ToString(), StringComparer.Ordinal), all);
     }
 
     private static async Task<List<Guid>> IdsAsync(FileRegistrationRecoveryService service, int take, int skip) =>
