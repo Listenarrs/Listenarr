@@ -128,7 +128,7 @@
         <button
           v-if="audiobooks.length > 0 && selectedCount === 0"
           class="toolbar-btn"
-          @click="libraryStore.selectAll()"
+          @click="selectAllBooks"
         >
           <PhCheckSquare />
           Select All
@@ -2523,6 +2523,17 @@ async function handleEditSaved() {
       editAudiobook.value = updated
     }
   }
+}
+
+// In "Broken books", Select All takes only the broken books shown, so Repair and Delete
+// can't reach healthy books hidden by the group
+function selectAllBooks() {
+  if (!brokenOnly.value) {
+    libraryStore.selectAll()
+    return
+  }
+  libraryStore.clearSelection()
+  for (const book of audiobooks.value) libraryStore.toggleSelection(book.id)
 }
 
 function applyCheckboxSelection(audiobook: Audiobook, shiftKey: boolean) {

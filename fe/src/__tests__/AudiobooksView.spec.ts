@@ -999,6 +999,30 @@ describe('AudiobooksView Grouping', () => {
       expect(shownIds(wrapper)).toEqual([2, 3])
     })
 
+    const clickSelectAll = async (wrapper: ReturnType<typeof mount>) => {
+      const button = wrapper.findAll('button.toolbar-btn').find((b) => b.text() === 'Select All')
+      expect(button).toBeDefined()
+      await button!.trigger('click')
+      await wrapper.vm.$nextTick()
+    }
+
+    it('selects only the broken books with Select All, so Repair leaves the healthy ones out', async () => {
+      const { wrapper } = await mountLibrary(books, '/audiobooks?group=broken')
+
+      await clickSelectAll(wrapper)
+
+      expect([...useLibraryStore().selectedIds].sort()).toEqual([2, 3])
+      expect(wrapper.get('button.repair-btn').text()).toContain('Repair Selected (2)')
+    })
+
+    it('still selects every book with Select All outside the broken group', async () => {
+      const { wrapper } = await mountLibrary(books)
+
+      await clickSelectAll(wrapper)
+
+      expect([...useLibraryStore().selectedIds].sort()).toEqual([1, 2, 3, 4])
+    })
+
     it('says when no book is broken, keeps the group menu and offers all books', async () => {
       const { wrapper } = await mountLibrary([books[0]!], '/audiobooks?group=broken')
 
