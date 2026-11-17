@@ -2,6 +2,12 @@
   "version": 2,
   "dependencies": {
     "net10.0": {
+      "coverlet.collector": {
+        "type": "Direct",
+        "requested": "[10.0.1, )",
+        "resolved": "10.0.1",
+        "contentHash": "27jXSV/0DbVqF5jDrAxuQFZ9oaz6gmG03p8ttxAFk+X0M4woFYj7MoWDLCna5EGLb0CE6OE7X6ZH3Wt5smTtaA=="
+      },
       "Microsoft.AspNetCore.Mvc.Testing": {
         "type": "Direct",
         "requested": "[10.0.8, )",
@@ -626,6 +632,12 @@
       "listenarr.domain": {
         "type": "Project"
       },
+      "listenarr.fakeproviders": {
+        "type": "Project",
+        "dependencies": {
+          "Listenarr.Api": "[1.7.2, )"
+        }
+      },
       "listenarr.infrastructure": {
         "type": "Project",
         "dependencies": {
@@ -642,12 +654,6 @@
           "SharpCompress": "[0.49.1, )",
           "SixLabors.ImageSharp": "[4.1.3, )",
           "TagLibSharp": "[2.3.0, )"
-        }
-      },
-      "listenarr.fakeproviders": {
-        "type": "Project",
-        "dependencies": {
-          "Listenarr.Api": "[1.7.2, )"
         }
       },
       "Asp.Versioning.Mvc": {

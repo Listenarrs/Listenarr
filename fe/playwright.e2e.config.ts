@@ -5,7 +5,7 @@ import { defineConfig, devices } from '@playwright/test'
 // scripts/e2e/run.mjs (`npm run test:e2e`) starts the container and sets the variables read here.
 const webPort = Number(process.env.LISTENARR_E2E_WEB_PORT ?? 5174)
 const webUrl = `http://127.0.0.1:${webPort}`
-const coverage = process.env.LISTENARR_E2E_COVERAGE === '1'
+const coverage = process.env.LISTENARR_COVERAGE === '1'
 
 export default defineConfig({
   testDir: './playwright/e2e',

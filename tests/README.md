@@ -10,6 +10,7 @@ tests/                              # Backend tests
 ├── Common/                         # Underlying test framework
 │   ├── BaseApiMock.cs              # Base class for API mocks
 │   ├── BaseTests.cs                # Base class for all tests
+│   ├── CoverageInstrumentation.cs  # Time limits that allow for coverage instrumentation
 │   └── MockUtils.cs                # Helper methods for mocks
 ├── Features/                       # Main directory for tests files
 │   ├── Api/                        # listenarr.api tests
@@ -28,6 +29,7 @@ tests/                              # Backend tests
 │   ├── Routes/                     # One route class per provider (Audible, Audnexus, OpenLibrary)
 │   └── Fixtures/                   # One folder per provider (see its README: naming, recording missing fixtures)
 ├── Listenarr.Tests.csproj          # Testing project
+├── coverage.runsettings            # Backend coverage settings (coverlet, Cobertura)
 └── README.md                       # Backend tests documentation
 ```
 
@@ -43,6 +45,24 @@ every OS. In CI it runs in its own Linux job, `backend-integration-tests`; the n
 ```
 dotnet test tests/Listenarr.BackendIntegrationTests
 ```
+
+### Coverage
+
+Coverage is off by default, locally and in CI. `tests/coverage.runsettings` collects it with coverlet, for
+Listenarr's own assemblies only, as Cobertura:
+
+```
+dotnet test tests/Listenarr.Tests.csproj --settings tests/coverage.runsettings --results-directory <dir>
+```
+
+In CI, a manual run of the `Run Tests` workflow with the `coverage` input collects it in every test job and merges it in a
+last `coverage` job (see `fe/README.md`, "Test Coverage"). It is reported, never gated.
+
+Coverlet adds a hit counter to every line of Listenarr's assemblies, so instrumented hot loops run several times slower.
+A test that asserts a wall-clock limit on Listenarr code takes it from
+`CoverageInstrumentation.TimeLimitMilliseconds(typeof(TestedClass), ms)`, which allows three times the limit when that
+class's assembly is instrumented. Fixed waits in concurrency tests that expire under coverage are raised one by one,
+with a comment saying why.
 
 ### Creating a test
 

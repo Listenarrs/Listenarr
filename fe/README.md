@@ -72,12 +72,23 @@ npm run test:e2e
 
 End-to-end browser tests: Chromium drives the frontend, served by the Vite dev server, which forwards every API and SignalR request to the app running in Docker. No Listenarr API response is stubbed. `tests/Listenarr.FakeProviders` stubs only the app's own outbound requests: every `IHttpClientFactory` client goes to one handler that answers the metadata providers (Audible, Audnexus, OpenLibrary) from `tests/Listenarr.FakeProviders/Fixtures/{Provider}/`, one route class per provider in `tests/Listenarr.FakeProviders/Routes/` (naming rules in `Fixtures/README.md`). Every other request (Amazon, images, any provider without a fixture) gets a 404. The container log lists every request that had no fixture. The container also has no DNS, so a request made outside the factory fails too, and the suite runs offline. The runner (`scripts/e2e/run.mjs`) starts the app in Docker with `scripts/lib/listenarr-stack.mjs` and seeds its library from `scripts/e2e/seed-library.json`. It generates the audiobook folders with `scripts/e2e/generate-library-fixtures.sh`, using the same pinned generator, and creates the `E2E Import` (default), `E2E Second`, `E2E Empty` and `E2E Library` root folders. Every test restores the seeded database and files first.
 
-The specs live under `playwright/e2e/` and run with `playwright.e2e.config.ts`, one at a time. The run collects coverage on both sides:
+The specs live under `playwright/e2e/` and run with `playwright.e2e.config.ts`, one at a time. With `--coverage` (`npm run test:e2e -- --coverage`) the run collects coverage on both sides, reported but not gated:
 
-- Frontend: V8 coverage from Chromium, mapped to the sources, in `test-results/e2e-coverage/index.html`. The whole suite fails when the Library Import code (`LIBRARY_IMPORT_SOURCES` in `playwright/e2e/support/coverage.ts`) falls below `THRESHOLDS`.
-- Backend: the host runs under `dotnet-coverage`. The merged Cobertura report goes to `test-results/e2e-coverage-backend/cobertura.xml`, with a summary of the library import code in `summary.md`. This side is reported but not gated.
+- Frontend: V8 coverage from Chromium, mapped to the sources, in `test-results/e2e-coverage/` (`index.html`, `lcov.info`).
+- Backend: the host runs under `dotnet-coverage`. The merged Cobertura report goes to `test-results/e2e-coverage-backend/cobertura.xml`, with a summary of the library import code in `summary.md`.
 
-`node ../scripts/e2e/run.mjs -- <playwright arguments>` runs a subset, such as a spec or `--repeat-each`, without the coverage gate. `--no-coverage` skips collection. `--serve` starts the stack and prints the variables to run Playwright against it repeatedly.
+`node ../scripts/e2e/run.mjs -- <playwright arguments>` runs a subset, such as a spec or `--repeat-each`. `--coverage` collects coverage (off by default). `--serve` starts the stack and prints the variables to run Playwright against it repeatedly.
+
+### Test Coverage
+
+Coverage is off by default, locally and in CI. To get it in CI, run the `Run Tests` workflow manually with the `coverage` input (`gh workflow run run-tests.yml --ref <branch> -f coverage=true`): every test job then collects coverage and uploads it as a `coverage-<job>` artifact, and the last job, `coverage`, merges them (`scripts/test-coverage/aggregate.mjs`) into a job summary, per side of the app, with each job's share of the coverable lines, the lines no other job covers and the total, plus a `coverage-report` artifact (HTML report, merged lcov). It is reported, not gated. Locally:
+
+- Unit tests: `npm run test:coverage` writes `coverage/unit/` (`lcov.info`, HTML).
+- Frontend integration tests: `LISTENARR_COVERAGE=1 npm run test:frontend-integration` writes `test-results/frontend-integration-coverage/`.
+- E2E tests: `npm run test:e2e -- --coverage` (see above).
+- Backend tests: `dotnet test <project> --settings tests/coverage.runsettings --results-directory <dir>` from the repository root.
+
+To merge them, put each job's reports in its own folder under one directory and run `dotnet tool restore && node scripts/test-coverage/aggregate.mjs <directory> <output> --html` from the repository root.
 
 ### Lint with [ESLint](https://eslint.org/)
 

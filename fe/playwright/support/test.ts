@@ -1,16 +1,32 @@
 import { test as base } from '@playwright/test'
 import { ApiStubs } from './api-stubs.js'
+import { collectPageCoverage } from './coverage.js'
+import {
+  collectCoverage,
+  frontendIntegrationCoverage,
+} from '../frontend-integration/support/coverage.js'
 
 /**
  * The `test` every frontend integration spec imports: its `api` fixture stubs the whole API before the test
- * body runs, so no request reaches a backend.
+ * body runs, so no request reaches a backend. With LISTENARR_COVERAGE=1, `jsCoverage` collects the V8
+ * coverage of every page the test loads.
  */
-export const test = base.extend<{ api: ApiStubs }>({
+export const test = base.extend<{ api: ApiStubs; jsCoverage: void }>({
   api: [
     async ({ page }, use) => {
       const api = new ApiStubs(page)
       await api.stubIntegrationDefaults()
       await use(api)
+    },
+    { auto: true },
+  ],
+  jsCoverage: [
+    async ({ page }, use) => {
+      if (!collectCoverage) {
+        await use()
+        return
+      }
+      await collectPageCoverage(page, frontendIntegrationCoverage, () => use())
     },
     { auto: true },
   ],
