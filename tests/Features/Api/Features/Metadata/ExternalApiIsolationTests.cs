@@ -56,7 +56,8 @@ public sealed class ExternalApiIsolationTests : BaseTests
     {
         // Given the backend test container
         Init();
-        using var client = _provider.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(AudibleService));
+        // AddHttpClient<AudibleService>() registers the client under the type's full name, not nameof().
+        using var client = _provider.GetRequiredService<IHttpClientFactory>().CreateClient(typeof(AudibleService).FullName!);
 
         // When Audible is asked for a book without a fixture
         using var response = await client.GetAsync("https://api.audible.com/1.0/catalog/products/UNKNOWN1234");
