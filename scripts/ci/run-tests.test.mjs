@@ -138,9 +138,10 @@ test('formatJobs: one line per job that ran, with minutes when known', () => {
   const lines = formatJobs([
     { name: 'unit-tests', conclusion: 'success', startedAt: '2026-01-01T10:00:00Z', completedAt: '2026-01-01T10:12:59Z' },
     { name: 'e2e-tests', conclusion: 'skipped' },
-    { name: 'coverage', conclusion: '', status: 'in_progress', startedAt: '2026-01-01T10:00:00Z' }
+    { name: 'coverage', conclusion: '', status: 'in_progress', startedAt: '2026-01-01T10:00:00Z' },
+    { name: 'e2e', conclusion: '', status: 'in_progress', startedAt: '2026-01-01T10:00:00Z', completedAt: '0001-01-01T00:00:00Z' }
   ])
-  assert.deepEqual(lines, ['SUCCESS unit-tests (12 min)', 'IN_PROGRESS coverage'])
+  assert.deepEqual(lines, ['SUCCESS unit-tests (12 min)', 'IN_PROGRESS coverage', 'IN_PROGRESS e2e'])
 })
 
 test('workflowJobs: the job ids of a workflow file', () => {
@@ -299,6 +300,22 @@ test('main: a run where no job ran says so and exits 1', async () => {
   assert.equal(await main([], fake.deps), 1)
   assert.ok(fake.output.includes('CI RUN: NO JOB RAN'))
   assert.equal(fake.called('gh run view').filter((call) => call.args.includes('--log-failed')).length, 0)
+})
+
+test('main: Ctrl+C while waiting cancels the run, deletes the snapshot branch and exits 130', async () => {
+  const fake = fakeEnvironment()
+  let interrupt
+  fake.deps.onInterrupt = (handler) => { interrupt = handler }
+  const run = fake.deps.run
+  fake.deps.run = async (cmd, args, options) => {
+    if (args[1] === 'watch') await interrupt()
+    return run(cmd, args, options)
+  }
+  assert.equal(await main([], fake.deps), 130)
+  assert.deepEqual(fake.called('gh run cancel')[0].args, ['run', 'cancel', '42', '-R', 'me/Listenarr'])
+  assert.ok(fake.output.includes('CI RUN: CANCELLED'))
+  assert.equal(fake.called('git push -q git@github.com:me/Listenarr.git :refs').length, 1)
+  assert.equal(fake.called('gh run view').length, 0)
 })
 
 test('main: usage errors exit 2, --help exits 0', async () => {

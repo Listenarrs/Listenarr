@@ -133,7 +133,8 @@ export function formatJobs (jobs) {
   return jobs.filter((job) => job.conclusion !== 'skipped').map((job) => {
     const start = Date.parse(job.startedAt ?? '')
     const end = Date.parse(job.completedAt ?? '')
-    const minutes = Number.isNaN(start) || Number.isNaN(end) ? '' : ` (${Math.floor((end - start) / 60000)} min)`
+    // A job still running has no completedAt, or GitHub's zero date.
+    const minutes = Number.isNaN(start) || Number.isNaN(end) || end < start ? '' : ` (${Math.floor((end - start) / 60000)} min)`
     return `${(job.conclusion || job.status).toUpperCase()} ${job.name}${minutes}`
   })
 }
@@ -221,8 +222,17 @@ async function runTests (options, deps) {
     deps.log(`run: https://github.com/${fork}/actions/runs/${run}`)
     if (!options.wait) return 0
 
-    deps.onInterrupt?.(() => deps.run('gh', ['run', 'cancel', String(run), '-R', fork]))
+    let interrupted = false
+    deps.onInterrupt?.(async () => {
+      interrupted = true
+      deps.error('interrupted: cancelling the run')
+      await deps.run('gh', ['run', 'cancel', String(run), '-R', fork])
+    })
     await deps.run('gh', ['run', 'watch', String(run), '-R', fork, '--interval', '15'])
+    if (interrupted) {
+      deps.log('CI RUN: CANCELLED')
+      return 130
+    }
     const { conclusion, jobs } = JSON.parse(await sh('gh', ['run', 'view', String(run), '-R', fork, '--json', 'conclusion,jobs']))
     for (const line of formatJobs(jobs)) deps.log(line)
     if (conclusion === 'success') {
@@ -266,15 +276,13 @@ function defaultDeps () {
     }),
     // Ctrl+C while waiting cancels the run; the snapshot branch is deleted once the watch ends.
     onInterrupt: (cancel) => process.once('SIGINT', async () => {
-      console.error('interrupted: cancelling the run')
+      const watching = [...children]
       await cancel()
-      for (const child of children) child.kill()
-      process.exitCode = 130
+      for (const child of watching) child.kill()
     })
   }
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  const code = await main(process.argv.slice(2))
-  if (process.exitCode !== 130) process.exitCode = code
+  process.exitCode = await main(process.argv.slice(2))
 }
