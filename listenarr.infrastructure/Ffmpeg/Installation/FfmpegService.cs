@@ -35,13 +35,15 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
         /// <summary>
         /// The notice for the packaged binary. The version is the one the binary reports through
         /// <c>-version</c>, so a package bump needs no code change; it is left out when the
-        /// binary does not pass the check.
+        /// binary does not pass the check. Every build and publish output carries the licence texts
+        /// and the source notice under <c>licenses/ffprobe/</c>.
         /// </summary>
         internal static string PackagedLicenseNotice(string? version)
         {
             var name = string.IsNullOrEmpty(version) ? "ffprobe" : $"ffprobe {version}";
-            return name + " is a static FFmpeg build shipped with Listenarr in the Openur.FFprobeStatic package. "
-                + "Review FFmpeg licensing (LGPL/GPL) at https://ffmpeg.org/legal.html";
+            return name + " is a static FFmpeg build shipped with Listenarr in the Openur.FFprobeStatic package, "
+                + "under the LGPL version 3 or later. The licence texts and a notice saying where its source is "
+                + "are in licenses/ffprobe/ in the Listenarr application directory.";
         }
 
         internal const string LegacyLicenseNotice =
