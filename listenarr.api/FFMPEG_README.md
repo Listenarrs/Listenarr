@@ -31,4 +31,4 @@ NuGet does not preserve Unix file modes reliably, so the binary can arrive witho
 Licensing
 ---------
 
-FFmpeg is distributed under the LGPL or GPL depending on how it is built. The packaged linux-x64 build (9.0.2.508) reports `--enable-version3` without `--enable-gpl` in its configuration; the other platforms were not checked. Redistributing it with Listenarr carries FFmpeg's licensing obligations; review https://ffmpeg.org/legal.html.
+The licence texts and a notice for the packaged binary are in `licenses/ffprobe/` at the repository root, and every build and publish output carries a copy under `licenses/ffprobe/`. The notice names the FFmpeg release, configure options, patches and bundled dav1d version, and where their source is. Every packaged platform is built with `--enable-version3` and without `--enable-gpl` or `--enable-nonfree`, which FFmpeg's own licence file places under the LGPL version 3 or later. Update the notice when a package bump changes any of these; https://ffmpeg.org/legal.html covers FFmpeg's redistribution terms.
