@@ -152,6 +152,16 @@ This project follows a layered pattern: domain models in `listenarr.domain`, EF 
 - Test coverage is off by default and never gated: see "Test Coverage" in `fe/README.md` to collect it locally, or run the `Run Tests` workflow manually with the `coverage` input to get a merged report of every test job
 - Ensure all tests pass before submitting PR
 
+**Running CI on your fork:**
+
+`npm run ci:fork -- [options]` (`scripts/ci/run-tests.mjs`) runs the `Run Tests` workflow on your fork of Listenarr, without opening a PR or committing: it pushes a snapshot of your working tree (uncommitted and untracked files included) to a throwaway `ci/wip-<branch>` branch of your fork, runs the workflow there, waits, prints one line per job and the logs of the failed steps, then deletes the branch. It needs git and the [GitHub CLI](https://cli.github.com/) signed in (`gh auth login`), and works the same on Linux, macOS and Windows.
+
+- **Fork:** the GitHub remote of your checkout owned by the `gh` user, or `--fork <owner/repo>`. A fork has Actions disabled until you enable them on its Actions tab (or push a `feature/*` branch, which triggers the workflow once).
+- **Where the Linux jobs run:** by default on the first online self-hosted runner registered on your fork (Settings > Actions > Runners; `--prefer a,b` or `LISTENARR_CI_RUNNERS=a,b` sets an order); `--runner <name or label>` picks one; `--runner github` uses GitHub-hosted runners. `backend-tests-windows` always runs on GitHub's Windows runner. A self-hosted runner needs Docker (privileged), `sudo`, PowerShell, Node.js and a workspace and `/tmp` on a regular filesystem such as ext4 (not overlayfs or ZFS).
+- **Only some jobs:** `--jobs unit-tests,e2e-tests`. Other workflow inputs: `--input coverage=true`.
+- **A pushed branch:** `--ref <branch>` runs the branch as it is on your fork, without a snapshot, so the run stays in the branch's Actions history.
+- **Other options:** `--tag <t>` (several snapshots at once), `--keep-branch`, `--no-wait` (print the run URL and return); `--help` lists them all.
+
 ### Compatibility and migration development policy
 
 The compatibility boundary for a pull request is the branch it targets. Databases, filesystem artifacts, API states, and recovery formats that were produced only by an unmerged feature branch or intermediate PR image are development artifacts, not supported upgrade inputs.
