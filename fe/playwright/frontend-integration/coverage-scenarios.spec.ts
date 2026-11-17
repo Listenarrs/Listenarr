@@ -11,6 +11,7 @@ import {
   test,
   type ApiStubs,
   type RepairIdentifier,
+  LIBRARY_PATH,
 } from '../support/test.js'
 
 const repairRow = (page: Page, id: number) => page.locator(`[data-testid="repair-row-${id}"]`)
@@ -254,7 +255,7 @@ test.describe('ported coverage scenarios (API-stubbed)', () => {
     }
     await api.stubSearch({ statusCode: 200, body: { results: [sharedMatch] } }, 'crossCardSearch')
 
-    await page.goto('/')
+    await page.goto(LIBRARY_PATH)
     await api.wait('getLibrary')
     await expect(libraryBook(page, firstTitle)).toBeVisible()
     await expect(libraryBook(page, secondTitle)).toBeVisible()
@@ -320,7 +321,7 @@ test.describe('ported coverage scenarios (API-stubbed)', () => {
       'deletedMidRunSearch',
     )
 
-    await page.goto('/')
+    await page.goto(LIBRARY_PATH)
     await api.wait('getLibrary')
     await expect(libraryBook(page, 'Unavailable Book')).toBeVisible()
     await expect(libraryBook(page, 'Available Book')).toBeVisible()

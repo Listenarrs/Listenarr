@@ -11,6 +11,7 @@ import {
   type ApiReply,
   type ApiStubs,
   type RepairIdentifier,
+  LIBRARY_PATH,
 } from '../support/test.js'
 
 const audiobookId = 401
@@ -217,7 +218,7 @@ test.describe('Review scenarios (API-stubbed)', () => {
 
     const repairSelected = page.locator('button', { hasText: 'Repair Selected (1)' })
 
-    await page.goto('/')
+    await page.goto(LIBRARY_PATH)
     await setSelected(page, firstBook.title!, true)
     await repairSelected.click()
     await expect(page.getByText('Loading the selected audiobooks').first()).toBeVisible()
@@ -304,7 +305,7 @@ test.describe('Review scenarios (API-stubbed)', () => {
     await api.stubSearch({ statusCode: 200, body: { results: [selectedMatch] } }, 'repairSearch')
     await api.stubRepairWrites(audiobookId)
 
-    await page.goto('/')
+    await page.goto(LIBRARY_PATH)
     await page.locator('nav, aside').locator('a', { hasText: 'Library Import' }).first().click()
     await expect.poll(() => pathname(page)).toBe('/library-import')
     await page.locator('nav, aside').locator('a', { hasText: 'Audiobooks' }).first().click()
