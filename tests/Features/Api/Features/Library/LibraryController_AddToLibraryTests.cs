@@ -121,6 +121,20 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
+        public void AddToLibrary_UsesOneControllerAndWorkflowPerRequestScope()
+        {
+            using var firstScope = _provider.CreateScope();
+            using var secondScope = _provider.CreateScope();
+
+            Assert.NotSame(
+                firstScope.ServiceProvider.GetRequiredService<LibraryController>(),
+                secondScope.ServiceProvider.GetRequiredService<LibraryController>());
+            Assert.NotSame(
+                firstScope.ServiceProvider.GetRequiredService<LibraryAddWorkflow>(),
+                secondScope.ServiceProvider.GetRequiredService<LibraryAddWorkflow>());
+        }
+
+        [Fact]
         public async Task AddToLibrary_ConcurrentIdentifierlessSameDestination_CommitsExactlyOnce()
         {
             var destination = Path.Join(tempRoot, "Identifierless", "Book");

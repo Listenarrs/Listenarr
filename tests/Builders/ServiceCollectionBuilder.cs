@@ -211,7 +211,7 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton<LibraryMetadataRescanWorkflow>();
             services.AddSingleton<LibraryScanPathResolver>();
             services.AddSingleton<LibraryScanQueueWorkflow>();
-            services.AddSingleton<LibraryAddWorkflow>();
+            services.AddScoped<LibraryAddWorkflow>();
             services.AddSingleton<LibraryManualScanWorkflow>();
             services.AddSingleton<LibraryBulkEditWorkflow>();
             services.AddSingleton<LibraryMoveWorkflow>();
@@ -238,7 +238,7 @@ namespace Listenarr.Tests.Builders
             services.AddSingleton<IMoveJobProcessor>(sp => sp.GetRequiredService<MoveJobProcessor>());
             services.AddSingleton<MoveBackgroundService>();
             services.AddSingleton<MoveQueueService>();
-            services.AddSingleton<LibraryController>();
+            services.AddScoped<LibraryController>();
             services.AddSingleton<ImagesController>();
             services.AddSingleton(new EphemeralDataProtectionProvider().CreateProtector("Listenarr.ConfigurationService.ProwlarrImport"));
 
