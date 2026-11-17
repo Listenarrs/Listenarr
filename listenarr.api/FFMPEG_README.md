@@ -26,7 +26,7 @@ Before it uses a binary, Listenarr runs `ffprobe -version` and accepts it only i
 Permissions
 -----------
 
-NuGet does not preserve Unix file modes reliably, so the binary can arrive without execute permission for every user. The Docker images set it during the build (`docker/runtime/finalize-app.sh`), and on startup Listenarr sets it itself when it owns the file.
+NuGet does not preserve Unix file modes reliably, so the binary can arrive without execute permission for every user. The Docker images set it before the binary reaches an image layer (`docker/runtime/prepare-ffprobe.sh`, run in the root `Dockerfile`'s build stage and by `finalize-app.sh`; CI sets it on the runtime image's input), and on startup Listenarr sets it itself when it owns the file.
 
 Licensing
 ---------
