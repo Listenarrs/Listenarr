@@ -6,6 +6,9 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Listenarr.Tests.Features.Infrastructure.Persistence;
 
+[Trait("Area", "Library")]
+[Trait("Name", "FileRegistrationOperatorReviewTests")]
+[Trait("Category", "Infrastructure")]
 public sealed class FileRegistrationOperatorReviewTests : BaseTests
 {
     private sealed class Factory(DbContextOptions<ListenArrDbContext> options) : IDbContextFactory<ListenArrDbContext>
