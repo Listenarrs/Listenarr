@@ -1,9 +1,9 @@
-# Dedicated test host for the suites that run Listenarr in Docker (backend integration, E2E), built and
-# started by scripts/lib/listenarr-stack.mjs:
+# Dedicated test host for the browser E2E suite, which runs Listenarr in Docker, built and started by
+# scripts/lib/listenarr-stack.mjs:
 #
-#   docker build --tag listenarr-backend-integration-app .
-#   docker build --tag listenarr-backend-integration --build-arg LISTENARR_IMAGE=listenarr-backend-integration-app \
-#     --file .devcontainer/backend-integration.Dockerfile .
+#   docker build --tag listenarr-e2e-app .
+#   docker build --tag listenarr-e2e-host --build-arg LISTENARR_IMAGE=listenarr-e2e-app \
+#     --file scripts/e2e/e2e-host.Dockerfile .
 #
 # It runs tests/Listenarr.FakeProviders (the API with fixture-backed metadata providers) instead of the
 # production entry point. With LISTENARR_COVERAGE_DIR set, the host runs under dotnet-coverage and
@@ -25,7 +25,7 @@ FROM ${LISTENARR_IMAGE}
 # Not under a path containing "testhost": Microsoft code coverage excludes those modules by default.
 COPY --from=test-host-build /out/integration-host/ /app/integration-host/
 COPY --from=test-host-build /out/dotnet-coverage/ /opt/dotnet-coverage/
-COPY .devcontainer/backend-integration-coverage.xml /opt/dotnet-coverage/listenarr.coverage.xml
+COPY scripts/e2e/e2e-host-coverage.xml /opt/dotnet-coverage/listenarr.coverage.xml
 
 # ffprobe reads the tags of the generated audiobooks the suites import; the
 # dotnet-coverage profiler needs libxml2.
@@ -50,7 +50,7 @@ ENV UMASK=000 \
 	LISTENARR_LOG_LEVEL=Warning \
 	DOTNET_ROLL_FORWARD=Major
 
-COPY .devcontainer/backend-integration-entrypoint.sh /backend-integration-entrypoint.sh
-RUN chmod 755 /backend-integration-entrypoint.sh
+COPY scripts/e2e/e2e-host-entrypoint.sh /e2e-host-entrypoint.sh
+RUN chmod 755 /e2e-host-entrypoint.sh
 
-ENTRYPOINT ["/backend-integration-entrypoint.sh"]
+ENTRYPOINT ["/e2e-host-entrypoint.sh"]

@@ -14,8 +14,8 @@ import {
   type ListenarrApi,
 } from './support/test.js'
 
-const importRoot = '/backend-integration/import'
-const libraryRoot = '/backend-integration/library'
+const importRoot = '/e2e/import'
+const libraryRoot = '/e2e/library'
 const source = {
   princess: `${importRoot}/Edgar Rice Burroughs/A Princess of Mars/A Princess of Mars.m4b`,
   tanar: `${importRoot}/Edgar Rice Burroughs/Tanar of Pellucidar/Tanar of Pellucidar.m4b`,

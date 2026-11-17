@@ -149,8 +149,8 @@ test.describe('Library Import table', () => {
   })
 
   test('Choose another folder adds a root folder and shows it', async ({ page, listenarr }) => {
-    await mkdir(hostPath('/backend-integration/extra'), { recursive: true })
-    await cp(hostPath('/backend-integration/second'), hostPath('/backend-integration/extra'), {
+    await mkdir(hostPath('/e2e/extra'), { recursive: true })
+    await cp(hostPath('/e2e/second'), hostPath('/e2e/extra'), {
       recursive: true,
     })
     await openLibraryImport(page)
@@ -166,7 +166,7 @@ test.describe('Library Import table', () => {
 
     await page.locator('.scan-controls button', { hasText: 'Choose another folder...' }).click()
     await page.getByPlaceholder('Enter a name for this root folder').fill('E2E Extra')
-    await page.locator('#root-path').fill('/backend-integration/extra')
+    await page.locator('#root-path').fill('/e2e/extra')
     await page.getByRole('button', { name: 'Save' }).click()
     await expect(page.getByRole('heading', { name: 'Add Root Folder' })).toHaveCount(0)
     await expect(page.locator('.folder-select option')).toHaveCount(folderCount + 1)
@@ -176,7 +176,7 @@ test.describe('Library Import table', () => {
     await scan(page)
     await expect.poll(() => rowFolders(page)).toEqual(['Tarzan of the Apes'])
     await expect(importRow(page, 'Tarzan of the Apes').locator('.file-path')).toHaveText(
-      '/backend-integration/extra/Edgar Rice Burroughs/Tarzan of the Apes/Tarzan of the Apes.m4b',
+      '/e2e/extra/Edgar Rice Burroughs/Tarzan of the Apes/Tarzan of the Apes.m4b',
     )
   })
 })

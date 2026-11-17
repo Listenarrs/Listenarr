@@ -1,5 +1,5 @@
 #!/bin/sh
-# Entry point of the test host image (.devcontainer/backend-integration.Dockerfile). It supervises
+# Entry point of the E2E test host image (scripts/e2e/e2e-host.Dockerfile). It supervises
 # tests/Listenarr.FakeProviders rather than replacing itself with it, so the suites can restart the app
 # without restarting the container: a container restart recreates its network interface, and the
 # host's network change makes Chromium abort the page loads in flight (net::ERR_NETWORK_CHANGED).
