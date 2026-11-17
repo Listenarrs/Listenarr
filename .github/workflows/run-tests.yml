@@ -261,7 +261,6 @@ jobs:
       - name: Run native backend tests
         env:
           ASPNETCORE_ENVIRONMENT: Test
-          Playwright__Enabled: 'false'
           LISTENARR_COVERAGE_DIRECTORY: ${{ inputs.coverage && 'TestResults/coverage' || '' }}
         run: pwsh -NoProfile -File scripts/run-native-backend-tests.ps1
 
@@ -299,7 +298,6 @@ jobs:
       - name: Run native backend tests
         env:
           ASPNETCORE_ENVIRONMENT: Test
-          Playwright__Enabled: 'false'
           LISTENARR_COVERAGE_DIRECTORY: ${{ inputs.coverage && 'TestResults/coverage' || '' }}
         run: pwsh -NoProfile -File scripts/run-native-backend-tests.ps1
 
