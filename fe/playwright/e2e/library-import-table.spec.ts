@@ -85,17 +85,13 @@ test.describe('Library Import table', () => {
       .poll(async () => (await rowFolders(page))[0])
       .toBe('Twenty Thousand Leagues Under the Sea')
 
-    // Columns can't be resized there.
-    const before = await page.evaluate(() =>
-      localStorage.getItem('listenarr.libraryImport.columnWidths.v1'),
-    )
-    await page
-      .locator('.resize-handle')
-      .first()
-      .dispatchEvent('pointerdown', { clientX: 100, pointerId: 1 })
-    expect(
-      await page.evaluate(() => localStorage.getItem('listenarr.libraryImport.columnWidths.v1')),
-    ).toBe(before)
+    // Columns can't be resized there: the header row carrying the resize handles is hidden on a narrow
+    // screen, so there is no edge to drag.
+    await expect(page.locator('.import-table thead')).toBeHidden()
+    await expect(header(page, 'Book')).toBeHidden()
+    for (const handle of await page.locator('.resize-handle').all()) {
+      await expect(handle).toBeHidden()
+    }
   })
 
   test('columns resize by dragging their edge, within limits, and keep their width', async ({

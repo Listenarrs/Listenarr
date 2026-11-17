@@ -54,33 +54,29 @@ test.describe('Hardlink/Copy move integration', () => {
     await expect(page.locator('button', { hasText: 'Move Files' }).first()).toBeVisible()
   })
 
-  test('calls move API when confirming move', async ({ page, api }) => {
-    await editDestination(page, api)
-
-    await expect(page.locator('input[aria-label="Move files now"]')).toBeChecked()
-    await page.locator('button', { hasText: 'Move Files' }).first().click()
-
-    await api.wait('moveAudiobook')
-    await expect(page.getByText('Move queued')).not.toHaveCount(0)
-  })
-
-  test('respects user choice to change without moving', async ({ page, api }) => {
-    await editDestination(page, api)
-
-    await page.locator('label.checkbox-label', { hasText: 'Move files now' }).first().click()
-    await expect(page.locator('input[aria-label="Move files now"]')).not.toBeChecked()
-    await page.locator('button', { hasText: 'Update Path' }).first().click()
-
-    const { request } = await api.wait('moveAudiobook')
-    expect(request.body.moveFiles).toBe(false)
-    await expect(page.getByText('Destination updated')).not.toHaveCount(0)
-  })
-
   test('requests volume check when move dialog opens', async ({ page, api }) => {
     await editDestination(page, api)
 
     await expect(page.locator('input[aria-label="Move files now"]')).toBeChecked()
 
     await api.wait('checkVolume')
+  })
+
+  // The move API and the "change without moving" choice are covered by move-flow.spec.ts; what is
+  // specific to the hardlink/copy action is the warning shown when the move would cross a volume.
+  test('warns that moving across volumes will break the hardlinks', async ({ page, api }) => {
+    await api.stubFileSystemCheckVolume({
+      sameVolume: false,
+      willBreakHardlinks: true,
+      sourceVolume: '/mnt',
+      destVolume: '/other',
+    })
+    await editDestination(page, api)
+
+    await expect(page.locator('input[aria-label="Move files now"]')).toBeChecked()
+    await api.wait('checkVolume')
+    const warning = page.locator('.hardlink-warning')
+    await expect(warning).toBeVisible()
+    await expect(warning).toContainText('will break hardlinks')
   })
 })

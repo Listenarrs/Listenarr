@@ -457,8 +457,8 @@ export class ApiStubs {
     }))
   }
 
-  stubFileSystemCheckVolume(alias = 'checkVolume') {
-    return this.stubJson('GET', '**/api/v1/filesystem/check-volume*', fileSystemCheckVolumeFixture(), alias)
+  stubFileSystemCheckVolume(overrides: Partial<FileSystemCheckVolumeResponse> = {}, alias = 'checkVolume') {
+    return this.stubJson('GET', '**/api/v1/filesystem/check-volume*', fileSystemCheckVolumeFixture(overrides), alias)
   }
 
   stubFileSystemValidate(alias = 'validateManualImportFolder') {
