@@ -26,7 +26,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
 
             // Tracked lookups for orphan cleanup ignore the category, so a tracked job
             // stays visible after its category changes. Display and discovery keep it.
-            var isFullPoll = ids.Count == 0;
+            var isFullPoll = ids.Count == 0 || ignoreCategory;
             var configuredCategory = ignoreCategory ? null : DownloadClientCategoryFilter.GetConfiguredCategory(client);
             var activeIdentities = new List<NzbgetHistoryEnrichmentWorkflow.ActiveHistoryIdentity>();
 
@@ -49,14 +49,25 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
                     throw new DownloadClientAdapterPollingException(message);
                 }
 
-                foreach (var valueElement in arrayData.Elements("value"))
+                foreach (var structElement in NzbgetHistoryReader.ReadStructs(listResult, ct, isFullPoll))
                 {
                     try
                     {
-                        var structElement = valueElement.Element("struct");
-                        if (structElement == null && isFullPoll)
+                        if (isFullPoll)
                         {
-                            throw new DownloadClientAdapterPollingException(IncompleteSnapshotMessage);
+                            var canonicalId = NzbgetHistoryReader.ReadIdentifier(structElement, "NZBID");
+                            var groupId = NzbgetHistoryReader.ReadIdentifier(structElement, "GroupID");
+                            var lastId = NzbgetHistoryReader.ReadIdentifier(structElement, "LastID");
+                            var aliases = new[] { canonicalId, groupId, lastId }.Where(id => !string.IsNullOrWhiteSpace(id)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                            if (aliases.Count == 0) throw new DownloadClientAdapterPollingException(IncompleteSnapshotMessage);
+                            if (ignoreCategory)
+                            {
+                                foreach (var id in ids.Where(aliases.Contains))
+                                {
+                                    items.Add(new QueueItem { Id = id, Title = structElement.Elements("member").FirstOrDefault(member => member.Element("name")?.Value == "NZBName")?.Element("value")?.Element("string")?.Value ?? string.Empty, Status = "unknown", CanPause = false, CanRemove = false, DownloadClientId = client.Id, DownloadClient = client.Name, DownloadClientType = "nzbget" });
+                                }
+                                continue;
+                            }
                         }
 
                         if (structElement != null)
@@ -107,6 +118,16 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
                 throw new DownloadClientAdapterPollingException("Error polling NZBGet queue.", ex);
             }
 
+            if (ignoreCategory)
+            {
+                var observed = items.Select(item => item.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var missing = ids.Where(id => !observed.Contains(id)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                if (missing.Count > 0)
+                {
+                    items.AddRange(await NzbgetTrackedPresence.ReadAsync(historyEnrichmentWorkflow, client, missing, logger, ct));
+                }
+                return items;
+            }
             await ApplyGlobalDownloadRateFallbackAsync(client, items, ct);
             await historyEnrichmentWorkflow.EnrichQueueAsync(
                 client,
