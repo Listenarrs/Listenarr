@@ -27,7 +27,8 @@ export default defineConfig({
   webServer: {
     command: 'npm run dev -- --host 127.0.0.1 --port 5173 --strictPort',
     url: 'http://127.0.0.1:5173',
-    reuseExistingServer: !process.env.CI,
+    // Always this checkout's own server: reusing whatever listens on the port could test another branch.
+    reuseExistingServer: false,
     timeout: 120_000,
   },
 })
