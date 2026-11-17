@@ -33,11 +33,6 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
     {
         public static string ExecutableName(bool isWindows) => isWindows ? "ffprobe.exe" : "ffprobe";
 
-        public static IReadOnlyList<string> CandidatePaths(string applicationBaseDirectory, string runtimeIdentifier, bool isWindows)
-        {
-            return CandidatePaths(applicationBaseDirectory, [runtimeIdentifier], isWindows);
-        }
-
         public static IReadOnlyList<string> CandidatePaths(string applicationBaseDirectory, IReadOnlyList<string> runtimeIdentifiers, bool isWindows)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(applicationBaseDirectory);
@@ -51,11 +46,6 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
             }
 
             return candidates;
-        }
-
-        public static string? Locate(string applicationBaseDirectory, string runtimeIdentifier, bool isWindows)
-        {
-            return Locate(applicationBaseDirectory, [runtimeIdentifier], isWindows);
         }
 
         public static string? Locate(string applicationBaseDirectory, IReadOnlyList<string> runtimeIdentifiers, bool isWindows)

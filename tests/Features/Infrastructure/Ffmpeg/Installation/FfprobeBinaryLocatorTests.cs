@@ -5,7 +5,7 @@ using Listenarr.Tests.Common;
 namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
 {
     /// <summary>
-    /// ffprobe arrives as a NuGet package (native asset per RID) in this option, so these tests
+    /// ffprobe arrives as a NuGet package (native asset per RID), so these tests
     /// pin down where the locator looks and that the build output really carries a binary for
     /// every RID Listenarr publishes.
     /// </summary>
@@ -20,7 +20,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
             var expected = Path.Join(appBase, "ffprobe");
             await File.WriteAllTextAsync(expected, "packaged");
 
-            var located = FfprobeBinaryLocator.Locate(appBase, "linux-x64", isWindows: false);
+            var located = FfprobeBinaryLocator.Locate(appBase, ["linux-x64"], isWindows: false);
 
             Assert.Equal(expected, located);
         }
@@ -33,7 +33,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
             Directory.CreateDirectory(Path.GetDirectoryName(expected)!);
             await File.WriteAllTextAsync(expected, "packaged");
 
-            var located = FfprobeBinaryLocator.Locate(appBase, "linux-arm64", isWindows: false);
+            var located = FfprobeBinaryLocator.Locate(appBase, ["linux-arm64"], isWindows: false);
 
             Assert.Equal(expected, located);
         }
@@ -46,7 +46,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
             Directory.CreateDirectory(Path.GetDirectoryName(foreign)!);
             await File.WriteAllTextAsync(foreign, "packaged");
 
-            var located = FfprobeBinaryLocator.Locate(appBase, "linux-x64", isWindows: false);
+            var located = FfprobeBinaryLocator.Locate(appBase, ["linux-x64"], isWindows: false);
 
             Assert.Null(located);
         }
@@ -59,12 +59,12 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
             Directory.CreateDirectory(Path.GetDirectoryName(extensionless)!);
             await File.WriteAllTextAsync(extensionless, "wrong name");
 
-            Assert.Null(FfprobeBinaryLocator.Locate(appBase, "win-x64", isWindows: true));
+            Assert.Null(FfprobeBinaryLocator.Locate(appBase, ["win-x64"], isWindows: true));
 
             var expected = extensionless + ".exe";
             await File.WriteAllTextAsync(expected, "packaged");
 
-            Assert.Equal(expected, FfprobeBinaryLocator.Locate(appBase, "win-x64", isWindows: true));
+            Assert.Equal(expected, FfprobeBinaryLocator.Locate(appBase, ["win-x64"], isWindows: true));
         }
 
         [Fact]
@@ -109,7 +109,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
         {
             // The RIDs Listenarr publishes come from the API project itself, so adding a RID
             // there without a packaged ffprobe for it fails here instead of in a user's install.
-            var apiProject = XDocument.Load(Path.Join(RepositoryRoot(), "listenarr.api", "Listenarr.Api.csproj"));
+            var apiProject = XDocument.Load(Path.Join(TestUtils.FindRepositoryRoot(), "listenarr.api", "Listenarr.Api.csproj"));
             var publishedRids = apiProject.Descendants("RuntimeIdentifiers")
                 .Single()
                 .Value
@@ -121,7 +121,7 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
             var missing = publishedRids
                 .Where(rid => !File.Exists(FfprobeBinaryLocator.CandidatePaths(
                     AppContext.BaseDirectory,
-                    rid,
+                    [rid],
                     isWindows: rid.StartsWith("win-", StringComparison.Ordinal))[1]))
                 .ToArray();
 
@@ -140,18 +140,6 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
 
             Assert.NotNull(located);
             Assert.StartsWith(Path.GetFullPath(AppContext.BaseDirectory), Path.GetFullPath(located));
-        }
-
-        private static string RepositoryRoot()
-        {
-            var directory = new DirectoryInfo(AppContext.BaseDirectory);
-            while (directory != null && !File.Exists(Path.Join(directory.FullName, "listenarr.slnx")))
-            {
-                directory = directory.Parent;
-            }
-
-            Assert.NotNull(directory);
-            return directory.FullName;
         }
     }
 }
