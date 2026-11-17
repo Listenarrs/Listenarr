@@ -1,5 +1,5 @@
-ffprobe
-=======
+ffprobe notice
+==============
 
 Listenarr ships the ffprobe program from the Openur.FFprobeStatic NuGet package to read audio
 file metadata. Listenarr runs it as a separate program and does not modify it. The package
