@@ -28,7 +28,9 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
     /// or an unrelated file at the expected path is reported as unavailable instead of failing
     /// every probe. The result is cached per path and invalidated when the file's length,
     /// modification time or (on Unix) mode changes; the mode is part of the key because the
-    /// execute-bit repair changes it without touching the modification time.
+    /// execute-bit repair changes it without touching the modification time. A timeout, or a
+    /// failure to run the process at all, is not cached: it says nothing lasting about the binary,
+    /// so the next caller checks again.
     /// </summary>
     public partial class FfmpegService
     {
@@ -91,9 +93,16 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
                 return cached;
             }
 
-            var (failure, version) = await RunVersionCheckAsync(fullPath);
+            var (failure, version, retryable) = await RunVersionCheckAsync(fullPath);
             var validation = new FfprobeValidation(file.Length, file.LastWriteTimeUtc, mode, failure, version);
-            _validationCache[fullPath] = validation;
+            if (retryable)
+            {
+                _validationCache.TryRemove(fullPath, out _);
+            }
+            else
+            {
+                _validationCache[fullPath] = validation;
+            }
             if (failure != null)
             {
                 _logger.LogWarning("ffprobe at {Path} is unusable: {Reason}", fullPath, LogRedaction.SanitizeText(failure));
@@ -106,7 +115,12 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
             return validation;
         }
 
-        private async Task<(string? Failure, string? Version)> RunVersionCheckAsync(string fullPath)
+        /// <summary>
+        /// Run <c>-version</c> once. <c>Retryable</c> marks a failure that came from the run rather
+        /// than from the binary's answer: a timeout, an exception from the runner, or exit -1 with
+        /// no output, which is how <c>SystemProcessRunner</c> reports a process it could not start.
+        /// </summary>
+        private async Task<(string? Failure, string? Version, bool Retryable)> RunVersionCheckAsync(string fullPath)
         {
             var startInfo = new ProcessStartInfo
             {
@@ -125,30 +139,31 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
-                return ($"-version could not be run: {ex.Message}", null);
+                return ($"-version could not be run: {ex.Message}", null, true);
             }
 
             if (result.TimedOut)
             {
-                return ($"-version did not finish within {VersionCheckTimeoutMs / 1000} s", null);
+                return ($"-version did not finish within {VersionCheckTimeoutMs / 1000} s", null, true);
             }
 
             if (result.ExitCode != 0)
             {
-                return ($"-version exited with code {result.ExitCode}", null);
+                var notStarted = result.ExitCode == -1 && string.IsNullOrEmpty(result.Stdout);
+                return ($"-version exited with code {result.ExitCode}", null, notStarted);
             }
 
             var firstLine = (result.Stdout ?? string.Empty).Split('\n', 2)[0].Trim();
             if (!firstLine.StartsWith(VersionLinePrefix, StringComparison.Ordinal))
             {
-                return ($"-version output does not start with \"{VersionLinePrefix}\"", null);
+                return ($"-version output does not start with \"{VersionLinePrefix}\"", null, false);
             }
 
             // "ffprobe version 9.0.2-Openur Copyright (c) ..." reports "9.0.2-Openur".
             var version = firstLine[VersionLinePrefix.Length..]
                 .Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .FirstOrDefault();
-            return (null, version);
+            return (null, version, false);
         }
     }
 }

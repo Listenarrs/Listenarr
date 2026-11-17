@@ -140,6 +140,58 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
             VerifyVersionChecks(processRunner, 2);
         }
 
+        [Theory]
+        [InlineData(-1, "", true)]
+        [InlineData(-1, "resource temporarily unavailable", false)]
+        public async Task VersionCheck_TimeoutOrRunnerFailure_IsNotCachedSoTheNextCallSucceeds(int exitCode, string stderr, bool timedOut)
+        {
+            // A timeout, or a process the runner could not start (exit -1 and no output), says
+            // nothing lasting about the binary, so the next caller checks again instead of
+            // treating ffprobe as unusable until restart.
+            var (applicationBase, packaged) = await PlacePackagedBinaryAsync($"ffprobe-transient-app-{timedOut}");
+            var processRunner = new Mock<IProcessRunner>()
+                .AnswerFfprobeVersionCheck(new ProcessResult(exitCode, string.Empty, stderr, timedOut));
+            var service = CreateService(processRunner.Object, FileService.GetTempDirectory($"ffprobe-transient-legacy-{timedOut}"), applicationBase);
+            Assert.Null(await service.GetFfprobePathAsync());
+
+            processRunner.AnswerFfprobeVersionCheck();
+
+            Assert.Equal(packaged, await service.GetFfprobePathAsync());
+            VerifyVersionChecks(processRunner, 2);
+        }
+
+        [Fact]
+        public async Task VersionCheck_RunnerThrowing_IsNotCachedSoTheNextCallSucceeds()
+        {
+            var (applicationBase, packaged) = await PlacePackagedBinaryAsync("ffprobe-runner-throws-app");
+            var processRunner = new Mock<IProcessRunner>();
+            processRunner.SetupSequence(runner => runner.RunAsync(It.IsAny<ProcessStartInfo>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new Win32Exception("Text file busy"))
+                .ReturnsAsync(new ProcessResult(0, FfprobeProcessRunnerMockExtensions.VersionOutput, string.Empty, false));
+            var service = CreateService(processRunner.Object, FileService.GetTempDirectory("ffprobe-runner-throws-legacy"), applicationBase);
+            Assert.Null(await service.GetFfprobePathAsync());
+
+            Assert.Equal(packaged, await service.GetFfprobePathAsync());
+            VerifyVersionChecks(processRunner, 2);
+        }
+
+        [Fact]
+        public async Task VersionCheck_FailureTheBinaryReports_StaysCachedUntilTheFileChanges()
+        {
+            // A non-zero exit or the wrong first line comes from the binary itself, so re-running
+            // it on every probe would only repeat the same answer.
+            var (applicationBase, _) = await PlacePackagedBinaryAsync("ffprobe-reported-failure-app");
+            var processRunner = new Mock<IProcessRunner>()
+                .AnswerFfprobeVersionCheck(new ProcessResult(1, string.Empty, "unknown option", false));
+            var service = CreateService(processRunner.Object, FileService.GetTempDirectory("ffprobe-reported-failure-legacy"), applicationBase);
+            Assert.Null(await service.GetFfprobePathAsync());
+
+            processRunner.AnswerFfprobeVersionCheck();
+
+            Assert.Null(await service.GetFfprobePathAsync());
+            VerifyVersionChecks(processRunner, 1);
+        }
+
         [Fact]
         public async Task RunFfprobeAsync_PackagedBinaryFailingTheCheck_ThrowsWithTheReasonAndNeverProbes()
         {
