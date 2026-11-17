@@ -64,6 +64,22 @@ namespace Listenarr.Application.Downloads.Submission
             // to true to ensure only indexers are queried (no Amazon/Audible scraping).
             var searchResults = await searchService.SearchAsync(searchQuery, isAutomaticSearch: true);
 
+            // Author-free fallback, as in the automatic sweep: release names often omit the author,
+            // so a title+author query can return nothing even when the book is available. Retried
+            // once, and only when the first search returned nothing. At this tag that includes
+            // indexer timeouts and errors, which SearchAsync swallows (it takes no cancellation token).
+            if (searchResults == null || !searchResults.Any())
+            {
+                var fallbackQuery = DownloadSearchQueryBuilder.BuildTitleFallback(audiobook);
+                if (!string.IsNullOrWhiteSpace(fallbackQuery)
+                    && !string.Equals(fallbackQuery, searchQuery, StringComparison.OrdinalIgnoreCase))
+                {
+                    logger.LogInformation("No results for '{Title}' with the full query; retrying without the author: {Query}",
+                        LogRedaction.SanitizeText(audiobook.Title), LogRedaction.SanitizeText(fallbackQuery));
+                    searchResults = await searchService.SearchAsync(fallbackQuery, isAutomaticSearch: true);
+                }
+            }
+
             if (searchResults == null || !searchResults.Any())
             {
                 return new SearchAndDownloadResult { Success = false, Message = "No search results found" };
