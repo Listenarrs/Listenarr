@@ -90,8 +90,17 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
                 throw new Exception($"NZBGet XML-RPC fault: {faultString}");
             }
 
-            return doc.Root?.Element("params")?.Element("param")?.Element("value")
-                ?? throw new Exception("Invalid XML-RPC response");
+            var root = doc.Root;
+            var parameters = root?.Element("params");
+            var parameter = parameters?.Element("param");
+            var value = parameter?.Element("value");
+            if (root?.Name != "methodResponse" || root.Elements().Count() != 1 ||
+                parameters?.Elements().Count() != 1 || parameter?.Elements().Count() != 1 || value == null ||
+                new[] { root, parameters, parameter }.Any(element => element!.Nodes().OfType<XText>().Any(text => !string.IsNullOrWhiteSpace(text.Value))))
+            {
+                throw new InvalidOperationException("Invalid or ambiguous XML-RPC response.");
+            }
+            return value;
         }
 
         private static XElement SerializeValue(object value)

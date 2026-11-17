@@ -95,7 +95,7 @@ namespace Listenarr.Application.Downloads.Contracts
         /// <param name="client">Download client configuration</param>
         /// <param name="ids">Client item IDs of tracked downloads</param>
         /// <param name="ct"></param>
-        /// <returns>The tracked items the client still reports</returns>
+        /// <returns>Identity-only items for cleanup membership, not progress, import, or action decisions.</returns>
         Task<List<QueueItem>> GetTrackedQueueAsync(DownloadClientConfiguration client, List<string> ids, CancellationToken ct = default);
 
         Task<List<DownloadClientItem>> GetItemsAsync(DownloadClientConfiguration client, CancellationToken ct = default);
