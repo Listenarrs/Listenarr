@@ -118,9 +118,8 @@ test.describe('Repair / Find Match card fields', () => {
       libraryAudiobookFixture({ id: Number(audiobookId), title: 'Dune', authors: ['Frank Herbert'] }),
     ])
     await api.stubAudiobook(Number(audiobookId), audiobook)
-    await api.stubLibraryIdentifiers(Number(audiobookId))
+    await api.stubAudiobookIdentifiers(Number(audiobookId), [])
     await api.stubWeakStorageMissingFiles(Number(audiobookId))
-    await api.stubQualityProfiles()
     await api.stubSettings(settingsFixture({ defaultSearchRegion: 'us' }))
     await api.stubSearch()
     await api.stubMetadata()
