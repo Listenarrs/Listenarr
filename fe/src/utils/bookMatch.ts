@@ -241,6 +241,8 @@ export function isEdited(bookMatch: BookMatch): boolean {
 export type SearchCache = Map<string, SearchResult[]>
 export const SEARCH_CACHE: InjectionKey<SearchCache> = Symbol('bookMatchSearchCache')
 
+// The fields encoded as a tuple, not joined: a separator typed in a field (`Dune|Frank` + `Herbert`
+// against `Dune` + `Frank|Herbert`) can't make two searches share a key
 export function searchCacheKey(title: string, author: string, region: string): string {
-  return `${region}|${title}|${author}`
+  return JSON.stringify([region, title, author])
 }
