@@ -74,13 +74,19 @@ public sealed record FileRegistrationReview(
     bool CanResolve, string ReviewToken, string? ResolutionNote, string? ResolvedBy,
     DateTime? ResolvedAtUtc);
 
+public sealed record FileRegistrationReviewPage(IReadOnlyList<FileRegistrationReview> Items, int TotalCount)
+{
+    public const int DefaultTake = 200;
+}
+
 /// <summary>
 /// Reconciles committed file-registration moves whose published destination is already
 /// owned by an audiobook but whose original source retirement is still incomplete.
 /// </summary>
 public interface IFileRegistrationRecoveryService
 {
-    Task<IReadOnlyList<FileRegistrationReview>> ListReviewsAsync(CancellationToken cancellationToken = default);
+    Task<FileRegistrationReviewPage> ListReviewsAsync(int take = FileRegistrationReviewPage.DefaultTake,
+        int skip = 0, CancellationToken cancellationToken = default);
     Task<FileRegistrationReview> InspectAsync(Guid operationId, CancellationToken cancellationToken = default);
     Task<FileRegistrationReview> ResolveAsync(Guid operationId, string reviewToken, string note,
         bool acknowledgeIncompleteContent, string actor, CancellationToken cancellationToken = default);

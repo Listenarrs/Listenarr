@@ -10,8 +10,13 @@ public sealed class FileRegistrationRecoveryController(
     IFilesystemMutationCoordinator mutationCoordinator) : ControllerBase
 {
     [HttpGet]
-    public Task<IReadOnlyList<FileRegistrationReview>> List(CancellationToken cancellationToken) =>
-        recoveryService.ListReviewsAsync(cancellationToken);
+    public async Task<IReadOnlyList<FileRegistrationReview>> List(
+        int take = FileRegistrationReviewPage.DefaultTake, int skip = 0, CancellationToken cancellationToken = default)
+    {
+        var page = await recoveryService.ListReviewsAsync(take, skip, cancellationToken);
+        Response.Headers["X-Total-Count"] = page.TotalCount.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return page.Items;
+    }
 
     [HttpGet("{operationId:guid}")]
     public async Task<IActionResult> Inspect(Guid operationId, CancellationToken cancellationToken)
