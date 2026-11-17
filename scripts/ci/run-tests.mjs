@@ -106,9 +106,11 @@ export function chooseRunner (runners, wanted, prefer) {
     if (runner.status !== 'online') throw new ExitError(4, `runner ${runner.name} is not online`)
     return { name: runner.name, label: wanted === runner.name ? labelOf(runner) : wanted }
   }
-  const ordered = prefer.length ? prefer.map((name) => online.find((runner) => runner.name === name)).filter(Boolean) : online
-  if (!ordered.length) throw new ExitError(4, 'no self-hosted runner of the fork is online (use --runner github for GitHub-hosted runners)')
-  return { name: ordered[0].name, label: labelOf(ordered[0]) }
+  const preferred = prefer.map((name) => online.find((runner) => runner.name === name)).filter(Boolean)
+  // A stale --prefer/$LISTENARR_CI_RUNNERS must not block all CI: fall back to any online runner.
+  const chosen = preferred[0] ?? online[0]
+  if (!chosen) throw new ExitError(4, 'no self-hosted runner of the fork is online (use --runner github for GitHub-hosted runners)')
+  return { name: chosen.name, label: labelOf(chosen) }
 }
 
 // The job ids under the top-level "jobs:" key of a workflow file.
