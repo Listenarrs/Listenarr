@@ -13,6 +13,8 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
     {
         private const string Title = "A Princess of Mars";
         private const string Author = "Edgar Rice Burroughs";
+        private const string Junk = "Twenty Thousand Leagues Under the Sea";
+        private const string JunkAuthor = "Jules Verne";
         private const string FullQuery = Title + " " + Author;
 
         private Mock<ISearchService> _searchService = null!;
@@ -99,6 +101,63 @@ namespace Listenarr.Tests.Features.Application.Downloads.Submission
 
             await Assert.ThrowsAsync<OperationCanceledException>(() => SearchAndDownloadAsync(book));
 
+            _searchService.Verify(s => s.SearchAsync(It.IsAny<string>(), null, null, It.IsAny<SearchSortBy>(), It.IsAny<SearchSortDirection>(), true), Times.Once);
+        }
+
+        [Fact]
+        public async Task OnlyRejectedFullQueryResults_RetriesTitleOnly_AndSubmitsTheFallbackRelease()
+        {
+            var book = await SeedAsync(Author);
+            var release = Release(Title + " [M4B]");
+            Returns(FullQuery, new List<SearchResult> { Release(Junk + " [M4B]", JunkAuthor) });
+            Returns(Title, new List<SearchResult> { release });
+
+            var result = await SearchAndDownloadAsync(book);
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal(release.Title, Assert.Single(_submitted).Title);
+            _searchService.Verify(s => s.SearchAsync(It.IsAny<string>(), null, null, It.IsAny<SearchSortBy>(), It.IsAny<SearchSortDirection>(), true), Times.Exactly(2));
+        }
+
+        [Fact]
+        public async Task OnlyRejectedResultsFromBothQueries_RetriesExactlyOnce_AndSubmitsNothing()
+        {
+            var book = await SeedAsync(Author);
+            Returns(FullQuery, new List<SearchResult> { Release(Junk + " [M4B]", JunkAuthor) });
+            Returns(Title, new List<SearchResult> { Release(Junk + " [M4B]", JunkAuthor) });
+
+            var result = await SearchAndDownloadAsync(book);
+
+            Assert.False(result.Success);
+            Assert.Equal("No acceptable search results found", result.Message);
+            Assert.Empty(_submitted);
+            _searchService.Verify(s => s.SearchAsync(It.IsAny<string>(), null, null, It.IsAny<SearchSortBy>(), It.IsAny<SearchSortDirection>(), true), Times.Exactly(2));
+        }
+
+        [Fact]
+        public async Task EmptyFullQuery_FallbackOnlyRejected_RetriesExactlyOnce_AndSubmitsNothing()
+        {
+            var book = await SeedAsync(Author);
+            Returns(FullQuery, new List<SearchResult>());
+            Returns(Title, new List<SearchResult> { Release(Junk + " [M4B]", JunkAuthor) });
+
+            var result = await SearchAndDownloadAsync(book);
+
+            Assert.False(result.Success);
+            Assert.Equal("No acceptable search results found", result.Message);
+            Assert.Empty(_submitted);
+            _searchService.Verify(s => s.SearchAsync(It.IsAny<string>(), null, null, It.IsAny<SearchSortBy>(), It.IsAny<SearchSortDirection>(), true), Times.Exactly(2));
+        }
+
+        [Fact]
+        public async Task AcceptableFullQueryResult_AlongsideJunk_DoesNotRetry()
+        {
+            var book = await SeedAsync(Author);
+            Returns(FullQuery, new List<SearchResult> { Release(Junk + " [M4B]", JunkAuthor), Release(Title + " [M4B]") });
+
+            var result = await SearchAndDownloadAsync(book);
+
+            Assert.True(result.Success, result.Message);
             _searchService.Verify(s => s.SearchAsync(It.IsAny<string>(), null, null, It.IsAny<SearchSortBy>(), It.IsAny<SearchSortDirection>(), true), Times.Once);
         }
 
