@@ -42,12 +42,9 @@ internal static class MetadataRegistrationExtensions
         services.AddScoped<IOpenLibraryService, OpenLibraryService>();
         services.AddSingleton<MetadataExtractionLimiter>();
         services.TryAddSingleton(TimeProvider.System);
-        services.AddHttpClient("Ffmpeg");
         services.AddSingleton<IFfmpegService>(provider =>
             new FfmpegService(
                 provider.GetRequiredService<ILogger<FfmpegService>>(),
-                provider.GetRequiredService<IHttpClientFactory>().CreateClient("Ffmpeg"),
-                provider.GetRequiredService<IStartupConfigService>(),
                 provider.GetRequiredService<IProcessRunner>(),
                 provider.GetRequiredService<IApplicationPathService>(),
                 timeProvider: provider.GetRequiredService<TimeProvider>()));

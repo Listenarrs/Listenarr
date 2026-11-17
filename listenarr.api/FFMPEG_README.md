@@ -11,12 +11,12 @@ ffprobe is a NuGet dependency, `Openur.FFprobeStatic`, the same package Sonarr r
 - A RID-specific publish (`dotnet publish -r linux-x64`, which is how release artifacts and the CI Docker images are built) places the binary next to the application.
 - A RID-agnostic build (`dotnet run`, the tests, the root `Dockerfile`) keeps the `runtimes/<rid>/native/` tree, and `FfprobeBinaryLocator` looks there for the current runtime only.
 
-Nothing is downloaded at first boot on a platform the package covers.
+Listenarr no longer downloads ffprobe at startup.
 
 Fallback
 --------
 
-If no packaged binary matches the running platform, Listenarr uses `ffprobe` (or `ffprobe.exe`) from the `ffmpeg` directory under its config directory if one has been placed there, and otherwise downloads one into that directory at startup as earlier releases did. A binary that an older release downloaded into that directory is ignored while a packaged one exists.
+If no packaged binary matches the running platform, Listenarr uses `ffprobe` (or `ffprobe.exe`) from the `ffmpeg` directory under its config directory if one has been placed there. With neither, audio metadata extraction is disabled and the startup log says so. A binary that an older release downloaded into that directory is ignored while a packaged one exists, and is left on disk.
 
 Version check
 -------------

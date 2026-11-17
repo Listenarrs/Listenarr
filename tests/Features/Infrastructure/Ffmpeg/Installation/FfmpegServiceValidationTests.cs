@@ -51,13 +51,11 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
             await File.WriteAllTextAsync(legacy, "downloaded by an older release");
             var processRunner = new Mock<IProcessRunner>()
                 .AnswerFfprobeVersionCheck(new ProcessResult(exitCode, stdout, string.Empty, timedOut));
-            var requests = new List<Uri?>();
-            var service = CreateService(processRunner.Object, legacyDirectory, applicationBase, requests: requests);
+            var service = CreateService(processRunner.Object, legacyDirectory, applicationBase);
 
             Assert.Null(await service.GetFfprobePathAsync());
             Assert.Null(await service.EnsureFfprobeInstalledAsync());
 
-            Assert.Empty(requests);
             Assert.Equal("downloaded by an older release", await File.ReadAllTextAsync(legacy));
         }
 
@@ -88,17 +86,18 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
         }
 
         [Fact]
-        public async Task LegacyOnlyBinaryFailingTheCheck_IsUnavailableAndNotReplacedByADownload()
+        public async Task LegacyOnlyBinaryFailingTheCheck_IsUnavailableAndLeftInPlace()
         {
             var legacyDirectory = FileService.GetTempDirectory("ffprobe-legacy-invalid");
-            await File.WriteAllTextAsync(Path.Join(legacyDirectory, ExecutableName), "truncated");
+            var legacy = Path.Join(legacyDirectory, ExecutableName);
+            await File.WriteAllTextAsync(legacy, "truncated");
             var processRunner = new Mock<IProcessRunner>()
                 .AnswerFfprobeVersionCheck(new ProcessResult(1, string.Empty, "exec format error", false));
-            var requests = new List<Uri?>();
-            var service = CreateService(processRunner.Object, legacyDirectory, FileService.GetTempDirectory("ffprobe-legacy-invalid-app"), requests: requests);
+            var service = CreateService(processRunner.Object, legacyDirectory, FileService.GetTempDirectory("ffprobe-legacy-invalid-app"));
 
             Assert.Null(await service.EnsureFfprobeInstalledAsync());
-            Assert.Empty(requests);
+            Assert.Equal([ExecutableName], Directory.EnumerateFileSystemEntries(legacyDirectory).Select(Path.GetFileName));
+            Assert.Equal("truncated", await File.ReadAllTextAsync(legacy));
         }
 
         [Fact]
@@ -402,18 +401,10 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
             string legacyDirectory,
             string applicationBaseDirectory,
             TimeProvider? timeProvider = null,
-            ILogger<FfmpegService>? logger = null,
-            List<Uri?>? requests = null)
+            ILogger<FfmpegService>? logger = null)
         {
-            var recorded = requests ?? [];
             return new FfmpegService(
                 logger ?? new Mock<ILogger<FfmpegService>>().Object,
-                new HttpClient(new DelegatingHandlerMock((request, _) =>
-                {
-                    recorded.Add(request.RequestUri);
-                    return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.NotFound));
-                })),
-                _provider.GetRequiredService<IStartupConfigService>(),
                 processRunner,
                 Mock.Of<IApplicationPathService>(service => service.FfmpegRootPath == legacyDirectory),
                 applicationBaseDirectory,
