@@ -6,6 +6,15 @@ test.describe('Settings UI integration', () => {
     await api.stubSettingsUpdate()
   })
 
+  test('stubSettings fills in the settings the app expects', async ({ page, api }) => {
+    await api.stubSettings({ defaultSearchRegion: 'us' })
+    await page.goto('/settings#general')
+    await api.wait('getSettings')
+
+    await expect(page.locator('input[placeholder="{Author}/{Series}/{Title}"]'))
+      .toHaveValue('{Author}/{Series}/{Title}')
+  })
+
   test('updates the folder naming pattern and completed-file action', async ({ page, api }) => {
     await page.goto('/settings#general')
     await api.wait('getStartupConfig')
