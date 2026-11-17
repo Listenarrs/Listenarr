@@ -24,6 +24,7 @@ export default defineConfig({
     ...devices['Desktop Chrome'],
     baseURL: webUrl,
     trace: 'retain-on-failure',
+    video: 'retain-on-failure',
   },
   webServer: {
     command: `npm run dev -- --host 127.0.0.1 --port ${webPort} --strictPort`,

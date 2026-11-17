@@ -32,6 +32,7 @@ import {
   waitForExit,
 } from '../lib/listenarr-stack.mjs'
 import { summarizeBackendCoverage } from './backend-coverage.mjs'
+import { convertVideos } from './webm-to-gif.mjs'
 
 const argv = process.argv.slice(2)
 const separator = argv.indexOf('--')
@@ -159,6 +160,8 @@ try {
     }
   }
 } finally {
+  // Turn the videos Playwright kept for failed tests into GIFs, whichever path we took out of the suite.
+  await convertVideos(join(frontendDirectory, 'test-results', 'e2e'))
   await stack?.dispose()
 }
 

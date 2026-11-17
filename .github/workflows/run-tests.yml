@@ -111,6 +111,9 @@ jobs:
       - name: Repository path-safety tests
         run: npm run --silent test:repository-paths
 
+      - name: E2E failure-GIF tests
+        run: npm run --silent test:e2e-gif
+
       - name: Frontend lint
         run: npm run --silent lint:frontend
 
