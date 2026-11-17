@@ -6,30 +6,6 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
     [Trait("Category", "FfmpegService")]
     public class FfmpegServiceTests : BaseTests
     {
-        // FIXME: This is too longo for unit tests
-        //[Fact]
-        [Trait("Method", "EnsureFfprobeInstalledAsync")]
-        [Trait("Category", "Release")]
-        private async Task EnsureFfprobeInstalledAsync()
-        {
-            var ffmpegDirectory = Path.Combine(FileService.GetTempPath(), "ffmpeg");
-
-            Assert.False(Path.Exists(ffmpegDirectory));
-
-            var ffmpegService = new FfmpegService(
-                new Mock<ILogger<FfmpegService>>().Object,
-                new HttpClient(),
-                _provider.GetRequiredService<IStartupConfigService>(),
-                _provider.GetRequiredService<IProcessRunner>(),
-                Mock.Of<IApplicationPathService>(service => service.FfmpegRootPath == ffmpegDirectory));
-
-            var ffprobePath = await ffmpegService.EnsureFfprobeInstalledAsync();
-
-            Assert.NotNull(ffprobePath);
-            Assert.True(Path.Exists(ffprobePath));
-            Assert.True(Path.Exists(ffmpegDirectory));
-        }
-
         [Fact]
         public async Task RunFfprobeAsync_RejectsNonAudioFileBeforeStartingProcess()
         {
