@@ -97,7 +97,7 @@ async function prepareBatchRepair(
 
   let searchIndex = 0
   const matches = [firstMatch, secondMatch]
-  await api.stubSearchWithReply(
+  await api.stubSearch(
     () => ({
       statusCode: 200,
       body: { results: [matches[searchIndex++]!] },

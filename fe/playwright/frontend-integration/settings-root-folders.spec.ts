@@ -10,7 +10,6 @@ test.describe('Root Folders Settings', () => {
         canScanFilesystem: true,
       }),
     ])
-    await api.stubSystemReadiness()
     await page.goto('/settings#rootfolders')
     await api.wait('getRootFolders')
   })

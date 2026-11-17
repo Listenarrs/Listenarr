@@ -429,23 +429,16 @@ export class ApiStubs {
     )
   }
 
-  stubSearch(reply: ApiReply = { statusCode: 200, body: { results: [] } }, alias = 'search') {
+  /** `reply` is a fixed reply, or a function called for each request. */
+  stubSearch(reply: ReplySource = { statusCode: 200, body: { results: [] } }, alias = 'search') {
     return this.register('POST', '**/api/v1/search', alias, reply)
   }
 
-  stubSearchWithReply(getReply: () => ApiReply, alias = 'search') {
-    return this.register('POST', '**/api/v1/search', alias, () => getReply())
-  }
-
   stubMetadata(
-    reply: ApiReply = { statusCode: 200, body: { metadata: { asin: 'B008DFUGCQ', title: 'Dune' } } },
+    reply: ReplySource = { statusCode: 200, body: { metadata: { asin: 'B008DFUGCQ', title: 'Dune' } } },
     alias = 'metadata',
   ) {
     return this.register(undefined, '**/api/v1/metadata/**', alias, reply)
-  }
-
-  stubMetadataWithReply(getReply: () => ApiReply, alias = 'metadata') {
-    return this.register(undefined, '**/api/v1/metadata/**', alias, () => getReply())
   }
 
   stubSettingsUpdate(alias = 'saveSettings') {
@@ -525,10 +518,6 @@ export class ApiStubs {
       { jobId, status: 'Completed', items },
       'getLibraryImportScanResults',
     )
-  }
-
-  stubLibraryImportSearch(getReply: () => ApiReply, alias = 'libraryImportSearch') {
-    return this.stubSearchWithReply(getReply, alias)
   }
 
   /** What every integration test starts from; the `api` fixture registers it before the test body runs. */
