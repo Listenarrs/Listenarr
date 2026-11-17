@@ -308,8 +308,11 @@ jobs:
           rm -rf "${{ env.DOCKER_OUTPUT }}"
           dotnet publish ${{ env.API_PROJECT }} -c Release -r linux-x64 --no-restore --self-contained false /p:UseAppHost=false -o "${{ env.DOCKER_OUTPUT }}/amd64"
           dotnet publish ${{ env.API_PROJECT }} -c Release -r linux-arm64 --no-restore --self-contained false /p:UseAppHost=false -o "${{ env.DOCKER_OUTPUT }}/arm64"
+          # Set ffprobe's mode before the image build: a chmod inside the image would copy the
+          # binary into a second layer.
           for arch in amd64 arm64; do
             test -f "${{ env.DOCKER_OUTPUT }}/${arch}/licenses/ffprobe/NOTICE"
+            chmod 755 "${{ env.DOCKER_OUTPUT }}/${arch}/ffprobe"
           done
 
       - name: Show publish contents (sanity check)
