@@ -112,7 +112,10 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
             await service.GetFfprobePathAsync();
             VerifyVersionChecks(processRunner, 1);
 
+            // Only the length changes here: the modification time is put back after the rewrite.
+            var lastWrite = File.GetLastWriteTimeUtc(packaged);
             await File.WriteAllTextAsync(packaged, "packaged, replaced by a longer build");
+            File.SetLastWriteTimeUtc(packaged, lastWrite);
             await service.GetFfprobePathAsync();
             VerifyVersionChecks(processRunner, 2);
 
