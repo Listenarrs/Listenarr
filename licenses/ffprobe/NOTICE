@@ -46,7 +46,7 @@ FFmpeg n9.0.2:
   https://ffmpeg.org/releases/
 
 dav1d 1.5.4:
-  https://code.videolan.org/videolan/dav1d, tag 1.5.4 (commit 191bdda98ec3c68137754dc97da1db34043d7cd4)
+  https://code.videolan.org/videolan/dav1d, tag 1.5.4 (commit 54706fc6bc0cdecab7e9593974a4039cc038fca7)
 
 Build scripts and the two patches:
   https://github.com/Openur/ffprobe-static-build at commit 0e8056a9bbeabedee51c5a1bcf517c755278c68c,
