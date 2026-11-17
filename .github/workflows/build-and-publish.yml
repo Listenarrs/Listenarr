@@ -147,12 +147,14 @@ jobs:
         run: |
           set -euo pipefail
           test -f ${{ env.API_OUTPUT }}/win-x64/ffprobe.exe
+          test -f ${{ env.API_OUTPUT }}/win-x64/licenses/ffprobe/NOTICE
           unix_rids="linux-x64"
           if [ "${{ inputs.include_osx }}" = "true" ]; then
             unix_rids="$unix_rids osx-x64"
           fi
           for rid in $unix_rids; do
             test -f "${{ env.API_OUTPUT }}/${rid}/ffprobe"
+            test -f "${{ env.API_OUTPUT }}/${rid}/licenses/ffprobe/NOTICE"
             chmod 755 "${{ env.API_OUTPUT }}/${rid}/ffprobe"
           done
           version_line="$(${{ env.API_OUTPUT }}/linux-x64/ffprobe -version | sed -n 1p)"
@@ -306,6 +308,9 @@ jobs:
           rm -rf "${{ env.DOCKER_OUTPUT }}"
           dotnet publish ${{ env.API_PROJECT }} -c Release -r linux-x64 --no-restore --self-contained false /p:UseAppHost=false -o "${{ env.DOCKER_OUTPUT }}/amd64"
           dotnet publish ${{ env.API_PROJECT }} -c Release -r linux-arm64 --no-restore --self-contained false /p:UseAppHost=false -o "${{ env.DOCKER_OUTPUT }}/arm64"
+          for arch in amd64 arm64; do
+            test -f "${{ env.DOCKER_OUTPUT }}/${arch}/licenses/ffprobe/NOTICE"
+          done
 
       - name: Show publish contents (sanity check)
         shell: bash
