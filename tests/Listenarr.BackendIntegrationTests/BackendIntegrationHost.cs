@@ -243,7 +243,6 @@ public sealed class BackendIntegrationHost : IAsyncDisposable
             // Host settings, not app configuration: Program reads them while it composes the services,
             // before ConfigureAppConfiguration callbacks apply.
             builder.UseSetting("Listenarr:SqliteDbPath", databasePath);
-            builder.UseSetting("Listenarr:EnableUnmatchedScanWorker", "true");
             builder.ConfigureLogging(logging => logging.ClearProviders());
             builder.ConfigureServices(services =>
             {
