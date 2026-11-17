@@ -107,7 +107,11 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
                 globalMaxRatio,
                 globalMaxSeedingTimeEnabled,
                 globalMaxSeedingTime);
-            var canBeRemoved = removeCompletedDownloads && seedLimitReached;
+            // A per-torrent limit that is present but unreadable must not fall back to "inherit the
+            // global limit", which could authorize removal the real limit would forbid.
+            var seedLimitReadable = IsReadableOrAbsent(ReadDouble(torrent, "ratio_limit"), torrent, "ratio_limit") &&
+                IsReadableOrAbsent(ReadInt64(torrent, "seeding_time_limit"), torrent, "seeding_time_limit");
+            var canBeRemoved = removeCompletedDownloads && seedLimitReached && seedLimitReadable;
 
             return new DownloadClientItem
             {
@@ -207,29 +211,95 @@ namespace Listenarr.Infrastructure.DownloadClients.Qbittorrent
             return values.TryGetValue(key, out var element) ? element.GetString() ?? defaultValue : defaultValue;
         }
 
+        // #1008: qBittorrent's API does not reliably hand back the shape these fields are
+        // documented as. A field nominally typed as an integer can arrive as a non-integral
+        // number (600.5), exponent notation (6e2, which GetInt64/GetInt32 cannot parse even
+        // though the value is whole), or a quoted string or object. Calling GetInt64/GetInt32/
+        // GetDouble directly threw FormatException or InvalidOperationException on any of these,
+        // which made the caller drop that torrent from the poll result.
+        //
+        // Numeric strings are deliberately NOT parsed here; a quoted number is treated as
+        // unreadable.
+        private static long? ReadInt64(Dictionary<string, JsonElement> values, string key)
+        {
+            if (!values.TryGetValue(key, out var element) || element.ValueKind != JsonValueKind.Number)
+            {
+                return null;
+            }
+
+            if (element.TryGetInt64(out var value))
+            {
+                return value;
+            }
+
+            // (double)long.MaxValue rounds up to 2^63, which no long can hold, so the bound is exclusive
+            return element.TryGetDouble(out var doubleValue) &&
+                double.IsFinite(doubleValue) &&
+                doubleValue >= long.MinValue &&
+                doubleValue < (double)long.MaxValue
+                ? (long)doubleValue
+                : null;
+        }
+
+        private static int? ReadInt32(Dictionary<string, JsonElement> values, string key)
+        {
+            if (!values.TryGetValue(key, out var element) || element.ValueKind != JsonValueKind.Number)
+            {
+                return null;
+            }
+
+            if (element.TryGetInt32(out var value))
+            {
+                return value;
+            }
+
+            return element.TryGetDouble(out var doubleValue) &&
+                double.IsFinite(doubleValue) &&
+                doubleValue >= int.MinValue &&
+                doubleValue <= int.MaxValue
+                ? (int)doubleValue
+                : null;
+        }
+
+        private static double? ReadDouble(Dictionary<string, JsonElement> values, string key)
+        {
+            if (!values.TryGetValue(key, out var element) || element.ValueKind != JsonValueKind.Number)
+            {
+                return null;
+            }
+
+            return element.TryGetDouble(out var value) && double.IsFinite(value) ? value : null;
+        }
+
+        private static bool IsReadableOrAbsent<T>(T? value, Dictionary<string, JsonElement> values, string key)
+            where T : struct
+        {
+            return value.HasValue || !values.ContainsKey(key);
+        }
+
         private static double GetDouble(Dictionary<string, JsonElement> values, string key, double defaultValue = 0)
         {
-            return values.TryGetValue(key, out var element) ? element.GetDouble() : defaultValue;
+            return ReadDouble(values, key) ?? defaultValue;
         }
 
         private static long GetInt64(Dictionary<string, JsonElement> values, string key, long defaultValue = 0)
         {
-            return values.TryGetValue(key, out var element) ? element.GetInt64() : defaultValue;
+            return ReadInt64(values, key) ?? defaultValue;
         }
 
         private static int? GetNullableInt32(Dictionary<string, JsonElement> values, string key)
         {
-            return values.TryGetValue(key, out var element) ? element.GetInt32() : null;
+            return ReadInt32(values, key);
         }
 
         private static long? GetNullableInt64(Dictionary<string, JsonElement> values, string key)
         {
-            return values.TryGetValue(key, out var element) ? element.GetInt64() : null;
+            return ReadInt64(values, key);
         }
 
         private static double? GetNullableDouble(Dictionary<string, JsonElement> values, string key)
         {
-            return values.TryGetValue(key, out var element) ? element.GetDouble() : null;
+            return ReadDouble(values, key);
         }
     }
 }
