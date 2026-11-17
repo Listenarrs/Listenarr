@@ -1,7 +1,7 @@
 import { test as base, expect, type APIRequestContext, type Page } from '@playwright/test'
-import { collectPageCoverage } from '../../support/coverage.js'
+import { withPageCoverage } from '../../support/coverage.js'
 import { antiforgeryHeaders, restoreSeed } from '../../support/docker-stack.js'
-import { collectCoverage, e2eCoverage } from './coverage.js'
+import { e2eCoverage } from './coverage.js'
 
 export type RootFolder = { id: number; name: string; path: string; isDefault?: boolean }
 
@@ -66,13 +66,7 @@ export const test = base.extend<{ seededStack: void; jsCoverage: void; listenarr
   ],
   // V8 coverage of every page the test loads (LISTENARR_COVERAGE=1).
   jsCoverage: [
-    async ({ page }, use) => {
-      if (!collectCoverage) {
-        await use()
-        return
-      }
-      await collectPageCoverage(page, e2eCoverage, () => use())
-    },
+    async ({ page }, use) => withPageCoverage(page, e2eCoverage, use),
     { auto: true },
   ],
   listenarr: async ({ request }, use) => {
@@ -114,7 +108,6 @@ export const scanButton = (page: Page) =>
 export const startMatchingButton = (page: Page) =>
   page.locator('.footer-center button', { hasText: 'Start Matching' })
 export const importButton = (page: Page) => page.locator('.footer-right button')
-export const toast = (page: Page, title: string) => page.locator('.toast', { hasText: title })
 
 /** Scans the selected root folder and waits for its results. */
 export async function scan(page: Page) {

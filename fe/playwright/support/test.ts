@@ -1,10 +1,7 @@
 import { test as base } from '@playwright/test'
 import { ApiStubs } from './api-stubs.js'
-import { collectPageCoverage } from './coverage.js'
-import {
-  collectCoverage,
-  frontendIntegrationCoverage,
-} from '../frontend-integration/support/coverage.js'
+import { withPageCoverage } from './coverage.js'
+import { frontendIntegrationCoverage } from '../frontend-integration/support/coverage.js'
 
 /**
  * The `test` every frontend integration spec imports: its `api` fixture stubs the whole API before the test
@@ -21,13 +18,7 @@ export const test = base.extend<{ api: ApiStubs; jsCoverage: void }>({
     { auto: true },
   ],
   jsCoverage: [
-    async ({ page }, use) => {
-      if (!collectCoverage) {
-        await use()
-        return
-      }
-      await collectPageCoverage(page, frontendIntegrationCoverage, () => use())
-    },
+    async ({ page }, use) => withPageCoverage(page, frontendIntegrationCoverage, use),
     { auto: true },
   ],
 })
