@@ -36,6 +36,14 @@ beforeEach(() => {
 })
 
 describe('RegistrationRecoveryPanel', () => {
+  it('states which operation types are listed and which are not', async () => {
+    const wrapper = mount(RegistrationRecoveryPanel)
+    await flushPromises()
+    expect(wrapper.find('h2').text()).toBe('File registration recovery')
+    expect(wrapper.text()).toContain('move, copy and hardlink registrations')
+    expect(wrapper.text()).toContain('existing-file move and rename operations is separate')
+  })
+
   it('requires inspection, a note and acknowledgement before resolving one operation', async () => {
     const wrapper = mount(RegistrationRecoveryPanel)
     await flushPromises()
