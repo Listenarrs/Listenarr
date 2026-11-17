@@ -307,8 +307,9 @@ export class ApiStubs {
     )
   }
 
-  stubSettings(settings: Partial<SettingsResponse>) {
-    return this.stubJson('GET', '**/api/v1/configuration/settings', settings, 'getSettings')
+  stubSettings(overrides: Partial<SettingsResponse>) {
+    // The API returns the whole settings object; a partial override must not become the whole response.
+    return this.stubJson('GET', '**/api/v1/configuration/settings', settingsFixture(overrides), 'getSettings')
   }
 
   stubLibrary(audiobooks: LibraryResponse) {
