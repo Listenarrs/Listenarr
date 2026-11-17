@@ -1768,7 +1768,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
                 ActiveGroupValue("103", "9003", null, "Filtered Active", "QUEUED", "movies", "10", "10", "/active/filtered")));
             var historyResponse = NzbgetApiMock.CreateHistoryResponse(string.Concat(
                 HistoryEntryValue("101", "Canonical Conflict", "SUCCESS/UNPACK", "audiobooks", "/suppressed/id"),
-                HistoryEntryValue(null, "Title Active", "FAILURE/HEALTH", "audiobooks"),
+                HistoryEntryValue("102", "Title Active", "FAILURE/HEALTH", "audiobooks"),
                 HistoryEntryValue("201", "Completed Final", "SUCCESS/UNPACK", "audiobooks", "/final/one", "/dest/one", "120", "120"),
                 HistoryEntryValue("202", "Completed Destination", "SUCCESS/VERIFY", " AUDIOBOOKS ", string.Empty, "/dest/two", "90", "90"),
                 HistoryEntryValue("203", "Failed History", "  FAILURE/HEALTH  ", "AudioBooks", "/must/not/use", "/must/not/use", "100", "40"),
@@ -2703,42 +2703,15 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
         }
 
         [Fact]
-        public async Task GetQueueAsync_IgnoredAndMalformedIndividualHistory_OmitsOnlyInvalidEntries()
+        public async Task GetQueueAsync_ValidIdentityAndOutcome_ToleratesUnknownByteTelemetry()
         {
-            // AC: AC-NZB-003/005/007 require ignored statuses and malformed entries to be omitted without hiding valid history.
-            // Behavior: Ignored/malformed records plus one valid terminal record -> queue output -> only safe valid entry remains.
-            // @category: edge-case
-            // @lane: integration
-            // @dependency: typed history parser defaults and terminal classification
-            // @complexity: medium
-            // Value Score: 26
             using var apiMock = new NzbgetApiMock();
-            apiMock.QueueXmlRpcResponse(
-                "listgroups",
-                NzbgetApiMock.CreateListGroupsResponse(string.Empty));
-            apiMock.QueueXmlRpcResponse(
-                "history",
-                NzbgetApiMock.CreateHistoryResponse(string.Concat(
-                    "<value><string>not-a-struct</string></value>",
-                    HistoryEntryValue("401", "Warning", "WARNING/REPAIRABLE", "audiobooks"),
-                    HistoryEntryValue("402", "Deleted", "DELETED/MANUAL", "audiobooks"),
-                    HistoryEntryValue("403", "Empty", string.Empty, "audiobooks"),
-                    HistoryEntryValue("404", "Unknown", "MYSTERY/STATE", "audiobooks"),
-                    HistoryEntryValue(
-                        "405",
-                        "Safe Defaults",
-                        "SUCCESS/UNPACK",
-                        "audiobooks",
-                        finalDir: string.Empty,
-                        destDir: "/safe/defaults",
-                        fileSizeMb: "not-a-number",
-                        downloadedSizeMb: "-20"))));
+            apiMock.QueueXmlRpcResponse("listgroups", NzbgetApiMock.CreateListGroupsResponse(string.Empty));
+            apiMock.QueueXmlRpcResponse("history", NzbgetApiMock.CreateHistoryResponse(
+                HistoryEntryValue("405", "Safe Defaults", "SUCCESS/UNPACK", "audiobooks",
+                    finalDir: string.Empty, destDir: "/safe/defaults", fileSizeMb: "not-a-number", downloadedSizeMb: "-20")));
             using var http = new HttpClient(apiMock);
-            var adapter = CreateAdapter(http);
-
-            var queue = await adapter.GetQueueAsync(CreateClient());
-
-            var item = Assert.Single(queue);
+            var item = Assert.Single(await CreateAdapter(http).GetQueueAsync(CreateClient()));
             Assert.Equal("405", item.Id);
             Assert.Equal("completed", item.Status);
             Assert.Equal(0, item.Size);
@@ -2747,6 +2720,17 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Nzbget
             Assert.Equal("/safe/defaults", item.ContentPath);
         }
 
+        [Theory]
+        [InlineData("<value><string>not-a-struct</string></value>")]
+        [InlineData("<value><struct><member><name>NZBID</name><value><i4>405</i4></value></member></struct></value>")]
+        public async Task GetQueueAsync_UnreadableHistory_FailsFullSnapshot(string entry)
+        {
+            using var apiMock = new NzbgetApiMock();
+            apiMock.QueueXmlRpcResponse("listgroups", NzbgetApiMock.CreateListGroupsResponse(string.Empty));
+            apiMock.QueueXmlRpcResponse("history", NzbgetApiMock.CreateHistoryResponse(entry));
+            using var http = new HttpClient(apiMock);
+            await Assert.ThrowsAsync<DownloadClientAdapterPollingException>(() => CreateAdapter(http).GetQueueAsync(CreateClient()));
+        }
         [Theory]
         [InlineData("malformed")]
         [InlineData("authentication")]

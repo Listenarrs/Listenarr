@@ -79,7 +79,7 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
 
             try
             {
-                var history = await ReadHistoryWithMeasurementAsync(client, QueueSurface, cancellationToken);
+                var history = await ReadHistoryWithMeasurementAsync(client, QueueSurface, cancellationToken, requireCompleteSnapshot: !isMonitorPoll);
                 AppendHistory(
                     client,
                     QueueSurface,
@@ -125,16 +125,17 @@ namespace Listenarr.Infrastructure.DownloadClients.Nzbget
             }
         }
 
-        private async Task<IReadOnlyList<NzbgetHistoryEntry>> ReadHistoryWithMeasurementAsync(
+        internal async Task<IReadOnlyList<NzbgetHistoryEntry>> ReadHistoryWithMeasurementAsync(
             DownloadClientConfiguration client,
             string surface,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool requireCompleteSnapshot = false)
         {
             var startTimestamp = timeProvider.GetTimestamp();
             var historyCount = 0;
             try
             {
-                var history = await historyReader.ReadAsync(client, cancellationToken);
+                var history = await historyReader.ReadAsync(client, cancellationToken, requireCompleteSnapshot);
                 historyCount = history.Count;
                 return history;
             }
