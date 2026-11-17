@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const frontendDirectory = path.join(repositoryRoot, 'fe')
@@ -35,102 +35,118 @@ function generatedFiles(directory) {
   return readdirSync(directory).filter(file => file.endsWith('.ts')).sort()
 }
 
-const temporaryDirectory = mkdtempSync(path.join(tmpdir(), 'listenarr-api-types-'))
+// npm's .bin shim is a shell script on POSIX and a .cmd on Windows; running the package's JS entry
+// with the current node keeps the generator usable on every platform.
+export function openapiTsInvocation(frontendDir) {
+  return {
+    command: process.execPath,
+    args: [path.join(frontendDir, 'node_modules', '@hey-api', 'openapi-ts', 'bin', 'run.js')],
+  }
+}
 
-try {
-  run('dotnet', ['tool', 'restore'], { cwd: repositoryRoot })
-  if (!noBuild) {
-    run('dotnet', ['build', 'listenarr.api/Listenarr.Api.csproj', '--configuration', 'Release'], {
+async function main() {
+  const temporaryDirectory = mkdtempSync(path.join(tmpdir(), 'listenarr-api-types-'))
+  try {
+    run('dotnet', ['tool', 'restore'], { cwd: repositoryRoot })
+    if (!noBuild) {
+      run('dotnet', ['build', 'listenarr.api/Listenarr.Api.csproj', '--configuration', 'Release'], {
+        cwd: repositoryRoot,
+      })
+    }
+
+    const openApiFile = path.join(temporaryDirectory, 'openapi.json')
+    const outputDirectory = path.join(temporaryDirectory, 'generated-api')
+    const environment = {
+      ...process.env,
+      ASPNETCORE_ENVIRONMENT: 'Test',
+      LISTENARR_TEST_MODE: 'true',
+      Listenarr__SqliteDbPath: path.join(temporaryDirectory, 'listenarr.db'),
+    }
+
+    run('dotnet', ['swagger', 'tofile', '--output', openApiFile, apiAssembly, 'v1'], {
       cwd: repositoryRoot,
+      env: environment,
     })
-  }
 
-  const openApiFile = path.join(temporaryDirectory, 'openapi.json')
-  const outputDirectory = path.join(temporaryDirectory, 'generated-api')
-  const environment = {
-    ...process.env,
-    ASPNETCORE_ENVIRONMENT: 'Test',
-    LISTENARR_TEST_MODE: 'true',
-    Listenarr__SqliteDbPath: path.join(temporaryDirectory, 'listenarr.db'),
-  }
-
-  run('dotnet', ['swagger', 'tofile', '--output', openApiFile, apiAssembly, 'v1'], {
-    cwd: repositoryRoot,
-    env: environment,
-  })
-
-  const openApi = JSON.parse(readFileSync(openApiFile, 'utf8'))
-  const sourceSchemas = openApi.components?.schemas ?? {}
-  const selectedPaths = Object.fromEntries(Object.entries(contractOperations).map(([contractPath, methods]) => {
-    const pathDefinition = openApi.paths[contractPath]
-    const selectedMethods = Object.fromEntries(methods.map(method => {
-      if (!pathDefinition?.[method]) throw new Error(`OpenAPI document is missing ${method.toUpperCase()} ${contractPath}`)
-      return [method, pathDefinition[method]]
+    const openApi = JSON.parse(readFileSync(openApiFile, 'utf8'))
+    const sourceSchemas = openApi.components?.schemas ?? {}
+    const selectedPaths = Object.fromEntries(Object.entries(contractOperations).map(([contractPath, methods]) => {
+      const pathDefinition = openApi.paths[contractPath]
+      const selectedMethods = Object.fromEntries(methods.map(method => {
+        if (!pathDefinition?.[method]) throw new Error(`OpenAPI document is missing ${method.toUpperCase()} ${contractPath}`)
+        return [method, pathDefinition[method]]
+      }))
+      return [contractPath, selectedMethods]
     }))
-    return [contractPath, selectedMethods]
-  }))
-  const selectedSchemaNames = new Set()
+    const selectedSchemaNames = new Set()
 
-  function collectSchemaReferences(value) {
-    if (!value || typeof value !== 'object') return
-    if (Array.isArray(value)) {
-      value.forEach(collectSchemaReferences)
-      return
+    function collectSchemaReferences(value) {
+      if (!value || typeof value !== 'object') return
+      if (Array.isArray(value)) {
+        value.forEach(collectSchemaReferences)
+        return
+      }
+
+      const reference = value.$ref
+      if (typeof reference === 'string' && reference.startsWith('#/components/schemas/')) {
+        const schemaName = decodeURIComponent(reference.slice('#/components/schemas/'.length))
+        if (!selectedSchemaNames.has(schemaName)) {
+          const schema = sourceSchemas[schemaName]
+          if (!schema) throw new Error(`OpenAPI document references missing schema ${schemaName}`)
+          selectedSchemaNames.add(schemaName)
+          collectSchemaReferences(schema)
+        }
+      }
+      Object.values(value).forEach(collectSchemaReferences)
     }
 
-    const reference = value.$ref
-    if (typeof reference === 'string' && reference.startsWith('#/components/schemas/')) {
-      const schemaName = decodeURIComponent(reference.slice('#/components/schemas/'.length))
-      if (!selectedSchemaNames.has(schemaName)) {
-        const schema = sourceSchemas[schemaName]
-        if (!schema) throw new Error(`OpenAPI document references missing schema ${schemaName}`)
-        selectedSchemaNames.add(schemaName)
-        collectSchemaReferences(schema)
+    collectSchemaReferences(selectedPaths)
+    openApi.paths = selectedPaths
+    openApi.components.schemas = Object.fromEntries(
+      [...selectedSchemaNames].sort().map(schemaName => [schemaName, sourceSchemas[schemaName]]),
+    )
+    writeFileSync(openApiFile, `${JSON.stringify(openApi, null, 2)}\n`)
+
+    const generator = openapiTsInvocation(frontendDirectory)
+    run(generator.command, [
+      ...generator.args,
+      '--input', openApiFile,
+      '--output', outputDirectory,
+      '--plugins', '@hey-api/typescript',
+    ], { cwd: frontendDirectory })
+
+    const files = generatedFiles(outputDirectory)
+    if (checkOnly) {
+      const existingFiles = generatedFiles(generatedDirectory)
+      const staleFiles = files.filter(file => {
+        try {
+          return readFileSync(path.join(outputDirectory, file), 'utf8') !==
+            readFileSync(path.join(generatedDirectory, file), 'utf8')
+        } catch {
+          return true
+        }
+      })
+      const unexpectedFiles = existingFiles.filter(file => !files.includes(file))
+      if (staleFiles.length || unexpectedFiles.length) {
+        console.error(`Generated API types are stale. Run "npm run api-types:generate" in fe.`)
+        if (staleFiles.length) console.error(`Changed or missing: ${staleFiles.join(', ')}`)
+        if (unexpectedFiles.length) console.error(`Unexpected generated files: ${unexpectedFiles.join(', ')}`)
+        process.exitCode = 1
+      } else {
+        console.log('Generated API types match the current OpenAPI document.')
       }
-    }
-    Object.values(value).forEach(collectSchemaReferences)
-  }
-
-  collectSchemaReferences(selectedPaths)
-  openApi.paths = selectedPaths
-  openApi.components.schemas = Object.fromEntries(
-    [...selectedSchemaNames].sort().map(schemaName => [schemaName, sourceSchemas[schemaName]]),
-  )
-  writeFileSync(openApiFile, `${JSON.stringify(openApi, null, 2)}\n`)
-
-  run(path.join(frontendDirectory, 'node_modules', '.bin', 'openapi-ts'), [
-    '--input', openApiFile,
-    '--output', outputDirectory,
-    '--plugins', '@hey-api/typescript',
-  ], { cwd: frontendDirectory })
-
-  const files = generatedFiles(outputDirectory)
-  if (checkOnly) {
-    const existingFiles = generatedFiles(generatedDirectory)
-    const staleFiles = files.filter(file => {
-      try {
-        return readFileSync(path.join(outputDirectory, file), 'utf8') !==
-          readFileSync(path.join(generatedDirectory, file), 'utf8')
-      } catch {
-        return true
-      }
-    })
-    const unexpectedFiles = existingFiles.filter(file => !files.includes(file))
-    if (staleFiles.length || unexpectedFiles.length) {
-      console.error(`Generated API types are stale. Run "npm run api-types:generate" in fe.`)
-      if (staleFiles.length) console.error(`Changed or missing: ${staleFiles.join(', ')}`)
-      if (unexpectedFiles.length) console.error(`Unexpected generated files: ${unexpectedFiles.join(', ')}`)
-      process.exitCode = 1
     } else {
-      console.log('Generated API types match the current OpenAPI document.')
+      mkdirSync(generatedDirectory, { recursive: true })
+      for (const file of files) {
+        writeFileSync(path.join(generatedDirectory, file), readFileSync(path.join(outputDirectory, file)))
+      }
+      console.log(`Generated ${files.length} API type files in fe/playwright/support/generated-api.`)
     }
-  } else {
-    mkdirSync(generatedDirectory, { recursive: true })
-    for (const file of files) {
-      writeFileSync(path.join(generatedDirectory, file), readFileSync(path.join(outputDirectory, file)))
-    }
-    console.log(`Generated ${files.length} API type files in fe/playwright/support/generated-api.`)
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true })
   }
-} finally {
-  rmSync(temporaryDirectory, { recursive: true, force: true })
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  await main()
 }
