@@ -1,9 +1,10 @@
 <template>
   <section class="recovery-panel" aria-labelledby="registration-recovery-heading">
-    <h2 id="registration-recovery-heading">File import recovery</h2>
+    <h2 id="registration-recovery-heading">File registration recovery</h2>
     <p>
-      Review blocked imports individually. Releasing a block preserves files and does not complete
-      an import.
+      Review blocked move, copy and hardlink registrations individually, including restarted
+      publications. Releasing a block preserves files and does not complete an import. Recovery of
+      existing-file move and rename operations is separate and is not listed here.
     </p>
     <button class="btn btn-secondary" :disabled="busy" @click="refresh">
       Refresh recovery operations
