@@ -76,6 +76,22 @@ public sealed class FileRegistrationOperatorReviewTests : BaseTests
     }
 
     [Fact]
+    public async Task RecoveryStatus_OffersResolveNotAbandon_UntilOperatorReleasesRow()
+    {
+        var (_, service, id, _, _) = await SeedAsync();
+        var pending = await service.RetryAsync(id);
+        Assert.Equal(FileRegistrationRecoveryDisposition.RequiresOperatorAttention, pending.Disposition);
+        Assert.True(pending.CanResolve);
+        Assert.False(pending.CanAbandon);
+        var review = await service.InspectAsync(id);
+        await service.ResolveAsync(id, review.ReviewToken, "reviewed", true, "tester");
+        var released = await service.RetryAsync(id);
+        Assert.Equal(FileMutationJournalState.OperatorResolved, released.JournalState);
+        Assert.False(released.CanResolve);
+        Assert.False(released.CanAbandon);
+    }
+
+    [Fact]
     public async Task MatchingFileEvidence_DoesNotClaimWholeBookCompleteness()
     {
         var (_, service, id, source, target) = await SeedAsync();
