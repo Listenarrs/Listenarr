@@ -279,6 +279,7 @@ public sealed class FileMoverSymlinkedSourcePathTests : BaseTests
 
     [LinuxFact]
     [Trait("Scenario", "A newline in the refused path cannot start a second log record")]
+    [System.Runtime.Versioning.SupportedOSPlatform("linux")]
     public async Task CheckAsync_NewlineInTheRefusedPath_StaysInTheOneWarning()
     {
         // The refusal is logged once, with the path and cause sanitized. A logger renders an
