@@ -64,15 +64,93 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
         [InlineData("\"seeding_time_limit\":\"60\"", false)]
         [InlineData("\"seeding_time_limit\":[]", false)]
         [InlineData("\"seeding_time_limit\":9223372036854775808", false)]
+        [InlineData("\"ratio_limit\":null", false)]
+        [InlineData("\"seeding_time_limit\":null", false)]
         public async Task GetItemsAsync_UnreadableSeedLimitKeepsTheTorrentButCannotAuthorizeRemoval(string limitField, bool expectedRemovable)
+        {
+            var item = await GetSingleItemAsync(
+                """{"max_ratio_enabled":true,"max_ratio":2,"max_seeding_time_enabled":false,"max_seeding_time":30}""",
+                $$"""{"hash":"EXACT","name":"Book","state":"stoppedUP","progress":1,"ratio":3,{{limitField}}}""");
+            Assert.Equal(expectedRemovable, item.CanBeRemoved);
+        }
+
+        // A seeding time limit is a whole number of minutes, so 60.0 and 6e1 are the same limit as
+        // 60, while 60.5 is not a limit qBittorrent can hold and must not be truncated into one.
+        // The limit is compared in seconds, so a limit whose conversion would overflow a long
+        // (anything above long.MaxValue / 60 = 153722867280912930) cannot be checked at all and
+        // must not wrap into a negative bound that every seeding time passes. -1 (no limit, and
+        // with no ratio limit either nothing holds the torrent back) and 0 keep their meaning.
+        [Theory]
+        [InlineData("60", 3600L, true)]
+        [InlineData("60", 3599L, false)]
+        [InlineData("60.0", 3600L, true)]
+        [InlineData("6e1", 3600L, true)]
+        [InlineData("60.5", 3600L, false)]
+        [InlineData("6.05e1", 3600L, false)]
+        [InlineData("0", 0L, true)]
+        [InlineData("-1", 0L, true)]
+        [InlineData("153722867280912929", long.MaxValue, true)]
+        [InlineData("153722867280912930", long.MaxValue, true)]
+        [InlineData("153722867280912930", 9223372036854775799L, false)]
+        [InlineData("153722867280912931", long.MaxValue, false)]
+        [InlineData("9223372036854775807", 600L, false)]
+        [InlineData("9223372036854775808", 600L, false)]
+        public async Task GetItemsAsync_SeedingTimeLimitMustBeAWholeNumberOfMinutesThatFitsInSeconds(string seedingTimeLimit, long seedingTime, bool expectedRemovable)
+        {
+            var item = await GetSingleItemAsync(
+                """{"max_ratio_enabled":false,"max_ratio":-1,"max_seeding_time_enabled":false,"max_seeding_time":-1}""",
+                $$"""{"hash":"EXACT","name":"Book","state":"stoppedUP","progress":1,"ratio":0,"ratio_limit":-1,"seeding_time":{{seedingTime}},"seeding_time_limit":{{seedingTimeLimit}}}""");
+            Assert.Equal(expectedRemovable, item.CanBeRemoved);
+            Assert.Equal(expectedRemovable, item.CanMoveFiles);
+        }
+
+        // The same overflow on the inherited path: a per-torrent limit of -2 defers to the global
+        // max_seeding_time, which is converted to seconds the same way. As with a per-torrent
+        // limit, a reached ratio does not unblock an inherited limit that cannot be checked; the
+        // row with an ordinary inherited limit shows the ratio alone is otherwise enough.
+        [Theory]
+        [InlineData(60L, 3600L, 0, -1, true)]
+        [InlineData(60L, 3599L, 0, -1, false)]
+        [InlineData(153722867280912930L, long.MaxValue, 0, -1, true)]
+        [InlineData(153722867280912931L, long.MaxValue, 0, -1, false)]
+        [InlineData(long.MaxValue, 600L, 0, -1, false)]
+        [InlineData(60L, 600L, 3, 1, true)]
+        [InlineData(long.MaxValue, 600L, 3, 1, false)]
+        public async Task GetItemsAsync_InheritedSeedingTimeLimitThatOverflowsSecondsCannotAuthorizeRemoval(long globalMaxSeedingTime, long seedingTime, double ratio, double ratioLimit, bool expectedRemovable)
+        {
+            var item = await GetSingleItemAsync(
+                $$"""{"max_ratio_enabled":false,"max_ratio":-1,"max_seeding_time_enabled":true,"max_seeding_time":{{globalMaxSeedingTime}}}""",
+                $$"""{"hash":"EXACT","name":"Book","state":"stoppedUP","progress":1,"ratio":{{ratio}},"ratio_limit":{{ratioLimit}},"seeding_time":{{seedingTime}},"seeding_time_limit":-2}""");
+            Assert.Equal(expectedRemovable, item.CanBeRemoved);
+            Assert.Equal(expectedRemovable, item.CanMoveFiles);
+        }
+
+        // A reached ratio limit normally authorizes removal on its own. It must not do so while
+        // the seeding time limit the user also set cannot be checked; the readable control shows
+        // the ratio alone is enough when the time limit is ordinary.
+        [Theory]
+        [InlineData("120", true)]
+        [InlineData("9223372036854775807", false)]
+        [InlineData("120.5", false)]
+        public async Task GetItemsAsync_ReachedRatioDoesNotOverrideAnUncheckableSeedingTimeLimit(string seedingTimeLimit, bool expectedRemovable)
+        {
+            var item = await GetSingleItemAsync(
+                """{"max_ratio_enabled":false,"max_ratio":-1,"max_seeding_time_enabled":false,"max_seeding_time":-1}""",
+                $$"""{"hash":"EXACT","name":"Book","state":"stoppedUP","progress":1,"ratio":3,"ratio_limit":1,"seeding_time":600,"seeding_time_limit":{{seedingTimeLimit}}}""");
+            Assert.Equal(expectedRemovable, item.CanBeRemoved);
+        }
+
+        // Fetches the item list through the real workflow against one canned preferences response
+        // and a single torrent, so a test can vary exactly the fields it is about.
+        private static async Task<DownloadClientItem> GetSingleItemAsync(string preferencesJson, string torrentJson)
         {
             using var http = new HttpClient(new DelegatingHandlerMock((request, _) =>
             {
                 var path = request.RequestUri!.AbsolutePath;
                 var response = path.EndsWith("/preferences")
-                    ? """{"max_ratio_enabled":true,"max_ratio":2,"max_seeding_time_enabled":false,"max_seeding_time":30}"""
+                    ? preferencesJson
                     : path.EndsWith("/login") ? "Ok."
-                    : $$"""[{"hash":"EXACT","name":"Book","state":"stoppedUP","progress":1,"ratio":3,{{limitField}}}]""";
+                    : $"[{torrentJson}]";
                 return Task.FromResult(MockUtils.GetCannedResponse(response));
             }));
             var factory = new Mock<IHttpClientFactory>();
@@ -80,8 +158,7 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
             var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<QbittorrentAdapter>.Instance;
             var workflow = new QbittorrentItemFetchWorkflow(factory.Object, new QbittorrentAuthSession(logger), logger, "qbittorrent");
             var client = new DownloadClientConfiguration { Host = "localhost", Port = 8080, RemoveCompletedDownloads = "remove_and_delete" };
-            var item = Assert.Single(await workflow.GetItemsAsync(client));
-            Assert.Equal(expectedRemovable, item.CanBeRemoved);
+            return Assert.Single(await workflow.GetItemsAsync(client));
         }
 
         private DownloadClientConfiguration _client = null!;
@@ -702,19 +779,20 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
 
         // A single torrent whose given field carries the given raw JSON token, everything else
         // filled in with ordinary, well-formed values. Used below to probe one numeric helper at
-        // a time without the three-torrent bookending the drop tests above need. `downloaded` is
-        // the field under test as often as any other, so it is folded into the substitution
-        // itself rather than also appearing as a fixed property, which would otherwise duplicate
-        // the JSON key.
+        // a time without the three-torrent bookending the drop tests above need. `downloaded` and
+        // `progress` are fields under test as well as fixed properties, so they are folded into
+        // the substitution itself rather than also appearing as fixed properties, which would
+        // otherwise duplicate the JSON key.
         private static string SingleTorrentWithField(string fieldName, string rawToken)
         {
             var downloadedToken = fieldName == "downloaded" ? rawToken : "500";
-            var extraField = fieldName == "downloaded" ? "" : $$""", "{{fieldName}}": {{rawToken}}""";
+            var progressToken = fieldName == "progress" ? rawToken : "0.5";
+            var extraField = fieldName is "downloaded" or "progress" ? "" : $$""", "{{fieldName}}": {{rawToken}}""";
 
             return $$"""
             [
                 {
-                    "hash": "ffff4444", "name": "Single", "progress": 0.5, "size": 1000,
+                    "hash": "ffff4444", "name": "Single", "progress": {{progressToken}}, "size": 1000,
                     "downloaded": {{downloadedToken}}, "state": "downloading",
                     "save_path": {{SavePathJson("single")}}{{extraField}}
                 }
@@ -813,6 +891,57 @@ namespace Listenarr.Tests.Features.Infrastructure.DownloadClients.Qbittorrent
 
             var item = Assert.Single(items);
             Assert.Equal(expectedEta, item.Eta);
+        }
+
+        // `added_on` only orders and labels the queue view, so a value that is not a usable Unix time must
+        // not cost the torrent its place in the snapshot. Anything negative, beyond the last
+        // second DateTime can hold (253402300799), or not a number at all maps to the Unix epoch,
+        // the same value a missing `added_on` has always produced. The quoted form is documented
+        // as an integer by qBittorrent and is not parsed.
+        [Theory]
+        [InlineData("1600000000", 1600000000L)]
+        [InlineData("1.6e9", 1600000000L)]
+        [InlineData("253402300799", 253402300799L)]
+        [InlineData("253402300800", 0L)]
+        [InlineData("1e12", 0L)]
+        [InlineData("99999999999999", 0L)]
+        [InlineData("-1", 0L)]
+        [InlineData("-62135596801", 0L)]
+        [InlineData("\"1600000000\"", 0L)]
+        [InlineData("\"NaN\"", 0L)]
+        [InlineData("null", 0L)]
+        public async Task GetQueueAsync_AnUnusableAddedOnKeepsTheTorrentAndFallsBackToTheEpoch(string addedOnToken, long expectedUnixSeconds)
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = SingleTorrentWithField("added_on", addedOnToken);
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            var items = await adapter.GetQueueAsync(_client);
+
+            var item = Assert.Single(items);
+            Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(expectedUnixSeconds).DateTime, item.AddedAt);
+        }
+
+        // `progress` has no JSON spelling for NaN or infinity, so a quoted "NaN" or a literal too
+        // large for a double is not a number this mapper reads. It falls back to 0 instead of
+        // reaching `Progress`, where a non-finite value would break serializing the queue.
+        [Theory]
+        [InlineData("0.25", 25.0)]
+        [InlineData("\"NaN\"", 0.0)]
+        [InlineData("1e400", 0.0)]
+        public async Task GetQueueAsync_AProgressThatIsNotAFiniteNumberFallsBackToZero(string progressToken, double expectedProgress)
+        {
+            var apiMock = _provider.GetRequiredService<QbittorrentApiMock>();
+            apiMock.InfoResponseOverride = SingleTorrentWithField("progress", progressToken);
+            var gateway = (DownloadClientGateway)_provider.GetRequiredService<IDownloadClientGateway>();
+            var adapter = (QbittorrentAdapter)gateway.ResolveAdapter(_client);
+
+            var items = await adapter.GetQueueAsync(_client);
+
+            var item = Assert.Single(items);
+            Assert.Equal(expectedProgress, item.Progress);
+            _ = JsonSerializer.Serialize(item);
         }
 
         // `seeding_time` goes through `GetNullableInt64` and is only consumed internally by the
