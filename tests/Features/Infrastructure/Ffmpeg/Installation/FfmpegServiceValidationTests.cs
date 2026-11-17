@@ -245,6 +245,68 @@ namespace Listenarr.Tests.Features.Infrastructure.Ffmpeg.Installation
             VerifyVersionChecks(processRunner, 1);
         }
 
+        [Fact]
+        public async Task GetFfprobePathAsync_PackagedBinaryFailing_DoesNotFallBackToAWorkingLegacyCopy()
+        {
+            var (service, processRunner, legacy) = await PlaceFailingPackagedAndWorkingLegacyAsync("ffprobe-no-fallback-get");
+
+            Assert.Null(await service.GetFfprobePathAsync());
+
+            VerifyNeverRun(processRunner, legacy);
+        }
+
+        [Fact]
+        public async Task EnsureFfprobeInstalledAsync_PackagedBinaryFailing_DoesNotFallBackToAWorkingLegacyCopy()
+        {
+            var (service, processRunner, legacy) = await PlaceFailingPackagedAndWorkingLegacyAsync("ffprobe-no-fallback-ensure");
+
+            Assert.Null(await service.EnsureFfprobeInstalledAsync());
+
+            VerifyNeverRun(processRunner, legacy);
+        }
+
+        [Fact]
+        public async Task RunFfprobeAsync_PackagedBinaryFailing_DoesNotFallBackToAWorkingLegacyCopy()
+        {
+            var (service, processRunner, legacy) = await PlaceFailingPackagedAndWorkingLegacyAsync("ffprobe-no-fallback-run");
+            var target = await FileService.GetFileAsync(FileService.GetTempDirectory("ffprobe-no-fallback-run-target"), "Chapter.m4b", "audio");
+
+            var exception = await Assert.ThrowsAsync<FfmpegException>(() => service.RunFfprobeAsync(target));
+
+            Assert.Contains("-version exited with code 1", exception.InnerException?.Message);
+            VerifyNeverRun(processRunner, legacy);
+        }
+
+        /// <summary>
+        /// A packaged binary that fails its check next to a legacy copy that would pass it. The
+        /// runner answers per path, so a fallback to the legacy copy would succeed and be seen.
+        /// </summary>
+        private async Task<(FfmpegService Service, Mock<IProcessRunner> ProcessRunner, string Legacy)> PlaceFailingPackagedAndWorkingLegacyAsync(string name)
+        {
+            var (applicationBase, _) = await PlacePackagedBinaryAsync($"{name}-app");
+            var legacyDirectory = FileService.GetTempDirectory($"{name}-legacy");
+            var legacy = Path.GetFullPath(Path.Join(legacyDirectory, ExecutableName));
+            await File.WriteAllTextAsync(legacy, "downloaded by an older release");
+            var processRunner = new Mock<IProcessRunner>()
+                .AnswerFfprobeVersionCheck(new ProcessResult(1, string.Empty, "exec format error", false));
+            processRunner.Setup(runner => runner.RunAsync(
+                    It.Is<ProcessStartInfo>(startInfo => startInfo.FileName == legacy),
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new ProcessResult(0, FfprobeProcessRunnerMockExtensions.VersionOutput, string.Empty, false));
+            return (CreateService(processRunner.Object, legacyDirectory, applicationBase), processRunner, legacy);
+        }
+
+        private static void VerifyNeverRun(Mock<IProcessRunner> processRunner, string path)
+        {
+            processRunner.Verify(
+                runner => runner.RunAsync(
+                    It.Is<ProcessStartInfo>(startInfo => startInfo.FileName == path),
+                    It.IsAny<int>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Never);
+        }
+
         private static void VerifyVersionChecks(Mock<IProcessRunner> processRunner, int expected)
         {
             processRunner.Verify(
