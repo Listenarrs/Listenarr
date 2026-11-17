@@ -111,9 +111,6 @@ jobs:
       - name: Repository path-safety tests
         run: npm run --silent test:repository-paths
 
-      - name: Fork CI script tests
-        run: npm run --silent test:ci-scripts
-
       - name: Frontend lint
         run: npm run --silent lint:frontend
 

@@ -157,7 +157,7 @@ Never use `async void` in production code. Always use `async Task` — `async vo
 
 ### Running CI on a Fork
 
-`npm run ci:fork -- [--jobs a,b] [--runner <name|label|github>] [--ref <branch>]` (`scripts/ci/run-tests.mjs`, tests `npm run test:ci-scripts`) runs the `Run Tests` workflow on the contributor's fork for the working tree as it is (a throwaway `ci/wip-<branch>` snapshot branch) or for a pushed branch, on a self-hosted runner of the fork or GitHub's, and reports one line per job. Run only the jobs a change concerns. See "Running CI on your fork" in `CONTRIBUTING.md`.
+`npm run ci:fork -- [--jobs a,b] [--runner <name|label|github>] [--ref <branch>]` (`scripts/ci/run-tests.mjs`) runs the `Run Tests` workflow on the contributor's fork for the working tree as it is (a throwaway `ci/wip-<branch>` snapshot branch) or for a pushed branch, on a self-hosted runner of the fork or GitHub's, and reports one line per job. Run only the jobs a change concerns. See "Running CI on your fork" in `CONTRIBUTING.md`.
 
 ### Pre-Push Checks
 
