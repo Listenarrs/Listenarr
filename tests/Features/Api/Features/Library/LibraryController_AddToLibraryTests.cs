@@ -133,11 +133,14 @@ namespace Listenarr.Tests.Features.Api.Features.Library
                 DestinationPath = destination,
                 Monitored = true
             };
-            var controller = _provider.GetRequiredService<LibraryController>();
+            // One scope per request, as in the app: two requests never share a DbContext, which isn't
+            // thread-safe; the same in-memory database stays behind both.
+            using var firstScope = _provider.CreateScope();
+            using var secondScope = _provider.CreateScope();
 
             var results = await Task.WhenAll(
-                controller.AddToLibrary(CreateRequest()),
-                controller.AddToLibrary(CreateRequest()));
+                firstScope.ServiceProvider.GetRequiredService<LibraryController>().AddToLibrary(CreateRequest()),
+                secondScope.ServiceProvider.GetRequiredService<LibraryController>().AddToLibrary(CreateRequest()));
 
             Assert.Single(results, result => result is OkObjectResult);
             Assert.Single(results, result => result is ConflictObjectResult);
