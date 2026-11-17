@@ -157,7 +157,7 @@ test.describe('ported coverage scenarios (API-stubbed)', () => {
     await api.stubMetadata({ statusCode: 200, body: { metadata: { asin: oldAsin, title: audiobook.title } } })
     let searchIndex = 0
     const matches = [firstMatch, secondMatch]
-    await api.stubSearchWithReply(
+    await api.stubSearch(
       () => ({ statusCode: 200, body: { results: [matches[searchIndex++]!] } }),
       'repeatRepairSearch',
     )
@@ -316,7 +316,7 @@ test.describe('ported coverage scenarios (API-stubbed)', () => {
     await api.stubRepairWrites(availableId)
     let searchIndex = 0
     const matches = [unavailableMatch, availableMatch]
-    await api.stubSearchWithReply(
+    await api.stubSearch(
       () => ({ statusCode: 200, body: { results: [matches[searchIndex++]!] } }),
       'deletedMidRunSearch',
     )
@@ -548,7 +548,7 @@ test.describe('ported coverage scenarios (API-stubbed)', () => {
       libraryAudiobookFixture({ id: 319, title: 'Existing Book', asin: result.asin, asinRegion: 'us', fileCount: 2 }),
     ])
     await api.stubLibraryImportSavedResults(1, [imported])
-    await api.stubLibraryImportSearch(() => ({ statusCode: 200, body: [result] }))
+    await api.stubSearch(() => ({ statusCode: 200, body: [result] }), 'libraryImportSearch')
 
     await page.goto('/library-import')
     await api.wait('getRootFolders')
@@ -580,7 +580,7 @@ test.describe('ported coverage scenarios (API-stubbed)', () => {
       libraryAudiobookFixture({ id: 320, title: 'Empty Book', asin: result.asin, asinRegion: 'us', fileCount: 0 }),
     ])
     await api.stubLibraryImportSavedResults(1, [imported])
-    await api.stubLibraryImportSearch(() => ({ statusCode: 200, body: [result] }))
+    await api.stubSearch(() => ({ statusCode: 200, body: [result] }), 'libraryImportSearch')
 
     await page.goto('/library-import')
     await api.wait('getRootFolders')

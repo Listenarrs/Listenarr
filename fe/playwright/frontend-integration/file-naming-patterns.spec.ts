@@ -28,7 +28,6 @@ test.describe('File Naming Patterns integration', () => {
 
     await api.stubLibrary([])
     await api.stubDownloads()
-    await api.stubSystemReadiness()
   })
 
   test.describe('Settings UI - Pattern Configuration', () => {

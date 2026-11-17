@@ -262,7 +262,7 @@ test.describe('Review scenarios (API-stubbed)', () => {
       })),
       selectedMatch,
     )
-    await api.stubSearchWithReply(
+    await api.stubSearch(
       () => ({
         statusCode: 200,
         body: { results: [targets[searchIndex++]!] },
@@ -421,7 +421,7 @@ test.describe('Review scenarios (API-stubbed)', () => {
     await api.stubSettings(settingsFixture({ outputPath: '/library', defaultSearchRegion: 'us' }))
     await api.stubLibrary([])
     await api.stubLibraryImportSavedResults(rootFolderId, [importItem])
-    await api.stubLibraryImportSearch(() => ({ statusCode: 200, body: [openLibraryResult] }))
+    await api.stubSearch(() => ({ statusCode: 200, body: [openLibraryResult] }), 'libraryImportSearch')
     await api.stubAddLibrary(
       audiobookFixture({
         id: importedAudiobookId,

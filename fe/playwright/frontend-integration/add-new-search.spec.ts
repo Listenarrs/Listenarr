@@ -69,8 +69,8 @@ test.beforeEach(async ({ page, api }) => {
   searchResponse = { statusCode: 200, body: [] }
   metadataStatusCode = 404
 
-  await api.stubSearchWithReply(() => searchResponse)
-  await api.stubMetadataWithReply(() => ({ statusCode: metadataStatusCode, body: { message: 'not found' } }))
+  await api.stubSearch(() => searchResponse)
+  await api.stubMetadata(() => ({ statusCode: metadataStatusCode, body: { message: 'not found' } }))
   await page.goto('/add-new')
   await expect(page.locator('h1', { hasText: 'Add New Audiobook' })).toBeVisible()
 })

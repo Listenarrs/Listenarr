@@ -80,13 +80,13 @@ test.describe('Library Import browser behavior (API-stubbed)', () => {
       authors: [{ name: 'Another Author' }],
     })
     let searchCount = 0
-    await api.stubLibraryImportSearch(() => {
+    await api.stubSearch(() => {
       searchCount += 1
       if (searchCount === 1) {
         return { statusCode: 500, body: { message: 'Search unavailable' } }
       }
       return { statusCode: 200, body: [otherAuthorResult, selectedMatch] }
-    })
+    }, 'libraryImportSearch')
 
     await startMatching(page).click()
     expect((await api.wait('libraryImportSearch')).request.body).toEqual({
@@ -126,7 +126,7 @@ test.describe('Library Import browser behavior (API-stubbed)', () => {
       title: 'Reload Book Match',
       authors: [{ name: 'Author' }],
     })
-    await api.stubLibraryImportSearch(() => ({ statusCode: 200, body: [match] }))
+    await api.stubSearch(() => ({ statusCode: 200, body: [match] }), 'libraryImportSearch')
     await openLibraryImport(page, api, [item])
 
     await startMatching(page).click()
@@ -159,14 +159,14 @@ test.describe('Library Import browser behavior (API-stubbed)', () => {
       title: 'Matched Book',
     })
     let searchCount = 0
-    await api.stubLibraryImportSearch(() => {
+    await api.stubSearch(() => {
       searchCount += 1
       return {
         statusCode: 200,
         body: [match],
         ...(searchCount === 1 ? { delay: 800 } : {}),
       }
-    })
+    }, 'libraryImportSearch')
     await openLibraryImport(page, api, items)
 
     await startMatching(page).click()
