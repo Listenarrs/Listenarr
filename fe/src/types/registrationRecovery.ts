@@ -17,3 +17,8 @@ export interface RegistrationReview {
   resolvedBy: string | null
   resolvedAtUtc: string | null
 }
+
+export interface RegistrationReviewList {
+  reviews: RegistrationReview[]
+  total: number
+}
