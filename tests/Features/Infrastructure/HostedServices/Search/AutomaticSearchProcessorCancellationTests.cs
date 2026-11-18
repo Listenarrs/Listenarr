@@ -23,8 +23,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Listenarr.Tests.Features.Infrastructure.HostedServices.Search
 {
-    // Follow-up to #757 (#949): an OperationCanceledException that is not the host stopping is a
-    // timeout (HttpClient surfaces it as TaskCanceledException). These drive the whole
+    // Follow-up to #757 (#949): an OperationCanceledException that is not the host stopping can be a
+    // local cancellation or timeout. These drive the whole
     // automatic-search cycle to prove a debug broadcast can no longer abort a book, that a real
     // shutdown still stops the cycle, and that a download-client timeout keeps the fast retry.
     [Trait("Name", "AutomaticSearchProcessorCancellationTests")]
