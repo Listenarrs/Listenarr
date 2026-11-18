@@ -82,17 +82,22 @@ namespace Listenarr.Infrastructure.Ffmpeg.Installation
 
         /// <summary>
         /// The packaged binary first, then one in the configured ffmpeg directory. A binary an older
-        /// release downloaded into that directory is therefore superseded by the packaged one.
+        /// release downloaded into that directory is therefore superseded by the packaged one. A
+        /// chosen path that leads through a link out of the application or ffmpeg directory it sits
+        /// in is rejected before anything chmods or runs it, and a rejected packaged binary does not
+        /// fall back to the copy in the ffmpeg directory.
         /// </summary>
         private string? ResolveFfprobePath()
         {
-            var packaged = ResolvePackagedFfprobePath();
-            if (packaged != null)
+            var path = ResolvePackagedFfprobePath()
+                ?? (File.Exists(_legacyFfprobePath) ? _legacyFfprobePath : null);
+            if (path != null && !FileSystemSafety.TryValidateMutationTarget(path, [_applicationBaseDirectory, _legacyDirectory], out _, out var reason))
             {
-                return packaged;
+                _logger.LogWarning("Rejected ffprobe path outside configured roots: {Reason}", LogRedaction.SanitizeText(reason));
+                return null;
             }
 
-            return File.Exists(_legacyFfprobePath) ? _legacyFfprobePath : null;
+            return path;
         }
 
         private string? ResolvePackagedFfprobePath()
