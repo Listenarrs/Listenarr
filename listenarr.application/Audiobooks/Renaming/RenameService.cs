@@ -164,6 +164,7 @@ namespace Listenarr.Application.Audiobooks.Renaming
             }
 
             var namingBase = ResolveNamingBasePath(preview.CurrentFolderPath, settings, rootFolders, semantics);
+            if (audiobook.TryGetNamingDestination(out var destination, out var custom)) namingBase = (destination, custom);
             var isMultiFile = files.Count > 1;
             var expectedPaths = new List<string>();
 

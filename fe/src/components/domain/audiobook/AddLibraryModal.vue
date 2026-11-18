@@ -1592,6 +1592,10 @@ const addToLibrary = async () => {
       qualityProfileId: options.value.qualityProfileId || undefined,
       autoSearch: options.value.autoSearch,
       destinationPath: destination,
+      destinationRoot:
+        selectedRootId.value !== 0 && !relativePathManuallyEdited.value
+          ? resolvePreviewRoot() || undefined
+          : undefined,
     })
     if (requestGeneration !== addGeneration || !isCurrentSeed(ownerGeneration)) return
 

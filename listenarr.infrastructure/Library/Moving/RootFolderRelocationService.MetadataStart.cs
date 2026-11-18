@@ -175,7 +175,7 @@ public sealed partial class RootFolderRelocationService
                     plan.Destination,
                     metadataSourceSemantics!.Value,
                     targetResolution.Semantics,
-                    command.TargetCaseSensitivityMode);
+                    command.TargetCaseSensitivityMode, sourceNamingRoot: sourcePath, targetNamingRoot: targetPath);
                 completed++;
             }
 
@@ -188,6 +188,7 @@ public sealed partial class RootFolderRelocationService
             AssignOwnershipMigrationKeys(
                 ownershipPlans,
                 nowUtc);
+            await RewritePlacementOnlyReferencesAsync(db, root, targetPath, targetResolution.Semantics, completionToken, metadataSourceSemantics);
             ApplyRootMetadata(
                 root,
                 command,

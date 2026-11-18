@@ -88,6 +88,10 @@ public partial class AudiobookRepository
                 targetCaseSensitivityMode,
                 targetPhysicalObjectIdentities,
                 targetPhysicalIdentityObservedAtUtc);
+            if (targetPhysicalObjectIdentities == null
+                && (string.IsNullOrWhiteSpace(sourceBasePath)
+                    || !FileSystemPathIdentity.AreEquivalent(sourceBasePath, targetBasePath, sourceSemantics)))
+                audiobook.SetCustomDestination(targetBasePath);
             await _db.SaveChangesAsync(ct);
             return true;
         }

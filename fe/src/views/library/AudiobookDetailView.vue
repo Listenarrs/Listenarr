@@ -688,12 +688,12 @@
 </template>
 
 <script setup lang="ts">
+import type { AudibleBookMetadata } from '@/types'
 import { ref, onMounted, onUnmounted, watch, computed, type Component } from 'vue'
 import { useToast } from '@/services/toastService'
 import type { Audiobook as AudiobookType } from '@/types'
 import { useRoute, useRouter } from 'vue-router'
 import { useLibraryStore } from '@/stores/library'
-import { useConfigurationStore } from '@/stores/configuration'
 import { useRootFoldersStore } from '@/stores/rootFolders'
 import { useScanNotificationsStore } from '@/stores/scanNotifications'
 import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
@@ -765,7 +765,6 @@ import {
 const route = useRoute()
 const router = useRouter()
 const libraryStore = useLibraryStore()
-const configStore = useConfigurationStore()
 const rootFoldersStore = useRootFoldersStore()
 const scanNotificationsStore = useScanNotificationsStore()
 const filesystemReadinessStore = useFilesystemReadinessStore()
@@ -776,6 +775,7 @@ type DetailTab = 'details' | 'files' | 'history'
 const audiobook = ref<Audiobook | null>(null)
 const loading = ref(true)
 const error = ref<string | null>(null)
+const previewBasePath = ref('')
 const activeTab = ref<DetailTab>('details')
 const showDeleteDialog = ref(false)
 const showManualSearchModal = ref(false)
@@ -1140,58 +1140,115 @@ const coverImageUrl = computed(() => {
 
 // Show a base path even when no files exist yet by falling back to configured default root folder
 const displayBasePath = computed(() => {
-  // Prefer server-provided basePath
   const server = audiobook.value?.basePath
   if (server && server.length > 0) return server
+  if (audiobook.value?.customDestinationPath) return audiobook.value.customDestinationPath
 
-  const settings = configStore.applicationSettings
-  if (!settings) return ''
-
-  // Use default root folder path, fallback to legacy outputPath
-  const defaultRoot = rootFoldersStore.defaultFolder
-  const root = (defaultRoot?.path || settings.outputPath || '').trim()
-  const pattern = (settings.folderNamingPattern || settings.fileNamingPattern || '').trim()
-  if (!root || !pattern) return root || ''
-
-  const author =
-    audiobook.value?.authors && audiobook.value.authors[0]
-      ? audiobook.value.authors[0]
-      : 'Unknown Author'
-  const series = audiobook.value?.series || ''
-  const title = audiobook.value?.title || 'Unknown Title'
-  const year = audiobook.value?.publishYear || ''
-  const seriesNumber = audiobook.value?.seriesNumber || ''
-
-  // Basic variable replacement mirroring server pattern keys
-  let relative = pattern
-    .replace(/\{Author(?::[^}]+)?\}/gi, sanitizePathComponent(author))
-    .replace(/\{Series(?::[^}]+)?\}/gi, sanitizePathComponent(series))
-    .replace(/\{Title(?::[^}]+)?\}/gi, sanitizePathComponent(title))
-    .replace(/\{Year(?::[^}]+)?\}/gi, year)
-    .replace(/\{SeriesNumber(?::[^}]+)?\}/gi, seriesNumber)
-
-  // Remove file-level variables (Disk/Chapter/Quality) if present
-  relative = relative
-    .replace(/\{DiskNumber(?::[^}]+)?\}/gi, '')
-    .replace(/\{ChapterNumber(?::[^}]+)?\}/gi, '')
-    .replace(/\{Quality(?::[^}]+)?\}/gi, '')
-
-  // Normalize repeated slashes and trim
-  relative = relative.replace(/[\\/]{2,}/g, '/').replace(/^\/+|\/+$/g, '')
-
-  const combined = joinPaths(root, relative)
-  // Base path should be the directory containing the files -> strip the last segment
-  const parts = combined.split(/[/\\]+/).filter(Boolean)
-  if (parts.length <= 1) return combined
-  const dir = parts.slice(0, -1).join('/')
-  return dir
+  return previewBasePath.value
 })
 
-function sanitizePathComponent(s?: string): string {
-  if (!s) return 'Unknown'
-  // Replace invalid filename chars with underscore
-  return s.replace(/[\\/:*?"<>|]/g, '_').trim() || 'Unknown'
+const previewDestinationRoot = computed(
+  () =>
+    audiobook.value?.namingRootPath?.trim() || rootFoldersStore.defaultFolder?.path?.trim() || '',
+)
+
+const previewBasePathKey = computed(() => {
+  const book = audiobook.value
+  if (!book || book.basePath?.trim()) return ''
+
+  return JSON.stringify({
+    root: previewDestinationRoot.value,
+    title: book.title || '',
+    subtitle: book.subtitle || '',
+    authors: book.authors || [],
+    publishedDate: book.publishedDate || '',
+    publishYear: book.publishYear || '',
+    series: book.series || '',
+    seriesNumber: book.seriesNumber || '',
+    seriesMemberships: book.seriesMemberships || [],
+    description: book.description || '',
+    genres: book.genres || [],
+    tags: book.tags || [],
+    narrators: book.narrators || [],
+    isbn: book.isbn || '',
+    asin: book.asin || '',
+    publisher: book.publisher || '',
+    language: book.language || '',
+    runtime: book.runtime || null,
+    edition: book.edition || '',
+    version: book.version || '',
+    imageUrl: book.imageUrl || '',
+    explicit: Boolean(book.explicit),
+    abridged: Boolean(book.abridged),
+    openLibraryId: book.openLibraryId || '',
+    qualityProfileId: book.qualityProfileId || null,
+  })
+})
+
+let previewBasePathRequestId = 0
+
+function buildPreviewMetadata(book: Audiobook): AudibleBookMetadata {
+  return {
+    title: book.title || 'Unknown Title',
+    subtitle: book.subtitle,
+    authors: book.authors || [],
+    publishedDate: book.publishedDate,
+    publishYear: book.publishYear,
+    series: book.series,
+    seriesNumber: book.seriesNumber,
+    seriesMemberships: book.seriesMemberships,
+    description: book.description,
+    genres: book.genres,
+    tags: book.tags,
+    narrators: book.narrators,
+    isbn: book.isbn,
+    asin: book.asin || '',
+    publisher: book.publisher,
+    language: book.language,
+    runtime: book.runtime,
+    edition: book.edition,
+    version: book.version,
+    imageUrl: book.imageUrl,
+    explicit: book.explicit,
+    abridged: book.abridged,
+    openLibraryId: book.openLibraryId,
+    qualityProfileId: book.qualityProfileId,
+  }
 }
+
+async function refreshPreviewBasePath() {
+  const requestId = ++previewBasePathRequestId
+  const book = audiobook.value
+
+  if (!book || book.basePath?.trim()) {
+    previewBasePath.value = ''
+    return
+  }
+
+  try {
+    const destinationRoot = previewDestinationRoot.value || undefined
+    const response = await apiService.previewLibraryPath(
+      buildPreviewMetadata(book),
+      destinationRoot,
+    )
+    if (requestId !== previewBasePathRequestId) return
+
+    previewBasePath.value = response?.fullPath || response?.root || ''
+  } catch (err) {
+    if (requestId !== previewBasePathRequestId) return
+
+    logger.debug('Failed to load audiobook path preview', err)
+    previewBasePath.value = previewDestinationRoot.value
+  }
+}
+
+watch(
+  previewBasePathKey,
+  () => {
+    void refreshPreviewBasePath()
+  },
+  { immediate: true },
+)
 
 function getLegacyIsbnValues(raw: unknown): string[] {
   if (Array.isArray(raw)) {

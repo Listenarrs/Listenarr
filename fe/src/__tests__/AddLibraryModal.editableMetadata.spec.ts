@@ -245,7 +245,26 @@ describe('AddLibraryModal editable metadata', () => {
         authors: ['Edited Author'],
         region: 'de',
       }),
-      expect.any(Object),
+      expect.objectContaining({ destinationRoot: 'C:\\root' }),
     )
+  })
+
+  it('submits a manually edited directory as an override without a naming root', async () => {
+    const wrapper = mount(AddLibraryModal, {
+      props: { visible: true, book: fakeBook },
+      global: { plugins: [createPinia()] },
+    })
+    await flushPromises()
+    await wrapper.get('input.relative-input').setValue('Custom Shelf')
+    await wrapper.get('button.btn-primary').trigger('click')
+    await flushPromises()
+    expect(apiMocks.addToLibrary).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        destinationPath: 'C:\\root\\Custom Shelf',
+        destinationRoot: undefined,
+      }),
+    )
+    wrapper.unmount()
   })
 })

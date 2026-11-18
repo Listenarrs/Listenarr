@@ -155,7 +155,7 @@ namespace Listenarr.Application.Audiobooks.Renaming
             if (string.IsNullOrWhiteSpace(folderPattern))
             {
                 var legacyPattern = string.IsNullOrWhiteSpace(filePattern) ? "{Author}/{Title}/{Title}" : filePattern;
-                relativePath = _fileNamingService.ApplyNamingPattern(legacyPattern, variables, false);
+                relativePath = _fileNamingService.ApplyNamingPattern(legacyPattern, variables, audiobook.TryGetNamingDestination(out _, out var custom) && custom);
             }
             else if (isCustomBasePath)
             {
@@ -180,14 +180,7 @@ namespace Listenarr.Application.Audiobooks.Renaming
 
         private static Dictionary<string, object> BuildNamingVariables(Audiobook audiobook, string? folderPattern, string? filePattern, int sequenceNumber, bool isMultiFile)
         {
-            var usesSubtitleToken = (!string.IsNullOrWhiteSpace(folderPattern) && folderPattern.IndexOf("Subtitle", StringComparison.OrdinalIgnoreCase) >= 0)
-                || (!string.IsNullOrWhiteSpace(filePattern) && filePattern.IndexOf("Subtitle", StringComparison.OrdinalIgnoreCase) >= 0);
-            var combinedTitle = !usesSubtitleToken
-                && !string.IsNullOrWhiteSpace(audiobook.Subtitle)
-                && !string.IsNullOrWhiteSpace(audiobook.Title)
-                && !audiobook.Title.Contains(audiobook.Subtitle, StringComparison.OrdinalIgnoreCase)
-                ? $"{audiobook.Title}: {audiobook.Subtitle}"
-                : audiobook.Title;
+            var combinedTitle = audiobook.Title;
             var narrator = audiobook.Narrators != null ? string.Join(", ", audiobook.Narrators.Where(n => !string.IsNullOrWhiteSpace(n))) : string.Empty;
 
             return new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)

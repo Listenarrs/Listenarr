@@ -299,7 +299,7 @@ public sealed partial class RootFolderRelocationService
                     plan.Destination,
                     sourceSemantics,
                     targetSemantics,
-                    relocation.TargetCaseSensitivityMode);
+                    relocation.TargetCaseSensitivityMode, sourceNamingRoot: relocation.SourcePath, targetNamingRoot: relocation.TargetPath);
             }
             RejectDuplicateAudiobookFileOwnership(db);
 

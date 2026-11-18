@@ -26,6 +26,7 @@ public sealed partial class RootFolderRelocationService
             cancellationToken);
         try
         {
+            await RewritePlacementOnlyReferencesAsync(db, root, targetPath, targetResolution.Semantics, cancellationToken);
             ApplyRootMetadata(
                 root,
                 command,

@@ -38,6 +38,11 @@ vi.mock('vue-router', () => ({
 vi.mock('@/services/api', () => ({
   apiService: {
     getImageUrl: vi.fn((url: string) => url || 'https://via.placeholder.com/300x450?text=No+Image'),
+    previewLibraryPath: vi.fn(async () => ({
+      fullPath: '/library/Preview',
+      relativePath: 'Preview',
+      root: '/library',
+    })),
     getQualityProfiles: vi.fn(async () => []),
     getLibrary: vi.fn(async () => []),
     getAudiobook: vi.fn(async () => undefined),

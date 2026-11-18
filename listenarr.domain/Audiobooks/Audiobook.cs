@@ -68,6 +68,29 @@ namespace Listenarr.Domain.Audiobooks
         public List<AudiobookFile>? Files { get; set; }
         public string? Quality { get; set; }
 
+        // Placement intent is independent of BasePath, which scanners update from actual files.
+        public string? NamingRootPath { get; set; }
+        public string? CustomDestinationPath { get; set; }
+
+        public void SetNamingRoot(string root)
+        {
+            NamingRootPath = root;
+            CustomDestinationPath = null;
+        }
+
+        public void SetCustomDestination(string directory)
+        {
+            CustomDestinationPath = directory;
+            NamingRootPath = null;
+        }
+
+        public bool TryGetNamingDestination(out string destination, out bool isCustomDirectory)
+        {
+            isCustomDirectory = !string.IsNullOrWhiteSpace(CustomDestinationPath);
+            destination = isCustomDirectory ? CustomDestinationPath! : NamingRootPath ?? string.Empty;
+            return !string.IsNullOrWhiteSpace(destination);
+        }
+
         // Quality Profile for automatic downloads
         public int? QualityProfileId { get; set; }
         public QualityProfile? QualityProfile { get; set; }

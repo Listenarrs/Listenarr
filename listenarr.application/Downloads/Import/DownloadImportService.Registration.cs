@@ -85,6 +85,17 @@ public partial class DownloadImportService
         string source,
         CancellationToken cancellationToken)
     {
+        if (audiobook.TryGetNamingDestination(out _, out _))
+        {
+            var paths = (audiobook.Files ?? [])
+                .Where(file => !string.IsNullOrWhiteSpace(file.Path))
+                .Select(file => file.Path!)
+                .Append(registrationLease.PublicPath);
+            var observedBase = FileUtils.GetCommonDirectory(paths)
+                ?? Path.GetDirectoryName(registrationLease.PublicPath)!;
+            return audiobookFileService.RegisterPublishedGenerationWithBasePathAsync(
+                audiobook, initialOwnership, registrationLease, observedBase, source, cancellationToken);
+        }
         return audiobookFileService.RegisterPublishedGenerationAsync(
             audiobook,
             initialOwnership,

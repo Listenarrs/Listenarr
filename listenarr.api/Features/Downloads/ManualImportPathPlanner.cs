@@ -52,6 +52,8 @@ public sealed class ManualImportPathPlanner
             : FileUtils.NormalizeStoredPath(destinationBasePath);
         var configuredOutput = settings.OutputPath ?? string.Empty;
         var isCustomBasePath = IsCustomBasePath(basePath, configuredOutput, rootFolders, destinationSemantics);
+        var hasPlacement = audiobook.TryGetNamingDestination(out var placementPath, out var placementIsCustom);
+        if (hasPlacement) { basePath = placementPath; isCustomBasePath = placementIsCustom; }
 
         var extension = Path.GetExtension(sourceFilePath).ToLowerInvariant();
         if (string.IsNullOrEmpty(extension))
@@ -73,7 +75,7 @@ public sealed class ManualImportPathPlanner
                 ? "{Author}/{Title}/{Title}"
                 : filePattern;
 
-            relativePath = _fileNamingService.ApplyNamingPattern(legacyPattern, variables, treatAsFilename: false);
+            relativePath = _fileNamingService.ApplyNamingPattern(legacyPattern, variables, treatAsFilename: hasPlacement && placementIsCustom);
         }
         else if (isCustomBasePath)
         {
@@ -274,16 +276,7 @@ public sealed class ManualImportPathPlanner
         if (!string.IsNullOrWhiteSpace(audiobook.Subtitle)) variables["Subtitle"] = audiobook.Subtitle;
         if (!string.IsNullOrWhiteSpace(audiobook.Edition)) variables["Edition"] = audiobook.Edition;
 
-        var usesSubtitleToken = (!string.IsNullOrWhiteSpace(folderPattern) && folderPattern.IndexOf("Subtitle", StringComparison.OrdinalIgnoreCase) >= 0)
-            || (!string.IsNullOrWhiteSpace(filePattern) && filePattern.IndexOf("Subtitle", StringComparison.OrdinalIgnoreCase) >= 0);
-
-        var titleFull = !usesSubtitleToken
-            && !string.IsNullOrWhiteSpace(audiobook.Subtitle)
-            && !string.IsNullOrWhiteSpace(audiobook.Title)
-            && !audiobook.Title.Contains(audiobook.Subtitle, StringComparison.OrdinalIgnoreCase)
-            ? $"{audiobook.Title}: {audiobook.Subtitle}"
-            : audiobook.Title;
-        variables["Title"] = !string.IsNullOrWhiteSpace(titleFull) ? titleFull : "Unknown Title";
+        variables["Title"] = !string.IsNullOrWhiteSpace(audiobook.Title) ? audiobook.Title : "Unknown Title";
 
         if (!string.IsNullOrWhiteSpace(audiobook.Series)) variables["Series"] = audiobook.Series;
         if (!string.IsNullOrWhiteSpace(audiobook.PublishYear)) variables["Year"] = audiobook.PublishYear;

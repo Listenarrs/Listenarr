@@ -37,6 +37,8 @@ namespace Listenarr.Application.Audiobooks.Contracts
 
         public string? DestinationPath { get; set; }
 
+        public string? DestinationRoot { get; set; }
+
         public SearchResult? SearchResult { get; set; }
 
         public string HistorySource { get; set; } = "AddNew";
