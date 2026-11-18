@@ -333,6 +333,25 @@ public sealed class LinuxDirectoryAndFileLinkFactAttribute : FactAttribute
     }
 }
 
+public sealed class LinuxFileLinkFactAttribute : FactAttribute
+{
+    public LinuxFileLinkFactAttribute()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Skip = "This test requires native Linux behavior.";
+            return;
+        }
+
+        var decision = NativeTestCapabilityPolicy.GetExecutionDecision(
+            NativeTestCapability.FileSymbolicLinks);
+        if (!decision.ShouldRun)
+        {
+            Skip = decision.SkipReason;
+        }
+    }
+}
+
 /// <summary>
 /// A fact that needs two writable directories whose only common ancestor is the filesystem
 /// root. The test output tree and the system temp directory usually qualify, but a checkout
