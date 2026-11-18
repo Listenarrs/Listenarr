@@ -100,6 +100,13 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    // The session's background jobs: Library Import scans, moves, folder scans, deletes
+    path: '/jobs',
+    name: 'jobs',
+    component: () => import('../views/system/JobsView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/logs',
     name: 'logs',
     component: () => import('../views/activity/LogsView.vue'),

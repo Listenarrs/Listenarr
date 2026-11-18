@@ -142,7 +142,7 @@ describe('ActivityView', () => {
     vi.restoreAllMocks()
   })
 
-  it('shows active library move progress in the unified activity list', async () => {
+  it('leaves library moves to the Jobs page', async () => {
     mockSignalR()
     mockApi()
     mockConfigurationStore(false)
@@ -163,11 +163,10 @@ describe('ActivityView', () => {
 
     const wrapper = await mountActivityView()
     const vm = wrapper.vm as unknown as ActivityViewVm
-    const move = vm.allActivityItems.find((item) => item.id === 'move:job-1')
 
-    expect(move).toMatchObject({ status: 'moving', progress: 37.5 })
-    expect(wrapper.text()).toContain('38%')
-    expect(wrapper.text()).toContain('Moving')
+    expect(vm.allActivityItems.some((item) => item.id === 'move:job-1')).toBe(false)
+    expect(wrapper.text()).not.toContain('38%')
+    expect(wrapper.text()).not.toContain('Moving')
   })
 
   it('includes completed external downloads from the downloads store in the unified list', async () => {
