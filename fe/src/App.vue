@@ -1098,7 +1098,55 @@ const visibleNotifications = computed(() => [
   ...recentNotifications.filter((notification) => !notification.dismissed),
 ])
 
-const notificationCount = computed(() => visibleNotifications.value.length)
+// Read notifications: what the list showed while open. A notification is read under its title, so a
+// new title (a task that ends, a move that completes) counts again; a progress update doesn't.
+// Kept for the browser session, like the Library Import scan.
+const READ_NOTIFICATIONS_SESSION_KEY = 'listenarr.notifications.read'
+const READ_NOTIFICATIONS_KEPT = 200
+
+function notificationReadKey(notification: HistoryNotification): string {
+  return `${notification.id}\n${notification.title}`
+}
+
+function loadReadNotificationKeys(): string[] {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(READ_NOTIFICATIONS_SESSION_KEY) ?? '[]')
+    return Array.isArray(saved) ? saved.filter((key) => typeof key === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+const readNotificationKeys = ref<string[]>(loadReadNotificationKeys())
+
+const notificationCount = computed(() => {
+  const read = new Set(readNotificationKeys.value)
+  return visibleNotifications.value.filter((n) => !read.has(notificationReadKey(n))).length
+})
+
+function markVisibleNotificationsRead() {
+  const keys = visibleNotifications.value.map(notificationReadKey)
+  if (keys.every((key) => readNotificationKeys.value.includes(key))) return
+  const others = readNotificationKeys.value.filter((key) => !keys.includes(key))
+  readNotificationKeys.value = [...others, ...keys].slice(-READ_NOTIFICATIONS_KEPT)
+  try {
+    sessionStorage.setItem(
+      READ_NOTIFICATIONS_SESSION_KEY,
+      JSON.stringify(readNotificationKeys.value),
+    )
+  } catch {
+    /* non-fatal */
+  }
+}
+
+// What the open list shows is read, including what arrives while it is open
+watch(
+  () =>
+    notificationsOpen.value ? visibleNotifications.value.map(notificationReadKey).join('\0') : null,
+  (shown) => {
+    if (shown !== null) markVisibleNotificationsRead()
+  },
+)
 
 function pushNotification(n: HistoryNotification) {
   // Ensure new notifications are not dismissed

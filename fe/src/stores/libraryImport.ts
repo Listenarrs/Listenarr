@@ -340,6 +340,18 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     if (saved.status === 'starting' || saved.status === 'running') {
       _setTask({ ...saved, status: 'running' })
       _followScan(scan, saved.jobId)
+    } else {
+      void _forgetIfServerLostIt(scan, saved.jobId)
+    }
+  }
+
+  // A scan that ended is shown as it ended, unless the server no longer knows it (it restarted):
+  // its results are gone with it, so the scan is forgotten rather than lead to an empty folder
+  async function _forgetIfServerLostIt(scan: number, jobId: string) {
+    try {
+      await apiService.getUnmatchedResults(jobId)
+    } catch (e) {
+      if ((e as { status?: number })?.status === 404 && scan === currentScan) dismissScanTask()
     }
   }
 

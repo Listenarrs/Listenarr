@@ -650,17 +650,78 @@ describe('library import store', () => {
         ).toMatchObject({ status: 'done' })
       })
 
-      it('shows a finished scan as it ended, without asking the server', async () => {
+      it('shows a finished scan the server still knows as it ended', async () => {
         sessionStorage.setItem(
           'listenarr.libraryImport.scanTask',
           JSON.stringify(savedTask('done')),
         )
         const store = await newStore()
+        getUnmatchedResults.mockResolvedValue(completed('job-1', '/srv/1/A.mp3'))
 
         store.restoreScanTask()
 
         expect(store.scanTask).toMatchObject({ status: 'done', itemCount: 3 })
-        expect(getUnmatchedResults).not.toHaveBeenCalled()
+        await vi.waitFor(() => expect(getUnmatchedResults).toHaveBeenCalledWith('job-1'))
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        expect(store.scanTask).toMatchObject({ status: 'done', itemCount: 3 })
+      })
+
+      it.each(['done', 'failed', 'canceled'])(
+        'forgets a %s scan the server no longer knows (its results are gone)',
+        async (status) => {
+          sessionStorage.setItem(
+            'listenarr.libraryImport.scanTask',
+            JSON.stringify(savedTask(status)),
+          )
+          const store = await newStore()
+          getUnmatchedResults.mockRejectedValue(
+            Object.assign(new Error('Not found'), { status: 404 }),
+          )
+
+          store.restoreScanTask()
+
+          await vi.waitFor(() => expect(store.scanTask).toBeNull())
+          expect(sessionStorage.getItem('listenarr.libraryImport.scanTask')).toBeNull()
+        },
+      )
+
+      it('keeps a finished scan when the server cannot be reached', async () => {
+        sessionStorage.setItem(
+          'listenarr.libraryImport.scanTask',
+          JSON.stringify(savedTask('done')),
+        )
+        const store = await newStore()
+        getUnmatchedResults.mockRejectedValue(new Error('Network error'))
+
+        store.restoreScanTask()
+
+        await vi.waitFor(() => expect(getUnmatchedResults).toHaveBeenCalledWith('job-1'))
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        expect(store.scanTask).toMatchObject({ status: 'done', itemCount: 3 })
+      })
+
+      it('does not forget a new scan started while the old one was being checked', async () => {
+        sessionStorage.setItem(
+          'listenarr.libraryImport.scanTask',
+          JSON.stringify(savedTask('done')),
+        )
+        const store = await newStore()
+        let forgetOldJob!: () => void
+        const oldJobCheck = new Promise<never>((_, reject) => {
+          forgetOldJob = () => reject(Object.assign(new Error('Not found'), { status: 404 }))
+        })
+        getUnmatchedResults.mockImplementation((jobId: string) =>
+          jobId === 'job-1' ? oldJobCheck : Promise.resolve(completed(jobId, '/srv/2/B.mp3')),
+        )
+        scanUnmatchedFiles.mockResolvedValue({ jobId: 'job-2' })
+        store.restoreScanTask()
+
+        await store.triggerScan(2)
+        await vi.waitFor(() => expect(store.scanTask?.status).toBe('done'))
+        forgetOldJob()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+
+        expect(store.scanTask).toMatchObject({ jobId: 'job-2', status: 'done' })
       })
 
       it('says so when the server no longer knows the scan', async () => {
