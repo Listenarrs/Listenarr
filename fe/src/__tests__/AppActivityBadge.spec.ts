@@ -834,7 +834,7 @@ describe('App.vue activity badge', () => {
       }
     }
 
-    async function mountApp(task: ScanTaskMock | null = null) {
+    async function mountApp(task: ScanTaskMock | null = null, { open = true } = {}) {
       const { useLibraryImportStore } = await import('@/stores/libraryImport')
       useLibraryImportStore().scanTask = task
       const { default: AppComponent } = await import('@/App.vue')
@@ -852,7 +852,7 @@ describe('App.vue activity badge', () => {
         global: { stubs: ['RouterView'], plugins: [createPinia(), router] },
       })
       await new Promise((resolve) => setTimeout(resolve, 20))
-      await wrapper.find('.notification-wrapper .nav-btn').trigger('click')
+      if (open) await wrapper.find('.notification-wrapper .nav-btn').trigger('click')
       return { wrapper, router }
     }
 
@@ -940,6 +940,72 @@ describe('App.vue activity badge', () => {
       await mountApp()
 
       expect(libraryImportMock.store!.restoreScanTask).toHaveBeenCalled()
+    })
+
+    describe('read notifications', () => {
+      function badge(w: VueWrapper) {
+        const element = w.find('.notification-wrapper .notification-badge')
+        return element.exists() ? element.text() : null
+      }
+
+      // Opens the list once (reading what it shows), then closes it: the badge is what is checked
+      async function mountAfterReading(task: ScanTaskMock | null) {
+        const mounted = await mountApp(task)
+        await mounted.wrapper.find('.notification-wrapper .nav-btn').trigger('click')
+        return mounted
+      }
+
+      beforeEach(() => sessionStorage.clear())
+
+      it('counts unread notifications only, and opening the list reads them', async () => {
+        moveJobsMock.trackedJobs.push({
+          jobId: 'move-1',
+          status: 'Running',
+          progress: 10,
+          phase: 'Copying',
+        })
+        const { wrapper: w } = await mountApp(scanTask(), { open: false })
+        expect(badge(w)).toBe('2')
+
+        await w.find('.notification-wrapper .nav-btn').trigger('click')
+
+        expect(badge(w)).toBeNull()
+        expect(w.findAll('.notification-item')).toHaveLength(2)
+      })
+
+      it('counts a notification again when its title changes, not on progress only', async () => {
+        const { wrapper: w } = await mountAfterReading(scanTask())
+        expect(badge(w)).toBeNull()
+
+        libraryImportMock.store!.scanTask = scanTask({ startedAt: '2026-08-08T10:41:00Z' })
+        await w.vm.$nextTick()
+        expect(badge(w)).toBeNull()
+
+        libraryImportMock.store!.scanTask = scanTask({ status: 'done', itemCount: 4 })
+        await w.vm.$nextTick()
+        expect(badge(w)).toBe('1')
+      })
+
+      it('reads a notification that arrives while the list is open', async () => {
+        const { wrapper: w } = await mountApp(null)
+
+        libraryImportMock.store!.scanTask = scanTask()
+        await w.vm.$nextTick()
+        await w.vm.$nextTick()
+        await w.find('.notification-wrapper .nav-btn').trigger('click')
+
+        expect(badge(w)).toBeNull()
+      })
+
+      it('remembers what was read after a reload', async () => {
+        const first = await mountAfterReading(scanTask())
+        first.wrapper.unmount()
+        wrapper = undefined
+
+        const { wrapper: w } = await mountApp(scanTask(), { open: false })
+
+        expect(badge(w)).toBeNull()
+      })
     })
 
     it('names a folder it does not know as "root folder"', async () => {
