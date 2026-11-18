@@ -56,6 +56,7 @@
       <div class="jobs-header">
         <div class="col-action">Action</div>
         <div class="col-title">Job</div>
+        <div class="col-description">Description</div>
         <div class="col-details">Details</div>
         <div class="col-progress">Progress</div>
         <div class="col-started">Started</div>
@@ -99,6 +100,7 @@
             <span v-else class="title-text" :title="job.title">{{ job.title }}</span>
           </div>
         </div>
+        <div class="col-description" :title="job.description">{{ job.description }}</div>
         <div class="col-details" :title="job.message">{{ job.message }}</div>
         <div class="col-progress">
           <div v-if="job.active" class="progress-cell">
@@ -225,7 +227,10 @@ const filteredJobs = computed(() => {
   const needle = filterText.value.trim().toLowerCase()
   if (!needle) return jobsStore.jobs
   return jobsStore.jobs.filter(
-    (job) => job.title.toLowerCase().includes(needle) || job.message.toLowerCase().includes(needle),
+    (job) =>
+      job.title.toLowerCase().includes(needle) ||
+      job.description.toLowerCase().includes(needle) ||
+      job.message.toLowerCase().includes(needle),
   )
 })
 
@@ -369,7 +374,7 @@ function formatTime(timestamp: string): string {
   display: grid;
   /* The Action column is as wide as its button, the same for every row */
   grid-template-columns:
-    11.5rem minmax(0, 3fr) minmax(0, 2fr) minmax(0, 1.5fr) minmax(0, 1fr)
+    11.5rem minmax(0, 2.5fr) minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.5fr) minmax(0, 1fr)
     minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 1fr) 40px;
   align-items: center;
 }
@@ -414,6 +419,7 @@ function formatTime(timestamp: string): string {
   align-self: stretch;
 }
 
+.jobs-row > .col-description,
 .jobs-row > .col-details {
   display: block;
   line-height: 1.9;
@@ -458,6 +464,7 @@ function formatTime(timestamp: string): string {
 }
 
 .jobs-row--stale .col-title,
+.jobs-row--stale .col-description,
 .jobs-row--stale .col-details {
   opacity: 0.6;
 }
@@ -625,9 +632,14 @@ function formatTime(timestamp: string): string {
     justify-content: flex-end;
   }
 
-  .jobs-row .col-details {
+  .jobs-row .col-description {
     grid-column: 1 / -1;
     grid-row: 2;
+  }
+
+  .jobs-row .col-details {
+    grid-column: 1 / -1;
+    grid-row: 6;
   }
 
   .jobs-row .col-progress {

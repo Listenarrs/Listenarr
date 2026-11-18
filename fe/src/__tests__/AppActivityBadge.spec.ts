@@ -332,7 +332,8 @@ describe('App.vue activity badge', () => {
     expect(scanNotification?.find('.notif-icon .ph-spin').exists()).toBe(true)
     expect(scanNotification?.find('.progress-fill').exists()).toBe(false)
     expect(scanNotification?.text()).not.toMatch(/\d+%/)
-    expect(scanNotification?.find('.dismiss-btn').exists()).toBe(false)
+    // Dismissing a running job only hides its notification: it goes on
+    expect(scanNotification?.find('.dismiss-btn').exists()).toBe(true)
 
     scanSignalRMock.callback?.({
       jobId: 'scan-1',
@@ -347,7 +348,8 @@ describe('App.vue activity badge', () => {
     expect(scanNotification?.text()).toContain('Scanning folder')
     expect(scanNotification?.find('.notif-icon .ph-spin').exists()).toBe(true)
     expect(scanNotification?.text()).not.toMatch(/\d+%/)
-    expect(scanNotification?.find('.dismiss-btn').exists()).toBe(false)
+    // Dismissing a running job only hides its notification: it goes on
+    expect(scanNotification?.find('.dismiss-btn').exists()).toBe(true)
 
     scanSignalRMock.callback?.({
       jobId: 'scan-1',
@@ -904,6 +906,8 @@ describe('App.vue activity badge', () => {
     }
 
     async function mountApp(task: ScanTaskMock | null = null, { open = true } = {}) {
+      // The jobs dismissed from the notifications are kept for the session
+      sessionStorage.removeItem('listenarr.jobs.notifications.hidden')
       const { useLibraryImportStore } = await import('@/stores/libraryImport')
       useLibraryImportStore().scanTask = task
       const { default: AppComponent } = await import('@/App.vue')
@@ -929,7 +933,7 @@ describe('App.vue activity badge', () => {
       return w.find('[data-testid="notification-library-import-scan"]')
     }
 
-    it('shows a running scan with a spinner, and no dismiss button', async () => {
+    it('shows a running scan with a spinner, and lets its notification be dismissed', async () => {
       const { wrapper: w } = await mountApp(scanTask({ status: 'starting', jobId: null }))
 
       const item = scanItem(w)
@@ -937,7 +941,7 @@ describe('App.vue activity badge', () => {
       expect(item.text()).toContain('Scanning Audiobooks A for unmatched files')
       expect(item.find('.notif-icon .ph-spin').exists()).toBe(true)
       expect(item.find('.progress-fill').exists()).toBe(false)
-      expect(item.find('.dismiss-btn').exists()).toBe(false)
+      expect(item.find('.dismiss-btn').exists()).toBe(true)
     })
 
     it('updates the same notification as the scan ends, and stops the spinner', async () => {
@@ -984,25 +988,26 @@ describe('App.vue activity badge', () => {
       expect(w.find(JOBS_LIST).exists()).toBe(false)
     })
 
-    it('forgets a finished scan when it is dismissed', async () => {
+    it('dismisses a notification without touching the job log', async () => {
       const { wrapper: w } = await mountApp(scanTask({ status: 'done', itemCount: 3 }))
 
       await scanItem(w).find('.dismiss-btn').trigger('click')
 
-      expect(libraryImportMock.store!.dismissScan).toHaveBeenCalledWith('scan-a')
       expect(scanItem(w).exists()).toBe(false)
+      expect(libraryImportMock.store!.dismissScan).not.toHaveBeenCalled()
+      expect(libraryImportMock.store!.scanTask).not.toBeNull()
     })
 
-    it('forgets a finished scan on Clear, but keeps a running one', async () => {
-      const { wrapper: w } = await mountApp(scanTask({ status: 'canceled' }))
+    it('clears the notifications, and notifies again when a running scan ends', async () => {
+      const { wrapper: w } = await mountApp(scanTask({ status: 'running' }))
 
       await w.find(`${JOBS_LIST} .clear-btn`).trigger('click')
       expect(scanItem(w).exists()).toBe(false)
+      expect(libraryImportMock.store!.clearFinishedScans).not.toHaveBeenCalled()
 
-      libraryImportMock.store!.scanTask = scanTask({ status: 'running' })
+      libraryImportMock.store!.scanTask = scanTask({ status: 'done', itemCount: 2 })
       await w.vm.$nextTick()
-      await w.find(`${JOBS_LIST} .clear-btn`).trigger('click')
-      expect(scanItem(w).exists()).toBe(true)
+      expect(scanItem(w).text()).toContain('Scan of Audiobooks A finished')
     })
 
     it("brings back the session's scan when the app starts, whatever the page", async () => {

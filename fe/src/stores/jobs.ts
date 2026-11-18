@@ -16,7 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 import { defineStore } from 'pinia'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { RouteLocationRaw } from 'vue-router'
 import { useLibraryImportStore, type LibraryImportScanTask } from '@/stores/libraryImport'
 import { useMoveJobsStore } from '@/stores/moveJobs'
@@ -32,6 +32,8 @@ export interface JobEntry {
   id: string
   kind: JobKind
   title: string
+  // What the job works on: "Scan root dir: /media/audiobooks"
+  description: string
   message: string
   status: JobStatus
   // Queued or running: shown with a spinner (or its progress), can't be dismissed
@@ -56,6 +58,9 @@ export interface JobAction {
   // Why the button is disabled
   disabledReason?: string
 }
+
+// The jobs dismissed from the job notifications (the header's cog): they stay in the job log
+const HIDDEN_NOTIFICATIONS_SESSION_KEY = 'listenarr.jobs.notifications.hidden'
 
 const STALE_SCAN_REASON =
   'Stale result: this scan was replaced by a more recent scan of the same folder'
@@ -146,6 +151,7 @@ export const useJobsStore = defineStore('jobs', () => {
       id: task.id,
       kind: 'library-import-scan',
       ...shown,
+      description: `Scan root dir: ${task.folderPath || task.folderName || 'unknown'}`,
       active,
       startedAt: task.startedAt,
       finishedAt: task.finishedAt ?? undefined,
@@ -169,6 +175,7 @@ export const useJobsStore = defineStore('jobs', () => {
         id: `move-${job.jobId}`,
         kind: 'move',
         title: title ? `Moving ${title}` : 'Moving audiobook',
+        description: `Move ${title || 'audiobook'}${target}`,
         message: `${job.phase || 'Preparing move'}${target}`,
         status: job.status === 'Queued' ? 'queued' : 'running',
         active: true,
@@ -225,6 +232,7 @@ export const useJobsStore = defineStore('jobs', () => {
           id: `scan-${job.jobId}`,
           kind: 'folder-scan' as const,
           ...shown,
+          description: `Scan book folder: ${subject}`,
           active: shown.status === 'queued' || shown.status === 'running',
           startedAt: job.timestamp,
           finishedAt: job.finishedAt,
@@ -270,6 +278,9 @@ export const useJobsStore = defineStore('jobs', () => {
           id: operation.id,
           kind: 'delete' as const,
           title,
+          description: isBulk
+            ? `Delete ${operation.total} audiobook${operation.total === 1 ? '' : 's'}`
+            : `Delete ${operation.title}`,
           message,
           status: active
             ? ('running' as const)
@@ -297,6 +308,55 @@ export const useJobsStore = defineStore('jobs', () => {
 
   const hasActiveJobs = computed(() => jobs.value.some((job) => job.active))
 
+  // ─── Job notifications (the header's cog) ─────────────────────────────────
+  // The job log's jobs, less those dismissed from the notifications. A job is dismissed as it was
+  // then: a running job dismissed goes on in the background and shows again when it ends.
+
+  function notificationKey(job: JobEntry): string {
+    return `${job.id}:${job.active ? 'active' : job.status}`
+  }
+
+  const hiddenNotificationKeys = ref<string[]>(loadHiddenNotificationKeys())
+
+  const notificationJobs = computed(() => {
+    const hidden = new Set(hiddenNotificationKeys.value)
+    return jobs.value.filter((job) => !hidden.has(notificationKey(job)))
+  })
+
+  function dismissNotification(id: string) {
+    const job = jobs.value.find((candidate) => candidate.id === id)
+    if (job) hideNotifications([notificationKey(job)])
+  }
+
+  function clearNotifications() {
+    hideNotifications(jobs.value.map(notificationKey))
+  }
+
+  function hideNotifications(keys: string[]) {
+    // Only the keys of the jobs still in the log are kept: the others can't come back
+    const inLog = new Set(jobs.value.map((job) => `${job.id}:`))
+    const next = [...new Set([...hiddenNotificationKeys.value, ...keys])].filter((key) =>
+      inLog.has(key.slice(0, key.lastIndexOf(':') + 1)),
+    )
+    hiddenNotificationKeys.value = next
+    try {
+      sessionStorage.setItem(HIDDEN_NOTIFICATIONS_SESSION_KEY, JSON.stringify(next))
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  function loadHiddenNotificationKeys(): string[] {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(HIDDEN_NOTIFICATIONS_SESSION_KEY) ?? '[]')
+      return Array.isArray(saved) ? saved.filter((key) => typeof key === 'string') : []
+    } catch {
+      return []
+    }
+  }
+
+  // ─── Job log (the Jobs page) ──────────────────────────────────────────────
+
   function dismiss(id: string) {
     const job = jobs.value.find((candidate) => candidate.id === id)
     if (job?.kind === 'library-import-scan') libraryImportStore.dismissScan(id)
@@ -316,5 +376,14 @@ export const useJobsStore = defineStore('jobs', () => {
     if (job?.kind === 'library-import-scan' && job.cancelable) await libraryImportStore.cancelScan()
   }
 
-  return { jobs, hasActiveJobs, dismiss, clearFinished, cancel }
+  return {
+    jobs,
+    notificationJobs,
+    hasActiveJobs,
+    dismiss,
+    clearFinished,
+    cancel,
+    dismissNotification,
+    clearNotifications,
+  }
 })

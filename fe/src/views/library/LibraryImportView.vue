@@ -78,12 +78,12 @@
       </div>
 
       <LibraryImportScanTask
-        v-if="store.scanTask"
+        v-if="store.scanTask && store.taskBarVisible"
         :task="store.scanTask"
         :folder-name="folderName(store.scanTask.rootFolderId)"
         :shown="store.rootFolderId === store.scanTask.rootFolderId"
         @cancel="store.cancelScan()"
-        @dismiss="store.dismissScanTask()"
+        @dismiss="store.dismissTaskBar()"
         @show="showScanTaskFolder"
       />
     </section>

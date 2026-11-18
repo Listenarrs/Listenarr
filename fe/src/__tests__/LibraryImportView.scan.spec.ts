@@ -293,6 +293,20 @@ describe('LibraryImportView opened from "Scan for unmatched files"', () => {
     expect(store.initFromRootFolder).toHaveBeenLastCalledWith(3)
   })
 
+  it("offers the task bar's dismiss button while the scan runs, and hides a dismissed bar", async () => {
+    routeQuery.value = {}
+    const { wrapper, store } = mountView()
+    await flushPromises()
+    store.scanTask = { ...task(2), id: 'scan-a' }
+    await flushPromises()
+
+    await wrapper.get('[data-testid="scan-task-dismiss"]').trigger('click')
+    await flushPromises()
+
+    expect(store.cancelScan).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="scan-task"]').exists()).toBe(false)
+  })
+
   it('shows the folder being matched when coming back to the page during Start Matching', async () => {
     routeQuery.value = {}
     const pinia = createPinia()

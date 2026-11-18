@@ -48,6 +48,8 @@ export interface LibraryImportScanTask {
   rootFolderId: number
   // The folder's name (or path) when the scan started, so it can be named on any page
   folderName: string | null
+  // The folder's path when the scan started (a scan saved before paths were kept has none)
+  folderPath?: string | null
   status: 'starting' | 'running' | 'done' | 'failed' | 'canceled'
   startedAt: string
   finishedAt: string | null
@@ -59,6 +61,9 @@ const SCAN_TASK_SESSION_KEY = 'listenarr.libraryImport.scanTask'
 // The session's earlier scans, newest first: the Jobs page lists them
 const SCAN_HISTORY_SESSION_KEY = 'listenarr.libraryImport.scanHistory'
 const SCAN_HISTORY_KEPT = 50
+// The task bar dismissed, as the scan was then: dismissing hides the bar, the scan goes on, and
+// the bar shows again when the scan ends (a new state to tell)
+const TASK_BAR_HIDDEN_SESSION_KEY = 'listenarr.libraryImport.taskBarHidden'
 
 let scanTaskSequence = 0
 function newScanTaskId(): string {
@@ -231,6 +236,10 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   const scanTask = ref<LibraryImportScanTask | null>(null)
   // The scans that came before it, newest first (each one ended: one scan runs at a time)
   const scanHistory = ref<LibraryImportScanTask[]>([])
+  const hiddenTaskBar = ref<string | null>(_loadHiddenTaskBar())
+  const taskBarVisible = computed(
+    () => !!scanTask.value && _taskBarKey(scanTask.value) !== hiddenTaskBar.value,
+  )
   const scanTaskActive = computed(
     () => scanTask.value?.status === 'starting' || scanTask.value?.status === 'running',
   )
@@ -291,6 +300,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
       jobId: null,
       rootFolderId: id,
       folderName: folder ? folder.name || folder.path : null,
+      folderPath: folder ? folder.path : null,
       status: 'starting',
       startedAt: new Date().toISOString(),
       finishedAt: null,
@@ -342,6 +352,33 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
       sessionStorage.removeItem(SCAN_TASK_SESSION_KEY)
     } catch {
       /* non-fatal */
+    }
+  }
+
+  // The task bar's dismiss button hides the bar: a running scan goes on, and its bar shows again
+  // when it ends; a scan that ended stays hidden
+  function dismissTaskBar() {
+    const task = scanTask.value
+    if (!task) return
+    hiddenTaskBar.value = _taskBarKey(task)
+    try {
+      sessionStorage.setItem(TASK_BAR_HIDDEN_SESSION_KEY, hiddenTaskBar.value)
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  // A scan starting then running is one state: only its end shows the bar again
+  function _taskBarKey(task: LibraryImportScanTask): string {
+    const phase = task.status === 'starting' || task.status === 'running' ? 'active' : task.status
+    return `${task.id}:${phase}`
+  }
+
+  function _loadHiddenTaskBar(): string | null {
+    try {
+      return sessionStorage.getItem(TASK_BAR_HIDDEN_SESSION_KEY)
+    } catch {
+      return null
     }
   }
 
@@ -825,6 +862,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     scanStatus,
     scanTask,
     scanHistory,
+    taskBarVisible,
     scanTaskActive,
     scanWarnings,
     lastScannedAt,
@@ -844,6 +882,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     cancelScan,
     dismissScanTask,
     dismissScan,
+    dismissTaskBar,
     clearFinishedScans,
     restoreScanTask,
     startProcessing,

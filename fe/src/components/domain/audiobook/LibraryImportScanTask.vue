@@ -64,8 +64,8 @@
         <PhStop :size="14" />
         Cancel scan
       </button>
+      <!-- Hides the bar; a running scan goes on, and its bar shows again when it ends -->
       <button
-        v-else
         type="button"
         class="scan-task-dismiss"
         title="Dismiss"
