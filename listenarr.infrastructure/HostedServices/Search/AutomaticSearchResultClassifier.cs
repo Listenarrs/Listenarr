@@ -36,20 +36,12 @@ namespace Listenarr.Infrastructure.HostedServices.Search
         }
 
         // Author-free fallback query: many release names omit the author, so the full
-        // title+author query can return nothing even when the book is available. A title
-        // (+ series) query recovers those. Callers must constrain the broadened results to
-        // titles that still match the book before grabbing.
+        // title+author query can return nothing even when the book is available. The shared
+        // query title recovers those, without the series. Callers must constrain the
+        // broadened results to titles that still match the book before grabbing.
         public string BuildTitleFallbackSearchQuery(Audiobook audiobook)
         {
-            var parts = new List<string>();
-
-            if (!string.IsNullOrEmpty(audiobook.Title))
-                parts.Add(audiobook.Title);
-
-            if (!string.IsNullOrEmpty(audiobook.Series))
-                parts.Add(audiobook.Series);
-
-            return string.Join(" ", parts);
+            return AudiobookSearchQueryBuilder.BuildQueryTitle(audiobook.Title);
         }
 
         public bool IsTorrentResult(SearchResult result)
