@@ -182,10 +182,9 @@ namespace Listenarr.Api.Features.SystemDiagnostics
                             using var doc = System.Text.Json.JsonDocument.Parse(meBody);
                             if (doc.RootElement.TryGetProperty("id", out var idProp)) botId = idProp.GetString();
                         }
-                        catch (System.Text.Json.JsonException)
+                        catch (System.Text.Json.JsonException exception)
                         {
-                            // ignore parse errors
-                            System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                            _logger.LogWarning(exception, "Discord connection test could not read the bot id from the /users/@me response; continuing without it");
                         }
                     }
                 }

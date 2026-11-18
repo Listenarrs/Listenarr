@@ -46,7 +46,7 @@ namespace Listenarr.Infrastructure.Images.Validation
             }
             catch (Exception ex) when (ex is not OperationCanceledException && ex is not OutOfMemoryException && ex is not StackOverflowException)
             {
-                _logger.LogDebug(ex, "Failed to measure image dimensions for cover {Url}", url);
+                _logger.LogDebug(ex, "Failed to measure image dimensions for cover {Url}", LogRedaction.SanitizeUrl(url));
                 return null;
             }
         }

@@ -16,6 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 
 namespace Listenarr.Infrastructure.Persistence
 {
@@ -27,10 +28,12 @@ namespace Listenarr.Infrastructure.Persistence
     public class ProcessExecutionStore : IProcessExecutionStore
     {
         private readonly IProcessExecutionLogRepository _logs;
+        private readonly ILogger<ProcessExecutionStore> _logger;
 
-        public ProcessExecutionStore(IProcessExecutionLogRepository logs)
+        public ProcessExecutionStore(IProcessExecutionLogRepository logs, ILogger<ProcessExecutionStore> logger)
         {
             _logs = logs;
+            _logger = logger;
         }
 
         public async Task SaveAsync(ProcessResult result, string? source = null, ProcessStartInfo? startInfo = null, CancellationToken cancellationToken = default)
@@ -54,8 +57,7 @@ namespace Listenarr.Infrastructure.Persistence
             }
             catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException)
             {
-                // Swallow errors here - persistence is best-effort to avoid disrupting process flows.
-                Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                _logger.LogWarning(caughtEx_1, "Could not persist the process execution log for {FileName}; the run itself is unaffected but the diagnostic record is lost", startInfo?.FileName);
             }
         }
     }

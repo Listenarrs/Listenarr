@@ -166,7 +166,7 @@ public class AsinEnricher
                         try { candidateDropReasons[asin] = "queued_for_fallback_no_metadata"; }
                         catch (Exception caughtEx_1) when (caughtEx_1 is not OperationCanceledException && caughtEx_1 is not OutOfMemoryException && caughtEx_1 is not StackOverflowException)
                         {
-                            System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                            _logger.LogDebug(caughtEx_1, "Could not record a drop reason for ASIN {Asin}; the fallback queue entry is unaffected", asin);
                         }
                     }
 
@@ -199,7 +199,7 @@ public class AsinEnricher
                             try { candidateDropReasons[asin] = filterReason ?? "filtered"; }
                             catch (Exception caughtEx_2) when (caughtEx_2 is not OperationCanceledException && caughtEx_2 is not OutOfMemoryException && caughtEx_2 is not StackOverflowException)
                             {
-                                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                _logger.LogDebug(caughtEx_2, "Could not record the filter drop reason for ASIN {Asin}; the result is still filtered out", asin);
                             }
                         }
                         else
@@ -208,7 +208,7 @@ public class AsinEnricher
                             try { candidateDropReasons[asin] = "enriched_from_metadata"; }
                             catch (Exception caughtEx_3) when (caughtEx_3 is not OperationCanceledException && caughtEx_3 is not OutOfMemoryException && caughtEx_3 is not StackOverflowException)
                             {
-                                System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                                _logger.LogDebug(caughtEx_3, "Could not record the enrichment reason for ASIN {Asin}; the result is still enriched", asin);
                             }
                         }
                     }
@@ -218,7 +218,7 @@ public class AsinEnricher
                         try { candidateDropReasons[asin] = "no_metadata_after_sources"; }
                         catch (Exception caughtEx_4) when (caughtEx_4 is not OperationCanceledException && caughtEx_4 is not OutOfMemoryException && caughtEx_4 is not StackOverflowException)
                         {
-                            System.Diagnostics.Debug.WriteLine("Suppressed non-fatal exception in catch block.");
+                            _logger.LogDebug(caughtEx_4, "Could not record the no-metadata reason for ASIN {Asin}", asin);
                         }
                     }
                 }

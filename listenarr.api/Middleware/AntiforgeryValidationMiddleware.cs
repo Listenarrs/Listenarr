@@ -153,7 +153,7 @@ namespace Listenarr.Api.Middleware
                     }
                     catch (Exception logEx) when (logEx is not OperationCanceledException && logEx is not OutOfMemoryException && logEx is not StackOverflowException)
                     {
-                        System.Diagnostics.Debug.WriteLine($"AntiforgeryValidationMiddleware logging failed: {logEx.Message}");
+                        // Nothing is logged here: the call that failed is the logging call itself.
                     }
 
                     context.Response.StatusCode = StatusCodes.Status400BadRequest;
