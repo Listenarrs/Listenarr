@@ -375,11 +375,11 @@ namespace Listenarr.Infrastructure.HostedServices.Search
             }
             catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
             {
-                // The host is not stopping, so this is a timeout from the download client
-                // (HttpClient surfaces it as TaskCanceledException). Name the submission step here,
+                // The host is not stopping, so this is a local cancellation or timeout
+                // (HttpClient timeouts surface as TaskCanceledException). Name the submission step here,
                 // then rethrow: the per-book handler skips the LastSearchTime write, so the book
                 // stays eligible for the next cycle instead of waiting out the cooldown.
-                _logger.LogWarning("Timed out queuing download for audiobook '{Title}': {ResultTitle}. The book stays eligible for the next cycle",
+                _logger.LogWarning("Canceled/timed out queuing download for audiobook '{Title}': {ResultTitle}. The book stays eligible for the next cycle",
                     audiobook.Title, topResult.SearchResult.Title);
                 throw;
             }
