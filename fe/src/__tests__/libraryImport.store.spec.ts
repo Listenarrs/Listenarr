@@ -599,6 +599,29 @@ describe('library import store', () => {
       expect(store.scanStatus).toBe('idle')
     })
 
+    it('names the folder it scans, so the task can be shown on any page', async () => {
+      const { useRootFoldersStore } = await import('@/stores/rootFolders')
+      useRootFoldersStore().folders = [
+        { id: 1, name: 'Audiobooks A', path: '/srv/1' },
+        { id: 2, name: '', path: '/srv/2' },
+      ] as never
+      const store = await newStore()
+      scanUnmatchedFiles.mockResolvedValue({ jobId: 'job-1' })
+      getUnmatchedResults.mockResolvedValue(running('job-1'))
+
+      await store.triggerScan(1)
+      expect(store.scanTask?.folderName).toBe('Audiobooks A')
+      expect(
+        JSON.parse(sessionStorage.getItem('listenarr.libraryImport.scanTask') ?? '{}'),
+      ).toMatchObject({ folderName: 'Audiobooks A' })
+
+      await store.triggerScan(2)
+      expect(store.scanTask?.folderName).toBe('/srv/2')
+
+      await store.triggerScan(3)
+      expect(store.scanTask?.folderName).toBeNull()
+    })
+
     describe('after a reload', () => {
       const savedTask = (status: string) => ({
         jobId: 'job-1',
