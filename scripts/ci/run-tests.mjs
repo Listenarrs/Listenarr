@@ -245,12 +245,19 @@ async function runTests (options, deps) {
     if (interrupted) return 130
     if (!options.wait) return 0
 
-    await deps.run('gh', ['run', 'watch', String(runId), '-R', fork, '--interval', '15'])
-    if (interrupted) {
-      deps.log('CI RUN: CANCELLED')
-      return 130
-    }
-    const { conclusion, jobs } = JSON.parse(await sh('gh', ['run', 'view', String(run), '-R', fork, '--json', 'conclusion,jobs']))
+    // `gh run watch` can return before the run is over (it sometimes exits early on a run that was
+    // just dispatched), so keep watching until GitHub reports the run completed; otherwise the
+    // conclusion read below is still empty and a passing run is misreported as a failure.
+    let status, conclusion, jobs
+    do {
+      await deps.run('gh', ['run', 'watch', String(runId), '-R', fork, '--interval', '15'])
+      if (interrupted) {
+        deps.log('CI RUN: CANCELLED')
+        return 130
+      }
+      ;({ status, conclusion, jobs } = JSON.parse(await sh('gh', ['run', 'view', String(run), '-R', fork, '--json', 'status,conclusion,jobs'])))
+      if (status !== 'completed') await deps.sleep(2000)
+    } while (status !== 'completed')
     for (const line of formatJobs(jobs)) deps.log(line)
     if (conclusion === 'success') {
       deps.log('CI RUN: PASS')
