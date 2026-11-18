@@ -78,6 +78,44 @@ const moveJobsMock = vi.hoisted(() => ({
   loadActiveJobs: vi.fn(async () => undefined),
 }))
 
+type ScanTaskMock = {
+  jobId: string | null
+  rootFolderId: number
+  folderName: string | null
+  status: 'starting' | 'running' | 'done' | 'failed' | 'canceled'
+  startedAt: string
+  finishedAt: string | null
+  error: string | null
+  itemCount: number | null
+}
+
+// The Library Import store, as far as the bell uses it: its scan task, kept reactive so the
+// notification follows the task as it changes. Made once per file (resetModules keeps mocks).
+const libraryImportMock = vi.hoisted(() => ({
+  store: null as null | {
+    scanTask: ScanTaskMock | null
+    readonly scanTaskActive: boolean
+    restoreScanTask: ReturnType<typeof vi.fn>
+    dismissScanTask: ReturnType<typeof vi.fn>
+  },
+}))
+
+vi.mock('@/stores/libraryImport', async () => {
+  const { reactive } = await import('vue')
+  const store = reactive({
+    scanTask: null as ScanTaskMock | null,
+    get scanTaskActive(): boolean {
+      return this.scanTask?.status === 'starting' || this.scanTask?.status === 'running'
+    },
+    restoreScanTask: vi.fn(),
+    dismissScanTask: vi.fn(() => {
+      if (!store.scanTaskActive) store.scanTask = null
+    }),
+  })
+  libraryImportMock.store = store
+  return { useLibraryImportStore: () => store }
+})
+
 vi.mock('@/stores/moveJobs', () => ({
   useMoveJobsStore: () => moveJobsMock,
 }))
@@ -161,6 +199,7 @@ describe('App.vue activity badge', () => {
     }))
     deleteOperationsMock.dismiss.mockReset()
     deleteOperationsMock.clearFinished.mockReset()
+    if (libraryImportMock.store) libraryImportMock.store.scanTask = null
     setActivePinia(createPinia())
   })
 
@@ -778,5 +817,135 @@ describe('App.vue activity badge', () => {
     const vm = wrapper.vm as unknown as { wantedCount: number }
     expect(getLibrary).toHaveBeenCalledTimes(2)
     expect(vm.wantedCount).toBe(1)
+  })
+
+  describe('Library Import scan', () => {
+    function scanTask(overrides: Partial<ScanTaskMock> = {}): ScanTaskMock {
+      return {
+        jobId: 'unmatched-1',
+        rootFolderId: 7,
+        folderName: 'Audiobooks A',
+        status: 'running',
+        startedAt: '2026-08-08T10:40:00Z',
+        finishedAt: null,
+        error: null,
+        itemCount: null,
+        ...overrides,
+      }
+    }
+
+    async function mountApp(task: ScanTaskMock | null = null) {
+      const { useLibraryImportStore } = await import('@/stores/libraryImport')
+      useLibraryImportStore().scanTask = task
+      const { default: AppComponent } = await import('@/App.vue')
+      const router = createRouter({
+        history: createMemoryHistory(),
+        routes: [
+          { path: '/', name: 'home', component: { template: '<div />' } },
+          { path: '/library-import', name: 'library-import', component: { template: '<div />' } },
+          { path: '/:pathMatch(.*)*', name: 'other', component: { template: '<div />' } },
+        ],
+      })
+      await router.push('/')
+      await router.isReady().catch(() => {})
+      wrapper = mount(AppComponent, {
+        global: { stubs: ['RouterView'], plugins: [createPinia(), router] },
+      })
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      await wrapper.find('.notification-wrapper .nav-btn').trigger('click')
+      return { wrapper, router }
+    }
+
+    function scanItem(w: VueWrapper) {
+      return w.find('[data-testid="notification-library-import-scan"]')
+    }
+
+    it('shows a running scan with a spinner, and no dismiss button', async () => {
+      const { wrapper: w } = await mountApp(scanTask({ status: 'starting', jobId: null }))
+
+      const item = scanItem(w)
+      expect(item.exists()).toBe(true)
+      expect(item.text()).toContain('Scanning Audiobooks A for unmatched files')
+      expect(item.find('.notif-icon .ph-spin').exists()).toBe(true)
+      expect(item.find('.progress-fill').exists()).toBe(false)
+      expect(item.find('.dismiss-btn').exists()).toBe(false)
+    })
+
+    it('updates the same notification as the scan ends, and stops the spinner', async () => {
+      const { wrapper: w } = await mountApp(scanTask())
+      const store = libraryImportMock.store!
+
+      store.scanTask = scanTask({
+        status: 'done',
+        finishedAt: '2026-08-08T10:42:00Z',
+        itemCount: 14,
+      })
+      await w.vm.$nextTick()
+      expect(w.findAll('[data-testid="notification-library-import-scan"]')).toHaveLength(1)
+      expect(scanItem(w).text()).toContain('Scan of Audiobooks A finished')
+      expect(scanItem(w).text()).toContain('14 unmatched books')
+      expect(scanItem(w).find('.ph-spin').exists()).toBe(false)
+      expect(scanItem(w).find('.dismiss-btn').exists()).toBe(true)
+
+      store.scanTask = scanTask({ status: 'failed', error: 'The root folder is unavailable' })
+      await w.vm.$nextTick()
+      expect(scanItem(w).text()).toContain('Scan of Audiobooks A failed')
+      expect(scanItem(w).text()).toContain('The root folder is unavailable')
+
+      store.scanTask = scanTask({ status: 'canceled', finishedAt: '2026-08-08T10:41:00Z' })
+      await w.vm.$nextTick()
+      expect(scanItem(w).text()).toContain('Scan of Audiobooks A canceled')
+    })
+
+    it('says "1 unmatched book" for a single result', async () => {
+      const { wrapper: w } = await mountApp(scanTask({ status: 'done', itemCount: 1 }))
+
+      expect(scanItem(w).text()).toContain('1 unmatched book')
+      expect(scanItem(w).text()).not.toContain('1 unmatched books')
+    })
+
+    it('brings the user back to the folder in Library Import when its name is clicked', async () => {
+      const { wrapper: w, router } = await mountApp(scanTask())
+
+      await scanItem(w).find('a.notif-title').trigger('click')
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      expect(router.currentRoute.value.name).toBe('library-import')
+      expect(router.currentRoute.value.query).toEqual({ rootFolder: '7' })
+      expect(w.find('.notification-dropdown').exists()).toBe(false)
+    })
+
+    it('forgets a finished scan when it is dismissed', async () => {
+      const { wrapper: w } = await mountApp(scanTask({ status: 'done', itemCount: 3 }))
+
+      await scanItem(w).find('.dismiss-btn').trigger('click')
+
+      expect(libraryImportMock.store!.dismissScanTask).toHaveBeenCalled()
+      expect(scanItem(w).exists()).toBe(false)
+    })
+
+    it('forgets a finished scan on Clear, but keeps a running one', async () => {
+      const { wrapper: w } = await mountApp(scanTask({ status: 'canceled' }))
+
+      await w.find('.notification-dropdown .clear-btn').trigger('click')
+      expect(scanItem(w).exists()).toBe(false)
+
+      libraryImportMock.store!.scanTask = scanTask({ status: 'running' })
+      await w.vm.$nextTick()
+      await w.find('.notification-dropdown .clear-btn').trigger('click')
+      expect(scanItem(w).exists()).toBe(true)
+    })
+
+    it("brings back the session's scan when the app starts, whatever the page", async () => {
+      await mountApp()
+
+      expect(libraryImportMock.store!.restoreScanTask).toHaveBeenCalled()
+    })
+
+    it('names a folder it does not know as "root folder"', async () => {
+      const { wrapper: w } = await mountApp(scanTask({ folderName: null }))
+
+      expect(scanItem(w).text()).toContain('Scanning root folder for unmatched files')
+    })
   })
 })

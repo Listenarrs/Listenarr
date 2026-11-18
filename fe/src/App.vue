@@ -155,16 +155,30 @@
               </button>
             </div>
             <ul class="notification-list">
-              <li v-for="item in visibleNotifications" :key="item.id" class="notification-item">
+              <li
+                v-for="item in visibleNotifications"
+                :key="item.id"
+                class="notification-item"
+                :data-testid="item.testId"
+              >
                 <div class="notif-icon">
+                  <PhSpinner v-if="item.spinner" class="ph-spin" />
                   <component
-                    v-if="notificationIconComponent(item.icon)"
+                    v-else-if="notificationIconComponent(item.icon)"
                     :is="notificationIconComponent(item.icon)"
                   />
                   <i v-else :class="item.icon"></i>
                 </div>
                 <div class="notif-content">
-                  <div class="notif-title">{{ item.title }}</div>
+                  <!-- A task's title leads back to where it was started -->
+                  <RouterLink
+                    v-if="item.to"
+                    :to="item.to"
+                    class="notif-title notif-title-link"
+                    @click="notificationsOpen = false"
+                    >{{ item.title }}</RouterLink
+                  >
+                  <div v-else class="notif-title">{{ item.title }}</div>
                   <div class="notif-message">{{ item.message }}</div>
                   <ProgressBar
                     v-if="item.progress != null"
@@ -545,6 +559,7 @@
 
 <script setup lang="ts">
 import { RouterLink, RouterView } from 'vue-router'
+import type { RouteLocationRaw } from 'vue-router'
 import {
   PhMagnifyingGlass,
   PhBell,
@@ -560,6 +575,9 @@ import {
   PhFileMinus,
   PhDownload,
   PhCheckCircle,
+  PhWarning,
+  PhProhibit,
+  PhSpinner,
   PhList,
   PhFolderOpen,
 } from '@phosphor-icons/vue'
@@ -577,6 +595,7 @@ import { useLibraryStore } from '@/stores/library'
 import { useMoveJobsStore } from '@/stores/moveJobs'
 import { useLibraryDeleteOperationsStore } from '@/stores/libraryDeleteOperations'
 import { useScanNotificationsStore } from '@/stores/scanNotifications'
+import { useLibraryImportStore } from '@/stores/libraryImport'
 import { useFilesystemReadinessStore } from '@/stores/filesystemReadiness'
 import { useAuthStore } from '@/stores/auth'
 import { apiService } from '@/services/api'
@@ -609,6 +628,7 @@ const libraryStore = useLibraryStore()
 const moveJobsStore = useMoveJobsStore()
 const deleteOperationsStore = useLibraryDeleteOperationsStore()
 const scanNotificationsStore = useScanNotificationsStore()
+const libraryImportStore = useLibraryImportStore()
 const filesystemReadinessStore = useFilesystemReadinessStore()
 const auth = useAuthStore()
 const authEnabled = ref(false)
@@ -902,6 +922,11 @@ type HistoryNotification = {
   active?: boolean
   showProgressPercentage?: boolean
   indeterminate?: boolean
+  // Where clicking the title leads (the page the task was started from)
+  to?: RouteLocationRaw
+  // A spinning wheel instead of the icon, while the task is pending
+  spinner?: boolean
+  testId?: string
 }
 
 const recentNotifications = reactive<HistoryNotification[]>([])
@@ -1016,7 +1041,57 @@ const deleteNotifications = computed<HistoryNotification[]>(() =>
     }),
 )
 
+const LIBRARY_IMPORT_SCAN_NOTIFICATION_ID = 'library-import-scan'
+
+// The session's Library Import scan, from its start to its end
+const libraryImportNotifications = computed<HistoryNotification[]>(() => {
+  const task = libraryImportStore.scanTask
+  if (!task) return []
+  const folder = task.folderName || 'root folder'
+  const active = task.status === 'starting' || task.status === 'running'
+  const startedAt = new Date(task.startedAt).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+  const ending = {
+    done: {
+      title: `Scan of ${folder} finished`,
+      message: task.itemCount === 1 ? '1 unmatched book' : `${task.itemCount ?? 0} unmatched books`,
+      icon: 'ph ph-check-circle',
+    },
+    failed: {
+      title: `Scan of ${folder} failed`,
+      message: task.error || 'The scan did not complete',
+      icon: 'ph ph-warning',
+    },
+    canceled: {
+      title: `Scan of ${folder} canceled`,
+      message: 'Library Import',
+      icon: 'ph ph-prohibit',
+    },
+  }
+  const shown = active
+    ? {
+        title: `Scanning ${folder} for unmatched files`,
+        message: `Library Import · started at ${startedAt}`,
+        icon: 'ph ph-folder-open',
+      }
+    : ending[task.status as keyof typeof ending]
+  return [
+    {
+      id: LIBRARY_IMPORT_SCAN_NOTIFICATION_ID,
+      testId: 'notification-library-import-scan',
+      ...shown,
+      timestamp: task.startedAt,
+      active,
+      spinner: active,
+      to: { name: 'library-import', query: { rootFolder: String(task.rootFolderId) } },
+    },
+  ]
+})
+
 const visibleNotifications = computed(() => [
+  ...libraryImportNotifications.value,
   ...activeMoveNotifications.value,
   ...scanNotifications.value,
   ...deleteNotifications.value,
@@ -1038,9 +1113,13 @@ function clearNotifications() {
   recentDownloadTitles.value.clear()
   deleteOperationsStore.clearFinished()
   scanNotificationsStore.clearFinished()
+  // A running scan stays: only a finished one is forgotten
+  libraryImportStore.dismissScanTask()
 }
 
 function dismissNotification(id: string) {
+  // The same task as the Library Import task bar: dismissing it here forgets it there too
+  if (id === LIBRARY_IMPORT_SCAN_NOTIFICATION_ID) libraryImportStore.dismissScanTask()
   deleteOperationsStore.dismiss(id)
   if (id.startsWith('scan-')) {
     scanNotificationsStore.dismiss(id.slice('scan-'.length))
@@ -1075,6 +1154,10 @@ function notificationIconComponent(icon?: string) {
       return PhDownload
     case 'ph ph-check-circle':
       return PhCheckCircle
+    case 'ph ph-warning':
+      return PhWarning
+    case 'ph ph-prohibit':
+      return PhProhibit
     default:
       return null
   }
@@ -1405,6 +1488,8 @@ onMounted(async () => {
     // Keep durable move jobs globally visible so the notification dropdown can
     // show progress even when the Activity page is not mounted.
     moveJobsStore.start()
+    // The session's Library Import scan, followed again from any page for the notification list
+    libraryImportStore.restoreScanTask()
 
     // Hydrate the app once, then keep it current from SignalR updates.
     await Promise.all([downloadsStore.loadDownloads(), syncLibrarySnapshot()])
@@ -2872,6 +2957,16 @@ these are not present, the Google Fonts import in `fe/index.html` will be used a
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.notif-title-link {
+  display: block;
+  text-decoration: none;
+}
+
+.notif-title-link:hover {
+  color: #2196f3;
+  text-decoration: underline;
 }
 
 .notif-message {

@@ -30,6 +30,7 @@ import {
 } from '@/services/audiobookSearch'
 import { normalizeSearchRegion, regionLabel } from '@/utils/languageMapping'
 import { useConfigurationStore } from '@/stores/configuration'
+import { useRootFoldersStore } from '@/stores/rootFolders'
 import { buildSeriesFields } from '@/utils/seriesUtils'
 import type { SeriesEntry } from '@/utils/seriesUtils'
 import type {
@@ -44,6 +45,8 @@ import type {
 export interface LibraryImportScanTask {
   jobId: string | null
   rootFolderId: number
+  // The folder's name (or path) when the scan started, so it can be named on any page
+  folderName: string | null
   status: 'starting' | 'running' | 'done' | 'failed' | 'canceled'
   startedAt: string
   finishedAt: string | null
@@ -264,9 +267,11 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     }
     const scan = ++currentScan
     _showFolder(id)
+    const folder = useRootFoldersStore().folders.find((f) => f.id === id)
     _setTask({
       jobId: null,
       rootFolderId: id,
+      folderName: folder ? folder.name || folder.path : null,
       status: 'starting',
       startedAt: new Date().toISOString(),
       finishedAt: null,
