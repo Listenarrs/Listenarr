@@ -50,6 +50,21 @@ namespace Listenarr.Tests.Features.Application.Search
             Assert.Equal("Dracula Bram Stoker", downloadQuery);
         }
 
+        [Fact]
+        [Trait("Method", "BuildTitleFallback")]
+        public void BuildTitleFallback_BothEntryPointsStripEditionAnnotationsAndOmitSeriesAndAuthor()
+        {
+            var audiobook = Book("A Princess of Mars (Unabridged)", "Edgar Rice Burroughs", "Barsoom");
+            var classifier = new AutomaticSearchResultClassifier(
+                Mock.Of<ILogger>());
+
+            var automaticFallback = classifier.BuildTitleFallbackSearchQuery(audiobook);
+            var downloadFallback = DownloadSearchQueryBuilder.BuildTitleFallback(audiobook);
+
+            Assert.Equal(automaticFallback, downloadFallback);
+            Assert.Equal("A Princess of Mars", downloadFallback);
+        }
+
         [Theory]
         [Trait("Method", "Build")]
         // Following Readarr, whose BookSearchCriteria has no series field, the series
