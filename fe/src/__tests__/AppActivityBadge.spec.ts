@@ -85,6 +85,7 @@ const moveJobsMock = vi.hoisted(() => ({
 }))
 
 type ScanTaskMock = {
+  id: string
   jobId: string | null
   rootFolderId: number
   folderName: string | null
@@ -101,8 +102,10 @@ const libraryImportMock = vi.hoisted(() => ({
   store: null as null | {
     scanTask: ScanTaskMock | null
     readonly scanTaskActive: boolean
+    scanHistory: ScanTaskMock[]
     restoreScanTask: ReturnType<typeof vi.fn>
-    dismissScanTask: ReturnType<typeof vi.fn>
+    dismissScan: ReturnType<typeof vi.fn>
+    clearFinishedScans: ReturnType<typeof vi.fn>
   },
 }))
 
@@ -113,9 +116,15 @@ vi.mock('@/stores/libraryImport', async () => {
     get scanTaskActive(): boolean {
       return this.scanTask?.status === 'starting' || this.scanTask?.status === 'running'
     },
+    scanHistory: [] as ScanTaskMock[],
     restoreScanTask: vi.fn(),
-    dismissScanTask: vi.fn(() => {
+    dismissScan: vi.fn((id: string) => {
+      if (store.scanTask?.id === id && !store.scanTaskActive) store.scanTask = null
+      store.scanHistory = store.scanHistory.filter((task) => task.id !== id)
+    }),
+    clearFinishedScans: vi.fn(() => {
       if (!store.scanTaskActive) store.scanTask = null
+      store.scanHistory = []
     }),
   })
   libraryImportMock.store = store
@@ -214,7 +223,10 @@ describe('App.vue activity badge', () => {
     }))
     deleteOperationsMock.dismiss.mockReset()
     deleteOperationsMock.clearFinished.mockReset()
-    if (libraryImportMock.store) libraryImportMock.store.scanTask = null
+    if (libraryImportMock.store) {
+      libraryImportMock.store.scanTask = null
+      libraryImportMock.store.scanHistory = []
+    }
     setActivePinia(createPinia())
   })
 
@@ -878,6 +890,7 @@ describe('App.vue activity badge', () => {
   describe('Library Import scan', () => {
     function scanTask(overrides: Partial<ScanTaskMock> = {}): ScanTaskMock {
       return {
+        id: 'scan-a',
         jobId: 'unmatched-1',
         rootFolderId: 7,
         folderName: 'Audiobooks A',
@@ -976,7 +989,7 @@ describe('App.vue activity badge', () => {
 
       await scanItem(w).find('.dismiss-btn').trigger('click')
 
-      expect(libraryImportMock.store!.dismissScanTask).toHaveBeenCalled()
+      expect(libraryImportMock.store!.dismissScan).toHaveBeenCalledWith('scan-a')
       expect(scanItem(w).exists()).toBe(false)
     })
 

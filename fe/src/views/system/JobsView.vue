@@ -54,10 +54,13 @@
 
     <div v-if="filteredJobs.length > 0" class="jobs-grid-container">
       <div class="jobs-header">
+        <div class="col-action">Action</div>
         <div class="col-title">Job</div>
         <div class="col-details">Details</div>
         <div class="col-progress">Progress</div>
         <div class="col-started">Started</div>
+        <div class="col-finished">Finished</div>
+        <div class="col-duration">Duration</div>
         <div class="col-status">Status</div>
         <div class="col-actions"></div>
       </div>
@@ -65,9 +68,29 @@
         v-for="job in filteredJobs"
         :key="job.id"
         class="jobs-row"
-        :class="`jobs-row--${job.status}`"
+        :class="[`jobs-row--${job.status}`, { 'jobs-row--stale': job.stale }]"
         data-testid="job-row"
       >
+        <div class="col-action">
+          <!-- The title is on a wrapper: a disabled button shows no tooltip in every browser -->
+          <span
+            v-if="job.action"
+            class="job-action-wrap"
+            :title="job.action.disabledReason ?? job.action.label"
+          >
+            <button
+              type="button"
+              class="btn btn-secondary btn-sm job-action-btn"
+              data-testid="job-action"
+              :disabled="!job.action.to"
+              @click="job.action.to && router.push(job.action.to)"
+            >
+              <PhArrowSquareOut v-if="job.action.label === 'See job results'" />
+              <PhEye v-else />
+              <span>{{ job.action.label }}</span>
+            </button>
+          </span>
+        </div>
         <div class="col-title">
           <div class="title-cell">
             <RouterLink v-if="job.to" :to="job.to" class="title-link" :title="job.title">{{
@@ -92,7 +115,15 @@
           <span v-else class="muted">-</span>
         </div>
         <div class="col-started">
-          <span v-if="job.startedAt">{{ formatStarted(job.startedAt) }}</span>
+          <span v-if="job.startedAt">{{ formatTime(job.startedAt) }}</span>
+          <span v-else class="muted">-</span>
+        </div>
+        <div class="col-finished">
+          <span v-if="job.finishedAt">{{ formatTime(job.finishedAt) }}</span>
+          <span v-else class="muted">-</span>
+        </div>
+        <div class="col-duration">
+          <span v-if="duration(job) !== null">{{ duration(job) }}</span>
           <span v-else class="muted">-</span>
         </div>
         <div class="col-status">
@@ -138,14 +169,57 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { RouterLink } from 'vue-router'
-import { PhBroom, PhGear, PhMagnifyingGlass, PhSpinner, PhStop, PhX } from '@phosphor-icons/vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
+import { RouterLink, useRouter } from 'vue-router'
+import {
+  PhArrowSquareOut,
+  PhBroom,
+  PhEye,
+  PhGear,
+  PhMagnifyingGlass,
+  PhSpinner,
+  PhStop,
+  PhX,
+} from '@phosphor-icons/vue'
 import { EmptyState, ProgressBar } from '@/components/base'
-import { useJobsStore, type JobStatus } from '@/stores/jobs'
+import { useJobsStore, type JobEntry, type JobStatus } from '@/stores/jobs'
 
 const jobsStore = useJobsStore()
+const router = useRouter()
 const filterText = ref('')
+
+// The clock running jobs' durations count against: ticks every second while a job runs
+const now = ref(Date.now())
+let clock: ReturnType<typeof setInterval> | null = null
+watch(
+  () => jobsStore.jobs.some((job) => job.active),
+  (anyActive) => {
+    if (anyActive && !clock) {
+      now.value = Date.now()
+      clock = setInterval(() => (now.value = Date.now()), 1000)
+    } else if (!anyActive && clock) {
+      clearInterval(clock)
+      clock = null
+    }
+  },
+  { immediate: true },
+)
+onUnmounted(() => {
+  if (clock) clearInterval(clock)
+})
+
+// How long the job took, or has been running: "45s", "2m 05s", "1h 02m"
+function duration(job: JobEntry): string | null {
+  if (!job.startedAt) return null
+  const start = new Date(job.startedAt).getTime()
+  const end = job.finishedAt ? new Date(job.finishedAt).getTime() : job.active ? now.value : NaN
+  if (Number.isNaN(start) || Number.isNaN(end)) return null
+  const seconds = Math.max(0, Math.round((end - start) / 1000))
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ${String(seconds % 60).padStart(2, '0')}s`
+  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`
+}
 
 const filteredJobs = computed(() => {
   const needle = filterText.value.trim().toLowerCase()
@@ -169,7 +243,7 @@ function statusLabel(status: JobStatus): string {
   return STATUS_LABELS[status]
 }
 
-function formatStarted(timestamp: string): string {
+function formatTime(timestamp: string): string {
   const date = new Date(timestamp)
   if (Number.isNaN(date.getTime())) return timestamp
   const sameDay = date.toDateString() === new Date().toDateString()
@@ -293,9 +367,10 @@ function formatStarted(timestamp: string): string {
 .jobs-header,
 .jobs-row {
   display: grid;
+  /* The Action column is as wide as its button, the same for every row */
   grid-template-columns:
-    minmax(0, 3fr) minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1fr)
-    minmax(0, 1fr) 40px;
+    11.5rem minmax(0, 3fr) minmax(0, 2fr) minmax(0, 1.5fr) minmax(0, 1fr)
+    minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 1fr) 40px;
   align-items: center;
 }
 
@@ -351,6 +426,40 @@ function formatStarted(timestamp: string): string {
 .jobs-row > .col-actions {
   justify-content: center;
   overflow: visible;
+}
+
+.job-action-wrap {
+  display: inline-flex;
+}
+
+/* One width for every button, and no taller than the row's text */
+.job-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  width: 10.5rem;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.job-action-btn svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.job-action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.jobs-row--stale .col-title,
+.jobs-row--stale .col-details {
+  opacity: 0.6;
 }
 
 .title-cell {
@@ -526,7 +635,22 @@ function formatStarted(timestamp: string): string {
     grid-row: 3;
   }
 
-  .jobs-row .col-started {
+  .jobs-row .col-started,
+  .jobs-row .col-finished {
+    display: none;
+  }
+
+  .jobs-row .col-action {
+    grid-column: 1 / -1;
+    grid-row: 4;
+  }
+
+  .jobs-row .col-duration {
+    grid-column: 1;
+    grid-row: 5;
+  }
+
+  .jobs-row .col-action:empty {
     display: none;
   }
 

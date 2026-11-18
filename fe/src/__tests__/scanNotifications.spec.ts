@@ -140,4 +140,26 @@ describe('scan notification store', () => {
     store.clearFinished()
     expect(store.jobs.map((job) => job.jobId)).toEqual(['active'])
   })
+
+  it('records when a scan ends, once', () => {
+    const store = useScanNotificationsStore()
+    store.registerManualScan('scan-1', 42)
+    store.applyUpdate({ jobId: 'scan-1', status: 'Processing' })
+    expect(store.jobs[0]?.finishedAt).toBeUndefined()
+
+    store.applyUpdate({ jobId: 'scan-1', status: 'Completed' })
+    const finishedAt = store.jobs[0]?.finishedAt
+    expect(finishedAt).toBeTruthy()
+
+    store.applyUpdate({ jobId: 'scan-1', status: 'Completed', found: 2 })
+    expect(store.jobs[0]?.finishedAt).toBe(finishedAt)
+  })
+
+  it('records the end of a scan first seen once it ended', () => {
+    const store = useScanNotificationsStore()
+
+    store.applyUpdate({ jobId: 'scan-fast', status: 'Completed' })
+
+    expect(store.jobs[0]?.finishedAt).toBeTruthy()
+  })
 })

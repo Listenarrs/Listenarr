@@ -18,7 +18,7 @@
 import { defineStore } from 'pinia'
 import { computed } from 'vue'
 import type { RouteLocationRaw } from 'vue-router'
-import { useLibraryImportStore } from '@/stores/libraryImport'
+import { useLibraryImportStore, type LibraryImportScanTask } from '@/stores/libraryImport'
 import { useMoveJobsStore } from '@/stores/moveJobs'
 import { useScanNotificationsStore } from '@/stores/scanNotifications'
 import { useLibraryDeleteOperationsStore } from '@/stores/libraryDeleteOperations'
@@ -39,13 +39,26 @@ export interface JobEntry {
   // A percentage, for the jobs that know one (moves, bulk deletes)
   progress?: number
   startedAt?: string
-  // The page the job was started from
+  finishedAt?: string
+  // The page the job was started from (none for a stale job)
   to?: RouteLocationRaw
   cancelable: boolean
+  // Replaced by a more recent job on the same target: its results are no longer the ones shown
+  stale: boolean
+  // The Action column's button, for the jobs that have results to show
+  action?: JobAction
   icon: string
 }
 
-const LIBRARY_IMPORT_SCAN_JOB_ID = 'library-import-scan'
+export interface JobAction {
+  label: 'Follow job progress' | 'See job results'
+  to?: RouteLocationRaw
+  // Why the button is disabled
+  disabledReason?: string
+}
+
+const STALE_SCAN_REASON =
+  'Stale result: this scan was replaced by a more recent scan of the same folder'
 
 // The background jobs of the session: the Library Import scan, moves, folder scans and deletes.
 // The jobs stay in their own stores; this one only lists them and routes dismiss, clear and cancel.
@@ -68,9 +81,22 @@ export const useJobsStore = defineStore('jobs', () => {
       : undefined
   }
 
+  // One job per scan of the session, newest first. Only the latest scan of each folder is current:
+  // the older ones are stale as soon as a newer one starts there.
   const libraryImportJobs = computed<JobEntry[]>(() => {
-    const task = libraryImportStore.scanTask
-    if (!task) return []
+    const tasks = [
+      ...(libraryImportStore.scanTask ? [libraryImportStore.scanTask] : []),
+      ...libraryImportStore.scanHistory,
+    ]
+    const latestByFolder = new Map<number, string>()
+    for (const task of tasks)
+      if (!latestByFolder.has(task.rootFolderId)) latestByFolder.set(task.rootFolderId, task.id)
+    return tasks.map((task) =>
+      libraryImportJob(task, latestByFolder.get(task.rootFolderId) !== task.id),
+    )
+  })
+
+  function libraryImportJob(task: LibraryImportScanTask, stale: boolean): JobEntry {
     const folder = task.folderName || 'root folder'
     const active = task.status === 'starting' || task.status === 'running'
     const startedAt = new Date(task.startedAt).toLocaleTimeString([], {
@@ -105,18 +131,34 @@ export const useJobsStore = defineStore('jobs', () => {
               message: 'Library Import',
               icon: 'ph ph-prohibit',
             }
-    return [
-      {
-        id: LIBRARY_IMPORT_SCAN_JOB_ID,
-        kind: 'library-import-scan',
-        ...shown,
-        active,
-        startedAt: task.startedAt,
-        cancelable: active,
-        to: { name: 'library-import', query: { rootFolder: String(task.rootFolderId) } },
+    const folderPage: RouteLocationRaw = {
+      name: 'library-import',
+      query: { rootFolder: String(task.rootFolderId) },
+    }
+    const noResults =
+      task.status === 'failed'
+        ? 'This scan has no results: it failed'
+        : task.status === 'canceled'
+          ? 'This scan has no results: it was canceled'
+          : undefined
+    const disabledReason = stale ? STALE_SCAN_REASON : noResults
+    return {
+      id: task.id,
+      kind: 'library-import-scan',
+      ...shown,
+      active,
+      startedAt: task.startedAt,
+      finishedAt: task.finishedAt ?? undefined,
+      cancelable: active,
+      stale,
+      to: stale ? undefined : folderPage,
+      action: {
+        label: active ? 'Follow job progress' : 'See job results',
+        to: disabledReason ? undefined : folderPage,
+        disabledReason,
       },
-    ]
-  })
+    }
+  }
 
   // A move is tracked while it runs only: its store drops it once it ends
   const moveJobs = computed<JobEntry[]>(() =>
@@ -132,6 +174,7 @@ export const useJobsStore = defineStore('jobs', () => {
         active: true,
         progress: job.progress,
         cancelable: false,
+        stale: false,
         to: bookPage(job.audiobookId),
         icon: 'ph ph-folder-open',
       }
@@ -184,7 +227,9 @@ export const useJobsStore = defineStore('jobs', () => {
           ...shown,
           active: shown.status === 'queued' || shown.status === 'running',
           startedAt: job.timestamp,
+          finishedAt: job.finishedAt,
           cancelable: false,
+          stale: false,
           to: bookPage(job.audiobookId),
           icon: 'ph ph-folder-open',
         }
@@ -235,7 +280,9 @@ export const useJobsStore = defineStore('jobs', () => {
           // A single delete has no meaningful percentage
           progress: active && isBulk ? operation.progress : undefined,
           startedAt: operation.startedAt,
+          finishedAt: operation.finishedAt,
           cancelable: false,
+          stale: false,
           icon: 'ph ph-file-remove',
         }
       }),
@@ -251,20 +298,22 @@ export const useJobsStore = defineStore('jobs', () => {
   const hasActiveJobs = computed(() => jobs.value.some((job) => job.active))
 
   function dismiss(id: string) {
-    if (id === LIBRARY_IMPORT_SCAN_JOB_ID) libraryImportStore.dismissScanTask()
-    else if (id.startsWith('scan-')) scanNotificationsStore.dismiss(id.slice('scan-'.length))
-    else deleteOperationsStore.dismiss(id)
+    const job = jobs.value.find((candidate) => candidate.id === id)
+    if (job?.kind === 'library-import-scan') libraryImportStore.dismissScan(id)
+    else if (job?.kind === 'folder-scan') scanNotificationsStore.dismiss(id.slice('scan-'.length))
+    else if (job?.kind === 'delete') deleteOperationsStore.dismiss(id)
   }
 
   // The jobs that ended are forgotten; the running ones stay
   function clearFinished() {
-    libraryImportStore.dismissScanTask()
+    libraryImportStore.clearFinishedScans()
     scanNotificationsStore.clearFinished()
     deleteOperationsStore.clearFinished()
   }
 
   async function cancel(id: string) {
-    if (id === LIBRARY_IMPORT_SCAN_JOB_ID) await libraryImportStore.cancelScan()
+    const job = jobs.value.find((candidate) => candidate.id === id)
+    if (job?.kind === 'library-import-scan' && job.cancelable) await libraryImportStore.cancelScan()
   }
 
   return { jobs, hasActiveJobs, dismiss, clearFinished, cancel }
