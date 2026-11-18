@@ -483,6 +483,39 @@ namespace Listenarr.Tests.Features.Api.Features.Library
         }
 
         [Fact]
+        public void GetUnmatchedResults_ReturnsEnqueuedAndCompletedTimestamps()
+        {
+            var queue = new FakeUnmatchedQueue
+            {
+                LastJob = new UnmatchedScanJob
+                {
+                    Id = Guid.NewGuid(),
+                    RootFolderPath = "/library",
+                    Status = "Completed",
+                    EnqueuedAt = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc),
+                    CompletedAt = new DateTime(2026, 1, 2, 3, 6, 7, DateTimeKind.Utc),
+                    Results = []
+                }
+            };
+            using var db = CreateDb();
+            var controller = new RootFoldersController(
+                new FakeService(),
+                queue,
+                new EfAudiobookFileRepository(db),
+                new AudiobookRepository(db),
+                new LocalFileSystem());
+
+            var result = controller.GetUnmatchedResults(queue.LastJob.Id);
+
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(result);
+            var json = JsonSerializer.Serialize(ok.Value);
+            Assert.Contains("\"enqueuedAt\":", json, StringComparison.Ordinal);
+            Assert.Contains("\"completedAt\":", json, StringComparison.Ordinal);
+            Assert.Contains("2026-01-02T03:04:05", json, StringComparison.Ordinal);
+            Assert.Contains("2026-01-02T03:06:07", json, StringComparison.Ordinal);
+        }
+
+        [Fact]
         public void GetUnmatchedResults_RedactsInternalFailureDetails()
         {
             var queue = new FakeUnmatchedQueue
