@@ -94,9 +94,10 @@ export function findFork (remotes, login, fork = '') {
   return { fork: own.slug, url: own.url }
 }
 
-// The runner label the workflow's "runner" input gets ('' for GitHub-hosted runners).
+// The runner label the workflow's "runner" input gets. GitHub-hosted runners are named explicitly,
+// so that the fork's CI_RUNNER variable doesn't send the jobs to a self-hosted runner anyway.
 export function chooseRunner (runners, wanted, prefer) {
-  if (wanted === 'github') return { name: 'github', label: '' }
+  if (wanted === 'github') return { name: 'github', label: 'ubuntu-24.04' }
   const labelOf = (runner) => runner.labels.find((label) => label.type === 'custom')?.name ?? runner.name
   const online = runners.filter((runner) => runner.status === 'online')
   if (wanted) {
