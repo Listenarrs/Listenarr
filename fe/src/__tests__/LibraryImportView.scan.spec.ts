@@ -21,10 +21,22 @@ import { createPinia, setActivePinia, type Pinia } from 'pinia'
 
 const routeQuery = vi.hoisted(() => ({ value: {} as Record<string, string> }))
 const routerReplace = vi.hoisted(() => vi.fn())
-vi.mock('vue-router', () => ({
-  useRoute: () => ({ query: routeQuery.value }),
-  useRouter: () => ({ replace: routerReplace, push: vi.fn() }),
+// The route of the page, reactive like vue-router's: a test changes it to navigate while the page
+// stays mounted (the same route with another query reuses the page)
+const routeState = vi.hoisted(() => ({
+  route: null as null | { name: string; query: Record<string, string | undefined> },
 }))
+vi.mock('vue-router', async () => {
+  const { reactive } = await import('vue')
+  return {
+    // One route per mounted page: the pages earlier tests left mounted keep their own
+    useRoute: () => {
+      routeState.route = reactive({ name: 'library-import', query: routeQuery.value })
+      return routeState.route
+    },
+    useRouter: () => ({ replace: routerReplace, push: vi.fn() }),
+  }
+})
 
 const showConfirm = vi.hoisted(() => vi.fn())
 vi.mock('@/composables/confirmService', () => ({ showConfirm }))
@@ -76,6 +88,83 @@ function mountView({
   })
   return { wrapper, store }
 }
+
+describe('LibraryImportView when the address changes while it is open', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    sessionStorage.clear()
+  })
+
+  function navigate(query: Record<string, string | undefined>, name = 'library-import') {
+    routeState.route!.name = name
+    routeState.route!.query = query
+  }
+
+  it('shows the folder a link asks for', async () => {
+    routeQuery.value = { rootFolder: '2' }
+    const { wrapper, store } = mountView()
+    await flushPromises()
+
+    navigate({ rootFolder: '3' })
+    await flushPromises()
+
+    expect(store.initFromRootFolder).toHaveBeenLastCalledWith(3)
+    expect((wrapper.get('select.folder-select').element as HTMLSelectElement).value).toBe('3')
+    expect(wrapper.get('[data-testid="results-header"]').text()).toContain('Folder 3')
+  })
+
+  it('scans the folder a link asks to scan', async () => {
+    routeQuery.value = { rootFolder: '2' }
+    const { store } = mountView()
+    await flushPromises()
+
+    navigate({ rootFolder: '3', scan: '1' })
+    await flushPromises()
+
+    expect(store.triggerScan).toHaveBeenCalledWith(3)
+    expect(routerReplace).toHaveBeenLastCalledWith({ query: { rootFolder: '3', scan: undefined } })
+  })
+
+  it('says so when a link asks for a folder that no longer exists', async () => {
+    routeQuery.value = { rootFolder: '2' }
+    const { wrapper } = mountView()
+    await flushPromises()
+
+    navigate({ rootFolder: '99' })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="requested-folder-missing"]').exists()).toBe(true)
+  })
+
+  it('keeps the address on the folder picked in the list, without loading it twice', async () => {
+    routeQuery.value = { rootFolder: '2' }
+    const { wrapper, store } = mountView()
+    await flushPromises()
+
+    await wrapper.get('select.folder-select').setValue(3)
+    await flushPromises()
+    expect(routerReplace).toHaveBeenLastCalledWith({ query: { rootFolder: '3' } })
+    const loads = vi.mocked(store.initFromRootFolder).mock.calls.length
+
+    // The router applies that address
+    navigate({ rootFolder: '3' })
+    await flushPromises()
+
+    expect(store.initFromRootFolder).toHaveBeenCalledTimes(loads)
+  })
+
+  it('does nothing while leaving the page', async () => {
+    routeQuery.value = { rootFolder: '2' }
+    const { store } = mountView()
+    await flushPromises()
+    const loads = vi.mocked(store.initFromRootFolder).mock.calls.length
+
+    navigate({ rootFolder: '3' }, 'jobs')
+    await flushPromises()
+
+    expect(store.initFromRootFolder).toHaveBeenCalledTimes(loads)
+  })
+})
 
 describe('LibraryImportView opened from "Scan for unmatched files"', () => {
   beforeEach(() => {
