@@ -199,4 +199,19 @@ describe('library delete notification operations', () => {
     })
     expect(libraryStore.audiobooks.map((book) => book.id)).toEqual([2])
   })
+
+  it('records when a delete ends', () => {
+    const store = useLibraryDeleteOperationsStore()
+    const single = store.beginSingle(1, 'Dune')
+    const failed = store.beginSingle(2, 'Emma')
+    const bulk = store.beginBulk(1)
+    expect(store.operations.every((operation) => operation.finishedAt === undefined)).toBe(true)
+
+    store.completeSingle(single)
+    store.failSingle(failed, 'locked')
+    store.updateBulkItem(bulk, 'Dune', true)
+    store.finishBulk(bulk)
+
+    expect(store.operations.every((operation) => !!operation.finishedAt)).toBe(true)
+  })
 })

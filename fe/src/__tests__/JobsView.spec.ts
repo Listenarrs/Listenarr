@@ -42,7 +42,12 @@ function job(overrides: Partial<JobEntry> = {}): JobEntry {
     active: true,
     startedAt: '2026-08-08T10:40:00Z',
     cancelable: true,
+    stale: false,
     to: { name: 'library-import', query: { rootFolder: '7' } },
+    action: {
+      label: 'Follow job progress',
+      to: { name: 'library-import', query: { rootFolder: '7' } },
+    },
     icon: 'ph ph-folder-open',
     ...overrides,
   }
@@ -170,5 +175,128 @@ describe('JobsView', () => {
 
     expect(rows(w)).toHaveLength(0)
     expect(w.text()).toContain('No jobs')
+  })
+
+  describe('Action column', () => {
+    const actionButton = (row: ReturnType<typeof rows>[number]) =>
+      row.find('.col-action [data-testid="job-action"]')
+
+    it("comes first, with the job's button", async () => {
+      jobsStore.jobs = [job()]
+      const { wrapper: w } = await mountView()
+
+      expect(w.find('.jobs-header > div').text()).toBe('Action')
+      expect(rows(w)[0]!.element.firstElementChild?.classList).toContain('col-action')
+      expect(actionButton(rows(w)[0]!).text()).toBe('Follow job progress')
+    })
+
+    it('follows a running job, and shows the results of a finished one', async () => {
+      jobsStore.jobs = [
+        job(),
+        job({
+          id: 'scan-b',
+          status: 'done',
+          active: false,
+          cancelable: false,
+          to: { name: 'library-import', query: { rootFolder: '9' } },
+          action: {
+            label: 'See job results',
+            to: { name: 'library-import', query: { rootFolder: '9' } },
+          },
+        }),
+      ]
+      const { wrapper: w, router } = await mountView()
+
+      expect(actionButton(rows(w)[1]!).text()).toBe('See job results')
+      await actionButton(rows(w)[1]!).trigger('click')
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      expect(router.currentRoute.value.fullPath).toBe('/library-import?rootFolder=9')
+    })
+
+    it('grays out a stale job, says why, and does not link its title', async () => {
+      const reason = 'Stale result: this scan was replaced by a more recent scan of the same folder'
+      jobsStore.jobs = [
+        job({
+          status: 'done',
+          active: false,
+          cancelable: false,
+          stale: true,
+          to: undefined,
+          action: { label: 'See job results', disabledReason: reason },
+        }),
+      ]
+      const { wrapper: w, router } = await mountView()
+      const row = rows(w)[0]!
+
+      expect(actionButton(row).attributes('disabled')).toBeDefined()
+      expect(row.find('.col-action [title]').attributes('title')).toBe(reason)
+      expect(row.find('a.title-link').exists()).toBe(false)
+      expect(row.classes()).toContain('jobs-row--stale')
+      await actionButton(row).trigger('click')
+      expect(router.currentRoute.value.name).toBe('jobs')
+    })
+
+    it('has no button for a job without results to show', async () => {
+      jobsStore.jobs = [job({ id: 'move-1', kind: 'move', action: undefined, cancelable: false })]
+      const { wrapper: w } = await mountView()
+
+      expect(rows(w)[0]!.find('.col-action').exists()).toBe(true)
+      expect(actionButton(rows(w)[0]!).exists()).toBe(false)
+    })
+  })
+
+  describe('Finished and Duration columns', () => {
+    afterEach(() => vi.useRealTimers())
+
+    it('shows when a job finished and how long it took', async () => {
+      jobsStore.jobs = [
+        job({
+          status: 'done',
+          active: false,
+          cancelable: false,
+          startedAt: '2026-08-08T10:40:00Z',
+          finishedAt: '2026-08-08T10:42:05Z',
+        }),
+      ]
+      const { wrapper: w } = await mountView()
+
+      expect(w.findAll('.jobs-header > div').map((cell) => cell.text())).toEqual([
+        'Action',
+        'Job',
+        'Details',
+        'Progress',
+        'Started',
+        'Finished',
+        'Duration',
+        'Status',
+        '',
+      ])
+      expect(rows(w)[0]!.find('.col-finished').text()).not.toBe('-')
+      expect(rows(w)[0]!.find('.col-duration').text()).toBe('2m 05s')
+    })
+
+    it('counts the duration of a running job as it goes', async () => {
+      vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] })
+      vi.setSystemTime(new Date('2026-08-08T10:40:45Z'))
+      jobsStore.jobs = [job({ startedAt: '2026-08-08T10:40:00Z' })]
+      const { wrapper: w } = await mountView()
+
+      expect(rows(w)[0]!.find('.col-finished').text()).toBe('-')
+      expect(rows(w)[0]!.find('.col-duration').text()).toBe('45s')
+
+      vi.advanceTimersByTime(1000 * 60)
+      await w.vm.$nextTick()
+      expect(rows(w)[0]!.find('.col-duration').text()).toBe('1m 45s')
+    })
+
+    it('shows no duration when the start is unknown', async () => {
+      jobsStore.jobs = [
+        job({ id: 'move-1', kind: 'move', startedAt: undefined, action: undefined }),
+      ]
+      const { wrapper: w } = await mountView()
+
+      expect(rows(w)[0]!.find('.col-duration').text()).toBe('-')
+    })
   })
 })

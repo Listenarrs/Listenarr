@@ -12,6 +12,8 @@ export interface ScanNotificationUpdate {
 
 export interface TrackedScanNotification extends ScanNotificationUpdate {
   timestamp: string
+  // When it ended (first seen in a terminal state)
+  finishedAt?: string
   visible: boolean
   dismissed?: boolean
 }
@@ -56,6 +58,7 @@ export const useScanNotificationsStore = defineStore('scanNotifications', () => 
         {
           ...update,
           timestamp: new Date().toISOString(),
+          finishedAt: isActive(update.status) ? undefined : new Date().toISOString(),
           visible: update.status.toLowerCase() === 'queued',
           dismissed: false,
         },
@@ -81,6 +84,9 @@ export const useScanNotificationsStore = defineStore('scanNotifications', () => 
     existing.created = update.created ?? existing.created
     existing.error = update.error ?? existing.error
     existing.visible = existing.visible || updateStatus === 'queued'
+    if (!isActive(existing.status) && !existing.finishedAt) {
+      existing.finishedAt = new Date().toISOString()
+    }
   }
 
   function registerManualScan(jobId: string, audiobookId: number): void {

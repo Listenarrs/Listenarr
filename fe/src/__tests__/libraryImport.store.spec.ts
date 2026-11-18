@@ -755,6 +755,133 @@ describe('library import store', () => {
       })
     })
 
+    describe("the session's scan history", () => {
+      const HISTORY_KEY = 'listenarr.libraryImport.scanHistory'
+
+      async function scanTwice() {
+        const store = await newStore()
+        scanUnmatchedFiles.mockImplementation(async (rootFolderId: number) => ({
+          jobId: `job-${rootFolderId}-${scanUnmatchedFiles.mock.calls.length}`,
+        }))
+        getUnmatchedResults.mockImplementation((jobId: string) =>
+          Promise.resolve(completed(jobId, `/srv/${jobId}.mp3`)),
+        )
+        await store.triggerScan(1)
+        await vi.waitFor(() => expect(store.scanTask?.status).toBe('done'))
+        await store.triggerScan(1)
+        await vi.waitFor(() => expect(store.scanTask?.status).toBe('done'))
+        return store
+      }
+
+      it('keeps the previous scans when a new one starts, newest first', async () => {
+        const store = await scanTwice()
+
+        expect(store.scanTask).toMatchObject({ jobId: 'job-1-2' })
+        expect(store.scanHistory).toHaveLength(1)
+        expect(store.scanHistory[0]).toMatchObject({ jobId: 'job-1-1', status: 'done' })
+        expect(store.scanHistory[0]!.id).not.toBe(store.scanTask!.id)
+        expect(JSON.parse(sessionStorage.getItem(HISTORY_KEY) ?? '[]')).toHaveLength(1)
+      })
+
+      it('keeps a scan canceled to start another one', async () => {
+        const store = await newStore()
+        scanUnmatchedFiles.mockImplementation(async (rootFolderId: number) => ({
+          jobId: `job-${rootFolderId}`,
+        }))
+        getUnmatchedResults.mockImplementation((jobId: string) => Promise.resolve(running(jobId)))
+        await store.triggerScan(1)
+
+        await store.triggerScan(2)
+
+        expect(store.scanHistory.map((task) => [task.jobId, task.status])).toEqual([
+          ['job-1', 'canceled'],
+        ])
+        expect(store.scanTask).toMatchObject({ jobId: 'job-2', status: 'running' })
+      })
+
+      it('brings the history back after a reload', async () => {
+        await scanTwice()
+        const history = sessionStorage.getItem(HISTORY_KEY)
+        setActivePinia(createPinia())
+        vi.resetModules()
+        sessionStorage.setItem(HISTORY_KEY, history!)
+
+        const store = await newStore()
+        store.restoreScanTask()
+
+        expect(store.scanHistory).toHaveLength(1)
+        expect(store.scanHistory[0]).toMatchObject({ jobId: 'job-1-1' })
+      })
+
+      it('keeps the latest 50 scans', async () => {
+        sessionStorage.setItem(
+          HISTORY_KEY,
+          JSON.stringify(
+            Array.from({ length: 50 }, (_, index) => ({
+              id: `old-${index}`,
+              jobId: `old-${index}`,
+              rootFolderId: 1,
+              folderName: 'A',
+              status: 'done',
+              startedAt: '2026-10-21T10:00:00Z',
+              finishedAt: '2026-10-21T10:01:00Z',
+              error: null,
+              itemCount: 0,
+            })),
+          ),
+        )
+        const store = await scanTwice()
+
+        expect(store.scanHistory).toHaveLength(50)
+        expect(store.scanHistory[0]).toMatchObject({ jobId: 'job-1-1' })
+        expect(store.scanHistory.at(-1)).toMatchObject({ id: 'old-48' })
+      })
+
+      it('dismisses one scan, from the history or the current one', async () => {
+        const store = await scanTwice()
+        const oldId = store.scanHistory[0]!.id
+
+        store.dismissScan(oldId)
+        expect(store.scanHistory).toEqual([])
+        expect(store.scanTask).not.toBeNull()
+
+        store.dismissScan(store.scanTask!.id)
+        expect(store.scanTask).toBeNull()
+      })
+
+      it('clears the scans that ended, and keeps a running one', async () => {
+        const store = await scanTwice()
+        getUnmatchedResults.mockImplementation((jobId: string) => Promise.resolve(running(jobId)))
+        await store.triggerScan(2)
+
+        store.clearFinishedScans()
+
+        expect(store.scanHistory).toEqual([])
+        expect(store.scanTask).toMatchObject({ rootFolderId: 2, status: 'running' })
+      })
+
+      it('gives an id to a scan saved before scans had one', async () => {
+        sessionStorage.setItem(
+          'listenarr.libraryImport.scanTask',
+          JSON.stringify({
+            jobId: 'job-1',
+            rootFolderId: 1,
+            status: 'done',
+            startedAt: '2026-10-21T10:40:00Z',
+            finishedAt: '2026-10-21T10:42:00Z',
+            error: null,
+            itemCount: 3,
+          }),
+        )
+        const store = await newStore()
+        getUnmatchedResults.mockResolvedValue(completed('job-1'))
+
+        store.restoreScanTask()
+
+        expect(store.scanTask?.id).toBeTruthy()
+      })
+    })
+
     it('keeps the matches already made in a folder it scans without loading it first', async () => {
       const store = await newStore()
       const match = { title: 'Book B', asin: 'B000000002' }

@@ -17,6 +17,7 @@ export interface LibraryDeleteOperation {
   failed: number
   currentTitle?: string
   startedAt: string
+  finishedAt?: string
   error?: string
   dismissed?: boolean
 }
@@ -102,6 +103,7 @@ export const useLibraryDeleteOperationsStore = defineStore('libraryDeleteOperati
     operation.deleted = 1
     operation.progress = 100
     operation.status = 'completed'
+    operation.finishedAt = new Date().toISOString()
   }
 
   function failSingle(operationId: string, error?: string): void {
@@ -112,6 +114,7 @@ export const useLibraryDeleteOperationsStore = defineStore('libraryDeleteOperati
     operation.failed = 1
     operation.status = 'failed'
     operation.error = error
+    operation.finishedAt = new Date().toISOString()
   }
 
   function cancelSingle(operationId: string): void {
@@ -159,6 +162,7 @@ export const useLibraryDeleteOperationsStore = defineStore('libraryDeleteOperati
     operation.progress = operation.processed >= operation.total ? 100 : operation.progress
     operation.status =
       operation.failed > 0 || operation.processed < operation.total ? 'failed' : 'completed'
+    operation.finishedAt = new Date().toISOString()
   }
 
   function dismiss(operationId: string): void {

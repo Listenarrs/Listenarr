@@ -22,6 +22,7 @@ import { useScanNotificationsStore } from '@/stores/scanNotifications'
 import { useLibraryDeleteOperationsStore } from '@/stores/libraryDeleteOperations'
 
 type ScanTask = {
+  id: string
   jobId: string | null
   rootFolderId: number
   folderName: string | null
@@ -34,7 +35,9 @@ type ScanTask = {
 
 const libraryImport = reactive({
   scanTask: null as ScanTask | null,
-  dismissScanTask: vi.fn(),
+  scanHistory: [] as ScanTask[],
+  dismissScan: vi.fn(),
+  clearFinishedScans: vi.fn(),
   cancelScan: vi.fn(async () => undefined),
 })
 
@@ -59,6 +62,7 @@ import { useJobsStore } from '@/stores/jobs'
 
 function scanTask(overrides: Partial<ScanTask> = {}): ScanTask {
   return {
+    id: 'scan-a',
     jobId: 'unmatched-1',
     rootFolderId: 7,
     folderName: 'Audiobooks A',
@@ -75,7 +79,9 @@ describe('jobs store', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     libraryImport.scanTask = null
-    libraryImport.dismissScanTask.mockReset()
+    libraryImport.scanHistory = []
+    libraryImport.dismissScan.mockReset()
+    libraryImport.clearFinishedScans.mockReset()
     libraryImport.cancelScan.mockReset()
     moveJobs.trackedJobs = []
     library.audiobooks = [{ id: 42, title: 'Dune' }]
@@ -88,14 +94,93 @@ describe('jobs store', () => {
       const [job] = useJobsStore().jobs
 
       expect(job).toMatchObject({
-        id: 'library-import-scan',
+        id: 'scan-a',
         kind: 'library-import-scan',
         title: 'Scanning Audiobooks A for unmatched files',
         status: 'running',
         active: true,
         cancelable: true,
+        stale: false,
         startedAt: '2026-08-08T10:40:00Z',
+        finishedAt: undefined,
         to: { name: 'library-import', query: { rootFolder: '7' } },
+        action: {
+          label: 'Follow job progress',
+          to: { name: 'library-import', query: { rootFolder: '7' } },
+          disabledReason: undefined,
+        },
+      })
+    })
+
+    it('offers its results once done, with when it finished', () => {
+      libraryImport.scanTask = scanTask({
+        status: 'done',
+        itemCount: 3,
+        finishedAt: '2026-08-08T10:42:00Z',
+      })
+
+      expect(useJobsStore().jobs[0]).toMatchObject({
+        finishedAt: '2026-08-08T10:42:00Z',
+        action: {
+          label: 'See job results',
+          to: { name: 'library-import', query: { rootFolder: '7' } },
+          disabledReason: undefined,
+        },
+      })
+    })
+
+    it.each([
+      ['failed', 'This scan has no results: it failed'],
+      ['canceled', 'This scan has no results: it was canceled'],
+    ] as const)('has no results to show when it %s', (status, reason) => {
+      libraryImport.scanTask = scanTask({ status })
+
+      expect(useJobsStore().jobs[0]?.action).toMatchObject({
+        label: 'See job results',
+        to: undefined,
+        disabledReason: reason,
+      })
+    })
+
+    it('lists every scan of the session, newest first', () => {
+      libraryImport.scanTask = scanTask({ id: 'scan-c', rootFolderId: 9, folderName: 'C' })
+      libraryImport.scanHistory = [
+        scanTask({ id: 'scan-b', status: 'done', itemCount: 2 }),
+        scanTask({ id: 'scan-a', status: 'canceled' }),
+      ]
+
+      expect(useJobsStore().jobs.map((job) => job.id)).toEqual(['scan-c', 'scan-b', 'scan-a'])
+    })
+
+    it('makes an older scan of a folder stale as soon as a newer one starts there', () => {
+      libraryImport.scanTask = scanTask({ id: 'scan-new', status: 'starting' })
+      libraryImport.scanHistory = [scanTask({ id: 'scan-old', status: 'done', itemCount: 2 })]
+
+      const [newer, older] = useJobsStore().jobs
+
+      expect(newer).toMatchObject({ stale: false, action: { label: 'Follow job progress' } })
+      expect(older).toMatchObject({
+        stale: true,
+        to: undefined,
+        action: {
+          label: 'See job results',
+          to: undefined,
+          disabledReason:
+            'Stale result: this scan was replaced by a more recent scan of the same folder',
+        },
+      })
+    })
+
+    it("keeps each folder's latest scan current", () => {
+      libraryImport.scanTask = scanTask({ id: 'scan-b', rootFolderId: 9, folderName: 'B' })
+      libraryImport.scanHistory = [scanTask({ id: 'scan-a', status: 'done', itemCount: 1 })]
+
+      const older = useJobsStore().jobs[1]
+
+      expect(older).toMatchObject({
+        stale: false,
+        to: { name: 'library-import', query: { rootFolder: '7' } },
+        action: { label: 'See job results', disabledReason: undefined },
       })
     })
 
@@ -228,14 +313,15 @@ describe('jobs store', () => {
     const deleteId = deletes.beginSingle(42, 'Dune')
     deletes.completeSingle(deleteId)
     libraryImport.scanTask = scanTask({ status: 'done', itemCount: 1 })
+    libraryImport.scanHistory = [scanTask({ id: 'scan-old', status: 'canceled' })]
     const store = useJobsStore()
 
-    store.dismiss('library-import-scan')
+    store.dismiss('scan-old')
     store.dismiss('scan-s1')
     store.dismiss(deleteId)
 
-    expect(libraryImport.dismissScanTask).toHaveBeenCalled()
-    expect(store.jobs.map((job) => job.id)).toEqual(['library-import-scan'])
+    expect(libraryImport.dismissScan).toHaveBeenCalledWith('scan-old')
+    expect(store.jobs.map((job) => job.id)).toEqual(['scan-a', 'scan-old'])
   })
 
   it('clears the jobs that ended and keeps the running ones', () => {
@@ -247,15 +333,25 @@ describe('jobs store', () => {
 
     store.clearFinished()
 
-    expect(libraryImport.dismissScanTask).toHaveBeenCalled()
+    expect(libraryImport.clearFinishedScans).toHaveBeenCalled()
     expect(store.jobs.map((job) => job.id)).toEqual(['scan-running'])
   })
 
   it('cancels a running Library Import scan', async () => {
     libraryImport.scanTask = scanTask()
 
-    await useJobsStore().cancel('library-import-scan')
+    await useJobsStore().cancel('scan-a')
 
     expect(libraryImport.cancelScan).toHaveBeenCalled()
+  })
+
+  it('records when folder scans and deletes finished', () => {
+    const scans = useScanNotificationsStore()
+    scans.registerManualScan('s1', 42)
+    scans.applyUpdate({ jobId: 's1', status: 'Completed' })
+    const deletes = useLibraryDeleteOperationsStore()
+    deletes.completeSingle(deletes.beginSingle(42, 'Dune'))
+
+    for (const job of useJobsStore().jobs) expect(job.finishedAt).toBeTruthy()
   })
 })

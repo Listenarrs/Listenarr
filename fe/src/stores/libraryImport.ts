@@ -43,6 +43,8 @@ import type {
 // A scan of one root folder, from its start to its end. Kept for the browser session, so the page
 // shows it again after a reload, finished or not.
 export interface LibraryImportScanTask {
+  // Tells the scans of the session apart (the job id comes later, from the server)
+  id: string
   jobId: string | null
   rootFolderId: number
   // The folder's name (or path) when the scan started, so it can be named on any page
@@ -55,6 +57,20 @@ export interface LibraryImportScanTask {
 }
 
 const SCAN_TASK_SESSION_KEY = 'listenarr.libraryImport.scanTask'
+// The session's earlier scans, newest first: the Jobs page lists them
+const SCAN_HISTORY_SESSION_KEY = 'listenarr.libraryImport.scanHistory'
+const SCAN_HISTORY_KEPT = 50
+
+let scanTaskSequence = 0
+function newScanTaskId(): string {
+  scanTaskSequence += 1
+  return `library-import-scan-${Date.now()}-${scanTaskSequence}`
+}
+
+// A scan saved before scans had an id gets one from its start
+function withId(task: Omit<LibraryImportScanTask, 'id'> & { id?: string }): LibraryImportScanTask {
+  return { ...task, id: task.id || `library-import-scan-${task.startedAt}` }
+}
 
 export interface LibraryImportItem {
   id: string // = fullPath (unique key)
@@ -214,6 +230,8 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
   // shows meanwhile: its results are written to that folder's rows only, and only while it is shown
   // (the server keeps them for when it is shown again)
   const scanTask = ref<LibraryImportScanTask | null>(null)
+  // The scans that came before it, newest first (each one ended: one scan runs at a time)
+  const scanHistory = ref<LibraryImportScanTask[]>([])
   const scanTaskActive = computed(
     () => scanTask.value?.status === 'starting' || scanTask.value?.status === 'running',
   )
@@ -267,8 +285,10 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     }
     const scan = ++currentScan
     _showFolder(id)
+    if (scanTask.value) _archiveTask(scanTask.value)
     const folder = useRootFoldersStore().folders.find((f) => f.id === id)
     _setTask({
+      id: newScanTaskId(),
       jobId: null,
       rootFolderId: id,
       folderName: folder ? folder.name || folder.path : null,
@@ -326,8 +346,50 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     }
   }
 
-  // After a reload: the session's latest scan comes back, and is followed again if it was running
+  // Forgets one scan of the session: the current one (once it ended) or an earlier one
+  function dismissScan(id: string) {
+    if (scanTask.value?.id === id) {
+      dismissScanTask()
+      return
+    }
+    _saveHistory(scanHistory.value.filter((task) => task.id !== id))
+  }
+
+  // Forgets the scans that ended; a running one stays
+  function clearFinishedScans() {
+    dismissScanTask()
+    _saveHistory([])
+  }
+
+  function _archiveTask(task: LibraryImportScanTask) {
+    // The saved history first, or a scan started before the restore would replace it
+    _restoreHistory()
+    _saveHistory([task, ...scanHistory.value].slice(0, SCAN_HISTORY_KEPT))
+  }
+
+  function _saveHistory(history: LibraryImportScanTask[]) {
+    scanHistory.value = history
+    try {
+      sessionStorage.setItem(SCAN_HISTORY_SESSION_KEY, JSON.stringify(history))
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  function _restoreHistory() {
+    if (scanHistory.value.length > 0) return
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(SCAN_HISTORY_SESSION_KEY) ?? '[]')
+      if (Array.isArray(saved)) scanHistory.value = saved.map(withId).slice(0, SCAN_HISTORY_KEPT)
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  // After a reload: the session's latest scan comes back, and is followed again if it was running;
+  // the earlier scans come back as they ended
   function restoreScanTask() {
+    _restoreHistory()
     if (scanTask.value) return
     let saved: LibraryImportScanTask | null = null
     try {
@@ -335,14 +397,16 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     } catch {
       saved = null
     }
-    if (!saved?.jobId) return
+    const jobId = saved?.jobId
+    if (!saved || !jobId) return
+    const task = withId(saved)
     const scan = ++currentScan
-    scanTask.value = saved
-    if (saved.status === 'starting' || saved.status === 'running') {
-      _setTask({ ...saved, status: 'running' })
-      _followScan(scan, saved.jobId)
+    scanTask.value = task
+    if (task.status === 'starting' || task.status === 'running') {
+      _setTask({ ...task, status: 'running' })
+      _followScan(scan, jobId)
     } else {
-      void _forgetIfServerLostIt(scan, saved.jobId)
+      void _forgetIfServerLostIt(scan, jobId)
     }
   }
 
@@ -765,6 +829,7 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     resultsLoaded,
     scanStatus,
     scanTask,
+    scanHistory,
     scanTaskActive,
     scanWarnings,
     lastScannedAt,
@@ -783,6 +848,8 @@ export const useLibraryImportStore = defineStore('libraryImport', () => {
     triggerScan,
     cancelScan,
     dismissScanTask,
+    dismissScan,
+    clearFinishedScans,
     restoreScanTask,
     startProcessing,
     stopProcessing,
