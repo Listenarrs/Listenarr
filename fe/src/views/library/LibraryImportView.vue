@@ -279,7 +279,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   PhSpinner,
@@ -380,28 +380,17 @@ onMounted(async () => {
   await configStore.loadApplicationSettings()
   loadColumnWidths()
 
-  // A folder asked for in the address ("Scan for unmatched files" in Settings > Root Folders), else
-  // the default one
-  const requestedId = Number(route.query.rootFolder)
-  const requestedFolder = rootFoldersStore.folders.find((f) => f.id === requestedId) ?? null
-  // An old link may name a folder removed since: open as usual on the default one, and say so
-  requestedFolderMissing.value = route.query.rootFolder !== undefined && !requestedFolder
-  const scanRequested = requestedFolder !== null && route.query.scan === '1'
+  // A folder asked for in the address ("Scan for unmatched files" in Settings > Root Folders, a
+  // job's link), else the default one
+  const { requestedFolder, missing, scanRequested } = readAddressRequest()
+  requestedFolderMissing.value = missing
 
   store.action = 'none'
-
-  if (requestedFolderMissing.value) {
-    // Nothing left to ask for: a reload opens the page normally
-    void router.replace({ query: { ...route.query, rootFolder: undefined, scan: undefined } })
-  } else if (route.query.scan === '1') {
-    // Scan once: a reload of the page must not start another scan
-    void router.replace({ query: { ...route.query, scan: undefined } })
-  }
 
   // After a reload, the session's latest scan (running, finished, failed or canceled)
   store.restoreScanTask()
 
-  if (scanRequested) {
+  if (scanRequested && requestedFolder) {
     // The requested folder itself, whatever the list shows by then
     await scanFolder(requestedFolder.id)
     return
@@ -433,6 +422,50 @@ onMounted(async () => {
   }
 })
 
+// What the address asks for: a folder, and maybe a scan of it. A request that can't be met (a
+// folder removed since) or must happen once (a scan) is then taken out of the address, so a reload
+// doesn't ask again.
+function readAddressRequest() {
+  const requestedId = Number(route.query.rootFolder)
+  const requestedFolder = rootFoldersStore.folders.find((f) => f.id === requestedId) ?? null
+  // An old link may name a folder removed since: open as usual on the default one, and say so
+  const missing = route.query.rootFolder !== undefined && !requestedFolder
+  const scanRequested = requestedFolder !== null && route.query.scan === '1'
+  if (missing) {
+    void router.replace({ query: { ...route.query, rootFolder: undefined, scan: undefined } })
+  } else if (route.query.scan === '1') {
+    void router.replace({ query: { ...route.query, scan: undefined } })
+  }
+  return { requestedFolder, missing, scanRequested }
+}
+
+// Another folder asked for while the page is open (a job's link, the address edited): the router
+// keeps the page, so it shows that folder itself. The address names the folder shown (see
+// showFolderInAddress), so a request for it changes nothing.
+watch(
+  () => [route.name, route.query.rootFolder, route.query.scan] as const,
+  async ([name, rootFolder]) => {
+    if (name !== 'library-import' || rootFolder === undefined) return
+    const { requestedFolder, missing, scanRequested } = readAddressRequest()
+    requestedFolderMissing.value = missing
+    if (!requestedFolder) return
+    if (scanRequested) {
+      await scanFolder(requestedFolder.id)
+      return
+    }
+    if (selectedFolderId.value === requestedFolder.id && store.rootFolderId === requestedFolder.id)
+      return
+    selectedFolderId.value = requestedFolder.id
+    await store.initFromRootFolder(requestedFolder.id)
+  },
+)
+
+// The address names the folder shown, so a link to another folder always changes it
+function showFolderInAddress(folderId: number) {
+  if (route.query.rootFolder === String(folderId)) return
+  void router.replace({ query: { ...route.query, rootFolder: String(folderId) } })
+}
+
 onBeforeUnmount(() => {
   stopResize()
 })
@@ -440,7 +473,9 @@ onBeforeUnmount(() => {
 async function onFolderChange() {
   requestedFolderMissing.value = false
   // Browsing another folder doesn't touch the scan running: its results stay with its folder
-  if (selectedFolderId.value) await store.initFromRootFolder(selectedFolderId.value)
+  if (!selectedFolderId.value) return
+  showFolderInAddress(selectedFolderId.value)
+  await store.initFromRootFolder(selectedFolderId.value)
 }
 
 async function startScan() {
@@ -471,6 +506,7 @@ async function showScanTaskFolder() {
   if (!task) return
   requestedFolderMissing.value = false
   selectedFolderId.value = task.rootFolderId
+  showFolderInAddress(task.rootFolderId)
   await store.initFromRootFolder(task.rootFolderId)
 }
 
