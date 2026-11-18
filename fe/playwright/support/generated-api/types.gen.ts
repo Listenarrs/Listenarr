@@ -41,6 +41,7 @@ export type ListenarrApplicationAudiobooksCatalogLibraryAudiobookListItem = {
     genres?: Array<string> | null;
     asin?: string | null;
     asinRegion?: string | null;
+    brokenReasons?: Array<string> | null;
     openLibraryId?: string | null;
     publisher?: string | null;
     language?: string | null;

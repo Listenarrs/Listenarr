@@ -76,7 +76,7 @@ const searchCases: Array<{
   {
     name: 'a lowercase ASIN in the title',
     fields: { title: 'b008dfugcq', author: 'Someone' },
-    lookup: 'b008dfugcq',
+    lookup: 'B008DFUGCQ',
   },
   {
     name: 'an ISBN-13 with an author is a title',

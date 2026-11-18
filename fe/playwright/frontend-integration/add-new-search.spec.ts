@@ -172,17 +172,18 @@ test.describe('Add New simple search requests', () => {
     })
   })
 
+  // The lookup sends the ASIN in uppercase, whatever case it was typed in.
   const asinCases: [string, string, string][] = [
     ['ASIN', 'B008DFUGCQ', 'B008DFUGCQ'],
-    ['lowercase ASIN', 'b008dfugcq', 'b008dfugcq'],
+    ['lowercase ASIN', 'b008dfugcq', 'B008DFUGCQ'],
     ['ASIN prefix', 'ASIN:B008DFUGCQ', 'B008DFUGCQ'],
-    ['lowercase ASIN prefix', 'asin:b008dfugcq', 'b008dfugcq'],
+    ['lowercase ASIN prefix', 'asin:b008dfugcq', 'B008DFUGCQ'],
     ['ASIN prefix with a space', 'ASIN: B008DFUGCQ', 'B008DFUGCQ'],
     ['ASIN surrounded by spaces', '  B008DFUGCQ  ', 'B008DFUGCQ'],
     ['ten-digit ASIN', '1000000001', '1000000001'],
     ['ASIN ending in X', '100000000X', '100000000X'],
-    ['ten-character title starting with B', 'Bloodlines', 'Bloodlines'],
-    ['lowercase ten-character title starting with B', 'bloodlines', 'bloodlines'],
+    ['ten-character title starting with B', 'Bloodlines', 'BLOODLINES'],
+    ['lowercase ten-character title starting with B', 'bloodlines', 'BLOODLINES'],
   ]
 
   asinCases.forEach(([name, query, asin]) => {
