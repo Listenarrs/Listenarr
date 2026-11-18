@@ -94,6 +94,15 @@ describe('HeaderMenu', () => {
     expect(rows[1]!.find('.dismiss-btn').exists()).toBe(true)
   })
 
+  it('lets a running item be dismissed when it says so', async () => {
+    const { wrapper: w } = await mountMenu([item({ dismissible: true })])
+    await open(w)
+
+    await w.find('.dismiss-btn').trigger('click')
+
+    expect(w.emitted('dismiss')).toEqual([['job-1']])
+  })
+
   it('shows a progress bar for an item with a percentage', async () => {
     const { wrapper: w } = await mountMenu([
       item({ spinner: false, progress: 42, showProgressPercentage: true }),

@@ -26,6 +26,7 @@ type ScanTask = {
   jobId: string | null
   rootFolderId: number
   folderName: string | null
+  folderPath?: string | null
   status: 'starting' | 'running' | 'done' | 'failed' | 'canceled'
   startedAt: string
   finishedAt: string | null
@@ -353,5 +354,109 @@ describe('jobs store', () => {
     deletes.completeSingle(deletes.beginSingle(42, 'Dune'))
 
     for (const job of useJobsStore().jobs) expect(job.finishedAt).toBeTruthy()
+  })
+
+  describe('description', () => {
+    it('names the root dir a Library Import scan scans', () => {
+      libraryImport.scanTask = scanTask({ folderPath: '/media/audiobooks' })
+      libraryImport.scanHistory = [scanTask({ id: 'old', status: 'done', folderPath: undefined })]
+
+      const [current, saved] = useJobsStore().jobs
+
+      expect(current?.description).toBe('Scan root dir: /media/audiobooks')
+      // Saved before scans kept their path: its name
+      expect(saved?.description).toBe('Scan root dir: Audiobooks A')
+    })
+
+    it('describes the other jobs', () => {
+      moveJobs.trackedJobs = [
+        { jobId: 'm1', audiobookId: 42, status: 'Running', progress: 1, target: '/new' },
+      ]
+      useScanNotificationsStore().registerManualScan('s1', 42)
+      const deletes = useLibraryDeleteOperationsStore()
+      deletes.beginSingle(42, 'Dune')
+      const bulk = deletes.beginBulk(3)
+
+      const byId = (id: string) => useJobsStore().jobs.find((job) => job.id === id)?.description
+
+      expect(byId('move-m1')).toBe('Move Dune to /new')
+      expect(byId('scan-s1')).toBe('Scan book folder: Dune')
+      expect(useJobsStore().jobs.find((job) => job.title === 'Deleting Dune')?.description).toBe(
+        'Delete Dune',
+      )
+      expect(byId(bulk)).toBe('Delete 3 audiobooks')
+    })
+  })
+
+  describe('job notifications, apart from the job log', () => {
+    beforeEach(() => sessionStorage.clear())
+
+    function endedAndRunning() {
+      const scans = useScanNotificationsStore()
+      scans.registerManualScan('ended', 42)
+      scans.applyUpdate({ jobId: 'ended', status: 'Completed' })
+      scans.registerManualScan('running', 42)
+    }
+
+    it('lists every job of the log until it is dismissed from the notifications', () => {
+      endedAndRunning()
+      const store = useJobsStore()
+
+      expect(store.notificationJobs.map((job) => job.id)).toEqual(['scan-running', 'scan-ended'])
+
+      store.dismissNotification('scan-ended')
+
+      expect(store.notificationJobs.map((job) => job.id)).toEqual(['scan-running'])
+      expect(store.jobs.map((job) => job.id)).toEqual(['scan-running', 'scan-ended'])
+    })
+
+    it('clears the notifications only, and shows a running job again when it ends', () => {
+      endedAndRunning()
+      libraryImport.scanTask = scanTask({ status: 'done', itemCount: 1 })
+      const store = useJobsStore()
+
+      store.clearNotifications()
+
+      expect(store.notificationJobs).toEqual([])
+      expect(store.jobs).toHaveLength(3)
+      expect(libraryImport.clearFinishedScans).not.toHaveBeenCalled()
+
+      useScanNotificationsStore().applyUpdate({ jobId: 'running', status: 'Completed' })
+      expect(store.notificationJobs.map((job) => job.id)).toEqual(['scan-running'])
+    })
+
+    it('hides a running job, which goes on, until it ends', () => {
+      endedAndRunning()
+      const store = useJobsStore()
+
+      store.dismissNotification('scan-running')
+      expect(store.notificationJobs.map((job) => job.id)).toEqual(['scan-ended'])
+      expect(store.jobs.find((job) => job.id === 'scan-running')?.active).toBe(true)
+
+      useScanNotificationsStore().applyUpdate({ jobId: 'running', status: 'Processing' })
+      expect(store.notificationJobs.map((job) => job.id)).toEqual(['scan-ended'])
+
+      useScanNotificationsStore().applyUpdate({ jobId: 'running', status: 'Completed' })
+      expect(store.notificationJobs.map((job) => job.id)).toEqual(['scan-running', 'scan-ended'])
+    })
+
+    it('remembers what was hidden after a reload', () => {
+      endedAndRunning()
+      useJobsStore().dismissNotification('scan-ended')
+
+      setActivePinia(createPinia())
+      endedAndRunning()
+
+      expect(useJobsStore().notificationJobs.map((job) => job.id)).toEqual(['scan-running'])
+    })
+
+    it('drops from the notifications a job removed from the log', () => {
+      endedAndRunning()
+      const store = useJobsStore()
+
+      store.dismiss('scan-ended')
+
+      expect(store.notificationJobs.map((job) => job.id)).toEqual(['scan-running'])
+    })
   })
 })

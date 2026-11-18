@@ -611,6 +611,7 @@ describe('library import store', () => {
 
       await store.triggerScan(1)
       expect(store.scanTask?.folderName).toBe('Audiobooks A')
+      expect(store.scanTask?.folderPath).toBe('/srv/1')
       expect(
         JSON.parse(sessionStorage.getItem('listenarr.libraryImport.scanTask') ?? '{}'),
       ).toMatchObject({ folderName: 'Audiobooks A' })
@@ -620,6 +621,7 @@ describe('library import store', () => {
 
       await store.triggerScan(3)
       expect(store.scanTask?.folderName).toBeNull()
+      expect(store.scanTask?.folderPath).toBeNull()
     })
 
     describe('after a reload', () => {
@@ -752,6 +754,62 @@ describe('library import store', () => {
 
         expect(store.scanTask).toBeNull()
         expect(sessionStorage.getItem('listenarr.libraryImport.scanTask')).toBeNull()
+      })
+    })
+
+    describe("the task bar's dismiss button", () => {
+      it('hides the bar of a running scan, which goes on, and shows it again when it ends', async () => {
+        const store = await newStore()
+        scanUnmatchedFiles.mockResolvedValue({ jobId: 'job-1' })
+        getUnmatchedResults.mockResolvedValue(running('job-1'))
+        await store.triggerScan(1)
+        expect(store.taskBarVisible).toBe(true)
+
+        await store.dismissTaskBar()
+
+        expect(cancelUnmatchedScan).not.toHaveBeenCalled()
+        expect(store.scanTask).toMatchObject({ jobId: 'job-1', status: 'running' })
+        expect(store.taskBarVisible).toBe(false)
+
+        getUnmatchedResults.mockResolvedValue(completed('job-1', '/srv/1/A.mp3'))
+        await unmatchedScanHandler?.({ jobId: 'job-1' })
+        await vi.waitFor(() => expect(store.scanTask?.status).toBe('done'))
+        expect(store.taskBarVisible).toBe(true)
+      })
+
+      it('only hides the bar of a scan that ended', async () => {
+        const store = await newStore()
+        scanUnmatchedFiles.mockResolvedValue({ jobId: 'job-1' })
+        getUnmatchedResults.mockResolvedValue(completed('job-1', '/srv/1/A.mp3'))
+        await store.triggerScan(1)
+        await vi.waitFor(() => expect(store.scanTask?.status).toBe('done'))
+
+        await store.dismissTaskBar()
+
+        expect(cancelUnmatchedScan).not.toHaveBeenCalled()
+        expect(store.scanTask).toMatchObject({ jobId: 'job-1', status: 'done' })
+        expect(store.taskBarVisible).toBe(false)
+      })
+
+      it('keeps the bar hidden after a reload, and shows it again for a new scan', async () => {
+        const store = await newStore()
+        scanUnmatchedFiles.mockResolvedValue({ jobId: 'job-1' })
+        getUnmatchedResults.mockResolvedValue(completed('job-1'))
+        await store.triggerScan(1)
+        await vi.waitFor(() => expect(store.scanTask?.status).toBe('done'))
+        await store.dismissTaskBar()
+
+        setActivePinia(createPinia())
+        vi.resetModules()
+        const reloaded = await newStore()
+        reloaded.restoreScanTask()
+        expect(reloaded.scanTask).not.toBeNull()
+        expect(reloaded.taskBarVisible).toBe(false)
+
+        scanUnmatchedFiles.mockResolvedValue({ jobId: 'job-2' })
+        getUnmatchedResults.mockResolvedValue(running('job-2'))
+        await reloaded.triggerScan(1)
+        expect(reloaded.taskBarVisible).toBe(true)
       })
     })
 

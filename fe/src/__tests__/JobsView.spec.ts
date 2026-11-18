@@ -37,6 +37,7 @@ function job(overrides: Partial<JobEntry> = {}): JobEntry {
     id: 'library-import-scan',
     kind: 'library-import-scan',
     title: 'Scanning Audiobooks A for unmatched files',
+    description: 'Scan root dir: /media/audiobooks',
     message: 'Library Import · started at 10:40',
     status: 'running',
     active: true,
@@ -264,6 +265,7 @@ describe('JobsView', () => {
       expect(w.findAll('.jobs-header > div').map((cell) => cell.text())).toEqual([
         'Action',
         'Job',
+        'Description',
         'Details',
         'Progress',
         'Started',
@@ -298,5 +300,28 @@ describe('JobsView', () => {
 
       expect(rows(w)[0]!.find('.col-duration').text()).toBe('-')
     })
+  })
+
+  it('says what each job works on, after its name', async () => {
+    jobsStore.jobs = [job()]
+    const { wrapper: w } = await mountView()
+
+    const cells = rows(w)[0]!.findAll(':scope > div')
+    expect(cells[1]!.classes()).toContain('col-title')
+    expect(cells[2]!.classes()).toContain('col-description')
+    expect(cells[2]!.text()).toBe('Scan root dir: /media/audiobooks')
+    expect(cells[2]!.attributes('title')).toBe('Scan root dir: /media/audiobooks')
+  })
+
+  it('filters on the description too', async () => {
+    jobsStore.jobs = [
+      job(),
+      job({ id: 'b', title: 'Other', message: 'x', description: 'Scan root dir: /srv/other' }),
+    ]
+    const { wrapper: w } = await mountView()
+
+    await w.find('input.filter-input').setValue('/srv/other')
+
+    expect(rows(w)).toHaveLength(1)
   })
 })

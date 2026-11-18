@@ -75,7 +75,7 @@
           </div>
           <div class="notif-actions">
             <button
-              v-if="!item.active"
+              v-if="item.dismissible ?? !item.active"
               class="dismiss-btn"
               title="Dismiss"
               @click.stop="emit('dismiss', item.id)"
@@ -116,8 +116,9 @@ export interface HeaderMenuItem {
   message: string
   icon?: string
   timestamp?: string
-  // Running: no dismiss button
+  // Running: no dismiss button, unless dismissible says otherwise
   active?: boolean
+  dismissible?: boolean
   // A spinning wheel instead of the icon, while the item is pending
   spinner?: boolean
   progress?: number

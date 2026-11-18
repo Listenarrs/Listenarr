@@ -145,8 +145,8 @@
           empty-text="No jobs"
           :icon-spinning="jobsStore.hasActiveJobs"
           test-id="jobs-menu"
-          @dismiss="jobsStore.dismiss"
-          @clear="jobsStore.clearFinished()"
+          @dismiss="jobsStore.dismissNotification"
+          @clear="jobsStore.clearNotifications()"
         />
         <!-- Downloads and messages from the server -->
         <HeaderMenu
@@ -895,16 +895,18 @@ function dismissNotification(id: string) {
   }
 }
 
-// The cog: the session's background jobs. A running job shows a spinner, or its progress bar
-// when it knows a percentage.
+// The cog: the job notifications, apart from the job log (the Jobs page). A running job shows a
+// spinner, or its progress bar when it knows a percentage, and can be dismissed: it goes on, and
+// is notified again when it ends.
 const jobMenuItems = computed<HeaderMenuItem[]>(() =>
-  jobsStore.jobs.map((job) => ({
+  jobsStore.notificationJobs.map((job) => ({
     id: job.id,
     title: job.title,
     message: job.message,
     icon: job.icon,
     timestamp: job.startedAt,
     active: job.active,
+    dismissible: true,
     spinner: job.active && job.progress == null,
     progress: job.progress,
     showProgressPercentage: job.progress != null,
