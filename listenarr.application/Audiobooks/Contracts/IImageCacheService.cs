@@ -26,5 +26,13 @@ namespace Listenarr.Application.Audiobooks.Contracts
         Task<string?> MoveToSeriesLibraryStorageAsync(string identifier, string? imageUrl = null, bool forceRefresh = false);
         Task<string?> GetCachedImagePathAsync(string identifier);
         Task ClearTempCacheAsync();
+
+        /// <summary>
+        /// Returns the bytes of an image reference as stored on an audiobook: either an
+        /// absolute http(s) URL, which is fetched through the validated download path, or a
+        /// content-root-relative path into the image cache. Returns null when the reference
+        /// is outside the cache, missing, unfetchable or larger than the image size limit.
+        /// </summary>
+        Task<byte[]?> GetImageBytesAsync(string imageReference);
     }
 }

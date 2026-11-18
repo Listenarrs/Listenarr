@@ -32,7 +32,6 @@ describe('File Naming Patterns - Import E2E', () => {
         maxConcurrentDownloads: 2,
         pollingIntervalSeconds: 30,
         enableMetadataProcessing: true,
-        enableCoverArtDownload: true,
       }
     }).as('getSettings')
 

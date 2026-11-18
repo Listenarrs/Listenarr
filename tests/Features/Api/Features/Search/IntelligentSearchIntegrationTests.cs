@@ -195,6 +195,11 @@ namespace Listenarr.Tests.Features.Api.Features.Search
         {
             return Task.CompletedTask;
         }
+
+        public Task<byte[]?> GetImageBytesAsync(string imageReference)
+        {
+            return Task.FromResult<byte[]?>(null);
+        }
     }
 }
 
