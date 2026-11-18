@@ -22,7 +22,7 @@ coverage
 /cypress/videos/
 /cypress/screenshots/
 test-results/
-playwright-report/
+eslint-report.json
 
 # Editor directories and files
 .vscode/*

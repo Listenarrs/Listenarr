@@ -3,9 +3,9 @@
   "include": [
     "vite.config.*",
     "vitest.config.*",
+    "vitest.projects.ts",
+    "vitest.*.config.*",
     "cypress.config.*",
-    "nightwatch.conf.*",
-    "playwright.config.*",
     "eslint.config.*"
   ],
   "compilerOptions": {

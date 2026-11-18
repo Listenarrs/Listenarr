@@ -1,6 +1,7 @@
 # Listenarr Frontend (fe)
 
-This template should help get you started developing with Vue 3 in Vite.
+Listenarr's Vue 3/Vite frontend for audiobook search, library management,
+settings, and activity workflows.
 
 ## Recommended IDE Setup
 
@@ -46,6 +47,19 @@ npm run build
 ```sh
 npm run test:unit
 ```
+
+This runs all configured Vitest projects: node-only specs, jsdom specs, and
+smoke specs. Name specs `*.node.spec.ts` only when they intentionally run
+without browser globals.
+
+### Run the Frontend Verification Gate
+
+```sh
+npm run verify
+```
+
+This runs the frontend structure guard, ESLint, Vue handler checks, type checks,
+and Vitest coverage.
 
 ### Run End-to-End Tests with [Cypress](https://www.cypress.io/)
 

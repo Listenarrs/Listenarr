@@ -910,7 +910,6 @@ const saveSettings = async () => {
           sessionTokenManager.clearToken()
         } catch {}
         auth.user.authenticated = false
-        auth.redirectTo = null
         try {
           await apiService.ensureAntiforgeryForCurrentAuth()
         } catch {}

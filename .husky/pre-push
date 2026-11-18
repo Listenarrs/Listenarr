@@ -12,6 +12,12 @@ node scripts/validate-repository-paths.mjs
 echo "Syncing version..."
 node scripts/sync-fe-version-from-csproj.mjs
 
+if ! git diff --quiet -- package.json package-lock.json fe/package.json fe/package-lock.json; then
+  echo "Version sync changed package metadata. Commit those changes before pushing."
+  git diff -- package.json package-lock.json fe/package.json fe/package-lock.json
+  exit 1
+fi
+
 echo "Checking backend format..."
 dotnet format listenarr.slnx --no-restore --verify-no-changes --verbosity minimal
 
